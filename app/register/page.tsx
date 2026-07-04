@@ -1,6 +1,15 @@
 import AuthShell from "@/components/AuthShell";
+import { signUpWithPassword } from "@/app/auth/actions";
 
-export default function RegisterPage() {
+type RegisterPageProps = {
+  searchParams: Promise<{
+    auth_error?: string;
+  }>;
+};
+
+export default async function RegisterPage({ searchParams }: RegisterPageProps) {
+  const { auth_error: authError } = await searchParams;
+
   return (
     <AuthShell
       eyebrow="ZERINIX ACCESS"
@@ -15,7 +24,13 @@ export default function RegisterPage() {
         <h2 className="mt-2 text-3xl font-bold text-white">Yeni hesap oluştur</h2>
       </div>
 
-      <form className="mt-8 space-y-4">
+      {authError && (
+        <p className="mt-6 rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">
+          Hesap oluşturulamadı. Bilgileri kontrol edip tekrar dene.
+        </p>
+      )}
+
+      <form action={signUpWithPassword} className="mt-8 space-y-4">
         <label className="block">
           <span className="text-sm font-medium text-gray-300">Ad soyad</span>
           <input
