@@ -23,43 +23,21 @@ type ReportSection = {
   content: string;
 };
 
-const sectionMatchers: Record<string, string[]> = {
-  "Executive Summary": ["Executive Summary", "Özet", "Yönetici Özeti"],
-  "Market Analysis": [
-    "Market Analysis",
-    "Market size",
-    "Competition level",
-    "Pazar Analizi",
-    "Pazar Büyüklüğü",
-    "Rekabet Seviyesi",
-  ],
-  "Target Audience": ["Target Audience", "Hedef Kitle"],
-  "Revenue Model": ["Revenue Model", "Revenue potential", "Gelir Modeli", "Gelir Potansiyeli"],
-  Risks: ["Risks", "Main risks", "Riskler", "Ana Riskler"],
-  "90-Day Roadmap": [
-    "90-Day Roadmap",
-    "Recommended first steps",
-    "90 Günlük Yol Haritası",
-    "Önerilen İlk Adımlar",
-  ],
-  "AI Success Score (0-100)": [
-    "AI Success Score",
-    "AI score",
-    "AI Başarı Skoru",
-    "AI Skoru",
-  ],
-  Sources: ["Sources", "Kaynaklar"],
+type MarketReport = {
+  executiveSummary: string;
+  marketAnalysis: string;
+  targetAudience: string;
+  revenueModel: string;
+  risks: string;
+  roadmap90Days: string;
+  successScore: string;
+  sources: string;
 };
 
-const sectionIcons: Record<string, LucideIcon> = {
-  "Executive Summary": Sparkles,
-  "Market Analysis": BarChart3,
-  "Target Audience": Users,
-  "Revenue Model": Landmark,
-  Risks: ShieldAlert,
-  "90-Day Roadmap": CalendarDays,
-  "AI Success Score (0-100)": Gauge,
-  Sources: Search,
+type MarketReportField = keyof MarketReport;
+
+type MarketReportStreamEvent = Partial<MarketReport> & {
+  done?: boolean;
 };
 
 const reportActions = [
@@ -69,72 +47,61 @@ const reportActions = [
   { label: "Export PDF", icon: Download },
 ];
 
-const reportSectionTitles = [
-  "Executive Summary",
-  "Market Analysis",
-  "Target Audience",
-  "Revenue Model",
-  "Risks",
-  "90-Day Roadmap",
-  "AI Success Score (0-100)",
-  "Sources",
+const reportFields: Array<{
+  field: MarketReportField;
+  title: string;
+  icon: LucideIcon;
+}> = [
+  { field: "executiveSummary", title: "Executive Summary", icon: Sparkles },
+  { field: "marketAnalysis", title: "Market Analysis", icon: BarChart3 },
+  { field: "targetAudience", title: "Target Audience", icon: Users },
+  { field: "revenueModel", title: "Revenue Model", icon: Landmark },
+  { field: "risks", title: "Risks", icon: ShieldAlert },
+  { field: "roadmap90Days", title: "90-Day Roadmap", icon: CalendarDays },
+  { field: "successScore", title: "AI Success Score (0-100)", icon: Gauge },
+  { field: "sources", title: "Sources", icon: Search },
 ];
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+const emptyMarketReport: MarketReport = {
+  executiveSummary: "",
+  marketAnalysis: "",
+  targetAudience: "",
+  revenueModel: "",
+  risks: "",
+  roadmap90Days: "",
+  successScore: "",
+  sources: "",
+};
 
-function normalizeHeading(value: string) {
-  return value
-    .replace(/^\s*[-*#\d.)]+\s*/, "")
-    .replace(/\*\*/g, "")
-    .replace(/:$/, "")
-    .trim()
-    .toLowerCase();
-}
-
-function parseReportSections(result: string): ReportSection[] {
-  const headings = Object.values(sectionMatchers).flat();
-  const headingPattern = headings.map(escapeRegExp).join("|");
-  const parts = result.split(new RegExp(`(^|\\n)\\s*(?:#{1,3}\\s*)?(${headingPattern})\\s*:?\\s*`, "i"));
-  const contentByHeading = new Map<string, string>();
-
-  for (let index = 2; index < parts.length; index += 3) {
-    const heading = normalizeHeading(parts[index]);
-    const content = (parts[index + 1] || "").trim();
-
-    if (content) {
-      contentByHeading.set(heading, content);
+const ReportPanel = memo(function ReportPanel({
+  marketReport,
+  result,
+}: {
+  marketReport: MarketReport | null;
+  result: string;
+}) {
+  const sections = useMemo<ReportSection[]>(() => {
+    if (marketReport) {
+      return reportFields.map(({ field, title, icon }) => ({
+        title,
+        icon,
+        content:
+          marketReport[field].trim() || "Bu bölüm için AI çıktısı bekleniyor.",
+      }));
     }
-  }
 
-  const fallback = result.trim();
+    return result
+      ? [
+          {
+            title: "Executive Summary",
+            icon: Sparkles,
+            content: result,
+          },
+        ]
+      : [];
+  }, [marketReport, result]);
 
-  return Object.entries(sectionMatchers).map(([title, aliases], index) => {
-    const matchedContent = aliases
-      .map((alias) => contentByHeading.get(normalizeHeading(alias)))
-      .filter(Boolean)
-      .join("\n\n");
-
-    return {
-      title,
-      icon: sectionIcons[title],
-      content:
-        matchedContent ||
-        (index === 0 && fallback
-          ? fallback
-          : "Bu bölüm için AI çıktısı bekleniyor."),
-    };
-  });
-}
-
-const ReportPanel = memo(function ReportPanel({ result }: { result: string }) {
-  const sections = useMemo(
-    () => (result ? parseReportSections(result) : []),
-    [result]
-  );
-
-  if (!result) {
+  if (!marketReport && !result) {
     return (
       <div className="flex min-h-[520px] items-center justify-center rounded-3xl border border-white/10 bg-zinc-950/70 p-8 text-center shadow-2xl shadow-black/40">
         <div>
@@ -218,6 +185,7 @@ const ReportPanel = memo(function ReportPanel({ result }: { result: string }) {
 export default function Planner() {
   const [prompt, setPrompt] = useState("");
   const [result, setResult] = useState("");
+  const [marketReport, setMarketReport] = useState<MarketReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
 
@@ -268,18 +236,19 @@ export default function Planner() {
     setResult(output || fallbackMessage);
   }
 
-  async function readStreamingSection(
+  async function readStreamingSectionJson(
     response: Response,
-    onChunk: (chunk: string) => void,
+    onEvent: (event: MarketReportStreamEvent) => void,
     fallbackMessage: string,
-    onFirstChunk?: () => void
+    onFirstChunk?: () => void,
+    fallbackField: MarketReportField = "executiveSummary"
   ) {
     if (!response.ok || !response.body) {
       try {
         const data = await response.json();
-        onChunk(data.error || fallbackMessage);
+        onEvent({ [fallbackField]: data.error || fallbackMessage });
       } catch {
-        onChunk(fallbackMessage);
+        onEvent({ [fallbackField]: fallbackMessage });
       }
 
       return;
@@ -288,6 +257,33 @@ export default function Planner() {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let hasChunk = false;
+    let buffer = "";
+
+    const emitBufferedEvents = () => {
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+
+        if (!trimmed) {
+          continue;
+        }
+
+        try {
+          const event = JSON.parse(trimmed) as MarketReportStreamEvent;
+
+          if (!hasChunk && Object.values(event).some(Boolean)) {
+            hasChunk = true;
+            onFirstChunk?.();
+          }
+
+          onEvent(event);
+        } catch {
+          onEvent({ [fallbackField]: fallbackMessage });
+        }
+      }
+    };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -296,25 +292,26 @@ export default function Planner() {
         break;
       }
 
-      const chunk = decoder.decode(value, { stream: true });
-
-      if (!hasChunk && chunk) {
-        hasChunk = true;
-        onFirstChunk?.();
-      }
-
-      onChunk(chunk);
+      buffer += decoder.decode(value, { stream: true });
+      emitBufferedEvents();
     }
 
-    const finalChunk = decoder.decode();
-    if (finalChunk) {
-      onChunk(finalChunk);
+    buffer += decoder.decode();
+    emitBufferedEvents();
+
+    if (buffer.trim()) {
+      try {
+        onEvent(JSON.parse(buffer.trim()) as MarketReportStreamEvent);
+      } catch {
+        onEvent({ [fallbackField]: fallbackMessage });
+      }
     }
   }
 
   async function generatePlan() {
     setLoading(true);
     setResult("");
+    setMarketReport(null);
 
     try {
       const res = await fetch("/api/plan", {
@@ -334,20 +331,15 @@ export default function Planner() {
   async function analyzeMarket() {
     setAnalyzing(true);
     setResult("");
+    setMarketReport(emptyMarketReport);
 
-    const sectionOutput = Object.fromEntries(
-      reportSectionTitles.map((section) => [section, ""])
-    ) as Record<string, string>;
+    const reportOutput: MarketReport = { ...emptyMarketReport };
     let frame: number | null = null;
     let remainingSectionsStarted = false;
     let remainingSectionsPromise: Promise<void[]> = Promise.resolve([]);
 
     const renderReport = () => {
-      setResult(
-        reportSectionTitles
-          .map((section) => `${section}\n${sectionOutput[section]}`)
-          .join("\n\n")
-      );
+      setMarketReport({ ...reportOutput });
     };
 
     const scheduleReportRender = () => {
@@ -361,21 +353,31 @@ export default function Planner() {
       });
     };
 
-    const streamSection = async (section: string, onFirstChunk?: () => void) => {
+    const streamField = async (
+      field: MarketReportField,
+      onFirstChunk?: () => void
+    ) => {
       const res = await fetch("/api/market-analysis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, section }),
+        body: JSON.stringify({ prompt, field }),
       });
 
-      await readStreamingSection(
+      await readStreamingSectionJson(
         res,
-        (chunk) => {
-          sectionOutput[section] += chunk;
+        (event) => {
+          const chunk = event[field];
+
+          if (!chunk) {
+            return;
+          }
+
+          reportOutput[field] += chunk;
           scheduleReportRender();
         },
         "Bu bölüm için AI çıktısı alınamadı.",
-        onFirstChunk
+        onFirstChunk,
+        field
       );
     };
 
@@ -386,11 +388,11 @@ export default function Planner() {
 
       remainingSectionsStarted = true;
       remainingSectionsPromise = Promise.all(
-        reportSectionTitles
+        reportFields
           .slice(1)
-          .map((section) =>
-            streamSection(section).catch(() => {
-              sectionOutput[section] = "Bu bölüm için AI çıktısı alınamadı.";
+          .map(({ field }) =>
+            streamField(field).catch(() => {
+              reportOutput[field] = "Bu bölüm için AI çıktısı alınamadı.";
               scheduleReportRender();
             })
           )
@@ -398,7 +400,7 @@ export default function Planner() {
     };
 
     try {
-      await streamSection("Executive Summary", startRemainingSections);
+      await streamField("executiveSummary", startRemainingSections);
       startRemainingSections();
       await remainingSectionsPromise;
 
@@ -409,6 +411,7 @@ export default function Planner() {
       renderReport();
     } catch {
       setResult("Pazar analizi sırasında bir hata oluştu.");
+      setMarketReport(null);
     } finally {
       setAnalyzing(false);
     }
@@ -456,7 +459,7 @@ export default function Planner() {
           </button>
         </div>
 
-        <ReportPanel result={result} />
+        <ReportPanel marketReport={marketReport} result={result} />
       </div>
     </main>
   );

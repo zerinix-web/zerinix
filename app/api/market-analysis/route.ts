@@ -5,70 +5,89 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-const sectionPrompts: Record<string, { prompt: string; maxTokens: number }> = {
-  "Executive Summary": {
+const fieldPrompts: Record<string, { prompt: string; maxTokens: number }> = {
+  executiveSummary: {
     prompt:
       "Güncel web araştırmasına dayanarak 2-3 cümlelik yönetici özeti yaz. Pazar fırsatı, kime satıldığı ve ilk odak noktasını belirt. Başlık yazma.",
     maxTokens: 190,
   },
-  "Market Analysis": {
+  marketAnalysis: {
     prompt:
       "Güncel kaynaklardan pazar büyüklüğü, rakip şirketler, sektör trendleri ve son haberleri kısa analiz et. Başlık yazma.",
     maxTokens: 270,
   },
-  "Target Audience": {
+  targetAudience: {
     prompt:
       "Güncel pazar sinyallerine göre hedef müşteri segmentlerini, erken benimseyenleri ve satın alma motivasyonlarını belirt. Başlık yazma.",
     maxTokens: 210,
   },
-  "Revenue Model": {
+  revenueModel: {
     prompt:
       "Rakip fiyatlandırma modellerini ve gelir potansiyelini kullanarak uygun gelir modelini öner. Başlık yazma.",
     maxTokens: 210,
   },
-  Risks: {
+  risks: {
     prompt:
       "SWOT için kullanılabilecek güncel verilerle ana riskleri ve azaltma aksiyonlarını yaz. Başlık yazma.",
     maxTokens: 210,
   },
-  "90-Day Roadmap": {
+  roadmap90Days: {
     prompt:
       "Web araştırmasından çıkan pazar gerçeklerine göre ilk 90 gün için uygulanabilir yol haritası yaz: 0-30, 31-60, 61-90 gün. Başlık yazma.",
     maxTokens: 220,
   },
-  "AI Success Score (0-100)": {
+  successScore: {
     prompt:
       "Güncel rekabet, pazar büyüklüğü, trendler ve risklere göre 0-100 arası başarı skoru ver; 2 kısa gerekçe yaz. Başlık yazma.",
     maxTokens: 150,
   },
-  Sources: {
+  sources: {
     prompt:
       "Web araştırmasında kullandığın en güvenilir 4-6 kaynağı listele. Her satırda kaynak adı, kısa kullanım nedeni ve URL olsun. Başlık yazma.",
     maxTokens: 220,
   },
 };
 
+const legacySectionToField: Record<string, string> = {
+  "Executive Summary": "executiveSummary",
+  "Market Analysis": "marketAnalysis",
+  "Target Audience": "targetAudience",
+  "Revenue Model": "revenueModel",
+  Risks: "risks",
+  "90-Day Roadmap": "roadmap90Days",
+  "AI Success Score (0-100)": "successScore",
+  Sources: "sources",
+};
+
 export async function POST(req: Request) {
   try {
-    const { prompt, section } = await req.json();
-    const sectionConfig =
-      typeof section === "string" ? sectionPrompts[section] : undefined;
+    const { prompt, field, section } = await req.json();
+    const reportField =
+      typeof field === "string"
+        ? field
+        : typeof section === "string"
+          ? legacySectionToField[section]
+          : undefined;
+    const fieldConfig =
+      typeof reportField === "string" ? fieldPrompts[reportField] : undefined;
+
+    if (!fieldConfig || !reportField) {
+      return NextResponse.json(
+        { error: "Geçersiz rapor alanı." },
+        { status: 400 }
+      );
+    }
 
     const stream = await client.responses.create(
       {
         model: "gpt-5-mini",
-        input: sectionConfig
-          ? `ZERINIX pazar raporu bölümü. İş fikri: ${prompt}
+        input: `ZERINIX pazar raporu alanı: ${reportField}
+İş fikri: ${prompt}
 
-Görev: ${sectionConfig.prompt}
+Görev: ${fieldConfig.prompt}
 Önce güncel web araştırması yap. Güvenilir kaynaklardan pazar büyüklüğü, rakip şirketler, sektör trendleri, hedef müşteri, son haberler, fiyatlandırma modelleri ve SWOT verilerini dikkate al.
-Türkçe, net, uygulanabilir yaz. Ürün için web adresi, alan adı, marka adı veya site önerisi verme; yalnızca Sources bölümünde kaynak URL'si yaz.`
-          : `ZERINIX için Türkçe pazar raporu yaz. İş fikri: ${prompt}
-
-Başlıklar: Executive Summary, Market Analysis, Target Audience, Revenue Model, Risks, 90-Day Roadmap, AI Success Score (0-100).
-Önce güncel web araştırması yap ve rapor sonunda Sources başlığı altında kullanılan kaynakları listele.
-Net, uygulanabilir, kısa paragraflar kullan. Ürün için web adresi, alan adı, marka adı veya site önerisi verme; yalnızca kaynak URL'si yaz.`,
-        max_output_tokens: sectionConfig?.maxTokens ?? 1000,
+Türkçe, net, uygulanabilir yaz. Markdown başlığı yazma. JSON yazma. Ürün için web adresi, alan adı, marka adı veya site önerisi verme; yalnızca sources alanında kaynak URL'si yaz.`,
+        max_output_tokens: fieldConfig.maxTokens,
         stream: true,
         tools: [
           {
@@ -92,7 +111,11 @@ Net, uygulanabilir, kısa paragraflar kullan. Ürün için web adresi, alan adı
           try {
             for await (const event of stream) {
               if (event.type === "response.output_text.delta") {
-                controller.enqueue(encoder.encode(event.delta));
+                controller.enqueue(
+                  encoder.encode(
+                    `${JSON.stringify({ [reportField]: event.delta })}\n`
+                  )
+                );
               }
             }
 
@@ -104,7 +127,7 @@ Net, uygulanabilir, kısa paragraflar kullan. Ürün için web adresi, alan adı
       }),
       {
         headers: {
-          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Type": "application/x-ndjson; charset=utf-8",
           "Cache-Control": "no-cache, no-transform",
         },
       }
