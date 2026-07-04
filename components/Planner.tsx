@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { jsPDF } from "jspdf";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -56,6 +56,46 @@ type PlanReportField = keyof PlanReport;
 type ReportStreamEvent = Partial<MarketReport & PlanReport> & {
   done?: boolean;
 };
+
+let pdfFontPromise: Promise<string> | null = null;
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+}
+
+function loadPdfFont() {
+  pdfFontPromise ??= fetch("/fonts/Geist-Regular.ttf")
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error("PDF font could not be loaded.");
+      }
+
+      return response.arrayBuffer();
+    })
+    .then(arrayBufferToBase64);
+
+  return pdfFontPromise;
+}
+
+function normalizePdfText(value: string) {
+  return value
+    .normalize("NFC")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\t/g, "  ")
+    .replace(/[ \u00a0]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 const reportActions = [
   { label: "Competitor Analysis", icon: Search },
@@ -143,6 +183,7 @@ const ReportPanel = memo(function ReportPanel({
 }) {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [pdfError, setPdfError] = useState("");
+  const [pdfFontBase64, setPdfFontBase64] = useState("");
   const sections = useMemo<ReportSection[]>(() => {
     if (reportData) {
       return reportFields.map(({ field, title, icon }) => ({
@@ -170,8 +211,31 @@ const ReportPanel = memo(function ReportPanel({
       section.content && section.content !== "Bu bölüm için AI çıktısı bekleniyor."
   );
 
+  useEffect(() => {
+    let mounted = true;
+
+    loadPdfFont()
+      .then((fontBase64) => {
+        if (mounted) {
+          setPdfFontBase64(fontBase64);
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   function downloadPdf() {
     if (!hasReportContent || exportingPdf) {
+      return;
+    }
+
+    if (!pdfFontBase64) {
+      setPdfError("PDF fontu yükleniyor. Lütfen birkaç saniye sonra tekrar deneyin.");
       return;
     }
 
@@ -187,7 +251,17 @@ const ReportPanel = memo(function ReportPanel({
       const pageHeight = pdf.internal.pageSize.getHeight();
       const margin = 14;
       const contentWidth = pageWidth - margin * 2;
+      const bodyX = margin + 20;
+      const bodyWidth = contentWidth - 28;
+      const bodyLineHeight = 4.8;
+      const cardHeaderHeight = 20;
+      const cardBottomPadding = 7;
       let y = margin;
+
+      pdf.addFileToVFS("Geist-Regular.ttf", pdfFontBase64);
+      pdf.addFont("Geist-Regular.ttf", "Geist", "normal");
+      pdf.setFont("Geist", "normal");
+      pdf.setCharSpace(0);
 
       const paintPage = () => {
         pdf.setFillColor("#000000");
@@ -206,7 +280,7 @@ const ReportPanel = memo(function ReportPanel({
 
       paintPage();
 
-      pdf.setFont("helvetica", "bold");
+      pdf.setFont("Geist", "normal");
       pdf.setFontSize(10);
       pdf.setTextColor("#5eead4");
       pdf.text("ZERINIX REPORT", margin, y);
@@ -218,7 +292,7 @@ const ReportPanel = memo(function ReportPanel({
       pdf.setFillColor("#042f2e");
       pdf.setDrawColor("#115e59");
       pdf.roundedRect(pageWidth - margin - 32, y + 1, 32, 10, 5, 5, "FD");
-      pdf.setFont("helvetica", "normal");
+      pdf.setFont("Geist", "normal");
       pdf.setFontSize(8);
       pdf.setTextColor("#ccfbf1");
       pdf.text("AI Ready", pageWidth - margin - 25, y + 7.3);
@@ -226,37 +300,56 @@ const ReportPanel = memo(function ReportPanel({
       y += 26;
 
       sections.forEach((section) => {
-        const bodyLines = pdf.splitTextToSize(section.content, contentWidth - 25);
-        const cardHeight = Math.max(31, 20 + bodyLines.length * 5.6);
+        const bodyLines = pdf.splitTextToSize(
+          normalizePdfText(section.content),
+          bodyWidth
+        ) as string[];
+        let lineIndex = 0;
 
-        ensureSpace(cardHeight + 5);
+        while (lineIndex < bodyLines.length) {
+          ensureSpace(38);
 
-        pdf.setFillColor("#09090b");
-        pdf.setDrawColor("#27272a");
-        pdf.roundedRect(margin, y, contentWidth, cardHeight, 5, 5, "FD");
+          const availableHeight =
+            pageHeight - margin - y - cardHeaderHeight - cardBottomPadding;
+          const maxLines = Math.max(1, Math.floor(availableHeight / bodyLineHeight));
+          const lines = bodyLines.slice(lineIndex, lineIndex + maxLines);
+          const isContinued = lineIndex > 0;
+          const cardHeight = Math.max(
+            31,
+            cardHeaderHeight + lines.length * bodyLineHeight + cardBottomPadding
+          );
 
-        pdf.setFillColor("#18181b");
-        pdf.setDrawColor("#27272a");
-        pdf.roundedRect(margin + 4, y + 5, 11, 11, 3, 3, "FD");
+          pdf.setFillColor("#09090b");
+          pdf.setDrawColor("#27272a");
+          pdf.roundedRect(margin, y, contentWidth, cardHeight, 5, 5, "FD");
 
-        pdf.setDrawColor("#99f6e4");
-        pdf.circle(margin + 9.5, y + 10.5, 2.9, "S");
-        pdf.line(margin + 9.5, y + 7.8, margin + 9.5, y + 13.2);
-        pdf.line(margin + 6.8, y + 10.5, margin + 12.2, y + 10.5);
+          pdf.setFillColor("#18181b");
+          pdf.setDrawColor("#27272a");
+          pdf.roundedRect(margin + 4, y + 5, 11, 11, 3, 3, "FD");
 
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(13);
-        pdf.setTextColor("#ffffff");
-        pdf.text(section.title, margin + 20, y + 11);
+          pdf.setDrawColor("#99f6e4");
+          pdf.circle(margin + 9.5, y + 10.5, 2.9, "S");
+          pdf.line(margin + 9.5, y + 7.8, margin + 9.5, y + 13.2);
+          pdf.line(margin + 6.8, y + 10.5, margin + 12.2, y + 10.5);
 
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(9.5);
-        pdf.setTextColor("#d4d4d8");
-        pdf.text(bodyLines, margin + 20, y + 20, {
-          lineHeightFactor: 1.35,
-        });
+          pdf.setFont("Geist", "normal");
+          pdf.setFontSize(13);
+          pdf.setTextColor("#ffffff");
+          pdf.text(`${section.title}${isContinued ? " devamı" : ""}`, bodyX, y + 11, {
+            maxWidth: bodyWidth,
+          });
 
-        y += cardHeight + 5;
+          pdf.setFont("Geist", "normal");
+          pdf.setFontSize(9);
+          pdf.setTextColor("#d4d4d8");
+          pdf.text(lines, bodyX, y + 20, {
+            lineHeightFactor: 1.22,
+            maxWidth: bodyWidth,
+          });
+
+          lineIndex += lines.length;
+          y += cardHeight + 5;
+        }
       });
 
       const blob = pdf.output("blob");
