@@ -15,9 +15,9 @@ export default function Navbar() {
           <a className="transition hover:text-white" href="#platform">
             Platform
           </a>
-          <a className="transition hover:text-white" href="#giris">
+          <Link className="transition hover:text-white" href="/login">
             Giriş Yap
-          </a>
+          </Link>
         </div>
 
         <Link
