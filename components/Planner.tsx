@@ -20,6 +20,7 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
+import { createClient } from "@/app/lib/supabase/client";
 
 type ReportSection = {
   title: string;
@@ -55,6 +56,12 @@ type PlanReportField = keyof PlanReport;
 
 type ReportStreamEvent = Partial<MarketReport & PlanReport> & {
   done?: boolean;
+};
+
+type ReportFieldDefinition = {
+  field: keyof (MarketReport & PlanReport);
+  title: string;
+  icon: LucideIcon;
 };
 
 let pdfFontPromise: Promise<string> | null = null;
@@ -164,6 +171,16 @@ function sanitizeReportContent(content: string) {
     .replace(/\(\s*\)/g, "")
     .replace(/[ \t]+\n/g, "\n")
     .trim();
+}
+
+function serializeReportSections(
+  reportData: Partial<MarketReport & PlanReport>,
+  fields: ReportFieldDefinition[]
+) {
+  return fields.map(({ field, title }) => ({
+    title,
+    content: sanitizeReportContent(reportData[field] || ""),
+  }));
 }
 
 const ReportPanel = memo(function ReportPanel({
@@ -501,6 +518,44 @@ export default function Planner() {
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
 
+  async function saveGeneratedReport({
+    title,
+    reportType,
+    sections,
+  }: {
+    title: string;
+    reportType: string;
+    sections: Array<{ title: string; content: string }>;
+  }) {
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        console.error(userError || new Error("Authenticated user not found."));
+        return;
+      }
+
+      const { error } = await supabase.from("reports").insert({
+        user_id: user.id,
+        title,
+        prompt,
+        report_type: reportType,
+        status: "completed",
+        sections,
+      });
+
+      if (error) {
+        console.error(error);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   async function readStreamingResult(response: Response, fallbackMessage: string) {
     if (!response.ok || !response.body) {
       try {
@@ -702,6 +757,11 @@ export default function Planner() {
       }
 
       renderReport();
+      await saveGeneratedReport({
+        title: "Business Plan Report",
+        reportType: "business_plan",
+        sections: serializeReportSections(reportOutput, planReportFields),
+      });
     } catch {
       setResult("Bir hata oluştu.");
       setPlanReport(null);
@@ -792,6 +852,11 @@ export default function Planner() {
       }
 
       renderReport();
+      await saveGeneratedReport({
+        title: "Business Intelligence Report",
+        reportType: "market_analysis",
+        sections: serializeReportSections(reportOutput, reportFields),
+      });
     } catch {
       setResult("Pazar analizi sırasında bir hata oluştu.");
       setMarketReport(null);
