@@ -4,11 +4,14 @@ import { memo, useMemo, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
+  BriefcaseBusiness,
   CalendarDays,
   Download,
   FileText,
   Gauge,
+  Goal,
   Landmark,
+  ListChecks,
   Palette,
   PieChart,
   Search,
@@ -34,9 +37,22 @@ type MarketReport = {
   sources: string;
 };
 
-type MarketReportField = keyof MarketReport;
+type PlanReport = {
+  executiveSummary: string;
+  businessModel: string;
+  targetCustomer: string;
+  revenueModel: string;
+  roadmap90Days: string;
+  risks: string;
+  firstCustomerStrategy: string;
+  kpiMetrics: string;
+  successScore: string;
+};
 
-type MarketReportStreamEvent = Partial<MarketReport> & {
+type MarketReportField = keyof MarketReport;
+type PlanReportField = keyof PlanReport;
+
+type ReportStreamEvent = Partial<MarketReport & PlanReport> & {
   done?: boolean;
 };
 
@@ -61,6 +77,22 @@ const reportFields: Array<{
   { field: "successScore", title: "AI Success Score (0-100)", icon: Gauge },
 ];
 
+const planReportFields: Array<{
+  field: PlanReportField;
+  title: string;
+  icon: LucideIcon;
+}> = [
+  { field: "executiveSummary", title: "Executive Summary", icon: Sparkles },
+  { field: "businessModel", title: "Business Model", icon: BriefcaseBusiness },
+  { field: "targetCustomer", title: "Target Customer", icon: Users },
+  { field: "revenueModel", title: "Revenue Model", icon: Landmark },
+  { field: "roadmap90Days", title: "90-Day Roadmap", icon: CalendarDays },
+  { field: "risks", title: "Risks", icon: ShieldAlert },
+  { field: "firstCustomerStrategy", title: "First Customer Strategy", icon: Goal },
+  { field: "kpiMetrics", title: "KPI Metrics", icon: ListChecks },
+  { field: "successScore", title: "AI Success Score", icon: Gauge },
+];
+
 const emptyMarketReport: MarketReport = {
   executiveSummary: "",
   marketAnalysis: "",
@@ -70,6 +102,18 @@ const emptyMarketReport: MarketReport = {
   roadmap90Days: "",
   successScore: "",
   sources: "",
+};
+
+const emptyPlanReport: PlanReport = {
+  executiveSummary: "",
+  businessModel: "",
+  targetCustomer: "",
+  revenueModel: "",
+  roadmap90Days: "",
+  risks: "",
+  firstCustomerStrategy: "",
+  kpiMetrics: "",
+  successScore: "",
 };
 
 function sanitizeReportContent(content: string) {
@@ -83,19 +127,27 @@ function sanitizeReportContent(content: string) {
 }
 
 const ReportPanel = memo(function ReportPanel({
-  marketReport,
+  reportData,
+  reportFields,
+  reportTitle,
   result,
 }: {
-  marketReport: MarketReport | null;
+  reportData: Partial<MarketReport & PlanReport> | null;
+  reportFields: Array<{
+    field: keyof (MarketReport & PlanReport);
+    title: string;
+    icon: LucideIcon;
+  }>;
+  reportTitle: string;
   result: string;
 }) {
   const sections = useMemo<ReportSection[]>(() => {
-    if (marketReport) {
+    if (reportData) {
       return reportFields.map(({ field, title, icon }) => ({
         title,
         icon,
         content:
-          sanitizeReportContent(marketReport[field]) ||
+          sanitizeReportContent(reportData[field] || "") ||
           "Bu bölüm için AI çıktısı bekleniyor.",
       }));
     }
@@ -109,9 +161,9 @@ const ReportPanel = memo(function ReportPanel({
           },
         ]
       : [];
-  }, [marketReport, result]);
+  }, [reportData, reportFields, result]);
 
-  if (!marketReport && !result) {
+  if (!reportData && !result) {
     return (
       <div className="flex min-h-[520px] items-center justify-center rounded-3xl border border-white/10 bg-zinc-950/70 p-8 text-center shadow-2xl shadow-black/40">
         <div>
@@ -137,7 +189,7 @@ const ReportPanel = memo(function ReportPanel({
             ZERINIX REPORT
           </p>
           <h2 className="mt-2 text-3xl font-bold text-white">
-            Business Intelligence Report
+            {reportTitle}
           </h2>
         </div>
         <div className="rounded-full border border-teal-300/20 bg-teal-300/10 px-4 py-2 text-sm text-teal-100">
@@ -196,6 +248,7 @@ export default function Planner() {
   const [prompt, setPrompt] = useState("");
   const [result, setResult] = useState("");
   const [marketReport, setMarketReport] = useState<MarketReport | null>(null);
+  const [planReport, setPlanReport] = useState<PlanReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
 
@@ -248,10 +301,10 @@ export default function Planner() {
 
   async function readStreamingSectionJson(
     response: Response,
-    onEvent: (event: MarketReportStreamEvent) => void,
+    onEvent: (event: ReportStreamEvent) => void,
     fallbackMessage: string,
     onFirstChunk?: () => void,
-    fallbackField: MarketReportField = "executiveSummary"
+    fallbackField: keyof (MarketReport & PlanReport) = "executiveSummary"
   ) {
     if (!response.ok || !response.body) {
       try {
@@ -281,7 +334,7 @@ export default function Planner() {
         }
 
         try {
-          const event = JSON.parse(trimmed) as MarketReportStreamEvent;
+          const event = JSON.parse(trimmed) as ReportStreamEvent;
 
           if (!hasChunk && Object.values(event).some(Boolean)) {
             hasChunk = true;
@@ -311,7 +364,7 @@ export default function Planner() {
 
     if (buffer.trim()) {
       try {
-        onEvent(JSON.parse(buffer.trim()) as MarketReportStreamEvent);
+        onEvent(JSON.parse(buffer.trim()) as ReportStreamEvent);
       } catch {
         onEvent({ [fallbackField]: fallbackMessage });
       }
@@ -322,17 +375,87 @@ export default function Planner() {
     setLoading(true);
     setResult("");
     setMarketReport(null);
+    setPlanReport(emptyPlanReport);
 
-    try {
+    const reportOutput: PlanReport = { ...emptyPlanReport };
+    let frame: number | null = null;
+    let remainingSectionsStarted = false;
+    let remainingSectionsPromise: Promise<void[]> = Promise.resolve([]);
+
+    const renderReport = () => {
+      setPlanReport({ ...reportOutput });
+    };
+
+    const scheduleReportRender = () => {
+      if (frame !== null) {
+        return;
+      }
+
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        renderReport();
+      });
+    };
+
+    const streamField = async (
+      field: PlanReportField,
+      onFirstChunk?: () => void
+    ) => {
       const res = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, field }),
       });
 
-      await readStreamingResult(res, "Cevap alınamadı.");
+      await readStreamingSectionJson(
+        res,
+        (event) => {
+          const chunk = event[field];
+
+          if (!chunk) {
+            return;
+          }
+
+          reportOutput[field] += chunk;
+          scheduleReportRender();
+        },
+        "Bu bölüm için AI çıktısı alınamadı.",
+        onFirstChunk,
+        field
+      );
+    };
+
+    const startRemainingSections = () => {
+      if (remainingSectionsStarted) {
+        return;
+      }
+
+      remainingSectionsStarted = true;
+      remainingSectionsPromise = Promise.all(
+        planReportFields
+          .slice(1)
+          .map(({ field }) =>
+            streamField(field).catch(() => {
+              reportOutput[field] = "Bu bölüm için AI çıktısı alınamadı.";
+              scheduleReportRender();
+            })
+          )
+      );
+    };
+
+    try {
+      await streamField("executiveSummary", startRemainingSections);
+      startRemainingSections();
+      await remainingSectionsPromise;
+
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+      }
+
+      renderReport();
     } catch {
       setResult("Bir hata oluştu.");
+      setPlanReport(null);
     } finally {
       setLoading(false);
     }
@@ -341,6 +464,7 @@ export default function Planner() {
   async function analyzeMarket() {
     setAnalyzing(true);
     setResult("");
+    setPlanReport(null);
     setMarketReport(emptyMarketReport);
 
     const reportOutput: MarketReport = { ...emptyMarketReport };
@@ -469,7 +593,20 @@ export default function Planner() {
           </button>
         </div>
 
-        <ReportPanel marketReport={marketReport} result={result} />
+        <ReportPanel
+          reportData={planReport || marketReport}
+          reportFields={
+            planReport
+              ? planReportFields
+              : (reportFields as Array<{
+                  field: keyof (MarketReport & PlanReport);
+                  title: string;
+                  icon: LucideIcon;
+                }>)
+          }
+          reportTitle={planReport ? "Business Plan Report" : "Business Intelligence Report"}
+          result={result}
+        />
       </div>
     </main>
   );
