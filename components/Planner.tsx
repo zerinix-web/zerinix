@@ -59,7 +59,6 @@ const reportFields: Array<{
   { field: "risks", title: "Risks", icon: ShieldAlert },
   { field: "roadmap90Days", title: "90-Day Roadmap", icon: CalendarDays },
   { field: "successScore", title: "AI Success Score (0-100)", icon: Gauge },
-  { field: "sources", title: "Sources", icon: Search },
 ];
 
 const emptyMarketReport: MarketReport = {
