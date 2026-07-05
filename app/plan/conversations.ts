@@ -32,19 +32,26 @@ export async function loadPlanConversations(
     .order("updated_at", { ascending: false });
 
   if (error) {
-    return [];
+    console.error("[ai_conversations select failed]", error);
+    return { conversations: [], error: error.message };
   }
 
   const conversations = (data || []) as ConversationRow[];
   const conversationIds = conversations.map((conversation) => conversation.id);
-  const { data: messages } = conversationIds.length
+  const { data: messages, error: messagesError } = conversationIds.length
     ? await supabase
         .from("ai_messages")
         .select("id,conversation_id,role,content,mode,status,attachments,created_at")
         .eq("user_id", user.id)
         .in("conversation_id", conversationIds)
         .order("created_at", { ascending: true })
-    : { data: [] };
+    : { data: [], error: null };
+
+  if (messagesError) {
+    console.error("[ai_messages select failed]", messagesError);
+    return { conversations: [], error: messagesError.message };
+  }
+
   const messagesByConversation = new Map<string, MessageRow[]>();
 
   ((messages || []) as Array<MessageRow & { conversation_id: string }>).forEach(
@@ -55,21 +62,24 @@ export async function loadPlanConversations(
     }
   );
 
-  return conversations.map((conversation) => ({
-    id: conversation.id,
-    title: conversation.title,
-    createdAt: new Date(conversation.created_at).getTime(),
-    updatedAt: new Date(conversation.updated_at).getTime(),
-    messages: (messagesByConversation.get(conversation.id) || []).map((message) => ({
-      id: message.id,
-      role: message.role,
-      content: message.content,
-      mode: message.mode || undefined,
-      status: message.status,
-      attachments: Array.isArray(message.attachments)
-        ? message.attachments
-        : [],
-      createdAt: new Date(message.created_at).getTime(),
+  return {
+    conversations: conversations.map((conversation) => ({
+      id: conversation.id,
+      title: conversation.title,
+      createdAt: new Date(conversation.created_at).getTime(),
+      updatedAt: new Date(conversation.updated_at).getTime(),
+      messages: (messagesByConversation.get(conversation.id) || []).map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        mode: message.mode || undefined,
+        status: message.status,
+        attachments: Array.isArray(message.attachments)
+          ? message.attachments
+          : [],
+        createdAt: new Date(message.created_at).getTime(),
+      })),
     })),
-  }));
+    error: "",
+  };
 }

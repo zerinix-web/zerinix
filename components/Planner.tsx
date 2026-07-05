@@ -116,6 +116,7 @@ type Conversation = {
 
 type PlannerProps = {
   initialConversations?: Conversation[];
+  conversationLoadError?: string;
 };
 
 const workflowSteps = [
@@ -1312,7 +1313,10 @@ const ReportPanel = memo(function ReportPanel({
   );
 });
 
-export default function Planner({ initialConversations = [] }: PlannerProps) {
+export default function Planner({
+  initialConversations = [],
+  conversationLoadError = "",
+}: PlannerProps) {
   const [prompt, setPrompt] = useState("");
   const [result, setResult] = useState("");
   const [marketReport, setMarketReport] = useState<MarketReport | null>(null);
@@ -1351,6 +1355,12 @@ export default function Planner({ initialConversations = [] }: PlannerProps) {
     [activeConversationId, conversations]
   );
   const messages = activeConversation?.messages || [];
+
+  useEffect(() => {
+    if (conversationLoadError) {
+      console.error("[ai_conversations load failed]", conversationLoadError);
+    }
+  }, [conversationLoadError]);
 
   useEffect(() => {
     chatScrollerRef.current?.scrollTo({
@@ -1495,7 +1505,7 @@ export default function Planner({ initialConversations = [] }: PlannerProps) {
     });
 
     if (error) {
-      console.error(error);
+      console.error("[ai_conversations insert failed]", error);
       return false;
     }
 
@@ -1515,7 +1525,7 @@ export default function Planner({ initialConversations = [] }: PlannerProps) {
       .eq("id", conversationId);
 
     if (error) {
-      console.error(error);
+      console.error("[ai_conversations update failed]", error);
     }
   }
 
@@ -1531,7 +1541,7 @@ export default function Planner({ initialConversations = [] }: PlannerProps) {
       .eq("id", conversationId);
 
     if (error) {
-      console.error(error);
+      console.error("[ai_conversations delete failed]", error);
       window.alert("Conversation could not be deleted. Please try again.");
       return false;
     }
@@ -1559,7 +1569,7 @@ export default function Planner({ initialConversations = [] }: PlannerProps) {
     });
 
     if (error) {
-      console.error(error);
+      console.error("[ai_messages insert failed]", error);
     }
   }
 
@@ -1575,7 +1585,7 @@ export default function Planner({ initialConversations = [] }: PlannerProps) {
       .eq("id", messageId);
 
     if (error) {
-      console.error(error);
+      console.error("[ai_messages update failed]", error);
     }
   }
 
@@ -1588,7 +1598,7 @@ export default function Planner({ initialConversations = [] }: PlannerProps) {
       .order("created_at", { ascending: true });
 
     if (error) {
-      console.error(error);
+      console.error("[ai_messages select failed]", error);
       return;
     }
 

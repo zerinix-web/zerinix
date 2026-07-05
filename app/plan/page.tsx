@@ -9,9 +9,14 @@ export default async function PlanPage() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const conversations = user
+  const conversationResult = user
     ? await loadPlanConversations(supabase, user)
-    : [];
+    : { conversations: [], error: "" };
 
-  return <Planner initialConversations={conversations} />;
+  return (
+    <Planner
+      initialConversations={conversationResult.conversations}
+      conversationLoadError={conversationResult.error}
+    />
+  );
 }
