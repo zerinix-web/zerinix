@@ -259,6 +259,46 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function needsClarification(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const genericPrompts = new Set([
+    "test",
+    "deneme",
+    "hi",
+    "hello",
+    "hey",
+    "merhaba",
+    "selam",
+    "ok",
+    "okay",
+    "evet",
+    "start",
+    "başla",
+  ]);
+
+  if (!normalized) {
+    return true;
+  }
+
+  if (genericPrompts.has(normalized)) {
+    return true;
+  }
+
+  const words = normalized.split(" ").filter(Boolean);
+
+  return words.length < 3 && normalized.length < 18;
+}
+
+function createClarificationQuestion(mode: ChatMode) {
+  return mode === "market"
+    ? "Hangi iş fikri veya sektör için pazar analizi yapmamı istersin? Kısaca ürününü, hedef müşterini ve ülke/pazarını yaz."
+    : "Hangi iş fikrini planlayalım? Kısaca ürününü, hedef müşterini ve ulaşmak istediğin sonucu yaz.";
+}
+
 function generateConversationTitle(content: string) {
   const cleanTitle = content
     .replace(/\s+/g, " ")
@@ -714,8 +754,8 @@ function ConversationSidebar({
   }
 
   return (
-    <aside className="flex min-h-0 border-b border-white/10 bg-zinc-950/95 p-4 backdrop-blur-xl lg:h-screen lg:w-[20.5rem] lg:flex-col lg:border-b-0 lg:border-r">
-      <div className="flex w-full items-center justify-between gap-3 lg:block">
+    <aside className="flex min-h-0 border-b border-white/10 bg-zinc-950/95 p-4 backdrop-blur-xl md:h-screen md:w-[20.5rem] md:flex-col md:border-b-0 md:border-r">
+      <div className="flex w-full items-center justify-between gap-3 md:block">
         <div>
           <p className="text-2xl font-bold tracking-[0.12em] text-white">ZERINIX</p>
           <p className="mt-1 text-sm text-zinc-500">AI business workspace</p>
@@ -723,16 +763,16 @@ function ConversationSidebar({
         <button
           type="button"
           onClick={() => void onCreateConversation()}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-zinc-200 transition hover:bg-white/10 lg:mt-5 lg:w-full lg:gap-2 lg:px-4 lg:text-sm"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-zinc-200 transition hover:bg-white/10 md:mt-5 md:w-full md:gap-2 md:px-4 md:text-sm"
           aria-label="New conversation"
           title="New conversation"
         >
           <Plus className="h-4 w-4 text-teal-200" />
-          <span className="hidden lg:inline">New chat</span>
+          <span className="hidden md:inline">New chat</span>
         </button>
       </div>
 
-      <div className="flex flex-1 gap-3 overflow-x-auto pl-3 lg:mt-6 lg:block lg:space-y-3 lg:overflow-y-auto lg:pl-0">
+      <div className="flex flex-1 gap-3 overflow-x-auto pl-3 md:mt-6 md:block md:space-y-3 md:overflow-y-auto md:pl-0">
         {sortedConversations.length === 0 ? (
           <div className="min-w-64 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-zinc-500">
             Conversation history will appear here.
@@ -744,7 +784,7 @@ function ConversationSidebar({
             key={conversation.id}
             type="button"
             onClick={() => onSelectConversation(conversation.id)}
-            className={`group min-w-72 rounded-2xl border p-4 text-left text-sm transition lg:w-full ${
+            className={`group min-w-72 rounded-2xl border p-4 text-left text-sm transition md:w-full ${
               conversation.id === activeConversationId
                 ? "border-teal-300/30 bg-teal-300/10"
                 : "border-white/10 bg-white/[0.03] hover:border-teal-300/30 hover:bg-teal-300/10"
@@ -779,7 +819,7 @@ function ConversationSidebar({
                   {conversation.messages.at(-1)?.content || "Ready for a new strategy session."}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-1 opacity-100 lg:opacity-0 lg:transition lg:group-hover:opacity-100">
+              <div className="flex shrink-0 items-center gap-1 opacity-100 md:opacity-0 md:transition md:group-hover:opacity-100">
                 <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-black/30">
                   <MoreHorizontal className="h-3.5 w-3.5 text-zinc-400" />
                 </span>
@@ -1884,6 +1924,59 @@ export default function Planner({
     }
   }
 
+  async function askForClarification(submittedPrompt: string) {
+    const conversationId = activeConversationId;
+    const title =
+      activeConversation?.title === "New conversation"
+        ? generateConversationTitle(submittedPrompt)
+        : activeConversation?.title || generateConversationTitle(submittedPrompt);
+
+    await ensurePersistedConversation(conversationId, title);
+    const userMessage = addUserMessage(activeMode, submittedPrompt, conversationId);
+    await persistMessage(conversationId, userMessage);
+
+    const clarification = createClarificationQuestion(activeMode);
+    const assistantMessageId = addAssistantMessage(
+      activeMode,
+      clarification,
+      "complete",
+      conversationId
+    );
+
+    await persistMessage(conversationId, {
+      id: assistantMessageId,
+      role: "assistant",
+      mode: activeMode,
+      content: clarification,
+      status: "complete",
+      createdAt: Date.now(),
+    });
+    setPrompt("");
+    setResult("");
+    setMarketReport(null);
+    setPlanReport(null);
+    setWorkflowCompletedSteps(0);
+  }
+
+  async function submitPrompt() {
+    const submittedPrompt = prompt.trim();
+
+    if (!submittedPrompt || isWorking) {
+      return;
+    }
+
+    if (needsClarification(submittedPrompt)) {
+      await askForClarification(submittedPrompt);
+      return;
+    }
+
+    if (activeMode === "plan") {
+      await generatePlan(submittedPrompt);
+    } else {
+      await analyzeMarket(submittedPrompt);
+    }
+  }
+
   async function getGeneralWorkspaceId(
     supabase: ReturnType<typeof createClient>,
     userId: string
@@ -2383,7 +2476,7 @@ export default function Planner({
 
   return (
     <main
-      className="flex h-screen overflow-hidden bg-black text-white"
+      className="flex h-screen flex-col overflow-hidden bg-black text-white md:flex-row"
       onDragEnter={(event) => {
         event.preventDefault();
         setIsDraggingFiles(true);
@@ -2542,11 +2635,7 @@ export default function Planner({
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
                     event.preventDefault();
-                    if (activeMode === "plan") {
-                      void generatePlan();
-                    } else {
-                      void analyzeMarket();
-                    }
+                    void submitPrompt();
                   }
                 }}
                 className="min-h-28 w-full resize-none rounded-2xl bg-transparent p-3 text-base leading-7 text-white outline-none placeholder:text-zinc-600"
@@ -2593,13 +2682,7 @@ export default function Planner({
                 <button
                   type="button"
                   disabled={!prompt.trim() || isWorking}
-                  onClick={() => {
-                    if (activeMode === "plan") {
-                      void generatePlan();
-                    } else {
-                      void analyzeMarket();
-                    }
-                  }}
+                  onClick={() => void submitPrompt()}
                   className="inline-flex items-center justify-center gap-2 rounded-2xl bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/40 transition hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isWorking ? "Streaming..." : "Send"}
