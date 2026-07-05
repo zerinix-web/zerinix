@@ -137,19 +137,6 @@ function extractResponseText(response: unknown) {
     .join("");
 }
 
-function logRawOpenAIEvent(event: unknown) {
-  const rawEvent = event as { type?: string };
-
-  if (
-    rawEvent.type === "response.completed" ||
-    rawEvent.type === "response.failed" ||
-    rawEvent.type === "response.incomplete" ||
-    rawEvent.type === "response.error"
-  ) {
-    console.log("[market-analysis] raw OpenAI response", JSON.stringify(event));
-  }
-}
-
 export async function POST(req: Request) {
   try {
     const { prompt, field, section } = await req.json();
@@ -209,8 +196,6 @@ Türkçe, net, uygulanabilir yaz. Ürün için web adresi, alan adı, marka adı
             let streamedText = "";
 
             for await (const event of stream) {
-              logRawOpenAIEvent(event);
-
               if (event.type === "response.output_text.delta" && event.delta) {
                 streamedText += event.delta;
                 controller.enqueue(
@@ -237,10 +222,6 @@ Türkçe, net, uygulanabilir yaz. Ürün için web adresi, alan adı, marka adı
               }
             }
 
-            console.log(
-              "[market-analysis] serialized JSON schema",
-              JSON.stringify(createReportChunk(reportField, streamedText))
-            );
             controller.close();
           } catch (error) {
             console.error("[market-analysis] stream error", error);

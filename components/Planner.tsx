@@ -17,7 +17,6 @@ import {
   BriefcaseBusiness,
   CalendarDays,
   Check,
-  CheckCircle2,
   Clipboard,
   ClipboardCheck,
   CornerDownLeft,
@@ -41,7 +40,6 @@ import {
   Send,
   ShieldAlert,
   Sparkles,
-  Trash2,
   User,
   Users,
   X,
@@ -114,6 +112,10 @@ type Conversation = {
   messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;
+};
+
+type PlannerProps = {
+  initialConversations?: Conversation[];
 };
 
 const workflowSteps = [
@@ -1310,18 +1312,23 @@ const ReportPanel = memo(function ReportPanel({
   );
 });
 
-export default function Planner() {
+export default function Planner({ initialConversations = [] }: PlannerProps) {
   const [prompt, setPrompt] = useState("");
   const [result, setResult] = useState("");
   const [marketReport, setMarketReport] = useState<MarketReport | null>(null);
   const [planReport, setPlanReport] = useState<PlanReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const initialConversationId = useMemo(() => createMessageId(), []);
+  const initialConversationId = useMemo(
+    () => initialConversations[0]?.id || createMessageId(),
+    [initialConversations]
+  );
   const [activeConversationId, setActiveConversationId] = useState(initialConversationId);
-  const [conversations, setConversations] = useState<Conversation[]>(() => [
-    createConversation(initialConversationId),
-  ]);
+  const [conversations, setConversations] = useState<Conversation[]>(() =>
+    initialConversations.length > 0
+      ? initialConversations
+      : [createConversation(initialConversationId)]
+  );
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [activeMode, setActiveMode] = useState<ChatMode>("plan");
   const [workflowCompletedSteps, setWorkflowCompletedSteps] = useState(0);
@@ -1332,6 +1339,9 @@ export default function Planner() {
   } | null>(null);
   const chatScrollerRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const persistedConversationIdsRef = useRef(
+    new Set(initialConversations.map((conversation) => conversation.id))
+  );
 
   const isWorking = loading || analyzing;
   const activeConversation = useMemo(
@@ -1368,17 +1378,24 @@ export default function Planner() {
   });
 
   function createMessageId() {
-    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  function updateConversation(
+    conversationId: string,
+    updater: (conversation: Conversation) => Conversation
+  ) {
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === conversationId ? updater(conversation) : conversation
+      )
+    );
   }
 
   function updateActiveConversation(
     updater: (conversation: Conversation) => Conversation
   ) {
-    setConversations((current) =>
-      current.map((conversation) =>
-        conversation.id === activeConversationId ? updater(conversation) : conversation
-      )
-    );
+    updateConversation(activeConversationId, updater);
   }
 
   function createNewConversation() {
@@ -1402,24 +1419,160 @@ export default function Planner() {
           : conversation
       )
     );
+
+    void persistConversationTitle(id, cleanTitle);
   }
 
   function deleteConversation(id: string) {
-    setConversations((current) => {
-      const remaining = current.filter((conversation) => conversation.id !== id);
+    const conversation = conversations.find((item) => item.id === id);
+    const shouldDelete = window.confirm(
+      `Delete "${conversation?.title || "this conversation"}"? This cannot be undone.`
+    );
 
-      if (remaining.length === 0) {
-        const newConversation = createConversation(createMessageId());
-        setActiveConversationId(newConversation.id);
-        return [newConversation];
+    if (!shouldDelete) {
+      return;
+    }
+
+    void deletePersistedConversation(id).then((deleted) => {
+      if (!deleted) {
+        return;
       }
 
-      if (id === activeConversationId) {
-        setActiveConversationId(remaining[0].id);
-      }
+      setConversations((current) => {
+        const remaining = current.filter((conversation) => conversation.id !== id);
 
-      return remaining;
+        if (remaining.length === 0) {
+          const newConversation = createConversation(createMessageId());
+          setActiveConversationId(newConversation.id);
+          return [newConversation];
+        }
+
+        if (id === activeConversationId) {
+          setActiveConversationId(remaining[0].id);
+        }
+
+        return remaining;
+      });
+
+      persistedConversationIdsRef.current.delete(id);
     });
+  }
+
+  async function getCurrentUserId() {
+    const supabase = createClient();
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
+
+    if (error || !user) {
+      return "";
+    }
+
+    return user.id;
+  }
+
+  async function ensurePersistedConversation(conversationId: string, title: string) {
+    if (persistedConversationIdsRef.current.has(conversationId)) {
+      return true;
+    }
+
+    const userId = await getCurrentUserId();
+
+    if (!userId) {
+      return false;
+    }
+
+    const supabase = createClient();
+    const { error } = await supabase.from("ai_conversations").insert({
+      id: conversationId,
+      user_id: userId,
+      title,
+    });
+
+    if (error) {
+      console.error(error);
+      return false;
+    }
+
+    persistedConversationIdsRef.current.add(conversationId);
+    return true;
+  }
+
+  async function persistConversationTitle(conversationId: string, title: string) {
+    if (!(await ensurePersistedConversation(conversationId, title))) {
+      return;
+    }
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("ai_conversations")
+      .update({ title })
+      .eq("id", conversationId);
+
+    if (error) {
+      console.error(error);
+    }
+  }
+
+  async function deletePersistedConversation(conversationId: string) {
+    if (!persistedConversationIdsRef.current.has(conversationId)) {
+      return true;
+    }
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("ai_conversations")
+      .delete()
+      .eq("id", conversationId);
+
+    if (error) {
+      console.error(error);
+      window.alert("Conversation could not be deleted. Please try again.");
+      return false;
+    }
+
+    return true;
+  }
+
+  async function persistMessage(conversationId: string, message: ChatMessage) {
+    const userId = await getCurrentUserId();
+
+    if (!userId) {
+      return;
+    }
+
+    const supabase = createClient();
+    const { error } = await supabase.from("ai_messages").insert({
+      id: message.id,
+      conversation_id: conversationId,
+      user_id: userId,
+      role: message.role,
+      content: message.content,
+      mode: message.mode || null,
+      status: message.status || "complete",
+      attachments: message.attachments || [],
+    });
+
+    if (error) {
+      console.error(error);
+    }
+  }
+
+  async function updatePersistedMessage(
+    messageId: string,
+    content: string,
+    status: ChatMessage["status"] = "complete"
+  ) {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("ai_messages")
+      .update({ content, status })
+      .eq("id", messageId);
+
+    if (error) {
+      console.error(error);
+    }
   }
 
   function handleFiles(files: FileList | null) {
@@ -1446,7 +1599,7 @@ export default function Planner() {
     setAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }
 
-  function addUserMessage(mode: ChatMode, content: string) {
+  function addUserMessage(mode: ChatMode, content: string, conversationId = activeConversationId) {
     const attachedFiles = attachments;
     const message: ChatMessage = {
       id: createMessageId(),
@@ -1457,8 +1610,12 @@ export default function Planner() {
       status: "complete",
       createdAt: Date.now(),
     };
+    const nextTitle =
+      activeConversation?.title === "New conversation"
+        ? generateConversationTitle(content)
+        : activeConversation?.title || generateConversationTitle(content);
 
-    updateActiveConversation((conversation) => ({
+    updateConversation(conversationId, (conversation) => ({
       ...conversation,
       title:
         conversation.title === "New conversation"
@@ -1467,33 +1624,46 @@ export default function Planner() {
       messages: [...conversation.messages, message],
       updatedAt: Date.now(),
     }));
+    void ensurePersistedConversation(conversationId, nextTitle).then((persisted) => {
+      if (persisted) {
+        void persistMessage(conversationId, message);
+      }
+    });
     setAttachments([]);
   }
 
-  function addAssistantMessage(mode: ChatMode, content: string, status: ChatMessage["status"] = "streaming") {
+  function addAssistantMessage(
+    mode: ChatMode,
+    content: string,
+    status: ChatMessage["status"] = "streaming",
+    conversationId = activeConversationId
+  ) {
     const id = createMessageId();
+    const message: ChatMessage = {
+      id,
+      role: "assistant",
+      mode,
+      content,
+      status,
+      createdAt: Date.now(),
+    };
 
-    updateActiveConversation((conversation) => ({
+    updateConversation(conversationId, (conversation) => ({
       ...conversation,
-      messages: [
-        ...conversation.messages,
-        {
-          id,
-          role: "assistant",
-          mode,
-          content,
-          status,
-          createdAt: Date.now(),
-        },
-      ],
+      messages: [...conversation.messages, message],
       updatedAt: Date.now(),
     }));
 
     return id;
   }
 
-  function updateAssistantMessage(id: string, content: string, status: ChatMessage["status"] = "streaming") {
-    updateActiveConversation((conversation) => ({
+  function updateAssistantMessage(
+    id: string,
+    content: string,
+    status: ChatMessage["status"] = "streaming",
+    conversationId = activeConversationId
+  ) {
+    updateConversation(conversationId, (conversation) => ({
       ...conversation,
       messages: conversation.messages.map((message) =>
         message.id === id ? { ...message, content, status } : message
@@ -1520,6 +1690,7 @@ export default function Planner() {
           : conversation.title,
       updatedAt: Date.now(),
     }));
+    void updatePersistedMessage(messageId, content, "complete");
   }
 
   function regenerateResponse() {
@@ -1622,53 +1793,6 @@ export default function Planner() {
     }
   }
 
-  async function readStreamingResult(response: Response, fallbackMessage: string) {
-    if (!response.ok || !response.body) {
-      try {
-        const data = await response.json();
-        setResult(data.error || fallbackMessage);
-      } catch {
-        setResult(fallbackMessage);
-      }
-
-      return;
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let output = "";
-    let frame: number | null = null;
-
-    const scheduleResultUpdate = () => {
-      if (frame !== null) {
-        return;
-      }
-
-      frame = requestAnimationFrame(() => {
-        frame = null;
-        setResult(output);
-      });
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-
-      if (done) {
-        break;
-      }
-
-      output += decoder.decode(value, { stream: true });
-      scheduleResultUpdate();
-    }
-
-    output += decoder.decode();
-    if (frame !== null) {
-      cancelAnimationFrame(frame);
-    }
-
-    setResult(output || fallbackMessage);
-  }
-
   async function readStreamingSectionJson(
     response: Response,
     onEvent: (event: ReportStreamEvent) => void,
@@ -1752,14 +1876,30 @@ export default function Planner() {
     setActiveMode("plan");
     setWorkflowCompletedSteps(0);
     setLastRequest({ mode: "plan", prompt: submittedPrompt });
+    const conversationId = activeConversationId;
+    await ensurePersistedConversation(
+      conversationId,
+      activeConversation?.title === "New conversation"
+        ? generateConversationTitle(submittedPrompt)
+        : activeConversation?.title || generateConversationTitle(submittedPrompt)
+    );
     if (addToHistory) {
-      addUserMessage("plan", submittedPrompt);
+      addUserMessage("plan", submittedPrompt, conversationId);
     }
     const assistantMessageId = addAssistantMessage(
       "plan",
       "## Business Plan Report\n\nPreparing the first sections...",
-      "streaming"
+      "streaming",
+      conversationId
     );
+    await persistMessage(conversationId, {
+      id: assistantMessageId,
+      role: "assistant",
+      mode: "plan",
+      content: "## Business Plan Report\n\nPreparing the first sections...",
+      status: "streaming",
+      createdAt: Date.now(),
+    });
     setResult("");
     setMarketReport(null);
     setPlanReport(emptyPlanReport);
@@ -1774,7 +1914,8 @@ export default function Planner() {
       updateAssistantMessage(
         assistantMessageId,
         getReportMarkdown("Business Plan Report", reportOutput, planReportFields),
-        "streaming"
+        "streaming",
+        conversationId
       );
     };
 
@@ -1854,6 +1995,12 @@ export default function Planner() {
       updateAssistantMessage(
         assistantMessageId,
         getReportMarkdown("Business Plan Report", reportOutput, planReportFields),
+        "complete",
+        conversationId
+      );
+      await updatePersistedMessage(
+        assistantMessageId,
+        getReportMarkdown("Business Plan Report", reportOutput, planReportFields),
         "complete"
       );
       await saveGeneratedReport({
@@ -1866,6 +2013,12 @@ export default function Planner() {
       setResult("Bir hata oluştu.");
       setPlanReport(null);
       updateAssistantMessage(
+        assistantMessageId,
+        "Bir hata oluştu. Lütfen tekrar deneyin.",
+        "complete",
+        conversationId
+      );
+      await updatePersistedMessage(
         assistantMessageId,
         "Bir hata oluştu. Lütfen tekrar deneyin.",
         "complete"
@@ -1886,14 +2039,30 @@ export default function Planner() {
     setActiveMode("market");
     setWorkflowCompletedSteps(0);
     setLastRequest({ mode: "market", prompt: submittedPrompt });
+    const conversationId = activeConversationId;
+    await ensurePersistedConversation(
+      conversationId,
+      activeConversation?.title === "New conversation"
+        ? generateConversationTitle(submittedPrompt)
+        : activeConversation?.title || generateConversationTitle(submittedPrompt)
+    );
     if (addToHistory) {
-      addUserMessage("market", submittedPrompt);
+      addUserMessage("market", submittedPrompt, conversationId);
     }
     const assistantMessageId = addAssistantMessage(
       "market",
       "## Business Intelligence Report\n\nPreparing live market research...",
-      "streaming"
+      "streaming",
+      conversationId
     );
+    await persistMessage(conversationId, {
+      id: assistantMessageId,
+      role: "assistant",
+      mode: "market",
+      content: "## Business Intelligence Report\n\nPreparing live market research...",
+      status: "streaming",
+      createdAt: Date.now(),
+    });
     setResult("");
     setPlanReport(null);
     setMarketReport(emptyMarketReport);
@@ -1908,7 +2077,8 @@ export default function Planner() {
       updateAssistantMessage(
         assistantMessageId,
         getReportMarkdown("Business Intelligence Report", reportOutput, reportFields),
-        "streaming"
+        "streaming",
+        conversationId
       );
     };
 
@@ -1988,6 +2158,12 @@ export default function Planner() {
       updateAssistantMessage(
         assistantMessageId,
         getReportMarkdown("Business Intelligence Report", reportOutput, reportFields),
+        "complete",
+        conversationId
+      );
+      await updatePersistedMessage(
+        assistantMessageId,
+        getReportMarkdown("Business Intelligence Report", reportOutput, reportFields),
         "complete"
       );
       await saveGeneratedReport({
@@ -2000,6 +2176,12 @@ export default function Planner() {
       setResult("Pazar analizi sırasında bir hata oluştu.");
       setMarketReport(null);
       updateAssistantMessage(
+        assistantMessageId,
+        "Pazar analizi sırasında bir hata oluştu. Lütfen tekrar deneyin.",
+        "complete",
+        conversationId
+      );
+      await updatePersistedMessage(
         assistantMessageId,
         "Pazar analizi sırasında bir hata oluştu. Lütfen tekrar deneyin.",
         "complete"
