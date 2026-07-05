@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ArrowRight, LockKeyhole, Sparkles } from "lucide-react";
+import { LockKeyhole, Sparkles } from "lucide-react";
+import WaitlistForm from "@/components/WaitlistForm";
 
 export default function Home() {
   return (
@@ -33,13 +34,7 @@ export default function Home() {
               founders.
             </p>
             <div className="mt-10 flex flex-col gap-4 sm:flex-row">
-              <a
-                href="mailto:yesilovaibrahim38@gmail.com?subject=ZERINIX%20early%20access%20request"
-                className="inline-flex items-center justify-center gap-2 rounded-full bg-teal-300 px-6 py-3 text-sm font-semibold text-black transition hover:bg-teal-200"
-              >
-                Request Early Access
-                <ArrowRight className="h-4 w-4" />
-              </a>
+              <WaitlistForm />
               <Link
                 href="/login?next=/plan"
                 className="inline-flex items-center justify-center rounded-full border border-white/12 px-6 py-3 text-sm font-semibold text-zinc-100 transition hover:border-white/30 hover:bg-white/[0.04]"

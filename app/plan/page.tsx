@@ -1,4 +1,5 @@
 import Planner from "@/components/Planner";
+import WaitlistForm from "@/components/WaitlistForm";
 import { isPrivateBetaAllowed } from "@/app/lib/beta-access";
 import { createClient } from "@/app/lib/supabase/server";
 import { loadPlanConversations } from "./conversations";
@@ -53,12 +54,7 @@ function PrivateBetaAccessOnly() {
           >
             Back to Landing
           </Link>
-          <a
-            href="mailto:yesilovaibrahim38@gmail.com?subject=ZERINIX%20private%20beta%20access"
-            className="inline-flex items-center justify-center rounded-full bg-teal-300 px-5 py-3 text-sm font-semibold text-black transition hover:bg-teal-200"
-          >
-            Request Early Access
-          </a>
+          <WaitlistForm />
         </div>
       </section>
     </main>
