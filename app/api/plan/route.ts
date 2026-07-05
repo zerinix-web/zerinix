@@ -2,6 +2,12 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { isPrivateBetaAllowed } from "@/app/lib/beta-access";
 import { createClient } from "@/app/lib/supabase/server";
+import {
+  checkRateLimit,
+  getClientIpFromRequest,
+  getRateLimitHeaders,
+} from "@/app/lib/security/rate-limit";
+import { logServerError } from "@/app/lib/security/errors";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -140,6 +146,22 @@ function buildLanguageInstructions(language: ResponseLanguage) {
 
 export async function POST(req: Request) {
   try {
+    const ip = getClientIpFromRequest(req);
+    const ipRateLimit = checkRateLimit(`api:plan:ip:${ip}`, {
+      limit: 30,
+      windowMs: 60_000,
+    });
+
+    if (!ipRateLimit.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests." },
+        {
+          status: 429,
+          headers: getRateLimitHeaders(ipRateLimit),
+        }
+      );
+    }
+
     const supabase = await createClient();
     const {
       data: { user },
@@ -154,6 +176,21 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: "Private beta access only." },
         { status: 403 }
+      );
+    }
+
+    const rateLimit = checkRateLimit(`api:plan:${user.id}:${ip}`, {
+      limit: 12,
+      windowMs: 60_000,
+    });
+
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests." },
+        {
+          status: 429,
+          headers: getRateLimitHeaders(rateLimit),
+        }
       );
     }
 
@@ -223,7 +260,7 @@ Write only the content for this section. Do not write a JSON object, field name,
       }
     );
   } catch (error) {
-    console.error(error);
+    logServerError("api:plan", error);
 
     return NextResponse.json(
       { error: "Something went wrong." },

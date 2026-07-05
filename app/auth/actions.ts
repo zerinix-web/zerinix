@@ -2,6 +2,10 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/app/lib/supabase/server";
+import {
+  checkRateLimit,
+  getServerActionClientIp,
+} from "@/app/lib/security/rate-limit";
 
 export type LoginActionState = {
   error?: string;
@@ -13,6 +17,17 @@ export async function loginWithPassword(
 ): Promise<LoginActionState> {
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  const ip = await getServerActionClientIp();
+  const rateLimit = checkRateLimit(`auth:login:${ip}:${email.toLowerCase()}`, {
+    limit: 8,
+    windowMs: 60_000,
+  });
+
+  if (!rateLimit.allowed) {
+    return {
+      error: "Too many attempts. Please wait a moment and try again.",
+    };
+  }
 
   if (!email || !password) {
     return {
@@ -39,6 +54,16 @@ export async function loginWithPassword(
 export async function signInWithPassword(formData: FormData) {
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
+  const ip = await getServerActionClientIp();
+  const rateLimit = checkRateLimit(`auth:signin:${ip}:${email.toLowerCase()}`, {
+    limit: 8,
+    windowMs: 60_000,
+  });
+
+  if (!rateLimit.allowed) {
+    redirect("/login?auth_error=rate_limited");
+  }
+
   const supabase = await createClient();
 
   const { error } = await supabase.auth.signInWithPassword({
@@ -57,6 +82,16 @@ export async function signUpWithPassword(formData: FormData) {
   const name = String(formData.get("name") ?? "");
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
+  const ip = await getServerActionClientIp();
+  const rateLimit = checkRateLimit(`auth:signup:${ip}:${email.toLowerCase()}`, {
+    limit: 5,
+    windowMs: 60_000,
+  });
+
+  if (!rateLimit.allowed) {
+    redirect("/register?auth_error=rate_limited");
+  }
+
   const supabase = await createClient();
 
   const { error } = await supabase.auth.signUp({

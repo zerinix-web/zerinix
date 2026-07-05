@@ -2,6 +2,12 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { isPrivateBetaAllowed } from "@/app/lib/beta-access";
 import { createClient } from "@/app/lib/supabase/server";
+import {
+  checkRateLimit,
+  getClientIpFromRequest,
+  getRateLimitHeaders,
+} from "@/app/lib/security/rate-limit";
+import { logServerError } from "@/app/lib/security/errors";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -185,6 +191,22 @@ function buildLanguageInstructions(language: ResponseLanguage) {
 
 export async function POST(req: Request) {
   try {
+    const ip = getClientIpFromRequest(req);
+    const ipRateLimit = checkRateLimit(`api:market:ip:${ip}`, {
+      limit: 20,
+      windowMs: 60_000,
+    });
+
+    if (!ipRateLimit.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests." },
+        {
+          status: 429,
+          headers: getRateLimitHeaders(ipRateLimit),
+        }
+      );
+    }
+
     const supabase = await createClient();
     const {
       data: { user },
@@ -199,6 +221,21 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: "Private beta access only." },
         { status: 403 }
+      );
+    }
+
+    const rateLimit = checkRateLimit(`api:market:${user.id}:${ip}`, {
+      limit: 8,
+      windowMs: 60_000,
+    });
+
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests." },
+        {
+          status: 429,
+          headers: getRateLimitHeaders(rateLimit),
+        }
       );
     }
 
@@ -292,7 +329,7 @@ Do not suggest website URLs, domain names, brand names, or site ideas for the pr
 
             controller.close();
           } catch (error) {
-            console.error("[market-analysis] stream error", error);
+            logServerError("api:market-analysis:stream", error);
             controller.error(error);
           }
         },
@@ -305,7 +342,7 @@ Do not suggest website URLs, domain names, brand names, or site ideas for the pr
       }
     );
   } catch (error) {
-    console.error(error);
+    logServerError("api:market-analysis", error);
 
     return NextResponse.json(
       { error: "Market analysis could not be generated." },
