@@ -309,7 +309,26 @@ function generateConversationTitle(content: string) {
     return "New ZERINIX conversation";
   }
 
-  return cleanTitle.length > 54 ? `${cleanTitle.slice(0, 54).trim()}...` : cleanTitle;
+  let title = cleanTitle
+    .replace(/^(?:i\s+want\s+to\s+build|i\s+want\s+to\s+create|i\s+want\s+to\s+start|i\s+am\s+building|i'?m\s+building|we\s+want\s+to\s+build|we\s+are\s+building|build|create|start|make|launch)\s+/i, "")
+    .replace(/^(?:an?|the)\s+/i, "")
+    .replace(/\s+(?:business|startup|company|platform|app|tool|product|solution)\s*$/i, "")
+    .replace(/[.!?]+$/g, "")
+    .trim();
+
+  if (!title) {
+    title = cleanTitle;
+  }
+
+  return title.length > 54 ? `${title.slice(0, 54).trim()}...` : title;
+}
+
+function shouldAutoTitleConversation(title: string) {
+  return (
+    title === "New conversation" ||
+    title === "New ZERINIX conversation" ||
+    title === "Untitled conversation"
+  );
 }
 
 function createConversation(id: string): Conversation {
@@ -1840,7 +1859,7 @@ export default function Planner({
     updateConversation(conversationId, (conversation) => ({
       ...conversation,
       title:
-        conversation.title === "New conversation"
+        shouldAutoTitleConversation(conversation.title)
           ? generateConversationTitle(content)
           : conversation.title,
       messages: [...conversation.messages, message],
@@ -1898,18 +1917,28 @@ export default function Planner({
   }
 
   function saveEditedMessage(messageId: string, content: string) {
+    const currentConversation = conversations.find((conversation) =>
+      conversation.messages.some((message) => message.id === messageId)
+    );
+    const shouldUpdateTitle =
+      currentConversation?.messages[0]?.id === messageId &&
+      shouldAutoTitleConversation(currentConversation.title);
+    const nextTitle = shouldUpdateTitle
+      ? generateConversationTitle(content)
+      : currentConversation?.title;
+
     updateActiveConversation((conversation) => ({
       ...conversation,
       messages: conversation.messages.map((message) =>
         message.id === messageId ? { ...message, content } : message
       ),
-      title:
-        conversation.messages[0]?.id === messageId
-          ? generateConversationTitle(content)
-          : conversation.title,
+      title: shouldUpdateTitle ? nextTitle || conversation.title : conversation.title,
       updatedAt: Date.now(),
     }));
     void updatePersistedMessage(messageId, content, "complete");
+    if (shouldUpdateTitle && nextTitle && currentConversation) {
+      void persistConversationTitle(currentConversation.id, nextTitle);
+    }
   }
 
   function regenerateResponse() {
@@ -1928,14 +1957,20 @@ export default function Planner({
 
   async function askForClarification(submittedPrompt: string) {
     const conversationId = activeConversationId;
+    const shouldUpdateTitle = shouldAutoTitleConversation(
+      activeConversation?.title || "New conversation"
+    );
     const title =
-      activeConversation?.title === "New conversation"
+      shouldUpdateTitle
         ? generateConversationTitle(submittedPrompt)
         : activeConversation?.title || generateConversationTitle(submittedPrompt);
 
     await ensurePersistedConversation(conversationId, title);
     const userMessage = addUserMessage(activeMode, submittedPrompt, conversationId);
     await persistMessage(conversationId, userMessage);
+    if (shouldUpdateTitle) {
+      await persistConversationTitle(conversationId, title);
+    }
 
     const clarification = createClarificationQuestion(activeMode);
     const assistantMessageId = addAssistantMessage(
@@ -2149,15 +2184,22 @@ export default function Planner({
     setWorkflowCompletedSteps(0);
     setLastRequest({ mode: "plan", prompt: submittedPrompt });
     const conversationId = activeConversationId;
+    const shouldUpdateTitle = shouldAutoTitleConversation(
+      activeConversation?.title || "New conversation"
+    );
+    const title = shouldUpdateTitle
+      ? generateConversationTitle(submittedPrompt)
+      : activeConversation?.title || generateConversationTitle(submittedPrompt);
     await ensurePersistedConversation(
       conversationId,
-      activeConversation?.title === "New conversation"
-        ? generateConversationTitle(submittedPrompt)
-        : activeConversation?.title || generateConversationTitle(submittedPrompt)
+      title
     );
     if (addToHistory) {
       const userMessage = addUserMessage("plan", submittedPrompt, conversationId);
       await persistMessage(conversationId, userMessage);
+      if (shouldUpdateTitle) {
+        await persistConversationTitle(conversationId, title);
+      }
     }
     const assistantMessageId = addAssistantMessage(
       "plan",
@@ -2313,15 +2355,22 @@ export default function Planner({
     setWorkflowCompletedSteps(0);
     setLastRequest({ mode: "market", prompt: submittedPrompt });
     const conversationId = activeConversationId;
+    const shouldUpdateTitle = shouldAutoTitleConversation(
+      activeConversation?.title || "New conversation"
+    );
+    const title = shouldUpdateTitle
+      ? generateConversationTitle(submittedPrompt)
+      : activeConversation?.title || generateConversationTitle(submittedPrompt);
     await ensurePersistedConversation(
       conversationId,
-      activeConversation?.title === "New conversation"
-        ? generateConversationTitle(submittedPrompt)
-        : activeConversation?.title || generateConversationTitle(submittedPrompt)
+      title
     );
     if (addToHistory) {
       const userMessage = addUserMessage("market", submittedPrompt, conversationId);
       await persistMessage(conversationId, userMessage);
+      if (shouldUpdateTitle) {
+        await persistConversationTitle(conversationId, title);
+      }
     }
     const assistantMessageId = addAssistantMessage(
       "market",
