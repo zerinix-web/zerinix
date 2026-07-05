@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { isPrivateBetaAllowed } from "@/app/lib/beta-access";
+import { createClient } from "@/app/lib/supabase/server";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -138,6 +140,23 @@ function buildLanguageInstructions(language: ResponseLanguage) {
 
 export async function POST(req: Request) {
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    if (!isPrivateBetaAllowed(user.email)) {
+      return NextResponse.json(
+        { error: "Private beta access only." },
+        { status: 403 }
+      );
+    }
+
     const { prompt, field, language } = await req.json();
     const promptText = typeof prompt === "string" ? prompt : "";
     const responseLanguage = normalizeLanguage(language, promptText);

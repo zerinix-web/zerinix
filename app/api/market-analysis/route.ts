@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { isPrivateBetaAllowed } from "@/app/lib/beta-access";
+import { createClient } from "@/app/lib/supabase/server";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -183,6 +185,23 @@ function buildLanguageInstructions(language: ResponseLanguage) {
 
 export async function POST(req: Request) {
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    if (!isPrivateBetaAllowed(user.email)) {
+      return NextResponse.json(
+        { error: "Private beta access only." },
+        { status: 403 }
+      );
+    }
+
     const { prompt, field, section, language } = await req.json();
     const promptText = typeof prompt === "string" ? prompt : "";
     const responseLanguage = normalizeLanguage(language, promptText);
@@ -202,18 +221,21 @@ export async function POST(req: Request) {
       );
     }
 
-    const stream = await client.responses.create(
-      {
-        model: "gpt-5-mini",
-        instructions: buildLanguageInstructions(responseLanguage),
-        input: `Business idea: ${promptText}
+    const instructions = buildLanguageInstructions(responseLanguage);
+    const input = `Business idea: ${promptText}
 
 Report section to generate: ${fieldLabelsByLanguage[responseLanguage][reportField]}
 Analysis task: ${fieldConfig.prompt}
 First perform current web research. Use reliable sources for market size, competitor companies, industry trends, target customers, recent news, pricing models, and SWOT inputs.
 Write the report from the available information.
 Write only the content for this section. Do not write a JSON object, field name, braces, markdown code block, heading, or any other report section.
-Do not suggest website URLs, domain names, brand names, or site ideas for the product; write source URLs only in the Sources section.`,
+Do not suggest website URLs, domain names, brand names, or site ideas for the product; write source URLs only in the Sources section.`;
+
+    const stream = await client.responses.create(
+      {
+        model: "gpt-5-mini",
+        instructions,
+        input,
         max_output_tokens: fieldConfig.maxTokens,
         stream: true,
         reasoning: {
