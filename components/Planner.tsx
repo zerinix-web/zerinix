@@ -889,17 +889,17 @@ function SourcesCard({ sections }: { sections: ReportSection[] }) {
 }
 
 const financialDashboardMetrics = [
-  "Revenue",
-  "Expenses",
-  "Gross Margin",
-  "CAC",
-  "LTV",
-  "Payback Period",
-  "Burn Rate",
-  "Runway",
-  "EBITDA",
-  "Break-even Month",
-  "Investment Needed",
+  { label: "ARR", aliases: ["ARR", "Annual Recurring Revenue", "Revenue"] },
+  { label: "MRR", aliases: ["MRR", "Monthly Recurring Revenue"] },
+  { label: "Gross Margin", aliases: ["Gross Margin", "Margin"] },
+  { label: "CAC", aliases: ["CAC", "Customer Acquisition Cost"] },
+  { label: "LTV", aliases: ["LTV", "Lifetime Value"] },
+  { label: "Burn Rate", aliases: ["Burn Rate", "Burn"] },
+  { label: "Runway", aliases: ["Runway"] },
+  { label: "Payback", aliases: ["Payback", "Payback Period"] },
+  { label: "EBITDA", aliases: ["EBITDA"] },
+  { label: "Break-even", aliases: ["Break-even Month", "Break even Month", "Breakeven"] },
+  { label: "Investment Needed", aliases: ["Investment Needed", "Investment"] },
 ];
 
 const founderScoreMetrics = [
@@ -911,6 +911,13 @@ const founderScoreMetrics = [
   "Execution Difficulty",
   "Revenue Potential",
   "Risk Level",
+];
+
+const swotQuadrants = [
+  { title: "Strengths", icon: Check },
+  { title: "Weaknesses", icon: ShieldAlert },
+  { title: "Opportunities", icon: Goal },
+  { title: "Threats", icon: ShieldAlert },
 ];
 
 const founderRoadmapSteps = [
@@ -929,6 +936,21 @@ function extractMetricValue(content: string, label: string) {
   );
 
   return match?.[1]?.trim().replace(/\*\*/g, "") || "";
+}
+
+function extractMetricValueFromAliases(
+  content: string,
+  aliases: string[] | readonly string[]
+) {
+  for (const alias of aliases) {
+    const value = extractMetricValue(content, alias);
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
 }
 
 function extractScore(content: string, label: string) {
@@ -965,32 +987,133 @@ function extractConfidence(content: string) {
   return Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
 }
 
+function extractSectionSnippet(content: string, title: string) {
+  const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = content.match(
+    new RegExp(
+      `${escapedTitle}\\s*[:\\-–—]?\\s*([\\s\\S]*?)(?=\\n\\s*(?:Strengths|Weaknesses|Opportunities|Threats|Worst|Base|Best|Revenue|MRR|Burn|Runway|Risk|Decision)\\s*[:\\-–—]|$)`,
+      "i"
+    )
+  );
+
+  return match?.[1]?.trim() || "";
+}
+
+function extractBullets(content: string, fallback: string) {
+  const source = content || fallback;
+  const bullets = source
+    .split("\n")
+    .map((line) => line.trim().replace(/^[-*]\s+/, ""))
+    .filter(Boolean)
+    .slice(0, 3);
+
+  return bullets.length > 0 ? bullets : [fallback];
+}
+
+function GaugeCircle({ label, score }: { label: string; score: number }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+      <div
+        className="mx-auto flex h-20 w-20 items-center justify-center rounded-full"
+        style={{
+          background: `conic-gradient(rgb(94 234 212) ${score * 3.6}deg, rgb(39 39 42) 0deg)`,
+        }}
+      >
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-black text-lg font-semibold text-white">
+          {score}
+        </div>
+      </div>
+      <p className="mt-3 text-center text-xs font-medium uppercase tracking-[0.16em] text-zinc-400">
+        {label}
+      </p>
+    </div>
+  );
+}
+
 function PremiumSectionVisual({ section }: { section: ReportSection }) {
   const field = section.field;
 
+  if (field === "tamSamSom") {
+    const bars = [
+      { label: "TAM", aliases: ["TAM"], width: "100%", color: "from-teal-200 to-cyan-100" },
+      { label: "SAM", aliases: ["SAM"], width: "62%", color: "from-teal-400 to-teal-200" },
+      { label: "SOM", aliases: ["SOM"], width: "28%", color: "from-emerald-400 to-teal-300" },
+    ];
+
+    return (
+      <div className="mb-5 space-y-3 rounded-3xl border border-white/10 bg-white/[0.025] p-4">
+        {bars.map((bar) => {
+          const value = extractMetricValueFromAliases(section.content, bar.aliases);
+
+          return (
+            <div key={bar.label} className="grid grid-cols-[3rem_1fr] items-center gap-3">
+              <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">
+                {bar.label}
+              </p>
+              <div className="h-9 rounded-full bg-zinc-900 p-1">
+                <div
+                  className={`flex h-full items-center justify-between rounded-full bg-gradient-to-r ${bar.color} px-4 text-xs font-semibold text-black`}
+                  style={{ width: bar.width }}
+                >
+                  <span>{bar.label}</span>
+                  {value ? <span className="truncate pl-3">{value}</span> : null}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (field === "swotAnalysis") {
+    return (
+      <div className="mb-5 grid gap-3 md:grid-cols-2">
+        {swotQuadrants.map(({ title, icon: Icon }) => {
+          const snippet = extractSectionSnippet(section.content, title);
+          const bullets = extractBullets(snippet, title);
+
+          return (
+            <div key={title} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10">
+                  <Icon className="h-4 w-4 text-teal-100" />
+                </div>
+                <p className="text-sm font-semibold text-white">{title}</p>
+              </div>
+              <ul className="mt-4 space-y-2">
+                {bullets.map((bullet) => (
+                  <li key={bullet} className="flex gap-2 text-sm leading-6 text-zinc-300">
+                    <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200" />
+                    <span>{bullet}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
   if (field === "financialDashboard") {
     return (
-      <div className="mb-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {financialDashboardMetrics.map((metric) => {
-          const value = extractMetricValue(section.content, metric);
+          const value = extractMetricValueFromAliases(section.content, metric.aliases);
 
           return (
             <div
-              key={metric}
-              className="rounded-2xl border border-white/10 bg-white/[0.035] p-3"
+              key={metric.label}
+              className="rounded-3xl border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.02))] p-4"
             >
-              <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">
-                {metric}
+              <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-zinc-500">
+                {metric.label}
               </p>
-              {value ? (
-                <p className="mt-1 line-clamp-2 text-sm font-semibold text-white">
-                  {value}
-                </p>
-              ) : (
-                <div className="mt-3 h-1.5 rounded-full bg-zinc-800">
-                  <div className="h-full w-2/5 rounded-full bg-teal-200/70" />
-                </div>
-              )}
+              <p className="mt-3 min-h-8 line-clamp-2 text-2xl font-semibold tracking-tight text-white">
+                {value || "TBD"}
+              </p>
+              <p className="mt-2 text-xs text-teal-200/70">Investor KPI</p>
             </div>
           );
         })}
@@ -1008,39 +1131,38 @@ function PremiumSectionVisual({ section }: { section: ReportSection }) {
     }
 
     return (
-      <div className="mb-5 grid gap-3 md:grid-cols-2">
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {scoredMetrics.map(({ metric, score }) => (
-          <div key={metric} className="rounded-2xl border border-white/10 bg-white/[0.035] p-3">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-medium text-zinc-200">{metric}</p>
-              <p className="text-sm font-semibold text-teal-100">{score}/100</p>
-            </div>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-zinc-800">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-teal-300 to-white"
-                style={{ width: `${score}%` }}
-              />
-            </div>
-          </div>
+          <GaugeCircle key={metric} label={metric} score={score} />
         ))}
       </div>
     );
   }
 
   if (field === "scenarioAnalysis") {
+    const scenarioMetrics = ["Revenue", "MRR", "Burn", "Runway", "Risk", "Decision"];
+
     return (
       <div className="mb-5 grid gap-3 md:grid-cols-3">
-        {["Worst Case", "Base Case", "Best Case"].map((scenario, index) => (
-          <div key={scenario} className="rounded-2xl border border-white/10 bg-white/[0.035] p-3">
-            <p className="text-sm font-semibold text-white">{scenario}</p>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-zinc-800">
-              <div
-                className="h-full rounded-full bg-teal-200/80"
-                style={{ width: `${[34, 62, 88][index]}%` }}
-              />
+        {["Worst", "Base", "Best"].map((scenario) => {
+          const snippet = extractSectionSnippet(section.content, scenario);
+
+          return (
+            <div key={scenario} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
+              <p className="text-lg font-semibold text-white">{scenario}</p>
+              <div className="mt-4 space-y-2">
+                {scenarioMetrics.map((metric) => (
+                  <div key={metric} className="flex items-start justify-between gap-3 border-t border-white/10 pt-2 first:border-t-0 first:pt-0">
+                    <span className="text-xs uppercase tracking-[0.14em] text-zinc-500">{metric}</span>
+                    <span className="max-w-40 text-right text-sm font-medium text-zinc-200">
+                      {extractMetricValue(snippet, metric) || "TBD"}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     );
   }
@@ -1048,57 +1170,110 @@ function PremiumSectionVisual({ section }: { section: ReportSection }) {
   if (field === "executiveRecommendation") {
     const selected = detectRecommendation(section.content);
     const decisions = ["GO", "NO GO", "WAIT", "PIVOT", "RAISE", "BOOTSTRAP"];
+    const recommendationMetrics = [
+      ["Confidence", extractConfidence(section.content) ? `${extractConfidence(section.content)}%` : "TBD"],
+      ["Investment Needed", extractMetricValue(section.content, "Investment Needed") || "TBD"],
+      ["Next Action", extractMetricValue(section.content, "Next Action") || extractMetricValue(section.content, "Next Critical Action") || "TBD"],
+      ["Main Risk", extractMetricValue(section.content, "Main Risk") || "TBD"],
+    ];
 
     return (
-      <div className="mb-5 flex flex-wrap gap-2">
-        {decisions.map((decision) => {
-          const active = selected === decision;
+      <div className="mb-5 rounded-[2rem] border border-teal-200/20 bg-teal-200/[0.06] p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200/80">
+              Executive Recommendation
+            </p>
+            <p className="mt-2 text-5xl font-semibold tracking-tight text-white">
+              {selected || "TBD"}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {decisions.map((decision) => {
+              const active = selected === decision;
 
-          return (
-            <span
-              key={decision}
-              className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.14em] ${
-                active
-                  ? "border-teal-200/60 bg-teal-200 text-black"
-                  : "border-white/10 bg-white/[0.035] text-zinc-500"
-              }`}
-            >
-              {decision}
-            </span>
-          );
-        })}
+              return (
+                <span
+                  key={decision}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.14em] ${
+                    active
+                      ? "border-teal-200/60 bg-teal-200 text-black"
+                      : "border-white/10 bg-black/20 text-zinc-500"
+                  }`}
+                >
+                  {decision}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-4">
+          {recommendationMetrics.map(([label, value]) => (
+            <div key={label} className="rounded-2xl border border-white/10 bg-black/25 p-3">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</p>
+              <p className="mt-2 line-clamp-2 text-sm font-semibold text-white">{value}</p>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
   if (field === "founderRoadmap" || field === "roadmap306090") {
     return (
-      <div className="mb-5 grid gap-3 md:grid-cols-6">
+      <div className="mb-5 overflow-x-auto rounded-3xl border border-white/10 bg-white/[0.025] p-4">
+        <div className="grid min-w-[780px] grid-cols-6 gap-3">
         {founderRoadmapSteps.map((step, index) => (
-          <div key={step} className="relative rounded-2xl border border-white/10 bg-white/[0.035] p-3">
-            <div className="flex items-center gap-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-teal-200 text-[11px] font-bold text-black">
+          <div key={step} className="relative rounded-2xl border border-white/10 bg-black/30 p-4">
+            {index < founderRoadmapSteps.length - 1 ? (
+              <div className="absolute left-[calc(100%-0.25rem)] top-1/2 hidden h-px w-4 bg-teal-200/40 md:block" />
+            ) : null}
+            <div className="flex flex-col gap-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-200 text-xs font-bold text-black">
                 {index + 1}
               </span>
-              <p className="text-xs font-semibold text-white">{step}</p>
+              <p className="text-sm font-semibold text-white">{step}</p>
+              <p className="text-xs leading-5 text-zinc-500">Milestone</p>
             </div>
           </div>
         ))}
+        </div>
       </div>
     );
   }
 
   if (field === "portersFiveForces") {
     return (
-      <div className="mb-5 grid gap-2 sm:grid-cols-5">
+      <div className="mb-5 grid gap-3 sm:grid-cols-5">
         {["Rivalry", "Entrants", "Buyer Power", "Supplier Power", "Substitutes"].map((force, index) => (
-          <div key={force} className="rounded-2xl border border-white/10 bg-white/[0.035] p-3">
-            <p className="text-[11px] font-medium text-zinc-400">{force}</p>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+          <div key={force} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
+            <p className="text-sm font-semibold text-white">{force}</p>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-800">
               <div
                 className="h-full rounded-full bg-teal-200/75"
                 style={{ width: `${[72, 54, 66, 48, 60][index]}%` }}
               />
+            </div>
+            <p className="mt-2 text-xs text-zinc-500">Force intensity</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (field === "kpiDashboard" || field === "kpis") {
+    const kpiMetrics = ["Acquisition", "Activation", "Retention", "Gross Margin", "Payback"];
+
+    return (
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {kpiMetrics.map((metric) => (
+          <div key={metric} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
+            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
+            <p className="mt-3 line-clamp-2 text-xl font-semibold text-white">
+              {extractMetricValue(section.content, metric) || "Target"}
+            </p>
+            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+              <div className="h-full w-2/3 rounded-full bg-teal-200/80" />
             </div>
           </div>
         ))}
@@ -1107,6 +1282,45 @@ function PremiumSectionVisual({ section }: { section: ReportSection }) {
   }
 
   return null;
+}
+
+function hasPremiumSectionVisual(section: ReportSection) {
+  return (
+    section.field === "tamSamSom" ||
+    section.field === "swotAnalysis" ||
+    section.field === "financialDashboard" ||
+    section.field === "founderScore" ||
+    section.field === "scenarioAnalysis" ||
+    section.field === "executiveRecommendation" ||
+    section.field === "founderRoadmap" ||
+    section.field === "roadmap306090" ||
+    section.field === "portersFiveForces" ||
+    section.field === "kpiDashboard" ||
+    section.field === "kpis"
+  );
+}
+
+function AnalysisNotes({
+  children,
+  compact,
+}: {
+  children: ReactNode;
+  compact: boolean;
+}) {
+  if (!compact) {
+    return <>{children}</>;
+  }
+
+  return (
+    <details className="group rounded-2xl border border-white/10 bg-black/25 p-4">
+      <summary className="cursor-pointer list-none text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500 transition hover:text-zinc-300">
+        Full analysis notes
+      </summary>
+      <div className="mt-4 border-t border-white/10 pt-4">
+        {children}
+      </div>
+    </details>
+  );
 }
 
 function WorkflowPanel({
@@ -1853,6 +2067,10 @@ const ReportPanel = memo(function ReportPanel({
           return 38;
         }
 
+        if (section.field === "founderScore") {
+          return 31;
+        }
+
         if (section.field === "tamSamSom") {
           return 22;
         }
@@ -1878,14 +2096,45 @@ const ReportPanel = memo(function ReportPanel({
             const width = funnelWidths[index];
             const x = bodyX + (visualWidth - width) / 2;
             const rowY = visualY + index * 6;
+            const value = extractMetricValue(section.content, label);
 
             pdf.setFillColor(index === 0 ? "#134e4a" : index === 1 ? "#115e59" : "#5eead4");
             pdf.roundedRect(x, rowY, width, 4, 1.5, 1.5, "F");
             pdf.setFontSize(6.5);
             pdf.setTextColor(index === 2 ? "#000000" : "#ccfbf1");
             pdf.text(label, x + 3, rowY + 3);
+            if (value) {
+              pdf.text(value, x + width - 34, rowY + 3, { maxWidth: 30 });
+            }
           });
           return 22;
+        }
+
+        if (section.field === "founderScore") {
+          const labels = founderScoreMetrics.slice(0, 6);
+          const itemWidth = (visualWidth - 10) / 3;
+
+          labels.forEach((label, index) => {
+            const x = bodyX + (index % 3) * (itemWidth + 5);
+            const itemY = visualY + Math.floor(index / 3) * 15;
+            const score = extractScore(section.content, label) ?? [76, 68, 61, 58, 64, 72][index] ?? 60;
+
+            pdf.setFillColor("#18181b");
+            pdf.setDrawColor("#27272a");
+            pdf.roundedRect(x, itemY, itemWidth, 12, 2.5, 2.5, "FD");
+            pdf.setDrawColor("#5eead4");
+            pdf.circle(x + 7, itemY + 6, 4.2, "S");
+            pdf.setFontSize(6);
+            pdf.setTextColor("#ccfbf1");
+            pdf.text(String(score), x + 4.2, itemY + 7.8);
+            pdf.setFontSize(6.5);
+            pdf.setTextColor("#e4e4e7");
+            pdf.text(label, x + 14, itemY + 5, { maxWidth: itemWidth - 17 });
+            pdf.setTextColor("#71717a");
+            pdf.text("Score", x + 14, itemY + 8.8);
+          });
+
+          return 31;
         }
 
         if (section.field === "executiveRecommendation") {
@@ -1944,9 +2193,7 @@ const ReportPanel = memo(function ReportPanel({
         const labels =
           section.field === "financialDashboard"
             ? financialDashboardMetrics
-            : section.field === "founderScore"
-              ? founderScoreMetrics
-              : section.field === "scenarioAnalysis"
+            : section.field === "scenarioAnalysis"
                 ? ["Worst", "Base", "Best"]
                 : section.field === "kpiDashboard" || section.field === "kpis"
                   ? ["Acquisition", "Activation", "Retention", "Revenue"]
@@ -1958,11 +2205,13 @@ const ReportPanel = memo(function ReportPanel({
         const columns = labels.length > 6 ? 4 : labels.length;
         const itemWidth = (visualWidth - (columns - 1) * 3) / columns;
 
-        labels.forEach((label, index) => {
+        labels.forEach((item, index) => {
+          const label = typeof item === "string" ? item : item.label;
+          const aliases = typeof item === "string" ? [item] : item.aliases;
           const x = bodyX + (index % columns) * (itemWidth + 3);
           const itemY = visualY + Math.floor(index / columns) * 12;
           const score = extractScore(section.content, label) ?? [42, 62, 84, 56][index] ?? 60;
-          const value = extractMetricValue(section.content, label);
+          const value = extractMetricValueFromAliases(section.content, aliases);
 
           pdf.setFillColor("#18181b");
           pdf.setDrawColor("#27272a");
@@ -2165,7 +2414,9 @@ const ReportPanel = memo(function ReportPanel({
                   </div>
                   <div className="mt-4 border-t border-white/10 pt-4">
                     <PremiumSectionVisual section={section} />
-                    <MarkdownRenderer content={section.content} />
+                    <AnalysisNotes compact={hasPremiumSectionVisual(section)}>
+                      <MarkdownRenderer content={section.content} />
+                    </AnalysisNotes>
                   </div>
                 </div>
               </div>

@@ -57,8 +57,25 @@ const founderRoadmapSteps = [
 const founderScoreMetrics = [
   "Overall Score",
   "Innovation",
-  "Market Timing",
+  "Execution",
   "Competition",
+  "Capital",
+  "Revenue",
+  "Risk",
+];
+
+const financialDashboardMetrics = [
+  { label: "ARR", aliases: ["ARR", "Annual Recurring Revenue", "Revenue"] },
+  { label: "MRR", aliases: ["MRR", "Monthly Recurring Revenue"] },
+  { label: "Gross Margin", aliases: ["Gross Margin", "Margin"] },
+  { label: "CAC", aliases: ["CAC", "Customer Acquisition Cost"] },
+  { label: "LTV", aliases: ["LTV", "Lifetime Value"] },
+  { label: "Burn Rate", aliases: ["Burn Rate", "Burn"] },
+  { label: "Runway", aliases: ["Runway"] },
+  { label: "Payback", aliases: ["Payback", "Payback Period"] },
+  { label: "EBITDA", aliases: ["EBITDA"] },
+  { label: "Break-even", aliases: ["Break-even Month", "Break even Month", "Breakeven"] },
+  { label: "Investment Needed", aliases: ["Investment Needed", "Investment"] },
 ];
 
 function extractMetricValue(content: string, label: string) {
@@ -68,6 +85,21 @@ function extractMetricValue(content: string, label: string) {
   );
 
   return match?.[1]?.trim().replace(/\*\*/g, "") || "";
+}
+
+function extractMetricValueFromAliases(
+  content: string,
+  aliases: string[] | readonly string[]
+) {
+  for (const alias of aliases) {
+    const value = extractMetricValue(content, alias);
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
 }
 
 function extractScore(content: string, label: string) {
@@ -354,14 +386,45 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             const width = funnelWidths[index];
             const x = bodyX + (bodyWidth - width) / 2;
             const rowY = visualY + index * 6;
+            const value = extractMetricValue(content, label);
 
             pdf.setFillColor(index === 0 ? "#134e4a" : index === 1 ? "#115e59" : "#5eead4");
             pdf.roundedRect(x, rowY, width, 4, 1.5, 1.5, "F");
             pdf.setFontSize(6.5);
             pdf.setTextColor(index === 2 ? "#000000" : "#ccfbf1");
             pdf.text(label, x + 3, rowY + 3);
+            if (value) {
+              pdf.text(value, x + width - 34, rowY + 3, { maxWidth: 30 });
+            }
           });
           return 22;
+        }
+
+        if (normalizedTitle.includes("founder score")) {
+          const labels = founderScoreMetrics.slice(0, 6);
+          const itemWidth = (bodyWidth - 10) / 3;
+
+          labels.forEach((label, index) => {
+            const x = bodyX + (index % 3) * (itemWidth + 5);
+            const itemY = visualY + Math.floor(index / 3) * 15;
+            const score = extractScore(content, label) ?? [76, 68, 61, 58, 64, 72][index] ?? 60;
+
+            pdf.setFillColor("#18181b");
+            pdf.setDrawColor("#27272a");
+            pdf.roundedRect(x, itemY, itemWidth, 12, 2.5, 2.5, "FD");
+            pdf.setDrawColor("#5eead4");
+            pdf.circle(x + 7, itemY + 6, 4.2, "S");
+            pdf.setFontSize(6);
+            pdf.setTextColor("#ccfbf1");
+            pdf.text(String(score), x + 4.2, itemY + 7.8);
+            pdf.setFontSize(6.5);
+            pdf.setTextColor("#e4e4e7");
+            pdf.text(label, x + 14, itemY + 5, { maxWidth: itemWidth - 17 });
+            pdf.setTextColor("#71717a");
+            pdf.text("Score", x + 14, itemY + 8.8);
+          });
+
+          return 31;
         }
 
         if (normalizedTitle.includes("executive recommendation")) {
@@ -435,15 +498,17 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
                     ? ["Market", "Product", "Pricing", "Execution"]
                     : normalizedTitle.includes("unit economics")
                       ? ["Gross Margin", "CAC", "LTV", "Payback"]
-                      : ["Revenue", "Expenses", "Gross Margin", "CAC", "LTV", "Payback Period", "Burn Rate", "Runway", "EBITDA", "Break-even Month", "Investment Needed"];
+                      : financialDashboardMetrics;
           const columns = labels.length > 6 ? 4 : labels.length;
           const itemWidth = (bodyWidth - (columns - 1) * 3) / columns;
 
-          labels.forEach((label, index) => {
+          labels.forEach((item, index) => {
+            const label = typeof item === "string" ? item : item.label;
+            const aliases = typeof item === "string" ? [item] : item.aliases;
             const x = bodyX + (index % columns) * (itemWidth + 3);
             const itemY = visualY + Math.floor(index / columns) * 12;
             const score = extractScore(content, label) ?? [42, 62, 84, 56][index] ?? 60;
-            const value = extractMetricValue(content, label);
+            const value = extractMetricValueFromAliases(content, aliases);
 
             pdf.setFillColor("#18181b");
             pdf.setDrawColor("#27272a");
@@ -481,6 +546,10 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
         if (normalizedTitle.includes("financial dashboard")) {
           return 38;
+        }
+
+        if (normalizedTitle.includes("founder score")) {
+          return 31;
         }
 
         if (normalizedTitle.includes("tam / sam / som")) {
