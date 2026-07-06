@@ -355,9 +355,17 @@ export async function POST(req: Request) {
       );
     }
 
-    const { prompt, field, section, language } = await req.json();
+    const {
+      prompt,
+      field,
+      section,
+      language,
+      reportRequestId: rawReportRequestId,
+    } = await req.json();
     const promptText = typeof prompt === "string" ? prompt : "";
     const responseLanguage = normalizeLanguage(language, promptText);
+    const reportRequestId =
+      typeof rawReportRequestId === "string" ? rawReportRequestId.trim().slice(0, 128) : "";
 
     if (isWeakMarketPrompt(promptText)) {
       return NextResponse.json(
@@ -400,9 +408,15 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
       requestKind: "market_analysis",
       promptText,
       reportField,
+      reportRequestId,
       ip,
     });
     const { model, planTier, promptHash } = productionLimit;
+    const sectionUsageMetadata = {
+      quota_event: false,
+      report_request_id: reportRequestId || null,
+      usage_kind: "section_generation",
+    };
 
     if (!productionLimit.allowed) {
       return NextResponse.json(
@@ -439,6 +453,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
         cacheHit: true,
         responseTimeMs: 0,
         metadata: {
+          ...sectionUsageMetadata,
           cachedEstimatedCostUsd: cachedResponse.estimatedCostUsd,
         },
       });
@@ -500,6 +515,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
           status: "failed",
           responseTimeMs: Date.now() - startedAt,
           metadata: {
+            ...sectionUsageMetadata,
             job: queuedJob,
             phase: "openai_request",
           },
@@ -579,6 +595,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
               cacheHit: false,
               responseTimeMs,
               metadata: {
+                ...sectionUsageMetadata,
                 job: queuedJob,
               },
             });
@@ -598,6 +615,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
               status: "failed",
               responseTimeMs: Date.now() - startedAt,
               metadata: {
+                ...sectionUsageMetadata,
                 job: queuedJob,
               },
             });

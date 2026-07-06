@@ -2418,6 +2418,7 @@ export default function Planner({
     const outputFields = localizeReportFields(planReportFields, responseLanguage);
     setActiveReportLanguage(responseLanguage);
     const conversationId = activeConversationId;
+    const reportRequestId = createMessageId();
     const shouldUpdateTitle = shouldAutoTitleConversation(
       activeConversation?.title || "New conversation"
     );
@@ -2486,7 +2487,12 @@ export default function Planner({
       const res = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: submittedPrompt, field, language: responseLanguage }),
+        body: JSON.stringify({
+          prompt: submittedPrompt,
+          field,
+          language: responseLanguage,
+          reportRequestId,
+        }),
       });
 
       const fieldIndex = planReportFields.findIndex((item) => item.field === field);
@@ -2593,6 +2599,7 @@ export default function Planner({
     const outputFields = localizeReportFields(reportFields, responseLanguage);
     setActiveReportLanguage(responseLanguage);
     const conversationId = activeConversationId;
+    const reportRequestId = createMessageId();
     const shouldUpdateTitle = shouldAutoTitleConversation(
       activeConversation?.title || "New conversation"
     );
@@ -2661,7 +2668,12 @@ export default function Planner({
       const res = await fetch("/api/market-analysis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: submittedPrompt, field, language: responseLanguage }),
+        body: JSON.stringify({
+          prompt: submittedPrompt,
+          field,
+          language: responseLanguage,
+          reportRequestId,
+        }),
       });
 
       const fieldIndex = reportFields.findIndex((item) => item.field === field);

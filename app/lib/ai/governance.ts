@@ -195,11 +195,15 @@ export async function checkUsageAllowance(
       .from("ai_usage_events")
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId)
+      .eq("status", "completed")
+      .eq("metadata->>quota_event", "true")
       .gte("created_at", dayStart),
     supabase
       .from("ai_usage_events")
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId)
+      .eq("status", "completed")
+      .eq("metadata->>quota_event", "true")
       .gte("created_at", monthStart),
   ]);
 

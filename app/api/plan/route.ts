@@ -287,10 +287,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const { prompt, field, language } = await req.json();
+    const { prompt, field, language, reportRequestId: rawReportRequestId } =
+      await req.json();
     const promptText = typeof prompt === "string" ? prompt : "";
     const responseLanguage = normalizeLanguage(language, promptText);
     const reportField = typeof field === "string" ? field : "executiveSummary";
+    const reportRequestId =
+      typeof rawReportRequestId === "string" ? rawReportRequestId.trim().slice(0, 128) : "";
 
     if (isWeakBusinessPrompt(promptText)) {
       return NextResponse.json(
@@ -328,9 +331,15 @@ Write only the content for this section. Do not write a JSON object, field name,
       requestKind: "business_plan",
       promptText,
       reportField,
+      reportRequestId,
       ip,
     });
     const { model, planTier, promptHash } = productionLimit;
+    const sectionUsageMetadata = {
+      quota_event: false,
+      report_request_id: reportRequestId || null,
+      usage_kind: "section_generation",
+    };
 
     if (!productionLimit.allowed) {
       return NextResponse.json(
@@ -367,6 +376,7 @@ Write only the content for this section. Do not write a JSON object, field name,
         cacheHit: true,
         responseTimeMs: 0,
         metadata: {
+          ...sectionUsageMetadata,
           cachedEstimatedCostUsd: cachedResponse.estimatedCostUsd,
         },
       });
@@ -421,6 +431,7 @@ Write only the content for this section. Do not write a JSON object, field name,
           status: "failed",
           responseTimeMs: Date.now() - startedAt,
           metadata: {
+            ...sectionUsageMetadata,
             job: queuedJob,
             phase: "openai_request",
           },
@@ -491,6 +502,7 @@ Write only the content for this section. Do not write a JSON object, field name,
               cacheHit: false,
               responseTimeMs,
               metadata: {
+                ...sectionUsageMetadata,
                 job: queuedJob,
               },
             });
@@ -510,6 +522,7 @@ Write only the content for this section. Do not write a JSON object, field name,
               status: "failed",
               responseTimeMs: Date.now() - startedAt,
               metadata: {
+                ...sectionUsageMetadata,
                 job: queuedJob,
               },
             });
