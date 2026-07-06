@@ -27,54 +27,84 @@ const client = new OpenAI({
 const planPrompts = {
   executiveSummary: {
     prompt:
-      "Write a premium 2-3 sentence executive summary. Cover the opportunity, objective, and first strategic focus.",
-    maxTokens: 700,
+      "Write a crisp founder-focused executive summary. Cover the business idea, who it serves, why now, the likely wedge, and the first strategic priority. Be specific to the user's idea. Max 130 words.",
+    maxTokens: 650,
   },
-  businessModel: {
+  problem: {
     prompt:
-      "Explain the business model clearly: value proposition, core activities, distribution channels, and differentiation.",
-    maxTokens: 850,
+      "Define the concrete customer problem. Explain the painful workflow, current alternatives, urgency, and why the problem is worth solving. Avoid generic startup language. Max 130 words.",
+    maxTokens: 650,
+  },
+  solution: {
+    prompt:
+      "Describe the proposed solution, core product experience, strongest differentiator, and what the first usable version should include. Make it practical for an early-stage founder. Max 150 words.",
+    maxTokens: 750,
   },
   targetCustomer: {
     prompt:
-      "Describe the target customer profile, early adopter segment, buying motivation, and core problem.",
+      "Define the target customer and ICP. Include the beachhead segment, buyer/user, early adopter traits, buying trigger, budget sensitivity, and disqualifying customer profile. Max 160 words.",
     maxTokens: 750,
   },
-  revenueModel: {
+  marketOpportunity: {
     prompt:
-      "Recommend the revenue model: pricing approach, packaging, recurring revenue, and upsell opportunities.",
-    maxTokens: 750,
+      "Analyze the market opportunity using explicit assumptions. Cover market category, demand drivers, reachable initial niche, expansion path, and what must be validated before investing heavily. Max 160 words.",
+    maxTokens: 800,
   },
-  roadmap90Days: {
+  competitorLandscape: {
     prompt:
-      "Write an actionable roadmap for the first 90 days: days 0-30, 31-60, and 61-90.",
+      "Map the competitor landscape. Include direct competitors, indirect substitutes, likely incumbent behavior, differentiation angles, and where a new entrant can win. Max 170 words.",
     maxTokens: 850,
+  },
+  businessModel: {
+    prompt:
+      "Explain the business model: value proposition, customer acquisition motion, delivery model, cost drivers, margins, retention loop, and operational leverage. Max 170 words.",
+    maxTokens: 850,
+  },
+  pricingStrategy: {
+    prompt:
+      "Recommend a pricing strategy. Include packaging, entry price logic, premium tier or upsell path, trial or pilot approach, and assumptions that must be tested. Max 150 words.",
+    maxTokens: 750,
+  },
+  goToMarketPlan: {
+    prompt:
+      "Write a go-to-market plan. Include beachhead positioning, channel strategy, message, launch sequence, proof assets, and first validation milestones. Max 170 words.",
+    maxTokens: 850,
+  },
+  salesStrategy: {
+    prompt:
+      "Write the sales strategy. Include who to contact, outreach angle, discovery questions, pilot offer, buying objections, and closing motion. Max 160 words.",
+    maxTokens: 800,
   },
   risks: {
     prompt:
-      "List the main business risks and mitigation actions for each risk.",
-    maxTokens: 700,
-  },
-  firstCustomerStrategy: {
-    prompt:
-      "Write a practical go-to-market strategy: target beachhead, channel, offer, messaging, sales motion, launch sequence, and validation method.",
+      "List the main risks and mitigation actions. Be honest about market, product, execution, distribution, pricing, regulatory, and funding risks where relevant. Max 170 words.",
     maxTokens: 800,
   },
-  kpiMetrics: {
+  kpis: {
     prompt:
-      "List the KPI metrics to track: acquisition, activation, revenue, retention, and operational metrics.",
-    maxTokens: 700,
+      "Define the KPIs. Include acquisition, activation, retention, revenue, sales pipeline, product quality, and learning metrics. Explain what good early traction looks like. Max 150 words.",
+    maxTokens: 750,
   },
-  successScore: {
+  roadmap306090: {
     prompt:
-      "Give an AI success score from 0-100 and write 2 short reasons.",
-    maxTokens: 500,
+      "Create a 30-60-90 day roadmap with specific founder actions, not vague goals. Cover validation, product, sales, marketing, operations, and decision gates. Max 190 words.",
+    maxTokens: 900,
+  },
+  financialAssumptions: {
+    prompt:
+      "Write financial assumptions for early-stage decision making. Include revenue assumptions, cost categories, unit economics, break-even signals, budget priorities, and assumptions to validate. Max 170 words.",
+    maxTokens: 850,
+  },
+  founderScore: {
+    prompt:
+      "Give an AI Founder Score out of 100. Include the score, 3 concise reasons, and the single highest-leverage action to improve the score. Max 110 words.",
+    maxTokens: 600,
   },
 } as const;
 
 type PlanReportField = keyof typeof planPrompts;
 
-type PlanReportChunk = Record<PlanReportField, string>;
+type PlanReportChunk = Partial<Record<PlanReportField, string>>;
 
 const planFields = Object.keys(planPrompts) as PlanReportField[];
 
@@ -86,25 +116,37 @@ const planFieldLabels: Record<
 > = {
   English: {
     executiveSummary: "Executive Summary",
+    problem: "Problem",
+    solution: "Solution",
+    targetCustomer: "Target Customer / ICP",
+    marketOpportunity: "Market Opportunity",
+    competitorLandscape: "Competitor Landscape",
     businessModel: "Business Model",
-    targetCustomer: "Target Customer",
-    revenueModel: "Revenue Model",
-    roadmap90Days: "90-Day Roadmap",
+    pricingStrategy: "Pricing Strategy",
+    goToMarketPlan: "Go-to-Market Plan",
+    salesStrategy: "Sales Strategy",
     risks: "Risks",
-    firstCustomerStrategy: "Go-to-Market Strategy",
-    kpiMetrics: "KPI Metrics",
-    successScore: "AI Success Score",
+    kpis: "KPIs",
+    roadmap306090: "30-60-90 Day Roadmap",
+    financialAssumptions: "Financial Assumptions",
+    founderScore: "AI Founder Score out of 100",
   },
   Turkish: {
     executiveSummary: "Yönetici Özeti",
+    problem: "Problem",
+    solution: "Çözüm",
+    targetCustomer: "Hedef Müşteri / ICP",
+    marketOpportunity: "Pazar Fırsatı",
+    competitorLandscape: "Rakip Haritası",
     businessModel: "İş Modeli",
-    targetCustomer: "Hedef Müşteri",
-    revenueModel: "Gelir Modeli",
-    roadmap90Days: "90 Günlük Yol Haritası",
+    pricingStrategy: "Fiyatlandırma Stratejisi",
+    goToMarketPlan: "Pazara Giriş Planı",
+    salesStrategy: "Satış Stratejisi",
     risks: "Riskler",
-    firstCustomerStrategy: "Pazara Giriş Stratejisi",
-    kpiMetrics: "KPI Metrikleri",
-    successScore: "AI Başarı Skoru",
+    kpis: "KPI'lar",
+    roadmap306090: "30-60-90 Günlük Yol Haritası",
+    financialAssumptions: "Finansal Varsayımlar",
+    founderScore: "100 Üzerinden AI Kurucu Skoru",
   },
 };
 
@@ -127,17 +169,7 @@ function isPlanReportField(value: string | undefined): value is PlanReportField 
 }
 
 function createPlanChunk(field: PlanReportField, content: string): PlanReportChunk {
-  return {
-    executiveSummary: field === "executiveSummary" ? content : "",
-    businessModel: field === "businessModel" ? content : "",
-    targetCustomer: field === "targetCustomer" ? content : "",
-    revenueModel: field === "revenueModel" ? content : "",
-    roadmap90Days: field === "roadmap90Days" ? content : "",
-    risks: field === "risks" ? content : "",
-    firstCustomerStrategy: field === "firstCustomerStrategy" ? content : "",
-    kpiMetrics: field === "kpiMetrics" ? content : "",
-    successScore: field === "successScore" ? content : "",
-  };
+  return { [field]: content };
 }
 
 function serializePlanChunk(field: PlanReportField, content: string) {
@@ -146,13 +178,57 @@ function serializePlanChunk(field: PlanReportField, content: string) {
 
 function buildLanguageInstructions(language: ResponseLanguage) {
   return [
-    "You are a senior AI business planner working for ZERINIX.",
+    "You are a senior AI business report engine working for ZERINIX.",
     `Respond entirely in ${language}.`,
     `Every heading, paragraph, bullet point, table label, markdown label, and sentence must be in ${language}.`,
     `If the user prompt includes another language, still write the final answer only in ${language}.`,
     "Do not switch languages. Do not translate the user's business name unless needed for grammar.",
-    "Write premium, clear, actionable analysis dense enough for a real entrepreneur to make decisions.",
+    "Write a structured, professional, founder-focused business report.",
+    "Be specific to the user's idea. Do not use generic filler or broad motivational language.",
+    "Make recommendations actionable for early-stage decision making.",
+    "Be honest about assumptions, uncertainty, validation needs, and execution risk.",
+    "If data is not provided, state a reasonable assumption instead of inventing precise facts.",
   ].join("\n");
+}
+
+function isWeakBusinessPrompt(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return true;
+  }
+
+  const genericPrompts = new Set([
+    "test",
+    "deneme",
+    "hi",
+    "hello",
+    "hey",
+    "merhaba",
+    "selam",
+    "ok",
+    "okay",
+    "start",
+    "başla",
+  ]);
+
+  if (genericPrompts.has(normalized)) {
+    return true;
+  }
+
+  const words = normalized.split(" ").filter(Boolean);
+
+  return words.length < 4 && normalized.length < 28;
+}
+
+function clarificationMessage(language: ResponseLanguage) {
+  return language === "Turkish"
+    ? "Daha güçlü bir iş raporu hazırlamam için lütfen iş fikrini biraz daha aç: ürün/hizmet nedir, hedef müşteri kimdir ve hangi pazarda başlamak istiyorsun?"
+    : "Please add a little more detail so I can generate a useful business report: what is the product or service, who is the target customer, and which market do you want to start in?";
 }
 
 export async function POST(req: Request) {
@@ -194,7 +270,7 @@ export async function POST(req: Request) {
     }
 
     const rateLimit = checkRateLimit(`api:plan:${user.id}:${ip}`, {
-      limit: 12,
+      limit: 24,
       windowMs: 60_000,
     });
 
@@ -216,6 +292,13 @@ export async function POST(req: Request) {
     const responseLanguage = normalizeLanguage(language, promptText);
     const reportField = typeof field === "string" ? field : "executiveSummary";
 
+    if (isWeakBusinessPrompt(promptText)) {
+      return NextResponse.json(
+        { error: clarificationMessage(responseLanguage) },
+        { status: 422 }
+      );
+    }
+
     if (!isPlanReportField(reportField)) {
       return NextResponse.json(
         { error: "Invalid plan field." },
@@ -229,6 +312,13 @@ export async function POST(req: Request) {
 
 Section to generate: ${planFieldLabels[responseLanguage][reportField]}
 Task: ${fieldConfig.prompt}
+
+Report quality rules:
+- Use clear headings only if they help this section, but do not repeat the section title.
+- Include practical founder actions, examples, and decision criteria.
+- Avoid generic filler such as "conduct market research" unless you specify exactly what to research and why.
+- Be honest about assumptions and uncertainty.
+- Keep the section concise, dense, and useful.
 
 Write only the content for this section. Do not write a JSON object, field name, markdown code block, or any other report section.`;
     const productionLimit = await checkAiProductionRateLimit({

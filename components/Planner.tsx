@@ -69,14 +69,20 @@ type MarketReport = {
 
 type PlanReport = {
   executiveSummary: string;
-  businessModel: string;
+  problem: string;
+  solution: string;
   targetCustomer: string;
-  revenueModel: string;
-  roadmap90Days: string;
+  marketOpportunity: string;
+  competitorLandscape: string;
+  businessModel: string;
+  pricingStrategy: string;
+  goToMarketPlan: string;
+  salesStrategy: string;
   risks: string;
-  firstCustomerStrategy: string;
-  kpiMetrics: string;
-  successScore: string;
+  kpis: string;
+  roadmap306090: string;
+  financialAssumptions: string;
+  founderScore: string;
 };
 
 type MarketReportField = keyof MarketReport;
@@ -200,14 +206,20 @@ const planReportFields: Array<{
   icon: LucideIcon;
 }> = [
   { field: "executiveSummary", title: "Executive Summary", icon: Sparkles },
+  { field: "problem", title: "Problem", icon: ShieldAlert },
+  { field: "solution", title: "Solution", icon: Goal },
+  { field: "targetCustomer", title: "Target Customer / ICP", icon: Users },
+  { field: "marketOpportunity", title: "Market Opportunity", icon: BarChart3 },
+  { field: "competitorLandscape", title: "Competitor Landscape", icon: Search },
   { field: "businessModel", title: "Business Model", icon: BriefcaseBusiness },
-  { field: "targetCustomer", title: "Target Customer", icon: Users },
-  { field: "revenueModel", title: "Revenue Model", icon: Landmark },
-  { field: "roadmap90Days", title: "90-Day Roadmap", icon: CalendarDays },
+  { field: "pricingStrategy", title: "Pricing Strategy", icon: Landmark },
+  { field: "goToMarketPlan", title: "Go-to-Market Plan", icon: Goal },
+  { field: "salesStrategy", title: "Sales Strategy", icon: Users },
   { field: "risks", title: "Risks", icon: ShieldAlert },
-  { field: "firstCustomerStrategy", title: "Go-to-Market Strategy", icon: Goal },
-  { field: "kpiMetrics", title: "KPI Metrics", icon: ListChecks },
-  { field: "successScore", title: "AI Success Score", icon: Gauge },
+  { field: "kpis", title: "KPIs", icon: ListChecks },
+  { field: "roadmap306090", title: "30-60-90 Day Roadmap", icon: CalendarDays },
+  { field: "financialAssumptions", title: "Financial Assumptions", icon: PieChart },
+  { field: "founderScore", title: "AI Founder Score out of 100", icon: Gauge },
 ];
 
 const turkishReportSectionTitles: Partial<
@@ -216,14 +228,21 @@ const turkishReportSectionTitles: Partial<
   executiveSummary: "Yönetici Özeti",
   marketAnalysis: "Pazar Analizi",
   targetAudience: "Hedef Kitle",
+  problem: "Problem",
+  solution: "Çözüm",
+  marketOpportunity: "Pazar Fırsatı",
+  competitorLandscape: "Rakip Haritası",
   businessModel: "İş Modeli",
-  targetCustomer: "Hedef Müşteri",
-  revenueModel: "Gelir Modeli",
-  roadmap90Days: "90 Günlük Yol Haritası",
+  targetCustomer: "Hedef Müşteri / ICP",
+  pricingStrategy: "Fiyatlandırma Stratejisi",
+  goToMarketPlan: "Pazara Giriş Planı",
+  salesStrategy: "Satış Stratejisi",
   risks: "Riskler",
-  firstCustomerStrategy: "Pazara Giriş Stratejisi",
-  kpiMetrics: "KPI Metrikleri",
+  kpis: "KPI'lar",
+  roadmap306090: "30-60-90 Günlük Yol Haritası",
+  financialAssumptions: "Finansal Varsayımlar",
   successScore: "AI Başarı Skoru",
+  founderScore: "100 Üzerinden AI Kurucu Skoru",
 };
 
 function localizeReportFields<T extends ReportFieldDefinition>(
@@ -253,14 +272,20 @@ const emptyMarketReport: MarketReport = {
 
 const emptyPlanReport: PlanReport = {
   executiveSummary: "",
-  businessModel: "",
+  problem: "",
+  solution: "",
   targetCustomer: "",
-  revenueModel: "",
-  roadmap90Days: "",
+  marketOpportunity: "",
+  competitorLandscape: "",
+  businessModel: "",
+  pricingStrategy: "",
+  goToMarketPlan: "",
+  salesStrategy: "",
   risks: "",
-  firstCustomerStrategy: "",
-  kpiMetrics: "",
-  successScore: "",
+  kpis: "",
+  roadmap306090: "",
+  financialAssumptions: "",
+  founderScore: "",
 };
 
 function sanitizeReportContent(content: string) {
@@ -326,7 +351,7 @@ function needsClarification(value: string) {
 
   const words = normalized.split(" ").filter(Boolean);
 
-  return words.length < 3 && normalized.length < 18;
+  return words.length < 4 && normalized.length < 28;
 }
 
 function detectResponseLanguage(value: string): ResponseLanguage {

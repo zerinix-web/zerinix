@@ -27,37 +27,37 @@ const client = new OpenAI({
 const fieldPrompts: Record<string, { prompt: string; maxTokens: number }> = {
   executiveSummary: {
     prompt:
-      "Based on current web research, write a 2-3 sentence executive summary. Cover the market opportunity, who it sells to, and the first strategic focus. Do not write a heading. Max 90 words.",
+      "Based on current market research, write a 2-3 sentence executive summary focused on market attractiveness, demand signal, competitor pressure, and entry focus. Do not write a heading. Max 100 words.",
     maxTokens: 1000,
   },
   marketAnalysis: {
     prompt:
-      "Briefly analyze market size, competitor companies, industry trends, and recent news from current sources. Do not write a heading. Max 170 words.",
+      "Analyze market size, growth drivers, category maturity, industry trends, recent news, and demand signals. Be honest about assumptions if exact market size is unavailable. Do not write a heading. Max 190 words.",
     maxTokens: 1800,
   },
   targetAudience: {
     prompt:
-      "Describe target customer segments, early adopters, and buying motivations based on current market signals. Do not write a heading. Max 130 words.",
+      "Describe target customer segments, early adopters, buyer/user roles, budget holders, buying motivations, and adoption barriers based on market signals. Do not write a heading. Max 150 words.",
     maxTokens: 1000,
   },
   revenueModel: {
     prompt:
-      "Recommend a suitable revenue model using competitor pricing models and revenue potential. Do not write a heading. Max 130 words.",
+      "Analyze competitor pricing patterns and recommend pricing/revenue model options. Include price sensitivity, packaging, pilot strategy, and revenue potential. Do not write a heading. Max 150 words.",
     maxTokens: 1000,
   },
   risks: {
     prompt:
-      "Write the main risks and mitigation actions using current data that could support SWOT analysis. Do not write a heading. Max 130 words.",
+      "Write the main market-entry risks and mitigations: competitor response, demand uncertainty, pricing risk, regulatory constraints, switching costs, and channel risk where relevant. Do not write a heading. Max 150 words.",
     maxTokens: 1000,
   },
   roadmap90Days: {
     prompt:
-      "Write an actionable first 90-day roadmap based on the market realities found in web research: days 0-30, 31-60, and 61-90. Do not write a heading. Max 150 words.",
+      "Write an actionable market-entry roadmap based on the market realities found in research: days 0-30, 31-60, and 61-90. Prioritize validation, competitor interviews, pricing tests, and first channel experiments. Do not write a heading. Max 170 words.",
     maxTokens: 1400,
   },
   successScore: {
     prompt:
-      "Give a success score from 0-100 based on current competition, market size, trends, and risks; write 2 short reasons. Do not write a heading. Max 80 words.",
+      "Give a market-entry success score from 0-100 based on market size, timing, demand, competition, pricing room, and entry risk; write 2-3 short reasons. Do not write a heading. Max 90 words.",
     maxTokens: 800,
   },
   sources: {
@@ -196,8 +196,50 @@ function buildLanguageInstructions(language: ResponseLanguage) {
     `Every heading, paragraph, bullet point, table label, markdown label, source note, and sentence must be in ${language}.`,
     `If source material is in another language, summarize it only in ${language}.`,
     "Do not switch languages. Do not ask questions or request clarification.",
-    "Be clear, current, and actionable.",
+    "Be clear, current, market-focused, and actionable for an early-stage founder.",
+    "Prioritize market size, trends, competitors, pricing, demand, and entry strategy.",
+    "Be honest about assumptions and uncertainty; do not invent precise figures.",
   ].join("\n");
+}
+
+function isWeakMarketPrompt(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return true;
+  }
+
+  const genericPrompts = new Set([
+    "test",
+    "deneme",
+    "hi",
+    "hello",
+    "hey",
+    "merhaba",
+    "selam",
+    "ok",
+    "okay",
+    "start",
+    "başla",
+  ]);
+
+  if (genericPrompts.has(normalized)) {
+    return true;
+  }
+
+  const words = normalized.split(" ").filter(Boolean);
+
+  return words.length < 4 && normalized.length < 28;
+}
+
+function clarificationMessage(language: ResponseLanguage) {
+  return language === "Turkish"
+    ? "Daha güçlü bir pazar analizi için lütfen iş fikrini veya sektörü, hedef müşteriyi ve hedef ülke/pazarı biraz daha detaylandır."
+    : "Please add a little more detail for a useful market analysis: the business idea or industry, target customer, and target country or market.";
 }
 
 export async function POST(req: Request) {
@@ -259,6 +301,14 @@ export async function POST(req: Request) {
     const { prompt, field, section, language } = await req.json();
     const promptText = typeof prompt === "string" ? prompt : "";
     const responseLanguage = normalizeLanguage(language, promptText);
+
+    if (isWeakMarketPrompt(promptText)) {
+      return NextResponse.json(
+        { error: clarificationMessage(responseLanguage) },
+        { status: 422 }
+      );
+    }
+
     const reportField =
       typeof field === "string"
         ? field
@@ -281,7 +331,8 @@ export async function POST(req: Request) {
 Report section to generate: ${fieldLabelsByLanguage[responseLanguage][reportField]}
 Analysis task: ${fieldConfig.prompt}
 First perform current web research. Use reliable sources for market size, competitor companies, industry trends, target customers, recent news, pricing models, and SWOT inputs.
-Write the report from the available information.
+Write the report from the available information with practical market-entry recommendations for the founder.
+Avoid generic filler. Use assumptions explicitly when evidence is limited.
 Write only the content for this section. Do not write a JSON object, field name, braces, markdown code block, heading, or any other report section.
 Do not suggest website URLs, domain names, brand names, or site ideas for the product; write source URLs only in the Sources section.`;
     const productionLimit = await checkAiProductionRateLimit({
