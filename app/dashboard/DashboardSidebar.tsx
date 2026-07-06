@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  Activity,
   LayoutDashboard,
   LogOut,
   Plus,
@@ -11,6 +12,7 @@ export default function DashboardSidebar() {
   const items = [
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { label: "New Report", href: "/plan", icon: Plus },
+    { label: "Usage", href: "/dashboard/usage", icon: Activity },
     { label: "Settings", href: "/dashboard#settings", icon: Settings },
   ];
 

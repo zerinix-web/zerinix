@@ -8,6 +8,20 @@ import {
   getRateLimitHeaders,
 } from "@/app/lib/security/rate-limit";
 import { logServerError } from "@/app/lib/security/errors";
+import {
+  checkUsageAllowance,
+  createAiCacheKey,
+  estimateAiCostUsd,
+  extractTokenUsage,
+  getCachedAiResponse,
+  getUserPlanTier,
+  hashAiPayload,
+  recordAiUsage,
+  selectAiModel,
+  storeCachedAiResponse,
+  type TokenUsage,
+} from "@/app/lib/ai/governance";
+import { createAiJobDescriptor } from "@/app/lib/ai/queue";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -259,6 +273,7 @@ export async function POST(req: Request) {
     }
 
     const instructions = buildLanguageInstructions(responseLanguage);
+    const model = selectAiModel("market_analysis");
     const input = `Business idea: ${promptText}
 
 Report section to generate: ${fieldLabelsByLanguage[responseLanguage][reportField]}
@@ -267,36 +282,142 @@ First perform current web research. Use reliable sources for market size, compet
 Write the report from the available information.
 Write only the content for this section. Do not write a JSON object, field name, braces, markdown code block, heading, or any other report section.
 Do not suggest website URLs, domain names, brand names, or site ideas for the product; write source URLs only in the Sources section.`;
+    const promptHash = hashAiPayload(promptText);
+    const cacheKey = createAiCacheKey({
+      endpoint: "/api/market-analysis",
+      reportField,
+      language: responseLanguage,
+      model,
+      instructions,
+      input,
+    });
+    const planTier = await getUserPlanTier(supabase, user.id);
+    const allowance = await checkUsageAllowance(supabase, user.id, planTier);
 
-    const stream = await client.responses.create(
-      {
-        model: "gpt-5-mini",
-        instructions,
-        input,
-        max_output_tokens: fieldConfig.maxTokens,
-        stream: true,
-        reasoning: {
-          effort: "low",
+    if (!allowance.allowed) {
+      await recordAiUsage(supabase, {
+        userId: user.id,
+        endpoint: "/api/market-analysis",
+        reportField,
+        promptHash,
+        model,
+        planTier,
+        tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        estimatedCostUsd: 0,
+        cacheHit: false,
+        status: "rate_limited",
+        responseTimeMs: 0,
+        metadata: {
+          reason: allowance.reason,
+          dailyUsed: allowance.dailyUsed,
+          monthlyUsed: allowance.monthlyUsed,
         },
-        tools: [
-          {
-            type: "web_search_preview",
-            search_context_size: "low",
-          },
-        ],
-        include: ["web_search_call.action.sources"],
-        text: {
-          verbosity: "medium",
-        },
-      },
-      { signal: req.signal }
-    );
+      });
 
+      return NextResponse.json(
+        { error: allowance.reason },
+        { status: 429 }
+      );
+    }
+
+    const cachedResponse = await getCachedAiResponse(supabase, user.id, cacheKey);
     const encoder = new TextEncoder();
+
+    if (cachedResponse) {
+      await recordAiUsage(supabase, {
+        userId: user.id,
+        endpoint: "/api/market-analysis",
+        reportField,
+        promptHash,
+        model: cachedResponse.model || model,
+        planTier,
+        tokenUsage: {
+          promptTokens: cachedResponse.promptTokens,
+          completionTokens: cachedResponse.completionTokens,
+          totalTokens: cachedResponse.totalTokens,
+        },
+        estimatedCostUsd: 0,
+        cacheHit: true,
+        responseTimeMs: 0,
+        metadata: {
+          cachedEstimatedCostUsd: cachedResponse.estimatedCostUsd,
+        },
+      });
+
+      return new Response(encoder.encode(serializeReportChunk(reportField, cachedResponse.responseText)), {
+        headers: {
+          "Content-Type": "application/x-ndjson; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+        },
+      });
+    }
+
+    const queuedJob = createAiJobDescriptor({
+      kind: "market_analysis",
+      userId: user.id,
+      endpoint: "/api/market-analysis",
+      reportField,
+      promptHash,
+      language: responseLanguage,
+      model,
+    });
+    const startedAt = Date.now();
+
+    const stream = await client.responses
+      .create(
+        {
+          model,
+          instructions,
+          input,
+          max_output_tokens: fieldConfig.maxTokens,
+          stream: true,
+          reasoning: {
+            effort: "low",
+          },
+          tools: [
+            {
+              type: "web_search_preview",
+              search_context_size: "low",
+            },
+          ],
+          include: ["web_search_call.action.sources"],
+          text: {
+            verbosity: "medium",
+          },
+        },
+        { signal: req.signal }
+      )
+      .catch(async (error) => {
+        await recordAiUsage(supabase, {
+          userId: user.id,
+          endpoint: "/api/market-analysis",
+          reportField,
+          promptHash,
+          model,
+          planTier,
+          tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          estimatedCostUsd: 0,
+          cacheHit: false,
+          status: "failed",
+          responseTimeMs: Date.now() - startedAt,
+          metadata: {
+            job: queuedJob,
+            phase: "openai_request",
+          },
+        });
+
+        throw error;
+      });
 
     return new Response(
       new ReadableStream({
         async start(controller) {
+          let tokenUsage: TokenUsage = {
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+          };
+
           try {
             let streamedText = "";
 
@@ -315,10 +436,11 @@ Do not suggest website URLs, domain names, brand names, or site ideas for the pr
                 );
               }
 
-              if (event.type === "response.completed" && !streamedText) {
+              if (event.type === "response.completed") {
+                tokenUsage = extractTokenUsage(event.response);
                 const completedText = extractResponseText(event.response);
 
-                if (completedText) {
+                if (completedText && !streamedText) {
                   streamedText = completedText;
                   controller.enqueue(
                     encoder.encode(serializeReportChunk(reportField, completedText))
@@ -327,8 +449,58 @@ Do not suggest website URLs, domain names, brand names, or site ideas for the pr
               }
             }
 
+            const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
+            const responseTimeMs = Date.now() - startedAt;
+
+            if (streamedText) {
+              await storeCachedAiResponse(supabase, {
+                userId: user.id,
+                cacheKey,
+                promptHash,
+                endpoint: "/api/market-analysis",
+                reportField,
+                language: responseLanguage,
+                model,
+                responseText: streamedText,
+                tokenUsage,
+                estimatedCostUsd,
+              });
+            }
+
+            await recordAiUsage(supabase, {
+              userId: user.id,
+              endpoint: "/api/market-analysis",
+              reportField,
+              promptHash,
+              model,
+              planTier,
+              tokenUsage,
+              estimatedCostUsd,
+              cacheHit: false,
+              responseTimeMs,
+              metadata: {
+                job: queuedJob,
+              },
+            });
+
             controller.close();
           } catch (error) {
+            await recordAiUsage(supabase, {
+              userId: user.id,
+              endpoint: "/api/market-analysis",
+              reportField,
+              promptHash,
+              model,
+              planTier,
+              tokenUsage,
+              estimatedCostUsd: estimateAiCostUsd(model, tokenUsage),
+              cacheHit: false,
+              status: "failed",
+              responseTimeMs: Date.now() - startedAt,
+              metadata: {
+                job: queuedJob,
+              },
+            });
             logServerError("api:market-analysis:stream", error);
             controller.error(error);
           }
