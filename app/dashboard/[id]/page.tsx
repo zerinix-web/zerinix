@@ -208,6 +208,192 @@ function extractFirstInsight(content: string) {
   );
 }
 
+function extractKeywordInsight(content: string, keywords: string[]) {
+  const lines = content
+    .replace(/^#{1,6}\s+/gm, "")
+    .split(/\n+/)
+    .map((line) => line.trim().replace(/^[-*]\s+/, ""))
+    .filter((line) => line.length > 12);
+
+  return (
+    lines.find((line) =>
+      keywords.some((keyword) => line.toLowerCase().includes(keyword.toLowerCase()))
+    ) ||
+    lines[0] ||
+    ""
+  );
+}
+
+function extractPercentScore(content: string, label: string) {
+  const explicitScore = extractScore(content, label);
+
+  if (explicitScore !== null) {
+    return explicitScore;
+  }
+
+  const value = extractMetricValue(content, label);
+  const percent = Number(value.match(/(\d{1,3})\s*%/)?.[1] || NaN);
+
+  return Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+}
+
+function getDecisionClasses(decision: string) {
+  if (decision === "GO" || decision === "RAISE" || decision === "BOOTSTRAP") {
+    return "border-emerald-300/35 bg-emerald-300/15 text-emerald-100";
+  }
+
+  if (decision === "NO GO" || decision === "PIVOT") {
+    return "border-red-300/30 bg-red-300/12 text-red-100";
+  }
+
+  if (decision === "WAIT") {
+    return "border-amber-300/35 bg-amber-300/15 text-amber-100";
+  }
+
+  return "border-teal-200/30 bg-teal-200/12 text-teal-100";
+}
+
+function MiniProgressCircle({
+  label,
+  value,
+}: {
+  label: string;
+  value: number | null;
+}) {
+  const displayValue = value === null ? "TBD" : `${value}%`;
+  const degrees = (value ?? 0) * 3.6;
+
+  return (
+    <div className="rounded-[1.4rem] border border-white/10 bg-black/30 p-4">
+      <div
+        className="flex h-16 w-16 items-center justify-center rounded-full"
+        style={{
+          background: `conic-gradient(rgb(94 234 212) ${degrees}deg, rgb(39 39 42) 0deg)`,
+        }}
+      >
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-zinc-950 text-xs font-semibold text-white">
+          {displayValue}
+        </div>
+      </div>
+      {label ? (
+        <p className="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-400">
+          {label}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function ExecutiveSummaryVisual({
+  title,
+  content,
+}: {
+  title: string;
+  content: string;
+}) {
+  if (!title.toLowerCase().includes("executive summary")) {
+    return null;
+  }
+
+  const score =
+    extractScore(content, "AI Investment Score") ??
+    extractScore(content, "AI Founder Score") ??
+    extractConfidence(content);
+  const recommendation = detectRecommendation(content) || "REVIEW";
+  const highlights = [
+    extractKeywordInsight(content, ["market", "pazar", "tam", "sam", "som"]),
+    extractKeywordInsight(content, ["revenue", "gelir", "pricing", "fiyat"]),
+    extractKeywordInsight(content, ["risk", "risk", "threat", "tehdit"]),
+  ].filter(Boolean);
+  const kpis = [
+    {
+      label: "Investment Score",
+      value: score === null ? "TBD" : `${score}/100`,
+      accent: "from-teal-200/25 to-cyan-200/5",
+    },
+    {
+      label: "Decision",
+      value: recommendation,
+      accent: "from-emerald-300/20 to-teal-300/5",
+    },
+    {
+      label: "Market Signal",
+      value: extractMetricValue(content, "Market") || extractMetricValue(content, "TAM") || "Review",
+      accent: "from-sky-300/18 to-teal-300/5",
+    },
+    {
+      label: "Risk Posture",
+      value: extractMetricValue(content, "Risk") || extractMetricValue(content, "Main Risk") || "Tracked",
+      accent: "from-amber-300/18 to-teal-300/5",
+    },
+  ];
+
+  return (
+    <div className="mb-5 overflow-hidden rounded-[2rem] border border-teal-200/15 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.18),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02))]">
+      <div className="grid gap-0 lg:grid-cols-[0.9fr_1.35fr]">
+        <div className="border-b border-white/10 p-5 lg:border-b-0 lg:border-r">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-teal-200/75">
+            Executive Command View
+          </p>
+          <div className="mt-5 flex items-end gap-4">
+            <div
+              className="flex h-28 w-28 shrink-0 items-center justify-center rounded-full"
+              style={{
+                background: `conic-gradient(rgb(94 234 212) ${(score ?? 0) * 3.6}deg, rgba(255,255,255,0.08) 0deg)`,
+              }}
+            >
+              <div className="flex h-20 w-20 flex-col items-center justify-center rounded-full border border-white/10 bg-black/70">
+                <span className="text-3xl font-semibold tracking-tight text-white">
+                  {score === null ? "--" : score}
+                </span>
+                <span className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Score</span>
+              </div>
+            </div>
+            <div>
+              <span className={`inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.18em] ${getDecisionClasses(recommendation)}`}>
+                {recommendation}
+              </span>
+              <p className="mt-3 text-sm leading-6 text-zinc-300">
+                {extractFirstInsight(content) || "Executive signal is being assembled."}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="p-5">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {kpis.map((kpi) => (
+              <div
+                key={kpi.label}
+                className={`rounded-3xl border border-white/10 bg-gradient-to-br ${kpi.accent} p-4`}
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                  {kpi.label}
+                </p>
+                <p className="mt-3 line-clamp-2 text-2xl font-semibold tracking-tight text-white">
+                  {kpi.value}
+                </p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 rounded-3xl border border-white/10 bg-black/30 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-teal-200/70">
+              Executive Highlights
+            </p>
+            <div className="mt-3 grid gap-2">
+              {(highlights.length > 0 ? highlights : [extractFirstInsight(content)]).map((highlight) => (
+                <div key={highlight} className="flex gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-sm leading-6 text-zinc-300">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200" />
+                  <span className="line-clamp-2">{highlight}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ExecutiveInsightBanner({
   content,
 }: {
@@ -331,20 +517,33 @@ function ReportSectionVisual({
 
   if (normalizedTitle.includes("financial dashboard")) {
     const benchmarkRows = [
-      { metric: "Gross Margin", benchmark: "70%+ SaaS benchmark" },
-      { metric: "CAC", benchmark: "Payback-led acquisition" },
-      { metric: "Runway", benchmark: "18+ months preferred" },
-      { metric: "Payback", benchmark: "<12 months strong" },
+      { metric: "Gross Margin", benchmark: "70%+ SaaS", status: "Quality" },
+      { metric: "CAC", benchmark: "Payback-led", status: "Efficiency" },
+      { metric: "Runway", benchmark: "18+ months", status: "Resilience" },
+      { metric: "Payback", benchmark: "<12 months", status: "Velocity" },
     ];
 
     return (
-      <div className="mb-5 space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-5 overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.12),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.015))]">
+        <div className="flex flex-col gap-2 border-b border-white/10 p-5 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-teal-200/75">
+              Bloomberg-Style Financial Console
+            </p>
+            <p className="mt-2 text-sm text-zinc-400">
+              Unit economics, runway and investor-readiness signals.
+            </p>
+          </div>
+          <span className="w-fit rounded-full border border-teal-200/20 bg-teal-200/10 px-3 py-1 text-xs font-semibold text-teal-100">
+            Live model
+          </span>
+        </div>
+        <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
           {financialDashboardMetrics.map((metric, index) => {
             const value = extractMetricValueFromAliases(content, metric.aliases);
 
             return (
-              <div key={metric.label} className="rounded-3xl border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.02))] p-4">
+              <div key={metric.label} className="rounded-3xl border border-white/10 bg-black/35 p-4 shadow-xl shadow-black/20">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-zinc-500">
                     {metric.label}
@@ -362,22 +561,30 @@ function ReportSectionVisual({
                 <p className="mt-3 min-h-8 line-clamp-2 text-2xl font-semibold tracking-tight text-white">
                   {value || "TBD"}
                 </p>
+                <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-teal-200/80"
+                    style={{ width: `${[78, 64, 72, 58, 70, 50, 66, 62, 54, 60, 48][index] || 60}%` }}
+                  />
+                </div>
                 <p className="mt-2 text-xs text-teal-200/70">Investor KPI</p>
               </div>
             );
           })}
         </div>
-        <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/25">
-          <div className="grid grid-cols-3 border-b border-white/10 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+        <div className="m-4 mt-0 overflow-hidden rounded-3xl border border-white/10 bg-black/35">
+          <div className="grid grid-cols-4 border-b border-white/10 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
             <span>Metric</span>
             <span>Current</span>
             <span>Benchmark</span>
+            <span>Status</span>
           </div>
           {benchmarkRows.map((row) => (
-            <div key={row.metric} className="grid grid-cols-3 gap-3 border-b border-white/10 px-4 py-3 text-sm last:border-b-0">
+            <div key={row.metric} className="grid grid-cols-4 gap-3 border-b border-white/10 px-4 py-3 text-sm last:border-b-0">
               <span className="font-medium text-white">{row.metric}</span>
               <span className="text-zinc-300">{extractMetricValue(content, row.metric) || "TBD"}</span>
               <span className="text-teal-100/80">{row.benchmark}</span>
+              <span className="text-zinc-400">{row.status}</span>
             </div>
           ))}
         </div>
@@ -527,18 +734,25 @@ function ReportSectionVisual({
   }
 
   if (normalizedTitle.includes("kpi")) {
-    const kpiMetrics = ["Acquisition", "Activation", "Retention", "Gross Margin", "Payback"];
+    const kpiMetrics = ["Acquisition", "Activation", "Retention", "Gross Margin", "Payback", "Conversion"];
 
     return (
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {kpiMetrics.map((metric) => (
-          <div key={metric} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
-            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
-            <p className="mt-3 line-clamp-2 text-xl font-semibold text-white">
-              {extractMetricValue(content, metric) || "Target"}
-            </p>
-            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-zinc-800">
-              <div className="h-full w-2/3 rounded-full bg-teal-200/80" />
+          <div key={metric} className="grid grid-cols-[4.25rem_1fr] gap-4 rounded-3xl border border-white/10 bg-white/[0.035] p-4">
+            <MiniProgressCircle label="" value={extractPercentScore(content, metric)} />
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
+              <p className="mt-2 line-clamp-2 text-xl font-semibold text-white">
+                {extractMetricValue(content, metric) || "Target"}
+              </p>
+              <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                <div
+                  className="h-full rounded-full bg-teal-200/80"
+                  style={{ width: `${extractPercentScore(content, metric) ?? 66}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-zinc-500">Analytics widget</p>
             </div>
           </div>
         ))}
@@ -553,6 +767,7 @@ function hasReportSectionVisual(title: string) {
   const normalizedTitle = title.toLowerCase();
 
   return (
+    normalizedTitle.includes("executive summary") ||
     normalizedTitle.includes("tam / sam / som") ||
     normalizedTitle.includes("swot") ||
     normalizedTitle.includes("financial dashboard") ||
@@ -566,6 +781,35 @@ function hasReportSectionVisual(title: string) {
     normalizedTitle.includes("porter") ||
     normalizedTitle.includes("kpi")
   );
+}
+
+function getReportArticleClass(title: string) {
+  const normalizedTitle = title.toLowerCase();
+  const base =
+    "relative overflow-hidden rounded-[1.75rem] border p-5 shadow-xl shadow-black/30";
+
+  if (normalizedTitle.includes("executive summary")) {
+    return `${base} border-teal-200/20 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.12),transparent_34%),rgba(0,0,0,0.62)]`;
+  }
+
+  if (normalizedTitle.includes("financial dashboard") || normalizedTitle.includes("kpi")) {
+    return `${base} border-white/10 bg-[linear-gradient(135deg,rgba(10,10,10,0.92),rgba(20,83,75,0.16))]`;
+  }
+
+  if (normalizedTitle.includes("swot") || normalizedTitle.includes("porter") || normalizedTitle.includes("scenario")) {
+    return `${base} border-white/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.72),rgba(0,0,0,0.48))]`;
+  }
+
+  if (
+    normalizedTitle.includes("executive recommendation") ||
+    normalizedTitle.includes("yönetici tavsiyesi") ||
+    normalizedTitle.includes("founder score") ||
+    normalizedTitle.includes("kurucu skoru")
+  ) {
+    return `${base} border-teal-200/15 bg-[linear-gradient(135deg,rgba(94,234,212,0.08),rgba(0,0,0,0.66))]`;
+  }
+
+  return `${base} border-white/10 bg-black/45`;
 }
 
 function AnalysisNotes({
@@ -813,7 +1057,7 @@ export default async function ReportDetailPage({
               return (
               <article
                 key={section.title}
-                className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-black/45 p-5 shadow-xl shadow-black/30"
+                className={getReportArticleClass(section.title)}
               >
                 <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-teal-200/30 to-transparent" />
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
@@ -830,7 +1074,11 @@ export default async function ReportDetailPage({
                       </span>
                     </div>
                     <div className="mt-4 border-t border-white/10 pt-4">
-                      {hasReportSectionVisual(section.title) ? (
+                      <ExecutiveSummaryVisual
+                        title={section.title}
+                        content={section.content}
+                      />
+                      {hasReportSectionVisual(section.title) && !section.title.toLowerCase().includes("executive summary") ? (
                         <ExecutiveInsightBanner content={section.content} />
                       ) : null}
                       <ReportSectionVisual
