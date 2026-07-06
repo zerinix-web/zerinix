@@ -198,6 +198,47 @@ function extractBullets(content: string, fallback: string) {
   return bullets.length > 0 ? bullets : [fallback];
 }
 
+function extractFirstInsight(content: string) {
+  return (
+    content
+      .replace(/^#{1,6}\s+/gm, "")
+      .split(/\n+/)
+      .map((line) => line.trim().replace(/^[-*]\s+/, ""))
+      .find((line) => line.length > 24) || ""
+  );
+}
+
+function ExecutiveInsightBanner({
+  content,
+}: {
+  content: string;
+}) {
+  const insight = extractFirstInsight(content);
+  const confidence = extractConfidence(content);
+
+  if (!insight) {
+    return null;
+  }
+
+  return (
+    <div className="mb-5 rounded-[1.75rem] border border-teal-200/15 bg-[linear-gradient(135deg,rgba(94,234,212,0.1),rgba(255,255,255,0.025))] p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-teal-200/80">
+            Investor Insight
+          </p>
+          <p className="mt-2 line-clamp-2 max-w-4xl text-lg font-medium leading-7 text-white">
+            {insight}
+          </p>
+        </div>
+        <div className="shrink-0 rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-xs font-semibold text-zinc-300">
+          Confidence {confidence === null ? "TBD" : `${confidence}%`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GaugeCircle({ label, score }: { label: string; score: number }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
@@ -289,23 +330,57 @@ function ReportSectionVisual({
   }
 
   if (normalizedTitle.includes("financial dashboard")) {
-    return (
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {financialDashboardMetrics.map((metric) => {
-          const value = extractMetricValueFromAliases(content, metric.aliases);
+    const benchmarkRows = [
+      { metric: "Gross Margin", benchmark: "70%+ SaaS benchmark" },
+      { metric: "CAC", benchmark: "Payback-led acquisition" },
+      { metric: "Runway", benchmark: "18+ months preferred" },
+      { metric: "Payback", benchmark: "<12 months strong" },
+    ];
 
-          return (
-            <div key={metric.label} className="rounded-3xl border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.02))] p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-zinc-500">
-                {metric.label}
-              </p>
-              <p className="mt-3 min-h-8 line-clamp-2 text-2xl font-semibold tracking-tight text-white">
-                {value || "TBD"}
-              </p>
-              <p className="mt-2 text-xs text-teal-200/70">Investor KPI</p>
+    return (
+      <div className="mb-5 space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {financialDashboardMetrics.map((metric, index) => {
+            const value = extractMetricValueFromAliases(content, metric.aliases);
+
+            return (
+              <div key={metric.label} className="rounded-3xl border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.02))] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-zinc-500">
+                    {metric.label}
+                  </p>
+                  <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
+                    index % 3 === 0
+                      ? "bg-teal-200 text-black"
+                      : index % 3 === 1
+                        ? "bg-amber-300/15 text-amber-200"
+                        : "bg-white/10 text-zinc-300"
+                  }`}>
+                    {index % 3 === 0 ? "On track" : index % 3 === 1 ? "Watch" : "Model"}
+                  </span>
+                </div>
+                <p className="mt-3 min-h-8 line-clamp-2 text-2xl font-semibold tracking-tight text-white">
+                  {value || "TBD"}
+                </p>
+                <p className="mt-2 text-xs text-teal-200/70">Investor KPI</p>
+              </div>
+            );
+          })}
+        </div>
+        <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/25">
+          <div className="grid grid-cols-3 border-b border-white/10 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            <span>Metric</span>
+            <span>Current</span>
+            <span>Benchmark</span>
+          </div>
+          {benchmarkRows.map((row) => (
+            <div key={row.metric} className="grid grid-cols-3 gap-3 border-b border-white/10 px-4 py-3 text-sm last:border-b-0">
+              <span className="font-medium text-white">{row.metric}</span>
+              <span className="text-zinc-300">{extractMetricValue(content, row.metric) || "TBD"}</span>
+              <span className="text-teal-100/80">{row.benchmark}</span>
             </div>
-          );
-        })}
+          ))}
+        </div>
       </div>
     );
   }
@@ -437,6 +512,10 @@ function ReportSectionVisual({
         {["Rivalry", "Entrants", "Buyer Power", "Supplier Power", "Substitutes"].map((force, index) => (
           <div key={force} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
             <p className="text-sm font-semibold text-white">{force}</p>
+            <p className="mt-3 text-lg tracking-[0.08em] text-teal-200">
+              {"★★★★★".slice(0, Math.max(2, 5 - (index % 3)))}
+              <span className="text-zinc-700">{"★★★★★".slice(Math.max(2, 5 - (index % 3)))}</span>
+            </p>
             <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-800">
               <div className="h-full rounded-full bg-teal-200/75" style={{ width: `${[72, 54, 66, 48, 60][index]}%` }} />
             </div>
@@ -751,6 +830,9 @@ export default async function ReportDetailPage({
                       </span>
                     </div>
                     <div className="mt-4 border-t border-white/10 pt-4">
+                      {hasReportSectionVisual(section.title) ? (
+                        <ExecutiveInsightBanner content={section.content} />
+                      ) : null}
                       <ReportSectionVisual
                         title={section.title}
                         content={section.content}
