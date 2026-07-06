@@ -43,6 +43,7 @@ import {
   Send,
   ShieldAlert,
   Sparkles,
+  TrendingUp,
   User,
   Users,
   X,
@@ -51,6 +52,7 @@ import Link from "next/link";
 import { createClient } from "@/app/lib/supabase/client";
 
 type ReportSection = {
+  field?: keyof (MarketReport & PlanReport);
   title: string;
   icon: LucideIcon;
   content: string;
@@ -68,6 +70,13 @@ type MarketReport = {
   threats: string;
   swotAnalysis: string;
   portersFiveForces: string;
+  unitEconomics: string;
+  financialDashboard: string;
+  scenarioAnalysis: string;
+  kpiDashboard: string;
+  executiveRecommendation: string;
+  founderRoadmap: string;
+  sourcesAssumptions: string;
   entryStrategy: string;
   validationPlan: string;
   keyMetrics: string;
@@ -82,14 +91,24 @@ type PlanReport = {
   marketOpportunity: string;
   competitorLandscape: string;
   businessModel: string;
+  tamSamSom: string;
+  swotAnalysis: string;
+  portersFiveForces: string;
   pricingStrategy: string;
   goToMarketPlan: string;
   salesStrategy: string;
+  unitEconomics: string;
+  financialDashboard: string;
+  scenarioAnalysis: string;
+  kpiDashboard: string;
+  executiveRecommendation: string;
   risks: string;
   kpis: string;
+  founderRoadmap: string;
   roadmap306090: string;
   financialAssumptions: string;
   founderScore: string;
+  sourcesAssumptions: string;
 };
 
 type MarketReportField = keyof MarketReport;
@@ -209,9 +228,16 @@ const reportFields: Array<{
   { field: "threats", title: "Threats", icon: ShieldAlert },
   { field: "swotAnalysis", title: "SWOT Analysis", icon: ListChecks },
   { field: "portersFiveForces", title: "Porter's Five Forces", icon: Landmark },
+  { field: "unitEconomics", title: "Unit Economics", icon: TrendingUp },
+  { field: "financialDashboard", title: "Financial Dashboard", icon: PieChart },
+  { field: "scenarioAnalysis", title: "Scenario Analysis: Worst / Base / Best Case", icon: BarChart3 },
+  { field: "kpiDashboard", title: "KPI Dashboard", icon: Gauge },
+  { field: "executiveRecommendation", title: "Executive Recommendation", icon: Sparkles },
   { field: "entryStrategy", title: "Entry Strategy", icon: BriefcaseBusiness },
   { field: "validationPlan", title: "Validation Plan", icon: CalendarDays },
+  { field: "founderRoadmap", title: "Founder Roadmap", icon: CalendarDays },
   { field: "keyMetrics", title: "Key Metrics", icon: Gauge },
+  { field: "sourcesAssumptions", title: "Sources / Assumptions", icon: FileText },
   { field: "sources", title: "Sources", icon: FileText },
 ];
 
@@ -227,14 +253,24 @@ const planReportFields: Array<{
   { field: "marketOpportunity", title: "Market Opportunity", icon: BarChart3 },
   { field: "competitorLandscape", title: "Competitor Landscape", icon: Search },
   { field: "businessModel", title: "Business Model", icon: BriefcaseBusiness },
+  { field: "tamSamSom", title: "TAM / SAM / SOM", icon: PieChart },
+  { field: "swotAnalysis", title: "SWOT Analysis", icon: ListChecks },
+  { field: "portersFiveForces", title: "Porter's Five Forces", icon: Landmark },
   { field: "pricingStrategy", title: "Pricing Strategy", icon: Landmark },
   { field: "goToMarketPlan", title: "Go-to-Market Plan", icon: Goal },
   { field: "salesStrategy", title: "Sales Strategy", icon: Users },
+  { field: "unitEconomics", title: "Unit Economics", icon: TrendingUp },
+  { field: "financialDashboard", title: "Financial Dashboard", icon: PieChart },
+  { field: "scenarioAnalysis", title: "Scenario Analysis: Worst / Base / Best Case", icon: BarChart3 },
+  { field: "kpiDashboard", title: "KPI Dashboard", icon: Gauge },
+  { field: "executiveRecommendation", title: "Executive Recommendation", icon: Sparkles },
   { field: "risks", title: "Risks", icon: ShieldAlert },
   { field: "kpis", title: "KPIs", icon: ListChecks },
+  { field: "founderRoadmap", title: "Founder Roadmap", icon: CalendarDays },
   { field: "roadmap306090", title: "30-60-90 Day Roadmap", icon: CalendarDays },
   { field: "financialAssumptions", title: "Financial Assumptions", icon: PieChart },
   { field: "founderScore", title: "AI Founder Score out of 100", icon: Gauge },
+  { field: "sourcesAssumptions", title: "Sources / Assumptions", icon: FileText },
 ];
 
 const turkishReportSectionTitles: Partial<
@@ -250,9 +286,16 @@ const turkishReportSectionTitles: Partial<
   threats: "Tehditler",
   swotAnalysis: "SWOT Analizi",
   portersFiveForces: "Porter'ın Beş Gücü",
+  unitEconomics: "Birim Ekonomisi",
+  financialDashboard: "Finansal Dashboard",
+  scenarioAnalysis: "Senaryo Analizi: Kötü / Baz / İyi",
+  kpiDashboard: "KPI Dashboard",
+  executiveRecommendation: "Yönetici Tavsiyesi",
   entryStrategy: "Pazara Giriş Stratejisi",
   validationPlan: "Doğrulama Planı",
+  founderRoadmap: "Kurucu Yol Haritası",
   keyMetrics: "Temel Metrikler",
+  sourcesAssumptions: "Kaynaklar / Varsayımlar",
   sources: "Kaynaklar",
   problem: "Problem",
   solution: "Çözüm",
@@ -296,9 +339,16 @@ const emptyMarketReport: MarketReport = {
   threats: "",
   swotAnalysis: "",
   portersFiveForces: "",
+  unitEconomics: "",
+  financialDashboard: "",
+  scenarioAnalysis: "",
+  kpiDashboard: "",
+  executiveRecommendation: "",
   entryStrategy: "",
   validationPlan: "",
+  founderRoadmap: "",
   keyMetrics: "",
+  sourcesAssumptions: "",
   sources: "",
 };
 
@@ -310,14 +360,24 @@ const emptyPlanReport: PlanReport = {
   marketOpportunity: "",
   competitorLandscape: "",
   businessModel: "",
+  tamSamSom: "",
+  swotAnalysis: "",
+  portersFiveForces: "",
   pricingStrategy: "",
   goToMarketPlan: "",
   salesStrategy: "",
+  unitEconomics: "",
+  financialDashboard: "",
+  scenarioAnalysis: "",
+  kpiDashboard: "",
+  executiveRecommendation: "",
   risks: "",
   kpis: "",
+  founderRoadmap: "",
   roadmap306090: "",
   financialAssumptions: "",
   founderScore: "",
+  sourcesAssumptions: "",
 };
 
 function sanitizeReportContent(content: string) {
@@ -666,7 +726,7 @@ function MarkdownRenderer({ content }: { content: string }) {
   const blocks = content.split(/```/g);
 
   return (
-    <div className="space-y-3 text-sm leading-7 text-zinc-300">
+    <div className="space-y-4 text-[15px] leading-8 text-zinc-300">
       {blocks.map((block, blockIndex) => {
         if (blockIndex % 2 === 1) {
           const [language = "", ...codeLines] = block.replace(/^\n/, "").split("\n");
@@ -691,7 +751,10 @@ function MarkdownRenderer({ content }: { content: string }) {
           }
 
           elements.push(
-            <p key={`p-${blockIndex}-${elements.length}`} className="whitespace-pre-wrap">
+            <p
+              key={`p-${blockIndex}-${elements.length}`}
+              className="max-w-4xl whitespace-pre-wrap text-zinc-300"
+            >
               <InlineMarkdown text={paragraph.join("\n")} />
             </p>
           );
@@ -717,11 +780,14 @@ function MarkdownRenderer({ content }: { content: string }) {
           elements.push(
             <ul
               key={`list-${blockIndex}-${elements.length}`}
-              className="space-y-2 pl-5 text-zinc-300"
+              className="space-y-2.5 text-zinc-300"
             >
               {list.map((item) => (
-                <li key={item} className="list-disc">
-                  <InlineMarkdown text={item.replace(/^[-*]\s+/, "")} />
+                <li key={item} className="flex gap-3">
+                  <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
+                  <span>
+                    <InlineMarkdown text={item.replace(/^[-*]\s+/, "")} />
+                  </span>
                 </li>
               ))}
             </ul>
@@ -790,28 +856,257 @@ function MarkdownRenderer({ content }: { content: string }) {
   );
 }
 
-function SourceCards() {
-  const sources = [
-    "Live market research",
-    "Competitive signals",
-    "Financial assumptions",
-  ];
-
+function SourcesCard({ sections }: { sections: ReportSection[] }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
-      {sources.map((source) => (
-        <div
-          key={source}
-          className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-zinc-300"
-        >
-          <p className="font-medium text-white">{source}</p>
-          <p className="mt-2 text-xs leading-5 text-zinc-500">
-            Used to ground this response.
-          </p>
+    <article className="rounded-[2rem] border border-teal-200/15 bg-teal-200/[0.045] p-5 shadow-xl shadow-black/30">
+      <div className="flex items-start gap-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10">
+          <FileText className="h-5 w-5 text-teal-100" />
         </div>
-      ))}
-    </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200/80">
+            Research Appendix
+          </p>
+          <h3 className="mt-1 text-xl font-semibold tracking-tight text-white">
+            Sources
+          </h3>
+          <div className="mt-4 space-y-5">
+            {sections.map((section) => (
+              <div key={section.title} className="border-t border-white/10 pt-4 first:border-t-0 first:pt-0">
+                {sections.length > 1 ? (
+                  <p className="mb-2 text-sm font-semibold text-zinc-100">
+                    {section.title}
+                  </p>
+                ) : null}
+                <MarkdownRenderer content={section.content} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </article>
   );
+}
+
+const financialDashboardMetrics = [
+  "Revenue",
+  "Expenses",
+  "Gross Margin",
+  "CAC",
+  "LTV",
+  "Payback Period",
+  "Burn Rate",
+  "Runway",
+  "EBITDA",
+  "Break-even Month",
+  "Investment Needed",
+];
+
+const founderScoreMetrics = [
+  "Overall Score",
+  "Innovation",
+  "Market Timing",
+  "Competition",
+  "Capital Intensity",
+  "Execution Difficulty",
+  "Revenue Potential",
+  "Risk Level",
+];
+
+const founderRoadmapSteps = [
+  "Tomorrow",
+  "This Week",
+  "30 Days",
+  "90 Days",
+  "180 Days",
+  "12 Months",
+];
+
+function extractMetricValue(content: string, label: string) {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = content.match(
+    new RegExp(`${escapedLabel}\\s*[:\\-–—]\\s*([^\\n|]+)`, "i")
+  );
+
+  return match?.[1]?.trim().replace(/\*\*/g, "") || "";
+}
+
+function extractScore(content: string, label: string) {
+  const value = extractMetricValue(content, label);
+  const scoreMatch = value.match(/\b(\d{1,3})\b/);
+  const fallbackMatch = content.match(
+    new RegExp(`${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\\d]{0,30}(\\d{1,3})`, "i")
+  );
+  const rawScore = Number(scoreMatch?.[1] || fallbackMatch?.[1] || NaN);
+
+  if (!Number.isFinite(rawScore)) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(100, rawScore));
+}
+
+function detectRecommendation(content: string) {
+  const match = content.match(/\b(GO|NO GO|WAIT|PIVOT|RAISE|BOOTSTRAP)\b/i);
+
+  return match?.[1]?.toUpperCase() || "";
+}
+
+function extractConfidence(content: string) {
+  const explicit = extractScore(content, "Confidence");
+
+  if (explicit !== null) {
+    return explicit;
+  }
+
+  const percentMatch = content.match(/\b(\d{1,3})\s*%/);
+  const percent = Number(percentMatch?.[1] || NaN);
+
+  return Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+}
+
+function PremiumSectionVisual({ section }: { section: ReportSection }) {
+  const field = section.field;
+
+  if (field === "financialDashboard") {
+    return (
+      <div className="mb-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {financialDashboardMetrics.map((metric) => {
+          const value = extractMetricValue(section.content, metric);
+
+          return (
+            <div
+              key={metric}
+              className="rounded-2xl border border-white/10 bg-white/[0.035] p-3"
+            >
+              <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">
+                {metric}
+              </p>
+              {value ? (
+                <p className="mt-1 line-clamp-2 text-sm font-semibold text-white">
+                  {value}
+                </p>
+              ) : (
+                <div className="mt-3 h-1.5 rounded-full bg-zinc-800">
+                  <div className="h-full w-2/5 rounded-full bg-teal-200/70" />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (field === "founderScore") {
+    const scoredMetrics = founderScoreMetrics
+      .map((metric) => ({ metric, score: extractScore(section.content, metric) }))
+      .filter((item): item is { metric: string; score: number } => item.score !== null);
+
+    if (scoredMetrics.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="mb-5 grid gap-3 md:grid-cols-2">
+        {scoredMetrics.map(({ metric, score }) => (
+          <div key={metric} className="rounded-2xl border border-white/10 bg-white/[0.035] p-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium text-zinc-200">{metric}</p>
+              <p className="text-sm font-semibold text-teal-100">{score}/100</p>
+            </div>
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-teal-300 to-white"
+                style={{ width: `${score}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (field === "scenarioAnalysis") {
+    return (
+      <div className="mb-5 grid gap-3 md:grid-cols-3">
+        {["Worst Case", "Base Case", "Best Case"].map((scenario, index) => (
+          <div key={scenario} className="rounded-2xl border border-white/10 bg-white/[0.035] p-3">
+            <p className="text-sm font-semibold text-white">{scenario}</p>
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+              <div
+                className="h-full rounded-full bg-teal-200/80"
+                style={{ width: `${[34, 62, 88][index]}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (field === "executiveRecommendation") {
+    const selected = detectRecommendation(section.content);
+    const decisions = ["GO", "NO GO", "WAIT", "PIVOT", "RAISE", "BOOTSTRAP"];
+
+    return (
+      <div className="mb-5 flex flex-wrap gap-2">
+        {decisions.map((decision) => {
+          const active = selected === decision;
+
+          return (
+            <span
+              key={decision}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.14em] ${
+                active
+                  ? "border-teal-200/60 bg-teal-200 text-black"
+                  : "border-white/10 bg-white/[0.035] text-zinc-500"
+              }`}
+            >
+              {decision}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (field === "founderRoadmap" || field === "roadmap306090") {
+    return (
+      <div className="mb-5 grid gap-3 md:grid-cols-6">
+        {founderRoadmapSteps.map((step, index) => (
+          <div key={step} className="relative rounded-2xl border border-white/10 bg-white/[0.035] p-3">
+            <div className="flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-teal-200 text-[11px] font-bold text-black">
+                {index + 1}
+              </span>
+              <p className="text-xs font-semibold text-white">{step}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (field === "portersFiveForces") {
+    return (
+      <div className="mb-5 grid gap-2 sm:grid-cols-5">
+        {["Rivalry", "Entrants", "Buyer Power", "Supplier Power", "Substitutes"].map((force, index) => (
+          <div key={force} className="rounded-2xl border border-white/10 bg-white/[0.035] p-3">
+            <p className="text-[11px] font-medium text-zinc-400">{force}</p>
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+              <div
+                className="h-full rounded-full bg-teal-200/75"
+                style={{ width: `${[72, 54, 66, 48, 60][index]}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function WorkflowPanel({
@@ -1281,6 +1576,7 @@ const ReportPanel = memo(function ReportPanel({
   const sections = useMemo<ReportSection[]>(() => {
     if (reportData) {
       return reportFields.map(({ field, title, icon }) => ({
+        field,
         title,
         icon,
         content:
@@ -1292,6 +1588,7 @@ const ReportPanel = memo(function ReportPanel({
     return result
       ? [
           {
+            field: "executiveSummary",
             title: "Executive Summary",
             icon: Sparkles,
             content: sanitizeReportContent(result),
@@ -1303,6 +1600,17 @@ const ReportPanel = memo(function ReportPanel({
   const hasReportContent = sections.some(
     (section) =>
       section.content && section.content !== waitingMessage
+  );
+  const isSourceSection = (section: ReportSection) =>
+    section.field === "sources" ||
+    section.field === "sourcesAssumptions" ||
+    /^(sources|kaynaklar|sources \/ assumptions|kaynaklar \/ varsayımlar)$/i.test(section.title.trim());
+  const visibleSections = sections.filter((section) => !isSourceSection(section));
+  const sourceSections = sections.filter(
+    (section) =>
+      isSourceSection(section) &&
+      section.content &&
+      section.content !== waitingMessage
   );
 
   useEffect(() => {
@@ -1360,6 +1668,16 @@ const ReportPanel = memo(function ReportPanel({
       const paintPage = () => {
         pdf.setFillColor("#000000");
         pdf.rect(0, 0, pageWidth, pageHeight, "F");
+        pdf.setDrawColor("#0f766e");
+        pdf.setLineWidth(0.15);
+
+        for (let gridX = 0; gridX <= pageWidth; gridX += 18) {
+          pdf.line(gridX, 0, gridX, pageHeight);
+        }
+
+        for (let gridY = 0; gridY <= pageHeight; gridY += 18) {
+          pdf.line(0, gridY, pageWidth, gridY);
+        }
       };
 
       const ensureSpace = (height: number) => {
@@ -1367,12 +1685,110 @@ const ReportPanel = memo(function ReportPanel({
           return;
         }
 
+        drawFooter();
         pdf.addPage();
         paintPage();
         y = margin;
       };
 
+      const drawFooter = () => {
+        pdf.setDrawColor("#27272a");
+        pdf.line(margin, pageHeight - 10, pageWidth - margin, pageHeight - 10);
+        pdf.setFontSize(7);
+        pdf.setTextColor("#71717a");
+        pdf.text("ZERINIX CONFIDENTIAL INVESTOR REPORT", margin, pageHeight - 5);
+        pdf.text(
+          `Page ${pdf.getNumberOfPages()}`,
+          pageWidth - margin - 18,
+          pageHeight - 5
+        );
+      };
+
+      const drawTag = (label: string, x: number, tagY: number, width: number) => {
+        pdf.setFillColor("#042f2e");
+        pdf.setDrawColor("#115e59");
+        pdf.roundedRect(x, tagY, width, 10, 5, 5, "FD");
+        pdf.setFontSize(7.5);
+        pdf.setTextColor("#ccfbf1");
+        pdf.text(label, x + 4, tagY + 6.4, { maxWidth: width - 8 });
+      };
+
+      const drawCoverPage = () => {
+        paintPage();
+        pdf.setFillColor("#020617");
+        pdf.setDrawColor("#134e4a");
+        pdf.roundedRect(margin, 18, contentWidth, pageHeight - 36, 8, 8, "FD");
+        pdf.setFillColor("#14b8a6");
+        pdf.rect(margin, 18, 2, pageHeight - 36, "F");
+
+        pdf.setFontSize(10);
+        pdf.setTextColor("#5eead4");
+        pdf.text("ZERINIX REPORT", margin + 12, 38);
+
+        pdf.setFontSize(32);
+        pdf.setTextColor("#ffffff");
+        pdf.text(reportTitle, margin + 12, 60, { maxWidth: contentWidth - 24 });
+
+        pdf.setFontSize(11);
+        pdf.setTextColor("#a1a1aa");
+        pdf.text("Premium AI business intelligence report for founder and investor decisions.", margin + 12, 78, {
+          maxWidth: contentWidth - 24,
+        });
+
+        drawTag("AI Ready", margin + 12, 94, 28);
+        drawTag("Investor Ready", margin + 44, 94, 38);
+
+        const coverMeta = [
+          ["Report Type", reportTitle],
+          ["Business Idea", "Generated from the active ZERINIX workspace"],
+          ["Date", new Date().toLocaleDateString("tr-TR")],
+          ["Theme", "Strategic analysis, financial dashboard, and executive recommendation"],
+        ];
+
+        let metaY = 122;
+        coverMeta.forEach(([label, value]) => {
+          pdf.setFillColor("#09090b");
+          pdf.setDrawColor("#27272a");
+          pdf.roundedRect(margin + 12, metaY, contentWidth - 24, 17, 4, 4, "FD");
+          pdf.setFontSize(7.5);
+          pdf.setTextColor("#71717a");
+          pdf.text(label.toUpperCase(), margin + 18, metaY + 6);
+          pdf.setFontSize(9.5);
+          pdf.setTextColor("#f4f4f5");
+          pdf.text(value, margin + 18, metaY + 12, { maxWidth: contentWidth - 36 });
+          metaY += 22;
+        });
+
+        const coverCards = [
+          "TAM / SAM / SOM",
+          "Unit Economics",
+          "Scenario Analysis",
+          "Founder Roadmap",
+        ];
+
+        coverCards.forEach((label, index) => {
+          const cardWidth = (contentWidth - 33) / 2;
+          const cardX = margin + 12 + (index % 2) * (cardWidth + 9);
+          const cardY = 218 + Math.floor(index / 2) * 20;
+
+          pdf.setFillColor("#0a0a0a");
+          pdf.setDrawColor("#27272a");
+          pdf.roundedRect(cardX, cardY, cardWidth, 14, 4, 4, "FD");
+          pdf.setFillColor("#5eead4");
+          pdf.circle(cardX + 6, cardY + 7, 1.7, "F");
+          pdf.setFontSize(8);
+          pdf.setTextColor("#d4d4d8");
+          pdf.text(label, cardX + 11, cardY + 8.5, { maxWidth: cardWidth - 15 });
+        });
+
+        drawFooter();
+      };
+
       paintPage();
+      drawCoverPage();
+      pdf.addPage();
+      paintPage();
+      y = margin;
 
       pdf.setFont("Geist", "normal");
       pdf.setFontSize(10);
@@ -1393,7 +1809,195 @@ const ReportPanel = memo(function ReportPanel({
 
       y += 26;
 
+      const summaryCards = [
+        `${visibleSections.length} Sections`,
+        "Investor Ready",
+        "Strategy Model",
+      ];
+
+      summaryCards.forEach((label, index) => {
+        const cardWidth = (contentWidth - 8) / 3;
+        const cardX = margin + index * (cardWidth + 4);
+
+        pdf.setFillColor("#09090b");
+        pdf.setDrawColor("#27272a");
+        pdf.roundedRect(cardX, y, cardWidth, 12, 3, 3, "FD");
+        pdf.setFontSize(7.5);
+        pdf.setTextColor(index === 1 ? "#ccfbf1" : "#a1a1aa");
+        pdf.text(label, cardX + 4, y + 7.5, { maxWidth: cardWidth - 8 });
+      });
+
+      y += 18;
+
+      const visualFields = new Set<ReportSection["field"]>([
+        "tamSamSom",
+        "unitEconomics",
+        "financialDashboard",
+        "founderScore",
+        "scenarioAnalysis",
+        "kpiDashboard",
+        "executiveRecommendation",
+        "founderRoadmap",
+        "roadmap306090",
+        "portersFiveForces",
+        "risks",
+        "kpis",
+      ]);
+
+      const getPdfVisualHeight = (section: ReportSection) => {
+        if (!visualFields.has(section.field)) {
+          return 0;
+        }
+
+        if (section.field === "financialDashboard") {
+          return 38;
+        }
+
+        if (section.field === "tamSamSom") {
+          return 22;
+        }
+
+        if (section.field === "executiveRecommendation") {
+          return 21;
+        }
+
+        return 16;
+      };
+
+      const drawPdfVisual = (section: ReportSection, sectionY: number) => {
+        if (!visualFields.has(section.field)) {
+          return 0;
+        }
+
+        const visualY = sectionY + 19;
+        const visualWidth = bodyWidth;
+
+        if (section.field === "tamSamSom") {
+          const funnelWidths = [visualWidth, visualWidth * 0.66, visualWidth * 0.34];
+          ["TAM", "SAM", "SOM"].forEach((label, index) => {
+            const width = funnelWidths[index];
+            const x = bodyX + (visualWidth - width) / 2;
+            const rowY = visualY + index * 6;
+
+            pdf.setFillColor(index === 0 ? "#134e4a" : index === 1 ? "#115e59" : "#5eead4");
+            pdf.roundedRect(x, rowY, width, 4, 1.5, 1.5, "F");
+            pdf.setFontSize(6.5);
+            pdf.setTextColor(index === 2 ? "#000000" : "#ccfbf1");
+            pdf.text(label, x + 3, rowY + 3);
+          });
+          return 22;
+        }
+
+        if (section.field === "executiveRecommendation") {
+          const selected = detectRecommendation(section.content) || "DECISION";
+          const confidence = extractConfidence(section.content);
+          const investmentNeeded = extractMetricValue(section.content, "Investment Needed");
+          const mainRisk = extractMetricValue(section.content, "Main Risk");
+          const nextAction = extractMetricValue(section.content, "Next Critical Action");
+
+          pdf.setFillColor("#ccfbf1");
+          pdf.setDrawColor("#5eead4");
+          pdf.roundedRect(bodyX, visualY, 28, 10, 5, 5, "FD");
+          pdf.setFontSize(8);
+          pdf.setTextColor("#000000");
+          pdf.text(selected, bodyX + 4, visualY + 6.5, { maxWidth: 20 });
+
+          const recItems = [
+            ["Confidence", confidence === null ? "TBD" : `${confidence}%`],
+            ["Investment", investmentNeeded || "Assumption"],
+            ["Main Risk", mainRisk || "See risk section"],
+            ["Next Action", nextAction || "Validate critical proof point"],
+          ];
+
+          recItems.forEach(([label, value], index) => {
+            const itemX = bodyX + 34 + (index % 2) * ((visualWidth - 38) / 2 + 2);
+            const itemY = visualY + Math.floor(index / 2) * 9;
+            const itemWidth = (visualWidth - 42) / 2;
+
+            pdf.setFillColor("#18181b");
+            pdf.setDrawColor("#27272a");
+            pdf.roundedRect(itemX, itemY, itemWidth, 7, 2, 2, "FD");
+            pdf.setFontSize(5.8);
+            pdf.setTextColor("#71717a");
+            pdf.text(label, itemX + 2, itemY + 2.7);
+            pdf.setTextColor("#e4e4e7");
+            pdf.text(value, itemX + 2, itemY + 5.7, { maxWidth: itemWidth - 4 });
+          });
+
+          return 21;
+        }
+
+        if (section.field === "founderRoadmap" || section.field === "roadmap306090") {
+          const stepWidth = (visualWidth - 10) / 6;
+          founderRoadmapSteps.forEach((step, index) => {
+            const x = bodyX + index * (stepWidth + 2);
+            pdf.setFillColor("#18181b");
+            pdf.setDrawColor("#27272a");
+            pdf.roundedRect(x, visualY, stepWidth, 9, 2, 2, "FD");
+            pdf.setFontSize(6.2);
+            pdf.setTextColor("#ccfbf1");
+            pdf.text(step, x + 2, visualY + 5.7, { maxWidth: stepWidth - 4 });
+          });
+          return 12;
+        }
+
+        const labels =
+          section.field === "financialDashboard"
+            ? financialDashboardMetrics
+            : section.field === "founderScore"
+              ? founderScoreMetrics
+              : section.field === "scenarioAnalysis"
+                ? ["Worst", "Base", "Best"]
+                : section.field === "kpiDashboard" || section.field === "kpis"
+                  ? ["Acquisition", "Activation", "Retention", "Revenue"]
+                  : section.field === "risks"
+                    ? ["Market", "Product", "Pricing", "Execution"]
+                    : section.field === "unitEconomics"
+                      ? ["Gross Margin", "CAC", "LTV", "Payback"]
+                      : ["Rivalry", "Entrants", "Buyer", "Substitutes"];
+        const columns = labels.length > 6 ? 4 : labels.length;
+        const itemWidth = (visualWidth - (columns - 1) * 3) / columns;
+
+        labels.forEach((label, index) => {
+          const x = bodyX + (index % columns) * (itemWidth + 3);
+          const itemY = visualY + Math.floor(index / columns) * 12;
+          const score = extractScore(section.content, label) ?? [42, 62, 84, 56][index] ?? 60;
+          const value = extractMetricValue(section.content, label);
+
+          pdf.setFillColor("#18181b");
+          pdf.setDrawColor("#27272a");
+          pdf.roundedRect(x, itemY, itemWidth, 10, 2, 2, "FD");
+          pdf.setFontSize(6.2);
+          pdf.setTextColor("#a1a1aa");
+          pdf.text(label, x + 2, itemY + 3.2, { maxWidth: itemWidth - 4 });
+          if (section.field === "financialDashboard" && value) {
+            pdf.setTextColor("#f4f4f5");
+            pdf.text(value, x + 2, itemY + 7.2, { maxWidth: itemWidth - 4 });
+            return;
+          }
+          pdf.setFillColor("#27272a");
+          pdf.roundedRect(x + 2, itemY + 7, itemWidth - 4, 1.4, 0.7, 0.7, "F");
+          pdf.setFillColor("#5eead4");
+          pdf.roundedRect(
+            x + 2,
+            itemY + 7,
+            Math.max(3, ((itemWidth - 4) * score) / 100),
+            1.4,
+            0.7,
+            0.7,
+            "F"
+          );
+        });
+
+        return labels.length > 6 ? 38 : 16;
+      };
+
       sections.forEach((section) => {
+        if (section.content === waitingMessage) {
+          return;
+        }
+
+        const visualHeight = getPdfVisualHeight(section);
         const bodyLines = pdf.splitTextToSize(
           normalizePdfText(section.content),
           bodyWidth
@@ -1404,18 +2008,21 @@ const ReportPanel = memo(function ReportPanel({
           ensureSpace(38);
 
           const availableHeight =
-            pageHeight - margin - y - cardHeaderHeight - cardBottomPadding;
+            pageHeight - margin - y - cardHeaderHeight - visualHeight - cardBottomPadding;
           const maxLines = Math.max(1, Math.floor(availableHeight / bodyLineHeight));
           const lines = bodyLines.slice(lineIndex, lineIndex + maxLines);
           const isContinued = lineIndex > 0;
           const cardHeight = Math.max(
             31,
-            cardHeaderHeight + lines.length * bodyLineHeight + cardBottomPadding
+            cardHeaderHeight + visualHeight + lines.length * bodyLineHeight + cardBottomPadding
           );
 
           pdf.setFillColor("#09090b");
           pdf.setDrawColor("#27272a");
           pdf.roundedRect(margin, y, contentWidth, cardHeight, 5, 5, "FD");
+
+          pdf.setFillColor("#111113");
+          pdf.roundedRect(margin, y, contentWidth, 18, 5, 5, "F");
 
           pdf.setFillColor("#18181b");
           pdf.setDrawColor("#27272a");
@@ -1426,6 +2033,9 @@ const ReportPanel = memo(function ReportPanel({
           pdf.line(margin + 9.5, y + 7.8, margin + 9.5, y + 13.2);
           pdf.line(margin + 6.8, y + 10.5, margin + 12.2, y + 10.5);
 
+          pdf.setFillColor("#5eead4");
+          pdf.rect(margin, y + 5, 1, cardHeight - 10, "F");
+
           pdf.setFont("Geist", "normal");
           pdf.setFontSize(13);
           pdf.setTextColor("#ffffff");
@@ -1433,10 +2043,12 @@ const ReportPanel = memo(function ReportPanel({
             maxWidth: bodyWidth,
           });
 
+          const drawnVisualHeight = isContinued ? 0 : drawPdfVisual(section, y);
+
           pdf.setFont("Geist", "normal");
           pdf.setFontSize(9);
           pdf.setTextColor("#d4d4d8");
-          pdf.text(lines, bodyX, y + 20, {
+          pdf.text(lines, bodyX, y + 20 + drawnVisualHeight, {
             lineHeightFactor: 1.22,
             maxWidth: bodyWidth,
           });
@@ -1445,6 +2057,8 @@ const ReportPanel = memo(function ReportPanel({
           y += cardHeight + 5;
         }
       });
+
+      drawFooter();
 
       const blob = pdf.output("blob");
       const url = URL.createObjectURL(blob);
@@ -1506,39 +2120,51 @@ const ReportPanel = memo(function ReportPanel({
   }
 
   return (
-    <section className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/40 backdrop-blur-2xl sm:p-5">
-      <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
-            ZERINIX REPORT
-          </p>
-          <h2 className="mt-2 text-3xl font-bold text-white">
-            {reportTitle}
-          </h2>
-        </div>
-        <div className="w-fit rounded-full border border-teal-300/20 bg-teal-300/10 px-4 py-2 text-sm text-teal-100">
-          {hasReportContent ? "AI Ready" : "Streaming"}
+    <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-950/70 shadow-2xl shadow-black/50 backdrop-blur-2xl">
+      <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.14),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-5 sm:p-7">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
+              ZERINIX EXECUTIVE REPORT
+            </p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+              {reportTitle}
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
+              Structured analysis prepared for founder-level decision making.
+            </p>
+          </div>
+          <div className="w-fit rounded-full border border-teal-300/20 bg-teal-300/10 px-4 py-2 text-sm text-teal-100">
+            {hasReportContent ? "AI Ready" : "Streaming"}
+          </div>
         </div>
       </div>
 
-      <div className="space-y-4">
-        {sections.map((section) => {
+      <div className="space-y-5 p-4 sm:p-5">
+        {visibleSections.map((section, index) => {
           const Icon = section.icon;
 
           return (
             <article
               key={section.title}
-              className="rounded-3xl border border-white/10 bg-black/45 p-5 shadow-xl shadow-black/30"
+              className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-black/45 p-5 shadow-xl shadow-black/30"
             >
-              <div className="flex items-start gap-4">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5">
+              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-teal-200/30 to-transparent" />
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-inner shadow-white/5">
                   <Icon className="h-5 w-5 text-teal-200" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-lg font-semibold text-white">
-                    {section.title}
-                  </h3>
-                  <div className="mt-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <h3 className="text-xl font-semibold tracking-tight text-white">
+                      {section.title}
+                    </h3>
+                    <span className="w-fit rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
+                      Section {String(index + 1).padStart(2, "0")}
+                    </span>
+                  </div>
+                  <div className="mt-4 border-t border-white/10 pt-4">
+                    <PremiumSectionVisual section={section} />
                     <MarkdownRenderer content={section.content} />
                   </div>
                 </div>
@@ -1548,7 +2174,7 @@ const ReportPanel = memo(function ReportPanel({
         })}
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 border-t border-white/10 p-4 sm:grid-cols-2 sm:p-5">
         {reportActions.map((action) => {
           const Icon = action.icon;
 
@@ -1584,9 +2210,9 @@ const ReportPanel = memo(function ReportPanel({
         ) : null}
       </div>
 
-      {hasReportContent ? (
-        <div className="mt-5">
-          <SourceCards />
+      {sourceSections.length > 0 ? (
+        <div className="border-t border-white/10 p-4 sm:p-5">
+          <SourcesCard sections={sourceSections} />
         </div>
       ) : null}
     </section>

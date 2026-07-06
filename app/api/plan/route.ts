@@ -27,78 +27,128 @@ const client = new OpenAI({
 const planPrompts = {
   executiveSummary: {
     prompt:
-      "Write a crisp founder-focused executive summary. Cover the business idea, who it serves, why now, the likely wedge, and the first strategic priority. Be specific to the user's idea. Max 130 words.",
+      "Write an investor-grade executive summary in the style of a top-tier strategy memo. Cover the thesis, target customer, why now, strategic wedge, scale potential, and one board-level priority. Include Evidence and Confidence for every major claim. Max 150 words.",
     maxTokens: 650,
   },
   problem: {
     prompt:
-      "Define the concrete customer problem. Explain the painful workflow, current alternatives, urgency, and why the problem is worth solving. Avoid generic startup language. Max 130 words.",
+      "Define the concrete customer problem as an investment diligence issue. Explain the painful workflow, current alternatives, urgency, economic cost of inaction, and why this pain can support a venture-scale opportunity. Include Evidence and Confidence. Max 150 words.",
     maxTokens: 650,
   },
   solution: {
     prompt:
-      "Describe the proposed solution, core product experience, strongest differentiator, and what the first usable version should include. Make it practical for an early-stage founder. Max 150 words.",
+      "Describe the solution as a strategic product thesis. Cover the core experience, differentiated capability, initial product scope, defensibility path, and what must be true for the solution to win. Include Evidence and Confidence. Max 160 words.",
     maxTokens: 750,
   },
   targetCustomer: {
     prompt:
-      "Define the target customer and ICP. Include the beachhead segment, buyer/user, early adopter traits, buying trigger, budget sensitivity, and disqualifying customer profile. Max 160 words.",
+      "Define the ICP with consulting-level precision. Include beachhead segment, buyer/user, budget owner, adoption trigger, urgency, willingness to pay, disqualifying profile, and the highest-probability first 50 customers. Include Evidence and Confidence. Max 170 words.",
     maxTokens: 750,
   },
   marketOpportunity: {
     prompt:
-      "Analyze the market opportunity using explicit assumptions. Cover market category, demand drivers, reachable initial niche, expansion path, and what must be validated before investing heavily. Max 160 words.",
+      "Analyze the market opportunity using TAM/SAM/SOM logic and explicit assumptions. Cover market category, demand drivers, reachable initial niche, expansion path, venture-scale ceiling, and validation gates before significant investment. Include Evidence and Confidence. Max 190 words.",
     maxTokens: 800,
   },
   competitorLandscape: {
     prompt:
-      "Map the competitor landscape. Include direct competitors, indirect substitutes, likely incumbent behavior, differentiation angles, and where a new entrant can win. Max 170 words.",
+      "Map the competitor landscape like an investor diligence note. Include direct competitors, indirect substitutes, incumbent response, positioning map, switching barriers, and where the gap exists for a new entrant. Include Evidence and Confidence. Max 190 words.",
     maxTokens: 850,
   },
   businessModel: {
     prompt:
-      "Explain the business model: value proposition, customer acquisition motion, delivery model, cost drivers, margins, retention loop, and operational leverage. Max 170 words.",
+      "Explain the business model as an investment case. Cover value proposition, revenue mechanics, gross margin logic, acquisition motion, retention loop, operational leverage, and what could make the model structurally attractive. Include Evidence and Confidence. Max 190 words.",
+    maxTokens: 850,
+  },
+  tamSamSom: {
+    prompt:
+      "Build TAM / SAM / SOM from the integrated strategy model. Define market boundaries, reachable segment, near-term obtainable share, sizing assumptions, evidence, and confidence. Do not invent precision; use ranges and explain why. Max 190 words.",
+    maxTokens: 850,
+  },
+  swotAnalysis: {
+    prompt:
+      "Create a decision-oriented SWOT Analysis. Each Strength, Weakness, Opportunity, and Threat must be specific to the business model, connected to the same strategy model, and include Evidence plus Confidence. Max 190 words.",
+    maxTokens: 850,
+  },
+  portersFiveForces: {
+    prompt:
+      "Analyze Porter's Five Forces with a qualitative rating for each force and the founder implication. Cover rivalry, new entrants, buyer power, supplier/platform power, and substitutes. Include Evidence and Confidence. Max 200 words.",
     maxTokens: 850,
   },
   pricingStrategy: {
     prompt:
-      "Recommend a pricing strategy. Include packaging, entry price logic, premium tier or upsell path, trial or pilot approach, and assumptions that must be tested. Max 150 words.",
+      "Recommend a pricing strategy based on buyer value, alternatives, urgency, and willingness to pay. Include packaging, entry price logic, premium tier, pilot economics, expansion path, and validation tests. Include Evidence and Confidence. Max 160 words.",
     maxTokens: 750,
   },
   goToMarketPlan: {
     prompt:
-      "Write a go-to-market plan. Include beachhead positioning, channel strategy, message, launch sequence, proof assets, and first validation milestones. Max 170 words.",
+      "Write a go-to-market plan with investor-grade execution logic. Include beachhead positioning, channel thesis, message, launch sequence, proof assets, first 10 customer path, CAC risk, and validation milestones. Include Evidence and Confidence. Max 190 words.",
     maxTokens: 850,
   },
   salesStrategy: {
     prompt:
-      "Write the sales strategy. Include who to contact, outreach angle, discovery questions, pilot offer, buying objections, and closing motion. Max 160 words.",
+      "Write the sales strategy as a founder-led revenue motion. Include account targets, outreach angle, discovery questions, pilot offer, buying objections, procurement friction, closing motion, and first repeatable sales signal. Include Evidence and Confidence. Max 180 words.",
     maxTokens: 800,
+  },
+  unitEconomics: {
+    prompt:
+      "Write Unit Economics as an investor dashboard. Include ARPA/ACV if relevant, gross margin, CAC, LTV, LTV:CAC, payback period, retention/churn assumption, and the assumption that most affects viability. Use real data first; otherwise state assumptions and why. Max 190 words.",
+    maxTokens: 850,
+  },
+  financialDashboard: {
+    prompt:
+      "Create a Financial Dashboard with compact card-style lines for Revenue, Expenses, Gross Margin, CAC, LTV, Payback Period, Burn Rate, Runway, EBITDA, Break-even Month, and Investment Needed. Every number must be real data or an explicit assumption with reason and confidence. Max 220 words.",
+    maxTokens: 950,
+  },
+  scenarioAnalysis: {
+    prompt:
+      "Create Scenario Analysis with Worst Case, Base Case, and Best Case. For each case include trigger conditions, revenue/MRR implication, burn/runway implication, biggest risk, and founder decision. Keep all scenarios consistent with the financial chain. Max 210 words.",
+    maxTokens: 900,
+  },
+  kpiDashboard: {
+    prompt:
+      "Create a KPI Dashboard for investor monitoring. Include acquisition, activation, retention, revenue, unit economics, pipeline, product quality, and learning metrics. Add target threshold, warning threshold, and decision implication. Max 190 words.",
+    maxTokens: 850,
+  },
+  executiveRecommendation: {
+    prompt:
+      "Write the Executive Recommendation. Select exactly one option and no second option: GO, NO GO, WAIT, PIVOT, RAISE, or BOOTSTRAP. Explain the decision in a short, evidence-backed rationale and name the single decisive next proof point. Max 130 words.",
+    maxTokens: 650,
   },
   risks: {
     prompt:
-      "List the main risks and mitigation actions. Be honest about market, product, execution, distribution, pricing, regulatory, and funding risks where relevant. Max 170 words.",
+      "Write a risk analysis with severity, probability, leading indicators, and mitigations. Cover market, product, distribution, pricing, regulatory, funding, and execution risks where relevant. Include Evidence and Confidence for each top risk. Max 190 words.",
     maxTokens: 800,
   },
   kpis: {
     prompt:
-      "Define the KPIs. Include acquisition, activation, retention, revenue, sales pipeline, product quality, and learning metrics. Explain what good early traction looks like. Max 150 words.",
+      "Define KPI metrics that an investor or operating partner would inspect. Include acquisition, activation, retention, revenue, pipeline, product quality, unit economics, and decision thresholds for traction. Include Evidence and Confidence. Max 160 words.",
     maxTokens: 750,
   },
   roadmap306090: {
     prompt:
-      "Create a 30-60-90 day roadmap with specific founder actions, not vague goals. Cover validation, product, sales, marketing, operations, and decision gates. Max 190 words.",
+      "Create the Founder Roadmap. It must have four dependent horizons: 30 Days, 90 Days, 180 Days, and 12 Months. Each horizon must depend on the evidence and decision gate from the previous horizon. Cover validation, product, sales, marketing, operations, capital needs, kill/pivot criteria, and founder priorities. Include Confidence where assumptions are weak. Max 230 words.",
     maxTokens: 900,
+  },
+  founderRoadmap: {
+    prompt:
+      "Create Founder Roadmap with Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months. Each step must depend on the prior step's proof point and decision gate. Include action, owner mindset, evidence to collect, and go/no-go threshold. Max 240 words.",
+    maxTokens: 950,
   },
   financialAssumptions: {
     prompt:
-      "Write financial assumptions for early-stage decision making. Include revenue assumptions, cost categories, unit economics, break-even signals, budget priorities, and assumptions to validate. Max 170 words.",
+      "Write the Financial Snapshot entirely from the integrated strategy model. Derive the chain Revenue -> MRR -> Gross Margin -> CAC -> LTV -> Payback -> Burn -> Runway -> EBITDA. Use real data if present; otherwise state each assumption and why it is reasonable. Explain which assumption most changes runway and investment readiness. Include Evidence and Confidence. Max 220 words.",
     maxTokens: 850,
   },
   founderScore: {
     prompt:
-      "Give an AI Founder Score out of 100. Include the score, 3 concise reasons, and the single highest-leverage action to improve the score. Max 110 words.",
-    maxTokens: 600,
+      "Detail the Founder Score. Include Overall Score plus sub-scores for Innovation, Market Timing, Competition, Capital Intensity, Execution Difficulty, Revenue Potential, and Risk Level. Use 0-100 scores, concise evidence, and confidence for each. Max 190 words.",
+    maxTokens: 800,
+  },
+  sourcesAssumptions: {
+    prompt:
+      "List Sources / Assumptions. Separate real evidence, inferred assumptions, and missing data. For each assumption, explain the reason, confidence, and which financial or strategic conclusion would change if wrong. Max 190 words.",
+    maxTokens: 850,
   },
 } as const;
 
@@ -122,14 +172,24 @@ const planFieldLabels: Record<
     marketOpportunity: "Market Opportunity",
     competitorLandscape: "Competitor Landscape",
     businessModel: "Business Model",
+    tamSamSom: "TAM / SAM / SOM",
+    swotAnalysis: "SWOT Analysis",
+    portersFiveForces: "Porter's Five Forces",
     pricingStrategy: "Pricing Strategy",
     goToMarketPlan: "Go-to-Market Plan",
     salesStrategy: "Sales Strategy",
+    unitEconomics: "Unit Economics",
+    financialDashboard: "Financial Dashboard",
+    scenarioAnalysis: "Scenario Analysis: Worst / Base / Best Case",
+    kpiDashboard: "KPI Dashboard",
+    executiveRecommendation: "Executive Recommendation",
     risks: "Risks",
     kpis: "KPIs",
-    roadmap306090: "30-60-90 Day Roadmap",
+    founderRoadmap: "Founder Roadmap",
+    roadmap306090: "Founder Roadmap",
     financialAssumptions: "Financial Assumptions",
-    founderScore: "AI Founder Score out of 100",
+    founderScore: "Founder Score",
+    sourcesAssumptions: "Sources / Assumptions",
   },
   Turkish: {
     executiveSummary: "Yönetici Özeti",
@@ -139,14 +199,24 @@ const planFieldLabels: Record<
     marketOpportunity: "Pazar Fırsatı",
     competitorLandscape: "Rakip Haritası",
     businessModel: "İş Modeli",
+    tamSamSom: "TAM / SAM / SOM",
+    swotAnalysis: "SWOT Analizi",
+    portersFiveForces: "Porter'ın Beş Gücü",
     pricingStrategy: "Fiyatlandırma Stratejisi",
     goToMarketPlan: "Pazara Giriş Planı",
     salesStrategy: "Satış Stratejisi",
+    unitEconomics: "Birim Ekonomisi",
+    financialDashboard: "Finansal Dashboard",
+    scenarioAnalysis: "Senaryo Analizi: Kötü / Baz / İyi",
+    kpiDashboard: "KPI Dashboard",
+    executiveRecommendation: "Yönetici Tavsiyesi",
     risks: "Riskler",
     kpis: "KPI'lar",
-    roadmap306090: "30-60-90 Günlük Yol Haritası",
+    founderRoadmap: "Kurucu Yol Haritası",
+    roadmap306090: "Kurucu Yol Haritası",
     financialAssumptions: "Finansal Varsayımlar",
-    founderScore: "100 Üzerinden AI Kurucu Skoru",
+    founderScore: "Kurucu Skoru",
+    sourcesAssumptions: "Kaynaklar / Varsayımlar",
   },
 };
 
@@ -178,16 +248,30 @@ function serializePlanChunk(field: PlanReportField, content: string) {
 
 function buildLanguageInstructions(language: ResponseLanguage) {
   return [
-    "You are a senior AI business report engine working for ZERINIX.",
+    "You are the ZERINIX Business Intelligence Report Engine.",
+    "Write like a McKinsey / BCG / Bain partner and Sequoia-style investment analyst preparing a founder diligence memo.",
     `Respond entirely in ${language}.`,
     `Every heading, paragraph, bullet point, table label, markdown label, and sentence must be in ${language}.`,
     `If the user prompt includes another language, still write the final answer only in ${language}.`,
     "Do not switch languages. Do not translate the user's business name unless needed for grammar.",
-    "Write a structured, professional, founder-focused business report.",
-    "Be specific to the user's idea. Do not use generic filler or broad motivational language.",
-    "Make recommendations actionable for early-stage decision making.",
-    "Be honest about assumptions, uncertainty, validation needs, and execution risk.",
-    "If data is not provided, state a reasonable assumption instead of inventing precise facts.",
+    "Produce investor-grade, evidence-weighted analysis for early-stage business decisions.",
+    "Be specific to the user's idea. Remove generic advice, motivational language, and obvious startup boilerplate.",
+    "Every important claim must include an Evidence note and a Confidence level: High, Medium, or Low.",
+    "Distinguish facts, assumptions, and hypotheses. Never present guesses as facts.",
+    "Use analytical framing: market attractiveness, strategic wedge, competitive gap, monetization logic, execution risk, and investor verdict.",
+    "Prefer compact bullets, decision criteria, and quantified ranges when defensible.",
+    "If precise market data is unavailable, give transparent assumptions and confidence rather than invented precision.",
+    "Do not recommend vague actions such as 'do market research' unless the exact research question, method, and decision impact are specified.",
+    "Before writing any visible output, silently build one Integrated Strategy Model for the whole company. Do not reveal this internal model directly.",
+    "The hidden Integrated Strategy Model must contain: Business Model, Customer, ICP, Market, Competition, TAM/SAM/SOM, Pricing, Revenue, GTM, Risks, Financial, Assumptions, and Founder priorities.",
+    "Every section must be derived from that same hidden model. No section may be written as a standalone independent answer.",
+    "Maintain dependency logic across the whole report: Problem changes Solution; Solution changes Pricing; Pricing changes Financial; Financial changes Runway; Runway changes Risk; Risk changes CEO Recommendation.",
+    "Financial reasoning must follow this chain: Revenue -> MRR -> Gross Margin -> CAC -> LTV -> Payback -> Burn -> Runway -> EBITDA.",
+    "Use real data first when available. If data is missing, create an explicit assumption, explain why it is reasonable, and assign confidence.",
+    "The final executive decision must be exactly one of: Launch, Delay, Pivot, Kill, Bootstrap, Raise, Acquire, Merge, Franchise, Licensing, Joint Venture.",
+    "When writing Executive Recommendation, select exactly one of: GO, NO GO, WAIT, PIVOT, RAISE, BOOTSTRAP.",
+    "Founder Score must include Overall Score, Innovation, Market Timing, Competition, Capital Intensity, Execution Difficulty, Revenue Potential, and Risk Level.",
+    "Founder Roadmap must include Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months, with each step dependent on the prior proof point.",
   ].join("\n");
 }
 
@@ -317,11 +401,16 @@ Section to generate: ${planFieldLabels[responseLanguage][reportField]}
 Task: ${fieldConfig.prompt}
 
 Report quality rules:
+- First silently construct the full Integrated Strategy Model. Do not output it.
+- Derive this section only from that model, including dependencies from previous strategic choices.
 - Use clear headings only if they help this section, but do not repeat the section title.
-- Include practical founder actions, examples, and decision criteria.
-- Avoid generic filler such as "conduct market research" unless you specify exactly what to research and why.
-- Be honest about assumptions and uncertainty.
-- Keep the section concise, dense, and useful.
+- Lead with the decision implication before details.
+- Add Evidence and Confidence for every material assertion.
+- Include practical founder actions, examples, decision criteria, and validation thresholds.
+- Avoid generic filler such as "conduct market research" unless you specify exactly what to research, how to research it, and what decision it informs.
+- Be explicit about assumptions, uncertainty, downside risk, and what would change the recommendation.
+- Keep financial claims consistent with the chain Revenue -> MRR -> Gross Margin -> CAC -> LTV -> Payback -> Burn -> Runway -> EBITDA.
+- Keep the section concise, dense, analytical, and investor-ready.
 
 Write only the content for this section. Do not write a JSON object, field name, markdown code block, or any other report section.`;
     const productionLimit = await checkAiProductionRateLimit({

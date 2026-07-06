@@ -27,77 +27,112 @@ const client = new OpenAI({
 const fieldPrompts = {
   executiveSummary: {
     prompt:
-      "Write a concise executive summary of the market analysis. Cover market attractiveness, demand signal, competitive intensity, entry timing, and the most important founder decision. Do not write a heading. Max 120 words.",
+      "Write an investor-grade executive summary of the market analysis. Cover market attractiveness, demand signal, competitive intensity, entry timing, strategic gap, and the founder's most important decision. Include Evidence and Confidence for every major claim. Do not write a heading. Max 150 words.",
     maxTokens: 1000,
   },
   marketOverview: {
     prompt:
-      "Analyze the market overview: category definition, maturity, growth drivers, buyer behavior, adoption barriers, and current demand signals. Be honest about assumptions if exact figures are unavailable. Do not write a heading. Max 180 words.",
+      "Analyze the market overview like a strategy diligence memo: category definition, maturity, growth drivers, buyer behavior, adoption barriers, demand signals, and timing. Distinguish facts from assumptions and add Evidence and Confidence. Do not write a heading. Max 200 words.",
     maxTokens: 1800,
   },
   tamSamSom: {
     prompt:
-      "Estimate TAM, SAM, and SOM using transparent assumptions. Explain the sizing logic, what would make the market larger or smaller, and what the founder should validate. Do not invent precise numbers; qualify uncertainty. Do not write a heading. Max 170 words.",
+      "Estimate TAM, SAM, and SOM using transparent assumptions and clear sizing logic. Explain market boundaries, reachable segments, adoption constraints, what could expand or shrink the market, and validation data needed. Do not invent precision; include Evidence and Confidence. Do not write a heading. Max 210 words.",
     maxTokens: 1400,
   },
   industryTrends: {
     prompt:
-      "Identify the most relevant industry trends, technology shifts, buyer behavior changes, regulatory or macro forces, and recent news shaping the market. Do not write a heading. Max 160 words.",
+      "Identify the industry trends that matter for investment timing: technology shifts, buyer behavior changes, regulatory or macro forces, recent news, budget movement, and adoption inflection points. Include Evidence and Confidence. Do not write a heading. Max 180 words.",
     maxTokens: 1200,
   },
   targetCustomer: {
     prompt:
-      "Describe target customer segments, early adopters, buyer/user roles, budget holders, buying motivations, adoption barriers, and the best initial beachhead. Do not write a heading. Max 150 words.",
+      "Describe target customer segments with ICP precision: early adopters, buyer/user roles, budget holders, buying motivations, adoption barriers, urgency, willingness to pay, and the best initial beachhead. Include Evidence and Confidence. Do not write a heading. Max 170 words.",
     maxTokens: 1000,
   },
   competitorAnalysis: {
     prompt:
-      "Analyze direct competitors, indirect substitutes, incumbent alternatives, positioning gaps, likely competitor response, and where a new entrant can differentiate. Do not write a heading. Max 180 words.",
+      "Analyze competitors like an investor diligence section: direct competitors, indirect substitutes, incumbent alternatives, positioning map, switching barriers, pricing signals, likely response, and where a new entrant can exploit a gap. Include Evidence and Confidence. Do not write a heading. Max 210 words.",
     maxTokens: 1400,
   },
   customerPainPoints: {
     prompt:
-      "List the most important customer pain points, current workarounds, switching triggers, urgency level, and evidence the founder should collect in interviews. Do not write a heading. Max 150 words.",
+      "List the highest-value customer pain points, current workarounds, economic cost, switching triggers, urgency level, and interview evidence needed to confirm demand. Include Evidence and Confidence. Do not write a heading. Max 170 words.",
     maxTokens: 1000,
   },
   opportunities: {
     prompt:
-      "Identify practical market opportunities: underserved segments, channel openings, pricing gaps, partnership angles, product wedges, and timing advantages. Do not write a heading. Max 150 words.",
+      "Identify practical market opportunities with strategic logic: underserved segments, channel openings, pricing gaps, partnership angles, product wedges, regulatory/timing advantages, and why incumbents may not address them. Include Evidence and Confidence. Do not write a heading. Max 170 words.",
     maxTokens: 1000,
   },
   threats: {
     prompt:
-      "Identify market threats: competitive pressure, demand uncertainty, switching costs, regulation, platform dependency, price compression, trust barriers, and distribution risk. Do not write a heading. Max 150 words.",
+      "Identify threats with severity and probability: competitive pressure, demand uncertainty, switching costs, regulation, platform dependency, price compression, trust barriers, data access, and distribution risk. Include Evidence and Confidence. Do not write a heading. Max 170 words.",
     maxTokens: 1000,
   },
   swotAnalysis: {
     prompt:
-      "Create a concise SWOT analysis with Strengths, Weaknesses, Opportunities, and Threats. Use bullets and keep it specific to the user's idea and market. Do not write a heading. Max 180 words.",
+      "Create a concise SWOT analysis with Strengths, Weaknesses, Opportunities, and Threats. Make each bullet specific, decision-relevant, and evidence-weighted with Confidence. Do not write a heading. Max 200 words.",
     maxTokens: 1300,
   },
   portersFiveForces: {
     prompt:
-      "Analyze Porter's Five Forces: competitive rivalry, threat of new entrants, buyer power, supplier/platform power, and threat of substitutes. Rate each force qualitatively and explain founder implications. Do not write a heading. Max 190 words.",
+      "Analyze Porter's Five Forces with a qualitative rating for each force and a founder implication. Cover rivalry, new entrants, buyer power, supplier/platform power, and substitutes. Include Evidence and Confidence for each force. Do not write a heading. Max 210 words.",
     maxTokens: 1400,
+  },
+  unitEconomics: {
+    prompt:
+      "Analyze Unit Economics implied by the market. Include likely ARPA/ACV, gross margin, CAC, LTV, payback period, retention/churn assumptions, and what the market suggests about viability. Use real data first; otherwise state assumptions and confidence. Do not write a heading. Max 190 words.",
+    maxTokens: 1200,
+  },
+  financialDashboard: {
+    prompt:
+      "Create a Financial Dashboard with compact card-style lines for Revenue, Expenses, Gross Margin, CAC, LTV, Payback Period, Burn Rate, Runway, EBITDA, Break-even Month, and Investment Needed. Tie every estimate to market evidence or explicit assumptions. Do not write a heading. Max 220 words.",
+    maxTokens: 1300,
+  },
+  scenarioAnalysis: {
+    prompt:
+      "Create Scenario Analysis with Worst Case, Base Case, and Best Case. For each case include demand signal, pricing/MRR implication, CAC/payback implication, burn/runway implication, market risk, and founder decision. Do not write a heading. Max 210 words.",
+    maxTokens: 1200,
+  },
+  kpiDashboard: {
+    prompt:
+      "Create a KPI Dashboard for market validation. Include demand, conversion, willingness to pay, sales cycle, channel CAC, retention intent, competitor displacement, market pull, and target/warning thresholds. Do not write a heading. Max 180 words.",
+    maxTokens: 1000,
+  },
+  executiveRecommendation: {
+    prompt:
+      "Write the Executive Recommendation. Select exactly one option and no second option: GO, NO GO, WAIT, PIVOT, RAISE, or BOOTSTRAP. Base it only on market evidence, risks, and financial implications. Add a short rationale and decisive next proof point. Do not write a heading. Max 130 words.",
+    maxTokens: 850,
   },
   entryStrategy: {
     prompt:
-      "Recommend an entry strategy: beachhead segment, positioning, first channel, initial offer, pricing/pilot approach, credibility assets, and wedge to expand. Do not write a heading. Max 180 words.",
+      "Recommend an entry strategy using consulting-style sequencing: beachhead segment, positioning, first channel, initial offer, pricing/pilot approach, credibility assets, expansion wedge, and decision gates. Include Evidence and Confidence. Do not write a heading. Max 200 words.",
     maxTokens: 1300,
   },
   validationPlan: {
     prompt:
-      "Write a validation plan for the first 30-45 days. Include customer interviews, competitor research, pricing tests, landing page or concierge MVP, success criteria, and kill/pivot signals. Do not write a heading. Max 180 words.",
+      "Write a validation plan for the first 30-45 days. Include customer interviews, competitor research, pricing tests, concierge MVP or landing page test, success criteria, kill/pivot signals, and the decision each test informs. Include Confidence where assumptions are weak. Do not write a heading. Max 200 words.",
     maxTokens: 1300,
   },
   keyMetrics: {
     prompt:
-      "Define the key market validation metrics: demand, conversion, willingness to pay, sales cycle, retention intent, channel cost, and competitor displacement signals. Do not write a heading. Max 140 words.",
+      "Define key market validation metrics an investor would monitor: demand, conversion, willingness to pay, sales cycle, retention intent, CAC/channel cost, competitor displacement, and market pull signals. Include decision thresholds and Confidence. Do not write a heading. Max 160 words.",
     maxTokens: 900,
+  },
+  founderRoadmap: {
+    prompt:
+      "Create Founder Roadmap with Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months. Each step must depend on the prior market proof point and decision gate. Include action, evidence to collect, and go/no-go threshold. Do not write a heading. Max 230 words.",
+    maxTokens: 1200,
+  },
+  sourcesAssumptions: {
+    prompt:
+      "List Sources / Assumptions. Separate real evidence, inferred assumptions, and missing data. For each assumption, explain reason, confidence, and which market or financial conclusion would change if wrong. Do not write a heading. Max 190 words.",
+    maxTokens: 1100,
   },
   sources: {
     prompt:
-      "List 4-6 reliable sources used or most relevant for validating this market. Include source name and the specific evidence it supports. Do not write a heading.",
+      "List 4-6 reliable sources used or most relevant for validating this market. For each source, state the specific evidence it supports, how it affects the verdict, and the confidence level. Do not write a heading.",
     maxTokens: 1200,
   },
 } as const;
@@ -114,9 +149,16 @@ const reportFields = [
   "threats",
   "swotAnalysis",
   "portersFiveForces",
+  "unitEconomics",
+  "financialDashboard",
+  "scenarioAnalysis",
+  "kpiDashboard",
+  "executiveRecommendation",
   "entryStrategy",
   "validationPlan",
   "keyMetrics",
+  "founderRoadmap",
+  "sourcesAssumptions",
   "sources",
 ] as const;
 
@@ -136,9 +178,16 @@ const fieldLabels: Record<MarketReportField, string> = {
   threats: "Threats",
   swotAnalysis: "SWOT Analysis",
   portersFiveForces: "Porter's Five Forces",
+  unitEconomics: "Unit Economics",
+  financialDashboard: "Financial Dashboard",
+  scenarioAnalysis: "Scenario Analysis: Worst / Base / Best Case",
+  kpiDashboard: "KPI Dashboard",
+  executiveRecommendation: "Executive Recommendation",
   entryStrategy: "Entry Strategy",
   validationPlan: "Validation Plan",
   keyMetrics: "Key Metrics",
+  founderRoadmap: "Founder Roadmap",
+  sourcesAssumptions: "Sources / Assumptions",
   sources: "Sources",
 };
 
@@ -156,9 +205,16 @@ const legacySectionToField: Record<string, string> = {
   Threats: "threats",
   "SWOT Analysis": "swotAnalysis",
   "Porter's Five Forces": "portersFiveForces",
+  "Unit Economics": "unitEconomics",
+  "Financial Dashboard": "financialDashboard",
+  "Scenario Analysis: Worst / Base / Best Case": "scenarioAnalysis",
+  "KPI Dashboard": "kpiDashboard",
+  "Executive Recommendation": "executiveRecommendation",
   "Entry Strategy": "entryStrategy",
   "Validation Plan": "validationPlan",
   "Key Metrics": "keyMetrics",
+  "Founder Roadmap": "founderRoadmap",
+  "Sources / Assumptions": "sourcesAssumptions",
   Sources: "sources",
 };
 
@@ -181,9 +237,16 @@ const fieldLabelsByLanguage: Record<
     threats: "Tehditler",
     swotAnalysis: "SWOT Analizi",
     portersFiveForces: "Porter'ın Beş Gücü",
+    unitEconomics: "Birim Ekonomisi",
+    financialDashboard: "Finansal Dashboard",
+    scenarioAnalysis: "Senaryo Analizi: Kötü / Baz / İyi",
+    kpiDashboard: "KPI Dashboard",
+    executiveRecommendation: "Yönetici Tavsiyesi",
     entryStrategy: "Pazara Giriş Stratejisi",
     validationPlan: "Doğrulama Planı",
     keyMetrics: "Temel Metrikler",
+    founderRoadmap: "Kurucu Yol Haritası",
+    sourcesAssumptions: "Kaynaklar / Varsayımlar",
     sources: "Kaynaklar",
   },
 };
@@ -247,15 +310,29 @@ function extractResponseText(response: unknown) {
 
 function buildLanguageInstructions(language: ResponseLanguage) {
   return [
-    "You are a professional market analyst working for ZERINIX.",
+    "You are the ZERINIX Market Intelligence Report Engine.",
+    "Write like a McKinsey / BCG / Bain strategy partner and Sequoia-style market diligence analyst.",
     `Respond entirely in ${language}.`,
     `Every heading, paragraph, bullet point, table label, markdown label, source note, and sentence must be in ${language}.`,
     `If source material is in another language, summarize it only in ${language}.`,
     "Do not switch languages. Do not ask questions or request clarification.",
-    "Be clear, current, market-focused, and actionable for an early-stage founder.",
+    "Be current, analytical, evidence-weighted, and decision-oriented for an early-stage founder.",
     "Generate a dedicated market analysis, not a business plan.",
-    "Prioritize market overview, TAM/SAM/SOM, trends, competitors, customer pain, opportunities, threats, SWOT, Porter's Five Forces, entry strategy, validation, metrics, and sources.",
+    "Prioritize market overview, TAM/SAM/SOM, industry trends, competitors, gap analysis, customer pain, opportunities, threats, SWOT, Porter's Five Forces, entry strategy, validation, metrics, sources, and an investment-style verdict.",
+    "Every important claim must include an Evidence note and a Confidence level: High, Medium, or Low.",
+    "Distinguish facts, assumptions, and hypotheses. Never present guesses as facts.",
     "Be honest about assumptions and uncertainty; do not invent precise figures.",
+    "Do not give generic advice. State what the founder should decide, why, what evidence supports it, and what could disprove it.",
+    "Before writing any visible output, silently build one Integrated Market Strategy Model for the whole opportunity. Do not reveal this internal model directly.",
+    "The hidden Integrated Market Strategy Model must contain: Business Model, Customer, ICP, Market, Competition, TAM/SAM/SOM, Pricing, Revenue, GTM, Risks, Financial assumptions, and Founder priorities.",
+    "Every section must be derived from that same hidden model. No section may be written as a standalone independent answer.",
+    "Maintain dependency logic across the analysis: Problem changes Solution; Solution changes Pricing; Pricing changes Financial; Financial changes Runway; Runway changes Risk; Risk changes CEO Recommendation.",
+    "Where financial market implications appear, reason through Revenue -> MRR -> Gross Margin -> CAC -> LTV -> Payback -> Burn -> Runway -> EBITDA.",
+    "Use real data first when available. If data is missing, create an explicit assumption, explain why it is reasonable, and assign confidence.",
+    "If a decision implication is needed, choose exactly one of: Launch, Delay, Pivot, Kill, Bootstrap, Raise, Acquire, Merge, Franchise, Licensing, Joint Venture.",
+    "When writing Executive Recommendation, select exactly one of: GO, NO GO, WAIT, PIVOT, RAISE, BOOTSTRAP.",
+    "Where score or KPI dashboards appear, make them investor-readable with explicit thresholds and confidence.",
+    "Founder Roadmap must include Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months, with each step dependent on the prior proof point.",
   ].join("\n");
 }
 
@@ -396,8 +473,11 @@ export async function POST(req: Request) {
 Report section to generate: ${fieldLabelsByLanguage[responseLanguage][reportField]}
 Analysis task: ${fieldConfig.prompt}
 First perform current web research. Use reliable sources for market size, competitor companies, industry trends, target customers, recent news, pricing models, SWOT inputs, Porter's Five Forces inputs, and entry strategy signals.
-Write the report from the available information with practical market-entry recommendations for the founder.
-Avoid generic filler. Use assumptions explicitly when evidence is limited.
+Before writing visible output, silently construct the full Integrated Market Strategy Model. Do not output the model.
+Derive this section only from that model so market size, ICP, competitors, pricing, GTM, financial implications, risks, and recommendation stay consistent.
+Write the section as an investor-grade market diligence note with practical market-entry recommendations for the founder.
+Lead with the decision implication, then support it with Evidence and Confidence.
+Avoid generic filler. Use assumptions explicitly when evidence is limited and state what would change the verdict.
 Use structured markdown inside the section when useful: short paragraphs, bullets, or compact tables.
 Write only the content for this section. Do not write a JSON object, field name, braces, markdown code block, heading, or any other report section.
 Do not generate business-plan sections here. Do not suggest website URLs, domain names, brand names, or site ideas for the product.`;
