@@ -58,12 +58,19 @@ type ReportSection = {
 
 type MarketReport = {
   executiveSummary: string;
-  marketAnalysis: string;
-  targetAudience: string;
-  revenueModel: string;
-  risks: string;
-  roadmap90Days: string;
-  successScore: string;
+  marketOverview: string;
+  tamSamSom: string;
+  industryTrends: string;
+  targetCustomer: string;
+  competitorAnalysis: string;
+  customerPainPoints: string;
+  opportunities: string;
+  threats: string;
+  swotAnalysis: string;
+  portersFiveForces: string;
+  entryStrategy: string;
+  validationPlan: string;
+  keyMetrics: string;
   sources: string;
 };
 
@@ -192,12 +199,20 @@ const reportFields: Array<{
   icon: LucideIcon;
 }> = [
   { field: "executiveSummary", title: "Executive Summary", icon: Sparkles },
-  { field: "marketAnalysis", title: "Market Analysis", icon: BarChart3 },
-  { field: "targetAudience", title: "Target Audience", icon: Users },
-  { field: "revenueModel", title: "Revenue Model", icon: Landmark },
-  { field: "risks", title: "Risks", icon: ShieldAlert },
-  { field: "roadmap90Days", title: "90-Day Roadmap", icon: CalendarDays },
-  { field: "successScore", title: "AI Success Score (0-100)", icon: Gauge },
+  { field: "marketOverview", title: "Market Overview", icon: BarChart3 },
+  { field: "tamSamSom", title: "TAM / SAM / SOM", icon: PieChart },
+  { field: "industryTrends", title: "Industry Trends", icon: Gauge },
+  { field: "targetCustomer", title: "Target Customer", icon: Users },
+  { field: "competitorAnalysis", title: "Competitor Analysis", icon: Search },
+  { field: "customerPainPoints", title: "Customer Pain Points", icon: ShieldAlert },
+  { field: "opportunities", title: "Opportunities", icon: Goal },
+  { field: "threats", title: "Threats", icon: ShieldAlert },
+  { field: "swotAnalysis", title: "SWOT Analysis", icon: ListChecks },
+  { field: "portersFiveForces", title: "Porter's Five Forces", icon: Landmark },
+  { field: "entryStrategy", title: "Entry Strategy", icon: BriefcaseBusiness },
+  { field: "validationPlan", title: "Validation Plan", icon: CalendarDays },
+  { field: "keyMetrics", title: "Key Metrics", icon: Gauge },
+  { field: "sources", title: "Sources", icon: FileText },
 ];
 
 const planReportFields: Array<{
@@ -226,8 +241,19 @@ const turkishReportSectionTitles: Partial<
   Record<keyof (MarketReport & PlanReport), string>
 > = {
   executiveSummary: "Yönetici Özeti",
-  marketAnalysis: "Pazar Analizi",
-  targetAudience: "Hedef Kitle",
+  marketOverview: "Pazar Genel Görünümü",
+  tamSamSom: "TAM / SAM / SOM",
+  industryTrends: "Sektör Trendleri",
+  competitorAnalysis: "Rakip Analizi",
+  customerPainPoints: "Müşteri Acı Noktaları",
+  opportunities: "Fırsatlar",
+  threats: "Tehditler",
+  swotAnalysis: "SWOT Analizi",
+  portersFiveForces: "Porter'ın Beş Gücü",
+  entryStrategy: "Pazara Giriş Stratejisi",
+  validationPlan: "Doğrulama Planı",
+  keyMetrics: "Temel Metrikler",
+  sources: "Kaynaklar",
   problem: "Problem",
   solution: "Çözüm",
   marketOpportunity: "Pazar Fırsatı",
@@ -241,7 +267,6 @@ const turkishReportSectionTitles: Partial<
   kpis: "KPI'lar",
   roadmap306090: "30-60-90 Günlük Yol Haritası",
   financialAssumptions: "Finansal Varsayımlar",
-  successScore: "AI Başarı Skoru",
   founderScore: "100 Üzerinden AI Kurucu Skoru",
 };
 
@@ -261,12 +286,19 @@ function localizeReportFields<T extends ReportFieldDefinition>(
 
 const emptyMarketReport: MarketReport = {
   executiveSummary: "",
-  marketAnalysis: "",
-  targetAudience: "",
-  revenueModel: "",
-  risks: "",
-  roadmap90Days: "",
-  successScore: "",
+  marketOverview: "",
+  tamSamSom: "",
+  industryTrends: "",
+  targetCustomer: "",
+  competitorAnalysis: "",
+  customerPainPoints: "",
+  opportunities: "",
+  threats: "",
+  swotAnalysis: "",
+  portersFiveForces: "",
+  entryStrategy: "",
+  validationPlan: "",
+  keyMetrics: "",
   sources: "",
 };
 
