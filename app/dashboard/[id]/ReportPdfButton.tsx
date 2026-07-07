@@ -4,8 +4,17 @@ import { useEffect, useState } from "react";
 import { jsPDF } from "jspdf";
 import { Download } from "lucide-react";
 import type { DashboardReport } from "../report-utils";
+import { isReportGenerationFailureText } from "@/app/lib/report-errors";
 
 let pdfFontPromise: Promise<string> | null = null;
+
+function isFailedReport(report: DashboardReport) {
+  return (
+    report.status.toLowerCase() !== "completed" ||
+    report.sections.length === 0 ||
+    report.sections.some((section) => isReportGenerationFailureText(section.content))
+  );
+}
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
@@ -203,6 +212,7 @@ function createFileName(title: string) {
 export default function ReportPdfButton({ report }: { report: DashboardReport }) {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
+  const failedReport = isFailedReport(report);
 
   const [fontBase64, setFontBase64] = useState("");
 
@@ -225,6 +235,11 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
   }, []);
 
   function downloadPdf() {
+    if (failedReport) {
+      setError("Report generation failed. PDF export is available only after a report completes successfully.");
+      return;
+    }
+
     if (exporting) {
       return;
     }
@@ -825,7 +840,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       <button
         type="button"
         onClick={downloadPdf}
-        disabled={exporting}
+        disabled={exporting || failedReport}
         className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl border border-teal-200/30 bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/30 transition hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Download className="h-4 w-4 text-black" />

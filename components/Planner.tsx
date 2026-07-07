@@ -52,6 +52,10 @@ import {
 import Link from "next/link";
 import { createClient } from "@/app/lib/supabase/client";
 import { isAmbiguousBusinessRequest } from "@/app/lib/business-idea-detection";
+import {
+  containsReportGenerationFailure,
+  isReportGenerationFailureText,
+} from "@/app/lib/report-errors";
 
 type ReportSection = {
   field?: keyof (MarketReport & PlanReport);
@@ -120,6 +124,14 @@ type ReportStreamEvent = Partial<MarketReport & PlanReport> & {
   done?: boolean;
 };
 
+function getReportGenerationErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
 type ReportFieldDefinition = {
   field: keyof (MarketReport & PlanReport);
   title: string;
@@ -142,7 +154,7 @@ type ChatMessage = {
   content: string;
   mode?: ChatMode;
   attachments?: ChatAttachment[];
-  status?: "streaming" | "complete";
+  status?: "streaming" | "complete" | "failed";
   createdAt: number;
 };
 
@@ -396,10 +408,37 @@ function serializeReportSections(
   reportData: Partial<MarketReport & PlanReport>,
   fields: ReportFieldDefinition[]
 ) {
-  return fields.map(({ field, title }) => ({
+  const sections = fields.map(({ field, title }) => ({
     title,
     content: sanitizeReportContent(reportData[field] || ""),
   }));
+
+  const invalidSection = sections.find(
+    (section) =>
+      !section.content ||
+      isReportGenerationFailureText(section.content)
+  );
+
+  if (invalidSection) {
+    throw new Error(
+      invalidSection.content && isReportGenerationFailureText(invalidSection.content)
+        ? invalidSection.content
+        : "Report generation failed before every section completed."
+    );
+  }
+
+  return sections;
+}
+
+function isCompleteReportSectionPayload(
+  sections: Array<{ title: string; content: string }>,
+  expectedSectionCount: number
+) {
+  return (
+    sections.length === expectedSectionCount &&
+    sections.every((section) => section.title.trim() && section.content.trim()) &&
+    !containsReportGenerationFailure(sections)
+  );
 }
 
 function formatFileSize(size: number) {
@@ -2380,6 +2419,7 @@ const ReportPanel = memo(function ReportPanel({
   reportTitle,
   waitingMessage,
   result,
+  failureMessage,
 }: {
   reportData: Partial<MarketReport & PlanReport> | null;
   reportFields: Array<{
@@ -2390,6 +2430,7 @@ const ReportPanel = memo(function ReportPanel({
   reportTitle: string;
   waitingMessage: string;
   result: string;
+  failureMessage?: string;
 }) {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [pdfError, setPdfError] = useState("");
@@ -2417,8 +2458,15 @@ const ReportPanel = memo(function ReportPanel({
         ]
       : [];
   }, [reportData, reportFields, result, waitingMessage]);
+  const failedSection = sections.find((section) =>
+    isReportGenerationFailureText(section.content)
+  );
+  const effectiveFailureMessage =
+    failureMessage ||
+    failedSection?.content ||
+    (!reportData && result && isReportGenerationFailureText(result) ? result : "");
 
-  const hasReportContent = sections.some(
+  const hasReportContent = !effectiveFailureMessage && sections.some(
     (section) =>
       section.content && section.content !== waitingMessage
   );
@@ -2453,6 +2501,11 @@ const ReportPanel = memo(function ReportPanel({
   }, []);
 
   function downloadPdf() {
+    if (effectiveFailureMessage) {
+      setPdfError("Report generation failed. PDF export is available only after a report completes successfully.");
+      return;
+    }
+
     if (!hasReportContent || exportingPdf) {
       return;
     }
@@ -3054,6 +3107,27 @@ const ReportPanel = memo(function ReportPanel({
     }
   }
 
+  if (effectiveFailureMessage) {
+    return (
+      <div className="flex min-h-[420px] items-center justify-center rounded-[2rem] border border-red-300/20 bg-red-950/20 p-8 text-center shadow-2xl shadow-black/40 backdrop-blur-2xl">
+        <div className="max-w-xl">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-red-300/20 bg-red-300/10">
+            <ShieldAlert className="h-5 w-5 text-red-200" />
+          </div>
+          <p className="mt-5 text-lg font-semibold text-white">
+            Report generation failed
+          </p>
+          <p className="mt-2 text-sm leading-6 text-red-100/80">
+            {effectiveFailureMessage}
+          </p>
+          <p className="mt-3 text-xs leading-5 text-zinc-500">
+            PDF export is disabled until a full report is generated successfully.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (!reportData && !result) {
     return (
       <div className="flex min-h-[420px] items-center justify-center rounded-[2rem] border border-white/10 bg-white/[0.04] p-8 text-center shadow-2xl shadow-black/40 backdrop-blur-2xl">
@@ -3273,6 +3347,7 @@ export default function Planner({
 }: PlannerProps) {
   const [prompt, setPrompt] = useState("");
   const [result, setResult] = useState("");
+  const [reportGenerationError, setReportGenerationError] = useState("");
   const [marketReport, setMarketReport] = useState<MarketReport | null>(null);
   const [planReport, setPlanReport] = useState<PlanReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -3423,6 +3498,7 @@ export default function Planner({
     setActiveConversationId(id);
     setPrompt("");
     setResult("");
+    setReportGenerationError("");
     setMarketReport(null);
     setPlanReport(null);
     setWorkflowCompletedSteps(0);
@@ -3762,6 +3838,7 @@ export default function Planner({
     setActiveConversationId(conversationId);
     setPrompt("");
     setResult("");
+    setReportGenerationError("");
     setMarketReport(null);
     setPlanReport(null);
     setWorkflowCompletedSteps(0);
@@ -4007,14 +4084,33 @@ export default function Planner({
     title,
     promptText,
     reportType,
+    status = "completed",
     sections,
+    expectedSectionCount,
   }: {
     title: string;
     promptText: string;
     reportType: string;
+    status?: "completed" | "failed";
     sections: Array<{ title: string; content: string }>;
+    expectedSectionCount: number;
   }) {
     try {
+      const isCompletedReport =
+        status === "completed" &&
+        isCompleteReportSectionPayload(sections, expectedSectionCount);
+      const persistedStatus = isCompletedReport ? "completed" : "failed";
+      const persistedSections = isCompletedReport ? sections : [];
+
+      if (status === "completed" && !isCompletedReport) {
+        console.error("[reports insert blocked completed status]", {
+          reportType,
+          expectedSectionCount,
+          receivedSectionCount: sections.length,
+          containsFailureText: containsReportGenerationFailure(sections),
+        });
+      }
+
       const supabase = createClient();
       const {
         data: { user },
@@ -4039,8 +4135,8 @@ export default function Planner({
         title,
         prompt: promptText,
         report_type: reportType,
-        status: "completed",
-        sections,
+        status: persistedStatus,
+        sections: persistedSections,
       });
 
       if (error) {
@@ -4055,24 +4151,42 @@ export default function Planner({
     response: Response,
     onEvent: (event: ReportStreamEvent) => void,
     fallbackMessage: string,
-    onFirstChunk?: () => void,
-    fallbackField: keyof (MarketReport & PlanReport) = "executiveSummary"
+    onFirstChunk?: () => void
   ) {
     if (!response.ok || !response.body) {
+      let errorMessage = fallbackMessage;
+
       try {
         const data = await response.json();
-        onEvent({ [fallbackField]: data.error || fallbackMessage });
+        errorMessage =
+          typeof data?.error === "string" && data.error.trim()
+            ? data.error
+            : fallbackMessage;
       } catch {
-        onEvent({ [fallbackField]: fallbackMessage });
+        errorMessage = fallbackMessage;
       }
 
-      return;
+      throw new Error(errorMessage);
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let hasChunk = false;
     let buffer = "";
+
+    const parseReportStreamEvent = (value: string) => {
+      const event = JSON.parse(value) as ReportStreamEvent;
+      const failedValue = Object.values(event).find(
+        (entry): entry is string =>
+          typeof entry === "string" && isReportGenerationFailureText(entry)
+      );
+
+      if (failedValue) {
+        throw new Error(failedValue);
+      }
+
+      return event;
+    };
 
     const emitBufferedEvents = () => {
       const lines = buffer.split("\n");
@@ -4086,7 +4200,7 @@ export default function Planner({
         }
 
         try {
-          const event = JSON.parse(trimmed) as ReportStreamEvent;
+          const event = parseReportStreamEvent(trimmed);
 
           if (!hasChunk && Object.values(event).some(Boolean)) {
             hasChunk = true;
@@ -4094,8 +4208,10 @@ export default function Planner({
           }
 
           onEvent(event);
-        } catch {
-          onEvent({ [fallbackField]: fallbackMessage });
+        } catch (error) {
+          throw error instanceof Error
+            ? error
+            : new Error("Report generation failed before every section completed.");
         }
       }
     };
@@ -4116,9 +4232,11 @@ export default function Planner({
 
     if (buffer.trim()) {
       try {
-        onEvent(JSON.parse(buffer.trim()) as ReportStreamEvent);
-      } catch {
-        onEvent({ [fallbackField]: fallbackMessage });
+        onEvent(parseReportStreamEvent(buffer.trim()));
+      } catch (error) {
+        throw error instanceof Error
+          ? error
+          : new Error("Report generation failed before every section completed.");
       }
     }
   }
@@ -4174,85 +4292,82 @@ export default function Planner({
       createdAt: Date.now(),
     });
     setResult("");
+    setReportGenerationError("");
     setMarketReport(null);
     setPlanReport(null);
 
     const reportOutput: PlanReport = { ...emptyPlanReport };
-    let completedSections = 0;
-    let remainingSectionsStarted = false;
-    let remainingSectionsPromise: Promise<void[]> = Promise.resolve([]);
+    const completedFields = new Set<PlanReportField>();
+    let reportApiCalls = 0;
+    const maxReportApiCalls = 1;
 
     const markSectionComplete = (field: PlanReportField) => {
-      completedSections += 1;
+      if (completedFields.has(field)) {
+        return;
+      }
+
+      completedFields.add(field);
       setCurrentReportSectionName(
         outputFields.find((item) => item.field === field)?.title || copy.planTitle
       );
-      setReportProgress((completedSections / planReportFields.length) * 100);
+      setReportProgress((completedFields.size / planReportFields.length) * 100);
     };
 
-    const streamField = async (
-      field: PlanReportField,
-      onFirstChunk?: () => void
-    ) => {
+    const streamFullReport = async () => {
+      reportApiCalls += 1;
+
+      console.info("[planner] Business Plan AI call count", {
+        reportRequestId,
+        aiCallsForReport: reportApiCalls,
+        maxAiCallsPerReport: maxReportApiCalls,
+      });
+
+      if (reportApiCalls > maxReportApiCalls) {
+        throw new Error(
+          "AI call budget exceeded for this report. Please start a new report request."
+        );
+      }
+
       const res = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: submittedPrompt,
-          field,
+          field: "fullReport",
           language: responseLanguage,
           reportRequestId,
         }),
       });
 
-      const fieldIndex = planReportFields.findIndex((item) => item.field === field);
-      setCurrentReportSectionName(
-        outputFields.find((item) => item.field === field)?.title || copy.planTitle
-      );
-      setWorkflowCompletedSteps((current) =>
-        Math.max(current, Math.min(workflowSteps.length - 1, fieldIndex + 1))
-      );
+      setCurrentReportSectionName("Generating complete report");
+      setWorkflowCompletedSteps((current) => Math.max(current, 1));
 
       await readStreamingSectionJson(
         res,
         (event) => {
-          const chunk = event[field];
+          for (const { field } of planReportFields) {
+            const chunk = event[field];
 
-          if (!chunk) {
-            return;
+            if (!chunk) {
+              continue;
+            }
+
+            if (isReportGenerationFailureText(chunk)) {
+              throw new Error(chunk);
+            }
+
+            reportOutput[field] = chunk;
+            markSectionComplete(field);
           }
-
-          reportOutput[field] += chunk;
         },
         copy.sectionFallback,
-        onFirstChunk,
-        field
-      );
-      markSectionComplete(field);
-    };
-
-    const startRemainingSections = () => {
-      if (remainingSectionsStarted) {
-        return;
-      }
-
-      remainingSectionsStarted = true;
-      remainingSectionsPromise = Promise.all(
-        planReportFields
-          .slice(1)
-          .map(({ field }) =>
-            streamField(field).catch(() => {
-              reportOutput[field] = copy.sectionFallback;
-              markSectionComplete(field);
-            })
-          )
+        undefined
       );
     };
 
     try {
-      await streamField("executiveSummary", startRemainingSections);
-      startRemainingSections();
-      await remainingSectionsPromise;
+      await streamFullReport();
+      const serializedSections = serializeReportSections(reportOutput, outputFields);
 
       setPlanReport({ ...reportOutput });
       setReportProgress(100);
@@ -4273,21 +4388,35 @@ export default function Planner({
         title: copy.planTitle,
         promptText: submittedPrompt,
         reportType: "business_plan",
-        sections: serializeReportSections(reportOutput, outputFields),
+        sections: serializedSections,
+        expectedSectionCount: outputFields.length,
       });
-    } catch {
-      setResult(copy.genericError);
+    } catch (error) {
+      const errorMessage = getReportGenerationErrorMessage(error, copy.retryError);
+      setReportGenerationError(errorMessage);
+      setResult(errorMessage);
       setPlanReport(null);
+      setReportProgress(0);
+      setCurrentReportSectionName("Report failed");
+      setWorkflowCompletedSteps(0);
+      await saveGeneratedReport({
+        title: copy.planTitle,
+        promptText: submittedPrompt,
+        reportType: "business_plan",
+        status: "failed",
+        sections: [],
+        expectedSectionCount: outputFields.length,
+      });
       updateAssistantMessage(
         assistantMessageId,
-        copy.retryError,
-        "complete",
+        errorMessage,
+        "failed",
         conversationId
       );
       await updatePersistedMessage(
         assistantMessageId,
-        copy.retryError,
-        "complete"
+        errorMessage,
+        "failed"
       );
     } finally {
       setLoading(false);
@@ -4345,85 +4474,82 @@ export default function Planner({
       createdAt: Date.now(),
     });
     setResult("");
+    setReportGenerationError("");
     setPlanReport(null);
     setMarketReport(null);
 
     const reportOutput: MarketReport = { ...emptyMarketReport };
-    let completedSections = 0;
-    let remainingSectionsStarted = false;
-    let remainingSectionsPromise: Promise<void[]> = Promise.resolve([]);
+    const completedFields = new Set<MarketReportField>();
+    let reportApiCalls = 0;
+    const maxReportApiCalls = 1;
 
     const markSectionComplete = (field: MarketReportField) => {
-      completedSections += 1;
+      if (completedFields.has(field)) {
+        return;
+      }
+
+      completedFields.add(field);
       setCurrentReportSectionName(
         outputFields.find((item) => item.field === field)?.title || copy.marketTitle
       );
-      setReportProgress((completedSections / reportFields.length) * 100);
+      setReportProgress((completedFields.size / reportFields.length) * 100);
     };
 
-    const streamField = async (
-      field: MarketReportField,
-      onFirstChunk?: () => void
-    ) => {
+    const streamFullReport = async () => {
+      reportApiCalls += 1;
+
+      console.info("[planner] Market Analysis AI call count", {
+        reportRequestId,
+        aiCallsForReport: reportApiCalls,
+        maxAiCallsPerReport: maxReportApiCalls,
+      });
+
+      if (reportApiCalls > maxReportApiCalls) {
+        throw new Error(
+          "AI call budget exceeded for this report. Please start a new report request."
+        );
+      }
+
       const res = await fetch("/api/market-analysis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: submittedPrompt,
-          field,
+          field: "fullReport",
           language: responseLanguage,
           reportRequestId,
         }),
       });
 
-      const fieldIndex = reportFields.findIndex((item) => item.field === field);
-      setCurrentReportSectionName(
-        outputFields.find((item) => item.field === field)?.title || copy.marketTitle
-      );
-      setWorkflowCompletedSteps((current) =>
-        Math.max(current, Math.min(workflowSteps.length - 1, fieldIndex + 1))
-      );
+      setCurrentReportSectionName("Generating complete report");
+      setWorkflowCompletedSteps((current) => Math.max(current, 1));
 
       await readStreamingSectionJson(
         res,
         (event) => {
-          const chunk = event[field];
+          for (const { field } of reportFields) {
+            const chunk = event[field];
 
-          if (!chunk) {
-            return;
+            if (!chunk) {
+              continue;
+            }
+
+            if (isReportGenerationFailureText(chunk)) {
+              throw new Error(chunk);
+            }
+
+            reportOutput[field] = chunk;
+            markSectionComplete(field);
           }
-
-          reportOutput[field] += chunk;
         },
         copy.sectionFallback,
-        onFirstChunk,
-        field
-      );
-      markSectionComplete(field);
-    };
-
-    const startRemainingSections = () => {
-      if (remainingSectionsStarted) {
-        return;
-      }
-
-      remainingSectionsStarted = true;
-      remainingSectionsPromise = Promise.all(
-        reportFields
-          .slice(1)
-          .map(({ field }) =>
-            streamField(field).catch(() => {
-              reportOutput[field] = copy.sectionFallback;
-              markSectionComplete(field);
-            })
-          )
+        undefined
       );
     };
 
     try {
-      await streamField("executiveSummary", startRemainingSections);
-      startRemainingSections();
-      await remainingSectionsPromise;
+      await streamFullReport();
+      const serializedSections = serializeReportSections(reportOutput, outputFields);
 
       setMarketReport({ ...reportOutput });
       setReportProgress(100);
@@ -4444,21 +4570,38 @@ export default function Planner({
         title: copy.marketTitle,
         promptText: submittedPrompt,
         reportType: "market_analysis",
-        sections: serializeReportSections(reportOutput, outputFields),
+        sections: serializedSections,
+        expectedSectionCount: outputFields.length,
       });
-    } catch {
-      setResult(copy.marketError);
+    } catch (error) {
+      const errorMessage = getReportGenerationErrorMessage(
+        error,
+        copy.marketRetryError
+      );
+      setReportGenerationError(errorMessage);
+      setResult(errorMessage);
       setMarketReport(null);
+      setReportProgress(0);
+      setCurrentReportSectionName("Report failed");
+      setWorkflowCompletedSteps(0);
+      await saveGeneratedReport({
+        title: copy.marketTitle,
+        promptText: submittedPrompt,
+        reportType: "market_analysis",
+        status: "failed",
+        sections: [],
+        expectedSectionCount: outputFields.length,
+      });
       updateAssistantMessage(
         assistantMessageId,
-        copy.marketRetryError,
-        "complete",
+        errorMessage,
+        "failed",
         conversationId
       );
       await updatePersistedMessage(
         assistantMessageId,
-        copy.marketRetryError,
-        "complete"
+        errorMessage,
+        "failed"
       );
     } finally {
       setAnalyzing(false);
@@ -4470,7 +4613,7 @@ export default function Planner({
     () => getLanguageCopy(currentResponseLanguage),
     [currentResponseLanguage]
   );
-  const activeReportMode = planReport ? "plan" : "market";
+  const activeReportMode = planReport ? "plan" : marketReport ? "market" : activeMode;
   const activeReportFields = useMemo(
     () =>
       (activeReportMode === "plan"
@@ -4482,7 +4625,7 @@ export default function Planner({
       }>,
     [activeReportMode, currentResponseLanguage]
   );
-  const currentReportTitle = planReport
+  const currentReportTitle = activeReportMode === "plan"
     ? currentLanguageCopy.planTitle
     : currentLanguageCopy.marketTitle;
 
@@ -4654,6 +4797,7 @@ export default function Planner({
                 reportTitle={currentReportTitle}
                 waitingMessage={currentLanguageCopy.waitingSection}
                 result={result}
+                failureMessage={reportGenerationError}
               />
             ) : null}
           </div>

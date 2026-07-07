@@ -1,4 +1,5 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { containsReportGenerationFailure } from "@/app/lib/report-errors";
 
 export type DashboardReport = {
   id: string;
@@ -44,7 +45,7 @@ const sectionLabels: Record<string, string> = {
   executiveRecommendation: "Executive Recommendation",
   kpis: "KPIs",
   founderRoadmap: "Founder Roadmap",
-  roadmap306090: "Founder Roadmap",
+  roadmap306090: "30-60-90 Day Roadmap",
   financialAssumptions: "Financial Assumptions",
   founderScore: "Founder Score",
   sourcesAssumptions: "Sources / Assumptions",
@@ -179,6 +180,11 @@ export function normalizeReport(row: ReportRow): DashboardReport {
   const reportType = inferReportType(row);
   const titleFallback =
     reportType === "Market Analysis" ? "Market Analysis Report" : "Business Plan Report";
+  const sections = normalizeSections(row);
+  const rowStatus = readString(row, ["status", "state"], "completed");
+  const failedReport =
+    rowStatus.toLowerCase() !== "completed" ||
+    containsReportGenerationFailure(sections);
 
   return {
     id: readString(row, ["id", "report_id"], crypto.randomUUID()),
@@ -186,8 +192,8 @@ export function normalizeReport(row: ReportRow): DashboardReport {
     title: readString(row, ["title", "name"], titleFallback),
     createdAt,
     type: reportType,
-    status: readString(row, ["status", "state"], "completed"),
-    sections: normalizeSections(row),
+    status: failedReport ? "failed" : rowStatus,
+    sections: failedReport ? [] : sections,
   };
 }
 

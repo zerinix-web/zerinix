@@ -20,6 +20,11 @@ import {
 } from "@/app/lib/ai/governance";
 import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 import { createAiJobDescriptor } from "@/app/lib/ai/queue";
+import {
+  createCanonicalFinancialAssumptions,
+  formatCanonicalFinancialAssumptions,
+} from "@/app/lib/ai/financial-assumptions";
+import { isReportGenerationFailureText } from "@/app/lib/report-errors";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -28,112 +33,112 @@ const client = new OpenAI({
 const fieldPrompts = {
   executiveSummary: {
     prompt:
-      "Write an investor-grade executive summary of the market analysis that synthesizes the market verdict. Cover only market attractiveness, demand signal, competitive intensity, entry timing, strategic gap, and the founder's most important market decision. Do not repeat later TAM, SWOT, Porter, or entry-plan details. Do not write a heading. Max 140 words.",
+      "Write an investor-grade Executive Summary with one job only: market verdict. Cover market attractiveness, demand signal, competitive intensity, entry timing, strategic gap, and the founder's most important market decision. Do not repeat TAM/SAM/SOM, SWOT, Porter, competitor, entry-plan, KPI, or source detail. Do not write a heading. Max 115 words.",
     maxTokens: 1000,
   },
   marketOverview: {
     prompt:
-      "Analyze the market overview like a strategy diligence memo: category definition, maturity, growth drivers, buyer behavior, adoption barriers, demand signals, and timing. Distinguish facts from assumptions and add Evidence and Confidence. Do not write a heading. Max 200 words.",
+      "Analyze only the market overview: category definition, maturity, growth drivers, buyer behavior, adoption barriers, demand signals, and timing. Do not repeat TAM/SAM/SOM numbers, competitor mapping, customer pain points, or entry strategy. Use one evidence/confidence note only if it changes the verdict. Do not write a heading. Max 165 words.",
     maxTokens: 1800,
   },
   tamSamSom: {
     prompt:
-      "Estimate TAM, SAM, and SOM using transparent assumptions and clear sizing logic. Explain market boundaries, reachable segments, adoption constraints, what could expand or shrink the market, and validation data needed. This section owns sizing only; do not repeat competitor analysis, customer pain, or entry strategy. Do not invent precision. Do not write a heading. Max 190 words.",
+      "Estimate only TAM, SAM, and SOM using transparent assumptions and clear sizing logic. Explain market boundaries, reachable segments, adoption constraints, and validation data needed. Do not repeat competitor analysis, customer pain, trends, or entry strategy. Do not invent precision. Do not write a heading. Max 145 words.",
     maxTokens: 1400,
   },
   industryTrends: {
     prompt:
-      "Identify the industry trends that matter for investment timing: technology shifts, buyer behavior changes, regulatory or macro forces, recent news, budget movement, and adoption inflection points. Include Evidence and Confidence. Do not write a heading. Max 180 words.",
+      "Identify only industry trends that matter for investment timing: technology shifts, buyer behavior changes, regulatory or macro forces, recent news, budget movement, and adoption inflection points. Do not repeat market overview, TAM, competitors, or entry plan. Do not write a heading. Max 145 words.",
     maxTokens: 1200,
   },
   targetCustomer: {
     prompt:
-      "Describe target customer segments with ICP precision: early adopters, buyer/user roles, budget holders, buying motivations, adoption barriers, urgency, willingness to pay, and the best initial beachhead. Include Evidence and Confidence. Do not write a heading. Max 170 words.",
+      "Describe only target customer / ICP: early adopters, buyer/user roles, budget holders, buying motivations, adoption barriers, urgency, willingness to pay, and best initial beachhead. Do not repeat customer pain details, TAM, pricing, or entry tactics. Do not write a heading. Max 145 words.",
     maxTokens: 1000,
   },
   competitorAnalysis: {
     prompt:
-      "Analyze competitors like an investor diligence section: direct competitors, indirect substitutes, incumbent alternatives, positioning map, switching barriers, pricing signals, likely response, and where a new entrant can exploit a gap. Include Evidence and Confidence. Do not write a heading. Max 210 words.",
+      "Analyze only competitors and substitutes: direct competitors, indirect substitutes, incumbent alternatives, positioning map, switching barriers, pricing signals, likely response, and entrant gap. Do not repeat SWOT, threats, market overview, or entry strategy. Do not write a heading. Max 170 words.",
     maxTokens: 1400,
   },
   customerPainPoints: {
     prompt:
-      "List the highest-value customer pain points, current workarounds, economic cost, switching triggers, urgency level, and interview evidence needed to confirm demand. Include Evidence and Confidence. Do not write a heading. Max 170 words.",
+      "List only customer pain points: current workarounds, economic cost, switching triggers, urgency level, and interview evidence needed to confirm demand. Do not repeat ICP, solution, competitors, or GTM. Do not write a heading. Max 135 words.",
     maxTokens: 1000,
   },
   opportunities: {
     prompt:
-      "Identify practical market opportunities with strategic logic: underserved segments, channel openings, pricing gaps, partnership angles, product wedges, regulatory/timing advantages, and why incumbents may not address them. Include Evidence and Confidence. Do not write a heading. Max 170 words.",
+      "Identify only market opportunities: underserved segments, channel openings, pricing gaps, partnership angles, product wedges, regulatory/timing advantages, and why incumbents may not address them. Do not repeat SWOT, entry strategy, or competitor analysis. Do not write a heading. Max 135 words.",
     maxTokens: 1000,
   },
   threats: {
     prompt:
-      "Identify threats with severity and probability: competitive pressure, demand uncertainty, switching costs, regulation, platform dependency, price compression, trust barriers, data access, and distribution risk. Include Evidence and Confidence. Do not write a heading. Max 170 words.",
+      "Identify only market threats with severity and probability: competitive pressure, demand uncertainty, switching costs, regulation, platform dependency, price compression, trust barriers, data access, and distribution risk. Do not repeat SWOT or Executive Recommendation. Do not write a heading. Max 135 words.",
     maxTokens: 1000,
   },
   swotAnalysis: {
     prompt:
-      "Create a concise SWOT analysis with Strengths, Weaknesses, Opportunities, and Threats. Every bullet must add a distinct market diligence insight and must not repeat the Executive Summary, TAM/SAM/SOM, or competitor section. Keep bullets short, specific, decision-relevant, and evidence-weighted. Do not write a heading. Max 180 words.",
+      "Create SWOT with distinct bullets only. Strengths and Weaknesses must focus on internal market-entry position; Opportunities and Threats must be external but must not repeat Opportunities, Threats, Competitor Analysis, or Executive Summary. Keep bullets short and decision-relevant. Do not write a heading. Max 145 words.",
     maxTokens: 1300,
   },
   portersFiveForces: {
     prompt:
-      "Analyze Porter's Five Forces with a qualitative rating for each force and a founder implication. Cover rivalry, new entrants, buyer power, supplier/platform power, and substitutes. Include Evidence and Confidence for each force. Do not write a heading. Max 210 words.",
+      "Analyze only Porter's Five Forces with a qualitative rating and one founder implication for rivalry, new entrants, buyer power, supplier/platform power, and substitutes. Do not repeat SWOT, threats, or competitor descriptions. Do not write a heading. Max 160 words.",
     maxTokens: 1400,
   },
   unitEconomics: {
     prompt:
-      "Analyze Unit Economics implied by the market. Include likely ARPA/ACV, gross margin, CAC, LTV, payback period, retention/churn assumptions, and what the market suggests about viability. Use numbers, ranges, and explicit assumptions only; avoid product or GTM prose covered elsewhere. Do not write a heading. Max 175 words.",
+      "Analyze only Unit Economics implied by the market. Include likely ARPA/ACV, gross margin, CAC, LTV, payback period, retention/churn assumptions, and the one assumption that most affects viability. Use numbers, ranges, and explicit assumptions only; avoid product, market, or GTM prose. Do not write a heading. Max 140 words.",
     maxTokens: 1200,
   },
   financialDashboard: {
     prompt:
-      "Create a Financial Dashboard focused only on market-derived numbers and assumptions. Use compact card-style lines for Revenue, Expenses, Gross Margin, CAC, LTV, Payback Period, Burn Rate, Runway, EBITDA, Break-even Month, and Investment Needed. Tie every estimate to market evidence or explicit assumptions. No generic commentary. Do not write a heading. Max 200 words.",
+      "Create only high-level market-derived financial KPI cards. Use compact lines for Revenue, Expenses, Gross Margin, CAC, LTV, Payback Period, Burn Rate, Runway, EBITDA, Break-even Month, and Investment Needed. Summarize CAC/LTV/payback if already covered by Unit Economics; do not explain again. No generic commentary. Do not write a heading. Max 145 words.",
     maxTokens: 1300,
   },
   scenarioAnalysis: {
     prompt:
-      "Create Scenario Analysis with Worst Case, Base Case, and Best Case. For each case include demand signal, pricing/MRR implication, CAC/payback implication, burn/runway implication, market risk, and founder decision. Do not write a heading. Max 210 words.",
+      "Create only future scenarios: Worst Case, Base Case, and Best Case. For each case include demand signal, pricing/MRR implication, CAC/payback implication, burn/runway implication, market risk, and founder decision. Do not repeat Financial Dashboard or Executive Recommendation wording. Do not write a heading. Max 170 words.",
     maxTokens: 1200,
   },
   kpiDashboard: {
     prompt:
-      "Create a KPI Dashboard for market validation. Include demand, conversion, willingness to pay, sales cycle, channel CAC, retention intent, competitor displacement, market pull, and target/warning thresholds. Each metric must have a decision implication; do not repeat the validation plan. Do not write a heading. Max 170 words.",
+      "Create only market validation operating metrics. Include demand, conversion, willingness to pay, sales cycle, channel CAC, retention intent, competitor displacement, market pull, and target/warning thresholds. Do not repeat Unit Economics or Validation Plan except as a concise threshold. Do not write a heading. Max 135 words.",
     maxTokens: 1000,
   },
   executiveRecommendation: {
     prompt:
-      "Write the Executive Recommendation with only four elements: investment decision, confidence level, biggest risks, and next actions. Select exactly one option and no second option: GO, NO GO, WAIT, PIVOT, RAISE, or BOOTSTRAP. Confidence must align with evidence: RAISE usually 70-90 only with strong validation, WAIT usually 40-70, PIVOT/NO GO usually 50-80. Never use 10% unless the analysis is unusable. Base it only on market evidence, risks, and financial implications. Do not restate the market overview, SWOT, or entry plan. Do not write a heading. Max 120 words.",
+      "Write only final investment decision. Include exactly four elements: selected decision, confidence level, biggest risks, and next actions. Select exactly one option and no second option: GO, NO GO, WAIT, PIVOT, RAISE, or BOOTSTRAP. Confidence must align with evidence: RAISE usually 70-90 only with strong validation, WAIT usually 40-70, PIVOT/NO GO usually 50-80. Do not restate market overview, SWOT, entry plan, or financial dashboard. Do not write a heading. Max 95 words.",
     maxTokens: 850,
   },
   entryStrategy: {
     prompt:
-      "Recommend an entry strategy using consulting-style sequencing: beachhead segment, positioning, first channel, initial offer, pricing/pilot approach, credibility assets, expansion wedge, and decision gates. Include Evidence and Confidence. Do not write a heading. Max 200 words.",
+      "Recommend only market entry strategy: beachhead segment, positioning, first channel, initial offer, pricing/pilot approach, credibility assets, expansion wedge, and decision gates. Do not repeat validation plan, target customer definition, or competitor analysis. Do not write a heading. Max 155 words.",
     maxTokens: 1300,
   },
   validationPlan: {
     prompt:
-      "Write a validation plan for the first 30-45 days. Include customer interviews, competitor research, pricing tests, concierge MVP or landing page test, success criteria, kill/pivot signals, and the decision each test informs. Include Confidence where assumptions are weak. Do not write a heading. Max 200 words.",
+      "Write only the first 30-45 day validation plan. Include customer interviews, competitor research, pricing tests, concierge MVP or landing page test, success criteria, kill/pivot signals, and the decision each test informs. Do not repeat roadmap or KPI dashboard wording. Do not write a heading. Max 155 words.",
     maxTokens: 1300,
   },
   keyMetrics: {
     prompt:
-      "Define key market validation metrics an investor would monitor: demand, conversion, willingness to pay, sales cycle, retention intent, CAC/channel cost, competitor displacement, and market pull signals. Include decision thresholds and Confidence. Do not write a heading. Max 160 words.",
+      "Define only key market validation metrics an investor would monitor: demand, conversion, willingness to pay, sales cycle, retention intent, CAC/channel cost, competitor displacement, and market pull signals. Include decision thresholds only. Do not repeat KPI Dashboard explanations. Do not write a heading. Max 125 words.",
     maxTokens: 900,
   },
   founderRoadmap: {
     prompt:
-      "Create Founder Roadmap with Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months. Each step must depend on the prior market proof point and decision gate. Include only market validation, competitive learning, pricing proof, and entry readiness actions. Do not write a heading. Max 210 words.",
+      "Create only founder execution roadmap with Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months. Each step must depend on the prior market proof point and decision gate. Include only execution actions for market validation, competitive learning, pricing proof, and entry readiness. Do not repeat validation plan or KPI thresholds. Do not write a heading. Max 165 words.",
     maxTokens: 1200,
   },
   sourcesAssumptions: {
     prompt:
-      "List Sources / Assumptions. Separate real evidence, inferred assumptions, and missing data. Do not write vague source claims such as 'industry reports' unless a specific source is named. When evidence is not verified, say 'Assumption based on comparable sector benchmarks', 'Needs validation with primary research', or 'Low confidence until verified'. For each assumption, explain reason, confidence, and which market or financial conclusion would change if wrong. Do not write a heading. Max 210 words.",
+      "List only sources and evidence assumptions. Separate real evidence, inferred assumptions, and missing data. Do not repeat market or financial analysis. Do not write vague source claims such as 'industry reports' unless a specific source is named. Use phrases such as 'Assumption based on comparable sector benchmarks', 'Needs validation with primary research', or 'Low confidence until verified'. Do not write a heading. Max 160 words.",
     maxTokens: 1300,
   },
   sources: {
     prompt:
-      "List 4-6 reliable sources used or most relevant for validating this market. Name specific sources when available. Do not use generic phrases such as 'industry reports' as if they are verified evidence. For each source, state the specific evidence it supports, how it affects the verdict, and the confidence level. If a source is missing, label the item as an assumption needing primary research. Do not write a heading.",
+      "List only 4-6 reliable sources used or most relevant for validating this market. Name specific sources when available. Do not use generic phrases such as 'industry reports' as verified evidence. For each source, state the specific evidence it supports and confidence level. If a source is missing, label the item as an assumption needing primary research. Do not repeat analysis. Do not write a heading.",
     maxTokens: 1400,
   },
 } as const;
@@ -164,6 +169,8 @@ const reportFields = [
 ] as const;
 
 type MarketReportField = (typeof reportFields)[number];
+const FULL_REPORT_FIELD = "fullReport";
+const MAX_AI_CALLS_PER_MARKET_REPORT = 1;
 
 type MarketReportChunk = Partial<Record<MarketReportField, string>>;
 
@@ -278,6 +285,92 @@ function serializeReportChunk(field: MarketReportField, content: string) {
   return `${JSON.stringify(createReportChunk(field, content))}\n`;
 }
 
+function serializeMarketReportChunks(report: Record<MarketReportField, string>) {
+  return reportFields
+    .map((field) => serializeReportChunk(field, report[field]))
+    .join("");
+}
+
+function createFullReportJsonSchema(name: string, fields: readonly string[]) {
+  return {
+    type: "json_schema" as const,
+    name,
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: Object.fromEntries(
+        fields.map((field) => [
+          field,
+          {
+            type: "string",
+            minLength: 1,
+          },
+        ])
+      ),
+      required: [...fields],
+    },
+  };
+}
+
+function parseFullMarketReport(value: string): Record<MarketReportField, string> {
+  const parsed = JSON.parse(value) as Record<string, unknown>;
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Report generation failed before every section completed.");
+  }
+
+  const report = {} as Record<MarketReportField, string>;
+
+  for (const field of reportFields) {
+    const content = parsed[field];
+
+    if (
+      typeof content !== "string" ||
+      !content.trim() ||
+      isReportGenerationFailureText(content)
+    ) {
+      throw new Error("Report generation failed before every section completed.");
+    }
+
+    report[field] = content.trim();
+  }
+
+  return report;
+}
+
+async function countAiCallsForReport({
+  supabase,
+  userId,
+  reportRequestId,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  userId: string;
+  reportRequestId: string;
+}) {
+  if (!reportRequestId) {
+    return 0;
+  }
+
+  const { count, error } = await supabase
+    .from("ai_usage_events")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("metadata->>report_request_id", reportRequestId)
+    .eq("metadata->>actual_ai_call", "true");
+
+  if (error) {
+    console.error("[api:market-analysis] Could not verify AI call budget", {
+      reportRequestId,
+      error: error.message,
+    });
+
+    return 0;
+  }
+
+  return count ?? 0;
+}
+
 function extractResponseText(response: unknown) {
   if (!response || typeof response !== "object") {
     return "";
@@ -320,12 +413,16 @@ function buildLanguageInstructions(language: ResponseLanguage) {
     "Be current, analytical, evidence-weighted, and decision-oriented for an early-stage founder.",
     "Generate a dedicated market analysis, not a business plan.",
     "Prioritize market overview, TAM/SAM/SOM, industry trends, competitors, gap analysis, customer pain, opportunities, threats, SWOT, Porter's Five Forces, entry strategy, validation, metrics, sources, and an investment-style verdict.",
-    "Every important claim must include an Evidence note and a Confidence level: High, Medium, or Low.",
-    "Avoid repetitive evidence phrasing; when confidence is clear, use compact labels such as Evidence: and Confidence: rather than repeating explanatory boilerplate.",
+    "Use evidence and confidence only where they materially affect a decision. Do not attach Evidence, Confidence, or Decision implication labels to every paragraph.",
+    "Avoid repeated label patterns. Prefer concise analyst prose; use Evidence/Confidence labels sparingly and only when uncertainty is important.",
     "Do not use generic AI phrases such as 'It is important to', 'Businesses should', 'This strategy can help', 'In today's market', or 'By leveraging'.",
-    "Each report section must contribute a unique market diligence job. Do not restate conclusions, paragraphs, or examples already assigned to another section.",
-    "Executive Summary must synthesize the market verdict. Financial sections must focus on market-derived numbers and assumptions. SWOT must not repeat Executive Summary.",
+    "Each report section must contribute a unique market diligence job. Do not restate conclusions, paragraphs, metrics, or examples already assigned to another section.",
+    "Respect strict section ownership: Executive Summary = market verdict only; Market Overview = category and demand context only; TAM/SAM/SOM = market sizing only; Industry Trends = timing forces only; Target Customer = ICP only; Competitor Analysis = competitors only; Customer Pain Points = pain only; Opportunities and Threats = distinct market openings/risks only; SWOT = non-duplicative matrix only; Porter's Five Forces = industry forces only; Unit Economics = unit metrics only; Financial Dashboard = high-level KPIs only; Scenario Analysis = future scenarios only; KPI Dashboard/Key Metrics = operating validation metrics only; Executive Recommendation = final investment decision only; Entry Strategy = market entry only; Validation Plan = tests only; Founder Roadmap = execution sequence only; Sources / Assumptions and Sources = sources only.",
+    "Never repeat the same metric more than once unless necessary. If a metric appears in Unit Economics, later financial sections may summarize it but must not explain it again.",
     "Use one consistent financial assumption set across Unit Economics, Financial Dashboard, Scenario Analysis, and Executive Recommendation. Reuse exact ASP, MRR, CAC, LTV, payback, burn, runway, and investment values unless explicitly updating the scenario.",
+    "The Canonical Financial Assumptions block in the user input is the single source of truth for all financial metrics. No section may invent, override, or independently recalculate those metrics.",
+    "Unit Economics, KPI Dashboard, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation must reference the same canonical values whenever financial metrics appear.",
+    "If a canonical metric has Low confidence, label it as an assumption needing validation instead of producing a different number.",
     "Keep payback, LTV:CAC, CAC, and runway realistic for the sector and capital intensity. If a result looks unusually strong, label it as a sensitivity or low-confidence assumption rather than a base case.",
     "Recommendation confidence must match evidence quality: RAISE normally requires 70-90 with strong validation; WAIT normally sits at 40-70; PIVOT or NO GO normally sits at 50-80 depending on evidence. Do not use extreme confidence values unless justified.",
     "Do not fake source authority. If a precise source is unavailable, use assumption language such as 'Assumption based on comparable sector benchmarks', 'Needs validation with primary research', or 'Low confidence until verified'.",
@@ -431,12 +528,15 @@ export async function POST(req: Request) {
       );
     }
 
-    const reportField =
+    const requestedField =
       typeof field === "string"
         ? field
         : typeof section === "string"
           ? legacySectionToField[section]
           : undefined;
+    const isFullReportRequest = requestedField === FULL_REPORT_FIELD;
+    const reportField = isFullReportRequest ? "executiveSummary" : requestedField;
+    const usageReportField = isFullReportRequest ? FULL_REPORT_FIELD : reportField;
 
     if (!isMarketReportField(reportField)) {
       return NextResponse.json(
@@ -448,7 +548,16 @@ export async function POST(req: Request) {
     const fieldConfig = fieldPrompts[reportField];
 
     const instructions = buildLanguageInstructions(responseLanguage);
+    const canonicalFinancialAssumptions = createCanonicalFinancialAssumptions({
+      prompt: promptText,
+      reportKind: "market_analysis",
+    });
+    const financialAssumptionsContext = formatCanonicalFinancialAssumptions(
+      canonicalFinancialAssumptions
+    );
     const input = `Business idea: ${promptText}
+
+${financialAssumptionsContext}
 
 Report section to generate: ${fieldLabelsByLanguage[responseLanguage][reportField]}
 Analysis task: ${fieldConfig.prompt}
@@ -456,11 +565,15 @@ First perform current web research. Use reliable sources for market size, compet
 Before writing visible output, silently construct the full Integrated Market Strategy Model. Do not output the model.
 Derive this section only from that model so market size, ICP, competitors, pricing, GTM, financial implications, risks, and recommendation stay consistent.
 Write the section as an investor-grade market diligence note with practical market-entry recommendations for the founder.
-Lead with the decision implication, then support it with Evidence and Confidence.
+Do not lead every section with the same decision-implication formula. Use it only where the section's job requires it.
+Use Evidence, Confidence, and Decision implication labels sparingly; do not repeat those labels in every paragraph or bullet.
 Avoid generic filler. Use assumptions explicitly when evidence is limited and state what would change the verdict.
-Do not repeat ideas that belong to other sections; this section must add unique value.
+Follow the section ownership contract exactly; do not borrow content assigned to another section.
+Do not repeat ideas, metrics, examples, or conclusions that belong to other sections; this section must add unique value.
 Remove filler phrases such as "It is important to", "Businesses should", "This strategy can help", "In today's market", and "By leveraging".
 Maintain exact financial consistency with the same assumption set across Unit Economics, Financial Dashboard, Scenario Analysis, and Executive Recommendation.
+Use the Canonical Financial Assumptions block as the only source of truth for ASP, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, and Break-even.
+Do not invent or override financial values. If the canonical value is low-confidence, call it an assumption and state what must be validated.
 Align recommendation confidence with evidence quality; avoid extreme confidence values unless the evidence clearly supports them.
 Use honest assumption language instead of vague source claims such as "industry reports".
 Finish with a complete sentence or complete bullet. Do not end mid-sentence.
@@ -473,7 +586,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
       endpoint: "/api/market-analysis",
       requestKind: "market_analysis",
       promptText,
-      reportField,
+      reportField: usageReportField,
       reportRequestId,
       ip,
     });
@@ -491,10 +604,234 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
       );
     }
 
+    if (isFullReportRequest) {
+      const fullReportCacheKey = createAiCacheKey({
+        endpoint: "/api/market-analysis",
+        normalizedPrompt: productionLimit.normalizedPrompt,
+        mode: `market_analysis:${FULL_REPORT_FIELD}:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
+        language: responseLanguage,
+        model,
+      });
+      const cachedFullReport = await getCachedAiResponse(
+        supabase,
+        user.id,
+        fullReportCacheKey
+      );
+      const encoder = new TextEncoder();
+
+      if (
+        cachedFullReport &&
+        !isReportGenerationFailureText(cachedFullReport.responseText)
+      ) {
+        const parsedCachedReport = parseFullMarketReport(cachedFullReport.responseText);
+
+        await recordAiUsage(supabase, {
+          userId: user.id,
+          endpoint: "/api/market-analysis",
+          reportField: FULL_REPORT_FIELD,
+          promptHash,
+          model: cachedFullReport.model || model,
+          planTier,
+          tokenUsage: {
+            promptTokens: cachedFullReport.promptTokens,
+            completionTokens: cachedFullReport.completionTokens,
+            totalTokens: cachedFullReport.totalTokens,
+          },
+          estimatedCostUsd: 0,
+          cacheHit: true,
+          responseTimeMs: 0,
+          metadata: {
+            quota_event: false,
+            report_request_id: reportRequestId || null,
+            usage_kind: "full_report_cache_hit",
+            actual_ai_call: false,
+            cachedEstimatedCostUsd: cachedFullReport.estimatedCostUsd,
+          },
+        });
+
+        return new Response(encoder.encode(serializeMarketReportChunks(parsedCachedReport)), {
+          headers: {
+            "Content-Type": "application/x-ndjson; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+          },
+        });
+      }
+
+      if (cachedFullReport) {
+        console.error("[api:market-analysis] Ignoring cached failed full report content", {
+          endpoint: "/api/market-analysis",
+          reportField: FULL_REPORT_FIELD,
+          cacheKey: fullReportCacheKey,
+        });
+      }
+
+      const existingAiCallCount = await countAiCallsForReport({
+        supabase,
+        userId: user.id,
+        reportRequestId,
+      });
+
+      console.info("[api:market-analysis] AI call budget", {
+        endpoint: "/api/market-analysis",
+        reportRequestId: reportRequestId || null,
+        existingAiCallCount,
+        maxAiCallsPerReport: MAX_AI_CALLS_PER_MARKET_REPORT,
+        requestedField: FULL_REPORT_FIELD,
+      });
+
+      if (existingAiCallCount >= MAX_AI_CALLS_PER_MARKET_REPORT) {
+        return NextResponse.json(
+          {
+            error:
+              "AI call budget exceeded for this report. Please start a new report request.",
+          },
+          { status: 429 }
+        );
+      }
+
+      const fullReportInput = `Business idea: ${promptText}
+
+${financialAssumptionsContext}
+
+Generate the complete Market Analysis report as one structured JSON object.
+Return exactly these JSON keys and no others:
+${reportFields.map((fieldName) => `- ${fieldName}: ${fieldLabelsByLanguage[responseLanguage][fieldName]} — ${fieldPrompts[fieldName].prompt}`).join("\n")}
+
+First perform current web research in this single request. Use reliable sources for market size, competitor companies, industry trends, target customers, recent news, pricing models, SWOT inputs, Porter's Five Forces inputs, and entry strategy signals.
+Before writing visible output, silently construct the full Integrated Market Strategy Model. Do not output the model.
+Derive every section only from that model so market size, ICP, competitors, pricing, GTM, financial implications, risks, and recommendation stay consistent.
+Follow the section ownership contract exactly; do not borrow content assigned to another section.
+Do not repeat ideas, metrics, examples, or conclusions across sections.
+Use the Canonical Financial Assumptions block as the only source of truth for ASP, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, and Break-even.
+Do not invent or override financial values. If the canonical value is low-confidence, call it an assumption and state what must be validated.
+Align recommendation confidence with evidence quality; avoid extreme confidence values unless the evidence clearly supports them.
+Use honest assumption language instead of vague source claims such as "industry reports".
+Finish every section with a complete sentence or complete bullet. Never end mid-sentence.
+Do not generate business-plan sections here. Do not suggest website URLs, domain names, brand names, or site ideas for the product.
+Do not include markdown code fences, braces inside string values, or commentary outside JSON.`;
+      const queuedJob = createAiJobDescriptor({
+        kind: "market_analysis",
+        userId: user.id,
+        endpoint: "/api/market-analysis",
+        reportField: FULL_REPORT_FIELD,
+        promptHash,
+        language: responseLanguage,
+        model,
+      });
+      const startedAt = Date.now();
+
+      try {
+        const response = await client.responses.create(
+          {
+            model,
+            instructions,
+            input: fullReportInput,
+            max_output_tokens: 6500,
+            reasoning: {
+              effort: "low",
+            },
+            tools: [
+              {
+                type: "web_search_preview",
+                search_context_size: "low",
+              },
+            ],
+            include: ["web_search_call.action.sources"],
+            text: {
+              verbosity: "medium",
+              format: createFullReportJsonSchema(
+                "zerinix_market_analysis_report",
+                reportFields
+              ),
+            },
+          },
+          { signal: req.signal }
+        );
+        const tokenUsage = extractTokenUsage(response);
+        const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
+        const responseTimeMs = Date.now() - startedAt;
+        const responseText = extractResponseText(response);
+        const parsedReport = parseFullMarketReport(responseText);
+        const cacheResponseText = JSON.stringify(parsedReport);
+
+        if (!isReportGenerationFailureText(cacheResponseText)) {
+          await storeCachedAiResponse(supabase, {
+            userId: user.id,
+            cacheKey: fullReportCacheKey,
+            promptHash,
+            endpoint: "/api/market-analysis",
+            reportField: FULL_REPORT_FIELD,
+            language: responseLanguage,
+            model,
+            responseText: cacheResponseText,
+            tokenUsage,
+            estimatedCostUsd,
+            expiresInDays: 3,
+          });
+        }
+
+        await recordAiUsage(supabase, {
+          userId: user.id,
+          endpoint: "/api/market-analysis",
+          reportField: FULL_REPORT_FIELD,
+          promptHash,
+          model,
+          planTier,
+          tokenUsage,
+          estimatedCostUsd,
+          cacheHit: false,
+          responseTimeMs,
+          metadata: {
+            quota_event: false,
+            report_request_id: reportRequestId || null,
+            usage_kind: "full_report_generation",
+            actual_ai_call: true,
+            max_ai_calls_per_report: MAX_AI_CALLS_PER_MARKET_REPORT,
+            job: queuedJob,
+          },
+        });
+
+        return new Response(encoder.encode(serializeMarketReportChunks(parsedReport)), {
+          headers: {
+            "Content-Type": "application/x-ndjson; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+          },
+        });
+      } catch (error) {
+        await recordAiUsage(supabase, {
+          userId: user.id,
+          endpoint: "/api/market-analysis",
+          reportField: FULL_REPORT_FIELD,
+          promptHash,
+          model,
+          planTier,
+          tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          estimatedCostUsd: 0,
+          cacheHit: false,
+          status: "failed",
+          responseTimeMs: Date.now() - startedAt,
+          metadata: {
+            quota_event: false,
+            report_request_id: reportRequestId || null,
+            usage_kind: "full_report_generation",
+            actual_ai_call: true,
+            max_ai_calls_per_report: MAX_AI_CALLS_PER_MARKET_REPORT,
+            job: queuedJob,
+          },
+        });
+        logServerError("api:market-analysis:full-report", error);
+
+        return NextResponse.json(
+          { error: "Market analysis could not be generated." },
+          { status: 502 }
+        );
+      }
+    }
+
     const cacheKey = createAiCacheKey({
       endpoint: "/api/market-analysis",
       normalizedPrompt: productionLimit.normalizedPrompt,
-      mode: `market_analysis:${reportField}`,
+      mode: `market_analysis:${reportField}:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
       language: responseLanguage,
       model,
     });
@@ -502,7 +839,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
     const cachedResponse = await getCachedAiResponse(supabase, user.id, cacheKey);
     const encoder = new TextEncoder();
 
-    if (cachedResponse) {
+    if (cachedResponse && !isReportGenerationFailureText(cachedResponse.responseText)) {
       await recordAiUsage(supabase, {
         userId: user.id,
         endpoint: "/api/market-analysis",
@@ -529,6 +866,14 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
           "Content-Type": "application/x-ndjson; charset=utf-8",
           "Cache-Control": "no-cache, no-transform",
         },
+      });
+    }
+
+    if (cachedResponse) {
+      console.error("[api:market-analysis] Ignoring cached failed report content", {
+        endpoint: "/api/market-analysis",
+        reportField,
+        cacheKey,
       });
     }
 
@@ -633,7 +978,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
             const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
             const responseTimeMs = Date.now() - startedAt;
 
-            if (streamedText) {
+            if (streamedText && !isReportGenerationFailureText(streamedText)) {
               await storeCachedAiResponse(supabase, {
                 userId: user.id,
                 cacheKey,
@@ -646,6 +991,12 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
                 tokenUsage,
                 estimatedCostUsd,
                 expiresInDays: 3,
+              });
+            } else if (streamedText) {
+              console.error("[api:market-analysis] Refused to cache failed report content", {
+                endpoint: "/api/market-analysis",
+                reportField,
+                cacheKey,
               });
             }
 

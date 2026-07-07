@@ -20,6 +20,11 @@ import {
 } from "@/app/lib/ai/governance";
 import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 import { createAiJobDescriptor } from "@/app/lib/ai/queue";
+import {
+  createCanonicalFinancialAssumptions,
+  formatCanonicalFinancialAssumptions,
+} from "@/app/lib/ai/financial-assumptions";
+import { isReportGenerationFailureText } from "@/app/lib/report-errors";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -28,127 +33,127 @@ const client = new OpenAI({
 const planPrompts = {
   executiveSummary: {
     prompt:
-      "Write an investor-grade executive summary that synthesizes the whole report instead of previewing every later section. Cover only the final thesis, investment attractiveness, strongest proof, largest constraint, financial viability signal, and one board-level priority. Do not repeat detailed market, SWOT, pricing, or roadmap content. Max 140 words.",
+      "Write an investor-grade Executive Summary with one job only: executive decision. Cover final thesis, investment attractiveness, strongest proof, largest constraint, financial viability signal, and one board-level priority. Do not explain the business model, product, market sizing, SWOT, pricing, GTM, risks, or roadmap. Use no more than one compact evidence/confidence note if it materially changes the verdict. Max 120 words.",
     maxTokens: 650,
   },
   problem: {
     prompt:
-      "Define the concrete customer problem as an investment diligence issue. Explain the painful workflow, current alternatives, urgency, economic cost of inaction, and why this pain can support a venture-scale opportunity. Include Evidence and Confidence. Max 150 words.",
+      "Define only the customer pain. Explain the painful workflow, current alternatives, urgency, economic cost of inaction, and why the pain is severe enough to investigate. Do not describe the product, market size, pricing, competitors, or solution. Use one evidence/confidence note only if needed. Max 140 words.",
     maxTokens: 650,
   },
   solution: {
     prompt:
-      "Describe the solution as a strategic product thesis. Cover the core experience, differentiated capability, initial product scope, defensibility path, and what must be true for the solution to win. Include Evidence and Confidence. Max 160 words.",
+      "Describe only the product solution. Cover core experience, differentiated capability, first product scope, defensibility path, and what must be true for the product to win. Do not repeat customer pain, revenue model, GTM, market size, or roadmap. Max 145 words.",
     maxTokens: 750,
   },
   targetCustomer: {
     prompt:
-      "Define the ICP with consulting-level precision. Include beachhead segment, buyer/user, budget owner, adoption trigger, urgency, willingness to pay, disqualifying profile, and the highest-probability first 50 customers. Include Evidence and Confidence. Max 170 words.",
+      "Define only the ICP. Include beachhead segment, buyer/user, budget owner, adoption trigger, urgency, willingness to pay, disqualifying profile, and highest-probability first 50 customers. Do not repeat market size, product features, pricing mechanics, or GTM channel tactics. Max 155 words.",
     maxTokens: 750,
   },
   marketOpportunity: {
     prompt:
-      "Analyze only market opportunity and competition context. Cover market category, demand drivers, reachable initial niche, expansion path, venture-scale ceiling, competitive intensity, and validation gates before significant investment. Do not repeat ICP details, product description, or go-to-market tactics. Max 190 words.",
+      "Analyze only market opportunity without calculating TAM/SAM/SOM. Cover category, demand drivers, reachable initial niche, expansion path, venture-scale potential, and validation gates before significant investment. Do not repeat ICP details, competitor mapping, product description, pricing, go-to-market tactics, or market-sizing numbers owned by TAM/SAM/SOM. Max 155 words.",
     maxTokens: 800,
   },
   competitorLandscape: {
     prompt:
-      "Map the competitor landscape like an investor diligence note. Include direct competitors, indirect substitutes, incumbent response, positioning map, switching barriers, and where the gap exists for a new entrant. Include Evidence and Confidence. Max 190 words.",
+      "Map only competitors and substitutes. Include direct competitors, indirect substitutes, incumbent response, positioning map, switching barriers, and the gap for a new entrant. Do not repeat market sizing, SWOT, risks, GTM, or product description. Max 170 words.",
     maxTokens: 850,
   },
   businessModel: {
     prompt:
-      "Explain the business model as an investment case. Cover value proposition, revenue mechanics, gross margin logic, acquisition motion, retention loop, operational leverage, and what could make the model structurally attractive. Include Evidence and Confidence. Max 190 words.",
+      "Explain only revenue mechanics. Cover who pays, what they pay for, pricing unit, recurring/transactional logic, gross margin logic, retention loop, operational leverage, and why the model can compound. Do not repeat product features, ICP, acquisition channels, or financial KPI dashboard detail. Max 165 words.",
     maxTokens: 850,
   },
   tamSamSom: {
     prompt:
-      "Build TAM / SAM / SOM from the integrated strategy model. Define market boundaries, reachable segment, near-term obtainable share, sizing assumptions, evidence, and confidence. This section owns sizing only; do not repeat competitor, GTM, or product strategy. Do not invent precision; use ranges and explain why. Max 180 words.",
+      "Build only TAM / SAM / SOM. Define market boundaries, reachable segment, near-term obtainable share, sizing assumptions, and confidence. Do not repeat competitor, ICP, GTM, product, pricing, or risk analysis. Do not invent precision; use ranges. Max 145 words.",
     maxTokens: 850,
   },
   swotAnalysis: {
     prompt:
-      "Create a decision-oriented SWOT Analysis. Each Strength, Weakness, Opportunity, and Threat must add a new diligence insight that is not already stated in the Executive Summary. Use short, specific bullets tied to the strategy model, with Evidence and Confidence only where material. Max 180 words.",
+      "Create SWOT with distinct bullets only. Strengths and Weaknesses must focus on internal company/model factors; Opportunities and Threats must be external but must not repeat Risks, Market Opportunity, or Competitor Landscape. Use short bullets and avoid Evidence/Confidence labels unless a bullet depends on a fragile assumption. Max 150 words.",
     maxTokens: 850,
   },
   portersFiveForces: {
     prompt:
-      "Analyze Porter's Five Forces with a qualitative rating for each force and the founder implication. Cover rivalry, new entrants, buyer power, supplier/platform power, and substitutes. Include Evidence and Confidence. Max 200 words.",
+      "Analyze only industry forces using Porter's Five Forces. Give a qualitative rating and one founder implication for rivalry, new entrants, buyer power, supplier/platform power, and substitutes. Do not repeat SWOT, risks, or competitor descriptions. Max 160 words.",
     maxTokens: 850,
   },
   pricingStrategy: {
     prompt:
-      "Recommend a pricing strategy based on buyer value, alternatives, urgency, and willingness to pay. Include packaging, entry price logic, premium tier, pilot economics, expansion path, and validation tests. Include Evidence and Confidence. Max 160 words.",
+      "Recommend only pricing logic. Include value metric, packaging, entry price logic, premium tier, pilot economics, expansion path, and pricing validation tests. Do not repeat revenue model, unit economics, financial dashboard, or GTM channels. Max 145 words.",
     maxTokens: 750,
   },
   goToMarketPlan: {
     prompt:
-      "Write a go-to-market plan with investor-grade execution logic. Include beachhead positioning, channel thesis, message, launch sequence, proof assets, first 10 customer path, CAC risk, and validation milestones. Include Evidence and Confidence. Max 190 words.",
+      "Write only customer acquisition strategy. Include beachhead positioning, channel thesis, message, launch sequence, proof assets, first 10 customer path, CAC risk, and validation milestones. Do not repeat ICP definition, sales process, roadmap, or pricing logic. Max 165 words.",
     maxTokens: 850,
   },
   salesStrategy: {
     prompt:
-      "Write the sales strategy as a founder-led revenue motion. Include account targets, outreach angle, discovery questions, pilot offer, buying objections, procurement friction, closing motion, and first repeatable sales signal. Include Evidence and Confidence. Max 180 words.",
+      "Write only the enterprise/founder-led sales process. Include account targets, outreach angle, discovery questions, pilot offer, buying objections, procurement friction, closing motion, and first repeatable sales signal. Do not repeat GTM channels, ICP, pricing dashboard, or roadmap. Max 155 words.",
     maxTokens: 800,
   },
   unitEconomics: {
     prompt:
-      "Write Unit Economics as an investor dashboard. Include ARPA/ACV if relevant, gross margin, CAC, LTV, LTV:CAC, payback period, retention/churn assumption, and the assumption that most affects viability. Use numbers, ranges, and assumptions only; avoid strategic prose already covered elsewhere. Max 180 words.",
+      "Write only financial unit metrics. Include ARPA/ACV if relevant, gross margin, CAC, LTV, LTV:CAC, payback period, retention/churn assumption, and the single assumption that most affects viability. Use numbers and ranges only; no strategic prose, market claims, or GTM explanation. Max 145 words.",
     maxTokens: 850,
   },
   financialDashboard: {
     prompt:
-      "Create a Financial Dashboard focused only on numbers and assumptions. Use compact card-style lines for Revenue, Expenses, Gross Margin, CAC, LTV, Payback Period, Burn Rate, Runway, EBITDA, Break-even Month, and Investment Needed. Every number must be real data or an explicit assumption with reason and confidence. No generic commentary. Max 200 words.",
+      "Create only high-level financial KPI cards. Use compact lines for Revenue, Expenses, Gross Margin, CAC, LTV, Payback Period, Burn Rate, Runway, EBITDA, Break-even Month, and Investment Needed. Summarize CAC/LTV/payback if already covered by Unit Economics; do not explain them again. No generic commentary. Max 145 words.",
     maxTokens: 950,
   },
   scenarioAnalysis: {
     prompt:
-      "Create Scenario Analysis with Worst Case, Base Case, and Best Case. For each case include trigger conditions, revenue/MRR implication, burn/runway implication, biggest risk, and founder decision. Keep all scenarios consistent with the financial chain. Max 210 words.",
+      "Create only future scenarios: Worst Case, Base Case, and Best Case. For each case include trigger conditions, revenue/MRR implication, burn/runway implication, biggest risk, and founder decision. Do not repeat Financial Dashboard or Executive Recommendation wording. Max 170 words.",
     maxTokens: 900,
   },
   kpiDashboard: {
     prompt:
-      "Create a KPI Dashboard for investor monitoring. Include acquisition, activation, retention, revenue, unit economics, pipeline, product quality, and learning metrics. For each metric provide target threshold, warning threshold, and decision implication. Do not repeat roadmap tasks or market claims. Max 180 words.",
+      "Create only the executive KPI Dashboard. Include the 6-8 operating metrics that prove whether the plan is working: acquisition, activation, retention, pipeline, product quality, learning velocity, and revenue signal. Use target threshold and warning threshold only. Do not include CAC, LTV, Gross Margin, Payback, ARR, MRR, Burn, or Runway; those belong to Unit Economics and Financial Dashboard. Do not include roadmap tasks or market claims. Max 135 words.",
     maxTokens: 850,
   },
   executiveRecommendation: {
     prompt:
-      "Write the Executive Recommendation with only four elements: investment decision, confidence level, biggest risks, and next actions. Select exactly one option and no second option: GO, NO GO, WAIT, PIVOT, RAISE, or BOOTSTRAP. Confidence must align with evidence: RAISE usually 70-90 only with strong validation, WAIT usually 40-70, PIVOT/NO GO usually 50-80. Never use 10% unless the analysis is unusable. Do not restate the business model, market summary, SWOT, or roadmap. Max 120 words.",
+      "Write only final investment decision. Include exactly four elements: selected decision, confidence level, biggest risks, and next actions. Select exactly one option and no second option: GO, NO GO, WAIT, PIVOT, RAISE, or BOOTSTRAP. Confidence must align with evidence: RAISE usually 70-90 only with strong validation, WAIT usually 40-70, PIVOT/NO GO usually 50-80. Do not restate the business model, market summary, SWOT, roadmap, or financial dashboard. Max 95 words.",
     maxTokens: 650,
   },
   risks: {
     prompt:
-      "Write a risk analysis with severity, probability, leading indicators, and mitigations. Cover market, product, distribution, pricing, regulatory, funding, and execution risks where relevant. Include Evidence and Confidence for each top risk. Max 190 words.",
+      "Write only risks. Include severity, probability, leading indicator, and mitigation for the top market, product, distribution, pricing, regulatory, funding, and execution risks where relevant. Do not repeat SWOT threats, scenario cases, or recommendation wording. Max 155 words.",
     maxTokens: 800,
   },
   kpis: {
     prompt:
-      "Define KPI metrics that an investor or operating partner would inspect. Include acquisition, activation, retention, revenue, pipeline, product quality, unit economics, and decision thresholds for traction. Include Evidence and Confidence. Max 160 words.",
+      "Define only the KPI governance logic, not another dashboard. For each KPI category, state owner, review cadence, decision trigger, and what action changes if the metric misses. Do not repeat KPI Dashboard values, Unit Economics, Financial Dashboard metrics, roadmap tasks, or market claims. Max 120 words.",
     maxTokens: 750,
   },
   roadmap306090: {
     prompt:
-      "Create the Founder Roadmap. It must have four dependent horizons: 30 Days, 90 Days, 180 Days, and 12 Months. Each horizon must depend on the evidence and decision gate from the previous horizon. Cover validation, product, sales, marketing, operations, capital needs, kill/pivot criteria, and founder priorities. Include Confidence where assumptions are weak. Max 230 words.",
+      "Create only the 30-60-90 style milestone timeline with four dependent horizons: 30 Days, 90 Days, 180 Days, and 12 Months. Each horizon must contain milestones and decision gates only. Do not repeat GTM, sales process, KPIs, or founder execution detail from Founder Roadmap. Max 165 words.",
     maxTokens: 900,
   },
   founderRoadmap: {
     prompt:
-      "Create Founder Roadmap with Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months. Each step must depend on the prior step's proof point and decision gate. Include action, owner mindset, evidence to collect, and go/no-go threshold. Max 240 words.",
+      "Create only the founder execution plan with Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months. Each step must depend on the prior proof point. Focus on founder actions, evidence to collect, owner mindset, and go/no-go threshold. Do not repeat timeline milestones, GTM strategy, or KPIs. Max 185 words.",
     maxTokens: 950,
   },
   financialAssumptions: {
     prompt:
-      "Write Financial Assumptions entirely from the integrated strategy model. Derive the chain Revenue -> MRR -> Gross Margin -> CAC -> LTV -> Payback -> Burn -> Runway -> EBITDA. Use real data if present; otherwise state each assumption and why it is reasonable. Focus only on assumptions, sensitivity, and numeric implications. Max 200 words.",
+      "Write only assumptions behind the financial model. Derive the chain Revenue -> MRR -> Gross Margin -> CAC -> LTV -> Payback -> Burn -> Runway -> EBITDA. Use real data if present; otherwise state each assumption and why it is reasonable. Do not repeat dashboard numbers except to identify the assumption they depend on. Max 165 words.",
     maxTokens: 1050,
   },
   founderScore: {
     prompt:
-      "Detail the Founder Score. Include Overall Score plus sub-scores for Innovation, Market Timing, Competition, Capital Intensity, Execution Difficulty, Revenue Potential, and Risk Level. Use 0-100 scores, concise evidence, and confidence for each. Max 190 words.",
+      "Write only founder evaluation. Include Overall Score plus sub-scores for Innovation, Market Timing, Competition, Capital Intensity, Execution Difficulty, Revenue Potential, and Risk Level. Use 0-100 scores with one concise reason each. Do not repeat recommendation, roadmap, or risk section. Max 140 words.",
     maxTokens: 800,
   },
   sourcesAssumptions: {
     prompt:
-      "List Sources / Assumptions. Separate real evidence, inferred assumptions, and missing data. Do not write vague source claims such as 'industry reports' unless a specific source is named. When evidence is not verified, say 'Assumption based on comparable sector benchmarks', 'Needs validation with primary research', or 'Low confidence until verified'. For each assumption, explain the reason, confidence, and which financial or strategic conclusion would change if wrong. Max 210 words.",
+      "List only sources and evidence assumptions. Separate real evidence, inferred assumptions, and missing data. Do not repeat financial or strategic analysis. Do not write vague source claims such as 'industry reports' unless a specific source is named. Use phrases such as 'Assumption based on comparable sector benchmarks', 'Needs validation with primary research', or 'Low confidence until verified'. Max 160 words.",
     maxTokens: 1050,
   },
 } as const;
@@ -158,6 +163,8 @@ type PlanReportField = keyof typeof planPrompts;
 type PlanReportChunk = Partial<Record<PlanReportField, string>>;
 
 const planFields = Object.keys(planPrompts) as PlanReportField[];
+const FULL_REPORT_FIELD = "fullReport";
+const MAX_AI_CALLS_PER_PLAN_REPORT = 1;
 
 type ResponseLanguage = "English" | "Turkish";
 
@@ -187,7 +194,7 @@ const planFieldLabels: Record<
     risks: "Risks",
     kpis: "KPIs",
     founderRoadmap: "Founder Roadmap",
-    roadmap306090: "Founder Roadmap",
+    roadmap306090: "30-60-90 Day Roadmap",
     financialAssumptions: "Financial Assumptions",
     founderScore: "Founder Score",
     sourcesAssumptions: "Sources / Assumptions",
@@ -214,7 +221,7 @@ const planFieldLabels: Record<
     risks: "Riskler",
     kpis: "KPI'lar",
     founderRoadmap: "Kurucu Yol Haritası",
-    roadmap306090: "Kurucu Yol Haritası",
+    roadmap306090: "30-60-90 Gün Yol Haritası",
     financialAssumptions: "Finansal Varsayımlar",
     founderScore: "Kurucu Skoru",
     sourcesAssumptions: "Kaynaklar / Varsayımlar",
@@ -247,6 +254,121 @@ function serializePlanChunk(field: PlanReportField, content: string) {
   return `${JSON.stringify(createPlanChunk(field, content))}\n`;
 }
 
+function serializePlanReportChunks(report: Record<PlanReportField, string>) {
+  return planFields.map((field) => serializePlanChunk(field, report[field])).join("");
+}
+
+function createFullReportJsonSchema(name: string, fields: readonly string[]) {
+  return {
+    type: "json_schema" as const,
+    name,
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: Object.fromEntries(
+        fields.map((field) => [
+          field,
+          {
+            type: "string",
+            minLength: 1,
+          },
+        ])
+      ),
+      required: [...fields],
+    },
+  };
+}
+
+function extractResponseText(response: unknown) {
+  if (!response || typeof response !== "object") {
+    return "";
+  }
+
+  const outputText = (response as { output_text?: unknown }).output_text;
+
+  if (typeof outputText === "string") {
+    return outputText;
+  }
+
+  const output = (response as { output?: unknown }).output;
+
+  if (!Array.isArray(output)) {
+    return "";
+  }
+
+  return output
+    .flatMap((item) => {
+      const content = (item as { content?: unknown }).content;
+
+      return Array.isArray(content) ? content : [];
+    })
+    .map((part) => {
+      const text = (part as { text?: unknown }).text;
+
+      return typeof text === "string" ? text : "";
+    })
+    .join("");
+}
+
+function parseFullPlanReport(value: string): Record<PlanReportField, string> {
+  const parsed = JSON.parse(value) as Record<string, unknown>;
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Report generation failed before every section completed.");
+  }
+
+  const report = {} as Record<PlanReportField, string>;
+
+  for (const field of planFields) {
+    const content = parsed[field];
+
+    if (
+      typeof content !== "string" ||
+      !content.trim() ||
+      isReportGenerationFailureText(content)
+    ) {
+      throw new Error("Report generation failed before every section completed.");
+    }
+
+    report[field] = content.trim();
+  }
+
+  return report;
+}
+
+async function countAiCallsForReport({
+  supabase,
+  userId,
+  reportRequestId,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  userId: string;
+  reportRequestId: string;
+}) {
+  if (!reportRequestId) {
+    return 0;
+  }
+
+  const { count, error } = await supabase
+    .from("ai_usage_events")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("metadata->>report_request_id", reportRequestId)
+    .eq("metadata->>actual_ai_call", "true");
+
+  if (error) {
+    console.error("[api:plan] Could not verify AI call budget", {
+      reportRequestId,
+      error: error.message,
+    });
+
+    return 0;
+  }
+
+  return count ?? 0;
+}
+
 function buildLanguageInstructions(language: ResponseLanguage) {
   return [
     "You are the ZERINIX Business Intelligence Report Engine.",
@@ -257,19 +379,23 @@ function buildLanguageInstructions(language: ResponseLanguage) {
     "Do not switch languages. Do not translate the user's business name unless needed for grammar.",
     "Produce investor-grade, evidence-weighted analysis for early-stage business decisions.",
     "Be specific to the user's idea. Remove generic advice, motivational language, and obvious startup boilerplate.",
-    "Every important claim must include an Evidence note and a Confidence level: High, Medium, or Low.",
-    "Avoid repetitive evidence phrasing; when confidence is clear, use compact labels such as Evidence: and Confidence: rather than repeating explanatory boilerplate.",
+    "Use evidence and confidence only where they materially affect a decision. Do not attach Evidence, Confidence, or Decision implication labels to every paragraph.",
+    "Avoid repeated label patterns. Prefer concise analyst prose; use Evidence/Confidence labels sparingly and only when uncertainty is important.",
     "Do not use generic AI phrases such as 'It is important to', 'Businesses should', 'This strategy can help', 'In today's market', or 'By leveraging'.",
-    "Each report section must contribute a unique analytical job. Do not restate conclusions, paragraphs, or examples already assigned to another section.",
-    "Executive Summary must synthesize the report verdict. Financial sections must focus on numbers and assumptions. Market sections must focus on opportunity and competition. SWOT must not repeat Executive Summary.",
+    "Each report section must contribute a unique analytical job. Do not restate conclusions, paragraphs, metrics, or examples assigned to another section.",
+    "Respect strict section ownership: Executive Summary = executive decision only; Problem = customer pain only; Solution = product only; Target Customer = ICP only; Market Opportunity = market attractiveness without TAM/SAM/SOM calculations; TAM/SAM/SOM = market sizing only; Competitor Landscape = competitors only; Business Model = revenue mechanics only; SWOT = internal strengths/weaknesses plus non-duplicative external bullets; Porter's Five Forces = industry forces only; Pricing = pricing logic only; Go-to-Market = customer acquisition only; Sales Strategy = enterprise sales process only; Unit Economics = financial unit metrics only; Financial Dashboard = high-level financial KPIs only; Scenario Analysis = future scenarios only; KPI Dashboard = operating metric values only; KPIs = governance cadence and decision triggers only; Executive Recommendation = final investment decision only; Risks = risks only; Founder Roadmap = founder execution plan only; 30-60-90 Roadmap = timeline only; Financial Assumptions = assumptions only; Founder Score = founder evaluation only; Sources / Assumptions = sources only.",
+    "Never repeat the same metric more than once unless necessary. If a metric appears in Unit Economics, later financial sections may summarize it but must not explain it again.",
     "Use one consistent financial assumption set across Unit Economics, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation. Reuse exact ASP, ARR, MRR, CAC, LTV, payback, burn, runway, and investment values unless explicitly updating the scenario.",
+    "The Canonical Financial Assumptions block in the user input is the single source of truth for all financial metrics. No section may invent, override, or independently recalculate those metrics.",
+    "Executive Summary, Business Model, Unit Economics, KPI Dashboard, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation must reference the same canonical values whenever financial metrics appear.",
+    "If a canonical metric has Low confidence, label it as an assumption needing validation instead of producing a different number.",
     "Keep payback, LTV:CAC, CAC, and runway realistic for the sector and capital intensity. If a result looks unusually strong, label it as a sensitivity or low-confidence assumption rather than a base case.",
     "Recommendation confidence must match evidence quality: RAISE normally requires 70-90 with strong validation; WAIT normally sits at 40-70; PIVOT or NO GO normally sits at 50-80 depending on evidence. Do not use extreme confidence values unless justified.",
     "Do not fake source authority. If a precise source is unavailable, use assumption language such as 'Assumption based on comparable sector benchmarks', 'Needs validation with primary research', or 'Low confidence until verified'.",
     "Every section must end with a complete sentence or complete bullet. Never end mid-sentence.",
     "Distinguish facts, assumptions, and hypotheses. Never present guesses as facts.",
     "Use analytical framing: market attractiveness, strategic wedge, competitive gap, monetization logic, execution risk, and investor verdict.",
-    "Prefer compact bullets, decision criteria, and quantified ranges when defensible.",
+    "Prefer compact bullets, decision criteria, quantified ranges, and distinct section-specific insights.",
     "If precise market data is unavailable, give transparent assumptions and confidence rather than invented precision.",
     "Do not recommend vague actions such as 'do market research' unless the exact research question, method, and decision impact are specified.",
     "Before writing any visible output, silently build one Integrated Strategy Model for the whole company. Do not reveal this internal model directly.",
@@ -355,7 +481,10 @@ export async function POST(req: Request) {
       await req.json();
     const promptText = typeof prompt === "string" ? prompt : "";
     const responseLanguage = normalizeLanguage(language, promptText);
-    const reportField = typeof field === "string" ? field : "executiveSummary";
+    const requestedField = typeof field === "string" ? field : "executiveSummary";
+    const isFullReportRequest = requestedField === FULL_REPORT_FIELD;
+    const reportField = isFullReportRequest ? "executiveSummary" : requestedField;
+    const usageReportField = isFullReportRequest ? FULL_REPORT_FIELD : reportField;
     const reportRequestId =
       typeof rawReportRequestId === "string" ? rawReportRequestId.trim().slice(0, 128) : "";
 
@@ -375,7 +504,16 @@ export async function POST(req: Request) {
 
     const fieldConfig = planPrompts[reportField];
     const instructions = buildLanguageInstructions(responseLanguage);
+    const canonicalFinancialAssumptions = createCanonicalFinancialAssumptions({
+      prompt: promptText,
+      reportKind: "business_plan",
+    });
+    const financialAssumptionsContext = formatCanonicalFinancialAssumptions(
+      canonicalFinancialAssumptions
+    );
     const input = `Business idea / goal: ${promptText}
+
+${financialAssumptionsContext}
 
 Section to generate: ${planFieldLabels[responseLanguage][reportField]}
 Task: ${fieldConfig.prompt}
@@ -384,17 +522,20 @@ Report quality rules:
 - First silently construct the full Integrated Strategy Model. Do not output it.
 - Derive this section only from that model, including dependencies from previous strategic choices.
 - Use clear headings only if they help this section, but do not repeat the section title.
-- Lead with the decision implication before details.
-- Add Evidence and Confidence for every material assertion.
-- Do not repeat ideas that belong to other sections; this section must add unique value.
+- Follow the section ownership contract exactly; do not borrow content assigned to another section.
+- Do not lead every section with the same decision-implication formula. Use it only where the section's job requires it.
+- Use Evidence, Confidence, and Decision implication labels sparingly; do not repeat those labels in every paragraph or bullet.
+- Do not repeat ideas, metrics, examples, or conclusions that belong to other sections; this section must add unique value.
 - Remove filler phrases such as "It is important to", "Businesses should", "This strategy can help", "In today's market", and "By leveraging".
 - Maintain exact financial consistency with the same assumption set across Unit Economics, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation.
+- Use the Canonical Financial Assumptions block as the only source of truth for ASP, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, and Break-even.
+- Do not invent or override financial values. If the canonical value is low-confidence, call it an assumption and state what must be validated.
 - Align recommendation confidence with evidence quality; avoid extreme confidence values unless the evidence clearly supports them.
 - Use honest assumption language instead of vague source claims such as "industry reports".
 - Finish with a complete sentence or complete bullet. Do not end mid-sentence.
-- Include practical founder actions, examples, decision criteria, and validation thresholds.
+- Include practical founder actions, examples, decision criteria, and validation thresholds only when they belong to this section.
 - Avoid generic filler such as "conduct market research" unless you specify exactly what to research, how to research it, and what decision it informs.
-- Be explicit about assumptions, uncertainty, downside risk, and what would change the recommendation.
+- Be explicit about assumptions, uncertainty, downside risk, and what would change the recommendation only in sections responsible for those topics.
 - Keep financial claims consistent with the chain Revenue -> MRR -> Gross Margin -> CAC -> LTV -> Payback -> Burn -> Runway -> EBITDA.
 - Keep the section concise, dense, analytical, and investor-ready.
 
@@ -405,7 +546,7 @@ Write only the content for this section. Do not write a JSON object, field name,
       endpoint: "/api/plan",
       requestKind: "business_plan",
       promptText,
-      reportField,
+      reportField: usageReportField,
       reportRequestId,
       ip,
     });
@@ -423,10 +564,227 @@ Write only the content for this section. Do not write a JSON object, field name,
       );
     }
 
+    if (isFullReportRequest) {
+      const fullReportCacheKey = createAiCacheKey({
+        endpoint: "/api/plan",
+        normalizedPrompt: productionLimit.normalizedPrompt,
+        mode: `business_plan:${FULL_REPORT_FIELD}:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
+        language: responseLanguage,
+        model,
+      });
+      const cachedFullReport = await getCachedAiResponse(
+        supabase,
+        user.id,
+        fullReportCacheKey
+      );
+      const encoder = new TextEncoder();
+
+      if (
+        cachedFullReport &&
+        !isReportGenerationFailureText(cachedFullReport.responseText)
+      ) {
+        const parsedCachedReport = parseFullPlanReport(cachedFullReport.responseText);
+
+        await recordAiUsage(supabase, {
+          userId: user.id,
+          endpoint: "/api/plan",
+          reportField: FULL_REPORT_FIELD,
+          promptHash,
+          model: cachedFullReport.model || model,
+          planTier,
+          tokenUsage: {
+            promptTokens: cachedFullReport.promptTokens,
+            completionTokens: cachedFullReport.completionTokens,
+            totalTokens: cachedFullReport.totalTokens,
+          },
+          estimatedCostUsd: 0,
+          cacheHit: true,
+          responseTimeMs: 0,
+          metadata: {
+            quota_event: false,
+            report_request_id: reportRequestId || null,
+            usage_kind: "full_report_cache_hit",
+            actual_ai_call: false,
+            cachedEstimatedCostUsd: cachedFullReport.estimatedCostUsd,
+          },
+        });
+
+        return new Response(encoder.encode(serializePlanReportChunks(parsedCachedReport)), {
+          headers: {
+            "Content-Type": "application/x-ndjson; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+          },
+        });
+      }
+
+      if (cachedFullReport) {
+        console.error("[api:plan] Ignoring cached failed full report content", {
+          endpoint: "/api/plan",
+          reportField: FULL_REPORT_FIELD,
+          cacheKey: fullReportCacheKey,
+        });
+      }
+
+      const existingAiCallCount = await countAiCallsForReport({
+        supabase,
+        userId: user.id,
+        reportRequestId,
+      });
+
+      console.info("[api:plan] AI call budget", {
+        endpoint: "/api/plan",
+        reportRequestId: reportRequestId || null,
+        existingAiCallCount,
+        maxAiCallsPerReport: MAX_AI_CALLS_PER_PLAN_REPORT,
+        requestedField: FULL_REPORT_FIELD,
+      });
+
+      if (existingAiCallCount >= MAX_AI_CALLS_PER_PLAN_REPORT) {
+        return NextResponse.json(
+          {
+            error:
+              "AI call budget exceeded for this report. Please start a new report request.",
+          },
+          { status: 429 }
+        );
+      }
+
+      const fullReportInput = `Business idea / goal: ${promptText}
+
+${financialAssumptionsContext}
+
+Generate the complete Business Plan report as one structured JSON object.
+Return exactly these JSON keys and no others:
+${planFields.map((fieldName) => `- ${fieldName}: ${planFieldLabels[responseLanguage][fieldName]} — ${planPrompts[fieldName].prompt}`).join("\n")}
+
+Report quality rules:
+- First silently construct the full Integrated Strategy Model. Do not output it.
+- Derive every section from the same model so the entire report is internally consistent.
+- Follow the section ownership contract exactly; do not borrow content assigned to another section.
+- Keep each JSON value concise, dense, analytical, investor-ready, and complete.
+- Do not repeat ideas, metrics, examples, or conclusions across sections.
+- Use the Canonical Financial Assumptions block as the only source of truth for ASP, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, and Break-even.
+- Do not invent or override financial values. If the canonical value is low-confidence, call it an assumption and state what must be validated.
+- Align recommendation confidence with evidence quality; avoid extreme confidence values unless the evidence clearly supports them.
+- Use honest assumption language instead of vague source claims such as "industry reports".
+- Finish every section with a complete sentence or complete bullet. Never end mid-sentence.
+- Do not include markdown code fences, braces inside string values, or commentary outside JSON.`;
+      const queuedJob = createAiJobDescriptor({
+        kind: "business_plan",
+        userId: user.id,
+        endpoint: "/api/plan",
+        reportField: FULL_REPORT_FIELD,
+        promptHash,
+        language: responseLanguage,
+        model,
+      });
+      const startedAt = Date.now();
+
+      try {
+        const response = await client.responses.create(
+          {
+            model,
+            instructions,
+            input: fullReportInput,
+            max_output_tokens: 7000,
+            reasoning: {
+              effort: "low",
+            },
+            text: {
+              verbosity: "medium",
+              format: createFullReportJsonSchema(
+                "zerinix_business_plan_report",
+                planFields
+              ),
+            },
+          },
+          { signal: req.signal }
+        );
+        const tokenUsage = extractTokenUsage(response);
+        const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
+        const responseTimeMs = Date.now() - startedAt;
+        const responseText = extractResponseText(response);
+        const parsedReport = parseFullPlanReport(responseText);
+        const cacheResponseText = JSON.stringify(parsedReport);
+
+        if (!isReportGenerationFailureText(cacheResponseText)) {
+          await storeCachedAiResponse(supabase, {
+            userId: user.id,
+            cacheKey: fullReportCacheKey,
+            promptHash,
+            endpoint: "/api/plan",
+            reportField: FULL_REPORT_FIELD,
+            language: responseLanguage,
+            model,
+            responseText: cacheResponseText,
+            tokenUsage,
+            estimatedCostUsd,
+            expiresInDays: 7,
+          });
+        }
+
+        await recordAiUsage(supabase, {
+          userId: user.id,
+          endpoint: "/api/plan",
+          reportField: FULL_REPORT_FIELD,
+          promptHash,
+          model,
+          planTier,
+          tokenUsage,
+          estimatedCostUsd,
+          cacheHit: false,
+          responseTimeMs,
+          metadata: {
+            quota_event: false,
+            report_request_id: reportRequestId || null,
+            usage_kind: "full_report_generation",
+            actual_ai_call: true,
+            max_ai_calls_per_report: MAX_AI_CALLS_PER_PLAN_REPORT,
+            job: queuedJob,
+          },
+        });
+
+        return new Response(encoder.encode(serializePlanReportChunks(parsedReport)), {
+          headers: {
+            "Content-Type": "application/x-ndjson; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+          },
+        });
+      } catch (error) {
+        await recordAiUsage(supabase, {
+          userId: user.id,
+          endpoint: "/api/plan",
+          reportField: FULL_REPORT_FIELD,
+          promptHash,
+          model,
+          planTier,
+          tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          estimatedCostUsd: 0,
+          cacheHit: false,
+          status: "failed",
+          responseTimeMs: Date.now() - startedAt,
+          metadata: {
+            quota_event: false,
+            report_request_id: reportRequestId || null,
+            usage_kind: "full_report_generation",
+            actual_ai_call: true,
+            max_ai_calls_per_report: MAX_AI_CALLS_PER_PLAN_REPORT,
+            job: queuedJob,
+          },
+        });
+        logServerError("api:plan:full-report", error);
+
+        return NextResponse.json(
+          { error: "Report generation failed. Please try again later." },
+          { status: 502 }
+        );
+      }
+    }
+
     const cacheKey = createAiCacheKey({
       endpoint: "/api/plan",
       normalizedPrompt: productionLimit.normalizedPrompt,
-      mode: `business_plan:${reportField}`,
+      mode: `business_plan:${reportField}:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
       language: responseLanguage,
       model,
     });
@@ -434,7 +792,7 @@ Write only the content for this section. Do not write a JSON object, field name,
     const cachedResponse = await getCachedAiResponse(supabase, user.id, cacheKey);
     const encoder = new TextEncoder();
 
-    if (cachedResponse) {
+    if (cachedResponse && !isReportGenerationFailureText(cachedResponse.responseText)) {
       await recordAiUsage(supabase, {
         userId: user.id,
         endpoint: "/api/plan",
@@ -461,6 +819,14 @@ Write only the content for this section. Do not write a JSON object, field name,
           "Content-Type": "application/x-ndjson; charset=utf-8",
           "Cache-Control": "no-cache, no-transform",
         },
+      });
+    }
+
+    if (cachedResponse) {
+      console.error("[api:plan] Ignoring cached failed report content", {
+        endpoint: "/api/plan",
+        reportField,
+        cacheKey,
       });
     }
 
@@ -549,7 +915,7 @@ Write only the content for this section. Do not write a JSON object, field name,
             const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
             const responseTimeMs = Date.now() - startedAt;
 
-            if (streamedText) {
+            if (streamedText && !isReportGenerationFailureText(streamedText)) {
               await storeCachedAiResponse(supabase, {
                 userId: user.id,
                 cacheKey,
@@ -562,6 +928,12 @@ Write only the content for this section. Do not write a JSON object, field name,
                 tokenUsage,
                 estimatedCostUsd,
                 expiresInDays: 7,
+              });
+            } else if (streamedText) {
+              console.error("[api:plan] Refused to cache failed report content", {
+                endpoint: "/api/plan",
+                reportField,
+                cacheKey,
               });
             }
 
