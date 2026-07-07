@@ -228,3 +228,17 @@ export function isPrivateBetaAllowed(account?: BetaAccessAccount | string | null
 
   return false;
 }
+
+export function isFounderAccount(account?: BetaAccessAccount | string | null) {
+  if (!account) {
+    return false;
+  }
+
+  const betaAccount = typeof account === "string" ? { email: account } : account;
+  const accountEmails = collectAccountEmails(betaAccount);
+
+  return (
+    accountEmails.has(normalizeEmail(ownerAllowedEmail)) ||
+    accountEmails.has(normalizeGmailAddress(ownerAllowedEmail))
+  );
+}

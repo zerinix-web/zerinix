@@ -630,6 +630,7 @@ Write only the content for this section. Do not write a JSON object, field name,
     const productionLimit = await checkAiProductionRateLimit({
       supabase,
       userId: user.id,
+      account: user,
       endpoint: "/api/plan",
       requestKind: "business_plan",
       promptText,

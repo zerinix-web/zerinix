@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isFounderAccount } from "@/app/lib/beta-access";
 import {
   checkUsageAllowance,
   createAiPromptHash,
@@ -14,6 +15,7 @@ import { QUOTA_COUNTING_USAGE_KIND_EXCLUSION } from "@/app/lib/ai/quota-rules.mj
 type AiProductionRateLimitInput = {
   supabase: SupabaseClient;
   userId: string;
+  account?: Parameters<typeof isFounderAccount>[0];
   endpoint: string;
   requestKind: AiRequestKind;
   promptText: string;
@@ -25,6 +27,7 @@ type AiProductionRateLimitInput = {
 export async function checkAiProductionRateLimit({
   supabase,
   userId,
+  account,
   endpoint,
   requestKind,
   promptText,
@@ -36,6 +39,35 @@ export async function checkAiProductionRateLimit({
   const model = selectAiModel(requestKind);
   const normalizedPrompt = normalizeAiPrompt(promptText);
   const promptHash = createAiPromptHash(promptText);
+  const founderQuotaExempt = isFounderAccount(account);
+
+  if (founderQuotaExempt) {
+    console.info("[ai quota] founder account quota bypass", {
+      endpoint,
+      reportField: reportField ?? null,
+      reportRequestId: reportRequestId ?? null,
+      planTier,
+      requestKind,
+      providerCalled: false,
+      quotaConsumed: false,
+      quotaExempt: true,
+    });
+
+    return {
+      allowed: true,
+      planTier,
+      dailyUsed: 0,
+      monthlyUsed: 0,
+      dailyRequests: Number.POSITIVE_INFINITY,
+      monthlyRequests: Number.POSITIVE_INFINITY,
+      reason: "",
+      model,
+      promptHash,
+      normalizedPrompt,
+      quotaAlreadyCharged: true,
+      quotaExempt: true,
+    };
+  }
 
   if (reportRequestId) {
     const { count, error } = await supabase

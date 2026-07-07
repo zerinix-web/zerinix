@@ -588,6 +588,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
     const productionLimit = await checkAiProductionRateLimit({
       supabase,
       userId: user.id,
+      account: user,
       endpoint: "/api/market-analysis",
       requestKind: "market_analysis",
       promptText,
