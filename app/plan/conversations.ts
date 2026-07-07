@@ -11,7 +11,7 @@ type MessageRow = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  mode: "plan" | "market" | null;
+  mode: "plan" | "market" | "chat" | null;
   status: "streaming" | "complete" | "failed";
   attachments: Array<{
     id: string;
@@ -72,7 +72,7 @@ export async function loadPlanConversations(
         id: message.id,
         role: message.role,
         content: message.content,
-        mode: message.mode || undefined,
+        mode: message.mode || "chat",
         status: message.status,
         attachments: Array.isArray(message.attachments)
           ? message.attachments

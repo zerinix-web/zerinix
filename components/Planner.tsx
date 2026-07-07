@@ -138,7 +138,7 @@ type ReportFieldDefinition = {
   icon: LucideIcon;
 };
 
-type ChatMode = "plan" | "market";
+type ChatMode = "plan" | "market" | "chat";
 
 type ResponseLanguage = "English" | "Turkish";
 
@@ -510,6 +510,12 @@ function createClarificationQuestionForLanguage(
   language: ResponseLanguage
 ) {
   const copy = getLanguageCopy(language);
+
+  if (mode === "chat") {
+    return language === "Turkish"
+      ? "Nasıl yardımcı olmamı istersin? İş, strateji, ürün, finans veya genel bir konuda kısa bir soru yazabilirsin."
+      : "How can I help? You can ask about business, strategy, product, finance, or any general topic.";
+  }
 
   return mode === "market" ? copy.marketClarification : copy.planClarification;
 }
@@ -2143,7 +2149,7 @@ function ConversationSidebar({
             AI Workspace
           </span>
           <span className="rounded-full border border-teal-200/20 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-teal-100">
-            {activeMode === "plan" ? "Plan" : "Market"}
+            {activeMode === "plan" ? "Plan" : activeMode === "market" ? "Market" : "Chat"}
           </span>
         </Link>
         <Link
@@ -3394,6 +3400,7 @@ export default function Planner({
   const [planReport, setPlanReport] = useState<PlanReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
   const initialConversationId = useMemo(
     () => initialConversations[0]?.id || createMessageId(),
     [initialConversations]
@@ -3426,7 +3433,8 @@ export default function Planner({
     new Set(initialConversations.map((conversation) => conversation.id))
   );
 
-  const isWorking = loading || analyzing;
+  const isReportWorking = loading || analyzing;
+  const isWorking = isReportWorking || chatLoading;
   const activeConversation = useMemo(
     () =>
       conversations.find((conversation) => conversation.id === activeConversationId) ||
@@ -3717,7 +3725,7 @@ export default function Planner({
       user_id: userId,
       role: message.role,
       content: message.content,
-      mode: message.mode || null,
+      mode: message.mode === "chat" ? null : message.mode || null,
       status: message.status || "complete",
       attachments: message.attachments || [],
     });
@@ -3810,7 +3818,7 @@ export default function Planner({
         id: message.id as string,
         role: message.role as "user" | "assistant",
         content: message.content as string,
-        mode: (message.mode as ChatMode | null) || undefined,
+        mode: (message.mode as ChatMode | null) || "chat",
         status: message.status as ChatMessage["status"],
         attachments: Array.isArray(message.attachments)
           ? (message.attachments as ChatAttachment[])
@@ -3862,7 +3870,7 @@ export default function Planner({
       id: message.id as string,
       role: message.role as "user" | "assistant",
       content: message.content as string,
-      mode: (message.mode as ChatMode | null) || undefined,
+      mode: (message.mode as ChatMode | null) || "chat",
       status: message.status as ChatMessage["status"],
       attachments: Array.isArray(message.attachments)
         ? (message.attachments as ChatAttachment[])
@@ -3877,7 +3885,17 @@ export default function Planner({
   }
 
   function selectConversation(conversationId: string) {
+    const selectedConversation = conversations.find(
+      (conversation) => conversation.id === conversationId
+    );
+    const latestMode = [...(selectedConversation?.messages || [])]
+      .reverse()
+      .find((message) => message.mode)?.mode;
+
     setActiveConversationId(conversationId);
+    if (latestMode) {
+      setActiveMode(latestMode);
+    }
     setPrompt("");
     setResult("");
     setReportGenerationError("");
@@ -4016,8 +4034,10 @@ export default function Planner({
 
     if (lastRequest.mode === "plan") {
       void generatePlan(lastRequest.prompt, false);
-    } else {
+    } else if (lastRequest.mode === "market") {
       void analyzeMarket(lastRequest.prompt, false);
+    } else {
+      void sendChatMessage(lastRequest.prompt, false);
     }
   }
 
@@ -4072,15 +4092,17 @@ export default function Planner({
       return;
     }
 
-    if (needsClarification(submittedPrompt)) {
+    if (activeMode !== "chat" && needsClarification(submittedPrompt)) {
       await askForClarification(submittedPrompt);
       return;
     }
 
     if (activeMode === "plan") {
       await generatePlan(submittedPrompt);
-    } else {
+    } else if (activeMode === "market") {
       await analyzeMarket(submittedPrompt);
+    } else {
+      await sendChatMessage(submittedPrompt);
     }
   }
 
@@ -4280,6 +4302,151 @@ export default function Planner({
           ? error
           : new Error("Report generation failed before every section completed.");
       }
+    }
+  }
+
+  async function readStreamingText(
+    response: Response,
+    onChunk: (content: string) => void,
+    fallbackMessage: string
+  ) {
+    if (!response.ok || !response.body) {
+      let errorMessage = fallbackMessage;
+
+      try {
+        const data = await response.json();
+        errorMessage =
+          typeof data?.error === "string" && data.error.trim()
+            ? data.error
+            : fallbackMessage;
+      } catch {
+        errorMessage = fallbackMessage;
+      }
+
+      throw new Error(errorMessage);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let output = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      output += decoder.decode(value, { stream: true });
+      onChunk(output);
+    }
+
+    output += decoder.decode();
+    onChunk(output);
+
+    return output.trim();
+  }
+
+  async function sendChatMessage(promptOverride = prompt, addToHistory = true) {
+    const submittedPrompt = promptOverride.trim();
+
+    if (!submittedPrompt || chatLoading) {
+      return;
+    }
+
+    setChatLoading(true);
+    setActiveMode("chat");
+    setLastRequest({ mode: "chat", prompt: submittedPrompt });
+    setReportGenerationError("");
+    setResult("");
+    setMarketReport(null);
+    setPlanReport(null);
+    setWorkflowCompletedSteps(0);
+    setReportProgress(0);
+    setCurrentReportSectionName("");
+
+    const conversationId = activeConversationId;
+    const shouldUpdateTitle = shouldAutoTitleConversation(
+      activeConversation?.title || "New conversation"
+    );
+    const title = shouldUpdateTitle
+      ? generateConversationTitle(submittedPrompt)
+      : activeConversation?.title || generateConversationTitle(submittedPrompt);
+    const currentMessages = activeConversation?.messages || [];
+    const memoryMessages = currentMessages
+      .filter(
+        (message) =>
+          message.content.trim() &&
+          message.status !== "failed" &&
+          !isReportPreparingPreview(message.content)
+      )
+      .slice(-12)
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+      }));
+
+    await ensurePersistedConversation(conversationId, title);
+
+    if (addToHistory) {
+      const userMessage = addUserMessage("chat", submittedPrompt, conversationId);
+      await persistMessage(conversationId, userMessage);
+      if (shouldUpdateTitle) {
+        await persistConversationTitle(conversationId, title);
+      }
+    }
+
+    const assistantMessageId = addAssistantMessage(
+      "chat",
+      "",
+      "streaming",
+      conversationId
+    );
+    await persistMessage(conversationId, {
+      id: assistantMessageId,
+      role: "assistant",
+      mode: "chat",
+      content: "",
+      status: "streaming",
+      createdAt: Date.now(),
+    });
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: submittedPrompt,
+          conversationId,
+          messages: [
+            ...memoryMessages,
+            ...(addToHistory
+              ? [{ role: "user" as const, content: submittedPrompt }]
+              : []),
+          ],
+        }),
+      });
+      const responseText = await readStreamingText(
+        res,
+        (content) => updateAssistantMessage(assistantMessageId, content, "streaming", conversationId),
+        "Chat response failed. Please try again."
+      );
+      const finalText = responseText || "I could not generate a response. Please try again.";
+
+      updateAssistantMessage(assistantMessageId, finalText, "complete", conversationId);
+      await updatePersistedMessage(assistantMessageId, finalText, "complete");
+      setPrompt("");
+    } catch (error) {
+      const errorMessage = getReportGenerationErrorMessage(
+        error,
+        "Chat response failed. Please try again."
+      );
+
+      setReportGenerationError(errorMessage);
+      updateAssistantMessage(assistantMessageId, errorMessage, "failed", conversationId);
+      await updatePersistedMessage(assistantMessageId, errorMessage, "failed");
+    } finally {
+      setChatLoading(false);
     }
   }
 
@@ -4725,7 +4892,11 @@ export default function Planner({
                 ZERINIX AI
               </p>
               <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-300">
-                {activeMode === "plan" ? "AI Plan mode" : "Market Analysis mode"}
+                {activeMode === "plan"
+                  ? "AI Plan mode"
+                  : activeMode === "market"
+                    ? "Market Analysis mode"
+                    : "AI Chat mode"}
               </span>
             </div>
             <h1 className="mt-1 truncate text-xl font-semibold text-white md:text-2xl">
@@ -4824,9 +4995,9 @@ export default function Planner({
               ))
             )}
 
-            <WorkflowPanel active={isWorking} completedSteps={workflowCompletedSteps} />
+            <WorkflowPanel active={isReportWorking} completedSteps={workflowCompletedSteps} />
 
-            {isWorking ? (
+            {isReportWorking ? (
               <ReportGenerationShell
                 title={currentReportTitle}
                 currentSection={currentReportSectionName}
@@ -4873,10 +5044,14 @@ export default function Planner({
             <div className="rounded-[2rem] border border-white/10 bg-white/[0.055] p-3 shadow-2xl shadow-black/50 backdrop-blur-2xl">
               <div className="mb-2 flex flex-wrap items-center gap-2 px-2 pt-1">
                 <span className="rounded-full border border-teal-200/20 bg-teal-200/10 px-3 py-1 text-xs font-medium text-teal-100">
-                  {activeMode === "plan" ? "AI Plan" : "Market Analysis"}
+                  {activeMode === "plan"
+                    ? "AI Plan"
+                    : activeMode === "market"
+                      ? "Market Analysis"
+                      : "AI Chat"}
                 </span>
                 <span className="text-xs text-zinc-600">
-                  Attach files, ask follow-ups, or generate a full report.
+                  Attach files, ask follow-ups, chat freely, or generate a full report.
                 </span>
               </div>
               <textarea
@@ -4927,6 +5102,17 @@ export default function Planner({
                     }`}
                   >
                     Market Analysis
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveMode("chat")}
+                    className={`rounded-2xl px-4 py-2 text-sm font-medium transition ${
+                      activeMode === "chat"
+                        ? "bg-white text-black"
+                        : "border border-white/10 bg-white/[0.04] text-zinc-300 hover:bg-white/10"
+                    }`}
+                  >
+                    AI Chat
                   </button>
                 </div>
 
