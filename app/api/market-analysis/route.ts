@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { isPrivateBetaAllowed } from "@/app/lib/beta-access";
+import { isAmbiguousBusinessRequest } from "@/app/lib/business-idea-detection";
 import { createClient } from "@/app/lib/supabase/server";
 import {
   checkRateLimit,
@@ -27,7 +28,7 @@ const client = new OpenAI({
 const fieldPrompts = {
   executiveSummary: {
     prompt:
-      "Write an investor-grade executive summary of the market analysis. Cover market attractiveness, demand signal, competitive intensity, entry timing, strategic gap, and the founder's most important decision. Include Evidence and Confidence for every major claim. Do not write a heading. Max 150 words.",
+      "Write an investor-grade executive summary of the market analysis that synthesizes the market verdict. Cover only market attractiveness, demand signal, competitive intensity, entry timing, strategic gap, and the founder's most important market decision. Do not repeat later TAM, SWOT, Porter, or entry-plan details. Do not write a heading. Max 140 words.",
     maxTokens: 1000,
   },
   marketOverview: {
@@ -37,7 +38,7 @@ const fieldPrompts = {
   },
   tamSamSom: {
     prompt:
-      "Estimate TAM, SAM, and SOM using transparent assumptions and clear sizing logic. Explain market boundaries, reachable segments, adoption constraints, what could expand or shrink the market, and validation data needed. Do not invent precision; include Evidence and Confidence. Do not write a heading. Max 210 words.",
+      "Estimate TAM, SAM, and SOM using transparent assumptions and clear sizing logic. Explain market boundaries, reachable segments, adoption constraints, what could expand or shrink the market, and validation data needed. This section owns sizing only; do not repeat competitor analysis, customer pain, or entry strategy. Do not invent precision. Do not write a heading. Max 190 words.",
     maxTokens: 1400,
   },
   industryTrends: {
@@ -72,7 +73,7 @@ const fieldPrompts = {
   },
   swotAnalysis: {
     prompt:
-      "Create a concise SWOT analysis with Strengths, Weaknesses, Opportunities, and Threats. Make each bullet specific, decision-relevant, and evidence-weighted with Confidence. Do not write a heading. Max 200 words.",
+      "Create a concise SWOT analysis with Strengths, Weaknesses, Opportunities, and Threats. Every bullet must add a distinct market diligence insight and must not repeat the Executive Summary, TAM/SAM/SOM, or competitor section. Keep bullets short, specific, decision-relevant, and evidence-weighted. Do not write a heading. Max 180 words.",
     maxTokens: 1300,
   },
   portersFiveForces: {
@@ -82,12 +83,12 @@ const fieldPrompts = {
   },
   unitEconomics: {
     prompt:
-      "Analyze Unit Economics implied by the market. Include likely ARPA/ACV, gross margin, CAC, LTV, payback period, retention/churn assumptions, and what the market suggests about viability. Use real data first; otherwise state assumptions and confidence. Do not write a heading. Max 190 words.",
+      "Analyze Unit Economics implied by the market. Include likely ARPA/ACV, gross margin, CAC, LTV, payback period, retention/churn assumptions, and what the market suggests about viability. Use numbers, ranges, and explicit assumptions only; avoid product or GTM prose covered elsewhere. Do not write a heading. Max 175 words.",
     maxTokens: 1200,
   },
   financialDashboard: {
     prompt:
-      "Create a Financial Dashboard with compact card-style lines for Revenue, Expenses, Gross Margin, CAC, LTV, Payback Period, Burn Rate, Runway, EBITDA, Break-even Month, and Investment Needed. Tie every estimate to market evidence or explicit assumptions. Do not write a heading. Max 220 words.",
+      "Create a Financial Dashboard focused only on market-derived numbers and assumptions. Use compact card-style lines for Revenue, Expenses, Gross Margin, CAC, LTV, Payback Period, Burn Rate, Runway, EBITDA, Break-even Month, and Investment Needed. Tie every estimate to market evidence or explicit assumptions. No generic commentary. Do not write a heading. Max 200 words.",
     maxTokens: 1300,
   },
   scenarioAnalysis: {
@@ -97,12 +98,12 @@ const fieldPrompts = {
   },
   kpiDashboard: {
     prompt:
-      "Create a KPI Dashboard for market validation. Include demand, conversion, willingness to pay, sales cycle, channel CAC, retention intent, competitor displacement, market pull, and target/warning thresholds. Do not write a heading. Max 180 words.",
+      "Create a KPI Dashboard for market validation. Include demand, conversion, willingness to pay, sales cycle, channel CAC, retention intent, competitor displacement, market pull, and target/warning thresholds. Each metric must have a decision implication; do not repeat the validation plan. Do not write a heading. Max 170 words.",
     maxTokens: 1000,
   },
   executiveRecommendation: {
     prompt:
-      "Write the Executive Recommendation. Select exactly one option and no second option: GO, NO GO, WAIT, PIVOT, RAISE, or BOOTSTRAP. Base it only on market evidence, risks, and financial implications. Add a short rationale and decisive next proof point. Do not write a heading. Max 130 words.",
+      "Write the Executive Recommendation with only four elements: investment decision, confidence level, biggest risks, and next actions. Select exactly one option and no second option: GO, NO GO, WAIT, PIVOT, RAISE, or BOOTSTRAP. Confidence must align with evidence: RAISE usually 70-90 only with strong validation, WAIT usually 40-70, PIVOT/NO GO usually 50-80. Never use 10% unless the analysis is unusable. Base it only on market evidence, risks, and financial implications. Do not restate the market overview, SWOT, or entry plan. Do not write a heading. Max 120 words.",
     maxTokens: 850,
   },
   entryStrategy: {
@@ -122,18 +123,18 @@ const fieldPrompts = {
   },
   founderRoadmap: {
     prompt:
-      "Create Founder Roadmap with Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months. Each step must depend on the prior market proof point and decision gate. Include action, evidence to collect, and go/no-go threshold. Do not write a heading. Max 230 words.",
+      "Create Founder Roadmap with Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months. Each step must depend on the prior market proof point and decision gate. Include only market validation, competitive learning, pricing proof, and entry readiness actions. Do not write a heading. Max 210 words.",
     maxTokens: 1200,
   },
   sourcesAssumptions: {
     prompt:
-      "List Sources / Assumptions. Separate real evidence, inferred assumptions, and missing data. For each assumption, explain reason, confidence, and which market or financial conclusion would change if wrong. Do not write a heading. Max 190 words.",
-    maxTokens: 1100,
+      "List Sources / Assumptions. Separate real evidence, inferred assumptions, and missing data. Do not write vague source claims such as 'industry reports' unless a specific source is named. When evidence is not verified, say 'Assumption based on comparable sector benchmarks', 'Needs validation with primary research', or 'Low confidence until verified'. For each assumption, explain reason, confidence, and which market or financial conclusion would change if wrong. Do not write a heading. Max 210 words.",
+    maxTokens: 1300,
   },
   sources: {
     prompt:
-      "List 4-6 reliable sources used or most relevant for validating this market. For each source, state the specific evidence it supports, how it affects the verdict, and the confidence level. Do not write a heading.",
-    maxTokens: 1200,
+      "List 4-6 reliable sources used or most relevant for validating this market. Name specific sources when available. Do not use generic phrases such as 'industry reports' as if they are verified evidence. For each source, state the specific evidence it supports, how it affects the verdict, and the confidence level. If a source is missing, label the item as an assumption needing primary research. Do not write a heading.",
+    maxTokens: 1400,
   },
 } as const;
 
@@ -320,6 +321,15 @@ function buildLanguageInstructions(language: ResponseLanguage) {
     "Generate a dedicated market analysis, not a business plan.",
     "Prioritize market overview, TAM/SAM/SOM, industry trends, competitors, gap analysis, customer pain, opportunities, threats, SWOT, Porter's Five Forces, entry strategy, validation, metrics, sources, and an investment-style verdict.",
     "Every important claim must include an Evidence note and a Confidence level: High, Medium, or Low.",
+    "Avoid repetitive evidence phrasing; when confidence is clear, use compact labels such as Evidence: and Confidence: rather than repeating explanatory boilerplate.",
+    "Do not use generic AI phrases such as 'It is important to', 'Businesses should', 'This strategy can help', 'In today's market', or 'By leveraging'.",
+    "Each report section must contribute a unique market diligence job. Do not restate conclusions, paragraphs, or examples already assigned to another section.",
+    "Executive Summary must synthesize the market verdict. Financial sections must focus on market-derived numbers and assumptions. SWOT must not repeat Executive Summary.",
+    "Use one consistent financial assumption set across Unit Economics, Financial Dashboard, Scenario Analysis, and Executive Recommendation. Reuse exact ASP, MRR, CAC, LTV, payback, burn, runway, and investment values unless explicitly updating the scenario.",
+    "Keep payback, LTV:CAC, CAC, and runway realistic for the sector and capital intensity. If a result looks unusually strong, label it as a sensitivity or low-confidence assumption rather than a base case.",
+    "Recommendation confidence must match evidence quality: RAISE normally requires 70-90 with strong validation; WAIT normally sits at 40-70; PIVOT or NO GO normally sits at 50-80 depending on evidence. Do not use extreme confidence values unless justified.",
+    "Do not fake source authority. If a precise source is unavailable, use assumption language such as 'Assumption based on comparable sector benchmarks', 'Needs validation with primary research', or 'Low confidence until verified'.",
+    "Every section must end with a complete sentence or complete bullet. Never end mid-sentence.",
     "Distinguish facts, assumptions, and hypotheses. Never present guesses as facts.",
     "Be honest about assumptions and uncertainty; do not invent precise figures.",
     "Do not give generic advice. State what the founder should decide, why, what evidence supports it, and what could disprove it.",
@@ -337,37 +347,7 @@ function buildLanguageInstructions(language: ResponseLanguage) {
 }
 
 function isWeakMarketPrompt(value: string) {
-  const normalized = value
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (!normalized) {
-    return true;
-  }
-
-  const genericPrompts = new Set([
-    "test",
-    "deneme",
-    "hi",
-    "hello",
-    "hey",
-    "merhaba",
-    "selam",
-    "ok",
-    "okay",
-    "start",
-    "başla",
-  ]);
-
-  if (genericPrompts.has(normalized)) {
-    return true;
-  }
-
-  const words = normalized.split(" ").filter(Boolean);
-
-  return words.length < 4 && normalized.length < 28;
+  return isAmbiguousBusinessRequest(value);
 }
 
 function clarificationMessage(language: ResponseLanguage) {
@@ -478,6 +458,12 @@ Derive this section only from that model so market size, ICP, competitors, prici
 Write the section as an investor-grade market diligence note with practical market-entry recommendations for the founder.
 Lead with the decision implication, then support it with Evidence and Confidence.
 Avoid generic filler. Use assumptions explicitly when evidence is limited and state what would change the verdict.
+Do not repeat ideas that belong to other sections; this section must add unique value.
+Remove filler phrases such as "It is important to", "Businesses should", "This strategy can help", "In today's market", and "By leveraging".
+Maintain exact financial consistency with the same assumption set across Unit Economics, Financial Dashboard, Scenario Analysis, and Executive Recommendation.
+Align recommendation confidence with evidence quality; avoid extreme confidence values unless the evidence clearly supports them.
+Use honest assumption language instead of vague source claims such as "industry reports".
+Finish with a complete sentence or complete bullet. Do not end mid-sentence.
 Use structured markdown inside the section when useful: short paragraphs, bullets, or compact tables.
 Write only the content for this section. Do not write a JSON object, field name, braces, markdown code block, heading, or any other report section.
 Do not generate business-plan sections here. Do not suggest website URLs, domain names, brand names, or site ideas for the product.`;

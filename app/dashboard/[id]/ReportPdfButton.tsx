@@ -159,6 +159,36 @@ function extractBullets(content: string, fallback: string) {
   return bullets.length > 0 ? bullets : [fallback];
 }
 
+function removeDuplicateVisualText(title: string, content: string) {
+  const normalizedTitle = title.toLowerCase();
+  const lines = normalizePdfText(content)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (normalizedTitle.includes("tam / sam / som")) {
+    return lines
+      .filter((line) => !/^(?:[-*]\s*)?(?:\*\*)?(tam|sam|som)(?:\*\*)?\s*[:\-–—]/i.test(line))
+      .join("\n");
+  }
+
+  if (normalizedTitle.includes("financial dashboard")) {
+    const metricPattern =
+      /^(?:[-*]\s*)?(?:\*\*)?(arr|mrr|revenue|expenses|gross margin|cac|ltv|payback(?: period)?|burn(?: rate)?|runway|ebitda|break[- ]?even(?: month)?|investment(?: needed)?)(?:\*\*)?\s*[:\-–—]/i;
+
+    return lines.filter((line) => !metricPattern.test(line)).join("\n");
+  }
+
+  if (normalizedTitle.includes("swot")) {
+    const swotPattern =
+      /^(?:[-*]\s*)?(?:\*\*)?(strengths?|weaknesses?|opportunities|threats?)(?:\*\*)?\s*[:\-–—]/i;
+
+    return lines.filter((line) => !swotPattern.test(line)).join("\n");
+  }
+
+  return normalizePdfText(content);
+}
+
 function createFileName(title: string) {
   const slug = title
     .toLowerCase()
@@ -686,19 +716,24 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
       report.sections.forEach((section) => {
         const visualHeight = getVisualHeight(section.title);
+        const sectionBodyContent = removeDuplicateVisualText(
+          section.title,
+          section.content
+        );
         const bodyLines = pdf.splitTextToSize(
-          normalizePdfText(section.content),
+          sectionBodyContent,
           bodyWidth
         ) as string[];
+        const safeBodyLines = bodyLines.length > 0 ? bodyLines : [""];
         let lineIndex = 0;
 
-        while (lineIndex < bodyLines.length) {
+        while (lineIndex < safeBodyLines.length) {
           ensureSpace(38);
 
           const availableHeight =
             pageHeight - margin - y - cardHeaderHeight - visualHeight - cardBottomPadding;
           const maxLines = Math.max(1, Math.floor(availableHeight / bodyLineHeight));
-          const lines = bodyLines.slice(lineIndex, lineIndex + maxLines);
+          const lines = safeBodyLines.slice(lineIndex, lineIndex + maxLines);
           const isContinued = lineIndex > 0;
           const cardHeight = Math.max(
             31,

@@ -51,6 +51,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { createClient } from "@/app/lib/supabase/client";
+import { isAmbiguousBusinessRequest } from "@/app/lib/business-idea-detection";
 
 type ReportSection = {
   field?: keyof (MarketReport & PlanReport);
@@ -414,37 +415,7 @@ function formatFileSize(size: number) {
 }
 
 function needsClarification(value: string) {
-  const normalized = value
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const genericPrompts = new Set([
-    "test",
-    "deneme",
-    "hi",
-    "hello",
-    "hey",
-    "merhaba",
-    "selam",
-    "ok",
-    "okay",
-    "evet",
-    "start",
-    "başla",
-  ]);
-
-  if (!normalized) {
-    return true;
-  }
-
-  if (genericPrompts.has(normalized)) {
-    return true;
-  }
-
-  const words = normalized.split(" ").filter(Boolean);
-
-  return words.length < 4 && normalized.length < 28;
+  return isAmbiguousBusinessRequest(value);
 }
 
 function detectResponseLanguage(value: string): ResponseLanguage {
