@@ -47,6 +47,7 @@ type AiExpert =
   | "Investment Advisor"
   | "Startup Mentor"
   | "Marketing Strategist"
+  | "Sales Strategist"
   | "Real Estate Advisor"
   | "Finance Advisor"
   | "Crypto Advisor"
@@ -54,23 +55,50 @@ type AiExpert =
   | "Legal Information Assistant"
   | "General AI Assistant";
 
+type ChatIntent =
+  | "Investment"
+  | "Startup"
+  | "Marketing"
+  | "Sales"
+  | "Finance"
+  | "Real Estate"
+  | "Crypto"
+  | "Career"
+  | "Legal Information"
+  | "General";
+
+const intentExpertMap: Record<ChatIntent, AiExpert> = {
+  Investment: "Investment Advisor",
+  Startup: "Startup Mentor",
+  Marketing: "Marketing Strategist",
+  Sales: "Sales Strategist",
+  Finance: "Finance Advisor",
+  "Real Estate": "Real Estate Advisor",
+  Crypto: "Crypto Advisor",
+  Career: "Career Advisor",
+  "Legal Information": "Legal Information Assistant",
+  General: "General AI Assistant",
+};
+
 const expertInstructions: Record<AiExpert, string> = {
   "Business Advisor":
     "Write from the perspective of a pragmatic business advisor. Focus on business models, market opportunity, operational tradeoffs, pricing, execution risks, and next decisions.",
   "Investment Advisor":
-    "Write from the perspective of an investment advisor for educational decision support. Focus on goals, budget, risk tolerance, time horizon, diversification, liquidity, downside risk, and clear next steps. Do not guarantee returns or present regulated financial advice as certainty.",
+    "Write from the perspective of an investment advisor for educational decision support. Focus on goals, budget, risk tolerance, time horizon, diversification, liquidity, downside risk, ranked allocation options, and clear next steps. Do not guarantee returns or present regulated financial advice as certainty.",
   "Startup Mentor":
-    "Write from the perspective of a startup mentor. Focus on founder-market fit, customer discovery, MVP scope, distribution, validation, fundraising readiness, and the next practical milestone.",
+    "Write from the perspective of a startup mentor. Focus on founder-market fit, customer discovery, MVP scope, distribution, validation, fundraising readiness, ranked startup opportunities, and the next practical milestone.",
   "Marketing Strategist":
-    "Write from the perspective of a marketing strategist. Focus on positioning, customer segments, acquisition channels, messaging, funnel metrics, experiments, and campaign priorities.",
+    "Write from the perspective of a marketing strategist. Focus on positioning, customer segments, acquisition channels, messaging, funnel metrics, experiments, ranked campaign options, and campaign priorities.",
+  "Sales Strategist":
+    "Write from the perspective of a sales strategist. Focus on ICP, pipeline design, outbound/inbound motion, qualification, pricing conversations, objection handling, close plan, revenue targets, and ranked sales plays.",
   "Real Estate Advisor":
-    "Write from the perspective of a real estate advisor for educational decision support. Focus on location, yield, occupancy, financing, regulatory risk, cash flow, liquidity, and due diligence.",
+    "Write from the perspective of a real estate advisor for educational decision support. Focus on location, yield, occupancy, financing, regulatory risk, cash flow, liquidity, ranked property strategies, and due diligence.",
   "Finance Advisor":
-    "Write from the perspective of a finance advisor for educational decision support. Focus on budgeting, cash flow, risk, tax-aware planning at a high level, scenarios, and financial discipline. Recommend a licensed professional for regulated or personal tax/legal decisions.",
+    "Write from the perspective of a finance advisor for educational decision support. Focus on budgeting, cash flow, risk, tax-aware planning at a high level, scenarios, ranked financial actions, and financial discipline. Recommend a licensed professional for regulated or personal tax/legal decisions.",
   "Crypto Advisor":
-    "Write from the perspective of a crypto advisor for educational decision support. Focus on volatility, custody, security, liquidity, regulatory risk, position sizing, and risk management. Do not guarantee returns.",
+    "Write from the perspective of a crypto advisor for educational decision support. Focus on volatility, custody, security, liquidity, regulatory risk, position sizing, ranked crypto strategies, and risk management. Do not guarantee returns.",
   "Career Advisor":
-    "Write from the perspective of a career advisor. Focus on skills, positioning, opportunities, compensation, portfolio proof, networking, and practical career moves.",
+    "Write from the perspective of a career advisor. Focus on skills, positioning, opportunities, compensation, portfolio proof, networking, ranked career moves, and practical next steps.",
   "Legal Information Assistant":
     "Write from the perspective of a legal information assistant. Provide general legal information, identify issues and questions to ask counsel, and avoid presenting the answer as legal advice.",
   "General AI Assistant":
@@ -226,56 +254,82 @@ function detectResponseLanguage(value: string) {
     : "English";
 }
 
-function classifyExpert(
+function getRoutingText(
   messages: ChatInputMessage[],
   prompt: string,
   profile: AiChatProfile | null
-): AiExpert {
+): string {
   const latest = prompt.toLowerCase();
   const recentContext = messages
     .slice(-4)
     .map((message) => message.content)
     .join("\n")
     .toLowerCase();
-  const text = `${buildProfileContext(profile).toLowerCase()}\n${recentContext}\n${latest}`;
+
+  return `${buildProfileContext(profile).toLowerCase()}\n${recentContext}\n${latest}`;
+}
+
+function classifyIntent(
+  messages: ChatInputMessage[],
+  prompt: string,
+  profile: AiChatProfile | null
+): ChatIntent {
+  const text = getRoutingText(messages, prompt, profile);
 
   if (/\b(legal|law|lawyer|attorney|contract|lawsuit|liability|compliance|terms of service|privacy policy|regulation|court|trademark|patent|hukuk|avukat|sözleşme|dava|yasal|mevzuat)\b/i.test(text)) {
-    return "Legal Information Assistant";
+    return "Legal Information";
   }
 
   if (/\b(crypto|bitcoin|btc|ethereum|eth|token|defi|nft|wallet|stablecoin|blockchain|altcoin|staking|kripto|coin|blokzincir)\b/i.test(text)) {
-    return "Crypto Advisor";
+    return "Crypto";
   }
 
   if (/\b(real estate|property|rental|rent|landlord|tenant|mortgage|airbnb|housing|commercial property|emlak|gayrimenkul|konut|arsa|kira)\b/i.test(text)) {
-    return "Real Estate Advisor";
+    return "Real Estate";
   }
 
   if (/\b(career|job|resume|cv|interview|salary|promotion|portfolio|linkedin|hire|hiring|iş kariyer|özgeçmiş|mülakat|maaş|terfi)\b/i.test(text)) {
-    return "Career Advisor";
+    return "Career";
+  }
+
+  if (/\b(sales|sell|selling|pipeline|prospecting|outbound|inbound|lead generation|lead gen|crm|quota|close rate|closing|deal|b2b sales|satış|müşteri bul|potansiyel müşteri|anlaşma|kapanış)\b/i.test(text)) {
+    return "Sales";
   }
 
   if (/\b(marketing|brand|branding|seo|ads|advertising|campaign|conversion|funnel|copywriting|content strategy|social media|growth marketing|pazarlama|reklam|marka|dönüşüm)\b/i.test(text)) {
-    return "Marketing Strategist";
+    return "Marketing";
   }
 
   if (/\b(accounting|budget|cash flow|cashflow|tax|taxes|debt|loan|profit margin|expenses|personal finance|forecast|bütçe|nakit akışı|vergi|borç|kredi|gider)\b/i.test(text)) {
-    return "Finance Advisor";
+    return "Finance";
   }
 
   if (/\b(invest|investment|portfolio|asset allocation|stocks?|bonds?|etf|fund|wealth|where should i put|where should i invest|yatırım|portföy|hisse|fon|tahvil|servet)\b/i.test(text)) {
-    return "Investment Advisor";
+    return "Investment";
   }
 
   if (/\b(startup|mvp|founder|venture|pitch deck|fundraising|seed round|accelerator|yc|startup ideas?|girişim|kurucu|yatırım turu)\b/i.test(text)) {
-    return "Startup Mentor";
+    return "Startup";
   }
 
   if (/\b(business|business idea|company|market opportunity|revenue model|pricing|operations|customer segment|iş fik|şirket|işletme|pazar fırsat|gelir modeli)\b/i.test(text)) {
-    return "Business Advisor";
+    return "Startup";
   }
 
-  return "General AI Assistant";
+  return "General";
+}
+
+function classifyExpert(
+  messages: ChatInputMessage[],
+  prompt: string,
+  profile: AiChatProfile | null
+) {
+  const intent = classifyIntent(messages, prompt, profile);
+
+  return {
+    intent,
+    expert: intentExpertMap[intent],
+  };
 }
 
 function isBusinessAdvisorRequest(prompt: string) {
@@ -374,6 +428,46 @@ function getMissingAdvisorContext(
   }
 
   return missing;
+}
+
+function isVagueAdvisorPrompt(prompt: string) {
+  return /^(where should i invest\??|where should i put my money\??|what should i build\??|i want to start a business\.?|best startup ideas\.?|business ideas\.?|startup ideas\.?|how should i invest\??|nereye yatırım yapmalıyım\??|ne iş kurmalıyım\??|iş fikri öner\.?)$/i.test(
+    prompt.trim()
+  );
+}
+
+function getEssentialAdvisorQuestions(
+  intent: ChatIntent,
+  prompt: string,
+  missing: string[]
+) {
+  if (missing.length === 0) {
+    return [];
+  }
+
+  const essentialByIntent: Partial<Record<ChatIntent, string[]>> = {
+    Investment: ["budget", "risk tolerance", "country"],
+    Startup: ["country", "budget", "experience"],
+    "Real Estate": ["country", "budget", "risk tolerance"],
+    Crypto: ["budget", "risk tolerance"],
+    Finance: ["budget", "goals"],
+  };
+  const essentials = essentialByIntent[intent] || [];
+  const essentialMissing = missing.filter((item) => essentials.includes(item));
+
+  if (isVagueAdvisorPrompt(prompt)) {
+    return essentialMissing.slice(0, 3);
+  }
+
+  if (intent === "Investment" && missing.includes("risk tolerance")) {
+    return ["risk tolerance"];
+  }
+
+  if (intent === "Investment" && missing.includes("budget")) {
+    return ["budget"];
+  }
+
+  return [];
 }
 
 function buildAdvisorClarification(
@@ -513,15 +607,22 @@ export async function POST(req: Request) {
 
     const chatProfile = normalizeProfile(profileData);
     const profileContext = buildProfileContext(chatProfile);
-    const selectedExpert = classifyExpert(messages, prompt, chatProfile);
+    const { intent: selectedIntent, expert: selectedExpert } = classifyExpert(
+      messages,
+      prompt,
+      chatProfile
+    );
     const advisorRequest = isBusinessAdvisorConversation(messages, prompt);
     const missingAdvisorContext = advisorRequest
       ? getMissingAdvisorContext(messages, prompt, chatProfile)
       : [];
+    const essentialAdvisorQuestions = advisorRequest
+      ? getEssentialAdvisorQuestions(selectedIntent, prompt, missingAdvisorContext)
+      : [];
 
-    if (advisorRequest && missingAdvisorContext.length > 0) {
+    if (advisorRequest && essentialAdvisorQuestions.length > 0) {
       return textStream(
-        buildAdvisorClarification(prompt, missingAdvisorContext, selectedExpert)
+        buildAdvisorClarification(prompt, essentialAdvisorQuestions, selectedExpert)
       );
     }
 
@@ -551,6 +652,7 @@ export async function POST(req: Request) {
       model,
       instructions: [
         "You are ZERINIX AI, a premium business operating assistant.",
+        `Classified user intent: ${selectedIntent}.`,
         `Selected expert: ${selectedExpert}.`,
         expertInstructions[selectedExpert],
         "The selected expert must shape the perspective, vocabulary, priorities, caveats, and structure of the answer. Do not announce the routing process unless it helps the user.",
@@ -561,8 +663,10 @@ export async function POST(req: Request) {
         "Use the conversation history for context, but do not fabricate facts.",
         "When attached file text is provided, treat it as user-supplied context. If a file has no readable text, say so briefly when relevant.",
         "If the user asks for a structured investor report, suggest AI Plan or Market Analysis mode instead of generating the full report in Chat mode.",
-        "AI Business Advisor behavior: when the user asks for investment ideas, business ideas, startup recommendations, market opportunities, or how to invest money, first ask only the minimum missing clarification questions: country/market, budget, risk tolerance, experience, available time, and goals. If those details are already available in the conversation, do not ask again.",
-        "When enough advisor context exists, answer as a conversational advisory memo, not a PDF report. Include ranked recommendations, reasoning, estimated investment, expected timeline, key risks, and concrete next actions. Be practical, honest about assumptions, and avoid regulated financial-advice language that sounds like a guarantee.",
+        "Advisor quality rules: ask follow-up questions only if the missing information is absolutely necessary. Never ask for information already present in the persistent profile or conversation. If useful but non-critical information is missing, proceed with clearly labeled assumptions.",
+        "When giving recommendations, go deeper than generic advice. Rank options from best to worst, show step-by-step reasoning, explain why each option was chosen, and include estimated investment, expected ROI or outcome range, timeline, risks, advantages, disadvantages, and next actions whenever applicable.",
+        "For investment, finance, crypto, real estate, legal, tax, or career-sensitive topics, use educational decision-support language, state uncertainty, and avoid guarantees.",
+        "Keep Business Plan and Market Analysis separate: do not generate a PDF-style report in Chat mode. If the user explicitly wants a full structured report, suggest AI Plan or Market Analysis.",
         "Use concise markdown when it improves readability. Match the user's language.",
       ].join("\n"),
       input: [
@@ -636,6 +740,7 @@ export async function POST(req: Request) {
                 quota_consumed: !productionLimit.quotaAlreadyCharged,
                 usage_kind: "chat_message",
                 conversation_id: conversationId || null,
+                selected_intent: selectedIntent,
                 selected_expert: selectedExpert,
                 profile_used: Boolean(profileContext),
                 model_preference: modelPreference,
@@ -665,6 +770,7 @@ export async function POST(req: Request) {
                 quota_consumed: false,
                 usage_kind: "chat_message",
                 conversation_id: conversationId || null,
+                selected_intent: selectedIntent,
                 selected_expert: selectedExpert,
                 profile_used: Boolean(profileContext),
                 model_preference: modelPreference,
