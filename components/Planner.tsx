@@ -139,6 +139,7 @@ type ReportFieldDefinition = {
 };
 
 type ChatMode = "plan" | "market" | "chat";
+type ChatModelPreference = "fast" | "balanced";
 
 type ResponseLanguage = "English" | "Turkish";
 
@@ -146,6 +147,7 @@ type ChatAttachment = {
   id: string;
   name: string;
   size: number;
+  textContent?: string;
 };
 
 type ChatMessage = {
@@ -179,6 +181,65 @@ const workflowSteps = [
   "Building strategy...",
   "Writing final report...",
 ];
+
+const chatModelOptions: Array<{
+  value: ChatModelPreference;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "fast",
+    label: "Fast",
+    description: "Quick everyday answers",
+  },
+  {
+    value: "balanced",
+    label: "Balanced",
+    description: "Deeper business reasoning",
+  },
+];
+
+const modeSuggestions: Record<ChatMode, string[]> = {
+  chat: [
+    "Help me think through whether this idea is worth pursuing.",
+    "Summarize the tradeoffs between bootstrapping and raising funding.",
+    "Review this positioning and suggest a sharper version.",
+  ],
+  plan: [
+    "Create a business plan for an AI CRM for clinics.",
+    "Build a 90-day launch plan for a B2B SaaS product.",
+    "Create an investor-ready plan for a premium private hospital chain.",
+  ],
+  market: [
+    "Analyze the market for premium online education in Germany.",
+    "Research the competitive landscape for EV charging in Turkey.",
+    "Analyze demand for a luxury electric yacht company.",
+  ],
+};
+
+const modeEmptyState: Record<ChatMode, { title: string; description: string; placeholder: string }> =
+  {
+    chat: {
+      title: "Ask ZERINIX anything.",
+      description:
+        "Use a continuous AI chat with conversation memory, markdown answers, file context, and fast model routing.",
+      placeholder: "Ask a question, paste context, or upload a file for ZERINIX to analyze...",
+    },
+    plan: {
+      title: "Create an investor-ready business plan.",
+      description:
+        "Describe the company, customer, market, constraints, and goals. ZERINIX will generate the structured Business Plan report.",
+      placeholder:
+        "Describe your business idea, target customer, pricing, geography, budget, and constraints...",
+    },
+    market: {
+      title: "Analyze a market with strategic depth.",
+      description:
+        "Enter a market, product category, geography, or business idea. ZERINIX will generate a structured Market Analysis report.",
+      placeholder:
+        "Describe the market, geography, customer segment, competitors, and strategic question...",
+    },
+  };
 
 let pdfFontPromise: Promise<string> | null = null;
 
@@ -3412,7 +3473,9 @@ export default function Planner({
       : [createConversation(initialConversationId)]
   );
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [activeMode, setActiveMode] = useState<ChatMode>("plan");
+  const [activeMode, setActiveMode] = useState<ChatMode>("chat");
+  const [chatModelPreference, setChatModelPreference] =
+    useState<ChatModelPreference>("fast");
   const [workflowCompletedSteps, setWorkflowCompletedSteps] = useState(0);
   const [reportProgress, setReportProgress] = useState(0);
   const [currentReportSectionName, setCurrentReportSectionName] = useState("");
@@ -3905,16 +3968,36 @@ export default function Planner({
     void loadPersistedMessages(conversationId);
   }
 
-  function handleFiles(files: FileList | null) {
+  async function readAttachmentText(file: File) {
+    const textLike =
+      file.type.startsWith("text/") ||
+      /\.(txt|md|csv|json|ts|tsx|js|jsx|css|html|sql)$/i.test(file.name);
+
+    if (!textLike || file.size > 220_000) {
+      return "";
+    }
+
+    try {
+      return (await file.text()).slice(0, 20_000);
+    } catch (error) {
+      console.error("[attachment text read failed]", error);
+      return "";
+    }
+  }
+
+  async function handleFiles(files: FileList | null) {
     if (!files) {
       return;
     }
 
-    const uploadedFiles = Array.from(files).map((file) => ({
-      id: createMessageId(),
-      name: file.name,
-      size: file.size,
-    }));
+    const uploadedFiles = await Promise.all(
+      Array.from(files).map(async (file) => ({
+        id: createMessageId(),
+        name: file.name,
+        size: file.size,
+        textContent: await readAttachmentText(file),
+      }))
+    );
 
     setAttachments((current) => [...current, ...uploadedFiles]);
   }
@@ -3922,7 +4005,7 @@ export default function Planner({
   function handleDropFiles(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     setIsDraggingFiles(false);
-    handleFiles(event.dataTransfer.files);
+    void handleFiles(event.dataTransfer.files);
   }
 
   function removeAttachment(id: string) {
@@ -4373,6 +4456,7 @@ export default function Planner({
       ? generateConversationTitle(submittedPrompt)
       : activeConversation?.title || generateConversationTitle(submittedPrompt);
     const currentMessages = activeConversation?.messages || [];
+    const currentAttachments = attachments;
     const memoryMessages = currentMessages
       .filter(
         (message) =>
@@ -4418,12 +4502,13 @@ export default function Planner({
         body: JSON.stringify({
           prompt: submittedPrompt,
           conversationId,
-          messages: [
-            ...memoryMessages,
-            ...(addToHistory
-              ? [{ role: "user" as const, content: submittedPrompt }]
-              : []),
-          ],
+          modelPreference: chatModelPreference,
+          attachments: currentAttachments.map((attachment) => ({
+            name: attachment.name,
+            size: attachment.size,
+            textContent: attachment.textContent || "",
+          })),
+          messages: memoryMessages,
         }),
       });
       const responseText = await readStreamingText(
@@ -4822,7 +4907,12 @@ export default function Planner({
     () => getLanguageCopy(currentResponseLanguage),
     [currentResponseLanguage]
   );
-  const activeReportMode = planReport ? "plan" : marketReport ? "market" : activeMode;
+  const activeReportMode = planReport
+    ? "plan"
+    : marketReport || activeMode === "market"
+      ? "market"
+      : "plan";
+  const activeEmptyState = modeEmptyState[activeMode];
   const activeReportFields = useMemo(
     () =>
       (activeReportMode === "plan"
@@ -4959,18 +5049,13 @@ export default function Planner({
                     <Sparkles className="h-6 w-6 text-teal-200" />
                   </div>
                   <h2 className="mt-6 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
-                    Build the next decision with ZERINIX.
+                    {activeEmptyState.title}
                   </h2>
                   <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-zinc-500">
-                    Upload context, describe your goal, and ZERINIX will stream a
-                    premium business plan or market intelligence report.
+                    {activeEmptyState.description}
                   </p>
                   <div className="mt-6 grid gap-3 text-left md:grid-cols-3">
-                    {[
-                      "Create a business plan for an AI CRM for clinics.",
-                      "Analyze the market for premium online education in Germany.",
-                      "Build a 90-day launch plan for a B2B SaaS product.",
-                    ].map((suggestion) => (
+                    {modeSuggestions[activeMode].map((suggestion) => (
                       <button
                         key={suggestion}
                         type="button"
@@ -5051,7 +5136,9 @@ export default function Planner({
                       : "AI Chat"}
                 </span>
                 <span className="text-xs text-zinc-600">
-                  Attach files, ask follow-ups, chat freely, or generate a full report.
+                  {activeMode === "chat"
+                    ? `AI Chat · ${chatModelOptions.find((option) => option.value === chatModelPreference)?.label || "Fast"} model`
+                    : "Structured report mode"}
                 </span>
               </div>
               <textarea
@@ -5065,7 +5152,7 @@ export default function Planner({
                   }
                 }}
                 className="min-h-28 w-full resize-none rounded-2xl bg-black/30 p-3 text-base leading-7 text-white outline-none ring-1 ring-white/5 transition placeholder:text-zinc-600 focus:ring-teal-200/25"
-                placeholder="Describe your business idea, market, budget, constraints, or upload supporting files..."
+                placeholder={activeEmptyState.placeholder}
               />
 
               <div className="flex flex-col gap-3 pt-3 md:flex-row md:items-center md:justify-between">
@@ -5077,7 +5164,7 @@ export default function Planner({
                       type="file"
                       multiple
                       className="hidden"
-                      onChange={(event) => handleFiles(event.target.files)}
+                      onChange={(event) => void handleFiles(event.target.files)}
                     />
                   </label>
 
@@ -5114,6 +5201,34 @@ export default function Planner({
                   >
                     AI Chat
                   </button>
+                  {activeMode === "chat" ? (
+                    <div className="flex flex-wrap items-center gap-1 rounded-2xl border border-white/10 bg-black/25 p-1">
+                      {chatModelOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setChatModelPreference(option.value)}
+                          className={`rounded-xl px-3 py-2 text-left transition ${
+                            chatModelPreference === option.value
+                              ? "bg-teal-200 text-black"
+                              : "text-zinc-400 hover:bg-white/10 hover:text-white"
+                          }`}
+                          aria-pressed={chatModelPreference === option.value}
+                        >
+                          <span className="block text-xs font-semibold">{option.label}</span>
+                          <span
+                            className={`block text-[10px] ${
+                              chatModelPreference === option.value
+                                ? "text-black/60"
+                                : "text-zinc-600"
+                            }`}
+                          >
+                            {option.description}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
 
                 <button

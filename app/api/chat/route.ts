@@ -24,6 +24,12 @@ type ChatInputMessage = {
   content: string;
 };
 
+type ChatAttachmentInput = {
+  name: string;
+  size: number;
+  textContent: string;
+};
+
 function normalizeMessages(value: unknown): ChatInputMessage[] {
   if (!Array.isArray(value)) {
     return [];
@@ -53,6 +59,54 @@ function normalizeMessages(value: unknown): ChatInputMessage[] {
     })
     .filter((message): message is ChatInputMessage => Boolean(message))
     .slice(-16);
+}
+
+function normalizeAttachments(value: unknown): ChatAttachmentInput[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((attachment) => {
+      if (!attachment || typeof attachment !== "object") {
+        return null;
+      }
+
+      const name = (attachment as { name?: unknown }).name;
+      const size = (attachment as { size?: unknown }).size;
+      const textContent = (attachment as { textContent?: unknown }).textContent;
+
+      if (typeof name !== "string" || !name.trim()) {
+        return null;
+      }
+
+      return {
+        name: name.trim().slice(0, 180),
+        size: typeof size === "number" && Number.isFinite(size) ? size : 0,
+        textContent:
+          typeof textContent === "string" ? textContent.trim().slice(0, 12_000) : "",
+      };
+    })
+    .filter((attachment): attachment is ChatAttachmentInput => Boolean(attachment))
+    .slice(-6);
+}
+
+function buildAttachmentContext(attachments: ChatAttachmentInput[]) {
+  if (attachments.length === 0) {
+    return "";
+  }
+
+  return attachments
+    .map((attachment, index) => {
+      const fileIntro = `File ${index + 1}: ${attachment.name} (${attachment.size} bytes)`;
+
+      if (!attachment.textContent) {
+        return `${fileIntro}\nReadable text was not available for this file.`;
+      }
+
+      return `${fileIntro}\n${attachment.textContent}`;
+    })
+    .join("\n\n---\n\n");
 }
 
 export async function POST(req: Request) {
@@ -103,6 +157,8 @@ export async function POST(req: Request) {
     const body = await req.json();
     const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
     const messages = normalizeMessages(body?.messages);
+    const attachments = normalizeAttachments(body?.attachments);
+    const modelPreference = body?.modelPreference === "balanced" ? "balanced" : "fast";
     const conversationId =
       typeof body?.conversationId === "string"
         ? body.conversationId.trim().slice(0, 128)
@@ -122,7 +178,8 @@ export async function POST(req: Request) {
       reportField: "chat",
       ip,
     });
-    const { model, planTier, promptHash } = productionLimit;
+    const { model: routedModel, planTier, promptHash } = productionLimit;
+    const model = modelPreference === "balanced" ? "gpt-5-mini" : routedModel;
 
     if (!productionLimit.allowed) {
       return NextResponse.json(
@@ -131,12 +188,15 @@ export async function POST(req: Request) {
       );
     }
 
+    const attachmentContext = buildAttachmentContext(attachments);
+
     const stream = await client.responses.create({
       model,
       instructions: [
         "You are ZERINIX AI, a premium business operating assistant.",
         "Answer naturally and directly. You may help with business, strategy, operations, finance, product, marketing, technology, or general questions.",
         "Use the conversation history for context, but do not fabricate facts.",
+        "When attached file text is provided, treat it as user-supplied context. If a file has no readable text, say so briefly when relevant.",
         "If the user asks for a structured investor report, suggest AI Plan or Market Analysis mode instead of generating the full report in Chat mode.",
         "Use concise markdown when it improves readability. Match the user's language.",
       ].join("\n"),
@@ -145,6 +205,14 @@ export async function POST(req: Request) {
           role: message.role,
           content: message.content,
         })),
+        ...(attachmentContext
+          ? [
+              {
+                role: "user" as const,
+                content: `Attached file context:\n\n${attachmentContext}`,
+              },
+            ]
+          : []),
         {
           role: "user" as const,
           content: prompt,
@@ -195,6 +263,8 @@ export async function POST(req: Request) {
                 quota_consumed: !productionLimit.quotaAlreadyCharged,
                 usage_kind: "chat_message",
                 conversation_id: conversationId || null,
+                model_preference: modelPreference,
+                attachment_count: attachments.length,
                 actual_ai_call: true,
               },
             });
@@ -220,6 +290,8 @@ export async function POST(req: Request) {
                 quota_consumed: false,
                 usage_kind: "chat_message",
                 conversation_id: conversationId || null,
+                model_preference: modelPreference,
+                attachment_count: attachments.length,
                 actual_ai_call: true,
               },
             });

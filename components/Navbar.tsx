@@ -15,6 +15,9 @@ export default function Navbar() {
           <a className="transition hover:text-white" href="#platform">
             Platform
           </a>
+          <Link className="transition hover:text-white" href="/chat">
+            AI Chat
+          </Link>
           <Link className="transition hover:text-white" href="/login">
             Giriş Yap
           </Link>
