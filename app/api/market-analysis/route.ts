@@ -420,8 +420,8 @@ function buildLanguageInstructions(language: ResponseLanguage) {
     "Respect strict section ownership: Executive Summary = market verdict only; Market Overview = category and demand context only; TAM/SAM/SOM = market sizing only; Industry Trends = timing forces only; Target Customer = ICP only; Competitor Analysis = competitors only; Customer Pain Points = pain only; Opportunities and Threats = distinct market openings/risks only; SWOT = non-duplicative matrix only; Porter's Five Forces = industry forces only; Unit Economics = unit metrics only; Financial Dashboard = high-level KPIs only; Scenario Analysis = future scenarios only; KPI Dashboard/Key Metrics = operating validation metrics only; Executive Recommendation = final investment decision only; Entry Strategy = market entry only; Validation Plan = tests only; Founder Roadmap = execution sequence only; Sources / Assumptions and Sources = sources only.",
     "Never repeat the same metric more than once unless necessary. If a metric appears in Unit Economics, later financial sections may summarize it but must not explain it again.",
     "Use one consistent financial assumption set across Unit Economics, Financial Dashboard, Scenario Analysis, and Executive Recommendation. Reuse exact ASP, MRR, CAC, LTV, payback, burn, runway, and investment values unless explicitly updating the scenario.",
-    "The AI-Driven Financial Modeling Engine block in the user input defines how to calculate dynamic financial metrics. Build the values from the user's business idea, target customer, pricing model, industry, geography, and business model.",
-    "Unit Economics, KPI Dashboard, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation must reference the same AI-generated financial model whenever financial metrics appear.",
+    "The Data-Driven Financial Analysis Engine block in the user input contains the calculated base-case financial model. Use those values as the source of truth.",
+    "Unit Economics, KPI Dashboard, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation must reference the same calculated financial model whenever financial metrics appear.",
     "Every financial estimate must include a confidence level. If confidence is Low, label it as an assumption needing validation instead of presenting it as a verified benchmark.",
     "Keep payback, LTV:CAC, CAC, and runway realistic for the sector and capital intensity. If a result looks unusually strong, label it as a sensitivity or low-confidence assumption rather than a base case.",
     "Recommendation confidence must match evidence quality: RAISE normally requires 70-90 with strong validation; WAIT normally sits at 40-70; PIVOT or NO GO normally sits at 50-80 depending on evidence. Do not use extreme confidence values unless justified.",
@@ -572,8 +572,8 @@ Follow the section ownership contract exactly; do not borrow content assigned to
 Do not repeat ideas, metrics, examples, or conclusions that belong to other sections; this section must add unique value.
 Remove filler phrases such as "It is important to", "Businesses should", "This strategy can help", "In today's market", and "By leveraging".
 Maintain exact financial consistency with the same assumption set across Unit Economics, Financial Dashboard, Scenario Analysis, and Executive Recommendation.
-Use the AI-Driven Financial Modeling Engine block to calculate one dynamic internal model for TAM, SAM, SOM, ARPA, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, Break-even Month, and Investment Needed.
-Reuse that single generated model everywhere. Do not create conflicting financial values in separate sections. If a generated value is low-confidence, call it an assumption and state what must be validated.
+Use the Data-Driven Financial Analysis Engine block as the calculated base-case model for TAM, SAM, SOM, ARPA, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, Break-even Month, Investment Needed, ROI, and Revenue Forecast.
+Reuse that single calculated model everywhere. Do not create conflicting financial values in separate sections. If a value is low-confidence, warn that it needs validation and explain why.
 Align recommendation confidence with evidence quality; avoid extreme confidence values unless the evidence clearly supports them.
 Use honest assumption language instead of vague source claims such as "industry reports".
 Finish with a complete sentence or complete bullet. Do not end mid-sentence.
@@ -711,8 +711,8 @@ Before writing visible output, silently construct the full Integrated Market Str
 Derive every section only from that model so market size, ICP, competitors, pricing, GTM, financial implications, risks, and recommendation stay consistent.
 Follow the section ownership contract exactly; do not borrow content assigned to another section.
 Do not repeat ideas, metrics, examples, or conclusions across sections.
-Use the AI-Driven Financial Modeling Engine block to calculate one dynamic internal model for TAM, SAM, SOM, ARPA, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, Break-even Month, and Investment Needed.
-Reuse that single generated model everywhere. Do not create conflicting financial values in separate sections. If a generated value is low-confidence, call it an assumption and state what must be validated.
+Use the Data-Driven Financial Analysis Engine block as the calculated base-case model for TAM, SAM, SOM, ARPA, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, Break-even Month, Investment Needed, ROI, and Revenue Forecast.
+Reuse that single calculated model everywhere. Do not create conflicting financial values in separate sections. If a value is low-confidence, warn that it needs validation and explain why.
 Align recommendation confidence with evidence quality; avoid extreme confidence values unless the evidence clearly supports them.
 Use honest assumption language instead of vague source claims such as "industry reports".
 Finish every section with a complete sentence or complete bullet. Never end mid-sentence.
