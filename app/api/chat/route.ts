@@ -735,7 +735,7 @@ export async function POST(req: Request) {
 
     const attachmentContext = buildAttachmentContext(attachments);
 
-    const stream = await client.responses.create({
+    const stream = client.responses.stream({
       model,
       instructions: [
         "You are ZERINIX AI, a premium business operating assistant.",
@@ -783,7 +783,6 @@ export async function POST(req: Request) {
         },
       ],
       max_output_tokens: 1_800,
-      stream: true,
     });
 
     const encoder = new TextEncoder();
@@ -835,12 +834,25 @@ export async function POST(req: Request) {
             }
 
             if (!streamedText.trim()) {
+              const finalResponse = await stream.finalResponse();
+
+              tokenUsage = extractTokenUsage(finalResponse);
+              completedText = extractResponseText(finalResponse);
+
+              if (completedText) {
+                streamedText = completedText;
+                controller.enqueue(encoder.encode(completedText));
+              }
+            }
+
+            if (!streamedText.trim()) {
               console.error("[api:chat] OpenAI completed without output text", {
                 model,
                 selectedIntent,
                 selectedExpert,
                 conversationId: conversationId || null,
                 completedTextLength: completedText.length,
+                streamFinalResponseAvailable: Boolean(completedText),
               });
 
               throw new Error("OpenAI chat response completed without output text.");
