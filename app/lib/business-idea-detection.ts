@@ -40,6 +40,39 @@ const ambiguousBusinessPatterns = [
   /\b(i\s+need|i\s+want)\s+(a\s+)?(business|startup|market)?\s*idea\b/i,
 ];
 
+const concreteBusinessTerms = [
+  "ai",
+  "assistant",
+  "automation",
+  "battery",
+  "brand",
+  "chain",
+  "clinic",
+  "company",
+  "crm",
+  "cybersecurity",
+  "electric",
+  "ev",
+  "factory",
+  "franchise",
+  "global",
+  "hospital",
+  "hotel",
+  "legal",
+  "luxury",
+  "manufacturer",
+  "marketplace",
+  "platform",
+  "premium",
+  "private",
+  "restaurant",
+  "saas",
+  "service",
+  "software",
+  "studio",
+  "yacht",
+];
+
 export function normalizeBusinessIdeaInput(value: string) {
   return value
     .toLowerCase()
@@ -48,11 +81,25 @@ export function normalizeBusinessIdeaInput(value: string) {
     .trim();
 }
 
+export function isConcreteBusinessDescription(value: string) {
+  const normalized = normalizeBusinessIdeaInput(value);
+  const words = normalized.split(" ").filter(Boolean);
+
+  return (
+    words.length >= 2 &&
+    concreteBusinessTerms.some((term) => words.includes(term))
+  );
+}
+
 export function isAmbiguousBusinessRequest(value: string) {
   const normalized = normalizeBusinessIdeaInput(value);
 
   if (!normalized) {
     return true;
+  }
+
+  if (isConcreteBusinessDescription(normalized)) {
+    return false;
   }
 
   if (ambiguousBusinessPrompts.has(normalized)) {

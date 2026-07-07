@@ -442,9 +442,9 @@ function getLanguageCopy(language: ResponseLanguage) {
       marketError: "Pazar analizi sırasında bir hata oluştu.",
       marketRetryError: "Pazar analizi sırasında bir hata oluştu. Lütfen tekrar deneyin.",
       planClarification:
-        "Hangi iş fikrini planlayalım? Kısaca ürününü, hedef müşterini ve ulaşmak istediğin sonucu yaz.",
+        "Lütfen planlamak istediğin iş fikrini birkaç kelimeyle yaz. Örneğin: premium hastane zinciri, AI hukuk asistanı veya lüks otel markası.",
       marketClarification:
-        "Hangi iş fikri veya sektör için pazar analizi yapmamı istersin? Kısaca ürününü, hedef müşterini ve ülke/pazarını yaz.",
+        "Lütfen analiz etmemi istediğin iş fikri veya sektörü yaz. Örneğin: lüks otel markası, elektrikli yat şirketi veya EV batarya üreticisi.",
     };
   }
 
@@ -460,9 +460,9 @@ function getLanguageCopy(language: ResponseLanguage) {
     marketError: "Something went wrong during market analysis.",
     marketRetryError: "Something went wrong during market analysis. Please try again.",
     planClarification:
-      "Which business idea should we plan? Briefly describe your product, target customer, and desired outcome.",
+      "Please enter the business idea you want to plan. For example: luxury hotel brand, AI legal assistant, or premium private hospital chain.",
     marketClarification:
-      "Which business idea or industry should I analyze? Briefly share your product, target customer, and target country or market.",
+      "Please enter the business idea or industry you want analyzed. For example: luxury hotel brand, electric yacht company, or EV battery manufacturer.",
   };
 }
 
