@@ -165,6 +165,7 @@ type PlanReportChunk = Partial<Record<PlanReportField, string>>;
 const planFields = Object.keys(planPrompts) as PlanReportField[];
 const FULL_REPORT_FIELD = "fullReport";
 const MAX_AI_CALLS_PER_PLAN_REPORT = 1;
+const FULL_REPORT_MAX_OUTPUT_TOKENS = 12_000;
 
 type ResponseLanguage = "English" | "Turkish";
 
@@ -311,27 +312,108 @@ function extractResponseText(response: unknown) {
     .join("");
 }
 
+function getOpenAiResponseStatusDetails(response: unknown) {
+  if (!response || typeof response !== "object") {
+    return {
+      status: "unknown",
+      incompleteReason: "",
+      errorMessage: "",
+    };
+  }
+
+  const status =
+    typeof (response as { status?: unknown }).status === "string"
+      ? (response as { status: string }).status
+      : "unknown";
+  const incompleteDetails = (response as { incomplete_details?: unknown })
+    .incomplete_details;
+  const incompleteReason =
+    incompleteDetails &&
+    typeof incompleteDetails === "object" &&
+    typeof (incompleteDetails as { reason?: unknown }).reason === "string"
+      ? (incompleteDetails as { reason: string }).reason
+      : "";
+  const error = (response as { error?: unknown }).error;
+  const errorMessage =
+    error &&
+    typeof error === "object" &&
+    typeof (error as { message?: unknown }).message === "string"
+      ? (error as { message: string }).message
+      : "";
+
+  return {
+    status,
+    incompleteReason,
+    errorMessage,
+  };
+}
+
+function assertCompletedOpenAiResponse(response: unknown) {
+  const details = getOpenAiResponseStatusDetails(response);
+
+  if (details.status !== "completed") {
+    throw new Error(
+      [
+        `OpenAI response ended with status "${details.status}".`,
+        details.incompleteReason ? `Incomplete reason: ${details.incompleteReason}.` : "",
+        details.errorMessage ? `Provider error: ${details.errorMessage}.` : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+  }
+}
+
 function parseFullPlanReport(value: string): Record<PlanReportField, string> {
-  const parsed = JSON.parse(value) as Record<string, unknown>;
+  let parsed: Record<string, unknown>;
+
+  try {
+    parsed = JSON.parse(value) as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(
+      `Full report JSON parse failed: ${
+        error instanceof Error ? error.message : "Invalid JSON"
+      }. outputLength=${value.length}`
+    );
+  }
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Report generation failed before every section completed.");
+    throw new Error(
+      `Full report JSON validation failed: root output was not an object. outputLength=${value.length}`
+    );
   }
 
   const report = {} as Record<PlanReportField, string>;
+  const invalidFields: string[] = [];
+  const failureFields: string[] = [];
 
   for (const field of planFields) {
     const content = parsed[field];
 
-    if (
-      typeof content !== "string" ||
-      !content.trim() ||
-      isReportGenerationFailureText(content)
-    ) {
-      throw new Error("Report generation failed before every section completed.");
+    if (typeof content !== "string" || !content.trim()) {
+      invalidFields.push(field);
+      continue;
+    }
+
+    if (isReportGenerationFailureText(content)) {
+      failureFields.push(field);
+      continue;
     }
 
     report[field] = content.trim();
+  }
+
+  if (invalidFields.length || failureFields.length) {
+    throw new Error(
+      [
+        "Full report JSON validation failed.",
+        invalidFields.length ? `Missing/invalid fields: ${invalidFields.join(", ")}.` : "",
+        failureFields.length ? `Failure-text fields: ${failureFields.join(", ")}.` : "",
+        `outputLength=${value.length}`,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
   }
 
   return report;
@@ -703,7 +785,7 @@ Report quality rules:
             model,
             instructions,
             input: fullReportInput,
-            max_output_tokens: 7000,
+            max_output_tokens: FULL_REPORT_MAX_OUTPUT_TOKENS,
             reasoning: {
               effort: "low",
             },
@@ -720,7 +802,14 @@ Report quality rules:
         const tokenUsage = extractTokenUsage(response);
         const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
         const responseTimeMs = Date.now() - startedAt;
+        assertCompletedOpenAiResponse(response);
         const responseText = extractResponseText(response);
+        if (!responseText.trim()) {
+          const details = getOpenAiResponseStatusDetails(response);
+          throw new Error(
+            `OpenAI response completed without output_text. status=${details.status} outputLength=0`
+          );
+        }
         const parsedReport = parseFullPlanReport(responseText);
         const cacheResponseText = JSON.stringify(parsedReport);
 
