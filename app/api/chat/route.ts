@@ -30,6 +30,41 @@ type ChatAttachmentInput = {
   textContent: string;
 };
 
+type AiExpert =
+  | "Business Advisor"
+  | "Investment Advisor"
+  | "Startup Mentor"
+  | "Marketing Strategist"
+  | "Real Estate Advisor"
+  | "Finance Advisor"
+  | "Crypto Advisor"
+  | "Career Advisor"
+  | "Legal Information Assistant"
+  | "General AI Assistant";
+
+const expertInstructions: Record<AiExpert, string> = {
+  "Business Advisor":
+    "Write from the perspective of a pragmatic business advisor. Focus on business models, market opportunity, operational tradeoffs, pricing, execution risks, and next decisions.",
+  "Investment Advisor":
+    "Write from the perspective of an investment advisor for educational decision support. Focus on goals, budget, risk tolerance, time horizon, diversification, liquidity, downside risk, and clear next steps. Do not guarantee returns or present regulated financial advice as certainty.",
+  "Startup Mentor":
+    "Write from the perspective of a startup mentor. Focus on founder-market fit, customer discovery, MVP scope, distribution, validation, fundraising readiness, and the next practical milestone.",
+  "Marketing Strategist":
+    "Write from the perspective of a marketing strategist. Focus on positioning, customer segments, acquisition channels, messaging, funnel metrics, experiments, and campaign priorities.",
+  "Real Estate Advisor":
+    "Write from the perspective of a real estate advisor for educational decision support. Focus on location, yield, occupancy, financing, regulatory risk, cash flow, liquidity, and due diligence.",
+  "Finance Advisor":
+    "Write from the perspective of a finance advisor for educational decision support. Focus on budgeting, cash flow, risk, tax-aware planning at a high level, scenarios, and financial discipline. Recommend a licensed professional for regulated or personal tax/legal decisions.",
+  "Crypto Advisor":
+    "Write from the perspective of a crypto advisor for educational decision support. Focus on volatility, custody, security, liquidity, regulatory risk, position sizing, and risk management. Do not guarantee returns.",
+  "Career Advisor":
+    "Write from the perspective of a career advisor. Focus on skills, positioning, opportunities, compensation, portfolio proof, networking, and practical career moves.",
+  "Legal Information Assistant":
+    "Write from the perspective of a legal information assistant. Provide general legal information, identify issues and questions to ask counsel, and avoid presenting the answer as legal advice.",
+  "General AI Assistant":
+    "Write from the perspective of a clear, capable general AI assistant. Be direct, useful, and adapt to the user's task.",
+};
+
 function normalizeMessages(value: unknown): ChatInputMessage[] {
   if (!Array.isArray(value)) {
     return [];
@@ -116,6 +151,54 @@ function detectResponseLanguage(value: string) {
     : "English";
 }
 
+function classifyExpert(messages: ChatInputMessage[], prompt: string): AiExpert {
+  const latest = prompt.toLowerCase();
+  const recentContext = messages
+    .slice(-4)
+    .map((message) => message.content)
+    .join("\n")
+    .toLowerCase();
+  const text = `${recentContext}\n${latest}`;
+
+  if (/\b(legal|law|lawyer|attorney|contract|lawsuit|liability|compliance|terms of service|privacy policy|regulation|court|trademark|patent|hukuk|avukat|sözleşme|dava|yasal|mevzuat)\b/i.test(text)) {
+    return "Legal Information Assistant";
+  }
+
+  if (/\b(crypto|bitcoin|btc|ethereum|eth|token|defi|nft|wallet|stablecoin|blockchain|altcoin|staking|kripto|coin|blokzincir)\b/i.test(text)) {
+    return "Crypto Advisor";
+  }
+
+  if (/\b(real estate|property|rental|rent|landlord|tenant|mortgage|airbnb|housing|commercial property|emlak|gayrimenkul|konut|arsa|kira)\b/i.test(text)) {
+    return "Real Estate Advisor";
+  }
+
+  if (/\b(career|job|resume|cv|interview|salary|promotion|portfolio|linkedin|hire|hiring|iş kariyer|özgeçmiş|mülakat|maaş|terfi)\b/i.test(text)) {
+    return "Career Advisor";
+  }
+
+  if (/\b(marketing|brand|branding|seo|ads|advertising|campaign|conversion|funnel|copywriting|content strategy|social media|growth marketing|pazarlama|reklam|marka|dönüşüm)\b/i.test(text)) {
+    return "Marketing Strategist";
+  }
+
+  if (/\b(accounting|budget|cash flow|cashflow|tax|taxes|debt|loan|profit margin|expenses|personal finance|forecast|bütçe|nakit akışı|vergi|borç|kredi|gider)\b/i.test(text)) {
+    return "Finance Advisor";
+  }
+
+  if (/\b(invest|investment|portfolio|asset allocation|stocks?|bonds?|etf|fund|wealth|where should i put|where should i invest|yatırım|portföy|hisse|fon|tahvil|servet)\b/i.test(text)) {
+    return "Investment Advisor";
+  }
+
+  if (/\b(startup|mvp|founder|venture|pitch deck|fundraising|seed round|accelerator|yc|startup ideas?|girişim|kurucu|yatırım turu)\b/i.test(text)) {
+    return "Startup Mentor";
+  }
+
+  if (/\b(business|business idea|company|market opportunity|revenue model|pricing|operations|customer segment|iş fik|şirket|işletme|pazar fırsat|gelir modeli)\b/i.test(text)) {
+    return "Business Advisor";
+  }
+
+  return "General AI Assistant";
+}
+
 function isBusinessAdvisorRequest(prompt: string) {
   const normalized = prompt.toLowerCase();
 
@@ -200,7 +283,11 @@ function getMissingAdvisorContext(messages: ChatInputMessage[], prompt: string) 
   return missing;
 }
 
-function buildAdvisorClarification(prompt: string, missing: string[]) {
+function buildAdvisorClarification(
+  prompt: string,
+  missing: string[],
+  expert: AiExpert
+) {
   const language = detectResponseLanguage(prompt);
   const requested = missing;
 
@@ -215,7 +302,7 @@ function buildAdvisorClarification(prompt: string, missing: string[]) {
     };
 
     return [
-      "Sana gerçekten uygulanabilir öneriler verebilmem için birkaç bilgiye ihtiyacım var:",
+      `${expert} olarak sana gerçekten uygulanabilir öneriler verebilmem için birkaç bilgiye ihtiyacım var:`,
       "",
       ...requested.map((item, index) => `${index + 1}. ${labels[item] || item}?`),
       "",
@@ -233,7 +320,7 @@ function buildAdvisorClarification(prompt: string, missing: string[]) {
   };
 
   return [
-    "To give you useful recommendations, I need a little context first:",
+    `As your ${expert}, I need a little context first to give you useful recommendations:`,
     "",
     ...requested.map((item, index) => `${index + 1}. What is your ${labels[item] || item}?`),
     "",
@@ -319,13 +406,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Message is required." }, { status: 400 });
     }
 
+    const selectedExpert = classifyExpert(messages, prompt);
     const advisorRequest = isBusinessAdvisorConversation(messages, prompt);
     const missingAdvisorContext = advisorRequest
       ? getMissingAdvisorContext(messages, prompt)
       : [];
 
     if (advisorRequest && missingAdvisorContext.length > 0) {
-      return textStream(buildAdvisorClarification(prompt, missingAdvisorContext));
+      return textStream(
+        buildAdvisorClarification(prompt, missingAdvisorContext, selectedExpert)
+      );
     }
 
     const productionLimit = await checkAiProductionRateLimit({
@@ -354,6 +444,9 @@ export async function POST(req: Request) {
       model,
       instructions: [
         "You are ZERINIX AI, a premium business operating assistant.",
+        `Selected expert: ${selectedExpert}.`,
+        expertInstructions[selectedExpert],
+        "The selected expert must shape the perspective, vocabulary, priorities, caveats, and structure of the answer. Do not announce the routing process unless it helps the user.",
         "Answer naturally and directly. You may help with business, strategy, operations, finance, product, marketing, technology, or general questions.",
         "Use the conversation history for context, but do not fabricate facts.",
         "When attached file text is provided, treat it as user-supplied context. If a file has no readable text, say so briefly when relevant.",
@@ -425,6 +518,7 @@ export async function POST(req: Request) {
                 quota_consumed: !productionLimit.quotaAlreadyCharged,
                 usage_kind: "chat_message",
                 conversation_id: conversationId || null,
+                selected_expert: selectedExpert,
                 model_preference: modelPreference,
                 attachment_count: attachments.length,
                 actual_ai_call: true,
@@ -452,6 +546,7 @@ export async function POST(req: Request) {
                 quota_consumed: false,
                 usage_kind: "chat_message",
                 conversation_id: conversationId || null,
+                selected_expert: selectedExpert,
                 model_preference: modelPreference,
                 attachment_count: attachments.length,
                 actual_ai_call: true,
