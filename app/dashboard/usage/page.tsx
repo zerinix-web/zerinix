@@ -8,8 +8,10 @@ import {
   Zap,
 } from "lucide-react";
 import { createClient } from "@/app/lib/supabase/server";
+import { isFounderAccount } from "@/app/lib/beta-access";
 import {
   getUserPlanTier,
+  loadAdminCostSummary,
   loadUserUsageSummary,
 } from "@/app/lib/ai/governance";
 import DashboardSidebar from "../DashboardSidebar";
@@ -44,9 +46,11 @@ export default async function UsageDashboardPage() {
     redirect("/login");
   }
 
-  const [planTier, summary] = await Promise.all([
+  const isAdmin = isFounderAccount(user);
+  const [planTier, summary, adminSummary] = await Promise.all([
     getUserPlanTier(supabase, user.id),
     loadUserUsageSummary(supabase, user.id),
+    isAdmin ? loadAdminCostSummary(supabase) : Promise.resolve(null),
   ]);
 
   const cards = [
@@ -148,6 +152,92 @@ export default async function UsageDashboardPage() {
               without changing the planner interface.
             </p>
           </div>
+
+          {adminSummary ? (
+            <div className="mt-8 rounded-3xl border border-teal-300/15 bg-teal-300/[0.035] p-6">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-teal-200/75">
+                    Admin Cost Control
+                  </p>
+                  <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
+                    Daily AI Cost Dashboard
+                  </h2>
+                </div>
+                <div className="rounded-2xl border border-teal-200/20 bg-black/35 px-4 py-3 text-right">
+                  <p className="text-xs text-zinc-500">Today</p>
+                  <p className="text-xl font-semibold text-teal-100">
+                    {formatCurrency(adminSummary.totalDailyCostUsd)}
+                  </p>
+                </div>
+              </div>
+
+              {adminSummary.error ? (
+                <p className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-950/20 p-4 text-sm text-amber-100">
+                  Admin telemetry is limited by current database access: {adminSummary.error}
+                </p>
+              ) : null}
+
+              <div className="mt-5 grid gap-4 xl:grid-cols-3">
+                <div className="rounded-3xl border border-white/10 bg-black/35 p-4">
+                  <p className="text-sm font-semibold text-white">Cost per mode</p>
+                  <div className="mt-3 space-y-3">
+                    {adminSummary.costPerMode.map((item) => (
+                      <div key={item.mode} className="flex items-center justify-between gap-4 text-sm">
+                        <span className="text-zinc-400">{item.mode}</span>
+                        <span className="font-medium text-teal-100">
+                          {formatCurrency(item.costUsd)} · {formatNumber(item.requests)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-white/10 bg-black/35 p-4">
+                  <p className="text-sm font-semibold text-white">Cost per user</p>
+                  <div className="mt-3 space-y-3">
+                    {adminSummary.costPerUser.map((item) => (
+                      <div key={item.userId} className="flex items-center justify-between gap-4 text-sm">
+                        <span className="max-w-40 truncate text-zinc-400">{item.userId}</span>
+                        <span className="font-medium text-teal-100">
+                          {formatCurrency(item.costUsd)} · {formatNumber(item.requests)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-white/10 bg-black/35 p-4">
+                  <p className="text-sm font-semibold text-white">Cache savings</p>
+                  <p className="mt-3 text-3xl font-semibold text-teal-100">
+                    {formatCurrency(adminSummary.cacheSavingsUsd)}
+                  </p>
+                  <p className="mt-2 text-sm text-zinc-500">
+                    Estimated avoided provider spend from cached responses.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-5 overflow-x-auto rounded-3xl border border-white/10 bg-black/35">
+                <div className="grid min-w-[760px] grid-cols-5 border-b border-white/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                  <span>Mode</span>
+                  <span>Endpoint</span>
+                  <span>Model</span>
+                  <span>Tokens</span>
+                  <span>Cost</span>
+                </div>
+                {adminSummary.mostExpensiveRequests.map((item) => (
+                  <div key={`${item.createdAt}-${item.endpoint}-${item.costUsd}`} className="grid min-w-[760px] grid-cols-5 gap-3 border-b border-white/10 px-4 py-3 text-sm last:border-b-0">
+                    <span className="text-white">{item.mode}</span>
+                    <span className="text-zinc-400">{item.endpoint}</span>
+                    <span className="text-zinc-400">{item.model}</span>
+                    <span className="text-zinc-400">{formatNumber(item.totalTokens)}</span>
+                    <span className="font-medium text-teal-100">{formatCurrency(item.costUsd)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </section>
       </div>
     </main>

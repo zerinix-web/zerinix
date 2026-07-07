@@ -9,9 +9,14 @@ import {
 } from "@/app/lib/security/rate-limit";
 import { logServerError } from "@/app/lib/security/errors";
 import {
+  createAiCacheKey,
   estimateAiCostUsd,
   extractTokenUsage,
+  getCachedAiResponse,
+  normalizeAiPrompt,
   recordAiUsage,
+  storeCachedAiResponse,
+  type AiRequestKind,
 } from "@/app/lib/ai/governance";
 import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 
@@ -330,6 +335,38 @@ function classifyExpert(
     intent,
     expert: intentExpertMap[intent],
   };
+}
+
+function classifyChatRequestKind(
+  intent: ChatIntent,
+  attachments: ChatAttachmentInput[],
+  advisorRequest: boolean
+): AiRequestKind {
+  if (attachments.length > 0) {
+    return "file_analysis";
+  }
+
+  if (intent === "Investment" || intent === "Finance" || intent === "Crypto" || intent === "Real Estate") {
+    return "investment_advice";
+  }
+
+  if (advisorRequest || intent === "Startup" || intent === "Marketing" || intent === "Sales") {
+    return "business_advice";
+  }
+
+  return "simple_chat";
+}
+
+function shouldUseChatCache(input: {
+  attachments: ChatAttachmentInput[];
+  messages: ChatInputMessage[];
+  requestKind: AiRequestKind;
+}) {
+  return (
+    input.attachments.length === 0 &&
+    input.requestKind !== "file_analysis" &&
+    input.messages.length <= 2
+  );
 }
 
 function isBusinessAdvisorRequest(prompt: string) {
@@ -706,6 +743,12 @@ export async function POST(req: Request) {
     const essentialAdvisorQuestions = advisorRequest
       ? getEssentialAdvisorQuestions(selectedIntent, prompt, missingAdvisorContext)
       : [];
+    const requestKind = classifyChatRequestKind(
+      selectedIntent,
+      attachments,
+      advisorRequest
+    );
+    const responseLanguage = detectResponseLanguage(prompt);
 
     if (advisorRequest && essentialAdvisorQuestions.length > 0) {
       return textStream(
@@ -718,19 +761,75 @@ export async function POST(req: Request) {
       userId: user.id,
       account: user,
       endpoint: "/api/chat",
-      requestKind: "simple",
+      requestKind,
       promptText: prompt,
       reportField: "chat",
       ip,
     });
-    const { planTier, promptHash } = productionLimit;
-    const model = "gpt-5-mini";
+    const { model, planTier, promptHash } = productionLimit;
 
     if (!productionLimit.allowed) {
       return NextResponse.json(
         { error: productionLimit.reason },
         { status: 429 }
       );
+    }
+
+    const chatCacheEnabled = shouldUseChatCache({
+      attachments,
+      messages,
+      requestKind,
+    });
+    const chatCacheKey = createAiCacheKey({
+      endpoint: "/api/chat",
+      normalizedPrompt: normalizeAiPrompt(prompt),
+      mode: `chat:${requestKind}:${selectedIntent}:${selectedExpert}`,
+      language: responseLanguage,
+      model,
+    });
+
+    if (chatCacheEnabled) {
+      const cachedChatResponse = await getCachedAiResponse(
+        supabase,
+        user.id,
+        chatCacheKey
+      );
+
+      if (cachedChatResponse?.responseText) {
+        await recordAiUsage(supabase, {
+          userId: user.id,
+          endpoint: "/api/chat",
+          reportField: "chat",
+          promptHash,
+          model: cachedChatResponse.model || model,
+          planTier,
+          tokenUsage: {
+            promptTokens: cachedChatResponse.promptTokens,
+            completionTokens: cachedChatResponse.completionTokens,
+            totalTokens: cachedChatResponse.totalTokens,
+          },
+          estimatedCostUsd: 0,
+          cacheHit: true,
+          responseTimeMs: Date.now() - startedAt,
+          metadata: {
+            quota_event: false,
+            quota_mode: requestKind,
+            quota_consumed: false,
+            usage_kind: "chat_cache_hit",
+            conversation_id: conversationId || null,
+            selected_intent: selectedIntent,
+            selected_expert: selectedExpert,
+            request_kind: requestKind,
+            profile_used: Boolean(profileContext),
+            model_preference: modelPreference,
+            attachment_count: attachments.length,
+            actual_ai_call: false,
+            cachedEstimatedCostUsd: cachedChatResponse.estimatedCostUsd,
+          },
+        });
+
+        return textStream(cachedChatResponse.responseText);
+      }
     }
 
     const attachmentContext = buildAttachmentContext(attachments);
@@ -871,17 +970,37 @@ export async function POST(req: Request) {
               responseTimeMs: Date.now() - startedAt,
               metadata: {
                 quota_event: !productionLimit.quotaAlreadyCharged,
+                quota_mode: requestKind,
                 quota_consumed: !productionLimit.quotaAlreadyCharged,
                 usage_kind: "chat_message",
                 conversation_id: conversationId || null,
                 selected_intent: selectedIntent,
                 selected_expert: selectedExpert,
+                request_kind: requestKind,
                 profile_used: Boolean(profileContext),
                 model_preference: modelPreference,
                 attachment_count: attachments.length,
                 actual_ai_call: true,
               },
             });
+
+            if (chatCacheEnabled) {
+              const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
+
+              await storeCachedAiResponse(supabase, {
+                userId: user.id,
+                cacheKey: chatCacheKey,
+                promptHash,
+                endpoint: "/api/chat",
+                reportField: "chat",
+                language: responseLanguage,
+                model,
+                responseText: streamedText,
+                tokenUsage,
+                estimatedCostUsd,
+                expiresInDays: 7,
+              });
+            }
 
             controller.close();
           } catch (error) {
@@ -901,11 +1020,13 @@ export async function POST(req: Request) {
               responseTimeMs: Date.now() - startedAt,
               metadata: {
                 quota_event: false,
+                quota_mode: requestKind,
                 quota_consumed: false,
                 usage_kind: "chat_message",
                 conversation_id: conversationId || null,
                 selected_intent: selectedIntent,
                 selected_expert: selectedExpert,
+                request_kind: requestKind,
                 profile_used: Boolean(profileContext),
                 model_preference: modelPreference,
                 attachment_count: attachments.length,

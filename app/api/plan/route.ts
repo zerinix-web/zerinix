@@ -633,7 +633,7 @@ Write only the content for this section. Do not write a JSON object, field name,
       userId: user.id,
       account: user,
       endpoint: "/api/plan",
-      requestKind: "business_plan",
+      requestKind: "report_generation",
       promptText,
       reportField: usageReportField,
       reportRequestId,
@@ -642,6 +642,7 @@ Write only the content for this section. Do not write a JSON object, field name,
     const { model, planTier, promptHash } = productionLimit;
     const sectionUsageMetadata = {
       quota_event: false,
+      quota_mode: "report_generation",
       report_request_id: reportRequestId || null,
       usage_kind: "section_generation",
     };
@@ -699,6 +700,7 @@ Write only the content for this section. Do not write a JSON object, field name,
           responseTimeMs: 0,
           metadata: {
             quota_event: false,
+            quota_mode: "report_generation",
             quota_consumed: false,
             report_request_id: reportRequestId || null,
             usage_kind: "full_report_cache_hit",
@@ -849,6 +851,7 @@ Report quality rules:
           responseTimeMs,
           metadata: {
             quota_event: !productionLimit.quotaAlreadyCharged,
+            quota_mode: "report_generation",
             quota_consumed: !productionLimit.quotaAlreadyCharged,
             report_request_id: reportRequestId || null,
             usage_kind: "full_report_generation",
@@ -887,6 +890,7 @@ Report quality rules:
           responseTimeMs: Date.now() - startedAt,
           metadata: {
             quota_event: false,
+            quota_mode: "report_generation",
             quota_consumed: false,
             report_request_id: reportRequestId || null,
             usage_kind: "full_report_generation",

@@ -4,7 +4,13 @@ import { logServerError } from "@/app/lib/security/errors";
 import { QUOTA_COUNTING_USAGE_KIND_EXCLUSION } from "@/app/lib/ai/quota-rules.mjs";
 
 export type PlanTier = "free" | "pro" | "business";
-export type AiRequestKind = "simple" | "business_plan" | "market_analysis";
+export type AiRequestKind =
+  | "simple_chat"
+  | "business_advice"
+  | "investment_advice"
+  | "report_generation"
+  | "market_analysis"
+  | "file_analysis";
 
 export type TokenUsage = {
   promptTokens: number;
@@ -16,6 +22,8 @@ type UsageLimit = {
   dailyRequests: number;
   monthlyRequests: number;
 };
+
+type UsageLimitSet = Record<AiRequestKind, UsageLimit>;
 
 type CachedAiResponse = {
   responseText: string;
@@ -58,18 +66,30 @@ type CacheInput = {
 export const dailyAiLimitMessage =
   "Daily AI usage limit reached. Please try again tomorrow or upgrade your plan.";
 
-const usageLimits: Record<PlanTier, UsageLimit> = {
+const usageLimits: Record<PlanTier, UsageLimitSet> = {
   free: {
-    dailyRequests: 10,
-    monthlyRequests: 310,
+    simple_chat: { dailyRequests: 20, monthlyRequests: 620 },
+    business_advice: { dailyRequests: 20, monthlyRequests: 620 },
+    investment_advice: { dailyRequests: 20, monthlyRequests: 620 },
+    file_analysis: { dailyRequests: 20, monthlyRequests: 620 },
+    report_generation: { dailyRequests: 1, monthlyRequests: 31 },
+    market_analysis: { dailyRequests: 1, monthlyRequests: 31 },
   },
   pro: {
-    dailyRequests: 100,
-    monthlyRequests: 3_100,
+    simple_chat: { dailyRequests: 100, monthlyRequests: 3_100 },
+    business_advice: { dailyRequests: 100, monthlyRequests: 3_100 },
+    investment_advice: { dailyRequests: 100, monthlyRequests: 3_100 },
+    file_analysis: { dailyRequests: 100, monthlyRequests: 3_100 },
+    report_generation: { dailyRequests: 10, monthlyRequests: 310 },
+    market_analysis: { dailyRequests: 10, monthlyRequests: 310 },
   },
   business: {
-    dailyRequests: 500,
-    monthlyRequests: 15_500,
+    simple_chat: { dailyRequests: 500, monthlyRequests: 15_500 },
+    business_advice: { dailyRequests: 500, monthlyRequests: 15_500 },
+    investment_advice: { dailyRequests: 500, monthlyRequests: 15_500 },
+    file_analysis: { dailyRequests: 500, monthlyRequests: 15_500 },
+    report_generation: { dailyRequests: 100, monthlyRequests: 3_100 },
+    market_analysis: { dailyRequests: 100, monthlyRequests: 3_100 },
   },
 };
 
@@ -100,7 +120,7 @@ function safeNumber(value: unknown) {
 }
 
 export function selectAiModel(kind: AiRequestKind) {
-  if (kind === "simple") {
+  if (kind === "simple_chat") {
     return "gpt-5-nano";
   }
 
@@ -185,9 +205,10 @@ export async function getUserPlanTier(
 export async function checkUsageAllowance(
   supabase: SupabaseClient,
   userId: string,
-  planTier: PlanTier
+  planTier: PlanTier,
+  requestKind: AiRequestKind
 ) {
-  const limit = usageLimits[planTier];
+  const limit = usageLimits[planTier][requestKind];
   const dayStart = startOfUtcDay().toISOString();
   const monthStart = startOfUtcMonth().toISOString();
 
@@ -198,6 +219,7 @@ export async function checkUsageAllowance(
       .eq("user_id", userId)
       .eq("status", "completed")
       .eq("metadata->>quota_event", "true")
+      .eq("metadata->>quota_mode", requestKind)
       .neq("metadata->>usage_kind", QUOTA_COUNTING_USAGE_KIND_EXCLUSION)
       .gte("created_at", dayStart),
     supabase
@@ -206,6 +228,7 @@ export async function checkUsageAllowance(
       .eq("user_id", userId)
       .eq("status", "completed")
       .eq("metadata->>quota_event", "true")
+      .eq("metadata->>quota_mode", requestKind)
       .neq("metadata->>usage_kind", QUOTA_COUNTING_USAGE_KIND_EXCLUSION)
       .gte("created_at", monthStart),
   ]);
@@ -218,6 +241,7 @@ export async function checkUsageAllowance(
     return {
       allowed: true,
       planTier,
+      requestKind,
       dailyUsed: 0,
       monthlyUsed: 0,
       ...limit,
@@ -232,6 +256,7 @@ export async function checkUsageAllowance(
     return {
       allowed: false,
       planTier,
+      requestKind,
       dailyUsed,
       monthlyUsed,
       ...limit,
@@ -243,6 +268,7 @@ export async function checkUsageAllowance(
     return {
       allowed: false,
       planTier,
+      requestKind,
       dailyUsed,
       monthlyUsed,
       ...limit,
@@ -253,6 +279,7 @@ export async function checkUsageAllowance(
   return {
     allowed: true,
     planTier,
+    requestKind,
     dailyUsed,
     monthlyUsed,
     ...limit,
@@ -460,6 +487,117 @@ export async function loadUserUsageSummary(
     cacheHitRatio: totalRequests > 0 ? cacheHits / totalRequests : 0,
     averageResponseTimeMs:
       totalRequests > 0 ? Math.round(responseTimeTotal / totalRequests) : 0,
+    error: "",
+  };
+}
+
+function readMetadataNumber(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== "object") {
+    return 0;
+  }
+
+  const value = (metadata as Record<string, unknown>)[key];
+
+  return safeNumber(value);
+}
+
+function readMetadataString(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== "object") {
+    return "";
+  }
+
+  const value = (metadata as Record<string, unknown>)[key];
+
+  return typeof value === "string" ? value : "";
+}
+
+export async function loadAdminCostSummary(supabase: SupabaseClient) {
+  const dayStart = startOfUtcDay().toISOString();
+  const { data, error } = await supabase
+    .from("ai_usage_events")
+    .select(
+      "user_id,endpoint,report_field,model,prompt_tokens,completion_tokens,total_tokens,estimated_cost_usd,cache_hit,response_time_ms,status,metadata,created_at"
+    )
+    .gte("created_at", dayStart)
+    .order("estimated_cost_usd", { ascending: false })
+    .limit(1000);
+
+  if (error) {
+    logServerError("ai-governance:admin-cost-summary", error);
+
+    return {
+      totalDailyCostUsd: 0,
+      cacheSavingsUsd: 0,
+      costPerUser: [] as Array<{ userId: string; costUsd: number; requests: number }>,
+      costPerMode: [] as Array<{ mode: string; costUsd: number; requests: number }>,
+      mostExpensiveRequests: [] as Array<{
+        endpoint: string;
+        mode: string;
+        model: string;
+        costUsd: number;
+        totalTokens: number;
+        createdAt: string;
+      }>,
+      error: error.message,
+    };
+  }
+
+  const rows = data ?? [];
+  const userMap = new Map<string, { userId: string; costUsd: number; requests: number }>();
+  const modeMap = new Map<string, { mode: string; costUsd: number; requests: number }>();
+  let cacheSavingsUsd = 0;
+
+  rows.forEach((row) => {
+    const costUsd = safeNumber(row.estimated_cost_usd);
+    const userId = typeof row.user_id === "string" ? row.user_id : "unknown";
+    const mode =
+      readMetadataString(row.metadata, "quota_mode") ||
+      readMetadataString(row.metadata, "request_kind") ||
+      (typeof row.report_field === "string" && row.report_field
+        ? row.report_field
+        : typeof row.endpoint === "string"
+          ? row.endpoint
+          : "unknown");
+
+    const userSummary = userMap.get(userId) || { userId, costUsd: 0, requests: 0 };
+    userSummary.costUsd += costUsd;
+    userSummary.requests += 1;
+    userMap.set(userId, userSummary);
+
+    const modeSummary = modeMap.get(mode) || { mode, costUsd: 0, requests: 0 };
+    modeSummary.costUsd += costUsd;
+    modeSummary.requests += 1;
+    modeMap.set(mode, modeSummary);
+
+    if (row.cache_hit) {
+      cacheSavingsUsd += readMetadataNumber(row.metadata, "cachedEstimatedCostUsd");
+    }
+  });
+
+  return {
+    totalDailyCostUsd: rows.reduce(
+      (sum, row) => sum + safeNumber(row.estimated_cost_usd),
+      0
+    ),
+    cacheSavingsUsd,
+    costPerUser: [...userMap.values()].sort((a, b) => b.costUsd - a.costUsd).slice(0, 8),
+    costPerMode: [...modeMap.values()].sort((a, b) => b.costUsd - a.costUsd).slice(0, 8),
+    mostExpensiveRequests: rows
+      .map((row) => ({
+        endpoint: typeof row.endpoint === "string" ? row.endpoint : "unknown",
+        mode:
+          readMetadataString(row.metadata, "quota_mode") ||
+          readMetadataString(row.metadata, "request_kind") ||
+          (typeof row.report_field === "string" && row.report_field
+            ? row.report_field
+            : "unknown"),
+        model: typeof row.model === "string" ? row.model : "unknown",
+        costUsd: safeNumber(row.estimated_cost_usd),
+        totalTokens: safeNumber(row.total_tokens),
+        createdAt: typeof row.created_at === "string" ? row.created_at : "",
+      }))
+      .sort((a, b) => b.costUsd - a.costUsd)
+      .slice(0, 8),
     error: "",
   };
 }

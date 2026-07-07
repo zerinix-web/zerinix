@@ -96,7 +96,7 @@ export async function checkAiProductionRateLimit({
     }
   }
 
-  const allowance = await checkUsageAllowance(supabase, userId, planTier);
+  const allowance = await checkUsageAllowance(supabase, userId, planTier, requestKind);
 
   if (!allowance.allowed) {
     console.info("[ai quota] request blocked", {
@@ -127,6 +127,7 @@ export async function checkAiProductionRateLimit({
       responseTimeMs: 0,
       metadata: {
         quota_event: false,
+        quota_mode: requestKind,
         quota_consumed: false,
         report_request_id: reportRequestId ?? null,
         usage_kind: "quota_check",

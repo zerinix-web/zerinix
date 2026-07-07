@@ -600,6 +600,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
     const { model, planTier, promptHash } = productionLimit;
     const sectionUsageMetadata = {
       quota_event: false,
+      quota_mode: "market_analysis",
       report_request_id: reportRequestId || null,
       usage_kind: "section_generation",
     };
@@ -657,6 +658,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
           responseTimeMs: 0,
           metadata: {
             quota_event: false,
+            quota_mode: "market_analysis",
             quota_consumed: false,
             report_request_id: reportRequestId || null,
             usage_kind: "full_report_cache_hit",
@@ -807,6 +809,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
           responseTimeMs,
           metadata: {
             quota_event: !productionLimit.quotaAlreadyCharged,
+            quota_mode: "market_analysis",
             quota_consumed: !productionLimit.quotaAlreadyCharged,
             report_request_id: reportRequestId || null,
             usage_kind: "full_report_generation",
@@ -845,6 +848,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
           responseTimeMs: Date.now() - startedAt,
           metadata: {
             quota_event: false,
+            quota_mode: "market_analysis",
             quota_consumed: false,
             report_request_id: reportRequestId || null,
             usage_kind: "full_report_generation",

@@ -1163,6 +1163,7 @@ function removeDuplicateVisualText(title: string, content: string) {
   if (normalizedTitle.includes("tam / sam / som")) {
     return lines
       .filter((line) => !/^(?:[-*]\s*)?(?:\*\*)?(tam|sam|som)(?:\*\*)?\s*[:\-–—]/i.test(line))
+      .filter((line) => !/\b(tam|sam|som)\b\s*(?:is|=|:|\-|–|—)/i.test(line))
       .join("\n");
   }
 
@@ -1170,17 +1171,38 @@ function removeDuplicateVisualText(title: string, content: string) {
     const metricPattern =
       /^(?:[-*]\s*)?(?:\*\*)?(arr|mrr|revenue|expenses|gross margin|cac|ltv|payback(?: period)?|burn(?: rate)?|runway|ebitda|break[- ]?even(?: month)?|investment(?: needed)?)(?:\*\*)?\s*[:\-–—]/i;
 
-    return lines.filter((line) => !metricPattern.test(line)).join("\n");
+    return lines
+      .filter((line) => !metricPattern.test(line))
+      .filter((line) => !/\b(arr|mrr|gross margin|cac|ltv|payback|burn rate|runway|ebitda|break[- ]?even|investment needed)\b\s*(?:is|=|:|\-|–|—)/i.test(line))
+      .join("\n");
   }
 
   if (normalizedTitle.includes("swot")) {
     const swotPattern =
       /^(?:[-*]\s*)?(?:\*\*)?(strengths?|weaknesses?|opportunities|threats?)(?:\*\*)?\s*[:\-–—]/i;
 
-    return lines.filter((line) => !swotPattern.test(line)).join("\n");
+    return lines
+      .filter((line) => !swotPattern.test(line))
+      .filter((line) => !/\b(strengths?|weaknesses?|opportunities|threats?)\b\s*(?:include|are|:|\-|–|—)/i.test(line))
+      .join("\n");
   }
 
   return normalizePdfText(content);
+}
+
+function dedupePdfSections<T extends { title: string; content: string }>(sections: T[]) {
+  const seen = new Set<string>();
+
+  return sections.filter((section) => {
+    const key = section.title.trim().toLowerCase().replace(/\s+/g, " ");
+
+    if (!key || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
 }
 
 function extractFirstInsight(content: string) {
@@ -3204,7 +3226,7 @@ const ReportPanel = memo(function ReportPanel({
         drawFooter();
       };
 
-      sections.forEach((section) => {
+      dedupePdfSections(sections).forEach((section) => {
         if (section.content === waitingMessage) {
           return;
         }
@@ -3215,11 +3237,17 @@ const ReportPanel = memo(function ReportPanel({
           sectionBodyContent,
           bodyWidth
         ) as string[];
+        const hasBodyText = sectionBodyContent.trim().length > 0;
         const safeBodyLines = bodyLines.length > 0 ? bodyLines : [""];
         let lineIndex = 0;
 
         while (lineIndex < safeBodyLines.length) {
-          ensureSpace(38);
+          const activeVisualHeight = lineIndex === 0 ? visualHeight : 0;
+          const bodyTextHeight = hasBodyText ? bodyLineHeight : 0;
+          const minimumCardHeight =
+            cardHeaderHeight + activeVisualHeight + bodyTextHeight + cardBottomPadding + 3;
+
+          ensureSpace(minimumCardHeight);
 
           if (lineIndex === 0) {
             tocEntries.push({
@@ -3229,13 +3257,16 @@ const ReportPanel = memo(function ReportPanel({
           }
 
           const availableHeight =
-            pageHeight - margin - y - cardHeaderHeight - visualHeight - cardBottomPadding;
+            pageHeight - margin - y - cardHeaderHeight - activeVisualHeight - cardBottomPadding;
           const maxLines = Math.max(1, Math.floor(availableHeight / bodyLineHeight));
           const lines = safeBodyLines.slice(lineIndex, lineIndex + maxLines);
           const isContinued = lineIndex > 0;
           const cardHeight = Math.max(
             31,
-            cardHeaderHeight + visualHeight + lines.length * bodyLineHeight + cardBottomPadding
+            cardHeaderHeight +
+              activeVisualHeight +
+              (hasBodyText ? lines.length * bodyLineHeight : 0) +
+              cardBottomPadding
           );
 
           pdf.setFillColor("#09090b");
@@ -3260,19 +3291,21 @@ const ReportPanel = memo(function ReportPanel({
           pdf.setFont("Geist", "normal");
           pdf.setFontSize(14);
           pdf.setTextColor("#ffffff");
-          pdf.text(`${section.title}${isContinued ? " devamı" : ""}`, bodyX, y + 12.5, {
+          pdf.text(`${section.title}${isContinued ? " continued" : ""}`, bodyX, y + 12.5, {
             maxWidth: bodyWidth,
           });
 
-          const drawnVisualHeight = isContinued ? 0 : drawPdfVisual(section, y);
+          const drawnVisualHeight = activeVisualHeight > 0 && !isContinued ? drawPdfVisual(section, y) : 0;
 
-          pdf.setFont("Geist", "normal");
-          pdf.setFontSize(8.8);
-          pdf.setTextColor("#d4d4d8");
-          pdf.text(lines, bodyX, y + 24 + drawnVisualHeight, {
-            lineHeightFactor: 1.3,
-            maxWidth: bodyWidth,
-          });
+          if (hasBodyText) {
+            pdf.setFont("Geist", "normal");
+            pdf.setFontSize(8.8);
+            pdf.setTextColor("#d4d4d8");
+            pdf.text(lines, bodyX, y + 24 + drawnVisualHeight, {
+              lineHeightFactor: 1.3,
+              maxWidth: bodyWidth,
+            });
+          }
 
           lineIndex += lines.length;
           y += cardHeight + 5;
