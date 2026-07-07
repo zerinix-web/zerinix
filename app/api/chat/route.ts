@@ -723,8 +723,8 @@ export async function POST(req: Request) {
       reportField: "chat",
       ip,
     });
-    const { model: routedModel, planTier, promptHash } = productionLimit;
-    const model = modelPreference === "balanced" ? "gpt-5-mini" : routedModel;
+    const { planTier, promptHash } = productionLimit;
+    const model = "gpt-5-mini";
 
     if (!productionLimit.allowed) {
       return NextResponse.json(
