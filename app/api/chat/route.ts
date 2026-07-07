@@ -30,6 +30,18 @@ type ChatAttachmentInput = {
   textContent: string;
 };
 
+type AiChatProfile = {
+  preferred_country: string | null;
+  preferred_industries: string[];
+  investment_budget_ranges: string[];
+  preferred_language: string | null;
+  experience_level: string | null;
+  available_time: string | null;
+  business_interests: string[];
+  risk_tolerance: string | null;
+  long_term_goals: string[];
+};
+
 type AiExpert =
   | "Business Advisor"
   | "Investment Advisor"
@@ -144,6 +156,69 @@ function buildAttachmentContext(attachments: ChatAttachmentInput[]) {
     .join("\n\n---\n\n");
 }
 
+function normalizeProfile(value: unknown): AiChatProfile | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const profile = value as Partial<AiChatProfile>;
+
+  return {
+    preferred_country:
+      typeof profile.preferred_country === "string" ? profile.preferred_country : null,
+    preferred_industries: Array.isArray(profile.preferred_industries)
+      ? profile.preferred_industries.filter((item): item is string => typeof item === "string")
+      : [],
+    investment_budget_ranges: Array.isArray(profile.investment_budget_ranges)
+      ? profile.investment_budget_ranges.filter(
+          (item): item is string => typeof item === "string"
+        )
+      : [],
+    preferred_language:
+      typeof profile.preferred_language === "string" ? profile.preferred_language : null,
+    experience_level:
+      typeof profile.experience_level === "string" ? profile.experience_level : null,
+    available_time:
+      typeof profile.available_time === "string" ? profile.available_time : null,
+    business_interests: Array.isArray(profile.business_interests)
+      ? profile.business_interests.filter((item): item is string => typeof item === "string")
+      : [],
+    risk_tolerance:
+      typeof profile.risk_tolerance === "string" ? profile.risk_tolerance : null,
+    long_term_goals: Array.isArray(profile.long_term_goals)
+      ? profile.long_term_goals.filter((item): item is string => typeof item === "string")
+      : [],
+  };
+}
+
+function buildProfileContext(profile: AiChatProfile | null) {
+  if (!profile) {
+    return "";
+  }
+
+  const lines = [
+    profile.preferred_country ? `Preferred country / market: ${profile.preferred_country}` : "",
+    profile.preferred_industries.length
+      ? `Preferred industries: ${profile.preferred_industries.join(", ")}`
+      : "",
+    profile.investment_budget_ranges.length
+      ? `Investment budget ranges: ${profile.investment_budget_ranges.join(", ")}`
+      : "",
+    profile.preferred_language ? `Preferred language: ${profile.preferred_language}` : "",
+    profile.experience_level ? `Experience level: ${profile.experience_level}` : "",
+    profile.available_time ? `Available time: ${profile.available_time}` : "",
+    profile.business_interests.length
+      ? `Business interests: ${profile.business_interests.join(", ")}`
+      : "",
+    profile.risk_tolerance ? `Risk tolerance: ${profile.risk_tolerance}` : "",
+    profile.long_term_goals.length
+      ? `Long-term goals: ${profile.long_term_goals.join(", ")}`
+      : "",
+  ].filter(Boolean);
+
+  return lines.length ? lines.join("\n") : "";
+}
+
 function detectResponseLanguage(value: string) {
   return /[çğıöşü]/i.test(value) ||
     /\b(ülke|bütçe|risk|yatırım|iş|fikir|pazar|hedef|deneyim|zaman|para|öneri|startup|girişim)\b/i.test(value)
@@ -151,14 +226,18 @@ function detectResponseLanguage(value: string) {
     : "English";
 }
 
-function classifyExpert(messages: ChatInputMessage[], prompt: string): AiExpert {
+function classifyExpert(
+  messages: ChatInputMessage[],
+  prompt: string,
+  profile: AiChatProfile | null
+): AiExpert {
   const latest = prompt.toLowerCase();
   const recentContext = messages
     .slice(-4)
     .map((message) => message.content)
     .join("\n")
     .toLowerCase();
-  const text = `${recentContext}\n${latest}`;
+  const text = `${buildProfileContext(profile).toLowerCase()}\n${recentContext}\n${latest}`;
 
   if (/\b(legal|law|lawyer|attorney|contract|lawsuit|liability|compliance|terms of service|privacy policy|regulation|court|trademark|patent|hukuk|avukat|sözleşme|dava|yasal|mevzuat)\b/i.test(text)) {
     return "Legal Information Assistant";
@@ -244,39 +323,53 @@ function isBusinessAdvisorConversation(messages: ChatInputMessage[], prompt: str
   });
 }
 
-function conversationText(messages: ChatInputMessage[], prompt: string) {
-  return [...messages.map((message) => message.content), prompt].join("\n").toLowerCase();
+function conversationText(
+  messages: ChatInputMessage[],
+  prompt: string,
+  profile: AiChatProfile | null
+) {
+  return [
+    buildProfileContext(profile),
+    ...messages.map((message) => message.content),
+    prompt,
+  ]
+    .join("\n")
+    .toLowerCase();
 }
 
-function getMissingAdvisorContext(messages: ChatInputMessage[], prompt: string) {
-  const text = conversationText(messages, prompt);
+function getMissingAdvisorContext(
+  messages: ChatInputMessage[],
+  prompt: string,
+  profile: AiChatProfile | null
+) {
+  const text = conversationText(messages, prompt, profile);
   const missing: string[] = [];
 
-  if (
+  if (!profile?.preferred_country &&
     !/\b(country|location|market|geography|region|city|usa|us|uk|europe|turkey|türkiye|germany|uae|dubai|ülke|şehir|pazar|bölge)\b/i.test(text)
   ) {
     missing.push("country");
   }
 
-  if (
+  if (!profile?.investment_budget_ranges.length &&
     !/[$€£₺]\s?\d+|\d+\s?(?:usd|eur|gbp|try|tl|dollar|euro|lira|k|m|bin|milyon|thousand|million|budget|capital|bütçe|sermaye)/i.test(text)
   ) {
     missing.push("budget");
   }
 
-  if (!/\b(low|medium|high|conservative|moderate|aggressive|risk|risky|safe|düşük|orta|yüksek|riskli|güvenli)\b/i.test(text)) {
+  if (!profile?.risk_tolerance && !/\b(low|medium|high|conservative|moderate|aggressive|risk|risky|safe|düşük|orta|yüksek|riskli|güvenli)\b/i.test(text)) {
     missing.push("risk tolerance");
   }
 
-  if (!/\b(experience|experienced|beginner|first time|background|worked|built|operator|founder|deneyim|tecrübe|başlangıç|kurucu)\b/i.test(text)) {
+  if (!profile?.experience_level && !/\b(experience|experienced|beginner|first time|background|worked|built|operator|founder|deneyim|tecrübe|başlangıç|kurucu)\b/i.test(text)) {
     missing.push("experience");
   }
 
-  if (!/\b(full[-\s]?time|part[-\s]?time|hours?|weekends?|available time|time per week|tam zaman|yarı zaman|saat|hafta sonu|zaman)\b/i.test(text)) {
+  if (!profile?.available_time && !/\b(full[-\s]?time|part[-\s]?time|hours?|weekends?|available time|time per week|tam zaman|yarı zaman|saat|hafta sonu|zaman)\b/i.test(text)) {
     missing.push("available time");
   }
 
-  if (!/\b(goal|goals|income|cash flow|growth|wealth|exit|passive|build|learn|hedef|gelir|nakit|büyüme|çıkış|pasif)\b/i.test(text)) {
+  if (!profile?.long_term_goals.length && !/\b(goal|goals|income|cash flow|growth|wealth|exit|passive|build|learn|hedef|gelir|nakit|büyüme|çıkış|pasif)\b/i.test(text)) {
     missing.push("goals");
   }
 
@@ -406,10 +499,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Message is required." }, { status: 400 });
     }
 
-    const selectedExpert = classifyExpert(messages, prompt);
+    const { data: profileData, error: profileError } = await supabase
+      .from("ai_chat_profiles")
+      .select(
+        "preferred_country,preferred_industries,investment_budget_ranges,preferred_language,experience_level,available_time,business_interests,risk_tolerance,long_term_goals"
+      )
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      console.error("[ai_chat_profiles select failed]", profileError);
+    }
+
+    const chatProfile = normalizeProfile(profileData);
+    const profileContext = buildProfileContext(chatProfile);
+    const selectedExpert = classifyExpert(messages, prompt, chatProfile);
     const advisorRequest = isBusinessAdvisorConversation(messages, prompt);
     const missingAdvisorContext = advisorRequest
-      ? getMissingAdvisorContext(messages, prompt)
+      ? getMissingAdvisorContext(messages, prompt, chatProfile)
       : [];
 
     if (advisorRequest && missingAdvisorContext.length > 0) {
@@ -447,6 +554,9 @@ export async function POST(req: Request) {
         `Selected expert: ${selectedExpert}.`,
         expertInstructions[selectedExpert],
         "The selected expert must shape the perspective, vocabulary, priorities, caveats, and structure of the answer. Do not announce the routing process unless it helps the user.",
+        profileContext
+          ? `Persistent user profile for non-sensitive personalization:\n${profileContext}\nUse this profile to avoid asking for details the user has already saved. If the user's latest message conflicts with the profile, prioritize the latest message.`
+          : "No persistent chat profile is available yet. Do not invent profile preferences.",
         "Answer naturally and directly. You may help with business, strategy, operations, finance, product, marketing, technology, or general questions.",
         "Use the conversation history for context, but do not fabricate facts.",
         "When attached file text is provided, treat it as user-supplied context. If a file has no readable text, say so briefly when relevant.",
@@ -460,6 +570,14 @@ export async function POST(req: Request) {
           role: message.role,
           content: message.content,
         })),
+        ...(profileContext
+          ? [
+              {
+                role: "user" as const,
+                content: `Persistent user profile context:\n\n${profileContext}`,
+              },
+            ]
+          : []),
         ...(attachmentContext
           ? [
               {
@@ -519,6 +637,7 @@ export async function POST(req: Request) {
                 usage_kind: "chat_message",
                 conversation_id: conversationId || null,
                 selected_expert: selectedExpert,
+                profile_used: Boolean(profileContext),
                 model_preference: modelPreference,
                 attachment_count: attachments.length,
                 actual_ai_call: true,
@@ -547,6 +666,7 @@ export async function POST(req: Request) {
                 usage_kind: "chat_message",
                 conversation_id: conversationId || null,
                 selected_expert: selectedExpert,
+                profile_used: Boolean(profileContext),
                 model_preference: modelPreference,
                 attachment_count: attachments.length,
                 actual_ai_call: true,

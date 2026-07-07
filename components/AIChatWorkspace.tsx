@@ -62,9 +62,33 @@ type Conversation = {
   updatedAt: number;
 };
 
+type ChatProfile = {
+  preferred_country: string;
+  preferred_industries: string[];
+  investment_budget_ranges: string[];
+  preferred_language: string;
+  experience_level: string;
+  available_time: string;
+  business_interests: string[];
+  risk_tolerance: string;
+  long_term_goals: string[];
+};
+
 type AIChatWorkspaceProps = {
   initialConversations?: Conversation[];
   conversationLoadError?: string;
+};
+
+const emptyProfile: ChatProfile = {
+  preferred_country: "",
+  preferred_industries: [],
+  investment_budget_ranges: [],
+  preferred_language: "",
+  experience_level: "",
+  available_time: "",
+  business_interests: [],
+  risk_tolerance: "",
+  long_term_goals: [],
 };
 
 const modelOptions: Array<{
@@ -153,6 +177,63 @@ function formatFileSize(size: number) {
   }
 
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function parseList(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function formatList(value: string[]) {
+  return value.join(", ");
+}
+
+function normalizeProfileRow(value: unknown): ChatProfile {
+  if (!value || typeof value !== "object") {
+    return emptyProfile;
+  }
+
+  const row = value as Partial<ChatProfile>;
+
+  return {
+    preferred_country:
+      typeof row.preferred_country === "string" ? row.preferred_country : "",
+    preferred_industries: Array.isArray(row.preferred_industries)
+      ? row.preferred_industries.filter((item): item is string => typeof item === "string")
+      : [],
+    investment_budget_ranges: Array.isArray(row.investment_budget_ranges)
+      ? row.investment_budget_ranges.filter((item): item is string => typeof item === "string")
+      : [],
+    preferred_language:
+      typeof row.preferred_language === "string" ? row.preferred_language : "",
+    experience_level:
+      typeof row.experience_level === "string" ? row.experience_level : "",
+    available_time: typeof row.available_time === "string" ? row.available_time : "",
+    business_interests: Array.isArray(row.business_interests)
+      ? row.business_interests.filter((item): item is string => typeof item === "string")
+      : [],
+    risk_tolerance: typeof row.risk_tolerance === "string" ? row.risk_tolerance : "",
+    long_term_goals: Array.isArray(row.long_term_goals)
+      ? row.long_term_goals.filter((item): item is string => typeof item === "string")
+      : [],
+  };
+}
+
+function hasProfileContent(profile: ChatProfile) {
+  return Boolean(
+    profile.preferred_country ||
+      profile.preferred_industries.length ||
+      profile.investment_budget_ranges.length ||
+      profile.preferred_language ||
+      profile.experience_level ||
+      profile.available_time ||
+      profile.business_interests.length ||
+      profile.risk_tolerance ||
+      profile.long_term_goals.length
+  );
 }
 
 function getConversationPreview(conversation: Conversation) {
@@ -617,6 +698,11 @@ export default function AIChatWorkspace({
   const [loading, setLoading] = useState(false);
   const [conversationError, setConversationError] = useState(conversationLoadError);
   const [userEmail, setUserEmail] = useState("");
+  const [profile, setProfile] = useState<ChatProfile>(emptyProfile);
+  const [profileDraft, setProfileDraft] = useState<ChatProfile>(emptyProfile);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState("");
   const [renamingId, setRenamingId] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -636,7 +722,7 @@ export default function AIChatWorkspace({
 
   useEffect(() => {
     const supabase = createClient();
-    void supabase.auth.getUser().then(({ data, error }) => {
+    void supabase.auth.getUser().then(async ({ data, error }) => {
       if (error) {
         console.error("[chat auth user failed]", error);
         setConversationError(error.message);
@@ -644,6 +730,28 @@ export default function AIChatWorkspace({
       }
 
       setUserEmail(data.user?.email || "");
+
+      if (!data.user) {
+        return;
+      }
+
+      const { data: profileData, error: profileError } = await supabase
+        .from("ai_chat_profiles")
+        .select(
+          "preferred_country,preferred_industries,investment_budget_ranges,preferred_language,experience_level,available_time,business_interests,risk_tolerance,long_term_goals"
+        )
+        .eq("user_id", data.user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error("[ai_chat_profiles client select failed]", profileError);
+        setProfileMessage(profileError.message);
+        return;
+      }
+
+      const nextProfile = normalizeProfileRow(profileData);
+      setProfile(nextProfile);
+      setProfileDraft(nextProfile);
     });
   }, []);
 
@@ -678,6 +786,96 @@ export default function AIChatWorkspace({
     }
 
     return user.id;
+  }
+
+  async function saveProfile() {
+    setProfileSaving(true);
+    setProfileMessage("");
+
+    const userId = await getCurrentUserId();
+
+    if (!userId) {
+      setProfileSaving(false);
+      setProfileMessage("Sign in again to save your AI profile.");
+      return;
+    }
+
+    const cleanProfile: ChatProfile = {
+      preferred_country: profileDraft.preferred_country.trim(),
+      preferred_industries: profileDraft.preferred_industries
+        .map((item) => item.trim())
+        .filter(Boolean),
+      investment_budget_ranges: profileDraft.investment_budget_ranges
+        .map((item) => item.trim())
+        .filter(Boolean),
+      preferred_language: profileDraft.preferred_language.trim(),
+      experience_level: profileDraft.experience_level.trim(),
+      available_time: profileDraft.available_time.trim(),
+      business_interests: profileDraft.business_interests
+        .map((item) => item.trim())
+        .filter(Boolean),
+      risk_tolerance: profileDraft.risk_tolerance.trim(),
+      long_term_goals: profileDraft.long_term_goals
+        .map((item) => item.trim())
+        .filter(Boolean),
+    };
+
+    const supabase = createClient();
+    const { error } = await supabase.from("ai_chat_profiles").upsert({
+      user_id: userId,
+      ...cleanProfile,
+    });
+
+    setProfileSaving(false);
+
+    if (error) {
+      console.error("[ai_chat_profiles upsert failed]", error);
+      setProfileMessage(error.message);
+      return;
+    }
+
+    setProfile(cleanProfile);
+    setProfileDraft(cleanProfile);
+    setProfileMessage("Profile saved. Future chats will use these preferences.");
+  }
+
+  async function clearProfile() {
+    const shouldClear = window.confirm(
+      "Clear your saved AI Chat profile? Future chats will stop using these preferences."
+    );
+
+    if (!shouldClear) {
+      return;
+    }
+
+    setProfileSaving(true);
+    setProfileMessage("");
+
+    const userId = await getCurrentUserId();
+
+    if (!userId) {
+      setProfileSaving(false);
+      setProfileMessage("Sign in again to clear your AI profile.");
+      return;
+    }
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("ai_chat_profiles")
+      .delete()
+      .eq("user_id", userId);
+
+    setProfileSaving(false);
+
+    if (error) {
+      console.error("[ai_chat_profiles delete failed]", error);
+      setProfileMessage(error.message);
+      return;
+    }
+
+    setProfile(emptyProfile);
+    setProfileDraft(emptyProfile);
+    setProfileMessage("Profile cleared.");
   }
 
   async function ensurePersistedConversation(conversationId: string, title: string) {
@@ -1299,6 +1497,195 @@ export default function AIChatWorkspace({
               </div>
             );
           })}
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.035] p-3">
+          <button
+            type="button"
+            onClick={() => {
+              setProfileDraft(profile);
+              setProfileOpen((current) => !current);
+              setProfileMessage("");
+            }}
+            className="flex w-full items-center justify-between gap-3 text-left"
+          >
+            <span>
+              <span className="block text-xs font-medium text-white">AI Chat Profile</span>
+              <span className="mt-1 block text-xs text-zinc-500">
+                {hasProfileContent(profile)
+                  ? "Saved preferences active"
+                  : "Add preferences to reduce repeat questions"}
+              </span>
+            </span>
+            <User className="h-4 w-4 text-teal-200" />
+          </button>
+
+          {profileOpen ? (
+            <div className="mt-4 space-y-3">
+              <label className="block text-xs text-zinc-500">
+                Country / market
+                <input
+                  value={profileDraft.preferred_country}
+                  onChange={(event) =>
+                    setProfileDraft((current) => ({
+                      ...current,
+                      preferred_country: event.target.value,
+                    }))
+                  }
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-teal-200/40"
+                  placeholder="Turkey, UAE, Germany..."
+                />
+              </label>
+
+              <label className="block text-xs text-zinc-500">
+                Preferred industries
+                <input
+                  value={formatList(profileDraft.preferred_industries)}
+                  onChange={(event) =>
+                    setProfileDraft((current) => ({
+                      ...current,
+                      preferred_industries: parseList(event.target.value),
+                    }))
+                  }
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-teal-200/40"
+                  placeholder="AI, healthcare, real estate"
+                />
+              </label>
+
+              <label className="block text-xs text-zinc-500">
+                Budget ranges
+                <input
+                  value={formatList(profileDraft.investment_budget_ranges)}
+                  onChange={(event) =>
+                    setProfileDraft((current) => ({
+                      ...current,
+                      investment_budget_ranges: parseList(event.target.value),
+                    }))
+                  }
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-teal-200/40"
+                  placeholder="$10k-$50k, $1M+"
+                />
+              </label>
+
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block text-xs text-zinc-500">
+                  Language
+                  <input
+                    value={profileDraft.preferred_language}
+                    onChange={(event) =>
+                      setProfileDraft((current) => ({
+                        ...current,
+                        preferred_language: event.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-teal-200/40"
+                    placeholder="English"
+                  />
+                </label>
+
+                <label className="block text-xs text-zinc-500">
+                  Risk
+                  <input
+                    value={profileDraft.risk_tolerance}
+                    onChange={(event) =>
+                      setProfileDraft((current) => ({
+                        ...current,
+                        risk_tolerance: event.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-teal-200/40"
+                    placeholder="Medium"
+                  />
+                </label>
+              </div>
+
+              <label className="block text-xs text-zinc-500">
+                Experience
+                <input
+                  value={profileDraft.experience_level}
+                  onChange={(event) =>
+                    setProfileDraft((current) => ({
+                      ...current,
+                      experience_level: event.target.value,
+                    }))
+                  }
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-teal-200/40"
+                  placeholder="Beginner, founder, operator..."
+                />
+              </label>
+
+              <label className="block text-xs text-zinc-500">
+                Available time
+                <input
+                  value={profileDraft.available_time}
+                  onChange={(event) =>
+                    setProfileDraft((current) => ({
+                      ...current,
+                      available_time: event.target.value,
+                    }))
+                  }
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-teal-200/40"
+                  placeholder="10 hours/week, part-time..."
+                />
+              </label>
+
+              <label className="block text-xs text-zinc-500">
+                Business interests
+                <input
+                  value={formatList(profileDraft.business_interests)}
+                  onChange={(event) =>
+                    setProfileDraft((current) => ({
+                      ...current,
+                      business_interests: parseList(event.target.value),
+                    }))
+                  }
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-teal-200/40"
+                  placeholder="SaaS, franchises, e-commerce"
+                />
+              </label>
+
+              <label className="block text-xs text-zinc-500">
+                Long-term goals
+                <input
+                  value={formatList(profileDraft.long_term_goals)}
+                  onChange={(event) =>
+                    setProfileDraft((current) => ({
+                      ...current,
+                      long_term_goals: parseList(event.target.value),
+                    }))
+                  }
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-teal-200/40"
+                  placeholder="Cash flow, exit, passive income"
+                />
+              </label>
+
+              {profileMessage ? (
+                <p className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs leading-5 text-zinc-300">
+                  {profileMessage}
+                </p>
+              ) : null}
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void saveProfile()}
+                  disabled={profileSaving}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-teal-200 px-3 py-2 text-xs font-semibold text-black transition hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {profileSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void clearProfile()}
+                  disabled={profileSaving || !hasProfileContent(profile)}
+                  className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.035] p-3">
