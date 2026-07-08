@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/app/lib/supabase/server";
+import { getSupabaseConfigSource, getSupabaseUrl } from "@/app/lib/supabase/env";
 import {
   checkRateLimit,
   getServerActionClientIp,
@@ -96,14 +97,24 @@ export async function signUpWithPassword(formData: FormData) {
   let supabase: Awaited<ReturnType<typeof createClient>>;
 
   try {
+    const supabaseUrl = getSupabaseUrl();
+    const supabaseHostname = supabaseUrl
+      ? new URL(supabaseUrl).hostname
+      : "missing";
+
+    console.info("[auth:signup:supabase_config]", {
+      ...getSupabaseConfigSource(),
+      hostname: supabaseHostname,
+    });
+
     supabase = await createClient();
   } catch (error) {
     logServerError("auth:signup:supabase_config", error);
     redirect("/register?auth_error=signup_failed");
   }
 
-  try {
-    const { error } = await supabase.auth.signUp({
+  const { error: signUpError } = await supabase.auth
+    .signUp({
       email,
       password,
       options: {
@@ -111,14 +122,15 @@ export async function signUpWithPassword(formData: FormData) {
           full_name: name,
         },
       },
+    })
+    .catch((error: unknown) => {
+      logServerError("auth:signup:supabase_fetch", error);
+
+      return { error };
     });
 
-    if (error) {
-      logServerError("auth:signup:supabase_error", error);
-      redirect("/register?auth_error=signup_failed");
-    }
-  } catch (error) {
-    logServerError("auth:signup:supabase_fetch", error);
+  if (signUpError) {
+    logServerError("auth:signup:supabase_error", signUpError);
     redirect("/register?auth_error=signup_failed");
   }
 

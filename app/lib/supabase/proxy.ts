@@ -1,23 +1,29 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import {
-  getSupabasePublishableKey,
-  getSupabaseUrl,
-  hasSupabaseConfig,
-} from "./env";
+import { requireSupabaseConfig } from "./env";
+import { logServerError } from "@/app/lib/security/errors";
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({
     request,
   });
 
-  if (!hasSupabaseConfig()) {
+  let supabaseUrl: string;
+  let supabaseKey: string;
+
+  try {
+    const config = requireSupabaseConfig();
+
+    supabaseUrl = config.supabaseUrl;
+    supabaseKey = config.supabaseKey;
+  } catch (error) {
+    logServerError("supabase:proxy:config", error);
     return response;
   }
 
   const supabase = createServerClient(
-    getSupabaseUrl()!,
-    getSupabasePublishableKey()!,
+    supabaseUrl,
+    supabaseKey,
     {
       cookies: {
         getAll() {
@@ -44,7 +50,11 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  await supabase.auth.getUser();
+  try {
+    await supabase.auth.getUser();
+  } catch (error) {
+    logServerError("supabase:proxy:get_user", error);
+  }
 
   return response;
 }

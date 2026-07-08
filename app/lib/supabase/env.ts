@@ -1,14 +1,43 @@
+const retiredSupabaseHosts = new Set(["dgqmrwjqjlatthqwqwwm.supabase.co"]);
+
+function readEnv(name: string) {
+  const value = process.env[name]?.trim();
+
+  return value ? value : undefined;
+}
+
 export function getSupabaseUrl() {
-  return process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+  return readEnv("SUPABASE_URL") ?? readEnv("NEXT_PUBLIC_SUPABASE_URL");
 }
 
 export function getSupabasePublishableKey() {
   return (
-    process.env.SUPABASE_PUBLISHABLE_KEY ??
-    process.env.SUPABASE_ANON_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    readEnv("SUPABASE_PUBLISHABLE_KEY") ??
+    readEnv("SUPABASE_ANON_KEY") ??
+    readEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY") ??
+    readEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
   );
+}
+
+export function getSupabaseConfigSource() {
+  return {
+    url:
+      readEnv("SUPABASE_URL") !== undefined
+        ? "SUPABASE_URL"
+        : readEnv("NEXT_PUBLIC_SUPABASE_URL") !== undefined
+          ? "NEXT_PUBLIC_SUPABASE_URL"
+          : "missing",
+    key:
+      readEnv("SUPABASE_PUBLISHABLE_KEY") !== undefined
+        ? "SUPABASE_PUBLISHABLE_KEY"
+        : readEnv("SUPABASE_ANON_KEY") !== undefined
+          ? "SUPABASE_ANON_KEY"
+          : readEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY") !== undefined
+            ? "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+            : readEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY") !== undefined
+              ? "NEXT_PUBLIC_SUPABASE_ANON_KEY"
+              : "missing",
+  };
 }
 
 function getSupabaseUrlValidationError(supabaseUrl: string) {
@@ -26,6 +55,10 @@ function getSupabaseUrlValidationError(supabaseUrl: string) {
 
   if (!parsedUrl.hostname.endsWith(".supabase.co")) {
     return "Invalid Supabase configuration. Supabase URL must point to a *.supabase.co host.";
+  }
+
+  if (retiredSupabaseHosts.has(parsedUrl.hostname)) {
+    return "Invalid Supabase configuration. The configured Supabase project host is retired or unreachable. Update SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL in production.";
   }
 
   return "";
@@ -51,5 +84,8 @@ export function requireSupabaseConfig() {
     throw new Error(supabaseUrlValidationError);
   }
 
-  return { supabaseUrl, supabaseKey };
+  return {
+    supabaseUrl: new URL(supabaseUrl).origin,
+    supabaseKey,
+  };
 }
