@@ -1,4 +1,7 @@
-const retiredSupabaseHosts = new Set(["dgqmrwjqjlatthqwqwwm.supabase.co"]);
+const unreachableSupabaseHosts = new Set([
+  "dgqmrwjqjlatthqwqwwm.supabase.co",
+  "dgqmrwjqljatthqwqwwm.supabase.co",
+]);
 
 function readEnv(name: string) {
   const value = process.env[name]?.trim();
@@ -57,8 +60,8 @@ function getSupabaseUrlValidationError(supabaseUrl: string) {
     return "Invalid Supabase configuration. Supabase URL must point to a *.supabase.co host.";
   }
 
-  if (retiredSupabaseHosts.has(parsedUrl.hostname)) {
-    return "Invalid Supabase configuration. The configured Supabase project host is retired or unreachable. Update SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL in production.";
+  if (unreachableSupabaseHosts.has(parsedUrl.hostname)) {
+    return `Invalid Supabase configuration. The configured Supabase project host is unreachable: ${parsedUrl.hostname}. Update SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL in production.`;
   }
 
   return "";
@@ -85,7 +88,7 @@ export function requireSupabaseConfig() {
   }
 
   return {
-    supabaseUrl: new URL(supabaseUrl).origin,
+    supabaseUrl,
     supabaseKey,
   };
 }

@@ -1,10 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { requireSupabaseConfig } from "./env";
+import { getSupabaseConfigSource, requireSupabaseConfig } from "./env";
 
 export async function createClient() {
   const { supabaseUrl, supabaseKey } = requireSupabaseConfig();
   const cookieStore = await cookies();
+
+  console.info("[supabase:server_client]", {
+    ...getSupabaseConfigSource(),
+    finalUrl: supabaseUrl,
+  });
 
   return createServerClient(supabaseUrl, supabaseKey, {
     cookies: {

@@ -80,14 +80,33 @@ export async function signInWithPassword(formData: FormData) {
 }
 
 function redirectWithSignupError(error: unknown): never {
+  const cause =
+    error instanceof Error && "cause" in error
+      ? (error as Error & { cause?: unknown }).cause
+      : undefined;
+  const causeMessage =
+    typeof cause === "object" && cause
+      ? [
+          "code" in cause ? `code=${String((cause as { code?: unknown }).code)}` : "",
+          "hostname" in cause
+            ? `hostname=${String((cause as { hostname?: unknown }).hostname)}`
+            : "",
+          "message" in cause
+            ? `message=${String((cause as { message?: unknown }).message)}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(", ")
+      : "";
   const message =
     error instanceof Error
       ? error.message
       : typeof error === "object" && error && "message" in error
         ? String((error as { message: unknown }).message)
         : String(error || "Unknown Supabase sign up error");
+  const displayMessage = causeMessage ? `${message} (${causeMessage})` : message;
 
-  redirect(`/register?auth_error=${encodeURIComponent(message)}`);
+  redirect(`/register?auth_error=${encodeURIComponent(displayMessage)}`);
 }
 
 export async function signUpWithPassword(formData: FormData) {
@@ -108,13 +127,10 @@ export async function signUpWithPassword(formData: FormData) {
 
   try {
     const supabaseUrl = getSupabaseUrl();
-    const supabaseHostname = supabaseUrl
-      ? new URL(supabaseUrl).hostname
-      : "missing";
 
     console.info("[auth:signup:supabase_config]", {
       ...getSupabaseConfigSource(),
-      hostname: supabaseHostname,
+      finalUrl: supabaseUrl ?? "missing",
     });
 
     supabase = await createClient();

@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { requireSupabaseConfig } from "./env";
+import { getSupabaseConfigSource, requireSupabaseConfig } from "./env";
 import { logServerError } from "@/app/lib/security/errors";
 
 export async function updateSession(request: NextRequest) {
@@ -49,6 +49,11 @@ export async function updateSession(request: NextRequest) {
       },
     }
   );
+
+  console.info("[supabase:proxy_client]", {
+    ...getSupabaseConfigSource(),
+    finalUrl: supabaseUrl,
+  });
 
   try {
     await supabase.auth.getUser();
