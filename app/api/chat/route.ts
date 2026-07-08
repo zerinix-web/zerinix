@@ -584,91 +584,178 @@ function createMockChatResponse(prompt: string, expert: AiExpert) {
   ].join("\n");
 }
 
+const TEXT_LIKE_RESPONSE_FIELD_PATTERN =
+  /^(output_text|text|value|content|message|refusal|response|answer|summary|reply|markdown|body|description)$/i;
+
+const NON_CONTENT_RESPONSE_FIELD_PATTERN =
+  /^(id|object|type|status|role|model|created|created_at|updated_at|usage|metadata|annotations|finish_reason|index|incomplete_details)$/i;
+
+function extractTextFromValue(
+  value: unknown,
+  parentKey = "",
+  seen: WeakSet<object> = new WeakSet()
+): string {
+  if (typeof value === "string") {
+    return !parentKey || TEXT_LIKE_RESPONSE_FIELD_PATTERN.test(parentKey) ? value : "";
+  }
+
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  if (seen.has(value)) {
+    return "";
+  }
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => extractTextFromValue(item, parentKey, seen))
+      .filter(Boolean)
+      .join("");
+  }
+
+  const record = value as Record<string, unknown>;
+  const type = typeof record.type === "string" ? record.type : "";
+  const candidateKeys =
+    type === "output_text"
+      ? ["text", "value", "content", "message"]
+      : [
+          "output_text",
+          "text",
+          "value",
+          "content",
+          "message",
+          "refusal",
+          "response",
+          "answer",
+          "summary",
+        ];
+
+  for (const key of candidateKeys) {
+    const extracted = extractTextFromValue(record[key], key, seen);
+
+    if (extracted.trim()) {
+      return extracted;
+    }
+  }
+
+  for (const [key, item] of Object.entries(record)) {
+    if (candidateKeys.includes(key) || NON_CONTENT_RESPONSE_FIELD_PATTERN.test(key)) {
+      continue;
+    }
+
+    const extracted = extractTextFromValue(item, key, seen);
+
+    if (extracted.trim()) {
+      return extracted;
+    }
+  }
+
+  return "";
+}
+
 function extractResponseText(response: unknown) {
   if (!response || typeof response !== "object") {
     return "";
   }
 
-  const directText = (response as { output_text?: unknown }).output_text;
+  const record = response as Record<string, unknown>;
+  const directText = extractTextFromValue(record.output_text);
 
-  if (typeof directText === "string" && directText.trim()) {
+  if (directText.trim()) {
     return directText;
   }
 
-  const output = (response as { output?: unknown }).output;
+  const outputText = extractTextFromValue(record.output);
 
-  if (!Array.isArray(output)) {
-    return "";
+  if (outputText.trim()) {
+    return outputText;
   }
 
-  return output
-    .flatMap((item) => {
-      if (!item || typeof item !== "object") {
-        return [];
-      }
-
-      const content = (item as { content?: unknown }).content;
-
-      if (!Array.isArray(content)) {
-        return [];
-      }
-
-      return content
-        .map((part) => {
-          if (!part || typeof part !== "object") {
-            return "";
-          }
-
-          const text = (part as { text?: unknown }).text;
-          const refusal = (part as { refusal?: unknown }).refusal;
-
-          if (typeof text === "string") {
-            return text;
-          }
-
-          if (typeof refusal === "string") {
-            return refusal;
-          }
-
-          return "";
-        })
-        .filter(Boolean);
-    })
-    .join("");
+  return extractTextFromValue(record.output_parsed);
 }
 
 function extractOutputItemText(item: unknown) {
-  if (!item || typeof item !== "object") {
+  return extractTextFromValue(item);
+}
+
+function getChatMaxOutputTokens(requestKind: AiRequestKind) {
+  if (requestKind === "simple_chat") {
+    return 900;
+  }
+
+  if (requestKind === "investment_advice") {
+    return 1_400;
+  }
+
+  return 1_200;
+}
+
+function getResponseStatus(response: unknown) {
+  if (!response || typeof response !== "object") {
     return "";
   }
 
-  const content = (item as { content?: unknown }).content;
+  const status = (response as Record<string, unknown>).status;
 
-  if (!Array.isArray(content)) {
+  return typeof status === "string" ? status : "";
+}
+
+function getIncompleteReason(response: unknown) {
+  if (!response || typeof response !== "object") {
     return "";
   }
 
-  return content
-    .map((part) => {
-      if (!part || typeof part !== "object") {
-        return "";
-      }
+  const details = (response as Record<string, unknown>).incomplete_details;
 
-      const text = (part as { text?: unknown }).text;
-      const refusal = (part as { refusal?: unknown }).refusal;
+  if (!details || typeof details !== "object") {
+    return "";
+  }
 
-      if (typeof text === "string") {
-        return text;
-      }
+  const reason = (details as Record<string, unknown>).reason;
 
-      if (typeof refusal === "string") {
-        return refusal;
-      }
+  return typeof reason === "string" ? reason : "";
+}
 
-      return "";
-    })
-    .filter(Boolean)
-    .join("");
+function createIncompleteResponseFallback(reason: string) {
+  if (reason === "max_output_tokens") {
+    return "I reached the response length limit before I could display the answer. Please ask me to continue or narrow the question.";
+  }
+
+  return "I received a response but could not display it. Please try again.";
+}
+
+function sanitizeResponseShape(value: unknown, depth = 0): unknown {
+  if (!value || typeof value !== "object") {
+    return typeof value;
+  }
+
+  if (depth > 3) {
+    return Array.isArray(value) ? `array(${value.length})` : "object";
+  }
+
+  if (Array.isArray(value)) {
+    return {
+      type: "array",
+      length: value.length,
+      sample: value.slice(0, 3).map((item) => sanitizeResponseShape(item, depth + 1)),
+    };
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return Object.fromEntries(
+    Object.entries(record)
+      .filter(([key]) => !/key|token|secret|authorization|cookie/i.test(key))
+      .map(([key, item]) => [
+        key,
+        typeof item === "string"
+          ? `string(${item.length})`
+          : sanitizeResponseShape(item, depth + 1),
+      ])
+  );
 }
 
 export async function POST(req: Request) {
@@ -885,8 +972,11 @@ export async function POST(req: Request) {
       model,
     });
 
+    const maxOutputTokens = getChatMaxOutputTokens(requestKind);
     const stream = client.responses.stream({
       model,
+      reasoning: { effort: "minimal" },
+      text: { verbosity: "low" },
       instructions: [
         "You are ZERINIX AI, a premium business operating assistant.",
         `Classified user intent: ${selectedIntent}.`,
@@ -932,7 +1022,7 @@ export async function POST(req: Request) {
           content: prompt,
         },
       ],
-      max_output_tokens: 1_800,
+      max_output_tokens: maxOutputTokens,
     });
 
     const encoder = new TextEncoder();
@@ -942,18 +1032,29 @@ export async function POST(req: Request) {
         async start(controller) {
           let streamedText = "";
           let completedText = "";
+          let completedResponse: unknown = null;
+          let incompleteReason = "";
+          let usedDisplayFallback = false;
           let tokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
           try {
             for await (const event of stream) {
               if (event.type === "response.output_text.delta" && event.delta) {
-                streamedText += event.delta;
-                controller.enqueue(encoder.encode(event.delta));
+                const deltaText = extractTextFromValue(event.delta);
+
+                if (deltaText) {
+                  streamedText += deltaText;
+                  controller.enqueue(encoder.encode(deltaText));
+                }
               }
 
               if (event.type === "response.output_text.done" && !streamedText) {
-                streamedText = event.text;
-                controller.enqueue(encoder.encode(event.text));
+                const doneText = extractTextFromValue(event.text);
+
+                if (doneText) {
+                  streamedText = doneText;
+                  controller.enqueue(encoder.encode(doneText));
+                }
               }
 
               if (event.type === "response.output_item.done" && !streamedText) {
@@ -966,8 +1067,23 @@ export async function POST(req: Request) {
               }
 
               if (event.type === "response.completed") {
+                completedResponse = event.response;
+                incompleteReason = getIncompleteReason(event.response);
                 tokenUsage = extractTokenUsage(event.response);
                 completedText = extractResponseText(event.response);
+
+                if (getResponseStatus(event.response) === "incomplete") {
+                  console.error("[api:chat] OpenAI response incomplete", {
+                    model,
+                    selectedIntent,
+                    selectedExpert,
+                    requestKind,
+                    maxOutputTokens,
+                    incompleteReason,
+                    conversationId: conversationId || null,
+                    responseShape: sanitizeResponseShape(event.response),
+                  });
+                }
 
                 if (!streamedText && completedText) {
                   streamedText = completedText;
@@ -986,8 +1102,23 @@ export async function POST(req: Request) {
             if (!streamedText.trim()) {
               const finalResponse = await stream.finalResponse();
 
+              completedResponse = finalResponse;
+              incompleteReason = getIncompleteReason(finalResponse);
               tokenUsage = extractTokenUsage(finalResponse);
               completedText = extractResponseText(finalResponse);
+
+              if (getResponseStatus(finalResponse) === "incomplete") {
+                console.error("[api:chat] OpenAI final response incomplete", {
+                  model,
+                  selectedIntent,
+                  selectedExpert,
+                  requestKind,
+                  maxOutputTokens,
+                  incompleteReason,
+                  conversationId: conversationId || null,
+                  responseShape: sanitizeResponseShape(finalResponse),
+                });
+              }
 
               if (completedText) {
                 streamedText = completedText;
@@ -1003,9 +1134,14 @@ export async function POST(req: Request) {
                 conversationId: conversationId || null,
                 completedTextLength: completedText.length,
                 streamFinalResponseAvailable: Boolean(completedText),
+                responseStatus: getResponseStatus(completedResponse),
+                incompleteReason,
+                responseShape: sanitizeResponseShape(completedResponse),
               });
 
-              throw new Error("OpenAI chat response completed without output text.");
+              streamedText = createIncompleteResponseFallback(incompleteReason);
+              usedDisplayFallback = true;
+              controller.enqueue(encoder.encode(streamedText));
             }
 
             await recordAiUsage(supabase, {
@@ -1032,10 +1168,14 @@ export async function POST(req: Request) {
                 model_preference: modelPreference,
                 attachment_count: attachments.length,
                 actual_ai_call: true,
+                max_output_tokens: maxOutputTokens,
+                response_status: getResponseStatus(completedResponse) || null,
+                incomplete_reason: incompleteReason || null,
+                display_fallback_used: usedDisplayFallback,
               },
             });
 
-            if (chatCacheEnabled) {
+            if (chatCacheEnabled && !usedDisplayFallback) {
               const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
 
               await storeCachedAiResponse(supabase, {
