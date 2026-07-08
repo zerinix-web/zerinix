@@ -26,7 +26,7 @@ export default async function RegisterPage({ searchParams }: RegisterPageProps) 
 
       {authError && (
         <p className="mt-6 rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">
-          Hesap oluşturulamadı. Bilgileri kontrol edip tekrar dene.
+          {authError}
         </p>
       )}
 

@@ -7,7 +7,6 @@ import {
   checkRateLimit,
   getServerActionClientIp,
 } from "@/app/lib/security/rate-limit";
-import { logServerError } from "@/app/lib/security/errors";
 
 export type LoginActionState = {
   error?: string;
@@ -80,6 +79,17 @@ export async function signInWithPassword(formData: FormData) {
   redirect("/plan");
 }
 
+function redirectWithSignupError(error: unknown): never {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error && "message" in error
+        ? String((error as { message: unknown }).message)
+        : String(error || "Unknown Supabase sign up error");
+
+  redirect(`/register?auth_error=${encodeURIComponent(message)}`);
+}
+
 export async function signUpWithPassword(formData: FormData) {
   const name = String(formData.get("name") ?? "");
   const email = String(formData.get("email") ?? "");
@@ -109,8 +119,8 @@ export async function signUpWithPassword(formData: FormData) {
 
     supabase = await createClient();
   } catch (error) {
-    logServerError("auth:signup:supabase_config", error);
-    redirect("/register?auth_error=signup_failed");
+    console.error("[auth:signup:supabase_config]", error);
+    redirectWithSignupError(error);
   }
 
   const { error: signUpError } = await supabase.auth
@@ -124,14 +134,14 @@ export async function signUpWithPassword(formData: FormData) {
       },
     })
     .catch((error: unknown) => {
-      logServerError("auth:signup:supabase_fetch", error);
+      console.error("[auth:signup:supabase_fetch]", error);
 
       return { error };
     });
 
   if (signUpError) {
-    logServerError("auth:signup:supabase_error", signUpError);
-    redirect("/register?auth_error=signup_failed");
+    console.error("[auth:signup:supabase_error]", signUpError);
+    redirectWithSignupError(signUpError);
   }
 
   redirect("/plan");
