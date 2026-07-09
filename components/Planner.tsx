@@ -467,6 +467,15 @@ function sanitizeReportContent(content: string) {
     .replace(/\n\s*(?:sources|kaynaklar)\s*:[\s\S]*$/im, "")
     .replace(/\[([^\]]+)\]\((?:https?:\/\/|www\.)[^\s)]+\)/gi, "$1")
     .replace(/(?:https?:\/\/|www\.)[^\s),]+/gi, "")
+    .replace(/\bEarly evidence\b/gi, "Directional")
+    .replace(/\bDeveloping evidence\b/gi, "Developing")
+    .replace(/\bStrong evidence\b/gi, "Verified")
+    .replace(/\bSector view\b/gi, "Market view")
+    .replace(/\bLow[\s-]+Confidence\b/gi, "Directional")
+    .replace(/\bMedium[\s-]+Confidence\b/gi, "Developing")
+    .replace(/\bHigh[\s-]+Confidence\b/gi, "Verified")
+    .replace(/\bIndustry[\s-]+Estimate\b/gi, "Market view")
+    .replace(/\bWAIT\b/g, "Hold for validation")
     .replace(/\(\s*\)/g, "")
     .replace(/[ \t]+\n/g, "\n")
     .trim();
@@ -991,6 +1000,119 @@ function MarkdownRenderer({
   );
 }
 
+type CitationData = {
+  sourceTitle: string;
+  organization: string;
+  publicationYear: string;
+  confidence: "High" | "Medium" | "Low" | "Unavailable";
+};
+
+function normalizeCitationConfidence(value: string): CitationData["confidence"] {
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized === "high") {
+    return "High";
+  }
+
+  if (normalized === "medium") {
+    return "Medium";
+  }
+
+  if (normalized === "low") {
+    return "Low";
+  }
+
+  return "Unavailable";
+}
+
+function parseCitations(content: string): CitationData[] {
+  if (/source unavailable/i.test(content)) {
+    return [];
+  }
+
+  const fallbackConfidence = normalizeCitationConfidence(
+    content.match(/\bconfidence\s*[:\-–—]\s*(high|medium|low)\b/i)?.[1] || ""
+  );
+
+  return content
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/^[-*•]\s*/, "")
+        .replace(/\*\*/g, "")
+        .trim()
+    )
+    .map((line) => {
+      const citationMatch = line.match(
+        /^([^—–|-]{2,80})\s*[—–-]\s*(.+?)(?:\s*\((\d{4})\))?(?:\s*[.;:]?\s*)?$/
+      );
+
+      if (!citationMatch) {
+        return null;
+      }
+
+      const organization = citationMatch[1].trim();
+      const sourceTitle = citationMatch[2]
+        .replace(/\bconfidence\s*[:\-–—]\s*(high|medium|low)\b/i, "")
+        .trim();
+      const publicationYear = citationMatch[3]?.trim() || "Year unavailable";
+
+      if (!organization || !sourceTitle || /source unavailable/i.test(sourceTitle)) {
+        return null;
+      }
+
+      return {
+        sourceTitle,
+        organization,
+        publicationYear,
+        confidence: fallbackConfidence,
+      } satisfies CitationData;
+    })
+    .filter((citation): citation is CitationData => Boolean(citation));
+}
+
+function Citation({ citation }: { citation?: CitationData }) {
+  if (!citation) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-zinc-400">
+        Source unavailable
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+      <p className="text-sm font-semibold text-white">
+        {citation.organization} — {citation.sourceTitle}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-400">
+        <span>Publication year: {citation.publicationYear}</span>
+        <span className="text-zinc-600">/</span>
+        <span>Confidence: {citation.confidence}</span>
+      </div>
+    </div>
+  );
+}
+
+function CitationList({ content }: { content: string }) {
+  const citations = parseCitations(content);
+
+  if (citations.length === 0) {
+    return <Citation />;
+  }
+
+  return (
+    <div className="space-y-3">
+      {citations.map((citation, index) => (
+        <Citation
+          key={`${citation.organization}-${citation.sourceTitle}-${index}`}
+          citation={citation}
+        />
+      ))}
+    </div>
+  );
+}
+
 function SourcesCard({ sections }: { sections: ReportSection[] }) {
   return (
     <article className="rounded-[2rem] border border-teal-200/15 bg-teal-200/[0.045] p-5 shadow-xl shadow-black/30">
@@ -1013,7 +1135,7 @@ function SourcesCard({ sections }: { sections: ReportSection[] }) {
                     {section.title}
                   </p>
                 ) : null}
-                <MarkdownRenderer content={section.content} />
+                <CitationList content={section.content} />
               </div>
             ))}
           </div>

@@ -134,12 +134,12 @@ const fieldPrompts = {
   },
   sourcesAssumptions: {
     prompt:
-      "List only sources, evidence basis, planning inputs, and missing data. Do not repeat market or financial analysis. Do not write vague source claims such as 'industry reports' unless a specific source is named. Use polished phrases such as 'Based on comparable sector patterns', 'Requires primary customer validation', or 'Evidence remains directional until verified'. Do not use internal confidence tiers, source-model labels, or grading jargon. Do not write a heading. Max 160 words.",
+      "List only sources, evidence basis, planning inputs, and missing data. Do not repeat market or financial analysis. For each verified source use this exact compact format when possible: Organization — Source title (Year). Then add one line: Confidence: High, Medium, or Low. If no verified source is available, write exactly: Source unavailable. Do not invent URLs, publications, or fake citations. Do not write vague source claims such as 'industry reports' unless a specific source is named. Do not write a heading. Max 160 words.",
     maxTokens: 1300,
   },
   sources: {
     prompt:
-      "List only 4-6 reliable sources used or most relevant for validating this market. Name specific sources when available. Do not use generic phrases such as 'industry reports' as verified evidence. For each source, state the specific market question it supports and how decision-useful it is. If a source is missing, describe the required primary research without internal labels. Do not repeat analysis. Do not write a heading.",
+      "List only 4-6 reliable sources used or most relevant for validating this market. For each verified source use this exact compact format when possible: Organization — Source title (Year). Then add one line for the group or source: Confidence: High, Medium, or Low. If no verified source is available, write exactly: Source unavailable. Do not invent URLs, publications, or fake citations. Do not use generic phrases such as 'industry reports' as verified evidence. Do not repeat analysis. Do not write a heading.",
     maxTokens: 1400,
   },
 } as const;
@@ -267,10 +267,14 @@ const fieldLabelsByLanguage: Record<
 };
 
 const marketReportTermReplacements: Array<[RegExp, string]> = [
-  [/\bLow[\s-]+Confidence\b/gi, "Early evidence"],
-  [/\bMedium[\s-]+Confidence\b/gi, "Developing evidence"],
-  [/\bHigh[\s-]+Confidence\b/gi, "Strong evidence"],
-  [/\bIndustry[\s-]+Estimate\b/gi, "Sector view"],
+  [/\bLow[\s-]+Confidence\b/gi, "Directional"],
+  [/\bMedium[\s-]+Confidence\b/gi, "Developing"],
+  [/\bHigh[\s-]+Confidence\b/gi, "Verified"],
+  [/\bEarly evidence\b/gi, "Directional"],
+  [/\bDeveloping evidence\b/gi, "Developing"],
+  [/\bStrong evidence\b/gi, "Verified"],
+  [/\bSector view\b/gi, "Market view"],
+  [/\bIndustry[\s-]+Estimate\b/gi, "Market view"],
   [/\bAI[\s-]+Assumptions?\b/gi, "Planning inputs"],
   [/\bBenchmarks?\b/gi, "Market references"],
   [/\bAssumptions?\b/gi, "Planning inputs"],
