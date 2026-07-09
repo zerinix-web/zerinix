@@ -183,6 +183,7 @@ const workflowSteps = [
 ];
 
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 60_000;
+const CHAT_REQUEST_TIMEOUT_MS = 75_000;
 
 const chatModelOptions: Array<{
   value: ChatModelPreference;
@@ -4651,7 +4652,7 @@ export default function Planner({
       "streaming",
       conversationId
     );
-    await persistMessage(conversationId, {
+    void persistMessage(conversationId, {
       id: assistantMessageId,
       role: "assistant",
       mode: "chat",
@@ -4660,10 +4661,18 @@ export default function Planner({
       createdAt: Date.now(),
     });
 
+    const abortController = new AbortController();
+    let requestTimedOut = false;
+    const requestTimeoutId = setTimeout(() => {
+      requestTimedOut = true;
+      abortController.abort();
+    }, CHAT_REQUEST_TIMEOUT_MS);
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
         body: JSON.stringify({
           prompt: submittedPrompt,
           conversationId,
@@ -4684,18 +4693,23 @@ export default function Planner({
       const finalText = responseText || "I could not generate a response. Please try again.";
 
       updateAssistantMessage(assistantMessageId, finalText, "complete", conversationId);
-      await updatePersistedMessage(assistantMessageId, finalText, "complete");
+      void updatePersistedMessage(assistantMessageId, finalText, "complete");
       setPrompt("");
     } catch (error) {
-      const errorMessage = getReportGenerationErrorMessage(
-        error,
-        "Chat response failed. Please try again."
-      );
+      const aborted = error instanceof DOMException && error.name === "AbortError";
+      const errorMessage =
+        aborted && requestTimedOut
+          ? "Chat response timed out before the server responded. Please try again."
+          : getReportGenerationErrorMessage(
+              error,
+              aborted ? "Generation stopped." : "Chat response failed. Please try again."
+            );
 
       setReportGenerationError(errorMessage);
       updateAssistantMessage(assistantMessageId, errorMessage, "failed", conversationId);
-      await updatePersistedMessage(assistantMessageId, errorMessage, "failed");
+      void updatePersistedMessage(assistantMessageId, errorMessage, "failed");
     } finally {
+      clearTimeout(requestTimeoutId);
       setChatLoading(false);
     }
   }

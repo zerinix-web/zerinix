@@ -1212,6 +1212,8 @@ export async function POST(req: Request) {
               controller.enqueue(encoder.encode(streamedText));
             }
 
+            controller.close();
+
             await recordAiUsage(supabase, {
               userId: user.id,
               endpoint: "/api/chat",
@@ -1270,8 +1272,6 @@ export async function POST(req: Request) {
                 expiresInDays: 7,
               });
             }
-
-            controller.close();
           } catch (error) {
             logServerError("api:chat:stream", error);
             const errorMessage = getChatErrorMessage(error);

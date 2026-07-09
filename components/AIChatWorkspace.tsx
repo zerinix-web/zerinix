@@ -80,6 +80,7 @@ type AIChatWorkspaceProps = {
 };
 
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 60_000;
+const CHAT_REQUEST_TIMEOUT_MS = 75_000;
 
 const emptyProfile: ChatProfile = {
   preferred_country: "",
@@ -1265,10 +1266,15 @@ export default function AIChatWorkspace({
       messages: [...current.messages, assistantMessage],
       updatedAt: getClientTimestamp(),
     }));
-    await persistMessage(conversationId, assistantMessage);
+    void persistMessage(conversationId, assistantMessage);
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    let requestTimedOut = false;
+    const requestTimeoutId = setTimeout(() => {
+      requestTimedOut = true;
+      abortController.abort();
+    }, CHAT_REQUEST_TIMEOUT_MS);
 
     try {
       const response = await fetch("/api/chat", {
@@ -1294,23 +1300,28 @@ export default function AIChatWorkspace({
       const finalText = responseText || "I could not generate a response. Please try again.";
 
       updateAssistantMessage(assistantMessageId, finalText, "complete", conversationId);
-      await updatePersistedMessage(assistantMessageId, finalText, "complete");
+      void updatePersistedMessage(assistantMessageId, finalText, "complete");
       setPrompt("");
       setAttachments([]);
     } catch (error) {
       const aborted = error instanceof DOMException && error.name === "AbortError";
       const errorMessage = aborted
-        ? "Generation stopped."
+        ? requestTimedOut
+          ? "Chat response timed out before the server responded. Please try again."
+          : "Generation stopped."
         : error instanceof Error
           ? error.message
           : "Chat response failed. Please try again.";
 
       updateAssistantMessage(assistantMessageId, errorMessage, "failed", conversationId);
-      await updatePersistedMessage(assistantMessageId, errorMessage, "failed");
+      void updatePersistedMessage(assistantMessageId, errorMessage, "failed");
       if (!aborted) {
+        setConversationError(errorMessage);
+      } else if (requestTimedOut) {
         setConversationError(errorMessage);
       }
     } finally {
+      clearTimeout(requestTimeoutId);
       abortControllerRef.current = null;
       setLoading(false);
     }
