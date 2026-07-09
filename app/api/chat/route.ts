@@ -566,7 +566,8 @@ function textStream(content: string) {
     {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-store",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
       },
     }
   );
@@ -979,57 +980,118 @@ export async function POST(req: Request) {
     });
 
     const maxOutputTokens = getChatMaxOutputTokens(requestKind);
-    const stream = client.responses.stream({
+    console.info("[api:chat] provider call started", {
       model,
-      reasoning: { effort: "minimal" },
-      text: { verbosity: "low" },
-      instructions: [
-        "You are ZERINIX AI, a premium business operating assistant.",
-        `Classified user intent: ${selectedIntent}.`,
-        `Selected expert: ${selectedExpert}.`,
-        expertInstructions[selectedExpert],
-        "The selected expert must shape the perspective, vocabulary, priorities, caveats, and structure of the answer. Do not announce the routing process unless it helps the user.",
-        profileContext
-          ? `Persistent user profile for non-sensitive personalization:\n${profileContext}\nUse this profile to avoid asking for details the user has already saved. If the user's latest message conflicts with the profile, prioritize the latest message.`
-          : "No persistent chat profile is available yet. Do not invent profile preferences.",
-        "Answer naturally and directly. You may help with business, strategy, operations, finance, product, marketing, technology, or general questions.",
-        "Use the conversation history for context, but do not fabricate facts.",
-        "When attached file text is provided, treat it as user-supplied context. If a file has no readable text, say so briefly when relevant.",
-        "If the user asks for a structured investor report, suggest AI Plan or Market Analysis mode instead of generating the full report in Chat mode.",
-        "Advisor quality rules: ask follow-up questions only if the missing information is absolutely necessary. Never ask for information already present in the persistent profile or conversation. If useful but non-critical information is missing, proceed with clearly labeled assumptions.",
-        "When giving recommendations, go deeper than generic advice. Rank options from best to worst, show step-by-step reasoning, explain why each option was chosen, and include estimated investment, expected ROI or outcome range, timeline, risks, advantages, disadvantages, and next actions whenever applicable.",
-        "For investment, finance, crypto, real estate, legal, tax, or career-sensitive topics, use educational decision-support language, state uncertainty, and avoid guarantees.",
-        "Keep Business Plan and Market Analysis separate: do not generate a PDF-style report in Chat mode. If the user explicitly wants a full structured report, suggest AI Plan or Market Analysis.",
-        "Use concise markdown when it improves readability. Match the user's language.",
-      ].join("\n"),
-      input: [
-        ...messages.map((message) => ({
-          role: message.role,
-          content: message.content,
-        })),
-        ...(profileContext
-          ? [
-              {
-                role: "user" as const,
-                content: `Persistent user profile context:\n\n${profileContext}`,
-              },
-            ]
-          : []),
-        ...(attachmentContext
-          ? [
-              {
-                role: "user" as const,
-                content: `Attached file context:\n\n${attachmentContext}`,
-              },
-            ]
-          : []),
-        {
-          role: "user" as const,
-          content: prompt,
-        },
-      ],
-      max_output_tokens: maxOutputTokens,
+      selectedIntent,
+      selectedExpert,
+      requestKind,
+      conversationId: conversationId || null,
+      providerCalled: true,
+      quotaConsumed: false,
     });
+
+    const stream = await client.responses
+      .create(
+        {
+          model,
+          reasoning: { effort: "minimal" },
+          text: { verbosity: "low" },
+          instructions: [
+            "You are ZERINIX AI, a premium business operating assistant.",
+            `Classified user intent: ${selectedIntent}.`,
+            `Selected expert: ${selectedExpert}.`,
+            expertInstructions[selectedExpert],
+            "The selected expert must shape the perspective, vocabulary, priorities, caveats, and structure of the answer. Do not announce the routing process unless it helps the user.",
+            profileContext
+              ? `Persistent user profile for non-sensitive personalization:\n${profileContext}\nUse this profile to avoid asking for details the user has already saved. If the user's latest message conflicts with the profile, prioritize the latest message.`
+              : "No persistent chat profile is available yet. Do not invent profile preferences.",
+            "Answer naturally and directly. You may help with business, strategy, operations, finance, product, marketing, technology, or general questions.",
+            "Use the conversation history for context, but do not fabricate facts.",
+            "When attached file text is provided, treat it as user-supplied context. If a file has no readable text, say so briefly when relevant.",
+            "If the user asks for a structured investor report, suggest AI Plan or Market Analysis mode instead of generating the full report in Chat mode.",
+            "Advisor quality rules: ask follow-up questions only if the missing information is absolutely necessary. Never ask for information already present in the persistent profile or conversation. If useful but non-critical information is missing, proceed with clearly labeled assumptions.",
+            "When giving recommendations, go deeper than generic advice. Rank options from best to worst, show step-by-step reasoning, explain why each option was chosen, and include estimated investment, expected ROI or outcome range, timeline, risks, advantages, disadvantages, and next actions whenever applicable.",
+            "For investment, finance, crypto, real estate, legal, tax, or career-sensitive topics, use educational decision-support language, state uncertainty, and avoid guarantees.",
+            "Keep Business Plan and Market Analysis separate: do not generate a PDF-style report in Chat mode. If the user explicitly wants a full structured report, suggest AI Plan or Market Analysis.",
+            "Use concise markdown when it improves readability. Match the user's language.",
+          ].join("\n"),
+          input: [
+            ...messages.map((message) => ({
+              role: message.role,
+              content: message.content,
+            })),
+            ...(profileContext
+              ? [
+                  {
+                    role: "user" as const,
+                    content: `Persistent user profile context:\n\n${profileContext}`,
+                  },
+                ]
+              : []),
+            ...(attachmentContext
+              ? [
+                  {
+                    role: "user" as const,
+                    content: `Attached file context:\n\n${attachmentContext}`,
+                  },
+                ]
+              : []),
+            {
+              role: "user" as const,
+              content: prompt,
+            },
+          ],
+          max_output_tokens: maxOutputTokens,
+          stream: true,
+        },
+        { signal: req.signal }
+      )
+      .catch(async (error) => {
+        const errorMessage = getChatErrorMessage(error);
+
+        console.info("[api:chat] provider request failed", {
+          model,
+          selectedIntent,
+          selectedExpert,
+          requestKind,
+          conversationId: conversationId || null,
+          providerCalled: true,
+          quotaConsumed: false,
+          failureReason: errorMessage,
+        });
+
+        await recordAiUsage(supabase, {
+          userId: user.id,
+          endpoint: "/api/chat",
+          reportField: "chat",
+          promptHash,
+          model,
+          planTier,
+          tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          estimatedCostUsd: 0,
+          cacheHit: false,
+          status: "failed",
+          responseTimeMs: Date.now() - startedAt,
+          metadata: {
+            quota_event: false,
+            quota_mode: requestKind,
+            quota_consumed: false,
+            usage_kind: "chat_message",
+            conversation_id: conversationId || null,
+            selected_intent: selectedIntent,
+            selected_expert: selectedExpert,
+            request_kind: requestKind,
+            profile_used: Boolean(profileContext),
+            model_preference: modelPreference,
+            attachment_count: attachments.length,
+            actual_ai_call: true,
+            phase: "openai_request",
+            error_message: errorMessage,
+          },
+        });
+
+        throw error;
+      });
 
     const encoder = new TextEncoder();
 
@@ -1097,24 +1159,13 @@ export async function POST(req: Request) {
                 }
               }
 
-              if (event.type === "response.failed") {
-                const errorMessage =
-                  event.response?.error?.message || "OpenAI chat response failed.";
+              if (event.type === "response.incomplete") {
+                completedResponse = event.response;
+                incompleteReason = getIncompleteReason(event.response);
+                tokenUsage = extractTokenUsage(event.response);
+                completedText = extractResponseText(event.response);
 
-                throw new Error(errorMessage);
-              }
-            }
-
-            if (!streamedText.trim()) {
-              const finalResponse = await stream.finalResponse();
-
-              completedResponse = finalResponse;
-              incompleteReason = getIncompleteReason(finalResponse);
-              tokenUsage = extractTokenUsage(finalResponse);
-              completedText = extractResponseText(finalResponse);
-
-              if (getResponseStatus(finalResponse) === "incomplete") {
-                console.error("[api:chat] OpenAI final response incomplete", {
+                console.error("[api:chat] OpenAI response incomplete", {
                   model,
                   selectedIntent,
                   selectedExpert,
@@ -1122,13 +1173,24 @@ export async function POST(req: Request) {
                   maxOutputTokens,
                   incompleteReason,
                   conversationId: conversationId || null,
-                  responseShape: sanitizeResponseShape(finalResponse),
+                  responseShape: sanitizeResponseShape(event.response),
                 });
+
+                if (!streamedText && completedText) {
+                  streamedText = completedText;
+                  controller.enqueue(encoder.encode(completedText));
+                }
               }
 
-              if (completedText) {
-                streamedText = completedText;
-                controller.enqueue(encoder.encode(completedText));
+              if (event.type === "response.failed") {
+                const errorMessage =
+                  event.response?.error?.message || "OpenAI chat response failed.";
+
+                throw new Error(errorMessage);
+              }
+
+              if (event.type === "error") {
+                throw new Error(event.message || "OpenAI chat stream failed.");
               }
             }
 
@@ -1179,6 +1241,16 @@ export async function POST(req: Request) {
                 incomplete_reason: incompleteReason || null,
                 display_fallback_used: usedDisplayFallback,
               },
+            });
+
+            console.info("[api:chat] provider call completed", {
+              model,
+              selectedIntent,
+              selectedExpert,
+              requestKind,
+              conversationId: conversationId || null,
+              providerCalled: true,
+              quotaConsumed: !productionLimit.quotaAlreadyCharged,
             });
 
             if (chatCacheEnabled && !usedDisplayFallback) {
@@ -1244,7 +1316,8 @@ export async function POST(req: Request) {
       {
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
-          "Cache-Control": "no-store",
+          "Cache-Control": "no-cache, no-transform",
+          "X-Accel-Buffering": "no",
         },
       }
     );
