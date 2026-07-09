@@ -88,6 +88,18 @@ const financialDashboardMetrics = [
   { label: "Break-even", aliases: ["Break-even Month", "Break even Month", "Breakeven"] },
 ];
 
+const mobilityFinancialDashboardMetrics = [
+  { label: "Yearly Revenue", aliases: ["Yearly Revenue", "Annual Revenue", "ARR", "Revenue"] },
+  { label: "Monthly Revenue", aliases: ["Monthly Revenue", "MRR"] },
+  { label: "Gross Margin", aliases: ["Gross Margin", "Margin"] },
+  { label: "Rider CAC", aliases: ["Rider CAC", "CAC", "Customer Acquisition Cost"] },
+  { label: "Rider LTV", aliases: ["Rider LTV", "LTV", "Lifetime Value"] },
+  { label: "Burn Rate", aliases: ["Burn Rate", "Monthly Burn", "Burn"] },
+  { label: "Runway", aliases: ["Runway"] },
+  { label: "Payback", aliases: ["Payback", "Payback Period", "CAC Payback"] },
+  { label: "Break-even", aliases: ["Break-even Month", "Break even Month", "Breakeven"] },
+];
+
 const founderScoreMetrics = [
   "Overall Score",
   "Innovation",
@@ -118,7 +130,10 @@ const swotQuadrants = [
 function extractMetricValue(content: string, label: string) {
   const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = content.match(
-    new RegExp(`${escapedLabel}\\s*[:\\-–—]\\s*([^\\n|]+)`, "i")
+    new RegExp(
+      `${escapedLabel}\\s*[:\\-–—]\\s*([\\s\\S]*?)(?=\\s*(?:\\||[,;]\\s*[A-Z][A-Za-z /-]{1,32}\\s*[:\\-–—]|\\bformula\\b|\\bplanning input\\b|\\bevidence\\b|\\breference\\b|\\bconfidence\\b|\\n\\s*[A-Z][A-Za-z /-]{1,32}\\s*[:\\-–—]|$))`,
+      "i"
+    )
   );
 
   return match?.[1]?.trim().replace(/\*\*/g, "") || "";
@@ -150,7 +165,22 @@ function formatMetricCardValue(value: string) {
     .split(/\b(?:formula|assumptions?|confidence|benchmark(?: source| comparison)?|explanation|justification|source)\b\s*[:\-–—]/i)[0]
     .split(/\s+(?:based on|using|assuming|calculated from|derived from)\s+/i)[0]
     .split(/\s*[;|]\s*/)[0]
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/(\d)\.\s+(\d)(\s*[kKmMbB%])?/g, "$1.$2$3")
+    .replace(/(\d),\s+(\d{3})/g, "$1,$2")
     .trim();
+}
+
+function isMobilityReportContent(content: string) {
+  return /\b(scooter|micromobility|micro mobility|shared mobility|bike sharing|bikeshare|per-ride|urban riders|commuters|fleet utilization|rental)\b/i.test(
+    content
+  );
+}
+
+function getFinancialDashboardMetrics(content: string) {
+  return isMobilityReportContent(content)
+    ? mobilityFinancialDashboardMetrics
+    : financialDashboardMetrics;
 }
 
 function extractScore(content: string, label: string) {
@@ -191,7 +221,7 @@ function extractSectionSnippet(content: string, title: string) {
   const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = content.match(
     new RegExp(
-      `${escapedTitle}\\s*[:\\-–—]?\\s*([\\s\\S]*?)(?=\\n\\s*(?:Strengths|Weaknesses|Opportunities|Threats|Worst|Base|Best|Revenue|MRR|Burn|Runway|Risk|Decision)\\s*[:\\-–—]|$)`,
+      `(?:^|\\n)\\s*(?:[-*]\\s*)?(?:\\*\\*)?${escapedTitle}(?:\\*\\*)?\\s*[:\\-–—]?\\s*([\\s\\S]*?)(?=\\n\\s*(?:[-*]\\s*)?(?:\\*\\*)?(?:Strengths|Weaknesses|Opportunities|Threats|Worst|Base|Best|Revenue|MRR|Monthly Revenue|Burn|Runway|Risk|Decision)(?:\\*\\*)?\\s*[:\\-–—]|$)`,
       "i"
     )
   );
@@ -200,14 +230,31 @@ function extractSectionSnippet(content: string, title: string) {
 }
 
 function extractBullets(content: string, fallback: string) {
-  const source = content || fallback;
+  const source = content || "";
   const bullets = source
     .split("\n")
-    .map((line) => line.trim().replace(/^[-*]\s+/, ""))
-    .filter(Boolean)
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^[-*•]\s+/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .replace(/\*\*/g, "")
+        .replace(new RegExp(`^${fallback}\\s*[:\\-–—]\\s*`, "i"), "")
+        .trim()
+    )
+    .filter((line) => line && !new RegExp(`^${fallback}$`, "i").test(line))
     .slice(0, 3);
 
-  return bullets.length > 0 ? bullets : [fallback];
+  if (bullets.length > 0) {
+    return bullets;
+  }
+
+  return source
+    .replace(/\*\*/g, "")
+    .split(/(?<=[.!?])\s+/)
+    .map((line) => line.trim())
+    .filter((line) => line && !new RegExp(`^${fallback}$`, "i").test(line))
+    .slice(0, 2);
 }
 
 function extractFirstInsight(content: string) {
@@ -504,19 +551,21 @@ function ReportSectionVisual({
             const value = extractMetricValueFromAliases(content, bar.aliases);
 
             return (
-              <div key={bar.label} className="grid grid-cols-[4rem_1fr] items-center gap-4">
+              <div key={bar.label} className="grid items-center gap-3 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(7rem,auto)]">
                 <div className="rounded-2xl border border-white/10 bg-black/35 p-3 text-center">
                   <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">{bar.label}</p>
                 </div>
                 <div className="h-14 rounded-2xl border border-white/10 bg-zinc-950 p-1.5">
                   <div
-                    className={`flex h-full items-center justify-between rounded-[1.1rem] bg-gradient-to-r ${bar.color} px-4 text-sm font-semibold text-black shadow-lg shadow-teal-950/20`}
+                    className={`h-full rounded-[1.1rem] bg-gradient-to-r ${bar.color} shadow-lg shadow-teal-950/20`}
                     style={{ width: bar.width }}
-                  >
-                    <span>{bar.label}</span>
-                    {value ? <span className="truncate pl-3">{value}</span> : null}
-                  </div>
+                  />
                 </div>
+                {value ? (
+                  <p className="min-w-0 truncate whitespace-nowrap rounded-2xl border border-white/10 bg-black/35 px-3 py-2 text-right text-sm font-semibold text-white">
+                    {formatMetricCardValue(value)}
+                  </p>
+                ) : null}
               </div>
             );
           })}
@@ -568,7 +617,7 @@ function ReportSectionVisual({
       <div className="mb-5 grid gap-3 md:grid-cols-2">
         {swotQuadrants.map(({ title: quadrantTitle, icon: Icon }) => {
           const snippet = extractSectionSnippet(content, quadrantTitle);
-          const bullets = extractBullets(snippet, quadrantTitle);
+          const bullets = extractBullets(snippet || content, quadrantTitle);
 
           return (
             <div key={quadrantTitle} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
@@ -679,7 +728,9 @@ function ReportSectionVisual({
   }
 
   if (normalizedTitle.includes("unit economics") || normalizedTitle.includes("financial assumptions")) {
-    const flow = ["Revenue", "CAC", "LTV", "Payback", "Runway"];
+    const flow = isMobilityReportContent(content)
+      ? ["Revenue", "Rider CAC", "Rider LTV", "Payback", "Runway"]
+      : ["Revenue", "CAC", "LTV", "Payback", "Runway"];
 
     return (
       <div className="mb-5 overflow-hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(90deg,rgba(94,234,212,0.08),rgba(255,255,255,0.025))]">
@@ -692,8 +743,8 @@ function ReportSectionVisual({
           {flow.map((metric) => (
             <div key={metric} className="bg-zinc-950/80 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
-              <p className="mt-3 line-clamp-2 text-lg font-semibold text-white">
-                {extractMetricValue(content, metric) || "Planning input"}
+              <p className="mt-3 truncate whitespace-nowrap text-lg font-semibold text-white">
+                {formatMetricCardValue(extractMetricValue(content, metric)) || "—"}
               </p>
             </div>
           ))}
@@ -746,7 +797,7 @@ function ReportSectionVisual({
           </span>
         </div>
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-          {financialDashboardMetrics.map((metric, index) => {
+          {getFinancialDashboardMetrics(content).map((metric, index) => {
             const value = formatMetricCardValue(
               extractMetricValueFromAliases(content, metric.aliases)
             );
@@ -768,7 +819,7 @@ function ReportSectionVisual({
                   </span>
                 </div>
                 <div className="mt-4 min-w-0">
-                  <p className="line-clamp-2 break-words text-[clamp(1.15rem,2.2vw,1.65rem)] font-semibold leading-tight tracking-tight text-white">
+                  <p className="truncate whitespace-nowrap text-[clamp(1.15rem,2.2vw,1.65rem)] font-semibold leading-tight tracking-tight text-white">
                     {value || "—"}
                   </p>
                   <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/10">
@@ -806,7 +857,9 @@ function ReportSectionVisual({
   }
 
   if (normalizedTitle.includes("scenario")) {
-    const scenarioMetrics = ["Revenue", "MRR", "Burn", "Runway", "Risk", "Decision"];
+    const scenarioMetrics = isMobilityReportContent(content)
+      ? ["Revenue", "Monthly Revenue", "Burn", "Runway", "Risk", "Decision"]
+      : ["Revenue", "MRR", "Burn", "Runway", "Risk", "Decision"];
     const styles = {
       Worst: "border-red-300/20 bg-red-300/[0.055]",
       Base: "border-teal-200/20 bg-teal-200/[0.055]",
@@ -1119,6 +1172,21 @@ function AnalysisNotes({
 
 function renderInlineMarkdown(text: string) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  const renderTextPart = (part: string, partKey: string) =>
+    part.split(/(\$?\d+(?:[.,]\d+)*(?:\.\d+)?\s?(?:k|K|m|M|b|B|%|months?|days?)?)/g).map((segment, segmentIndex) => {
+      const isNumberToken = /^\$?\d+(?:[.,]\d+)*(?:\.\d+)?\s?(?:k|K|m|M|b|B|%|months?|days?)?$/.test(
+        segment
+      );
+
+      return (
+        <span
+          key={`${partKey}-${segmentIndex}`}
+          className={isNumberToken ? "whitespace-nowrap" : undefined}
+        >
+          {segment}
+        </span>
+      );
+    });
 
   return parts.map((part) => {
     if (part.startsWith("**") && part.endsWith("**")) {
@@ -1129,8 +1197,143 @@ function renderInlineMarkdown(text: string) {
       );
     }
 
-    return part;
+    return renderTextPart(part, part);
   });
+}
+
+type CitationData = {
+  sourceTitle: string;
+  organization: string;
+  publicationYear?: string;
+  confidence?: "High" | "Medium" | "Low";
+  url?: string;
+};
+
+function normalizeCitationConfidence(value: string): CitationData["confidence"] | undefined {
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized === "high") {
+    return "High";
+  }
+
+  if (normalized === "medium") {
+    return "Medium";
+  }
+
+  if (normalized === "low") {
+    return "Low";
+  }
+
+  return undefined;
+}
+
+function parseCitations(content: string): CitationData[] {
+  if (/\bsource\s+unavailable\b/i.test(content)) {
+    return [];
+  }
+
+  const fallbackConfidence = normalizeCitationConfidence(
+    content.match(/\bconfidence\s*[:\-–—]\s*(high|medium|low)\b/i)?.[1] || ""
+  );
+
+  return content
+    .split("\n")
+    .map((rawLine) => {
+      const url =
+        rawLine.match(/\]\((https?:\/\/[^)]+)\)/i)?.[1]?.trim() ||
+        rawLine.match(/\bhttps?:\/\/[^\s)]+/i)?.[0]?.trim();
+      const line = rawLine
+        .replace(/^[-*•]\s*/, "")
+        .replace(/\*\*/g, "")
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/gi, "$1")
+        .replace(/\bhttps?:\/\/[^\s)]+/gi, "")
+        .trim();
+
+      return { line, url };
+    })
+    .map(({ line, url }): CitationData | null => {
+      const citationMatch = line.match(
+        /^([^—–|-]{2,80})\s*[—–-]\s*(.+?)(?:\s*\((\d{4})\))?(?:\s*[.;:]?\s*)?$/
+      );
+
+      if (!citationMatch) {
+        return null;
+      }
+
+      const organization = citationMatch[1].trim();
+      const sourceTitle = citationMatch[2]
+        .replace(/\bconfidence\s*[:\-–—]\s*(high|medium|low)\b/i, "")
+        .trim();
+      const publicationYear = citationMatch[3]?.trim();
+
+      if (!organization || !sourceTitle || /\bsource\s+unavailable\b/i.test(sourceTitle)) {
+        return null;
+      }
+
+      return {
+        sourceTitle,
+        organization,
+        ...(publicationYear ? { publicationYear } : {}),
+        ...(fallbackConfidence ? { confidence: fallbackConfidence } : {}),
+        ...(url ? { url } : {}),
+      };
+    })
+    .filter((citation): citation is CitationData => Boolean(citation));
+}
+
+function CitationCard({ citation }: { citation: CitationData }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+      <p className="text-sm font-semibold leading-6 text-white">{citation.sourceTitle}</p>
+      <div className="mt-3 grid gap-2 text-xs text-zinc-400 sm:grid-cols-2">
+        <p>
+          <span className="text-zinc-500">Publisher</span>
+          <span className="ml-2 text-zinc-200">{citation.organization}</span>
+        </p>
+        {citation.publicationYear ? (
+          <p>
+            <span className="text-zinc-500">Year</span>
+            <span className="ml-2 text-zinc-200">{citation.publicationYear}</span>
+          </p>
+        ) : null}
+        {citation.confidence ? (
+          <p>
+            <span className="text-zinc-500">Confidence</span>
+            <span className="ml-2 text-zinc-200">{citation.confidence}</span>
+          </p>
+        ) : null}
+      </div>
+      {citation.url ? (
+        <a
+          href={citation.url}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 block truncate text-xs text-teal-200/80 underline-offset-4 hover:text-teal-100 hover:underline"
+        >
+          {citation.url}
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
+function CitationList({ content }: { content: string }) {
+  const citations = parseCitations(content);
+
+  if (citations.length === 0) {
+    return <ReportText content={content} />;
+  }
+
+  return (
+    <div className="space-y-3">
+      {citations.map((citation, index) => (
+        <CitationCard
+          key={`${citation.organization}-${citation.sourceTitle}-${index}`}
+          citation={citation}
+        />
+      ))}
+    </div>
+  );
 }
 
 function ReportText({ content }: { content: string }) {
@@ -1222,7 +1425,7 @@ function ReportText({ content }: { content: string }) {
         }
 
         return (
-          <p key={`p-${blockIndex}`} className="max-w-4xl whitespace-pre-wrap break-words text-zinc-300">
+          <p key={`p-${blockIndex}`} className="max-w-4xl whitespace-pre-wrap text-zinc-300 [overflow-wrap:anywhere]">
             {renderInlineMarkdown(block)}
           </p>
         );
@@ -1411,7 +1614,7 @@ export default async function ReportDetailPage({
                             key={section.title}
                             className="border-t border-white/10 pt-4 first:border-t-0 first:pt-0"
                           >
-                            <ReportText content={section.content} />
+                            <CitationList content={section.content} />
                           </div>
                         ))}
                       </div>

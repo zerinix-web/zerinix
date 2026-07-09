@@ -134,12 +134,12 @@ const fieldPrompts = {
   },
   sourcesAssumptions: {
     prompt:
-      "List only verified sources, evidence basis, planning inputs, and missing validation data. Do not repeat market or financial analysis. Prefer real organizations over generic references, especially OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant. For each verified source use this exact compact format when possible: Organization — Source title (Year). Then add one line: Confidence: High, Medium, or Low. If no verified source metadata exists, omit the citation item and write a concise planning-input note instead. Do not invent URLs, report names, publications, or fake citations. If uncertain, mark the item as a planning input instead of fabricating a citation. Do not write vague source claims such as 'industry reports' unless a specific source is named. Do not write a heading. Max 160 words.",
+      "List only verified sources, evidence basis, planning inputs, and missing validation data. Do not repeat market or financial analysis. Prefer real organizations over generic references, especially OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant. For each verified source use this exact compact format when possible: Organization — Source title (Year). Include the URL only when it is available from the source context. Then add one line: Confidence: High, Medium, or Low. If no verified source metadata exists, omit the citation item and write a concise planning-input note instead. Do not invent URLs, report names, publications, or fake citations. If uncertain, mark the item as a planning input instead of fabricating a citation. Do not write vague source claims such as 'industry reports' unless a specific source is named. Do not write a heading. Max 160 words.",
     maxTokens: 1300,
   },
   sources: {
     prompt:
-      "List only 4-6 reliable verified sources used or most relevant for validating this market. Prefer real organizations over generic references, especially OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant. For each verified source use this exact compact format when possible: Organization — Source title (Year). Then add one line for the group or source: Confidence: High, Medium, or Low. If no verified source metadata exists, omit the citation item and write a concise planning-input note instead. Do not invent URLs, report names, publications, or fake citations. If uncertain, mark the item as a planning input instead of fabricating a citation. Do not use generic phrases such as 'industry reports' as verified evidence. Do not repeat analysis. Do not write a heading.",
+      "List only 4-6 reliable verified sources used or most relevant for validating this market. Prefer real organizations over generic references, especially OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant. For each verified source use this exact compact format when possible: Organization — Source title (Year). Include the URL only when it is available from the source context. Then add one line for the group or source: Confidence: High, Medium, or Low. If no verified source metadata exists, omit the citation item and write a concise planning-input note instead. Do not invent URLs, report names, publications, or fake citations. If uncertain, mark the item as a planning input instead of fabricating a citation. Do not use generic phrases such as 'industry reports' as verified evidence. Do not repeat analysis. Do not write a heading.",
     maxTokens: 1400,
   },
 } as const;
@@ -284,6 +284,10 @@ const marketReportTermReplacements: Array<[RegExp, string]> = [
   [/\bPlaceholder\b/gi, ""],
   [/\bUnknown\b/gi, ""],
   [/\bUnavailable\b/gi, ""],
+  [/Yeni analiz\s+geçişi gerekir\.?/gi, ""],
+  [/requires a fresh\s+analysis pass\.?/gi, ""],
+  [/Section missing\.?/gi, ""],
+  [/\bFailed\b/gi, ""],
   [/\bWAIT\b/g, "Hold for validation"],
 ];
 
@@ -329,24 +333,14 @@ function serializeWarningChunk(warning: MarketReportWarningChunk) {
 
 function serializeMarketReportChunks(report: Record<MarketReportField, string>) {
   return reportFields
+    .filter((field) => report[field]?.trim())
     .map((field) => serializeReportChunk(field, report[field]))
     .join("");
 }
 
-function createPartialSectionFallback(
-  field: MarketReportField,
-  language: ResponseLanguage
-) {
-  const title = fieldLabelsByLanguage[language][field];
-
-  return language === "Turkish"
-    ? `${title} için karar kalitesinde analiz üretmek üzere yeni bir analiz geçişi gerekir. Tamamlanan bölümler mevcut değerlendirme için kullanılabilir; bu başlık yeniden analiz edildiğinde netleştirilmelidir.`
-    : `${title} requires a fresh analysis pass to produce decision-grade detail. Use the completed sections as the current basis and regenerate the analysis when ready.`;
-}
-
-function createFallbackMarketReport(language: ResponseLanguage) {
+function createFallbackMarketReport() {
   return Object.fromEntries(
-    reportFields.map((field) => [field, createPartialSectionFallback(field, language)])
+    reportFields.map((field) => [field, ""])
   ) as Record<MarketReportField, string>;
 }
 
@@ -388,8 +382,7 @@ function createFullReportJsonSchema(name: string, fields: readonly string[]) {
 }
 
 function parseFullMarketReport(
-  value: string,
-  language: ResponseLanguage
+  value: string
 ): {
   report: Record<MarketReportField, string>;
   missingFields: MarketReportField[];
@@ -410,13 +403,13 @@ function parseFullMarketReport(
 
     if (typeof content !== "string" || !content.trim()) {
       missingFields.push(field);
-      report[field] = createPartialSectionFallback(field, language);
+      report[field] = "";
       continue;
     }
 
     if (isReportGenerationFailureText(content)) {
       invalidFields.push(field);
-      report[field] = createPartialSectionFallback(field, language);
+      report[field] = "";
       continue;
     }
 
@@ -587,7 +580,7 @@ function buildLanguageInstructions(language: ResponseLanguage) {
     "Recommendation conviction must match evidence quality and the Investment Scoring Engine. Use Proceed for strong evidence, Hold for validation when validation gaps remain, and Decline when economics or execution risk are not investable yet.",
     "Do not fake source authority. If a precise source is unavailable, use language such as 'Based on comparable sector patterns', 'Needs validation with primary research', or 'Directional until verified'.",
     "When citing sources, prefer real organizations over generic references: OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant.",
-    "Never invent URLs, report names, publications, or fake citations. If a source cannot be verified from available context, mark it as an assumption instead of presenting it as a citation.",
+    "Include a source URL only when it is available from the source context. Never invent URLs, report names, publications, or fake citations. If a source cannot be verified from available context, mark it as a planning input instead of presenting it as a citation.",
     "Every section must end with a complete sentence or complete bullet. Never end mid-sentence.",
     "Distinguish facts, planning inputs, and hypotheses. Never present guesses as facts.",
     "Be honest about uncertainty; do not invent precise figures.",
@@ -766,7 +759,7 @@ Align recommendation conviction with evidence quality and the calculated Investm
 Do not expose internal grading labels, source-model labels, or internal recommendation codes anywhere in the final report.
 Make examples, KPIs, risks, roadmap actions, and financial interpretation specific to the detected industry instead of using generic startup templates.
 Use honest planning-input language instead of vague source claims such as "industry reports".
-When citing sources, prefer real organizations such as OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant; never invent URLs or report names.
+When citing sources, prefer real organizations such as OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant; include URLs only when available and never invent URLs or report names.
 Finish with a complete sentence or complete bullet. Do not end mid-sentence.
 Use structured markdown inside the section when useful: short paragraphs, bullets, or compact tables.
 Write only the content for this section. Do not write a JSON object, field name, braces, markdown code block, heading, or any other report section.
@@ -837,10 +830,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
         let cachedInvalidFields: MarketReportField[] = [];
 
         try {
-          const parsedCachePayload = parseFullMarketReport(
-            cachedFullReport.responseText,
-            responseLanguage
-          );
+          const parsedCachePayload = parseFullMarketReport(cachedFullReport.responseText);
 
           parsedCachedReport = parsedCachePayload.report;
           cachedMissingFields = parsedCachePayload.missingFields;
@@ -900,7 +890,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
             cachedMissingFields.length || cachedInvalidFields.length
               ? serializeWarningChunk({
                   warning:
-                    "Market analysis returned a partial report. Some areas need a fresh analysis pass before they are decision-grade.",
+                    "Market analysis returned a partial report. Some areas need additional market validation before they are decision-grade.",
                   missingFields: cachedMissingFields,
                   invalidFields: cachedInvalidFields,
                   partial: true,
@@ -967,7 +957,7 @@ Translate any internal recommendation into exactly one visible decision: Proceed
 Do not expose internal grading labels, source-model labels, or internal recommendation codes anywhere in the final report.
 Align recommendation conviction with evidence quality; avoid extreme conviction values unless the evidence clearly supports them.
 Use honest planning-input language instead of vague source claims such as "industry reports".
-When citing sources, prefer real organizations such as OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant; never invent URLs or report names.
+When citing sources, prefer real organizations such as OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant; include URLs only when available and never invent URLs or report names.
 Write concise executive memo prose with specific observations, numbered insights where useful, and no generic conclusions.
 Do not repeat the user's prompt verbatim; translate it into market context, buyer economics, competitor dynamics, and founder decisions.
 Every section must include at least one concrete business insight that changes sizing, timing, positioning, pricing, distribution, risk, or validation priority.
@@ -1038,7 +1028,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
           report: parsedReport,
           missingFields,
           invalidFields,
-        } = parseFullMarketReport(responseText, responseLanguage);
+        } = parseFullMarketReport(responseText);
         const cacheResponseText = JSON.stringify(parsedReport);
         const isPartialReport = Boolean(missingFields.length || invalidFields.length);
 
@@ -1125,7 +1115,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
           isPartialReport
             ? serializeWarningChunk({
                 warning:
-                  "Market analysis returned a partial report. Some areas need a fresh analysis pass before they are decision-grade.",
+                  "Market analysis returned a partial report. Some areas need additional market validation before they are decision-grade.",
                 missingFields,
                 invalidFields,
                 partial: true,
@@ -1182,7 +1172,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
         logServerError("api:market-analysis:full-report", error);
 
         const failedFields = [...reportFields];
-        const fallbackReport = createFallbackMarketReport(responseLanguage);
+        const fallbackReport = createFallbackMarketReport();
         const warning = serializeWarningChunk({
           warning:
             "Market analysis returned a partial report because the provider response could not be parsed completely. Please retry to refresh the affected areas.",

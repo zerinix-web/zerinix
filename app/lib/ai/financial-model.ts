@@ -92,6 +92,7 @@ export function inferIndustryKey(value: string): IndustryKey {
   return firstMatching(
     [
       [/\b(ev charging|charging station|charge point|charger network|electric charging)\b/, "evCharging"],
+      [/\b(scooter|scooters|scooter rental|micromobility|micro mobility|bike sharing|bikeshare|ride sharing|urban mobility|shared mobility)\b/, "mobility"],
       [/\b(fintech|payments|banking|lending|wallet|neobank|insurance|insurtech)\b/, "fintech"],
       [/\b(ecommerce|e-commerce|online store|shopify|retail marketplace|dtc|direct to consumer)\b/, "ecommerce"],
       [/\b(marketplace|two-sided|two sided|platform marketplace)\b/, "marketplace"],
@@ -127,6 +128,7 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
       [
         [/\b(saas|subscription|platform|software|crm|cybersecurity)\b/, "subscription software"],
         [/\b(marketplace|two-sided|two sided)\b/, "marketplace"],
+        [/\b(scooter|scooters|micromobility|micro mobility|bike sharing|bikeshare|shared mobility)\b/, "asset-heavy rental / utilization model"],
         [/\b(franchise|chain)\b/, "multi-location / franchise"],
         [/\b(restaurant|food service|foodservice|fast casual|fine dining|qsr)\b/, "location-based food service"],
         [/\b(drone|drones|uav|autonomous aerial|aerial robotics)\b/, "hardware plus service contracts"],
@@ -144,6 +146,7 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
         [/\b(luxury|premium|affluent|private|yacht|hotel)\b/, "premium consumer / high-net-worth customers"],
         [/\b(founder|startup|smb|small business)\b/, "startups and SMBs"],
         [/\b(government|public sector|municipal)\b/, "public-sector buyers"],
+        [/\b(commuter|commuters|student|students|urban|city|tourist|tourists|rider|riders)\b/, "urban riders / commuters"],
       ],
       "inferred early adopters",
       normalized
@@ -164,6 +167,7 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
       [
         [/\b(subscription|monthly|annual|saas|software|cybersecurity)\b/, "subscription"],
         [/\b(usage|per use|consumption)\b/, "usage-based"],
+        [/\b(scooter|scooters|micromobility|bike sharing|bikeshare|ride sharing|rental)\b/, "per-ride rental plus passes"],
         [/\b(take rate|commission|marketplace)\b/, "take-rate / commission"],
         [/\b(franchise)\b/, "franchise fee plus royalties"],
         [/\b(coffee|cafe|hotel|yacht|hospital|clinic|gym|luxury|premium)\b/, "premium ticket / membership / service package"],
@@ -222,6 +226,7 @@ function confidenceFor(input: {
     input.industryKey === "luxuryGoods" ||
     input.industryKey === "evCharging" ||
     input.industryKey === "drone" ||
+    input.industryKey === "mobility" ||
     input.industryKey === "fintech" ||
     input.industryKey === "agriculture";
 
@@ -350,6 +355,20 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
       metric: metricName,
       industryKey: inputs.industryKey,
     });
+  const isMobility = inputs.industryKey === "mobility";
+  const customerUnit = isMobility ? "active riders" : "customers";
+  const arpaLabel = isMobility ? "Monthly Revenue per Active Rider" : "ARPA";
+  const mrrLabel = isMobility ? "Monthly Revenue" : "MRR";
+  const arrLabel = isMobility ? "Yearly Revenue" : "ARR";
+  const cacLabel = isMobility ? "Rider CAC" : "CAC";
+  const ltvLabel = isMobility ? "Rider LTV" : "LTV";
+  const arpaFormula = isMobility
+    ? "monthly ride revenue per active rider x idea scope multiplier"
+    : "benchmark monthly ARPA x idea scope multiplier";
+  const mrrFormula = isMobility
+    ? "Month-12 active riders x monthly revenue per active rider"
+    : "Month-12 customers x ARPA";
+  const arrFormula = isMobility ? "Monthly Revenue x 12" : "MRR x 12";
   const sharedAssumptions = [
     `Industry benchmark: ${benchmark.label}`,
     `Business model: ${inputs.businessModel}`,
@@ -406,30 +425,32 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
         benchmarkComparison: "Derived from benchmark obtainable-share rate.",
       }),
       arpa: metric({
-        label: "ARPA",
+        label: arpaLabel,
         value: arpa,
         unit: "usd",
         displayValue: `${formatUsd(arpa)}/month`,
-        confidence: confidence("ARPA"),
-        formula: "benchmark monthly ARPA x idea scope multiplier",
-        assumptions: [...sharedAssumptions, `Month-12 customers: ${month12Customers}`],
-        benchmarkComparison: "Uses industry benchmark ARPA as the base case.",
+        confidence: confidence(arpaLabel),
+        formula: arpaFormula,
+        assumptions: [...sharedAssumptions, `Month-12 ${customerUnit}: ${month12Customers}`],
+        benchmarkComparison: isMobility
+          ? "Uses mobility revenue-per-active-rider benchmark as the base case."
+          : "Uses industry benchmark ARPA as the base case.",
       }),
       cac: metric({
-        label: "CAC",
+        label: cacLabel,
         value: cac,
         unit: "usd",
-        confidence: confidence("CAC"),
+        confidence: confidence(cacLabel),
         formula: "benchmark CAC x complexity multiplier",
         assumptions: [...sharedAssumptions, `Complexity multiplier: ${scopeMultiplier > 1 ? 1.18 : 1}`],
         benchmarkComparison: compareToBenchmark(cac, benchmark.ranges.cac),
       }),
       ltv: metric({
-        label: "LTV",
+        label: ltvLabel,
         value: ltv,
         unit: "usd",
-        confidence: confidence("LTV"),
-        formula: "ARPA x Gross Margin x lifetime months",
+        confidence: confidence(ltvLabel),
+        formula: `${arpaLabel} x Gross Margin x lifetime months`,
         assumptions: [...sharedAssumptions, `Lifetime: ${modeling.lifetimeMonths} months`],
         benchmarkComparison: compareToBenchmark(ltv, benchmark.ranges.ltv),
       }),
@@ -471,13 +492,13 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
         benchmarkComparison: "Runway is calculated from financing need and monthly burn.",
       }),
       arr: metric({
-        label: "ARR",
+        label: arrLabel,
         value: arr,
         unit: "usd",
-        confidence: confidence("ARR"),
-        formula: "MRR x 12",
-        assumptions: [...sharedAssumptions, `MRR: ${formatUsd(mrr)}`, `Month-12 customers: ${month12Customers}`],
-        benchmarkComparison: "ARR is calculated from customer count and pricing assumptions.",
+        confidence: confidence(arrLabel),
+        formula: arrFormula,
+        assumptions: [...sharedAssumptions, `${mrrLabel}: ${formatUsd(mrr)}`, `Month-12 ${customerUnit}: ${month12Customers}`],
+        benchmarkComparison: `${arrLabel} is calculated from ${customerUnit} and pricing assumptions.`,
       }),
       revenueGrowth: metric({
         label: "Revenue Growth",
@@ -489,20 +510,20 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
         benchmarkComparison: compareToBenchmark(modeling.customerGrowthRate, benchmark.ranges.arrGrowth),
       }),
       mrr: metric({
-        label: "MRR",
+        label: mrrLabel,
         value: mrr,
         unit: "usd",
-        confidence: confidence("MRR"),
-        formula: "Month-12 customers x ARPA",
-        assumptions: [...sharedAssumptions, `Month-12 customers: ${month12Customers}`, `ARPA: ${formatUsd(arpa)}/month`],
-        benchmarkComparison: "MRR is calculated from customer count and pricing assumptions.",
+        confidence: confidence(mrrLabel),
+        formula: mrrFormula,
+        assumptions: [...sharedAssumptions, `Month-12 ${customerUnit}: ${month12Customers}`, `${arpaLabel}: ${formatUsd(arpa)}/month`],
+        benchmarkComparison: `${mrrLabel} is calculated from ${customerUnit} and pricing assumptions.`,
       }),
       ebitda: metric({
         label: "EBITDA",
         value: ebitda,
         unit: "usd",
         confidence: confidence("EBITDA"),
-        formula: "ARR x Gross Margin - annualized operating expense",
+        formula: `${arrLabel} x Gross Margin - annualized operating expense`,
         assumptions: [...sharedAssumptions, `Annualized operating expense: ${formatUsd(annualOpex)}`],
         benchmarkComparison: compareToBenchmark(ebitda / Math.max(1, arr), benchmark.ranges.ebitdaMargin),
       }),

@@ -13,6 +13,7 @@ export type IndustryKey =
   | "restaurant"
   | "drone"
   | "evCharging"
+  | "mobility"
   | "manufacturing"
   | "hospitality"
   | "luxuryGoods"
@@ -357,6 +358,36 @@ export const industryBenchmarks: Record<IndustryKey, IndustryBenchmark> = {
       targetRunwayMonths: 22,
     },
   },
+  mobility: {
+    key: "mobility",
+    label: "Mobility / scooter rental",
+    benchmarkBasis:
+      "Shared micromobility and scooter rental benchmarks adjusted for fleet utilization, local density, maintenance, charging, permits, theft risk, and repeat trips.",
+    confidence: "Low",
+    ranges: {
+      grossMargin: { low: 0.25, high: 0.52, unit: "percent" },
+      cac: { low: 18, high: 95, unit: "usd" },
+      ltv: { low: 90, high: 650, unit: "usd" },
+      cacPayback: { low: 2, high: 10, unit: "months" },
+      arrGrowth: { low: 0.25, high: 1.1, unit: "percent" },
+      ebitdaMargin: { low: -0.45, high: 0.18, unit: "percent" },
+      revenueMultiple: { low: 0.8, high: 4.5, unit: "multiple" },
+    },
+    modeling: {
+      tamUsd: 28_000_000_000,
+      samRate: 0.035,
+      somRate: 0.006,
+      arpaMonthly: 24,
+      month12Customers: 9_000,
+      customerGrowthRate: 0.72,
+      cacUsd: 42,
+      grossMarginRate: 0.38,
+      lifetimeMonths: 14,
+      monthlyBurnUsd: 185_000,
+      startupCapexUsd: 1_200_000,
+      targetRunwayMonths: 18,
+    },
+  },
   manufacturing: {
     key: "manufacturing",
     label: "Advanced manufacturing",
@@ -632,6 +663,13 @@ function normalizeIndustryKey(industry: string): IndustryKey {
     autonomoussystems: "drone",
     evcharging: "evCharging",
     electricvehiclecharging: "evCharging",
+    mobility: "mobility",
+    micromobility: "mobility",
+    scooterrental: "mobility",
+    scooter: "mobility",
+    scooters: "mobility",
+    bikesharing: "mobility",
+    ridesharing: "mobility",
     manufacturing: "manufacturing",
     hospitality: "hospitality",
     luxurygoods: "luxuryGoods",

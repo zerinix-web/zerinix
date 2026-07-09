@@ -55,13 +55,17 @@ function formatUsd(value: number) {
 export function formatCanonicalFinancialAssumptions(
   context: AiFinancialModelContext
 ) {
+  const isMobility = context.inputs.industryKey === "mobility";
+  const customerLabel = isMobility ? "active riders" : "customers";
+  const monthlyRevenueLabel = isMobility ? "Monthly Revenue" : "MRR";
+  const yearlyRevenueLabel = isMobility ? "Yearly Revenue" : "ARR";
   const metricRows = Object.values(context.metrics)
     .map((metric) => formatMetricRow(metric, context.benchmark.basis))
     .join("\n");
   const forecastRows = context.revenueForecast
     .map(
       (year) =>
-        `- ${year.year}: customers=${year.customers}, MRR=${formatUsd(year.mrr)}, ARR=${formatUsd(year.arr)}, revenue=${formatUsd(year.revenue)}, SOM penetration=${Math.round(year.marketPenetration * 100)}%`
+        `- ${year.year}: ${customerLabel}=${year.customers}, ${monthlyRevenueLabel}=${formatUsd(year.mrr)}, ${yearlyRevenueLabel}=${formatUsd(year.arr)}, revenue=${formatUsd(year.revenue)}, SOM penetration=${Math.round(year.marketPenetration * 100)}%`
     )
     .join("\n");
   const investmentScoreContext = formatInvestmentScore(context.investmentScore);
@@ -94,6 +98,7 @@ Financial modeling rules:
 - Use the Investment Scoring Engine as the source of truth for Total Investment Score, confidence, strengths, weaknesses, Founder Score, and investment recommendation logic.
 - Do not invent static investment scores or category scores; reuse the calculated score and category reasoning above.
 - Executive Summary and Executive Recommendation must use the calculated Recommendation, Estimated Valuation, Funding Stage, Top Risks, and Next Critical Action from the Investment Scoring Engine.
-- For ARR, MRR, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, show value, formula, assumptions, confidence, and benchmark source when the section is responsible for financial explanation.
+- For recurring software models, ARR and MRR are appropriate. For mobility, retail, hospitality, manufacturing, and other non-subscription models, use business-model-specific revenue labels from the structured model instead of SaaS labels.
+- For revenue, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, show value, formula, assumptions, confidence, and benchmark source when the section is responsible for financial explanation.
 - Tag important claims with one concise evidence label only when useful: Real Evidence, Benchmark, Industry Estimate, AI Assumption, Low Confidence, or High Confidence. Do not create fake citations.`;
 }

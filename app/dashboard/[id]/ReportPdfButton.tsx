@@ -50,8 +50,113 @@ function normalizePdfText(value: string) {
     .replace(/\r/g, "\n")
     .replace(/\t/g, "  ")
     .replace(/[ \u00a0]+/g, " ")
+    .replace(/(\d)\.\s+(\d)(\s*[kKmMbB%])?/g, "$1.$2$3")
+    .replace(/(\d),\s+(\d{3})/g, "$1,$2")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+type CitationData = {
+  sourceTitle: string;
+  organization: string;
+  publicationYear?: string;
+  confidence?: "High" | "Medium" | "Low";
+  url?: string;
+};
+
+function normalizeCitationConfidence(value: string): CitationData["confidence"] | undefined {
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized === "high") return "High";
+  if (normalized === "medium") return "Medium";
+  if (normalized === "low") return "Low";
+
+  return undefined;
+}
+
+function parseCitations(content: string): CitationData[] {
+  if (/\bsource\s+unavailable\b/i.test(content)) {
+    return [];
+  }
+
+  const fallbackConfidence = normalizeCitationConfidence(
+    content.match(/\bconfidence\s*[:\-–—]\s*(high|medium|low)\b/i)?.[1] || ""
+  );
+
+  return content
+    .split("\n")
+    .map((rawLine) => {
+      const url =
+        rawLine.match(/\]\((https?:\/\/[^)]+)\)/i)?.[1]?.trim() ||
+        rawLine.match(/\bhttps?:\/\/[^\s)]+/i)?.[0]?.trim();
+      const line = rawLine
+        .replace(/^[-*•]\s*/, "")
+        .replace(/\*\*/g, "")
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/gi, "$1")
+        .replace(/\bhttps?:\/\/[^\s)]+/gi, "")
+        .trim();
+
+      return { line, url };
+    })
+    .map(({ line, url }): CitationData | null => {
+      const citationMatch = line.match(
+        /^([^—–|-]{2,80})\s*[—–-]\s*(.+?)(?:\s*\((\d{4})\))?(?:\s*[.;:]?\s*)?$/
+      );
+
+      if (!citationMatch) {
+        return null;
+      }
+
+      const organization = citationMatch[1].trim();
+      const sourceTitle = citationMatch[2]
+        .replace(/\bconfidence\s*[:\-–—]\s*(high|medium|low)\b/i, "")
+        .trim();
+      const publicationYear = citationMatch[3]?.trim();
+
+      if (!organization || !sourceTitle || /\bsource\s+unavailable\b/i.test(sourceTitle)) {
+        return null;
+      }
+
+      return {
+        sourceTitle,
+        organization,
+        ...(publicationYear ? { publicationYear } : {}),
+        ...(fallbackConfidence ? { confidence: fallbackConfidence } : {}),
+        ...(url ? { url } : {}),
+      };
+    })
+    .filter((citation): citation is CitationData => Boolean(citation));
+}
+
+function isSourceSectionTitle(title: string) {
+  return /^(sources|references|kaynaklar|sources \/ assumptions|kaynaklar \/ varsayımlar)$/i.test(
+    title.trim()
+  );
+}
+
+function formatPdfCitationContent(content: string) {
+  const citations = parseCitations(content);
+
+  if (citations.length === 0) {
+    return normalizePdfText(content);
+  }
+
+  return citations
+    .slice(0, 8)
+    .map((citation) => {
+      const year = citation.publicationYear ? `\n  Year: ${citation.publicationYear}` : "";
+      const confidence = citation.confidence ? `\n  Confidence: ${citation.confidence}` : "";
+      const url = citation.url ? `\n  URL: ${citation.url}` : "";
+
+      return [
+        `• ${citation.sourceTitle}`,
+        `  Publisher: ${citation.organization}`,
+        year,
+        confidence,
+        url,
+      ].join("\n");
+    })
+    .join("\n");
 }
 
 const founderRoadmapSteps = [
@@ -85,10 +190,25 @@ const financialDashboardMetrics = [
   { label: "Break-even", aliases: ["Break-even Month", "Break even Month", "Breakeven"] },
 ];
 
+const mobilityFinancialDashboardMetrics = [
+  { label: "Yearly Revenue", aliases: ["Yearly Revenue", "Annual Revenue", "ARR", "Revenue"] },
+  { label: "Monthly Revenue", aliases: ["Monthly Revenue", "MRR"] },
+  { label: "Gross Margin", aliases: ["Gross Margin", "Margin"] },
+  { label: "Rider CAC", aliases: ["Rider CAC", "CAC", "Customer Acquisition Cost"] },
+  { label: "Rider LTV", aliases: ["Rider LTV", "LTV", "Lifetime Value"] },
+  { label: "Burn Rate", aliases: ["Burn Rate", "Monthly Burn", "Burn"] },
+  { label: "Runway", aliases: ["Runway"] },
+  { label: "Payback", aliases: ["Payback", "Payback Period", "CAC Payback"] },
+  { label: "Break-even", aliases: ["Break-even Month", "Break even Month", "Breakeven"] },
+];
+
 function extractMetricValue(content: string, label: string) {
   const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = content.match(
-    new RegExp(`${escapedLabel}\\s*[:\\-–—]\\s*([^\\n|]+)`, "i")
+    new RegExp(
+      `${escapedLabel}\\s*[:\\-–—]\\s*([\\s\\S]*?)(?=\\s*(?:\\||[,;]\\s*[A-Z][A-Za-z /-]{1,32}\\s*[:\\-–—]|\\bformula\\b|\\bplanning input\\b|\\bevidence\\b|\\breference\\b|\\bconfidence\\b|\\n\\s*[A-Z][A-Za-z /-]{1,32}\\s*[:\\-–—]|$))`,
+      "i"
+    )
   );
 
   return match?.[1]?.trim().replace(/\*\*/g, "") || "";
@@ -120,6 +240,58 @@ function formatMetricCardValue(value: string) {
     .split(/\b(?:formula|assumptions?|confidence|benchmark(?: source| comparison)?|explanation|justification|source)\b\s*[:\-–—]/i)[0]
     .split(/\s+(?:based on|using|assuming|calculated from|derived from)\s+/i)[0]
     .split(/\s*[;|]\s*/)[0]
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/(\d)\.\s+(\d)(\s*[kKmMbB%])?/g, "$1.$2$3")
+    .replace(/(\d),\s+(\d{3})/g, "$1,$2")
+    .trim();
+}
+
+function compactPdfMetricValue(value: string) {
+  const cleanValue = formatMetricCardValue(value)
+    .replace(/\s+/g, " ")
+    .replace(/\s+([kKmMbB%$])/g, "$1")
+    .replace(/([kKmMbB%])\s+\$/g, "$1$")
+    .trim();
+  const numericMatch = cleanValue.match(
+    /(?:[$€₺]\s*)?\d+(?:[.,]\d+)*(?:\.\d+)?\s*(?:[kKmMbB%]|months?|ay|gün|days?)?\s*(?:[$€₺])?/i
+  );
+
+  return numericMatch?.[0]?.replace(/\s+/g, " ").replace(/([kKmMbB%])\s+([$€₺])/g, "$1$2") || cleanValue.split(/\s{2,}/)[0] || "";
+}
+
+function isMobilityReportContent(content: string) {
+  return /\b(scooter|micromobility|micro mobility|shared mobility|bike sharing|bikeshare|per-ride|urban riders|commuters|fleet utilization|rental)\b/i.test(
+    content
+  );
+}
+
+function getFinancialDashboardMetrics(content: string) {
+  return isMobilityReportContent(content)
+    ? mobilityFinancialDashboardMetrics
+    : financialDashboardMetrics;
+}
+
+function extractMetricDetail(content: string, aliases: string[] | readonly string[]) {
+  const lines = normalizePdfText(content).split("\n");
+  const line = lines.find((candidate) =>
+    aliases.some((alias) =>
+      new RegExp(`^(?:[-*•]\\s*)?(?:\\*\\*)?${alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\*\\*)?\\s*[:\\-–—]`, "i").test(
+        candidate.trim()
+      )
+    )
+  );
+
+  if (!line) {
+    return "";
+  }
+
+  return line
+    .replace(/^[-*•]\s*/, "")
+    .replace(/\*\*/g, "")
+    .split(/\s*\|\s*/)
+    .slice(1)
+    .join(" | ")
+    .replace(/\bbenchmarkSource\b/gi, "source")
     .trim();
 }
 
@@ -139,11 +311,43 @@ function extractScore(content: string, label: string) {
 }
 
 function detectRecommendation(content: string) {
-  const match = content.match(/\b(GO|PASS|NO GO|WAIT|PIVOT|RAISE|BOOTSTRAP)\b/i);
+  const explicit = content.match(
+    /\b(?:recommendation|decision|karar)\s*[:\-–—]\s*([A-Z][A-Z ]{1,34})\b/i
+  );
+  const explicitDecision = explicit?.[1]?.trim().replace(/\s+/g, " ").toUpperCase();
 
+  if (explicitDecision && !["CONFIDENCE", "INVESTMENT", "MAIN RISK"].includes(explicitDecision)) {
+    return explicitDecision;
+  }
+
+  const match = content.match(/\b(HOLD FOR VALIDATION|INVEST|REJECT|GO|PASS|NO GO|WAIT|PIVOT|RAISE|BOOTSTRAP)\b/i);
   const recommendation = match?.[1]?.toUpperCase() || "";
 
-  return recommendation === "NO GO" ? "PASS" : recommendation;
+  if (recommendation === "NO GO" || recommendation === "REJECT") {
+    return "PASS";
+  }
+
+  return recommendation;
+}
+
+function formatDecisionLabel(decision: string) {
+  const normalized = decision.trim().replace(/\s+/g, " ").toUpperCase();
+
+  if (normalized === "HOLD FOR VALIDATION") {
+    return "Hold for validation";
+  }
+
+  if (normalized === "PASS") {
+    return "Reject";
+  }
+
+  if (normalized === "GO") {
+    return "Invest";
+  }
+
+  return normalized
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function extractConfidence(content: string) {
@@ -194,7 +398,7 @@ function extractSectionSnippet(content: string, title: string) {
   const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = content.match(
     new RegExp(
-      `${escapedTitle}\\s*[:\\-–—]?\\s*([\\s\\S]*?)(?=\\n\\s*(?:Strengths|Weaknesses|Opportunities|Threats|Worst|Base|Best|Revenue|MRR|Burn|Runway|Risk|Decision)\\s*[:\\-–—]|$)`,
+      `(?:^|\\n)\\s*(?:#{1,6}\\s*)?(?:[-*]\\s*)?(?:\\*\\*)?${escapedTitle}(?:\\*\\*)?\\s*[:\\-–—]?\\s*([\\s\\S]*?)(?=\\n\\s*(?:#{1,6}\\s*)?(?:[-*]\\s*)?(?:\\*\\*)?(?:Strengths|Weaknesses|Opportunities|Threats|Worst|Base|Best|Revenue|MRR|Monthly Revenue|Burn|Runway|Risk|Decision)(?:\\*\\*)?\\s*[:\\-–—]|$)`,
       "i"
     )
   );
@@ -203,28 +407,121 @@ function extractSectionSnippet(content: string, title: string) {
 }
 
 function extractBullets(content: string, fallback: string) {
-  const source = content || fallback;
+  const source = content || "";
   const bullets = source
     .split("\n")
-    .map((line) => line.trim().replace(/^[-*]\s+/, ""))
-    .filter(Boolean)
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^[-*•]\s+/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .replace(/\*\*/g, "")
+        .replace(new RegExp(`^${fallback}\\s*[:\\-–—]\\s*`, "i"), "")
+        .trim()
+    )
+    .filter((line) => line && !new RegExp(`^${fallback}$`, "i").test(line))
     .slice(0, 2);
 
-  return bullets.length > 0 ? bullets : [fallback];
+  if (bullets.length > 0) {
+    return bullets;
+  }
+
+  return source
+    .replace(/\*\*/g, "")
+    .split(/(?<=[.!?])\s+/)
+    .map((line) => line.trim())
+    .filter((line) => line && !new RegExp(`^${fallback}$`, "i").test(line))
+    .slice(0, 2);
+}
+
+function extractSwotBullets(content: string, label: string) {
+  const snippet = extractSectionSnippet(content, label);
+  const direct = extractBullets(snippet, label);
+
+  if (direct.length > 0) {
+    return direct;
+  }
+
+  const labelPattern = new RegExp(
+    `(?:^|\\n)\\s*(?:#{1,6}\\s*)?(?:[-*•]\\s*)?(?:\\*\\*)?${label}(?:\\*\\*)?\\s*[:\\-–—]\\s*([^\\n]+)`,
+    "i"
+  );
+  const inline = content.match(labelPattern)?.[1]?.trim() || "";
+
+  if (inline && !new RegExp(`^${label}$`, "i").test(inline)) {
+    return extractBullets(inline, label);
+  }
+
+  return [];
+}
+
+function extractShortDescription(content: string, aliases: string[] | readonly string[]) {
+  const detail = extractMetricDetail(content, aliases)
+    .replace(/\b(?:formula|assumptions?|benchmark|source|confidence)\s*[:=]\s*/gi, "")
+    .replace(/\s*\|\s*/g, " ")
+    .trim();
+
+  if (detail) {
+    return detail;
+  }
+
+  const raw = normalizePdfText(extractMetricValueFromAliases(content, aliases));
+
+  return raw
+    .split(/\b(?:formula|assumptions?|confidence|benchmark(?: source| comparison)?|explanation|justification|source)\b\s*[:\-–—]/i)
+    .slice(1)
+    .join(" ")
+    .replace(/\s*\|\s*/g, " ")
+    .trim();
+}
+
+function extractKpiValue(content: string, label: string) {
+  return (
+    compactPdfMetricValue(extractMetricValue(content, label)) ||
+    compactPdfMetricValue(extractKeywordInsight(content, [label])) ||
+    ""
+  );
+}
+
+function extractKpiTarget(content: string, label: string) {
+  const snippet = extractSectionSnippet(content, label) || extractKeywordInsight(content, [label]);
+  const target = snippet.match(/\btarget\s*[:\-–—]\s*([^.;\n|]+)/i)?.[1]?.trim();
+
+  return target ? compactPdfMetricValue(target) || target : "";
+}
+
+function extractKpiStatus(content: string, label: string) {
+  const snippet = extractSectionSnippet(content, label) || extractKeywordInsight(content, [label]);
+  const status = snippet.match(/\bstatus\s*[:\-–—]\s*([^.;\n|]+)/i)?.[1]?.trim();
+
+  if (status) {
+    return status;
+  }
+
+  return (extractScore(content, label) ?? 0) >= 70 ? "On track" : "Watch";
+}
+
+function extractKeywordInsight(content: string, keywords: string[]) {
+  const lines = normalizePdfText(content)
+    .replace(/^#{1,6}\s+/gm, "")
+    .split(/\n+/)
+    .map((line) => line.trim().replace(/^[-*•]\s+/, ""))
+    .filter((line) => line.length > 12);
+
+  return (
+    lines.find((line) =>
+      keywords.some((keyword) => line.toLowerCase().includes(keyword.toLowerCase()))
+    ) ||
+    lines[0] ||
+    ""
+  );
 }
 
 function removeDuplicateVisualText(title: string, content: string) {
   const normalizedTitle = title.toLowerCase();
-  const lines = normalizePdfText(content)
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
 
   if (normalizedTitle.includes("tam / sam / som")) {
-    return lines
-      .filter((line) => !/^(?:[-*]\s*)?(?:\*\*)?(tam|sam|som)(?:\*\*)?\s*[:\-–—]/i.test(line))
-      .filter((line) => !/\b(tam|sam|som)\b\s*(?:is|=|:|\-|–|—)/i.test(line))
-      .join("\n");
+    return "";
   }
 
   if (normalizedTitle.includes("financial dashboard")) {
@@ -232,13 +529,7 @@ function removeDuplicateVisualText(title: string, content: string) {
   }
 
   if (normalizedTitle.includes("swot")) {
-    const swotPattern =
-      /^(?:[-*]\s*)?(?:\*\*)?(strengths?|weaknesses?|opportunities|threats?)(?:\*\*)?\s*[:\-–—]/i;
-
-    return lines
-      .filter((line) => !swotPattern.test(line))
-      .filter((line) => !/\b(strengths?|weaknesses?|opportunities|threats?)\b\s*(?:include|are|:|\-|–|—)/i.test(line))
-      .join("\n");
+    return "";
   }
 
   return normalizePdfText(content);
@@ -257,6 +548,30 @@ function dedupePdfSections<T extends { title: string; content: string }>(section
     seen.add(key);
     return true;
   });
+}
+
+function mergePdfSourceSections<T extends { title: string; content: string }>(sections: T[]) {
+  const sourceSections = sections.filter((section) => isSourceSectionTitle(section.title));
+  const nonSourceSections = sections.filter(
+    (section) => !sourceSections.includes(section)
+  );
+  const mergedSourceContent = sourceSections
+    .map((section) => section.content.trim())
+    .filter(Boolean)
+    .join("\n");
+
+  if (!mergedSourceContent) {
+    return nonSourceSections;
+  }
+
+  return [
+    ...nonSourceSections,
+    {
+      ...sourceSections[0],
+      title: "Sources",
+      content: mergedSourceContent,
+    },
+  ];
 }
 
 function createFileName(title: string) {
@@ -625,61 +940,194 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
       y += 18;
 
+      const getTamRows = (content: string, width: number) =>
+        ([
+          ["TAM", "#134e4a"],
+          ["SAM", "#115e59"],
+          ["SOM", "#5eead4"],
+        ] as const).map(([label, color]) => {
+          const value = compactPdfMetricValue(extractMetricValue(content, label));
+          const snippet = extractSectionSnippet(content, label);
+          const description = normalizePdfText(snippet.replace(value, ""))
+            .replace(new RegExp(`^${label}\\s*[:\\-–—]?`, "i"), "")
+            .trim();
+          const descriptionLines = description
+            ? (pdf.splitTextToSize(description, width - 8) as string[])
+            : [];
+          const rowHeight = Math.max(15, 13 + descriptionLines.length * 4.4);
+
+          return { label, color, value, descriptionLines, rowHeight };
+        });
+
+      const getTamVisualHeight = (content: string, width: number) =>
+        getTamRows(content, width).reduce((height, row, index) => {
+          return height + row.rowHeight + (index === 0 ? 0 : 3);
+        }, 0);
+
+      const getSwotLayout = (content: string, width: number) => {
+        const quadrants = [
+          ["Strengths", "#042f2e"],
+          ["Weaknesses", "#18181b"],
+          ["Opportunities", "#0f3f3a"],
+          ["Threats", "#1c1917"],
+        ] as const;
+        const gap = 3;
+        const boxWidth = (width - gap) / 2;
+        const items = quadrants.map(([label, color]) => {
+          const bulletLines = extractSwotBullets(content, label)
+            .slice(0, 3)
+            .map((bullet) => pdf.splitTextToSize(`• ${bullet}`, boxWidth - 6) as string[]);
+          const textLineCount = Math.max(1, bulletLines.reduce((count, lines) => count + lines.length, 0));
+          const boxHeight = Math.max(29, 11 + textLineCount * 4.2);
+
+          return { label, color, bulletLines, boxHeight };
+        });
+        const firstRowHeight = Math.max(items[0]?.boxHeight ?? 29, items[1]?.boxHeight ?? 29);
+        const secondRowHeight = Math.max(items[2]?.boxHeight ?? 29, items[3]?.boxHeight ?? 29);
+
+        return {
+          gap,
+          boxWidth,
+          items,
+          rowHeights: [firstRowHeight, secondRowHeight],
+          totalHeight: firstRowHeight + gap + secondRowHeight,
+        };
+      };
+
+      const getFinancialLayout = (content: string, width: number) => {
+        const labels = getFinancialDashboardMetrics(content);
+        const columns = 3;
+        const itemWidth = (width - (columns - 1) * 3) / columns;
+        const itemHeight = 18;
+        const items = labels
+          .map((item) => {
+            const value = formatMetricCardValue(extractMetricValueFromAliases(content, item.aliases));
+            const compactValue = compactPdfMetricValue(value);
+            const description = extractShortDescription(content, item.aliases);
+            const descriptionLines = description
+              ? (pdf.splitTextToSize(`${item.label}: ${description}`, width - 6) as string[])
+              : [];
+
+            return {
+              label: item.label,
+              aliases: item.aliases,
+              value,
+              compactValue,
+              descriptionLines,
+              height: itemHeight,
+            };
+          })
+          .filter((item) => item.compactValue);
+        const rowHeights = items.reduce<number[]>((rows, item, index) => {
+          const rowIndex = Math.floor(index / columns);
+          rows[rowIndex] = Math.max(rows[rowIndex] ?? 0, item.height);
+          return rows;
+        }, []);
+
+        return {
+          columns,
+          itemWidth,
+          items,
+          rowHeights,
+          detailLines: items.flatMap((item) => item.descriptionLines),
+          gridHeight:
+            rowHeights.reduce((total, rowHeight) => total + rowHeight, 0) +
+            Math.max(0, rowHeights.length - 1) * 3,
+          totalHeight:
+            rowHeights.reduce((total, rowHeight) => total + rowHeight, 0) +
+            Math.max(0, rowHeights.length - 1) * 3 +
+            (items.some((item) => item.descriptionLines.length > 0)
+              ? 9 + items.flatMap((item) => item.descriptionLines).length * 3.6
+              : 0),
+        };
+      };
+
       const drawSectionVisual = (title: string, content: string, sectionY: number) => {
         const normalizedTitle = title.toLowerCase();
         const visualY = sectionY + 19;
+        const drawSingleLine = (
+          text: string,
+          x: number,
+          lineY: number,
+          maxWidth: number,
+          size: number,
+          minSize = 5.4,
+          truncate = true
+        ) => {
+          let fontSize = size;
+
+          pdf.setFontSize(fontSize);
+          while (fontSize > minSize && pdf.getTextWidth(text) > maxWidth) {
+            fontSize -= 0.35;
+            pdf.setFontSize(fontSize);
+          }
+
+          const safeText =
+            truncate && pdf.getTextWidth(text) > maxWidth
+              ? `${text.slice(0, Math.max(4, Math.floor(text.length * (maxWidth / Math.max(pdf.getTextWidth(text), 1))) - 1))}…`
+              : text;
+
+          pdf.text(safeText, x, lineY);
+        };
 
         if (normalizedTitle.includes("tam / sam / som")) {
-          const funnelWidths = [bodyWidth, bodyWidth * 0.66, bodyWidth * 0.34];
-          ["TAM", "SAM", "SOM"].forEach((label, index) => {
-            const width = funnelWidths[index];
-            const x = bodyX + (bodyWidth - width) / 2;
-            const rowY = visualY + index * 6;
-            const value = extractMetricValue(content, label);
+          const rows = getTamRows(content, bodyWidth);
+          let rowY = visualY;
 
-            pdf.setFillColor(index === 0 ? "#134e4a" : index === 1 ? "#115e59" : "#5eead4");
-            pdf.roundedRect(x, rowY, width, 4, 1.5, 1.5, "F");
-            pdf.setFontSize(6.5);
+          rows.forEach(({ label, color, value, descriptionLines, rowHeight }, index) => {
+            pdf.setFillColor("#101113");
+            pdf.setDrawColor(color);
+            pdf.roundedRect(bodyX, rowY, bodyWidth, rowHeight, 3, 3, "FD");
+            pdf.setFillColor(color);
+            pdf.roundedRect(bodyX + 3, rowY + 2, 13, 5, 2.5, 2.5, "F");
+            pdf.setFontSize(6.4);
             pdf.setTextColor(index === 2 ? "#000000" : "#ccfbf1");
-            pdf.text(label, x + 3, rowY + 3);
-            if (value) {
-              pdf.text(value, x + width - 34, rowY + 3, { maxWidth: 30 });
+            pdf.text(label, bodyX + 5, rowY + 5.4);
+            pdf.setTextColor("#ccfbf1");
+            drawSingleLine(value || "—", bodyX + 20, rowY + 5.7, bodyWidth - 24, 8.2, 4.2, false);
+
+            if (descriptionLines.length > 0) {
+              pdf.setFontSize(5.6);
+              pdf.setTextColor("#a1a1aa");
+              pdf.text(descriptionLines, bodyX + 3, rowY + 12.5, {
+                lineHeightFactor: 1.18,
+                maxWidth: bodyWidth - 6,
+              });
             }
+
+            rowY += rowHeight + 3;
           });
-          return 22;
+          return getTamVisualHeight(content, bodyWidth);
         }
 
         if (normalizedTitle.includes("swot")) {
-          const quadrants = [
-            ["Strengths", "#042f2e"],
-            ["Weaknesses", "#18181b"],
-            ["Opportunities", "#0f3f3a"],
-            ["Threats", "#1c1917"],
-          ];
-          const gap = 3;
-          const boxWidth = (bodyWidth - gap) / 2;
-          const boxHeight = 18;
+          const swotLayout = getSwotLayout(content, bodyWidth);
 
-          quadrants.forEach(([label, color], index) => {
-            const x = bodyX + (index % 2) * (boxWidth + gap);
-            const boxY = visualY + Math.floor(index / 2) * (boxHeight + gap);
-            const snippet = extractSectionSnippet(content, label);
-            const bullets = extractBullets(snippet, label).slice(0, 1).join(" ");
+          swotLayout.items.forEach(({ label, color, bulletLines }, index) => {
+            const rowIndex = Math.floor(index / 2);
+            const x = bodyX + (index % 2) * (swotLayout.boxWidth + swotLayout.gap);
+            const boxY = visualY + (rowIndex === 0 ? 0 : swotLayout.rowHeights[0] + swotLayout.gap);
+            const boxHeight = swotLayout.rowHeights[rowIndex];
 
             pdf.setFillColor(color);
             pdf.setDrawColor("#334155");
-            pdf.roundedRect(x, boxY, boxWidth, boxHeight, 2.5, 2.5, "FD");
+            pdf.roundedRect(x, boxY, swotLayout.boxWidth, boxHeight, 2.5, 2.5, "FD");
             pdf.setFontSize(7.2);
             pdf.setTextColor("#ccfbf1");
             pdf.text(label.toUpperCase(), x + 3, boxY + 5);
             pdf.setFontSize(6.2);
             pdf.setTextColor("#d4d4d8");
-            pdf.text(bullets || "Decision factor", x + 3, boxY + 10, {
-              maxWidth: boxWidth - 6,
+            let bulletY = boxY + 10;
+            bulletLines.forEach((lines) => {
+              pdf.text(lines, x + 3, bulletY, {
+                lineHeightFactor: 1.14,
+                maxWidth: swotLayout.boxWidth - 6,
+              });
+              bulletY += lines.length * 4.2;
             });
           });
 
-          return 44;
+          return swotLayout.totalHeight;
         }
 
         if (normalizedTitle.includes("founder score")) {
@@ -710,26 +1158,35 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         }
 
         if (normalizedTitle.includes("executive recommendation")) {
-          const selected = detectRecommendation(content) || "DECISION";
+          const selected = detectRecommendation(content) || "REVIEW";
+          const decisionLabel = formatDecisionLabel(selected);
           const confidence = extractConfidence(content);
-          const investmentNeeded = extractMetricValue(content, "Investment Needed");
+          const investmentRecommendation =
+            extractMetricValue(content, "Investment Recommendation") ||
+            extractMetricValue(content, "Recommendation") ||
+            selected;
           const mainRisk = extractMetricValue(content, "Main Risk");
-          const nextAction = extractMetricValue(content, "Next Critical Action");
+          const nextAction =
+            extractMetricValue(content, "Next Critical Action") ||
+            extractMetricValue(content, "Next Action");
 
           pdf.setFillColor("#ccfbf1");
           pdf.setDrawColor("#5eead4");
-          pdf.roundedRect(bodyX, visualY, 44, 18, 5, 5, "FD");
+          pdf.roundedRect(bodyX, visualY, 52, 26, 5, 5, "FD");
+          pdf.setFontSize(5.8);
+          pdf.setTextColor("#134e4a");
+          pdf.text("RECOMMENDATION", bodyX + 5, visualY + 6);
           pdf.setFontSize(13);
           pdf.setTextColor("#000000");
-          pdf.text(selected, bodyX + 5, visualY + 11.5, { maxWidth: 34 });
+          drawSingleLine(decisionLabel, bodyX + 5, visualY + 16, 42, 11, 6.5);
 
           pdf.setFillColor("#27272a");
-          pdf.roundedRect(bodyX, visualY + 24, 44, 4, 2, 2, "F");
+          pdf.roundedRect(bodyX, visualY + 31, 52, 4, 2, 2, "F");
           pdf.setFillColor("#5eead4");
           pdf.roundedRect(
             bodyX,
-            visualY + 24,
-            (44 * (confidence ?? 50)) / 100,
+            visualY + 31,
+            (52 * (confidence ?? 50)) / 100,
             4,
             2,
             2,
@@ -738,27 +1195,28 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
           const recItems = [
             ["Confidence", confidence === null ? "—" : `${confidence}%`],
-            ["Investment", investmentNeeded || "Planning input"],
+            ["Investment Recommendation", investmentRecommendation || "—"],
             ["Main Risk", mainRisk || "See risk section"],
             ["Next Action", nextAction || "Validate critical proof point"],
           ];
 
           recItems.forEach(([label, value], index) => {
-            const itemX = bodyX + 52 + (index % 2) * ((bodyWidth - 56) / 2 + 2);
-            const itemY = visualY + Math.floor(index / 2) * 13;
-            const itemWidth = (bodyWidth - 60) / 2;
+            const itemX = bodyX + 60 + (index % 2) * ((bodyWidth - 64) / 2 + 2);
+            const itemY = visualY + Math.floor(index / 2) * 17;
+            const itemWidth = (bodyWidth - 68) / 2;
 
             pdf.setFillColor("#18181b");
             pdf.setDrawColor("#27272a");
-            pdf.roundedRect(itemX, itemY, itemWidth, 11, 2.5, 2.5, "FD");
+            pdf.roundedRect(itemX, itemY, itemWidth, 15, 2.5, 2.5, "FD");
             pdf.setFontSize(6);
             pdf.setTextColor("#71717a");
             pdf.text(label.toUpperCase(), itemX + 2, itemY + 3.2);
             pdf.setTextColor("#e4e4e7");
-            pdf.text(value, itemX + 2, itemY + 7.6, { maxWidth: itemWidth - 4 });
+            pdf.setFontSize(6);
+            drawSingleLine(value, itemX + 2, itemY + 7.8, itemWidth - 4, 6);
           });
 
-          return 36;
+          return 48;
         }
 
         if (normalizedTitle.includes("roadmap")) {
@@ -819,8 +1277,13 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           normalizedTitle.includes("financial dashboard") ||
           normalizedTitle.includes("founder score") ||
           normalizedTitle.includes("scenario") ||
-          normalizedTitle.includes("porter")
+          normalizedTitle.includes("porter") ||
+          normalizedTitle.includes("kpi") ||
+          normalizedTitle.includes("unit economics")
         ) {
+          const financialLayout = normalizedTitle.includes("financial dashboard")
+            ? getFinancialLayout(content, bodyWidth)
+            : null;
           const labels = normalizedTitle.includes("founder score")
             ? founderScoreMetrics
             : normalizedTitle.includes("scenario")
@@ -833,20 +1296,35 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
                     ? ["Market", "Product", "Pricing", "Execution"]
                     : normalizedTitle.includes("unit economics")
                       ? ["Gross Margin", "CAC", "LTV", "Payback"]
-                      : financialDashboardMetrics;
-          const columns = normalizedTitle.includes("financial dashboard") ? 2 : labels.length > 6 ? 4 : labels.length;
-          const itemWidth = (bodyWidth - (columns - 1) * 3) / columns;
+                      : financialLayout?.items ?? [];
+          const isFinancialDashboard = normalizedTitle.includes("financial dashboard");
+          const isKpiDashboard = normalizedTitle.includes("kpi");
+          const isScenario = normalizedTitle.includes("scenario");
+          const isUnitEconomics = normalizedTitle.includes("unit economics");
+          const columns = isFinancialDashboard ? 3 : labels.length > 6 ? 4 : labels.length;
+          const itemWidth = isFinancialDashboard && financialLayout
+            ? financialLayout.itemWidth
+            : (bodyWidth - (columns - 1) * 3) / columns;
 
           labels.forEach((item, index) => {
             const label = typeof item === "string" ? item : item.label;
             const aliases = typeof item === "string" ? [item] : item.aliases;
             const x = bodyX + (index % columns) * (itemWidth + 3);
-            const itemHeight = normalizedTitle.includes("financial dashboard") ? 16 : 10;
-            const itemY = visualY + Math.floor(index / columns) * (itemHeight + 3);
+            const rowIndex = Math.floor(index / columns);
+            const priorRowHeight = isFinancialDashboard && financialLayout
+              ? financialLayout.rowHeights.slice(0, rowIndex).reduce((sum, height) => sum + height, 0)
+              : 0;
+            const itemHeight = isFinancialDashboard && financialLayout
+              ? financialLayout.rowHeights[rowIndex]
+              : isKpiDashboard ? 23 : isScenario ? 20 : isUnitEconomics ? 14 : 10;
+            const itemY = isFinancialDashboard && financialLayout
+              ? visualY + priorRowHeight + rowIndex * 3
+              : visualY + rowIndex * (itemHeight + 3);
             const score = extractScore(content, label) ?? [42, 62, 84, 56][index] ?? 60;
-            const value = formatMetricCardValue(
-              extractMetricValueFromAliases(content, aliases)
-            );
+            const value = typeof item !== "string" && "value" in item
+              ? item.value
+              : formatMetricCardValue(extractMetricValueFromAliases(content, aliases));
+            const compactValue = compactPdfMetricValue(value);
 
             pdf.setFillColor("#18181b");
             pdf.setDrawColor("#27272a");
@@ -854,13 +1332,43 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             pdf.setFontSize(6.2);
             pdf.setTextColor("#a1a1aa");
             pdf.text(label, x + 2, itemY + 3.2, { maxWidth: itemWidth - 4 });
-            if (normalizedTitle.includes("financial dashboard") && value) {
+            if (isFinancialDashboard && value) {
               pdf.setTextColor("#f4f4f5");
-              pdf.setFontSize(8);
-              pdf.text(pdf.splitTextToSize(value, itemWidth - 4).slice(0, 2), x + 2, itemY + 8.1, {
+              drawSingleLine(compactValue || "—", x + 2, itemY + 11.7, itemWidth - 4, 8.8, 4.2, false);
+              return;
+            }
+            if (isUnitEconomics) {
+              drawSingleLine(compactValue || "—", x + 2, itemY + 8.8, itemWidth - 4, 7.2, 4.2, false);
+              return;
+            }
+            if (isKpiDashboard) {
+              const kpiValue = extractKpiValue(content, label) || `${score}%`;
+              const target = extractKpiTarget(content, label);
+              const status = extractKpiStatus(content, label);
+              pdf.setTextColor("#f4f4f5");
+              drawSingleLine(kpiValue, x + 2, itemY + 8.4, itemWidth - 4, 7.5, 4.2, false);
+              pdf.setFontSize(5.3);
+              pdf.setTextColor("#a1a1aa");
+              pdf.text(`Target: ${target || kpiValue || "—"}`, x + 2, itemY + 12.1, { maxWidth: itemWidth - 4 });
+              pdf.text(`Status: ${status}`, x + 2, itemY + 15.5, { maxWidth: itemWidth - 4 });
+              pdf.setFillColor("#27272a");
+              pdf.roundedRect(x + 2, itemY + 18.8, itemWidth - 4, 1.5, 0.7, 0.7, "F");
+              pdf.setFillColor("#5eead4");
+              pdf.roundedRect(x + 2, itemY + 18.8, Math.max(3, ((itemWidth - 4) * score) / 100), 1.5, 0.7, 0.7, "F");
+              return;
+            }
+            if (isScenario) {
+              const snippet = extractSectionSnippet(content, label) || extractKeywordInsight(content, [label]);
+              pdf.setTextColor("#f4f4f5");
+              pdf.setFontSize(6);
+              pdf.text(pdf.splitTextToSize(snippet || "Scenario path under review.", itemWidth - 4).slice(0, 2), x + 2, itemY + 8.1, {
                 lineHeightFactor: 1.12,
                 maxWidth: itemWidth - 4,
               });
+              pdf.setFillColor("#27272a");
+              pdf.roundedRect(x + 2, itemY + 15, itemWidth - 4, 1.4, 0.7, 0.7, "F");
+              pdf.setFillColor(index === 0 ? "#fca5a5" : index === 1 ? "#fde68a" : "#5eead4");
+              pdf.roundedRect(x + 2, itemY + 15, Math.max(3, ((itemWidth - 4) * ([42, 66, 84][index] || score)) / 100), 1.4, 0.7, 0.7, "F");
               return;
             }
             pdf.setFillColor("#27272a");
@@ -877,21 +1385,54 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             );
           });
 
-          return normalizedTitle.includes("financial dashboard") ? 112 : labels.length > 6 ? 38 : 22;
+          if (isFinancialDashboard) {
+            if (financialLayout && financialLayout.detailLines.length > 0) {
+              const detailsY = visualY + financialLayout.gridHeight + 7;
+
+              pdf.setFillColor("#101113");
+              pdf.setDrawColor("#27272a");
+              pdf.roundedRect(bodyX, detailsY - 4, bodyWidth, financialLayout.detailLines.length * 3.6 + 8, 2.5, 2.5, "FD");
+              pdf.setFontSize(6);
+              pdf.setTextColor("#5eead4");
+              pdf.text("METRIC DETAILS", bodyX + 3, detailsY);
+              pdf.setFontSize(5.5);
+              pdf.setTextColor("#a1a1aa");
+              pdf.text(financialLayout.detailLines, bodyX + 3, detailsY + 4, {
+                lineHeightFactor: 1.1,
+                maxWidth: bodyWidth - 6,
+              });
+            }
+
+            return financialLayout?.totalHeight ?? 0;
+          }
+
+          if (isKpiDashboard) {
+            return 52;
+          }
+
+          if (isScenario) {
+            return 26;
+          }
+
+          if (isUnitEconomics) {
+            return 18;
+          }
+
+          return labels.length > 6 ? 38 : 22;
         }
 
         return 0;
       };
 
-      const getVisualHeight = (title: string) => {
-        const normalizedTitle = title.toLowerCase();
+      const getVisualHeight = (section: DashboardReport["sections"][number]) => {
+        const normalizedTitle = section.title.toLowerCase();
 
         if (normalizedTitle.includes("financial dashboard")) {
-          return 112;
+          return getFinancialLayout(section.content, bodyWidth).totalHeight;
         }
 
         if (normalizedTitle.includes("swot")) {
-          return 44;
+          return getSwotLayout(section.content, bodyWidth).totalHeight;
         }
 
         if (normalizedTitle.includes("porter")) {
@@ -903,14 +1444,26 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         }
 
         if (normalizedTitle.includes("tam / sam / som")) {
-          return 22;
+          return getTamVisualHeight(section.content, bodyWidth);
+        }
+
+        if (normalizedTitle.includes("scenario")) {
+          return 26;
+        }
+
+        if (normalizedTitle.includes("kpi")) {
+          return 52;
+        }
+
+        if (normalizedTitle.includes("unit economics")) {
+          return 18;
         }
 
         if (normalizedTitle.includes("executive recommendation")) {
-          return 36;
+          return 48;
         }
 
-        return /founder score|scenario|roadmap|porter|kpi|risk|unit economics/i.test(title)
+        return /founder score|scenario|roadmap|porter|kpi|risk|unit economics/i.test(section.title)
           ? 22
           : 0;
       };
@@ -950,12 +1503,11 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         drawFooter();
       };
 
-      dedupePdfSections(report.sections).forEach((section) => {
-        const visualHeight = getVisualHeight(section.title);
-        const sectionBodyContent = removeDuplicateVisualText(
-          section.title,
-          section.content
-        );
+      dedupePdfSections(mergePdfSourceSections(report.sections)).forEach((section) => {
+        const visualHeight = getVisualHeight(section);
+        const sectionBodyContent = isSourceSectionTitle(section.title)
+          ? formatPdfCitationContent(section.content)
+          : removeDuplicateVisualText(section.title, section.content);
         const bodyLines = pdf.splitTextToSize(
           sectionBodyContent,
           bodyWidth
