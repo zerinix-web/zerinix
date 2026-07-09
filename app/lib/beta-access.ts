@@ -1,14 +1,12 @@
+import { isFounderEmail } from "@/app/lib/founder-access.mjs";
+
 const primaryAllowedEmail = [
   "yesilovaibrahim38",
   ["gmail", "com"].join("."),
 ].join("@");
-const ownerAllowedEmail = [
-  "yesilova_ibrahim",
-  ["hotmail", "com"].join("."),
-].join("@");
 const primaryDeveloperHandle = ["iyslv94", "coder"].join("-");
 
-const allowedBetaEmails = new Set([primaryAllowedEmail, ownerAllowedEmail]);
+const allowedBetaEmails = new Set([primaryAllowedEmail]);
 const allowedDeveloperHandles = new Set([primaryDeveloperHandle]);
 
 type BetaAccessIdentity = {
@@ -217,8 +215,5 @@ export function isFounderAccount(account?: BetaAccessAccount | string | null) {
   const betaAccount = typeof account === "string" ? { email: account } : account;
   const accountEmails = collectAccountEmails(betaAccount);
 
-  return (
-    accountEmails.has(normalizeEmail(ownerAllowedEmail)) ||
-    accountEmails.has(normalizeGmailAddress(ownerAllowedEmail))
-  );
+  return [...accountEmails].some((email) => isFounderEmail(email));
 }
