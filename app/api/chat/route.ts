@@ -727,6 +727,12 @@ function createIncompleteResponseFallback(reason: string) {
   return "I received a response but could not display it. Please try again.";
 }
 
+function getChatErrorMessage(error: unknown) {
+  return error instanceof Error && error.message.trim()
+    ? error.message
+    : "Chat response failed. Please try again.";
+}
+
 function sanitizeResponseShape(value: unknown, depth = 0): unknown {
   if (!value || typeof value !== "object") {
     return typeof value;
@@ -1196,6 +1202,13 @@ export async function POST(req: Request) {
             controller.close();
           } catch (error) {
             logServerError("api:chat:stream", error);
+            const errorMessage = getChatErrorMessage(error);
+
+            if (!streamedText.trim()) {
+              controller.enqueue(encoder.encode(errorMessage));
+            }
+
+            controller.close();
 
             await recordAiUsage(supabase, {
               userId: user.id,
@@ -1222,10 +1235,9 @@ export async function POST(req: Request) {
                 model_preference: modelPreference,
                 attachment_count: attachments.length,
                 actual_ai_call: true,
+                error_message: errorMessage,
               },
             });
-
-            controller.error(error);
           }
         },
       }),

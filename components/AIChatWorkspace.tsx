@@ -79,6 +79,8 @@ type AIChatWorkspaceProps = {
   conversationLoadError?: string;
 };
 
+const CHAT_STREAM_IDLE_TIMEOUT_MS = 60_000;
+
 const emptyProfile: ChatProfile = {
   preferred_country: "",
   preferred_industries: [],
@@ -1167,7 +1169,25 @@ export default function AIChatWorkspace({
     let output = "";
 
     while (true) {
-      const { done, value } = await reader.read();
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const { done, value } = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  "Chat response timed out before the stream completed. Please try again."
+                )
+              ),
+            CHAT_STREAM_IDLE_TIMEOUT_MS
+          );
+        }),
+      ]).finally(() => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      });
 
       if (done) {
         break;
