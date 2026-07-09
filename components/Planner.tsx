@@ -122,6 +122,10 @@ type PlanReportField = keyof PlanReport;
 
 type ReportStreamEvent = Partial<MarketReport & PlanReport> & {
   done?: boolean;
+  warning?: string;
+  missingFields?: Array<MarketReportField | PlanReportField>;
+  invalidFields?: Array<MarketReportField | PlanReportField>;
+  partial?: boolean;
 };
 
 function getReportGenerationErrorMessage(error: unknown, fallback: string) {
@@ -2574,6 +2578,7 @@ const ReportPanel = memo(function ReportPanel({
   waitingMessage,
   result,
   failureMessage,
+  warningMessage,
 }: {
   reportData: Partial<MarketReport & PlanReport> | null;
   reportFields: Array<{
@@ -2586,6 +2591,7 @@ const ReportPanel = memo(function ReportPanel({
   waitingMessage: string;
   result: string;
   failureMessage?: string;
+  warningMessage?: string;
 }) {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [pdfError, setPdfError] = useState("");
@@ -3411,6 +3417,11 @@ const ReportPanel = memo(function ReportPanel({
             {hasReportContent ? "AI Ready" : "Streaming"}
           </div>
         </div>
+        {warningMessage ? (
+          <div className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm leading-6 text-amber-100/90">
+            {warningMessage}
+          </div>
+        ) : null}
       </div>
 
       <div className="space-y-5 p-4 sm:p-5">
@@ -3605,6 +3616,7 @@ export default function Planner({
   const [prompt, setPrompt] = useState("");
   const [result, setResult] = useState("");
   const [reportGenerationError, setReportGenerationError] = useState("");
+  const [reportGenerationWarning, setReportGenerationWarning] = useState("");
   const [marketReport, setMarketReport] = useState<MarketReport | null>(null);
   const [planReport, setPlanReport] = useState<PlanReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -3760,6 +3772,7 @@ export default function Planner({
     setPrompt("");
     setResult("");
     setReportGenerationError("");
+    setReportGenerationWarning("");
     setMarketReport(null);
     setPlanReport(null);
     setWorkflowCompletedSteps(0);
@@ -4110,6 +4123,7 @@ export default function Planner({
     setPrompt("");
     setResult("");
     setReportGenerationError("");
+    setReportGenerationWarning("");
     setMarketReport(null);
     setPlanReport(null);
     setWorkflowCompletedSteps(0);
@@ -4471,10 +4485,17 @@ export default function Planner({
 
     const parseReportStreamEvent = (value: string) => {
       const event = JSON.parse(value) as ReportStreamEvent;
-      const failedValue = Object.values(event).find(
-        (entry): entry is string =>
-          typeof entry === "string" && isReportGenerationFailureText(entry)
+      const failedEntry = Object.entries(event).find(
+        ([key, entry]) =>
+          key !== "warning" &&
+          key !== "missingFields" &&
+          key !== "invalidFields" &&
+          key !== "partial" &&
+          typeof entry === "string" &&
+          isReportGenerationFailureText(entry)
       );
+      const failedValue =
+        typeof failedEntry?.[1] === "string" ? failedEntry[1] : undefined;
 
       if (failedValue) {
         throw new Error(failedValue);
@@ -4607,6 +4628,7 @@ export default function Planner({
     setActiveMode("chat");
     setLastRequest({ mode: "chat", prompt: submittedPrompt });
     setReportGenerationError("");
+    setReportGenerationWarning("");
     setResult("");
     setMarketReport(null);
     setPlanReport(null);
@@ -4766,6 +4788,7 @@ export default function Planner({
     });
     setResult("");
     setReportGenerationError("");
+    setReportGenerationWarning("");
     setMarketReport(null);
     setPlanReport(null);
 
@@ -4948,6 +4971,7 @@ export default function Planner({
     });
     setResult("");
     setReportGenerationError("");
+    setReportGenerationWarning("");
     setPlanReport(null);
     setMarketReport(null);
 
@@ -5000,6 +5024,23 @@ export default function Planner({
       await readStreamingSectionJson(
         res,
         (event) => {
+          if (event.warning) {
+            const affectedFields = [
+              ...(event.missingFields || []),
+              ...(event.invalidFields || []),
+            ];
+            const affectedTitles = affectedFields
+              .map((field) => outputFields.find((item) => item.field === field)?.title)
+              .filter(Boolean)
+              .join(", ");
+            const warningMessage = affectedTitles
+              ? `${event.warning} Affected sections: ${affectedTitles}.`
+              : event.warning;
+
+            setReportGenerationWarning(warningMessage);
+            setResult(warningMessage);
+          }
+
           for (const { field } of reportFields) {
             const chunk = event[field];
 
@@ -5276,6 +5317,7 @@ export default function Planner({
                 waitingMessage={currentLanguageCopy.waitingSection}
                 result={result}
                 failureMessage={reportGenerationError}
+                warningMessage={reportGenerationWarning}
               />
             ) : null}
           </div>

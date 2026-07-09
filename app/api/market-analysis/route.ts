@@ -174,6 +174,12 @@ const FULL_REPORT_FIELD = "fullReport";
 const MAX_AI_CALLS_PER_MARKET_REPORT = 1;
 
 type MarketReportChunk = Partial<Record<MarketReportField, string>>;
+type MarketReportWarningChunk = {
+  warning: string;
+  missingFields?: MarketReportField[];
+  invalidFields?: MarketReportField[];
+  partial?: boolean;
+};
 
 const fieldLabels: Record<MarketReportField, string> = {
   executiveSummary: "Executive Summary",
@@ -286,10 +292,31 @@ function serializeReportChunk(field: MarketReportField, content: string) {
   return `${JSON.stringify(createReportChunk(field, content))}\n`;
 }
 
+function serializeWarningChunk(warning: MarketReportWarningChunk) {
+  return `${JSON.stringify(warning)}\n`;
+}
+
 function serializeMarketReportChunks(report: Record<MarketReportField, string>) {
   return reportFields
     .map((field) => serializeReportChunk(field, report[field]))
     .join("");
+}
+
+function createPartialSectionFallback(
+  field: MarketReportField,
+  language: ResponseLanguage
+) {
+  const title = fieldLabelsByLanguage[language][field];
+
+  return language === "Turkish"
+    ? `${title} bölümü model yanıtında eksik veya tamamlanmamış döndü. Diğer bölümler kullanılabilir; bu bölüm için yeniden analiz çalıştırılması önerilir.`
+    : `${title} was missing or incomplete in the model response. The remaining sections are usable; rerun the analysis to regenerate this section.`;
+}
+
+function createFallbackMarketReport(language: ResponseLanguage) {
+  return Object.fromEntries(
+    reportFields.map((field) => [field, createPartialSectionFallback(field, language)])
+  ) as Record<MarketReportField, string>;
 }
 
 function createMockMarketReport(prompt: string, language: ResponseLanguage) {
@@ -329,7 +356,14 @@ function createFullReportJsonSchema(name: string, fields: readonly string[]) {
   };
 }
 
-function parseFullMarketReport(value: string): Record<MarketReportField, string> {
+function parseFullMarketReport(
+  value: string,
+  language: ResponseLanguage
+): {
+  report: Record<MarketReportField, string>;
+  missingFields: MarketReportField[];
+  invalidFields: MarketReportField[];
+} {
   const parsed = JSON.parse(value) as Record<string, unknown>;
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -337,22 +371,28 @@ function parseFullMarketReport(value: string): Record<MarketReportField, string>
   }
 
   const report = {} as Record<MarketReportField, string>;
+  const missingFields: MarketReportField[] = [];
+  const invalidFields: MarketReportField[] = [];
 
   for (const field of reportFields) {
     const content = parsed[field];
 
-    if (
-      typeof content !== "string" ||
-      !content.trim() ||
-      isReportGenerationFailureText(content)
-    ) {
-      throw new Error("Report generation failed before every section completed.");
+    if (typeof content !== "string" || !content.trim()) {
+      missingFields.push(field);
+      report[field] = createPartialSectionFallback(field, language);
+      continue;
+    }
+
+    if (isReportGenerationFailureText(content)) {
+      invalidFields.push(field);
+      report[field] = createPartialSectionFallback(field, language);
+      continue;
     }
 
     report[field] = content.trim();
   }
 
-  return report;
+  return { report, missingFields, invalidFields };
 }
 
 async function countAiCallsForReport({
@@ -387,35 +427,97 @@ async function countAiCallsForReport({
   return count ?? 0;
 }
 
+const TEXT_LIKE_RESPONSE_FIELD_PATTERN =
+  /^(output_text|text|value|content|message|response|answer|summary)$/i;
+
+const NON_CONTENT_RESPONSE_FIELD_PATTERN =
+  /^(id|object|type|status|role|model|created|created_at|updated_at|usage|metadata|annotations|finish_reason|index|incomplete_details)$/i;
+
+function extractTextFromValue(
+  value: unknown,
+  parentKey = "",
+  seen: WeakSet<object> = new WeakSet()
+): string {
+  if (typeof value === "string") {
+    return !parentKey || TEXT_LIKE_RESPONSE_FIELD_PATTERN.test(parentKey) ? value : "";
+  }
+
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  if (seen.has(value)) {
+    return "";
+  }
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => extractTextFromValue(item, parentKey, seen))
+      .filter(Boolean)
+      .join("");
+  }
+
+  const record = value as Record<string, unknown>;
+  const type = typeof record.type === "string" ? record.type : "";
+  const candidateKeys =
+    type === "output_text"
+      ? ["text", "value", "content", "message"]
+      : [
+          "output_text",
+          "text",
+          "value",
+          "content",
+          "message",
+          "response",
+          "answer",
+          "summary",
+        ];
+
+  for (const key of candidateKeys) {
+    const extracted = extractTextFromValue(record[key], key, seen);
+
+    if (extracted.trim()) {
+      return extracted;
+    }
+  }
+
+  for (const [key, item] of Object.entries(record)) {
+    if (candidateKeys.includes(key) || NON_CONTENT_RESPONSE_FIELD_PATTERN.test(key)) {
+      continue;
+    }
+
+    const extracted = extractTextFromValue(item, key, seen);
+
+    if (extracted.trim()) {
+      return extracted;
+    }
+  }
+
+  return "";
+}
+
 function extractResponseText(response: unknown) {
   if (!response || typeof response !== "object") {
     return "";
   }
 
-  const outputText = (response as { output_text?: unknown }).output_text;
+  const record = response as Record<string, unknown>;
 
-  if (typeof outputText === "string") {
-    return outputText;
+  if (record.output_parsed) {
+    return JSON.stringify(record.output_parsed);
   }
 
-  const output = (response as { output?: unknown }).output;
+  const directText = extractTextFromValue(record.output_text);
 
-  if (!Array.isArray(output)) {
-    return "";
+  if (directText.trim()) {
+    return directText;
   }
 
-  return output
-    .flatMap((item) => {
-      const content = (item as { content?: unknown }).content;
+  const outputText = extractTextFromValue(record.output);
 
-      return Array.isArray(content) ? content : [];
-    })
-    .map((part) => {
-      const text = (part as { text?: unknown }).text;
-
-      return typeof text === "string" ? text : "";
-    })
-    .join("");
+  return outputText.trim() ? outputText : "";
 }
 
 function buildLanguageInstructions(language: ResponseLanguage) {
@@ -684,40 +786,88 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
           cacheHit: true,
         });
 
-        const parsedCachedReport = parseFullMarketReport(cachedFullReport.responseText);
+        let parsedCachedReport: Record<MarketReportField, string> | null = null;
+        let cachedMissingFields: MarketReportField[] = [];
+        let cachedInvalidFields: MarketReportField[] = [];
 
-        await recordAiUsage(supabase, {
-          userId: user.id,
-          endpoint: "/api/market-analysis",
-          reportField: FULL_REPORT_FIELD,
-          promptHash,
-          model: cachedFullReport.model || model,
-          planTier,
-          tokenUsage: {
-            promptTokens: cachedFullReport.promptTokens,
-            completionTokens: cachedFullReport.completionTokens,
-            totalTokens: cachedFullReport.totalTokens,
-          },
-          estimatedCostUsd: 0,
-          cacheHit: true,
-          responseTimeMs: 0,
-          metadata: {
-            quota_event: false,
-            quota_mode: "market_analysis",
-            quota_consumed: false,
-            report_request_id: reportRequestId || null,
-            usage_kind: "full_report_cache_hit",
-            actual_ai_call: false,
-            cachedEstimatedCostUsd: cachedFullReport.estimatedCostUsd,
-          },
-        });
+        try {
+          const parsedCachePayload = parseFullMarketReport(
+            cachedFullReport.responseText,
+            responseLanguage
+          );
 
-        return new Response(encoder.encode(serializeMarketReportChunks(parsedCachedReport)), {
-          headers: {
-            "Content-Type": "application/x-ndjson; charset=utf-8",
-            "Cache-Control": "no-cache, no-transform",
-          },
-        });
+          parsedCachedReport = parsedCachePayload.report;
+          cachedMissingFields = parsedCachePayload.missingFields;
+          cachedInvalidFields = parsedCachePayload.invalidFields;
+        } catch (error) {
+          console.error("[api:market-analysis] Ignoring malformed cached full report", {
+            reportRequestId: reportRequestId || null,
+            cacheKey: fullReportCacheKey,
+            failureReason:
+              error instanceof Error && error.message ? error.message : "CacheParseFailed",
+          });
+        }
+
+        if (!parsedCachedReport) {
+          console.info("[api:market-analysis] cache miss after malformed full report", {
+            reportRequestId: reportRequestId || null,
+            cacheKey: fullReportCacheKey,
+          });
+        } else {
+
+          if (cachedMissingFields.length || cachedInvalidFields.length) {
+            console.info("[api:market-analysis] cached full report partial sections", {
+              reportRequestId: reportRequestId || null,
+              missingFields: cachedMissingFields,
+              invalidFields: cachedInvalidFields,
+              source: "cache",
+            });
+          }
+
+          await recordAiUsage(supabase, {
+            userId: user.id,
+            endpoint: "/api/market-analysis",
+            reportField: FULL_REPORT_FIELD,
+            promptHash,
+            model: cachedFullReport.model || model,
+            planTier,
+            tokenUsage: {
+              promptTokens: cachedFullReport.promptTokens,
+              completionTokens: cachedFullReport.completionTokens,
+              totalTokens: cachedFullReport.totalTokens,
+            },
+            estimatedCostUsd: 0,
+            cacheHit: true,
+            responseTimeMs: 0,
+            metadata: {
+              quota_event: false,
+              quota_mode: "market_analysis",
+              quota_consumed: false,
+              report_request_id: reportRequestId || null,
+              usage_kind: "full_report_cache_hit",
+              actual_ai_call: false,
+              cachedEstimatedCostUsd: cachedFullReport.estimatedCostUsd,
+            },
+          });
+
+          const cachedWarning =
+            cachedMissingFields.length || cachedInvalidFields.length
+              ? serializeWarningChunk({
+                  warning:
+                    "Market analysis returned a partial report. Some sections were missing or incomplete and were marked for regeneration.",
+                  missingFields: cachedMissingFields,
+                  invalidFields: cachedInvalidFields,
+                  partial: true,
+                })
+              : "";
+
+          return new Response(encoder.encode(cachedWarning + serializeMarketReportChunks(parsedCachedReport)), {
+            headers: {
+              "Content-Type": "application/x-ndjson; charset=utf-8",
+              "Cache-Control": "no-cache, no-transform",
+            },
+          });
+        }
       }
 
       if (cachedFullReport) {
@@ -829,10 +979,41 @@ Do not include markdown code fences, braces inside string values, or commentary 
         const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
         const responseTimeMs = Date.now() - startedAt;
         const responseText = extractResponseText(response);
-        const parsedReport = parseFullMarketReport(responseText);
+        const {
+          report: parsedReport,
+          missingFields,
+          invalidFields,
+        } = parseFullMarketReport(responseText, responseLanguage);
         const cacheResponseText = JSON.stringify(parsedReport);
+        const isPartialReport = Boolean(missingFields.length || invalidFields.length);
 
-        if (!isReportGenerationFailureText(cacheResponseText)) {
+        console.info("[api:market-analysis] full report section validation", {
+          reportRequestId: reportRequestId || null,
+          model,
+          responseTextLength: responseText.length,
+          completedFields: reportFields.filter(
+            (fieldName) =>
+              !missingFields.includes(fieldName) && !invalidFields.includes(fieldName)
+          ),
+          missingFields,
+          invalidFields,
+          partial: isPartialReport,
+        });
+        reportFields.forEach((fieldName) => {
+          console.info("[api:market-analysis] section validation step", {
+            reportRequestId: reportRequestId || null,
+            reportField: fieldName,
+            model,
+            status: missingFields.includes(fieldName)
+              ? "missing"
+              : invalidFields.includes(fieldName)
+                ? "invalid"
+                : "completed",
+            contentLength: parsedReport[fieldName]?.length || 0,
+          });
+        });
+
+        if (!isPartialReport && !isReportGenerationFailureText(cacheResponseText)) {
           await storeCachedAiResponse(supabase, {
             userId: user.id,
             cacheKey: fullReportCacheKey,
@@ -845,6 +1026,12 @@ Do not include markdown code fences, braces inside string values, or commentary 
             tokenUsage,
             estimatedCostUsd,
             expiresInDays: 3,
+          });
+        } else if (isPartialReport) {
+          console.info("[api:market-analysis] skipped cache for partial full report", {
+            reportRequestId: reportRequestId || null,
+            missingFields,
+            invalidFields,
           });
         }
 
@@ -879,7 +1066,18 @@ Do not include markdown code fences, braces inside string values, or commentary 
           quotaConsumed: !productionLimit.quotaAlreadyCharged,
         });
 
-        return new Response(encoder.encode(serializeMarketReportChunks(parsedReport)), {
+        const warning =
+          isPartialReport
+            ? serializeWarningChunk({
+                warning:
+                  "Market analysis returned a partial report. Some sections were missing or incomplete and were marked for regeneration.",
+                missingFields,
+                invalidFields,
+                partial: true,
+              })
+            : "";
+
+        return new Response(encoder.encode(warning + serializeMarketReportChunks(parsedReport)), {
           headers: {
             "Content-Type": "application/x-ndjson; charset=utf-8",
             "Cache-Control": "no-cache, no-transform",
@@ -928,9 +1126,25 @@ Do not include markdown code fences, braces inside string values, or commentary 
         });
         logServerError("api:market-analysis:full-report", error);
 
-        return NextResponse.json(
-          { error: "Market analysis could not be generated." },
-          { status: 502 }
+        const failedFields = [...reportFields];
+        const fallbackReport = createFallbackMarketReport(responseLanguage);
+        const warning = serializeWarningChunk({
+          warning:
+            "Market analysis returned a partial report because the provider response could not be parsed completely. Please retry to regenerate missing sections.",
+          missingFields: failedFields,
+          invalidFields: [],
+          partial: true,
+        });
+
+        return new Response(
+          encoder.encode(warning + serializeMarketReportChunks(fallbackReport)),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/x-ndjson; charset=utf-8",
+              "Cache-Control": "no-cache, no-transform",
+            },
+          }
         );
       }
     }
