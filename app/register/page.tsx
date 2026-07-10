@@ -1,80 +1,42 @@
 import AuthShell from "@/components/AuthShell";
-import { signUpWithPassword } from "@/app/auth/actions";
 
-type RegisterPageProps = {
-  searchParams: Promise<{
-    auth_error?: string;
-  }>;
-};
-
-export default async function RegisterPage({ searchParams }: RegisterPageProps) {
-  const { auth_error: authError } = await searchParams;
-  const authErrorMessage =
-    authError === "registration_failed"
-      ? "Kayıt tamamlanamadı. Bilgilerini kontrol edip tekrar dene."
-      : authError;
-
+export default function RegisterPage() {
   return (
     <AuthShell
       eyebrow="ZERINIX ACCESS"
-      title="AI işletim sistemini kurmaya başla."
-      subtitle="ZERINIX, girişim hedefini anlaşılır bir plana çevirip iş akışını büyüme odaklı hale getirir."
+      title="Private beta erişimi kontrollü olarak açılıyor."
+      subtitle="ZERINIX, girişimciler için AI iş planlama, pazar zekası ve stratejik raporları premium bir çalışma alanında birleştirir."
       footerText="Zaten hesabın var mı?"
       footerHref="/login"
       footerLinkText="Giriş yap"
     >
-      <div>
-        <p className="text-sm font-medium text-gray-500">Kayıt</p>
-        <h2 className="mt-2 text-3xl font-bold text-white">Yeni hesap oluştur</h2>
-      </div>
-
-      {authErrorMessage && (
-        <p className="mt-6 rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">
-          {authErrorMessage}
+      <div className="rounded-[28px] border border-teal-300/20 bg-teal-300/[0.055] p-5">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-teal-200/25 bg-teal-200/10 text-xl">
+          🔒
+        </div>
+        <p className="mt-5 text-sm font-semibold tracking-[0.28em] text-teal-200/80">
+          ZERINIX PRIVATE BETA
         </p>
-      )}
+        <h2 className="mt-3 text-3xl font-bold tracking-tight text-white">
+          ZERINIX Private Beta
+        </h2>
+        <div className="mt-5 space-y-4 text-sm leading-7 text-zinc-300">
+          <p>
+            Şu anda yalnızca davet edilen kullanıcılar hesap oluşturabilir.
+          </p>
+          <p>
+            ZERINIX&apos;i en yüksek kalite standartlarında geliştirebilmek için
+            yeni kullanıcıları kontrollü olarak kabul ediyoruz.
+          </p>
+        </div>
 
-      <form action={signUpWithPassword} className="mt-8 space-y-4">
-        <label className="block">
-          <span className="text-sm font-medium text-gray-300">Ad soyad</span>
-          <input
-            type="text"
-            name="name"
-            autoComplete="name"
-            placeholder="Ada Lovelace"
-            className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-black/50 px-4 text-white outline-none transition placeholder:text-gray-600 focus:border-teal-300/70"
-          />
-        </label>
-
-        <label className="block">
-          <span className="text-sm font-medium text-gray-300">E-posta</span>
-          <input
-            type="email"
-            name="email"
-            autoComplete="email"
-            placeholder="you@company.com"
-            className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-black/50 px-4 text-white outline-none transition placeholder:text-gray-600 focus:border-teal-300/70"
-          />
-        </label>
-
-        <label className="block">
-          <span className="text-sm font-medium text-gray-300">Şifre</span>
-          <input
-            type="password"
-            name="password"
-            autoComplete="new-password"
-            placeholder="En az 8 karakter"
-            className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-black/50 px-4 text-white outline-none transition placeholder:text-gray-600 focus:border-teal-300/70"
-          />
-        </label>
-
-        <button
-          type="submit"
-          className="h-12 w-full rounded-2xl bg-white font-semibold text-black transition hover:bg-zinc-200"
+        <a
+          href="mailto:admin@zerinix.com?subject=ZERINIX%20Private%20Beta"
+          className="mt-7 inline-flex h-12 w-full items-center justify-center rounded-2xl bg-white px-5 text-sm font-semibold text-black shadow-lg shadow-white/10 transition duration-200 hover:-translate-y-0.5 hover:bg-zinc-200"
         >
-          Hesap Oluştur
-        </button>
-      </form>
+          Erken Erişim Talep Et
+        </a>
+      </div>
     </AuthShell>
   );
 }
