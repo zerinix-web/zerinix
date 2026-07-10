@@ -1,4 +1,10 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+import {
+  loadUserReports,
+  loadUserWorkspaces,
+  type DashboardReport,
+  type DashboardWorkspace,
+} from "@/app/dashboard/report-utils";
 
 type ConversationRow = {
   id: string;
@@ -33,7 +39,12 @@ export async function loadPlanConversations(
 
   if (error) {
     console.error("[ai_conversations select failed]", error);
-    return { conversations: [], error: error.message };
+    return {
+      conversations: [],
+      error: error.message,
+      workspaces: [] as DashboardWorkspace[],
+      latestReport: null as DashboardReport | null,
+    };
   }
 
   const conversations = (data || []) as ConversationRow[];
@@ -49,8 +60,22 @@ export async function loadPlanConversations(
 
   if (messagesError) {
     console.error("[ai_messages select failed]", messagesError);
-    return { conversations: [], error: messagesError.message };
+    return {
+      conversations: [],
+      error: messagesError.message,
+      workspaces: [] as DashboardWorkspace[],
+      latestReport: null as DashboardReport | null,
+    };
   }
+
+  const [{ workspaces }, { reports }] = await Promise.all([
+    loadUserWorkspaces(supabase, user),
+    loadUserReports(supabase, user),
+  ]);
+  const latestReport =
+    reports.find(
+      (report) => report.status.toLowerCase() === "completed" && report.sections.length > 0
+    ) || null;
 
   const messagesByConversation = new Map<string, MessageRow[]>();
 
@@ -81,5 +106,7 @@ export async function loadPlanConversations(
       })),
     })),
     error: "",
+    workspaces,
+    latestReport,
   };
 }

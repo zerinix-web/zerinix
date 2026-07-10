@@ -5,7 +5,13 @@ import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
-export default async function PlanPage() {
+type PlanPageProps = {
+  searchParams?: Promise<{
+    workspaceId?: string;
+  }>;
+};
+
+export default async function PlanPage({ searchParams }: PlanPageProps) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -18,11 +24,15 @@ export default async function PlanPage() {
   }
 
   const conversationResult = await loadPlanConversations(supabase, user);
+  const params = searchParams ? await searchParams : {};
 
   return (
     <Planner
       initialConversations={conversationResult.conversations}
       conversationLoadError={conversationResult.error}
+      initialWorkspaces={conversationResult.workspaces}
+      initialReport={conversationResult.latestReport}
+      initialWorkspaceId={params.workspaceId}
     />
   );
 }

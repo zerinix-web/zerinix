@@ -995,6 +995,16 @@ export default function AIChatWorkspace({
     }
   }
 
+  async function deletePersistedMessage(messageId: string) {
+    const supabase = createClient();
+    const { error } = await supabase.from("ai_messages").delete().eq("id", messageId);
+
+    if (error) {
+      console.error("[ai_messages delete failed]", error);
+      setConversationError(error.message);
+    }
+  }
+
   async function deletePersistedConversation(conversationId: string) {
     if (!persistedConversationIdsRef.current.has(conversationId)) {
       return true;
@@ -1204,7 +1214,11 @@ export default function AIChatWorkspace({
     return output.trim();
   }
 
-  async function sendMessage(promptOverride = prompt, addToHistory = true) {
+  async function sendMessage(
+    promptOverride = prompt,
+    addToHistory = true,
+    supersededAssistantMessageId = ""
+  ) {
     const submittedPrompt = promptOverride.trim();
 
     if (!submittedPrompt || loading) {
@@ -1221,7 +1235,12 @@ export default function AIChatWorkspace({
     const currentAttachments = attachments;
     const currentMessages = conversation?.messages || [];
     const memoryMessages = currentMessages
-      .filter((message) => message.content.trim() && message.status !== "failed")
+      .filter(
+        (message) =>
+          message.content.trim() &&
+          message.id !== supersededAssistantMessageId &&
+          message.status !== "failed"
+      )
       .slice(-16)
       .map((message) => ({
         role: message.role,
@@ -1342,11 +1361,14 @@ export default function AIChatWorkspace({
     void updatePersistedMessage(messageId, content, "complete");
   }
 
-  function regenerateResponse() {
+  async function regenerateResponse() {
     if (loading) {
       return;
     }
 
+    const previousAssistantMessage = [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant");
     const lastUserMessage = [...messages]
       .reverse()
       .find((message) => message.role === "user" && message.content.trim());
@@ -1355,7 +1377,18 @@ export default function AIChatWorkspace({
       return;
     }
 
-    void sendMessage(lastUserMessage.content, false);
+    if (previousAssistantMessage) {
+      updateConversation(activeConversationId, (conversation) => ({
+        ...conversation,
+        messages: conversation.messages.filter(
+          (message) => message.id !== previousAssistantMessage.id
+        ),
+        updatedAt: getClientTimestamp(),
+      }));
+      await deletePersistedMessage(previousAssistantMessage.id);
+    }
+
+    void sendMessage(lastUserMessage.content, false, previousAssistantMessage?.id);
   }
 
   const activeModel = modelOptions.find((option) => option.value === modelPreference);

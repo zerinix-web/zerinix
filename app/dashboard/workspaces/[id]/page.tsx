@@ -56,7 +56,7 @@ export default async function WorkspaceReportsPage({
               </div>
 
               <Link
-                href="/plan"
+                href={`/plan?workspaceId=${data.workspace.id}`}
                 className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-white/5 transition duration-200 hover:-translate-y-0.5 hover:bg-zinc-200"
               >
                 <Plus className="h-4 w-4" />

@@ -172,9 +172,31 @@ type Conversation = {
   updatedAt: number;
 };
 
+type PlannerWorkspace = {
+  id: string;
+  name: string;
+};
+
+type InitialReport = {
+  id: string;
+  workspaceId: string;
+  title: string;
+  prompt: string;
+  type: "Business Plan" | "Market Analysis";
+  status: string;
+  sections: Array<{
+    field?: string;
+    title: string;
+    content: string;
+  }>;
+};
+
 type PlannerProps = {
   initialConversations?: Conversation[];
   conversationLoadError?: string;
+  initialWorkspaces?: PlannerWorkspace[];
+  initialWorkspaceId?: string;
+  initialReport?: InitialReport | null;
 };
 
 const workflowSteps = [
@@ -389,6 +411,55 @@ const planReportFields: Array<{
 
 function localizeReportFields<T extends ReportFieldDefinition>(fields: T[]) {
   return fields;
+}
+
+function buildInitialReportData(
+  initialReport: InitialReport | null | undefined,
+  fields: Array<{ field: string; title: string }>,
+  emptyReport: Record<string, string>
+) {
+  const restoredReport: Record<string, string> = { ...emptyReport };
+
+  if (!initialReport?.sections.length) {
+    return restoredReport;
+  }
+
+  const normalizedSections = new Map(
+    initialReport.sections.map((section) => [
+      (section.field || section.title).trim().toLowerCase(),
+      section.content,
+    ])
+  );
+
+  fields.forEach(({ field, title }) => {
+    const fieldKey = field.toLowerCase();
+    const titleKey = title.trim().toLowerCase();
+    const content = normalizedSections.get(fieldKey) || normalizedSections.get(titleKey);
+
+    if (content) {
+      restoredReport[field] = content;
+    }
+  });
+
+  return restoredReport;
+}
+
+function getInitialSelectedWorkspaceId(
+  workspaces: PlannerWorkspace[],
+  requestedWorkspaceId: string,
+  reportWorkspaceId = ""
+) {
+  const workspaceIds = new Set(workspaces.map((workspace) => workspace.id));
+
+  if (requestedWorkspaceId && workspaceIds.has(requestedWorkspaceId)) {
+    return requestedWorkspaceId;
+  }
+
+  if (reportWorkspaceId && workspaceIds.has(reportWorkspaceId)) {
+    return reportWorkspaceId;
+  }
+
+  return workspaces[0]?.id || "";
 }
 
 const emptyMarketReport: MarketReport = {
@@ -4329,13 +4400,44 @@ function ReportGenerationShell({
 export default function Planner({
   initialConversations = [],
   conversationLoadError = "",
+  initialWorkspaces = [],
+  initialWorkspaceId = "",
+  initialReport = null,
 }: PlannerProps) {
+  const restoredReportMode =
+    initialReport?.status?.toLowerCase() === "completed"
+      ? initialReport.type === "Market Analysis"
+        ? "market"
+        : "plan"
+      : null;
+  const restoredPlanReport =
+    restoredReportMode === "plan"
+      ? buildInitialReportData(
+          initialReport,
+          planReportFields,
+          emptyPlanReport as Record<PlanReportField, string>
+        )
+      : null;
+  const restoredMarketReport =
+    restoredReportMode === "market"
+      ? buildInitialReportData(
+          initialReport,
+          reportFields,
+          emptyMarketReport as Record<MarketReportField, string>
+        )
+      : null;
   const [prompt, setPrompt] = useState("");
-  const [result, setResult] = useState("");
+  const [result, setResult] = useState(
+    initialReport?.status?.toLowerCase() === "completed" ? "" : ""
+  );
   const [reportGenerationError, setReportGenerationError] = useState("");
   const [reportGenerationWarning, setReportGenerationWarning] = useState("");
-  const [marketReport, setMarketReport] = useState<MarketReport | null>(null);
-  const [planReport, setPlanReport] = useState<PlanReport | null>(null);
+  const [marketReport, setMarketReport] = useState<MarketReport | null>(
+    restoredMarketReport as MarketReport | null
+  );
+  const [planReport, setPlanReport] = useState<PlanReport | null>(
+    restoredPlanReport as PlanReport | null
+  );
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
@@ -4350,9 +4452,16 @@ export default function Planner({
       : [createConversation(initialConversationId)]
   );
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [activeMode, setActiveMode] = useState<ChatMode>("chat");
+  const [activeMode, setActiveMode] = useState<ChatMode>(restoredReportMode || "chat");
   const [chatModelPreference, setChatModelPreference] =
     useState<ChatModelPreference>("fast");
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(
+    getInitialSelectedWorkspaceId(
+      initialWorkspaces,
+      initialWorkspaceId,
+      initialReport?.workspaceId
+    )
+  );
   const [workflowCompletedSteps, setWorkflowCompletedSteps] = useState(0);
   const [reportProgress, setReportProgress] = useState(0);
   const [currentReportSectionName, setCurrentReportSectionName] = useState("");
@@ -4362,7 +4471,11 @@ export default function Planner({
   const [lastRequest, setLastRequest] = useState<{
     mode: ChatMode;
     prompt: string;
-  } | null>(null);
+  } | null>(
+    restoredReportMode && initialReport?.prompt
+      ? { mode: restoredReportMode, prompt: initialReport.prompt }
+      : null
+  );
   const [activeReportLanguage, setActiveReportLanguage] =
     useState<ResponseLanguage>("English");
   const chatScrollerRef = useRef<HTMLDivElement | null>(null);
@@ -4699,6 +4812,16 @@ export default function Planner({
     }
   }
 
+  async function deletePersistedMessage(messageId: string) {
+    const supabase = createClient();
+    const { error } = await supabase.from("ai_messages").delete().eq("id", messageId);
+
+    if (error) {
+      console.error("[ai_messages delete failed]", error);
+      setConversationError(error.message);
+    }
+  }
+
   async function loadPersistedConversations() {
     const supabase = createClient();
     const {
@@ -4987,9 +5110,24 @@ export default function Planner({
     }
   }
 
-  function regenerateResponse() {
+  async function regenerateResponse() {
     if (!lastRequest || isWorking) {
       return;
+    }
+
+    const previousAssistantMessage = [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant");
+
+    if (previousAssistantMessage) {
+      updateActiveConversation((conversation) => ({
+        ...conversation,
+        messages: conversation.messages.filter(
+          (message) => message.id !== previousAssistantMessage.id
+        ),
+        updatedAt: Date.now(),
+      }));
+      await deletePersistedMessage(previousAssistantMessage.id);
     }
 
     setPrompt(lastRequest.prompt);
@@ -4999,7 +5137,7 @@ export default function Planner({
     } else if (lastRequest.mode === "market") {
       void analyzeMarket(lastRequest.prompt, false);
     } else {
-      void sendChatMessage(lastRequest.prompt, false);
+      void sendChatMessage(lastRequest.prompt, false, previousAssistantMessage?.id);
     }
   }
 
@@ -5110,6 +5248,7 @@ export default function Planner({
     title,
     promptText,
     reportType,
+    workspaceId,
     status = "completed",
     sections,
     expectedSectionCount,
@@ -5117,6 +5256,7 @@ export default function Planner({
     title: string;
     promptText: string;
     reportType: string;
+    workspaceId?: string;
     status?: "completed" | "failed";
     sections: Array<{ title: string; content: string }>;
     expectedSectionCount: number;
@@ -5148,16 +5288,17 @@ export default function Planner({
         return;
       }
 
-      const workspaceId = await getGeneralWorkspaceId(supabase, user.id);
+      const destinationWorkspaceId =
+        workspaceId || selectedWorkspaceId || (await getGeneralWorkspaceId(supabase, user.id));
 
-      if (!workspaceId) {
-        console.error(new Error("Default workspace not found."));
+      if (!destinationWorkspaceId) {
+        console.error(new Error("Destination workspace not found."));
         return;
       }
 
       const { error } = await supabase.from("reports").insert({
         user_id: user.id,
-        workspace_id: workspaceId,
+        workspace_id: destinationWorkspaceId,
         title,
         prompt: promptText,
         report_type: reportType,
@@ -5334,7 +5475,11 @@ export default function Planner({
     return output.trim();
   }
 
-  async function sendChatMessage(promptOverride = prompt, addToHistory = true) {
+  async function sendChatMessage(
+    promptOverride = prompt,
+    addToHistory = true,
+    supersededAssistantMessageId = ""
+  ) {
     const submittedPrompt = promptOverride.trim();
 
     if (!submittedPrompt || chatLoading) {
@@ -5366,6 +5511,7 @@ export default function Planner({
       .filter(
         (message) =>
           message.content.trim() &&
+          message.id !== supersededAssistantMessageId &&
           message.status !== "failed" &&
           !isReportPreparingPreview(message.content)
       )
@@ -5601,6 +5747,7 @@ export default function Planner({
         title: copy.planTitle,
         promptText: submittedPrompt,
         reportType: "business_plan",
+        workspaceId: selectedWorkspaceId,
         sections: serializedSections,
         expectedSectionCount: outputFields.length,
       });
@@ -5616,6 +5763,7 @@ export default function Planner({
         title: copy.planTitle,
         promptText: submittedPrompt,
         reportType: "business_plan",
+        workspaceId: selectedWorkspaceId,
         status: "failed",
         sections: [],
         expectedSectionCount: outputFields.length,
@@ -5801,6 +5949,7 @@ export default function Planner({
         title: copy.marketTitle,
         promptText: submittedPrompt,
         reportType: "market_analysis",
+        workspaceId: selectedWorkspaceId,
         sections: serializedSections,
         expectedSectionCount: outputFields.length,
       });
@@ -5819,6 +5968,7 @@ export default function Planner({
         title: copy.marketTitle,
         promptText: submittedPrompt,
         reportType: "market_analysis",
+        workspaceId: selectedWorkspaceId,
         status: "failed",
         sections: [],
         expectedSectionCount: outputFields.length,
@@ -6079,6 +6229,22 @@ export default function Planner({
                     ? `AI Chat · ${chatModelOptions.find((option) => option.value === chatModelPreference)?.label || "Fast"} model`
                     : "Structured report mode"}
                 </span>
+                {activeMode !== "chat" && initialWorkspaces.length > 0 ? (
+                  <label className="ml-auto flex items-center gap-2 text-xs text-zinc-500">
+                    Save to
+                    <select
+                      value={selectedWorkspaceId}
+                      onChange={(event) => setSelectedWorkspaceId(event.target.value)}
+                      className="rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs font-medium text-zinc-200 outline-none transition focus:border-teal-300/40"
+                    >
+                      {initialWorkspaces.map((workspace) => (
+                        <option key={workspace.id} value={workspace.id}>
+                          {workspace.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
               </div>
               <div className="mb-3 grid gap-2 md:grid-cols-3">
                 {modeCards.map((modeCard) => {
