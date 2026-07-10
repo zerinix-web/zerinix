@@ -706,8 +706,11 @@ export default function AIChatWorkspace({
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMessage, setProfileMessage] = useState("");
-  const [renamingId, setRenamingId] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const persistedConversationIdsRef = useRef<Set<string>>(
@@ -722,6 +725,16 @@ export default function AIChatWorkspace({
   );
   const messages = activeConversation?.messages || [];
   const latestMessageContent = messages.at(-1)?.content;
+  const sortedConversations = useMemo(
+    () => [...conversations].sort((a, b) => b.updatedAt - a.updatedAt),
+    [conversations]
+  );
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const visibleConversations = normalizedSearchQuery
+    ? sortedConversations.filter((conversation) =>
+        conversation.title.toLowerCase().includes(normalizedSearchQuery)
+      )
+    : sortedConversations;
 
   useEffect(() => {
     const supabase = createClient();
@@ -1045,32 +1058,39 @@ export default function AIChatWorkspace({
   }
 
   function startRename(conversation: Conversation) {
-    setRenamingId(conversation.id);
+    setRenameTarget(conversation);
     setRenameDraft(conversation.title);
+    setRenameError("");
   }
 
-  function commitRename(conversationId: string) {
-    const cleanTitle = renameDraft.trim() || "Untitled conversation";
-    updateConversation(conversationId, (conversation) => ({
+  function closeRenameModal() {
+    setRenameTarget(null);
+    setRenameDraft("");
+    setRenameError("");
+  }
+
+  function commitRename() {
+    if (!renameTarget) {
+      return;
+    }
+
+    const cleanTitle = renameDraft.trim();
+
+    if (!cleanTitle) {
+      setRenameError("Conversation name cannot be empty.");
+      return;
+    }
+
+    updateConversation(renameTarget.id, (conversation) => ({
       ...conversation,
       title: cleanTitle,
       updatedAt: Date.now(),
     }));
-    setRenamingId("");
-    setRenameDraft("");
-    void persistConversationTitle(conversationId, cleanTitle);
+    closeRenameModal();
+    void persistConversationTitle(renameTarget.id, cleanTitle);
   }
 
   function deleteConversation(conversationId: string) {
-    const conversation = conversations.find((item) => item.id === conversationId);
-    const shouldDelete = window.confirm(
-      `Delete "${conversation?.title || "this conversation"}"? This cannot be undone.`
-    );
-
-    if (!shouldDelete) {
-      return;
-    }
-
     void deletePersistedConversation(conversationId).then((deleted) => {
       if (!deleted) {
         return;
@@ -1411,6 +1431,100 @@ export default function AIChatWorkspace({
       }}
       onDrop={handleDropFiles}
     >
+      {renameTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl">
+          <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-zinc-950 p-6 shadow-2xl shadow-black/60">
+            <p className="text-xs font-semibold uppercase tracking-[0.26em] text-teal-200/70">
+              Rename conversation
+            </p>
+            <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">
+              Update conversation title
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-500">
+              Use a clear title so this conversation is easy to find later.
+            </p>
+            <input
+              value={renameDraft}
+              onChange={(event) => {
+                setRenameDraft(event.target.value);
+                setRenameError("");
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitRename();
+                }
+
+                if (event.key === "Escape") {
+                  closeRenameModal();
+                }
+              }}
+              autoFocus
+              className="mt-5 h-12 w-full rounded-2xl border border-white/10 bg-black/40 px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-teal-300/40"
+              placeholder="Conversation title"
+            />
+            {renameError ? (
+              <p className="mt-3 text-sm text-red-300">{renameError}</p>
+            ) : null}
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={closeRenameModal}
+                className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={commitRename}
+                className="inline-flex flex-1 items-center justify-center rounded-2xl bg-teal-300 px-4 py-3 text-sm font-semibold text-black transition hover:bg-teal-200"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl">
+          <div className="w-full max-w-md rounded-[2rem] border border-red-300/20 bg-zinc-950 p-6 shadow-2xl shadow-black/60">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-red-300/20 bg-red-300/10">
+              <Trash2 className="h-5 w-5 text-red-200" />
+            </div>
+            <p className="mt-5 text-xs font-semibold uppercase tracking-[0.26em] text-red-200/70">
+              Delete conversation
+            </p>
+            <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">
+              {deleteTarget.title}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">
+              This will permanently delete the conversation and its saved messages.
+              This action cannot be undone.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteConversation(deleteTarget.id);
+                  setDeleteTarget(null);
+                }}
+                className="inline-flex flex-1 items-center justify-center rounded-2xl border border-red-300/20 bg-red-300/15 px-4 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-300/20"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {isDraggingFiles ? (
         <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xl">
           <div className="rounded-[2rem] border border-teal-200/30 bg-zinc-950/90 p-8 text-center shadow-2xl shadow-teal-950/30">
@@ -1468,11 +1582,32 @@ export default function AIChatWorkspace({
 
         <div className="mt-5 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-zinc-500">
           <Search className="h-4 w-4" />
-          <span>Conversation history</span>
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search conversations..."
+            className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-zinc-600"
+          />
         </div>
 
         <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-          {conversations.map((conversation) => {
+          {sortedConversations.length === 0 ? (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-5 text-sm leading-6 text-zinc-500">
+              <p className="font-semibold text-white">No conversations yet</p>
+              <p className="mt-2">
+                Start a new chat to build your ZERINIX conversation history.
+              </p>
+            </div>
+          ) : visibleConversations.length === 0 ? (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-5 text-sm leading-6 text-zinc-500">
+              <p className="font-semibold text-white">No conversations found</p>
+              <p className="mt-2">
+                Try another title or clear the search field.
+              </p>
+            </div>
+          ) : null}
+
+          {visibleConversations.map((conversation) => {
             const selected = conversation.id === activeConversationId;
 
             return (
@@ -1484,80 +1619,41 @@ export default function AIChatWorkspace({
                     : "border-white/10 bg-white/[0.035] hover:bg-white/[0.06]"
                 }`}
               >
-                {renamingId === conversation.id ? (
-                  <div className="space-y-2">
-                    <input
-                      value={renameDraft}
-                      onChange={(event) => setRenameDraft(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          commitRename(conversation.id);
-                        }
-
-                        if (event.key === "Escape") {
-                          setRenamingId("");
-                        }
-                      }}
-                      className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-teal-200/40"
-                      autoFocus
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => commitRename(conversation.id)}
-                        className="inline-flex flex-1 items-center justify-center gap-1 rounded-xl bg-teal-200 px-2 py-1.5 text-xs font-semibold text-black"
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setRenamingId("")}
-                        className="rounded-xl border border-white/10 px-2 py-1.5 text-xs text-zinc-300"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
+                <button
+                  type="button"
+                  onClick={() => selectConversation(conversation.id)}
+                  className="block w-full text-left"
+                >
+                  <span className="line-clamp-1 text-sm font-semibold text-white">
+                    {conversation.title}
+                  </span>
+                  <span className="mt-1 line-clamp-2 block text-xs leading-5 text-zinc-500">
+                    {getConversationPreview(conversation)}
+                  </span>
+                </button>
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-[0.16em] text-zinc-600">
+                    {new Date(conversation.updatedAt).toLocaleDateString()}
+                  </span>
+                  <div className="flex gap-1 opacity-100 md:opacity-0 md:transition md:group-hover:opacity-100">
                     <button
                       type="button"
-                      onClick={() => selectConversation(conversation.id)}
-                      className="block w-full text-left"
+                      onClick={() => startRename(conversation)}
+                      className="rounded-lg border border-white/10 p-1.5 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+                      aria-label="Rename conversation"
                     >
-                      <span className="line-clamp-1 text-sm font-semibold text-white">
-                        {conversation.title}
-                      </span>
-                      <span className="mt-1 line-clamp-2 block text-xs leading-5 text-zinc-500">
-                        {getConversationPreview(conversation)}
-                      </span>
+                      <Edit3 className="h-3.5 w-3.5" />
                     </button>
-                    <div className="mt-3 flex items-center justify-between">
-                      <span className="text-[10px] uppercase tracking-[0.16em] text-zinc-600">
-                        {new Date(conversation.updatedAt).toLocaleDateString()}
-                      </span>
-                      <div className="flex gap-1 opacity-100 md:opacity-0 md:transition md:group-hover:opacity-100">
-                        <button
-                          type="button"
-                          onClick={() => startRename(conversation)}
-                          className="rounded-lg border border-white/10 p-1.5 text-zinc-400 transition hover:bg-white/10 hover:text-white"
-                          aria-label="Rename conversation"
-                        >
-                          <Edit3 className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteConversation(conversation.id)}
-                          className="rounded-lg border border-white/10 p-1.5 text-zinc-400 transition hover:bg-red-400/10 hover:text-red-200"
-                          aria-label="Delete conversation"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
+                    <button
+                      type="button"
+                      onClick={() => setDeleteTarget(conversation)}
+                      className="rounded-lg border border-white/10 p-1.5 text-zinc-400 transition hover:bg-red-400/10 hover:text-red-200"
+                      aria-label="Delete conversation"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
               </div>
             );
           })}

@@ -2712,26 +2712,59 @@ function ConversationSidebar({
   onRenameConversation: (id: string, title: string) => void;
   onDeleteConversation: (id: string) => void;
 }) {
-  const [editingId, setEditingId] = useState("");
-  const [draftTitle, setDraftTitle] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
 
   const sortedConversations = [...conversations].sort(
     (a, b) => b.updatedAt - a.updatedAt
   );
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const visibleConversations = normalizedSearchQuery
+    ? sortedConversations.filter((conversation) =>
+        conversation.title.toLowerCase().includes(normalizedSearchQuery)
+      )
+    : sortedConversations;
 
   function startRename(conversation: Conversation) {
-    setEditingId(conversation.id);
-    setDraftTitle(conversation.title);
+    setRenameTarget(conversation);
+    setRenameDraft(conversation.title);
+    setRenameError("");
   }
 
   function submitRename() {
-    if (!editingId) {
+    if (!renameTarget) {
       return;
     }
 
-    onRenameConversation(editingId, draftTitle);
-    setEditingId("");
-    setDraftTitle("");
+    const cleanTitle = renameDraft.trim();
+
+    if (!cleanTitle) {
+      setRenameError("Conversation name cannot be empty.");
+      return;
+    }
+
+    onRenameConversation(renameTarget.id, cleanTitle);
+    setRenameTarget(null);
+    setRenameDraft("");
+    setRenameError("");
+  }
+
+  function closeRenameModal() {
+    setRenameTarget(null);
+    setRenameDraft("");
+    setRenameError("");
+  }
+
+  function confirmDelete() {
+    if (!deleteTarget) {
+      return;
+    }
+
+    onDeleteConversation(deleteTarget.id);
+    setDeleteTarget(null);
   }
 
   const reportCount = conversations.reduce(
@@ -2742,6 +2775,98 @@ function ConversationSidebar({
   );
 
   return (
+    <>
+    {renameTarget ? (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl">
+        <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-zinc-950 p-6 shadow-2xl shadow-black/60">
+          <p className="text-xs font-semibold uppercase tracking-[0.26em] text-teal-200/70">
+            Rename conversation
+          </p>
+          <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">
+            Update conversation title
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-500">
+            Use a clear title so this conversation is easy to find later.
+          </p>
+          <input
+            value={renameDraft}
+            onChange={(event) => {
+              setRenameDraft(event.target.value);
+              setRenameError("");
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                submitRename();
+              }
+
+              if (event.key === "Escape") {
+                closeRenameModal();
+              }
+            }}
+            autoFocus
+            className="mt-5 h-12 w-full rounded-2xl border border-white/10 bg-black/40 px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-teal-300/40"
+            placeholder="Conversation title"
+          />
+          {renameError ? (
+            <p className="mt-3 text-sm text-red-300">{renameError}</p>
+          ) : null}
+          <div className="mt-6 flex gap-3">
+            <button
+              type="button"
+              onClick={closeRenameModal}
+              className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={submitRename}
+              className="inline-flex flex-1 items-center justify-center rounded-2xl bg-teal-300 px-4 py-3 text-sm font-semibold text-black transition hover:bg-teal-200"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
+
+    {deleteTarget ? (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl">
+        <div className="w-full max-w-md rounded-[2rem] border border-red-300/20 bg-zinc-950 p-6 shadow-2xl shadow-black/60">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-red-300/20 bg-red-300/10">
+            <ShieldAlert className="h-5 w-5 text-red-200" />
+          </div>
+          <p className="mt-5 text-xs font-semibold uppercase tracking-[0.26em] text-red-200/70">
+            Delete conversation
+          </p>
+          <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">
+            {deleteTarget.title}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-400">
+            This will permanently delete the conversation and its saved messages.
+            This action cannot be undone.
+          </p>
+          <div className="mt-6 flex gap-3">
+            <button
+              type="button"
+              onClick={() => setDeleteTarget(null)}
+              className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmDelete}
+              className="inline-flex flex-1 items-center justify-center rounded-2xl border border-red-300/20 bg-red-300/15 px-4 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-300/20"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
+
     <aside className="flex min-h-0 border-b border-white/10 bg-black/80 p-4 backdrop-blur-2xl md:h-screen md:w-[21.5rem] md:flex-col md:border-b-0 md:border-r md:bg-black/70">
       <div className="flex w-full items-center justify-between gap-3 md:block">
         <div>
@@ -2810,17 +2935,37 @@ function ConversationSidebar({
 
       <div className="mt-4 hidden items-center justify-between px-1 text-xs font-semibold uppercase tracking-[0.22em] text-zinc-600 md:flex">
         <span>Conversations</span>
-        <span>{sortedConversations.length}</span>
+        <span>{visibleConversations.length}</span>
       </div>
+
+      <label className="mt-3 hidden items-center gap-2 rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-zinc-500 md:flex">
+        <Search className="h-4 w-4 text-teal-200" />
+        <input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search conversations..."
+          className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-zinc-600"
+        />
+      </label>
 
       <div className="flex flex-1 gap-3 overflow-x-auto pl-3 md:mt-3 md:block md:space-y-3 md:overflow-y-auto md:pl-0">
         {sortedConversations.length === 0 ? (
-          <div className="min-w-64 rounded-3xl border border-white/10 bg-white/[0.035] p-4 text-sm leading-6 text-zinc-500">
-            Your saved strategy conversations will appear here after your first prompt.
+          <div className="min-w-64 rounded-3xl border border-white/10 bg-white/[0.035] p-5 text-sm leading-6 text-zinc-500">
+            <p className="font-semibold text-white">No conversations yet</p>
+            <p className="mt-2">
+              Start a new chat or generate a report to build your workspace history.
+            </p>
+          </div>
+        ) : visibleConversations.length === 0 ? (
+          <div className="min-w-64 rounded-3xl border border-white/10 bg-white/[0.035] p-5 text-sm leading-6 text-zinc-500">
+            <p className="font-semibold text-white">No conversations found</p>
+            <p className="mt-2">
+              Try another title or clear the search field.
+            </p>
           </div>
         ) : null}
 
-        {sortedConversations.map((conversation) => (
+        {visibleConversations.map((conversation) => (
           <button
             key={conversation.id}
             type="button"
@@ -2833,29 +2978,9 @@ function ConversationSidebar({
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                {editingId === conversation.id ? (
-                  <input
-                    value={draftTitle}
-                    onChange={(event) => setDraftTitle(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        submitRename();
-                      }
-                      if (event.key === "Escape") {
-                        setEditingId("");
-                      }
-                    }}
-                    onBlur={submitRename}
-                    autoFocus
-                    className="w-full rounded-lg border border-white/10 bg-black/50 px-2 py-1 font-medium text-white outline-none focus:border-teal-300/40"
-                    onClick={(event) => event.stopPropagation()}
-                  />
-                ) : (
-                  <p className="line-clamp-1 font-medium text-white">
-                    {conversation.title}
-                  </p>
-                )}
+                <p className="line-clamp-1 font-medium text-white">
+                  {conversation.title}
+                </p>
                 <p className="mt-2 line-clamp-2 text-zinc-500">
                   {getConversationPreview(conversation)}
                 </p>
@@ -2894,12 +3019,12 @@ function ConversationSidebar({
                 tabIndex={0}
                 onClick={(event) => {
                   event.stopPropagation();
-                  onDeleteConversation(conversation.id);
+                  setDeleteTarget(conversation);
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
                     event.stopPropagation();
-                    onDeleteConversation(conversation.id);
+                    setDeleteTarget(conversation);
                   }
                 }}
                 className="rounded-full border border-red-300/10 bg-red-300/5 px-2 py-1 text-[11px] text-red-200 transition hover:bg-red-300/10"
@@ -2925,6 +3050,7 @@ function ConversationSidebar({
         </Link>
       </div>
     </aside>
+    </>
   );
 }
 
@@ -4626,15 +4752,6 @@ export default function Planner({
   }
 
   function deleteConversation(id: string) {
-    const conversation = conversations.find((item) => item.id === id);
-    const shouldDelete = window.confirm(
-      `Delete "${conversation?.title || "this conversation"}"? This cannot be undone.`
-    );
-
-    if (!shouldDelete) {
-      return;
-    }
-
     void deletePersistedConversation(id).then((deleted) => {
       if (!deleted) {
         return;
