@@ -81,8 +81,14 @@ test("PDF text normalization repairs malformed month expressions", () => {
     assert.equal(source.includes("$1–$2\\u00a0days"), true);
     assert.equal(source.includes("1\\s*[-–]\\s*80\\s+days?"), true);
     assert.equal(source.includes("180\\u00a0days"), true);
+    assert.equal(source.includes("1\\s*[-–]\\s*80\\b"), true);
+    assert.equal(source.includes("\"180\""), true);
     assert.equal(source.includes("100\\s*[-–]\\s*3\\s*[-–]\\s*00\\s+scooters?"), true);
     assert.equal(source.includes("100–300\\u00a0scooters"), true);
+    assert.equal(source.includes("100\\s*[-–]\\s*3\\s*[-–]\\s*00\\b"), true);
+    assert.equal(source.includes("\"100–300\""), true);
+    assert.equal(source.includes("\\b1224\\b"), true);
+    assert.equal(source.includes("\"12–24\""), true);
     assert.equal(source.includes("(\\d{1,2})(\\d{2})\\s+(days?|months?|scooters?|rides\\/day|rides)"), true);
     assert.equal(source.includes("\\s*scooters?"), true);
     assert.equal(source.includes("$1–$2\\u00a0scooters"), true);
