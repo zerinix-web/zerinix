@@ -1,6 +1,18 @@
+import { redirect } from "next/navigation";
 import AuthShell from "@/components/AuthShell";
+import { createClient } from "@/app/lib/supabase/server";
+import { getRegisterRouteState } from "./register-access.mjs";
 
-export default function RegisterPage() {
+export default async function RegisterPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (getRegisterRouteState(user) === "redirect_dashboard") {
+    redirect("/dashboard");
+  }
+
   return (
     <AuthShell
       eyebrow="ZERINIX ACCESS"
