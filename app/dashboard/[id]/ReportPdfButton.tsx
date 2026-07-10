@@ -44,7 +44,7 @@ function loadPdfFont() {
 }
 
 function normalizePdfText(value: string) {
-  return value
+  return preservePdfInlineTokens(value
     .normalize("NFC")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
@@ -53,6 +53,31 @@ function normalizePdfText(value: string) {
     .replace(/(\d)\.\s+(\d)(\s*[kKmMbB%])?/g, "$1.$2$3")
     .replace(/(\d),\s+(\d{3})/g, "$1,$2")
     .replace(/\n{3,}/g, "\n\n")
+    .trim());
+}
+
+function preservePdfInlineTokens(value: string) {
+  return value
+    .replace(/([€$₺])\s+(?=\d)/g, "$1")
+    .replace(/>\s+([€$₺]?\d)/g, ">$1")
+    .replace(/(\d)\s+([kKmMbB%])/g, "$1$2")
+    .replace(/([kKmMbB%])\s+([€$₺])/g, "$1$2")
+    .replace(/(\d(?:[.,]\d+)*)\s+(months?|ay|gün|days?|weeks?|hafta|years?|yıl)\b/gi, "$1\u00a0$2")
+    .replace(/\bYear\s+(\d+)\b/gi, "Year\u00a0$1")
+    .replace(/\be\.\s*g\./gi, "e.g.")
+    .replace(/\bi\.\s*e\./gi, "i.e.")
+    .replace(/\bB\s*2\s*B\b/gi, "B2B")
+    .replace(/\bE\s*B\s*I\s*T\s*D\s*A\b/gi, "EBITDA")
+    .replace(/(\d)\.\s*(\d)/g, "$1.$2")
+    .replace(/(\d),\s*(\d{3})/g, "$1,$2");
+}
+
+function normalizeCitationKey(value: string) {
+  return normalizePdfText(value)
+    .toLowerCase()
+    .replace(/\bhttps?:\/\/\S+/gi, "")
+    .replace(/[^a-z0-9ığüşöçİĞÜŞÖÇ]+/gi, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -83,7 +108,7 @@ function parseCitations(content: string): CitationData[] {
     content.match(/\bconfidence\s*[:\-–—]\s*(high|medium|low)\b/i)?.[1] || ""
   );
 
-  return content
+  const citations = content
     .split("\n")
     .map((rawLine) => {
       const url =
@@ -126,6 +151,25 @@ function parseCitations(content: string): CitationData[] {
       };
     })
     .filter((citation): citation is CitationData => Boolean(citation));
+
+  const unique = new Map<string, CitationData>();
+
+  citations.forEach((citation) => {
+    const key = [
+      normalizeCitationKey(citation.organization),
+      normalizeCitationKey(citation.sourceTitle),
+      citation.publicationYear || "",
+    ].join("|");
+    const existing = unique.get(key);
+
+    unique.set(key, {
+      ...citation,
+      ...(existing?.url && !citation.url ? { url: existing.url } : {}),
+      ...(existing?.confidence && !citation.confidence ? { confidence: existing.confidence } : {}),
+    });
+  });
+
+  return Array.from(unique.values());
 }
 
 function isSourceSectionTitle(title: string) {
@@ -406,6 +450,37 @@ function extractSectionSnippet(content: string, title: string) {
   return match?.[1]?.trim() || "";
 }
 
+const swotLabelAliases: Record<string, string[]> = {
+  Strengths: ["Strengths", "Güçlü Yönler", "Güçlü Yanlar", "Avantajlar"],
+  Weaknesses: ["Weaknesses", "Zayıf Yönler", "Zayıflıklar", "Eksikler"],
+  Opportunities: ["Opportunities", "Fırsatlar"],
+  Threats: ["Threats", "Tehditler"],
+};
+
+const scenarioLabelAliases: Record<string, string[]> = {
+  Worst: ["Worst", "Worst Case", "Kötü", "Kötü Senaryo"],
+  Base: ["Base", "Base Case", "Baz", "Baz Senaryo"],
+  Best: ["Best", "Best Case", "İyi", "Iyi", "İyi Senaryo", "Iyi Senaryo"],
+};
+
+function extractAliasedSectionSnippet(content: string, labels: string[]) {
+  for (const label of labels) {
+    const snippet = extractSectionSnippet(content, label);
+
+    if (snippet) {
+      return snippet;
+    }
+  }
+
+  return "";
+}
+
+function isOrphanBulletText(value: string) {
+  return /^(strengths|weaknesses|opportunities|threats|güçlü yönler|güçlü yanlar|zayıf yönler|zayıflıklar|fırsatlar|tehditler)$/i.test(
+    value.trim()
+  );
+}
+
 function extractBullets(content: string, fallback: string) {
   const source = content || "";
   const bullets = source
@@ -419,7 +494,7 @@ function extractBullets(content: string, fallback: string) {
         .replace(new RegExp(`^${fallback}\\s*[:\\-–—]\\s*`, "i"), "")
         .trim()
     )
-    .filter((line) => line && !new RegExp(`^${fallback}$`, "i").test(line))
+    .filter((line) => line && !new RegExp(`^${fallback}$`, "i").test(line) && !isOrphanBulletText(line))
     .slice(0, 2);
 
   if (bullets.length > 0) {
@@ -430,29 +505,75 @@ function extractBullets(content: string, fallback: string) {
     .replace(/\*\*/g, "")
     .split(/(?<=[.!?])\s+/)
     .map((line) => line.trim())
-    .filter((line) => line && !new RegExp(`^${fallback}$`, "i").test(line))
+    .filter((line) => line && !new RegExp(`^${fallback}$`, "i").test(line) && !isOrphanBulletText(line))
     .slice(0, 2);
 }
 
-function extractSwotBullets(content: string, label: string) {
-  const snippet = extractSectionSnippet(content, label);
+function extractSwotBullets(content: string, label: string, fallbackContent = content) {
+  const aliases = swotLabelAliases[label] || [label];
+  const snippet = extractAliasedSectionSnippet(content, aliases);
   const direct = extractBullets(snippet, label);
 
   if (direct.length > 0) {
     return direct;
   }
 
-  const labelPattern = new RegExp(
-    `(?:^|\\n)\\s*(?:#{1,6}\\s*)?(?:[-*•]\\s*)?(?:\\*\\*)?${label}(?:\\*\\*)?\\s*[:\\-–—]\\s*([^\\n]+)`,
-    "i"
-  );
-  const inline = content.match(labelPattern)?.[1]?.trim() || "";
+  for (const alias of aliases) {
+    const labelPattern = new RegExp(
+      `(?:^|\\n)\\s*(?:#{1,6}\\s*)?(?:[-*•]\\s*)?(?:\\*\\*)?${alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\*\\*)?\\s*[:\\-–—]\\s*([^\\n]+)`,
+      "i"
+    );
+    const inline = content.match(labelPattern)?.[1]?.trim() || "";
 
-  if (inline && !new RegExp(`^${label}$`, "i").test(inline)) {
-    return extractBullets(inline, label);
+    if (inline && !new RegExp(`^${alias}$`, "i").test(inline)) {
+      return extractBullets(inline, label);
+    }
   }
 
-  return [];
+  const fallbackSnippet =
+    extractAliasedSectionSnippet(fallbackContent, aliases) ||
+    extractKeywordInsight(
+      fallbackContent,
+      label === "Strengths"
+        ? ["strength", "advantage", "moat", "positive", "güçlü", "avantaj"]
+        : label === "Weaknesses"
+          ? ["weakness", "constraint", "cost", "capital", "margin pressure", "zayıf", "maliyet"]
+          : label === "Opportunities"
+            ? ["opportunity", "underserved", "growth", "demand", "gap", "fırsat"]
+            : ["threat", "risk", "regulation", "competition", "substitute", "tehdit"]
+    );
+
+  return extractBullets(fallbackSnippet, label).slice(0, 2);
+}
+
+function extractScenarioSnippet(content: string, scenario: string) {
+  const aliases = scenarioLabelAliases[scenario] || [scenario];
+  const sectionSnippet = extractAliasedSectionSnippet(content, aliases);
+
+  if (sectionSnippet) {
+    return sectionSnippet;
+  }
+
+  const allAliases = Object.values(scenarioLabelAliases).flat();
+  for (const alias of aliases) {
+    const escapedAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const stopLabels = allAliases
+      .filter((candidate) => candidate !== alias)
+      .map((candidate) => candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|");
+    const inlineMatch = normalizePdfText(content).match(
+      new RegExp(
+        `${escapedAlias}\\s*(?:case|senaryo)?\\s*[:\\-–—]\\s*([\\s\\S]*?)(?=\\s+(?:${stopLabels})\\s*(?:case|senaryo)?\\s*[:\\-–—]|$)`,
+        "i"
+      )
+    );
+
+    if (inlineMatch?.[1]?.trim()) {
+      return inlineMatch[1].trim();
+    }
+  }
+
+  return "";
 }
 
 function extractShortDescription(content: string, aliases: string[] | readonly string[]) {
@@ -640,6 +761,9 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       const cardHeaderHeight = 24;
       const cardBottomPadding = 9;
       const businessIdea = normalizePdfText(report.prompt || report.title);
+      const fullReportContent = report.sections
+        .map((section) => `${section.title}\n${section.content}`)
+        .join("\n\n");
       const tocEntries: Array<{ title: string; page: number }> = [];
       let y = margin;
 
@@ -709,36 +833,56 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         pdf.text(label, x + 4, tagY + 6.4, { maxWidth: width - 8 });
       };
 
+      const splitPdfReadableLines = (content: string, width: number) =>
+        content.split("\n").flatMap((rawLine) => {
+          const line = normalizePdfText(rawLine);
+
+          if (!line) {
+            return [""];
+          }
+
+          const withoutBullet = line.replace(/^[-*•]\s+/, "").trim();
+
+          if (isOrphanBulletText(withoutBullet)) {
+            return [];
+          }
+
+          const isBullet = /^[-*•]\s+/.test(line);
+          const availableWidth = isBullet ? width - 4 : width;
+          const wrapped = pdf.splitTextToSize(line, availableWidth) as string[];
+
+          return wrapped.map((wrappedLine, index) =>
+            isBullet && index > 0 ? `  ${wrappedLine}` : wrappedLine
+          );
+        });
+
       const drawCoverPage = () => {
-        const fullContent = report.sections
-          .map((section) => `${section.title}\n${section.content}`)
-          .join("\n\n");
         const investmentScore =
-          extractScore(fullContent, "Total Investment Score") ??
-          extractScore(fullContent, "Investment Score") ??
-          extractScore(fullContent, "AI Investment Score") ??
-          extractScore(fullContent, "Overall Score");
-        const confidence = extractConfidence(fullContent);
-        const recommendation = detectRecommendation(fullContent) || "WAIT";
-        const valuation = extractFirstMetric(fullContent, [
+          extractScore(fullReportContent, "Total Investment Score") ??
+          extractScore(fullReportContent, "Investment Score") ??
+          extractScore(fullReportContent, "AI Investment Score") ??
+          extractScore(fullReportContent, "Overall Score");
+        const confidence = extractConfidence(fullReportContent);
+        const recommendation = detectRecommendation(fullReportContent) || "WAIT";
+        const valuation = extractFirstMetric(fullReportContent, [
           "Estimated Valuation",
           "Valuation",
           "Enterprise Value",
         ]);
-        const fundingStage = extractFirstMetric(fullContent, [
+        const fundingStage = extractFirstMetric(fullReportContent, [
           "Funding Stage",
           "Stage",
         ]);
         const nextAction =
-          extractFirstMetric(fullContent, ["Next Critical Action", "Next Action"]) ||
+          extractFirstMetric(fullReportContent, ["Next Critical Action", "Next Action"]) ||
           "Use the detailed recommendation section.";
         const strengths = extractDashboardList(
-          fullContent,
+          fullReportContent,
           ["Top 3 Strengths", "Strengths"],
           3
         );
         const risks = extractDashboardList(
-          fullContent,
+          fullReportContent,
           ["Top 3 Risks", "Top Risks", "Risks"],
           3
         );
@@ -974,7 +1118,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         const gap = 3;
         const boxWidth = (width - gap) / 2;
         const items = quadrants.map(([label, color]) => {
-          const bulletLines = extractSwotBullets(content, label)
+          const bulletLines = extractSwotBullets(content, label, fullReportContent)
             .slice(0, 3)
             .map((bullet) => pdf.splitTextToSize(`• ${bullet}`, boxWidth - 6) as string[]);
           const textLineCount = Math.max(1, bulletLines.reduce((count, lines) => count + lines.length, 0));
@@ -995,15 +1139,16 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       };
 
       const getFinancialLayout = (content: string, width: number) => {
-        const labels = getFinancialDashboardMetrics(content);
+        const metricContent = `${content}\n${fullReportContent}`;
+        const labels = getFinancialDashboardMetrics(metricContent);
         const columns = 3;
         const itemWidth = (width - (columns - 1) * 3) / columns;
         const itemHeight = 18;
         const items = labels
           .map((item) => {
-            const value = formatMetricCardValue(extractMetricValueFromAliases(content, item.aliases));
+            const value = formatMetricCardValue(extractMetricValueFromAliases(metricContent, item.aliases));
             const compactValue = compactPdfMetricValue(value);
-            const description = extractShortDescription(content, item.aliases);
+            const description = extractShortDescription(metricContent, item.aliases);
             const descriptionLines = description
               ? (pdf.splitTextToSize(`${item.label}: ${description}`, width - 6) as string[])
               : [];
@@ -1301,6 +1446,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           const isKpiDashboard = normalizedTitle.includes("kpi");
           const isScenario = normalizedTitle.includes("scenario");
           const isUnitEconomics = normalizedTitle.includes("unit economics");
+          const metricContent = `${content}\n${fullReportContent}`;
           const columns = isFinancialDashboard ? 3 : labels.length > 6 ? 4 : labels.length;
           const itemWidth = isFinancialDashboard && financialLayout
             ? financialLayout.itemWidth
@@ -1320,10 +1466,10 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             const itemY = isFinancialDashboard && financialLayout
               ? visualY + priorRowHeight + rowIndex * 3
               : visualY + rowIndex * (itemHeight + 3);
-            const score = extractScore(content, label) ?? [42, 62, 84, 56][index] ?? 60;
+            const score = extractScore(metricContent, label) ?? [42, 62, 84, 56][index] ?? 60;
             const value = typeof item !== "string" && "value" in item
               ? item.value
-              : formatMetricCardValue(extractMetricValueFromAliases(content, aliases));
+              : formatMetricCardValue(extractMetricValueFromAliases(metricContent, aliases));
             const compactValue = compactPdfMetricValue(value);
 
             pdf.setFillColor("#18181b");
@@ -1358,7 +1504,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
               return;
             }
             if (isScenario) {
-              const snippet = extractSectionSnippet(content, label) || extractKeywordInsight(content, [label]);
+              const snippet = extractScenarioSnippet(content, label) || extractKeywordInsight(content, [label]);
               pdf.setTextColor("#f4f4f5");
               pdf.setFontSize(6);
               pdf.text(pdf.splitTextToSize(snippet || "Scenario path under review.", itemWidth - 4).slice(0, 2), x + 2, itemY + 8.1, {
@@ -1508,10 +1654,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         const sectionBodyContent = isSourceSectionTitle(section.title)
           ? formatPdfCitationContent(section.content)
           : removeDuplicateVisualText(section.title, section.content);
-        const bodyLines = pdf.splitTextToSize(
-          sectionBodyContent,
-          bodyWidth
-        ) as string[];
+        const bodyLines = splitPdfReadableLines(sectionBodyContent, bodyWidth);
         const hasBodyText = sectionBodyContent.trim().length > 0;
         const safeBodyLines = bodyLines.length > 0 ? bodyLines : [""];
         let lineIndex = 0;

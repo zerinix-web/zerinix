@@ -330,7 +330,7 @@ function loadPdfFont() {
 }
 
 function normalizePdfText(value: string) {
-  return value
+  return preservePdfInlineTokens(value
     .normalize("NFC")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
@@ -339,7 +339,23 @@ function normalizePdfText(value: string) {
     .replace(/(\d)\.\s+(\d)(\s*[kKmMbB%])?/g, "$1.$2$3")
     .replace(/(\d),\s+(\d{3})/g, "$1,$2")
     .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .trim());
+}
+
+function preservePdfInlineTokens(value: string) {
+  return value
+    .replace(/([€$₺])\s+(?=\d)/g, "$1")
+    .replace(/>\s+([€$₺]?\d)/g, ">$1")
+    .replace(/(\d)\s+([kKmMbB%])/g, "$1$2")
+    .replace(/([kKmMbB%])\s+([€$₺])/g, "$1$2")
+    .replace(/(\d(?:[.,]\d+)*)\s+(months?|ay|gün|days?|weeks?|hafta|years?|yıl)\b/gi, "$1\u00a0$2")
+    .replace(/\bYear\s+(\d+)\b/gi, "Year\u00a0$1")
+    .replace(/\be\.\s*g\./gi, "e.g.")
+    .replace(/\bi\.\s*e\./gi, "i.e.")
+    .replace(/\bB\s*2\s*B\b/gi, "B2B")
+    .replace(/\bE\s*B\s*I\s*T\s*D\s*A\b/gi, "EBITDA")
+    .replace(/(\d)\.\s*(\d)/g, "$1.$2")
+    .replace(/(\d),\s*(\d{3})/g, "$1,$2");
 }
 
 const reportActions = [
@@ -1123,7 +1139,7 @@ function parseCitations(content: string): CitationData[] {
     content.match(/\bconfidence\s*[:\-–—]\s*(high|medium|low)\b/i)?.[1] || ""
   );
 
-  return content
+  const citations = content
     .split("\n")
     .map((rawLine) => {
       const url =
@@ -1166,6 +1182,25 @@ function parseCitations(content: string): CitationData[] {
       };
     })
     .filter((citation): citation is CitationData => Boolean(citation));
+
+  const unique = new Map<string, CitationData>();
+
+  citations.forEach((citation) => {
+    const key = [
+      normalizePdfText(citation.organization).toLowerCase().replace(/\W+/g, " ").trim(),
+      normalizePdfText(citation.sourceTitle).toLowerCase().replace(/\W+/g, " ").trim(),
+      citation.publicationYear || "",
+    ].join("|");
+    const existing = unique.get(key);
+
+    unique.set(key, {
+      ...citation,
+      ...(existing?.url && !citation.url ? { url: existing.url } : {}),
+      ...(existing?.confidence && !citation.confidence ? { confidence: existing.confidence } : {}),
+    });
+  });
+
+  return Array.from(unique.values());
 }
 
 function Citation({ citation }: { citation?: CitationData }) {
@@ -1491,6 +1526,37 @@ function extractSectionSnippet(content: string, title: string) {
   return match?.[1]?.trim() || "";
 }
 
+const swotLabelAliases: Record<string, string[]> = {
+  Strengths: ["Strengths", "Güçlü Yönler", "Güçlü Yanlar", "Avantajlar"],
+  Weaknesses: ["Weaknesses", "Zayıf Yönler", "Zayıflıklar", "Eksikler"],
+  Opportunities: ["Opportunities", "Fırsatlar"],
+  Threats: ["Threats", "Tehditler"],
+};
+
+const scenarioLabelAliases: Record<string, string[]> = {
+  Worst: ["Worst", "Worst Case", "Kötü", "Kötü Senaryo"],
+  Base: ["Base", "Base Case", "Baz", "Baz Senaryo"],
+  Best: ["Best", "Best Case", "İyi", "Iyi", "İyi Senaryo", "Iyi Senaryo"],
+};
+
+function extractAliasedSectionSnippet(content: string, labels: string[]) {
+  for (const label of labels) {
+    const snippet = extractSectionSnippet(content, label);
+
+    if (snippet) {
+      return snippet;
+    }
+  }
+
+  return "";
+}
+
+function isOrphanBulletText(value: string) {
+  return /^(strengths|weaknesses|opportunities|threats|güçlü yönler|güçlü yanlar|zayıf yönler|zayıflıklar|fırsatlar|tehditler)$/i.test(
+    value.trim()
+  );
+}
+
 function extractBullets(content: string, fallback: string) {
   const source = content || "";
   const bullets = source
@@ -1504,7 +1570,7 @@ function extractBullets(content: string, fallback: string) {
         .replace(new RegExp(`^${fallback}\\s*[:\\-–—]\\s*`, "i"), "")
         .trim()
     )
-    .filter((line) => line && !new RegExp(`^${fallback}$`, "i").test(line))
+    .filter((line) => line && !new RegExp(`^${fallback}$`, "i").test(line) && !isOrphanBulletText(line))
     .slice(0, 3);
 
   if (bullets.length > 0) {
@@ -1515,29 +1581,75 @@ function extractBullets(content: string, fallback: string) {
     .replace(/\*\*/g, "")
     .split(/(?<=[.!?])\s+/)
     .map((line) => line.trim())
-    .filter((line) => line && !new RegExp(`^${fallback}$`, "i").test(line))
+    .filter((line) => line && !new RegExp(`^${fallback}$`, "i").test(line) && !isOrphanBulletText(line))
     .slice(0, 2);
 }
 
-function extractSwotBullets(content: string, label: string) {
-  const snippet = extractSectionSnippet(content, label);
+function extractSwotBullets(content: string, label: string, fallbackContent = content) {
+  const aliases = swotLabelAliases[label] || [label];
+  const snippet = extractAliasedSectionSnippet(content, aliases);
   const direct = extractBullets(snippet, label);
 
   if (direct.length > 0) {
     return direct;
   }
 
-  const labelPattern = new RegExp(
-    `(?:^|\\n)\\s*(?:#{1,6}\\s*)?(?:[-*•]\\s*)?(?:\\*\\*)?${label}(?:\\*\\*)?\\s*[:\\-–—]\\s*([^\\n]+)`,
-    "i"
-  );
-  const inline = content.match(labelPattern)?.[1]?.trim() || "";
+  for (const alias of aliases) {
+    const labelPattern = new RegExp(
+      `(?:^|\\n)\\s*(?:#{1,6}\\s*)?(?:[-*•]\\s*)?(?:\\*\\*)?${alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\*\\*)?\\s*[:\\-–—]\\s*([^\\n]+)`,
+      "i"
+    );
+    const inline = content.match(labelPattern)?.[1]?.trim() || "";
 
-  if (inline && !new RegExp(`^${label}$`, "i").test(inline)) {
-    return extractBullets(inline, label);
+    if (inline && !new RegExp(`^${alias}$`, "i").test(inline)) {
+      return extractBullets(inline, label);
+    }
   }
 
-  return [];
+  const fallbackSnippet =
+    extractAliasedSectionSnippet(fallbackContent, aliases) ||
+    extractKeywordInsight(
+      fallbackContent,
+      label === "Strengths"
+        ? ["strength", "advantage", "moat", "positive", "güçlü", "avantaj"]
+        : label === "Weaknesses"
+          ? ["weakness", "constraint", "cost", "capital", "margin pressure", "zayıf", "maliyet"]
+          : label === "Opportunities"
+            ? ["opportunity", "underserved", "growth", "demand", "gap", "fırsat"]
+            : ["threat", "risk", "regulation", "competition", "substitute", "tehdit"]
+    );
+
+  return extractBullets(fallbackSnippet, label).slice(0, 2);
+}
+
+function extractScenarioSnippet(content: string, scenario: string) {
+  const aliases = scenarioLabelAliases[scenario] || [scenario];
+  const sectionSnippet = extractAliasedSectionSnippet(content, aliases);
+
+  if (sectionSnippet) {
+    return sectionSnippet;
+  }
+
+  const allAliases = Object.values(scenarioLabelAliases).flat();
+  for (const alias of aliases) {
+    const escapedAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const stopLabels = allAliases
+      .filter((candidate) => candidate !== alias)
+      .map((candidate) => candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|");
+    const inlineMatch = normalizePdfText(content).match(
+      new RegExp(
+        `${escapedAlias}\\s*(?:case|senaryo)?\\s*[:\\-–—]\\s*([\\s\\S]*?)(?=\\s+(?:${stopLabels})\\s*(?:case|senaryo)?\\s*[:\\-–—]|$)`,
+        "i"
+      )
+    );
+
+    if (inlineMatch?.[1]?.trim()) {
+      return inlineMatch[1].trim();
+    }
+  }
+
+  return "";
 }
 
 function extractShortDescription(content: string, aliases: string[] | readonly string[]) {
@@ -2330,7 +2442,7 @@ function PremiumSectionVisual({ section }: { section: ReportSection }) {
       <div className="mb-5 space-y-4">
         <div className="grid gap-3 md:grid-cols-3">
         {["Worst", "Base", "Best"].map((scenario) => {
-          const snippet = extractSectionSnippet(section.content, scenario);
+          const snippet = extractScenarioSnippet(section.content, scenario);
 
           return (
             <div key={scenario} className={`rounded-3xl border p-4 ${styles[scenario as keyof typeof styles]}`}>
@@ -3352,6 +3464,9 @@ const ReportPanel = memo(function ReportPanel({
       const cardHeaderHeight = 25;
       const cardBottomPadding = 11;
       const businessIdea = normalizePdfText(sourcePrompt || reportTitle);
+      const fullReportContent = sections
+        .map((section) => `${section.title}\n${section.content}`)
+        .join("\n\n");
       const tocEntries: Array<{ title: string; page: number }> = [];
       let y = margin;
 
@@ -3427,6 +3542,12 @@ const ReportPanel = memo(function ReportPanel({
 
           if (!line) {
             return [""];
+          }
+
+          const withoutBullet = line.replace(/^[-*•]\s+/, "").trim();
+
+          if (isOrphanBulletText(withoutBullet)) {
+            return [];
           }
 
           const isBullet = /^[-*•]\s+/.test(line);
@@ -3609,7 +3730,7 @@ const ReportPanel = memo(function ReportPanel({
         const gap = 3;
         const boxWidth = (width - gap) / 2;
         const items = quadrants.map(([label, color]) => {
-          const bulletLines = extractSwotBullets(content, label)
+          const bulletLines = extractSwotBullets(content, label, fullReportContent)
             .slice(0, 3)
             .map((bullet) => pdf.splitTextToSize(`• ${bullet}`, boxWidth - 6) as string[]);
           const textLineCount = Math.max(1, bulletLines.reduce((count, lines) => count + lines.length, 0));
@@ -3630,15 +3751,16 @@ const ReportPanel = memo(function ReportPanel({
       };
 
       const getFinancialLayout = (content: string, width: number) => {
-        const labels = getFinancialDashboardMetrics(content);
+        const metricContent = `${content}\n${fullReportContent}`;
+        const labels = getFinancialDashboardMetrics(metricContent);
         const columns = 3;
         const itemWidth = (width - (columns - 1) * 3) / columns;
         const itemHeight = 18;
         const items = labels
           .map((item) => {
-            const value = formatMetricCardValue(extractMetricValueFromAliases(content, item.aliases));
+            const value = formatMetricCardValue(extractMetricValueFromAliases(metricContent, item.aliases));
             const compactValue = compactPdfMetricValue(value);
-            const description = extractShortDescription(content, item.aliases);
+            const description = extractShortDescription(metricContent, item.aliases);
             const descriptionLines = description
               ? (pdf.splitTextToSize(`${item.label}: ${description}`, width - 6) as string[])
               : [];
@@ -3974,6 +4096,7 @@ const ReportPanel = memo(function ReportPanel({
         const isKpiDashboard = section.field === "kpiDashboard" || section.field === "kpis";
         const isScenario = section.field === "scenarioAnalysis";
         const isUnitEconomics = section.field === "unitEconomics";
+        const metricContent = `${section.content}\n${fullReportContent}`;
         const columns = isFinancialDashboard ? 3 : labels.length > 6 ? 4 : labels.length;
         const itemWidth = isFinancialDashboard && financialLayout
           ? financialLayout.itemWidth
@@ -3993,10 +4116,10 @@ const ReportPanel = memo(function ReportPanel({
           const itemY = isFinancialDashboard && financialLayout
             ? visualY + priorRowHeight + rowIndex * 3
             : visualY + rowIndex * (itemHeight + 3);
-          const score = extractScore(section.content, label) ?? [42, 62, 84, 56][index] ?? 60;
+          const score = extractScore(metricContent, label) ?? [42, 62, 84, 56][index] ?? 60;
           const value = typeof item !== "string" && "value" in item
             ? item.value
-            : formatMetricCardValue(extractMetricValueFromAliases(section.content, aliases));
+            : formatMetricCardValue(extractMetricValueFromAliases(metricContent, aliases));
           const compactValue = compactPdfMetricValue(value);
 
           pdf.setFillColor("#18181b");
@@ -4031,7 +4154,7 @@ const ReportPanel = memo(function ReportPanel({
             return;
           }
           if (isScenario) {
-            const snippet = extractSectionSnippet(section.content, label) || extractKeywordInsight(section.content, [label]);
+            const snippet = extractScenarioSnippet(section.content, label) || extractKeywordInsight(section.content, [label]);
             pdf.setTextColor("#f4f4f5");
             pdf.setFontSize(6);
             pdf.text(pdf.splitTextToSize(snippet || "Scenario path under review.", itemWidth - 4).slice(0, 2), x + 2, itemY + 8.1, {
