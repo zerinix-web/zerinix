@@ -62,16 +62,96 @@ type CitationData = {
   publicationYear?: string;
   confidence?: "High" | "Medium" | "Low";
   url?: string;
+  sourceType?: "Verified source" | "Planning assumption";
 };
 
 function normalizeCitationConfidence(value: string): CitationData["confidence"] | undefined {
   const normalized = value.trim().toLowerCase();
 
-  if (normalized === "high") return "High";
-  if (normalized === "medium") return "Medium";
+  if (normalized === "high" || normalized === "strong") return "High";
+  if (normalized === "medium" || normalized === "moderate") return "Medium";
   if (normalized === "low") return "Low";
 
   return undefined;
+}
+
+function normalizeSourceType(value: string): CitationData["sourceType"] {
+  return /\b(assumption|planning input|estimate|ai assumption|market-derived)\b/i.test(value)
+    ? "Planning assumption"
+    : "Verified source";
+}
+
+function looksLikePromptOrInstruction(value: string) {
+  return /\b(based on the entire report|would you invest|should i invest|what do you think|section to generate|report quality rules|write only|business idea\s*\/\s*goal|system prompt|internal instruction|validation prompt)\b/i.test(
+    value
+  );
+}
+
+function getFirstReadableSentence(value: string) {
+  const cleaned = normalizePdfText(value)
+    .replace(/[#*_`>-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned || looksLikePromptOrInstruction(cleaned)) {
+    return "";
+  }
+
+  const sentence = cleaned.match(/^(.{32,220}?[.!?])\s/)?.[1] || cleaned.slice(0, 180);
+
+  return looksLikePromptOrInstruction(sentence) ? "" : sentence.trim();
+}
+
+function getBusinessIdeaFromPrompt(value: string) {
+  const cleaned = normalizePdfText(value)
+    .replace(/^[-*•]\s*/, "")
+    .replace(/\?+$/g, "")
+    .trim();
+
+  if (!cleaned || looksLikePromptOrInstruction(cleaned)) {
+    return "";
+  }
+
+  if (/\b(who is|what is|why|how|would|should|can you|tell me|analyze|compare)\b/i.test(cleaned)) {
+    return "";
+  }
+
+  return cleaned.slice(0, 180);
+}
+
+function deriveBusinessDescriptionFromSections(report: DashboardReport) {
+  const promptDescription = getBusinessIdeaFromPrompt(report.prompt);
+
+  if (promptDescription) {
+    return promptDescription;
+  }
+
+  const priorityFields = [
+    "businessModel",
+    "solution",
+    "executiveSummary",
+    "marketOverview",
+    "marketOpportunity",
+    "targetCustomer",
+  ];
+  const prioritySections = priorityFields
+    .map((field) => report.sections.find((section) => section.field === field))
+    .filter((section): section is DashboardReport["sections"][number] => Boolean(section));
+  const remainingSections = report.sections.filter(
+    (section) => !prioritySections.includes(section)
+  );
+
+  for (const section of [...prioritySections, ...remainingSections]) {
+    const sentence = getFirstReadableSentence(section.content);
+
+    if (sentence) {
+      return sentence;
+    }
+  }
+
+  return looksLikePromptOrInstruction(report.title)
+    ? "Analyzed business/company profile"
+    : normalizePdfText(report.title || "Analyzed business/company profile");
 }
 
 function parseCitations(content: string): CitationData[] {
@@ -80,12 +160,29 @@ function parseCitations(content: string): CitationData[] {
   }
 
   const fallbackConfidence = normalizeCitationConfidence(
-    content.match(/\bconfidence\s*[:\-–—]\s*(high|medium|low)\b/i)?.[1] || ""
+    content.match(/\bconfidence\s*[:\-–—]\s*(high|medium|low|moderate|strong)\b/i)?.[1] || ""
   );
+  const entries: CitationData[] = [];
+  let current: Partial<CitationData> = {};
+  const flushCurrent = () => {
+    if (current.sourceTitle || current.organization || current.url) {
+      entries.push({
+        sourceTitle: current.sourceTitle || current.organization || "Untitled source",
+        organization: current.organization || "Publisher not specified",
+        ...(current.publicationYear ? { publicationYear: current.publicationYear } : {}),
+        ...(current.confidence || fallbackConfidence
+          ? { confidence: current.confidence || fallbackConfidence }
+          : {}),
+        ...(current.url ? { url: current.url } : {}),
+        ...(current.sourceType ? { sourceType: current.sourceType } : { sourceType: "Verified source" }),
+      });
+    }
+    current = {};
+  };
 
-  const citations = content
+  content
     .split("\n")
-    .map((rawLine) => {
+    .forEach((rawLine) => {
       const url =
         rawLine.match(/\]\((https?:\/\/[^)]+)\)/i)?.[1]?.trim() ||
         rawLine.match(/\bhttps?:\/\/[^\s)]+/i)?.[0]?.trim();
@@ -96,40 +193,71 @@ function parseCitations(content: string): CitationData[] {
         .replace(/\bhttps?:\/\/[^\s)]+/gi, "")
         .trim();
 
-      return { line, url };
-    })
-    .map(({ line, url }): CitationData | null => {
+      if (!line) {
+        return;
+      }
+
+      const metadataMatch = line.match(
+        /^(title|source|publisher|organization|year|publication year|url|confidence|source type|type)\s*[:\-–—]\s*(.+)$/i
+      );
+      if (metadataMatch) {
+        const key = metadataMatch[1].toLowerCase();
+        const value = metadataMatch[2].trim();
+
+        if ((key === "title" || key === "source") && current.sourceTitle) {
+          flushCurrent();
+        }
+
+        if (key === "title" || key === "source") {
+          current.sourceTitle = value;
+        } else if (key === "publisher" || key === "organization") {
+          current.organization = value;
+        } else if (key === "year" || key === "publication year") {
+          current.publicationYear = value.match(/\b(19|20)\d{2}\b/)?.[0];
+        } else if (key === "url") {
+          current.url = url || value;
+        } else if (key === "confidence") {
+          current.confidence = normalizeCitationConfidence(value);
+        } else {
+          current.sourceType = normalizeSourceType(value);
+        }
+        if (url) current.url = url;
+        return;
+      }
+
       const citationMatch = line.match(
         /^([^—–|-]{2,80})\s*[—–-]\s*(.+?)(?:\s*\((\d{4})\))?(?:\s*[.;:]?\s*)?$/
       );
 
       if (!citationMatch) {
-        return null;
+        return;
       }
 
+      flushCurrent();
       const organization = citationMatch[1].trim();
       const sourceTitle = citationMatch[2]
-        .replace(/\bconfidence\s*[:\-–—]\s*(high|medium|low)\b/i, "")
+        .replace(/\bconfidence\s*[:\-–—]\s*(high|medium|low|moderate|strong)\b/i, "")
         .trim();
       const publicationYear = citationMatch[3]?.trim();
 
       if (!organization || !sourceTitle || /\bsource\s+unavailable\b/i.test(sourceTitle)) {
-        return null;
+        return;
       }
 
-      return {
+      entries.push({
         sourceTitle,
         organization,
         ...(publicationYear ? { publicationYear } : {}),
         ...(fallbackConfidence ? { confidence: fallbackConfidence } : {}),
         ...(url ? { url } : {}),
-      };
-    })
-    .filter((citation): citation is CitationData => Boolean(citation));
+        sourceType: normalizeSourceType(line),
+      });
+    });
+  flushCurrent();
 
   const unique = new Map<string, CitationData>();
 
-  citations.forEach((citation) => {
+  entries.forEach((citation) => {
     const normalizedUrl = citation.url?.trim().toLowerCase().replace(/\/+$/, "");
     const key = normalizedUrl
       ? `url:${normalizedUrl}`
@@ -137,7 +265,6 @@ function parseCitations(content: string): CitationData[] {
           "source",
           normalizeCitationKey(citation.organization),
           normalizeCitationKey(citation.sourceTitle),
-          citation.publicationYear || "",
         ].join("|");
     const existing = unique.get(key);
 
@@ -145,6 +272,7 @@ function parseCitations(content: string): CitationData[] {
       ...citation,
       ...(existing?.url && !citation.url ? { url: existing.url } : {}),
       ...(existing?.confidence && !citation.confidence ? { confidence: existing.confidence } : {}),
+      ...(existing?.sourceType && !citation.sourceType ? { sourceType: existing.sourceType } : {}),
     });
   });
 
@@ -170,12 +298,14 @@ function formatPdfCitationContent(content: string) {
       const year = citation.publicationYear ? `\n  Year: ${citation.publicationYear}` : "";
       const confidence = citation.confidence ? `\n  Confidence: ${citation.confidence}` : "";
       const url = citation.url ? `\n  URL: ${citation.url}` : "";
+      const sourceType = citation.sourceType ? `\n  Type: ${citation.sourceType}` : "";
 
       return [
         `• ${citation.sourceTitle}`,
         `  Publisher: ${citation.organization}`,
         year,
         confidence,
+        sourceType,
         url,
       ].join("\n");
     })
@@ -282,6 +412,15 @@ function compactPdfMetricValue(value: string) {
   return numericMatch?.[0]?.replace(/\s+/g, " ").replace(/([kKmMbB%])\s+([$€₺])/g, "$1$2") || cleanValue.split(/\s{2,}/)[0] || "";
 }
 
+function extractMarketSizeValue(content: string, label: string) {
+  const escapedLabel = escapeRegExp(label);
+  const direct = normalizePdfText(content).match(
+    new RegExp(`\\b${escapedLabel}\\b\\s*[:\\-–—]?\\s*((?:[<>~≈]?\\s*)?[€$₺]?\\s*\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT%])?)`, "i")
+  )?.[1];
+
+  return compactPdfMetricValue(direct || extractMetricValue(content, label));
+}
+
 function isMobilityReportContent(content: string) {
   return /\b(scooter|micromobility|micro mobility|shared mobility|bike sharing|bikeshare|per-ride|urban riders|commuters|fleet utilization|rental)\b/i.test(
     content
@@ -380,10 +519,33 @@ function extractConfidence(content: string) {
     return explicit;
   }
 
+  const scoreMatch = content.match(/\b(?:score|conviction)\s*(?:of|:)?\s*(\d{1,3})\s*\/\s*100\b/i);
+  const score = Number(scoreMatch?.[1] || NaN);
+
+  if (Number.isFinite(score)) {
+    return Math.max(0, Math.min(100, score));
+  }
+
   const percentMatch = content.match(/\b(\d{1,3})\s*%/);
   const percent = Number(percentMatch?.[1] || NaN);
 
-  return Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+  if (Number.isFinite(percent)) {
+    return Math.max(0, Math.min(100, percent));
+  }
+
+  if (/\b(high|strong)\s+(?:confidence|conviction)\b/i.test(content)) {
+    return 80;
+  }
+
+  if (/\b(medium|moderate)\s+(?:confidence|conviction)\b/i.test(content)) {
+    return 60;
+  }
+
+  if (/\b(low|weak)\s+(?:confidence|conviction)\b/i.test(content)) {
+    return 35;
+  }
+
+  return null;
 }
 
 function extractFirstMetric(content: string, labels: string[]) {
@@ -803,7 +965,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       const bodyLineHeight = 5.25;
       const cardHeaderHeight = 24;
       const cardBottomPadding = 9;
-      const businessIdea = normalizePdfText(report.prompt || report.title);
+      const businessIdea = deriveBusinessDescriptionFromSections(report);
       const fullReportContent = report.sections
         .map((section) => `${section.title}\n${section.content}`)
         .join("\n\n");
@@ -1130,7 +1292,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           ["SAM", "#115e59"],
           ["SOM", "#5eead4"],
         ] as const).map(([label, color]) => {
-          const value = compactPdfMetricValue(extractMetricValue(content, label));
+          const value = extractMarketSizeValue(`${content}\n${fullReportContent}`, label);
           const snippet = extractSectionSnippet(content, label);
           const description = normalizePdfText(snippet.replace(value, ""))
             .replace(new RegExp(`^${label}\\s*[:\\-–—]?`, "i"), "")
@@ -1345,7 +1507,10 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         if (normalizedTitle.includes("executive recommendation")) {
           const selected = detectRecommendation(content) || "REVIEW";
           const decisionLabel = formatDecisionLabel(selected);
-          const confidence = extractConfidence(content);
+          const confidence =
+            extractConfidence(content) ??
+            extractConfidence(fullReportContent) ??
+            extractScore(fullReportContent, "Investment Score");
           const investmentRecommendation =
             extractMetricValue(content, "Investment Recommendation") ||
             extractMetricValue(content, "Recommendation") ||
@@ -1381,8 +1546,8 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           const recItems = [
             ["Confidence", confidence === null ? "—" : `${confidence}%`],
             ["Investment Recommendation", investmentRecommendation || "—"],
-            ["Main Risk", mainRisk || "See risk section"],
-            ["Next Action", nextAction || "Validate critical proof point"],
+            ["Main Risk", mainRisk || extractKeywordInsight(fullReportContent, ["risk", "threat"]) || "Primary risk is detailed in the risk analysis"],
+            ["Next Action", nextAction || extractKeywordInsight(fullReportContent, ["next action", "critical action", "validate"]) || "Validate the primary investment thesis"],
           ];
 
           recItems.forEach(([label, value], index) => {

@@ -30,6 +30,7 @@ import {
   isAiTestMode,
   logAiExecution,
 } from "@/app/lib/ai/runtime";
+import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 
 const fieldPrompts = {
   executiveSummary: {
@@ -271,7 +272,7 @@ const marketReportTermReplacements: Array<[RegExp, string]> = [
 function sanitizeMarketReportContent(value: string) {
   return marketReportTermReplacements.reduce(
     (content, [pattern, replacement]) => content.replace(pattern, replacement),
-    value
+    sanitizeAiResponseText(value)
   )
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")

@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
+import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 import {
   Bot,
   Check,
@@ -77,10 +78,16 @@ type ChatProfile = {
 type AIChatWorkspaceProps = {
   initialConversations?: Conversation[];
   conversationLoadError?: string;
+  initialReportMemory?: {
+    id: string;
+    title: string;
+    type: string;
+  } | null;
 };
 
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 60_000;
 const CHAT_REQUEST_TIMEOUT_MS = 75_000;
+const ACTIVE_REPORT_ID_STORAGE_KEY = "zerinix.activeReportId";
 
 const emptyProfile: ChatProfile = {
   preferred_country: "",
@@ -140,6 +147,27 @@ function createConversation(id = createMessageId()): Conversation {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function getReportIdFromLocation() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  return (params.get("reportId") || params.get("report") || "").trim();
+}
+
+function getStoredActiveReportId() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  try {
+    return window.sessionStorage.getItem(ACTIVE_REPORT_ID_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
 }
 
 function shouldAutoTitleConversation(title: string) {
@@ -684,6 +712,7 @@ const ChatBubble = memo(function ChatBubble({
 export default function AIChatWorkspace({
   initialConversations = [],
   conversationLoadError = "",
+  initialReportMemory = null,
 }: AIChatWorkspaceProps) {
   const initialConversationId = useMemo(
     () => initialConversations[0]?.id || createMessageId(),
@@ -713,6 +742,9 @@ export default function AIChatWorkspace({
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [activeReportMemoryId] = useState(() =>
+    initialReportMemory?.id || getReportIdFromLocation() || getStoredActiveReportId()
+  );
   const persistedConversationIdsRef = useRef<Set<string>>(
     new Set(initialConversations.map((conversation) => conversation.id))
   );
@@ -735,6 +767,23 @@ export default function AIChatWorkspace({
         conversation.title.toLowerCase().includes(normalizedSearchQuery)
       )
     : sortedConversations;
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      if (activeReportMemoryId) {
+        window.sessionStorage.setItem(
+          ACTIVE_REPORT_ID_STORAGE_KEY,
+          activeReportMemoryId
+        );
+      }
+    } catch {
+      // Session storage is a convenience layer; chat still works without it.
+    }
+  }, [activeReportMemoryId]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -1225,13 +1274,14 @@ export default function AIChatWorkspace({
       }
 
       output += decoder.decode(value, { stream: true });
-      onChunk(output);
+      onChunk(sanitizeAiResponseText(output));
     }
 
     output += decoder.decode();
-    onChunk(output);
+    const sanitizedOutput = sanitizeAiResponseText(output);
+    onChunk(sanitizedOutput);
 
-    return output.trim();
+    return sanitizedOutput;
   }
 
   async function sendMessage(
@@ -1330,6 +1380,7 @@ export default function AIChatWorkspace({
             textContent: attachment.textContent || "",
           })),
           messages: memoryMessages,
+          reportId: activeReportMemoryId,
         }),
       });
 

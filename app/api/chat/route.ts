@@ -18,12 +18,14 @@ import {
   type AiRequestKind,
 } from "@/app/lib/ai/governance";
 import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
+import { loadUserReport, type DashboardReport } from "@/app/dashboard/report-utils";
 import {
   createOpenAiClient,
   getAiConfigurationErrorMessage,
   isAiTestMode,
   logAiExecution,
 } from "@/app/lib/ai/runtime";
+import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 
 type ChatInputMessage = {
   role: "user" | "assistant";
@@ -34,6 +36,14 @@ type ChatAttachmentInput = {
   name: string;
   size: number;
   textContent: string;
+};
+
+type ReportMemoryContext = {
+  id: string;
+  title: string;
+  type: string;
+  prompt: string;
+  content: string;
 };
 
 type AiChatProfile = {
@@ -188,6 +198,60 @@ function buildAttachmentContext(attachments: ChatAttachmentInput[]) {
       return `${fileIntro}\n${attachment.textContent}`;
     })
     .join("\n\n---\n\n");
+}
+
+function normalizeReportId(value: unknown) {
+  return typeof value === "string" ? value.trim().slice(0, 128) : "";
+}
+
+function buildReportMemoryContext(report: DashboardReport | null): ReportMemoryContext | null {
+  if (!report || report.status.toLowerCase() !== "completed" || report.sections.length === 0) {
+    return null;
+  }
+
+  const sectionBlocks = report.sections
+    .map((section) => {
+      const title = section.title.trim();
+      const content = section.content.replace(/\s+/g, " ").trim();
+
+      if (!title || !content) {
+        return "";
+      }
+
+      return `## ${title}\n${content}`;
+    })
+    .filter(Boolean);
+
+  if (sectionBlocks.length === 0) {
+    return null;
+  }
+
+  const header = [
+    `Report ID: ${report.id}`,
+    `Report title: ${report.title}`,
+    `Report type: ${report.type}`,
+    report.prompt ? `Original user prompt: ${report.prompt}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    id: report.id,
+    title: report.title,
+    type: report.type,
+    prompt: report.prompt,
+    content: `${header}\n\n${sectionBlocks.join("\n\n")}`,
+  };
+}
+
+function isReportMemoryQuestion(prompt: string, messages: ChatInputMessage[]) {
+  const text = [...messages.slice(-4).map((message) => message.content), prompt]
+    .join("\n")
+    .toLowerCase();
+
+  return /\b(my report|the report|this report|tam|sam|som|competitors?|risks?|cagr|gross margin|market size|executive summary|swot|porter|financial dashboard|unit economics|sources?)\b/i.test(
+    text
+  );
 }
 
 function normalizeProfile(value: unknown): AiChatProfile | null {
@@ -362,9 +426,11 @@ function shouldUseChatCache(input: {
   attachments: ChatAttachmentInput[];
   messages: ChatInputMessage[];
   requestKind: AiRequestKind;
+  reportMemory: ReportMemoryContext | null;
 }) {
   return (
     input.attachments.length === 0 &&
+    !input.reportMemory &&
     input.requestKind !== "file_analysis" &&
     input.messages.length <= 2
   );
@@ -535,11 +601,12 @@ function buildAdvisorClarification(
 
 function textStream(content: string) {
   const encoder = new TextEncoder();
+  const sanitizedContent = sanitizeAiResponseText(content);
 
   return new Response(
     new ReadableStream({
       start(controller) {
-        controller.enqueue(encoder.encode(content));
+        controller.enqueue(encoder.encode(sanitizedContent));
         controller.close();
       },
     }),
@@ -554,7 +621,7 @@ function textStream(content: string) {
 }
 
 function createMockChatResponse(prompt: string, expert: AiExpert) {
-  return [
+  return sanitizeAiResponseText([
     `Mock ${expert} response for: ${prompt}`,
     "",
     "This deterministic response is served because AI_TEST_MODE is enabled.",
@@ -562,7 +629,7 @@ function createMockChatResponse(prompt: string, expert: AiExpert) {
     "- No OpenAI request was made.",
     "- Conversation, streaming UI, sidebar persistence, copy, regenerate, and file upload flows can be tested safely.",
     "- Switch AI_TEST_MODE off to use the configured environment-specific OpenAI key.",
-  ].join("\n");
+  ].join("\n"));
 }
 
 const TEXT_LIKE_RESPONSE_FIELD_PATTERN =
@@ -794,6 +861,7 @@ export async function POST(req: Request) {
     const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
     const messages = normalizeMessages(body?.messages);
     const attachments = normalizeAttachments(body?.attachments);
+    const reportId = normalizeReportId(body?.reportId);
     const modelPreference = body?.modelPreference === "balanced" ? "balanced" : "fast";
     const conversationId =
       typeof body?.conversationId === "string"
@@ -818,6 +886,16 @@ export async function POST(req: Request) {
 
     const chatProfile = normalizeProfile(profileData);
     const profileContext = buildProfileContext(chatProfile);
+    const loadedReport = reportId ? await loadUserReport(supabase, user, reportId) : null;
+    const reportMemory = buildReportMemoryContext(loadedReport);
+    const reportMemoryDebugReason = reportMemory
+      ? "attached"
+      : reportId
+        ? loadedReport
+          ? "Report was found but is not completed or has no saved sections."
+          : `Report id ${reportId} was not found for the authenticated user.`
+        : "No report id was provided with this chat request.";
+    const reportQuestion = isReportMemoryQuestion(prompt, messages);
     const { intent: selectedIntent, expert: selectedExpert } = classifyExpert(
       messages,
       prompt,
@@ -827,7 +905,7 @@ export async function POST(req: Request) {
     const missingAdvisorContext = advisorRequest
       ? getMissingAdvisorContext(messages, prompt, chatProfile)
       : [];
-    const essentialAdvisorQuestions = advisorRequest
+    const essentialAdvisorQuestions = advisorRequest && !reportMemory
       ? getEssentialAdvisorQuestions(selectedIntent, prompt, missingAdvisorContext)
       : [];
     const requestKind = classifyChatRequestKind(
@@ -845,6 +923,26 @@ export async function POST(req: Request) {
       });
 
       return textStream(createMockChatResponse(prompt, selectedExpert));
+    }
+
+    if (reportQuestion && !reportMemory) {
+      console.info("[api:chat] report memory missing", {
+        conversationId: conversationId || null,
+        reportId: reportId || null,
+        reportMemoryAttached: false,
+        reportMemoryDebugReason,
+        promptLength: prompt.length,
+      });
+
+      return textStream(
+        [
+          "No report is attached to this chat request.",
+          "",
+          `Debug reason: ${reportMemoryDebugReason}`,
+          "",
+          "Open AI Chat from a saved report or pass the report id so I can answer from the report text.",
+        ].join("\n")
+      );
     }
 
     if (advisorRequest && essentialAdvisorQuestions.length > 0) {
@@ -876,6 +974,7 @@ export async function POST(req: Request) {
       attachments,
       messages,
       requestKind,
+      reportMemory,
     });
     const chatCacheKey = createAiCacheKey({
       endpoint: "/api/chat",
@@ -926,6 +1025,8 @@ export async function POST(req: Request) {
             selected_expert: selectedExpert,
             request_kind: requestKind,
             profile_used: Boolean(profileContext),
+            report_memory_used: Boolean(reportMemory),
+            report_id: reportMemory?.id || null,
             model_preference: modelPreference,
             attachment_count: attachments.length,
             actual_ai_call: false,
@@ -960,12 +1061,84 @@ export async function POST(req: Request) {
     });
 
     const maxOutputTokens = getChatMaxOutputTokens(requestKind);
+    const instructionsText = [
+      "You are ZERINIX AI, a premium business operating assistant.",
+      `Classified user intent: ${selectedIntent}.`,
+      `Selected expert: ${selectedExpert}.`,
+      expertInstructions[selectedExpert],
+      "The selected expert must shape the perspective, vocabulary, priorities, caveats, and structure of the answer. Do not announce the routing process unless it helps the user.",
+      profileContext
+        ? `Persistent user profile for non-sensitive personalization:\n${profileContext}\nUse this profile to avoid asking for details the user has already saved. If the user's latest message conflicts with the profile, prioritize the latest message.`
+        : "No persistent chat profile is available yet. Do not invent profile preferences.",
+      reportMemory
+        ? [
+            "A saved ZERINIX report is attached as authoritative report memory.",
+            "Prioritize the report memory over general model knowledge for every answer.",
+            "If the report contains the answer, never say you assume; explicitly reference the relevant report finding or section.",
+            "If the report does not contain the requested information, say that the report does not contain it, then use general reasoning clearly marked as outside-report reasoning.",
+            "Keep using this report memory for follow-up questions in this conversation.",
+          ].join("\n")
+        : "No saved report memory is attached to this chat request.",
+      "Answer naturally and directly. You may help with business, strategy, operations, finance, product, marketing, technology, or general questions.",
+      "Use the conversation history for context, but do not fabricate facts.",
+      "When attached file text is provided, treat it as user-supplied context. If a file has no readable text, say so briefly when relevant.",
+      "If the user asks for a structured investor report, suggest AI Plan or Market Analysis mode instead of generating the full report in Chat mode.",
+      "Advisor quality rules: ask follow-up questions only if the missing information is absolutely necessary. Never ask for information already present in the persistent profile or conversation. If useful but non-critical information is missing, proceed with clearly labeled assumptions.",
+      "When giving recommendations, go deeper than generic advice. Rank options from best to worst, show step-by-step reasoning, explain why each option was chosen, and include estimated investment, expected ROI or outcome range, timeline, risks, advantages, disadvantages, and next actions whenever applicable.",
+      "For investment, finance, crypto, real estate, legal, tax, or career-sensitive topics, use educational decision-support language, state uncertainty, and avoid guarantees.",
+      "Keep Business Plan and Market Analysis separate: do not generate a PDF-style report in Chat mode. If the user explicitly wants a full structured report, suggest AI Plan or Market Analysis.",
+      "Use concise markdown when it improves readability. Match the user's language.",
+    ].join("\n");
+    const inputMessages = [
+      ...messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+      ...(profileContext
+        ? [
+            {
+              role: "user" as const,
+              content: `Persistent user profile context:\n\n${profileContext}`,
+            },
+          ]
+        : []),
+      ...(attachmentContext
+        ? [
+            {
+              role: "user" as const,
+              content: `Attached file context:\n\n${attachmentContext}`,
+            },
+          ]
+        : []),
+      ...(reportMemory
+        ? [
+            {
+              role: "user" as const,
+              content: `Saved ZERINIX report memory. Use this as the primary source for answering report-related questions:\n\n${reportMemory.content}`,
+            },
+          ]
+        : []),
+      {
+        role: "user" as const,
+        content: prompt,
+      },
+    ];
+    const finalPromptLength =
+      instructionsText.length +
+      inputMessages.reduce((total, message) => total + message.content.length, 0);
+
     console.info("[api:chat] provider call started", {
       model,
       selectedIntent,
       selectedExpert,
       requestKind,
       conversationId: conversationId || null,
+      reportId: reportId || null,
+      reportMemoryAttached: Boolean(reportMemory),
+      reportMemoryDebugReason,
+      reportMemoryLength: reportMemory?.content.length || 0,
+      promptLength: prompt.length,
+      finalPromptLength,
       providerCalled: true,
       quotaConsumed: false,
     });
@@ -976,51 +1149,8 @@ export async function POST(req: Request) {
           model,
           reasoning: { effort: "minimal" },
           text: { verbosity: "low" },
-          instructions: [
-            "You are ZERINIX AI, a premium business operating assistant.",
-            `Classified user intent: ${selectedIntent}.`,
-            `Selected expert: ${selectedExpert}.`,
-            expertInstructions[selectedExpert],
-            "The selected expert must shape the perspective, vocabulary, priorities, caveats, and structure of the answer. Do not announce the routing process unless it helps the user.",
-            profileContext
-              ? `Persistent user profile for non-sensitive personalization:\n${profileContext}\nUse this profile to avoid asking for details the user has already saved. If the user's latest message conflicts with the profile, prioritize the latest message.`
-              : "No persistent chat profile is available yet. Do not invent profile preferences.",
-            "Answer naturally and directly. You may help with business, strategy, operations, finance, product, marketing, technology, or general questions.",
-            "Use the conversation history for context, but do not fabricate facts.",
-            "When attached file text is provided, treat it as user-supplied context. If a file has no readable text, say so briefly when relevant.",
-            "If the user asks for a structured investor report, suggest AI Plan or Market Analysis mode instead of generating the full report in Chat mode.",
-            "Advisor quality rules: ask follow-up questions only if the missing information is absolutely necessary. Never ask for information already present in the persistent profile or conversation. If useful but non-critical information is missing, proceed with clearly labeled assumptions.",
-            "When giving recommendations, go deeper than generic advice. Rank options from best to worst, show step-by-step reasoning, explain why each option was chosen, and include estimated investment, expected ROI or outcome range, timeline, risks, advantages, disadvantages, and next actions whenever applicable.",
-            "For investment, finance, crypto, real estate, legal, tax, or career-sensitive topics, use educational decision-support language, state uncertainty, and avoid guarantees.",
-            "Keep Business Plan and Market Analysis separate: do not generate a PDF-style report in Chat mode. If the user explicitly wants a full structured report, suggest AI Plan or Market Analysis.",
-            "Use concise markdown when it improves readability. Match the user's language.",
-          ].join("\n"),
-          input: [
-            ...messages.map((message) => ({
-              role: message.role,
-              content: message.content,
-            })),
-            ...(profileContext
-              ? [
-                  {
-                    role: "user" as const,
-                    content: `Persistent user profile context:\n\n${profileContext}`,
-                  },
-                ]
-              : []),
-            ...(attachmentContext
-              ? [
-                  {
-                    role: "user" as const,
-                    content: `Attached file context:\n\n${attachmentContext}`,
-                  },
-                ]
-              : []),
-            {
-              role: "user" as const,
-              content: prompt,
-            },
-          ],
+          instructions: instructionsText,
+          input: inputMessages,
           max_output_tokens: maxOutputTokens,
           stream: true,
         },
@@ -1062,6 +1192,8 @@ export async function POST(req: Request) {
             selected_expert: selectedExpert,
             request_kind: requestKind,
             profile_used: Boolean(profileContext),
+            report_memory_used: Boolean(reportMemory),
+            report_id: reportMemory?.id || null,
             model_preference: modelPreference,
             attachment_count: attachments.length,
             actual_ai_call: true,
@@ -1134,8 +1266,9 @@ export async function POST(req: Request) {
                 }
 
                 if (!streamedText && completedText) {
-                  streamedText = completedText;
-                  controller.enqueue(encoder.encode(completedText));
+                  const sanitizedCompletedText = sanitizeAiResponseText(completedText);
+                  streamedText = sanitizedCompletedText;
+                  controller.enqueue(encoder.encode(sanitizedCompletedText));
                 }
               }
 
@@ -1157,8 +1290,9 @@ export async function POST(req: Request) {
                 });
 
                 if (!streamedText && completedText) {
-                  streamedText = completedText;
-                  controller.enqueue(encoder.encode(completedText));
+                  const sanitizedCompletedText = sanitizeAiResponseText(completedText);
+                  streamedText = sanitizedCompletedText;
+                  controller.enqueue(encoder.encode(sanitizedCompletedText));
                 }
               }
 
@@ -1192,6 +1326,8 @@ export async function POST(req: Request) {
               controller.enqueue(encoder.encode(streamedText));
             }
 
+            streamedText = sanitizeAiResponseText(streamedText);
+
             controller.close();
 
             await recordAiUsage(supabase, {
@@ -1215,6 +1351,8 @@ export async function POST(req: Request) {
                 selected_expert: selectedExpert,
                 request_kind: requestKind,
                 profile_used: Boolean(profileContext),
+                report_memory_used: Boolean(reportMemory),
+                report_id: reportMemory?.id || null,
                 model_preference: modelPreference,
                 attachment_count: attachments.length,
                 actual_ai_call: true,
@@ -1284,6 +1422,8 @@ export async function POST(req: Request) {
                 selected_expert: selectedExpert,
                 request_kind: requestKind,
                 profile_used: Boolean(profileContext),
+                report_memory_used: Boolean(reportMemory),
+                report_id: reportMemory?.id || null,
                 model_preference: modelPreference,
                 attachment_count: attachments.length,
                 actual_ai_call: true,

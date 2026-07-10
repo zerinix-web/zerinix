@@ -21,6 +21,7 @@ import { createClient } from "@/app/lib/supabase/server";
 import DashboardSidebar from "../DashboardSidebar";
 import { getAuthenticatedUser, loadUserReport } from "../report-utils";
 import ReportPdfButton from "./ReportPdfButton";
+import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 
 export const dynamic = "force-dynamic";
 
@@ -1337,7 +1338,7 @@ function CitationList({ content }: { content: string }) {
 }
 
 function ReportText({ content }: { content: string }) {
-  const blocks = content
+  const blocks = sanitizeAiResponseText(content)
     .split(/\n{2,}/)
     .map((block) => block.trim())
     .filter(Boolean);

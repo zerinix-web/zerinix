@@ -86,6 +86,11 @@ ${metricRows}
 Revenue forecast:
 ${forecastRows}
 
+Evidence classification:
+- User-provided facts: ${context.normalizedBusinessIdea}
+- Market-derived estimates: industry benchmark ranges, market sizing, growth, margin, CAC, LTV, payback, EBITDA, and revenue multiple assumptions from the selected benchmark basis.
+- AI assumptions: geography multiplier, serviceable market rate, obtainable share rate, customer count, pricing model, burn rate, runway target, startup capex, and break-even timing where direct user data is absent.
+
 ${investmentScoreContext}
 
 Financial modeling rules:
@@ -100,5 +105,6 @@ Financial modeling rules:
 - Executive Summary and Executive Recommendation must use the calculated Recommendation, Estimated Valuation, Funding Stage, Top Risks, and Next Critical Action from the Investment Scoring Engine.
 - For recurring software models, ARR and MRR are appropriate. For mobility, retail, hospitality, manufacturing, and other non-subscription models, use business-model-specific revenue labels from the structured model instead of SaaS labels.
 - For revenue, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, show value, formula, assumptions, confidence, and benchmark source when the section is responsible for financial explanation.
+- Financial Assumptions must be written as a Key Assumptions section that lists every calculation assumption and classifies each as User-provided fact, AI assumption, or Market-derived estimate.
 - Tag important claims with one concise evidence label only when useful: Real Evidence, Benchmark, Industry Estimate, AI Assumption, Low Confidence, or High Confidence. Do not create fake citations.`;
 }

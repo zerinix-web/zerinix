@@ -51,6 +51,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { createClient } from "@/app/lib/supabase/client";
+import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 import { isAmbiguousBusinessRequest } from "@/app/lib/business-idea-detection";
 import {
   containsReportGenerationFailure,
@@ -214,6 +215,7 @@ const workflowSteps = [
 
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 60_000;
 const CHAT_REQUEST_TIMEOUT_MS = 75_000;
+const ACTIVE_REPORT_ID_STORAGE_KEY = "zerinix.activeReportId";
 
 const chatModelOptions: Array<{
   value: ChatModelPreference;
@@ -331,6 +333,83 @@ function loadPdfFont() {
     .then(arrayBufferToBase64);
 
   return pdfFontPromise;
+}
+
+function looksLikePromptOrInstruction(value: string) {
+  return /\b(based on the entire report|would you invest|should i invest|what do you think|section to generate|report quality rules|write only|business idea\s*\/\s*goal|system prompt|internal instruction|validation prompt)\b/i.test(
+    value
+  );
+}
+
+function getFirstReadableReportSentence(value: string) {
+  const cleaned = normalizePdfText(value)
+    .replace(/[#*_`>-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned || looksLikePromptOrInstruction(cleaned)) {
+    return "";
+  }
+
+  const sentence = cleaned.match(/^(.{32,220}?[.!?])\s/)?.[1] || cleaned.slice(0, 180);
+
+  return looksLikePromptOrInstruction(sentence) ? "" : sentence.trim();
+}
+
+function getBusinessIdeaFromPrompt(value: string) {
+  const cleaned = normalizePdfText(value)
+    .replace(/^[-*•]\s*/, "")
+    .replace(/\?+$/g, "")
+    .trim();
+
+  if (!cleaned || looksLikePromptOrInstruction(cleaned)) {
+    return "";
+  }
+
+  if (/\b(who is|what is|why|how|would|should|can you|tell me|analyze|compare)\b/i.test(cleaned)) {
+    return "";
+  }
+
+  return cleaned.slice(0, 180);
+}
+
+function deriveBusinessDescriptionFromSections(
+  sections: ReportSection[],
+  fallbackTitle: string,
+  sourcePrompt = ""
+) {
+  const promptDescription = getBusinessIdeaFromPrompt(sourcePrompt);
+
+  if (promptDescription) {
+    return promptDescription;
+  }
+
+  const priorityFields = [
+    "businessModel",
+    "solution",
+    "executiveSummary",
+    "marketOverview",
+    "marketOpportunity",
+    "targetCustomer",
+  ];
+  const prioritySections = priorityFields
+    .map((field) => sections.find((section) => section.field === field))
+    .filter((section): section is ReportSection => Boolean(section));
+  const remainingSections = sections.filter(
+    (section) => !prioritySections.includes(section)
+  );
+
+  for (const section of [...prioritySections, ...remainingSections]) {
+    const sentence = getFirstReadableReportSentence(section.content);
+
+    if (sentence) {
+      return sentence;
+    }
+  }
+
+  return looksLikePromptOrInstruction(fallbackTitle)
+    ? "Analyzed business/company profile"
+    : normalizePdfText(fallbackTitle || "Analyzed business/company profile");
 }
 
 const reportActions = [
@@ -507,7 +586,7 @@ const emptyPlanReport: PlanReport = {
 };
 
 function sanitizeReportContent(content: string) {
-  return content
+  return sanitizeAiResponseText(content)
     .replace(/\n\s*(?:sources|kaynaklar)\s*:[\s\S]*$/im, "")
     .replace(/\[([^\]]+)\]\((?:https?:\/\/|www\.)[^\s)]+\)/gi, "$1")
     .replace(/(?:https?:\/\/|www\.)[^\s),]+/gi, "")
@@ -530,7 +609,7 @@ function sanitizeReportFieldContent(
   content: string
 ) {
   if (field === "sources" || field === "sourcesAssumptions") {
-    return content
+    return sanitizeAiResponseText(content)
       .normalize("NFC")
       .replace(/\r\n/g, "\n")
       .replace(/\r/g, "\n")
@@ -705,6 +784,18 @@ function createConversation(id: string): Conversation {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function getStoredActiveReportId() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  try {
+    return window.sessionStorage.getItem(ACTIVE_REPORT_ID_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
 }
 
 function getReportMarkdown(
@@ -1085,16 +1176,17 @@ type CitationData = {
   publicationYear?: string;
   confidence?: "High" | "Medium" | "Low";
   url?: string;
+  sourceType?: "Verified source" | "Planning assumption";
 };
 
 function normalizeCitationConfidence(value: string): CitationData["confidence"] | undefined {
   const normalized = value.trim().toLowerCase();
 
-  if (normalized === "high") {
+  if (normalized === "high" || normalized === "strong") {
     return "High";
   }
 
-  if (normalized === "medium") {
+  if (normalized === "medium" || normalized === "moderate") {
     return "Medium";
   }
 
@@ -1105,18 +1197,42 @@ function normalizeCitationConfidence(value: string): CitationData["confidence"] 
   return undefined;
 }
 
+function normalizeSourceType(value: string): CitationData["sourceType"] {
+  return /\b(assumption|planning input|estimate|ai assumption|market-derived)\b/i.test(value)
+    ? "Planning assumption"
+    : "Verified source";
+}
+
 function parseCitations(content: string): CitationData[] {
   if (/\bsource\s+unavailable\b/i.test(content)) {
     return [];
   }
 
   const fallbackConfidence = normalizeCitationConfidence(
-    content.match(/\bconfidence\s*[:\-–—]\s*(high|medium|low)\b/i)?.[1] || ""
+    content.match(/\bconfidence\s*[:\-–—]\s*(high|medium|low|moderate|strong)\b/i)?.[1] || ""
   );
 
-  const citations = content
+  const entries: CitationData[] = [];
+  let current: Partial<CitationData> = {};
+  const flushCurrent = () => {
+    if (current.sourceTitle || current.organization || current.url) {
+      entries.push({
+        sourceTitle: current.sourceTitle || current.organization || "Untitled source",
+        organization: current.organization || "Publisher not specified",
+        ...(current.publicationYear ? { publicationYear: current.publicationYear } : {}),
+        ...(current.confidence || fallbackConfidence
+          ? { confidence: current.confidence || fallbackConfidence }
+          : {}),
+        ...(current.url ? { url: current.url } : {}),
+        ...(current.sourceType ? { sourceType: current.sourceType } : { sourceType: "Verified source" }),
+      });
+    }
+    current = {};
+  };
+
+  content
     .split("\n")
-    .map((rawLine) => {
+    .forEach((rawLine) => {
       const url =
         rawLine.match(/\]\((https?:\/\/[^)]+)\)/i)?.[1]?.trim() ||
         rawLine.match(/\bhttps?:\/\/[^\s)]+/i)?.[0]?.trim();
@@ -1127,40 +1243,71 @@ function parseCitations(content: string): CitationData[] {
         .replace(/\bhttps?:\/\/[^\s)]+/gi, "")
         .trim();
 
-      return { line, url };
-    })
-    .map(({ line, url }): CitationData | null => {
+      if (!line) {
+        return;
+      }
+
+      const metadataMatch = line.match(
+        /^(title|source|publisher|organization|year|publication year|url|confidence|source type|type)\s*[:\-–—]\s*(.+)$/i
+      );
+      if (metadataMatch) {
+        const key = metadataMatch[1].toLowerCase();
+        const value = metadataMatch[2].trim();
+
+        if ((key === "title" || key === "source") && current.sourceTitle) {
+          flushCurrent();
+        }
+
+        if (key === "title" || key === "source") {
+          current.sourceTitle = value;
+        } else if (key === "publisher" || key === "organization") {
+          current.organization = value;
+        } else if (key === "year" || key === "publication year") {
+          current.publicationYear = value.match(/\b(19|20)\d{2}\b/)?.[0];
+        } else if (key === "url") {
+          current.url = url || value;
+        } else if (key === "confidence") {
+          current.confidence = normalizeCitationConfidence(value);
+        } else {
+          current.sourceType = normalizeSourceType(value);
+        }
+        if (url) current.url = url;
+        return;
+      }
+
       const citationMatch = line.match(
         /^([^—–|-]{2,80})\s*[—–-]\s*(.+?)(?:\s*\((\d{4})\))?(?:\s*[.;:]?\s*)?$/
       );
 
       if (!citationMatch) {
-        return null;
+        return;
       }
 
+      flushCurrent();
       const organization = citationMatch[1].trim();
       const sourceTitle = citationMatch[2]
-        .replace(/\bconfidence\s*[:\-–—]\s*(high|medium|low)\b/i, "")
+        .replace(/\bconfidence\s*[:\-–—]\s*(high|medium|low|moderate|strong)\b/i, "")
         .trim();
       const publicationYear = citationMatch[3]?.trim();
 
       if (!organization || !sourceTitle || /\bsource\s+unavailable\b/i.test(sourceTitle)) {
-        return null;
+        return;
       }
 
-      return {
+      entries.push({
         sourceTitle,
         organization,
         ...(publicationYear ? { publicationYear } : {}),
         ...(fallbackConfidence ? { confidence: fallbackConfidence } : {}),
         ...(url ? { url } : {}),
-      };
-    })
-    .filter((citation): citation is CitationData => Boolean(citation));
+        sourceType: normalizeSourceType(line),
+      });
+    });
+  flushCurrent();
 
   const unique = new Map<string, CitationData>();
 
-  citations.forEach((citation) => {
+  entries.forEach((citation) => {
     const normalizedUrl = citation.url?.trim().toLowerCase().replace(/\/+$/, "");
     const key = normalizedUrl
       ? `url:${normalizedUrl}`
@@ -1168,7 +1315,6 @@ function parseCitations(content: string): CitationData[] {
           "source",
           normalizePdfText(citation.organization).toLowerCase().replace(/\W+/g, " ").trim(),
           normalizePdfText(citation.sourceTitle).toLowerCase().replace(/\W+/g, " ").trim(),
-          citation.publicationYear || "",
         ].join("|");
     const existing = unique.get(key);
 
@@ -1176,6 +1322,7 @@ function parseCitations(content: string): CitationData[] {
       ...citation,
       ...(existing?.url && !citation.url ? { url: existing.url } : {}),
       ...(existing?.confidence && !citation.confidence ? { confidence: existing.confidence } : {}),
+      ...(existing?.sourceType && !citation.sourceType ? { sourceType: existing.sourceType } : {}),
     });
   });
 
@@ -1205,6 +1352,12 @@ function Citation({ citation }: { citation?: CitationData }) {
           <p>
             <span className="text-zinc-500">Confidence</span>
             <span className="ml-2 text-zinc-200">{citation.confidence}</span>
+          </p>
+        ) : null}
+        {citation.sourceType ? (
+          <p>
+            <span className="text-zinc-500">Type</span>
+            <span className="ml-2 text-zinc-200">{citation.sourceType}</span>
           </p>
         ) : null}
       </div>
@@ -1389,6 +1542,15 @@ function compactPdfMetricValue(value: string) {
   return numericMatch?.[0]?.replace(/\s+/g, " ").replace(/([kKmMbB%])\s+([$€₺])/g, "$1$2") || cleanValue.split(/\s{2,}/)[0] || "";
 }
 
+function extractMarketSizeValue(content: string, label: string) {
+  const escapedLabel = escapeRegExp(label);
+  const direct = normalizePdfText(content).match(
+    new RegExp(`\\b${escapedLabel}\\b\\s*[:\\-–—]?\\s*((?:[<>~≈]?\\s*)?[€$₺]?\\s*\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT%])?)`, "i")
+  )?.[1];
+
+  return compactPdfMetricValue(direct || extractMetricValue(content, label));
+}
+
 function isMobilityReportContent(content: string) {
   return /\b(scooter|micromobility|micro mobility|shared mobility|bike sharing|bikeshare|per-ride|urban riders|commuters|fleet utilization|rental)\b/i.test(
     content
@@ -1487,10 +1649,33 @@ function extractConfidence(content: string) {
     return explicit;
   }
 
+  const scoreMatch = content.match(/\b(?:score|conviction)\s*(?:of|:)?\s*(\d{1,3})\s*\/\s*100\b/i);
+  const score = Number(scoreMatch?.[1] || NaN);
+
+  if (Number.isFinite(score)) {
+    return Math.max(0, Math.min(100, score));
+  }
+
   const percentMatch = content.match(/\b(\d{1,3})\s*%/);
   const percent = Number(percentMatch?.[1] || NaN);
 
-  return Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+  if (Number.isFinite(percent)) {
+    return Math.max(0, Math.min(100, percent));
+  }
+
+  if (/\b(high|strong)\s+(?:confidence|conviction)\b/i.test(content)) {
+    return 80;
+  }
+
+  if (/\b(medium|moderate)\s+(?:confidence|conviction)\b/i.test(content)) {
+    return 60;
+  }
+
+  if (/\b(low|weak)\s+(?:confidence|conviction)\b/i.test(content)) {
+    return 35;
+  }
+
+  return null;
 }
 
 function extractSectionSnippet(content: string, title: string) {
@@ -1792,12 +1977,14 @@ function formatPdfCitationContent(content: string) {
       const year = citation.publicationYear ? `\n  Year: ${citation.publicationYear}` : "";
       const confidence = citation.confidence ? `\n  Confidence: ${citation.confidence}` : "";
       const url = citation.url ? `\n  URL: ${citation.url}` : "";
+      const sourceType = citation.sourceType ? `\n  Type: ${citation.sourceType}` : "";
 
       return [
         `• ${citation.sourceTitle}`,
         `  Publisher: ${citation.organization}`,
         year,
         confidence,
+        sourceType,
         url,
       ].join("\n");
     })
@@ -2224,12 +2411,11 @@ function PremiumSectionVisual({ section }: { section: ReportSection }) {
     );
   }
 
-  if (field === "swotAnalysis") {
+if (field === "swotAnalysis") {
     return (
       <div className="mb-5 grid gap-3 md:grid-cols-2">
         {swotQuadrants.map(({ title, icon: Icon }) => {
-          const snippet = extractSectionSnippet(section.content, title);
-          const bullets = extractBullets(snippet || section.content, title);
+          const bullets = extractSwotBullets(section.content, title);
 
           return (
             <div key={title} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
@@ -3506,10 +3692,14 @@ const ReportPanel = memo(function ReportPanel({
       const bodyLineHeight = 5.85;
       const cardHeaderHeight = 25;
       const cardBottomPadding = 11;
-      const businessIdea = normalizePdfText(sourcePrompt || reportTitle);
       const fullReportContent = sections
         .map((section) => `${section.title}\n${section.content}`)
         .join("\n\n");
+      const businessIdea = deriveBusinessDescriptionFromSections(
+        sections,
+        reportTitle,
+        sourcePrompt
+      );
       const tocEntries: Array<{ title: string; page: number }> = [];
       let y = margin;
 
@@ -3742,7 +3932,7 @@ const ReportPanel = memo(function ReportPanel({
           ["SAM", "#115e59"],
           ["SOM", "#5eead4"],
         ] as const).map(([label, color]) => {
-          const value = compactPdfMetricValue(extractMetricValue(content, label));
+          const value = extractMarketSizeValue(`${content}\n${fullReportContent}`, label);
           const snippet = extractSectionSnippet(content, label);
           const description = normalizePdfText(snippet.replace(value, ""))
             .replace(new RegExp(`^${label}\\s*[:\\-–—]?`, "i"), "")
@@ -4005,7 +4195,10 @@ const ReportPanel = memo(function ReportPanel({
         if (section.field === "executiveRecommendation") {
           const selected = detectRecommendation(section.content) || "REVIEW";
           const decisionLabel = formatDecisionLabel(selected);
-          const confidence = extractConfidence(section.content);
+          const confidence =
+            extractConfidence(section.content) ??
+            extractConfidence(fullReportContent) ??
+            extractScore(fullReportContent, "Investment Score");
           const investmentRecommendation =
             extractMetricValue(section.content, "Investment Recommendation") ||
             extractMetricValue(section.content, "Recommendation") ||
@@ -4041,8 +4234,8 @@ const ReportPanel = memo(function ReportPanel({
           const recItems = [
             ["Confidence", confidence === null ? "—" : `${confidence}%`],
             ["Investment Recommendation", investmentRecommendation || "—"],
-            ["Main Risk", mainRisk || "See risk section"],
-            ["Next Action", nextAction || "Validate critical proof point"],
+            ["Main Risk", mainRisk || extractKeywordInsight(fullReportContent, ["risk", "threat"]) || "Primary risk is detailed in the risk analysis"],
+            ["Next Action", nextAction || extractKeywordInsight(fullReportContent, ["next action", "critical action", "validate"]) || "Validate the primary investment thesis"],
           ];
 
           recItems.forEach(([label, value], index) => {
@@ -4727,6 +4920,9 @@ export default function Planner({
   const [planReport, setPlanReport] = useState<PlanReport | null>(
     restoredPlanReport as PlanReport | null
   );
+  const [activeReportId, setActiveReportId] = useState(
+    () => initialReport?.id || getStoredActiveReportId()
+  );
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
@@ -4784,6 +4980,22 @@ export default function Planner({
     [activeConversationId, conversations]
   );
   const messages = activeConversation?.messages || [];
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      if (activeReportId) {
+        window.sessionStorage.setItem(ACTIVE_REPORT_ID_STORAGE_KEY, activeReportId);
+      } else {
+        window.sessionStorage.removeItem(ACTIVE_REPORT_ID_STORAGE_KEY);
+      }
+    } catch {
+      // Session storage is best-effort; report chat still works from server props.
+    }
+  }, [activeReportId]);
 
   useEffect(() => {
     if (conversationLoadError) {
@@ -4894,6 +5106,7 @@ export default function Planner({
     setReportGenerationWarning("");
     setMarketReport(null);
     setPlanReport(null);
+    setActiveReportId("");
     setWorkflowCompletedSteps(0);
     setReportProgress(0);
     setCurrentReportSectionName("");
@@ -5565,7 +5778,7 @@ export default function Planner({
 
       if (userError || !user) {
         console.error(userError || new Error("Authenticated user not found."));
-        return;
+        return "";
       }
 
       const destinationWorkspaceId =
@@ -5573,24 +5786,32 @@ export default function Planner({
 
       if (!destinationWorkspaceId) {
         console.error(new Error("Destination workspace not found."));
-        return;
+        return "";
       }
 
-      const { error } = await supabase.from("reports").insert({
-        user_id: user.id,
-        workspace_id: destinationWorkspaceId,
-        title,
-        prompt: promptText,
-        report_type: reportType,
-        status: persistedStatus,
-        sections: persistedSections,
-      });
+      const { data, error } = await supabase
+        .from("reports")
+        .insert({
+          user_id: user.id,
+          workspace_id: destinationWorkspaceId,
+          title,
+          prompt: promptText,
+          report_type: reportType,
+          status: persistedStatus,
+          sections: persistedSections,
+        })
+        .select("id")
+        .single();
 
       if (error) {
         console.error(error);
+        return "";
       }
+
+      return typeof data?.id === "string" ? data.id : "";
     } catch (error) {
       console.error(error);
+      return "";
     }
   }
 
@@ -5746,13 +5967,14 @@ export default function Planner({
       }
 
       output += decoder.decode(value, { stream: true });
-      onChunk(output);
+      onChunk(sanitizeAiResponseText(output));
     }
 
     output += decoder.decode();
-    onChunk(output);
+    const sanitizedOutput = sanitizeAiResponseText(output);
+    onChunk(sanitizedOutput);
 
-    return output.trim();
+    return sanitizedOutput;
   }
 
   async function sendChatMessage(
@@ -5848,6 +6070,7 @@ export default function Planner({
             textContent: attachment.textContent || "",
           })),
           messages: memoryMessages,
+          reportId: activeReportId,
         }),
       });
       const responseText = await readStreamingText(
@@ -6023,7 +6246,7 @@ export default function Planner({
         getReportMarkdown(copy.planTitle, reportOutput, outputFields),
         "complete"
       );
-      await saveGeneratedReport({
+      const savedReportId = await saveGeneratedReport({
         title: copy.planTitle,
         promptText: submittedPrompt,
         reportType: "business_plan",
@@ -6031,6 +6254,7 @@ export default function Planner({
         sections: serializedSections,
         expectedSectionCount: outputFields.length,
       });
+      setActiveReportId(savedReportId);
     } catch (error) {
       const errorMessage = getReportGenerationErrorMessage(error, copy.retryError);
       setReportGenerationError(errorMessage);
@@ -6225,7 +6449,7 @@ export default function Planner({
         getReportMarkdown(copy.marketTitle, reportOutput, outputFields),
         "complete"
       );
-      await saveGeneratedReport({
+      const savedReportId = await saveGeneratedReport({
         title: copy.marketTitle,
         promptText: submittedPrompt,
         reportType: "market_analysis",
@@ -6233,6 +6457,7 @@ export default function Planner({
         sections: serializedSections,
         expectedSectionCount: outputFields.length,
       });
+      setActiveReportId(savedReportId);
     } catch (error) {
       const errorMessage = getReportGenerationErrorMessage(
         error,
