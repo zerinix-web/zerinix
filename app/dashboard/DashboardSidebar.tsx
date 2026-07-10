@@ -17,13 +17,13 @@ export default function DashboardSidebar() {
   ];
 
   return (
-    <aside className="flex border-b border-white/10 bg-black/85 px-4 py-4 backdrop-blur-2xl lg:sticky lg:top-0 lg:min-h-screen lg:w-72 lg:flex-col lg:border-b-0 lg:border-r lg:border-white/10 lg:px-5 lg:py-6">
+    <aside className="flex border-b border-white/10 bg-black/80 px-4 py-4 shadow-2xl shadow-black/30 backdrop-blur-2xl lg:sticky lg:top-0 lg:min-h-screen lg:w-72 lg:flex-col lg:border-b-0 lg:border-r lg:border-white/10 lg:bg-black/65 lg:px-5 lg:py-6">
       <div className="hidden lg:block">
         <Link
           href="/"
-          className="group flex items-center gap-3 rounded-3xl border border-white/10 bg-white/[0.04] p-3 transition duration-200 hover:border-teal-300/25 hover:bg-teal-300/[0.06]"
+          className="group flex items-center gap-3 rounded-[1.65rem] border border-white/10 bg-white/[0.045] p-3 shadow-xl shadow-black/20 transition duration-300 hover:-translate-y-0.5 hover:border-teal-300/25 hover:bg-white/[0.065]"
         >
-          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-sm font-black tracking-[0.12em] text-black">
+          <span className="flex h-11 w-11 items-center justify-center rounded-[1.15rem] bg-white text-sm font-black tracking-[0.12em] text-black shadow-lg shadow-white/10">
             ZX
           </span>
           <span className="min-w-0">
@@ -37,9 +37,9 @@ export default function DashboardSidebar() {
           <ChevronRight className="ml-auto h-4 w-4 text-zinc-700 transition group-hover:text-teal-200" />
         </Link>
 
-        <div className="mt-4 rounded-3xl border border-teal-300/15 bg-teal-300/[0.055] p-4">
+        <div className="mt-4 rounded-[1.65rem] border border-teal-300/15 bg-teal-300/[0.055] p-4 shadow-xl shadow-teal-950/10">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10">
+            <div className="flex h-10 w-10 items-center justify-center rounded-[1rem] border border-teal-200/20 bg-teal-200/10">
               <ShieldCheck className="h-5 w-5 text-teal-200" />
             </div>
             <div>
@@ -58,9 +58,9 @@ export default function DashboardSidebar() {
             <Link
               key={item.href}
               href={item.href}
-              className="group flex shrink-0 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-medium text-zinc-300 transition duration-200 hover:-translate-y-0.5 hover:border-teal-300/30 hover:bg-teal-300/10 hover:text-white lg:w-full"
+              className="group flex shrink-0 items-center gap-3 rounded-[1.15rem] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-medium text-zinc-300 shadow-sm shadow-black/10 transition duration-300 hover:-translate-y-0.5 hover:border-teal-300/25 hover:bg-white/[0.065] hover:text-white lg:w-full"
             >
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-black/25 transition group-hover:border-teal-200/25 group-hover:bg-teal-200/10">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-black/25 transition duration-300 group-hover:border-teal-200/25 group-hover:bg-teal-200/10">
                 <Icon className="h-4 w-4 text-teal-200" />
               </span>
               <span>{item.label}</span>
@@ -73,7 +73,7 @@ export default function DashboardSidebar() {
       <form action={signOut} className="ml-2 lg:ml-0 lg:mt-6">
         <button
           type="submit"
-          className="flex items-center gap-3 rounded-2xl border border-white/10 bg-zinc-950 px-4 py-3 text-sm font-medium text-zinc-300 transition duration-200 hover:border-red-300/30 hover:bg-red-950/30 hover:text-white lg:w-full"
+          className="flex items-center gap-3 rounded-[1.15rem] border border-white/10 bg-zinc-950/80 px-4 py-3 text-sm font-medium text-zinc-300 transition duration-300 hover:-translate-y-0.5 hover:border-red-300/30 hover:bg-red-950/30 hover:text-white lg:w-full"
         >
           <LogOut className="h-4 w-4 text-red-200" />
           Logout

@@ -81,24 +81,24 @@ export default async function DashboardPage() {
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
-      <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.16),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.08),transparent_28%)]" />
+      <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.12),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.055),transparent_26%)]" />
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <DashboardSidebar />
 
-        <section className="flex-1 px-5 py-6 sm:px-8 lg:px-10 lg:py-8">
-          <div className="overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-950/75 shadow-2xl shadow-black/35">
-            <div className="relative p-6 sm:p-8 lg:p-9">
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.16),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.07),transparent_44%)]" />
-              <div className="relative flex flex-col gap-7 md:flex-row md:items-end md:justify-between">
+        <section className="flex-1 px-5 py-6 sm:px-8 lg:px-10 lg:py-9">
+          <div className="overflow-hidden rounded-[2.25rem] border border-white/10 bg-white/[0.045] shadow-2xl shadow-black/35 backdrop-blur-2xl">
+            <div className="relative p-6 sm:p-8 lg:p-10">
+              <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08),transparent_42%)]" />
+              <div className="relative flex flex-col gap-8 md:flex-row md:items-end md:justify-between">
                 <div>
-                  <div className="inline-flex items-center gap-2 rounded-full border border-teal-300/20 bg-teal-300/10 px-3 py-1 text-xs font-semibold tracking-[0.24em] text-teal-100">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-teal-300/20 bg-teal-300/10 px-3 py-1.5 text-xs font-semibold tracking-[0.24em] text-teal-100 shadow-lg shadow-teal-950/20">
                     <Sparkles className="h-3.5 w-3.5" />
                     USER DASHBOARD
                   </div>
-                  <h1 className="mt-4 text-4xl font-bold tracking-tight text-white md:text-5xl">
+                  <h1 className="mt-5 max-w-3xl text-4xl font-semibold tracking-tight text-white md:text-6xl">
                     Workspace Center
                   </h1>
-                  <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
+                  <p className="mt-4 max-w-2xl text-base leading-7 text-zinc-400">
                     Organize ZERINIX reports into focused workspaces and manage
                     business decisions through a structured intelligence system.
                   </p>
@@ -106,16 +106,16 @@ export default async function DashboardPage() {
 
                 <Link
                   href="/plan"
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-white/5 transition duration-200 hover:-translate-y-0.5 hover:bg-zinc-200"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black shadow-xl shadow-white/10 transition duration-300 hover:-translate-y-0.5 hover:bg-zinc-200"
                 >
                   <Plus className="h-4 w-4" />
                   Create New Report
                 </Link>
               </div>
 
-              <div className="relative mt-7 grid gap-3 border-t border-white/10 pt-5 sm:grid-cols-3">
+              <div className="relative mt-8 grid gap-3 border-t border-white/10 pt-5 sm:grid-cols-3">
                 {["Workspace reports", "Live sync", "PDF export"].map((item) => (
-                  <div key={item} className="flex items-center gap-2 text-sm text-zinc-400">
+                  <div key={item} className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-400">
                     <BadgeCheck className="h-4 w-4 text-teal-200" />
                     {item}
                   </div>
@@ -141,20 +141,20 @@ export default async function DashboardPage() {
               return (
                 <article
                   key={stat.label}
-                  className="group rounded-[1.5rem] border border-white/10 bg-zinc-950/75 p-5 shadow-2xl shadow-black/25 transition duration-200 hover:-translate-y-0.5 hover:border-teal-300/25 hover:bg-zinc-900/80"
+                  className="group rounded-[1.65rem] border border-white/10 bg-white/[0.045] p-5 shadow-2xl shadow-black/25 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-teal-300/20 hover:bg-white/[0.065]"
                 >
                   <div className="flex items-center justify-between gap-4">
-                    <div className={`flex h-11 w-11 items-center justify-center rounded-2xl border ${accentClass}`}>
+                    <div className={`flex h-11 w-11 items-center justify-center rounded-[1.05rem] border ${accentClass}`}>
                       <Icon className="h-5 w-5 text-teal-200" />
                     </div>
-                    <span className="rounded-full border border-white/10 bg-black/25 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-500 transition group-hover:text-teal-100">
+                    <span className="rounded-full border border-white/10 bg-black/25 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-500 transition duration-300 group-hover:text-teal-100">
                       Live
                     </span>
                   </div>
                   <p className="mt-5 text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">
                     {stat.label}
                   </p>
-                  <p className="mt-2 text-2xl font-semibold tracking-tight text-white">
+                  <p className="mt-2 text-3xl font-semibold tracking-tight text-white">
                     {stat.value}
                   </p>
                   <p className="mt-2 text-sm leading-5 text-zinc-500">

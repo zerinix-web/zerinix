@@ -88,19 +88,19 @@ export default async function UsageDashboardPage() {
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
-      <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.14),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.07),transparent_28%)]" />
+      <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.12),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.055),transparent_26%)]" />
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <DashboardSidebar />
 
-        <section className="flex-1 px-5 py-6 sm:px-8 lg:px-10 lg:py-8">
-          <div className="overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-950/75 p-6 shadow-2xl shadow-black/35 sm:p-8">
+        <section className="flex-1 px-5 py-6 sm:px-8 lg:px-10 lg:py-9">
+          <div className="overflow-hidden rounded-[2.25rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/35 backdrop-blur-2xl sm:p-8 lg:p-10">
             <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
               AI OPERATIONS
             </p>
-            <h1 className="mt-3 text-4xl font-bold tracking-tight text-white md:text-5xl">
+            <h1 className="mt-3 text-4xl font-semibold tracking-tight text-white md:text-5xl">
               Usage Intelligence
             </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
+            <p className="mt-4 max-w-2xl text-base leading-7 text-zinc-400">
               Monitor request volume, token consumption, cache efficiency and
               estimated AI spend before ZERINIX scales into heavier production
               traffic.
@@ -120,15 +120,15 @@ export default async function UsageDashboardPage() {
               return (
                 <article
                   key={card.label}
-                  className="rounded-[1.5rem] border border-white/10 bg-zinc-950/70 p-6 shadow-2xl shadow-black/30 transition duration-200 hover:-translate-y-0.5 hover:border-teal-300/25 hover:bg-zinc-900/80"
+                  className="group rounded-[1.65rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-teal-300/20 hover:bg-white/[0.065]"
                 >
                   <div className="flex items-center justify-between gap-4">
-                    <div className="rounded-2xl border border-teal-300/20 bg-teal-300/10 p-3">
+                    <div className="rounded-[1.05rem] border border-teal-300/20 bg-teal-300/10 p-3 shadow-lg shadow-teal-950/10">
                       <Icon className="h-5 w-5 text-teal-200" />
                     </div>
-                    <Gauge className="h-4 w-4 text-zinc-600" />
+                    <Gauge className="h-4 w-4 text-zinc-600 transition duration-300 group-hover:text-teal-200" />
                   </div>
-                  <p className="mt-5 text-sm font-medium text-zinc-400">
+                  <p className="mt-5 text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">
                     {card.label}
                   </p>
                   <p className="mt-2 text-3xl font-semibold tracking-tight text-white">
@@ -142,7 +142,7 @@ export default async function UsageDashboardPage() {
             })}
           </div>
 
-          <div className="mt-8 rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-6 shadow-2xl shadow-black/20">
+          <div className="mt-8 rounded-[1.75rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl">
             <h2 className="text-lg font-semibold text-white">
               Queue-Ready Architecture
             </h2>
@@ -154,7 +154,7 @@ export default async function UsageDashboardPage() {
           </div>
 
           {adminSummary ? (
-            <div className="mt-8 rounded-[1.5rem] border border-teal-300/15 bg-teal-300/[0.035] p-6 shadow-2xl shadow-black/25">
+            <div className="mt-8 rounded-[1.9rem] border border-teal-300/15 bg-teal-300/[0.035] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.28em] text-teal-200/75">
@@ -164,7 +164,7 @@ export default async function UsageDashboardPage() {
                     Daily AI Cost Dashboard
                   </h2>
                 </div>
-                <div className="rounded-2xl border border-teal-200/20 bg-black/35 px-4 py-3 text-right">
+                <div className="rounded-2xl border border-teal-200/20 bg-black/35 px-4 py-3 text-right shadow-lg shadow-teal-950/10">
                   <p className="text-xs text-zinc-500">Today</p>
                   <p className="text-xl font-semibold text-teal-100">
                     {formatCurrency(adminSummary.totalDailyCostUsd)}
@@ -179,7 +179,7 @@ export default async function UsageDashboardPage() {
               ) : null}
 
               <div className="mt-5 grid gap-4 xl:grid-cols-3">
-                <div className="rounded-3xl border border-white/10 bg-black/35 p-4">
+                <div className="rounded-3xl border border-white/10 bg-black/35 p-4 shadow-xl shadow-black/10">
                   <p className="text-sm font-semibold text-white">Cost per mode</p>
                   <div className="mt-3 space-y-3">
                     {adminSummary.costPerMode.map((item) => (
@@ -193,7 +193,7 @@ export default async function UsageDashboardPage() {
                   </div>
                 </div>
 
-                <div className="rounded-3xl border border-white/10 bg-black/35 p-4">
+                <div className="rounded-3xl border border-white/10 bg-black/35 p-4 shadow-xl shadow-black/10">
                   <p className="text-sm font-semibold text-white">Cost per user</p>
                   <div className="mt-3 space-y-3">
                     {adminSummary.costPerUser.map((item) => (
@@ -207,7 +207,7 @@ export default async function UsageDashboardPage() {
                   </div>
                 </div>
 
-                <div className="rounded-3xl border border-white/10 bg-black/35 p-4">
+                <div className="rounded-3xl border border-white/10 bg-black/35 p-4 shadow-xl shadow-black/10">
                   <p className="text-sm font-semibold text-white">Cache savings</p>
                   <p className="mt-3 text-3xl font-semibold text-teal-100">
                     {formatCurrency(adminSummary.cacheSavingsUsd)}
