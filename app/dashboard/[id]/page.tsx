@@ -26,10 +26,10 @@ export const dynamic = "force-dynamic";
 
 function formatDate(value: string) {
   if (!value) {
-    return "Tarih yok";
+    return "No date";
   }
 
-  return new Intl.DateTimeFormat("tr-TR", {
+  return new Intl.DateTimeFormat("en-US", {
     day: "2-digit",
     month: "long",
     year: "numeric",

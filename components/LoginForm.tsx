@@ -23,7 +23,7 @@ export default function LoginForm() {
       )}
 
       <label className="block">
-        <span className="text-sm font-medium text-gray-300">E-posta</span>
+        <span className="text-sm font-medium text-gray-300">Email</span>
         <input
           type="email"
           name="email"
@@ -34,7 +34,7 @@ export default function LoginForm() {
       </label>
 
       <label className="block">
-        <span className="text-sm font-medium text-gray-300">Şifre</span>
+        <span className="text-sm font-medium text-gray-300">Password</span>
         <input
           type="password"
           name="password"
@@ -51,7 +51,7 @@ export default function LoginForm() {
             name="remember"
             className="h-4 w-4 rounded border-white/10 bg-black accent-white"
           />
-          Beni hatırla
+          Remember me
         </label>
       </div>
 
@@ -60,7 +60,7 @@ export default function LoginForm() {
         disabled={pending}
         className="h-12 w-full rounded-2xl bg-white font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {pending ? "Giriş yapılıyor..." : "Giriş Yap"}
+        {pending ? "Signing in..." : "Sign In"}
       </button>
     </form>
   );

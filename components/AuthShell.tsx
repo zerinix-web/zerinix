@@ -35,7 +35,7 @@ export default function AuthShell({
             href="/plan"
             className="rounded-full border border-white/10 px-4 py-2 text-sm text-gray-300 transition hover:border-white/30 hover:text-white"
           >
-            Hedefimi Planla
+            Plan My Business
           </Link>
         </nav>
 
@@ -54,15 +54,15 @@ export default function AuthShell({
             <div className="mt-10 grid max-w-xl grid-cols-3 gap-3 border-y border-white/10 py-5 text-sm text-gray-400">
               <div>
                 <p className="text-2xl font-bold text-white">OS</p>
-                <p>strateji</p>
+                <p>strategy</p>
               </div>
               <div>
                 <p className="text-2xl font-bold text-white">AI</p>
-                <p>planlama</p>
+                <p>planning</p>
               </div>
               <div>
                 <p className="text-2xl font-bold text-white">HQ</p>
-                <p>operasyon</p>
+                <p>operations</p>
               </div>
             </div>
           </div>

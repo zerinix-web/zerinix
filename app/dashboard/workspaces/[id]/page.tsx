@@ -51,7 +51,7 @@ export default async function WorkspaceReportsPage({
                   {data.workspace.name}
                 </h1>
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
-                  Bu workspace içindeki raporları ara, aç ve dışa aktar.
+                  Search, open and export the reports inside this workspace.
                 </p>
               </div>
 
@@ -67,7 +67,7 @@ export default async function WorkspaceReportsPage({
 
           {data.error ? (
             <div className="mt-6 rounded-3xl border border-amber-300/20 bg-amber-950/20 p-5 text-sm leading-6 text-amber-100">
-              Workspace raporları şu anda okunamadı: {data.error}
+              Workspace reports could not be loaded right now: {data.error}
             </div>
           ) : null}
 

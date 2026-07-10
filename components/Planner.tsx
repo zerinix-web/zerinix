@@ -387,58 +387,8 @@ const planReportFields: Array<{
   { field: "sourcesAssumptions", title: "Sources / Assumptions", icon: FileText },
 ];
 
-const turkishReportSectionTitles: Partial<
-  Record<keyof (MarketReport & PlanReport), string>
-> = {
-  executiveSummary: "Yönetici Özeti",
-  marketOverview: "Pazar Genel Görünümü",
-  tamSamSom: "TAM / SAM / SOM",
-  industryTrends: "Sektör Trendleri",
-  competitorAnalysis: "Rakip Analizi",
-  customerPainPoints: "Müşteri Acı Noktaları",
-  opportunities: "Fırsatlar",
-  threats: "Tehditler",
-  swotAnalysis: "SWOT Analizi",
-  portersFiveForces: "Porter'ın Beş Gücü",
-  unitEconomics: "Birim Ekonomisi",
-  financialDashboard: "Finansal Dashboard",
-  scenarioAnalysis: "Senaryo Analizi: Kötü / Baz / İyi",
-  kpiDashboard: "KPI Dashboard",
-  executiveRecommendation: "Yönetici Tavsiyesi",
-  entryStrategy: "Pazara Giriş Stratejisi",
-  validationPlan: "Doğrulama Planı",
-  founderRoadmap: "Kurucu Yol Haritası",
-  keyMetrics: "Temel Metrikler",
-  sourcesAssumptions: "Kaynaklar / Varsayımlar",
-  sources: "Kaynaklar",
-  problem: "Problem",
-  solution: "Çözüm",
-  marketOpportunity: "Pazar Fırsatı",
-  competitorLandscape: "Rakip Haritası",
-  businessModel: "İş Modeli",
-  targetCustomer: "Hedef Müşteri / ICP",
-  pricingStrategy: "Fiyatlandırma Stratejisi",
-  goToMarketPlan: "Pazara Giriş Planı",
-  salesStrategy: "Satış Stratejisi",
-  risks: "Riskler",
-  kpis: "KPI'lar",
-  roadmap306090: "30-60-90 Günlük Yol Haritası",
-  financialAssumptions: "Finansal Varsayımlar",
-  founderScore: "100 Üzerinden AI Kurucu Skoru",
-};
-
-function localizeReportFields<T extends ReportFieldDefinition>(
-  fields: T[],
-  language: ResponseLanguage
-) {
-  if (language === "English") {
-    return fields;
-  }
-
-  return fields.map((field) => ({
-    ...field,
-    title: turkishReportSectionTitles[field.field] || field.title,
-  }));
+function localizeReportFields<T extends ReportFieldDefinition>(fields: T[]) {
+  return fields;
 }
 
 const emptyMarketReport: MarketReport = {
@@ -603,20 +553,20 @@ function detectResponseLanguage(value: string): ResponseLanguage {
 function getLanguageCopy(language: ResponseLanguage) {
   if (language === "Turkish") {
     return {
-      planTitle: "İş Planı Raporu",
-      marketTitle: "Pazar Analizi Raporu",
-      preparingPlan: "## İş Planı Raporu\n\nİlk bölümler hazırlanıyor...",
-      preparingMarket: "## Pazar Analizi Raporu\n\nCanlı pazar araştırması hazırlanıyor...",
-      waitingSection: "Bu bölüm için AI çıktısı bekleniyor.",
-      sectionFallback: "Bu bölüm için AI çıktısı alınamadı.",
-      genericError: "Bir hata oluştu.",
-      retryError: "Bir hata oluştu. Lütfen tekrar deneyin.",
-      marketError: "Pazar analizi sırasında bir hata oluştu.",
-      marketRetryError: "Pazar analizi sırasında bir hata oluştu. Lütfen tekrar deneyin.",
+      planTitle: "Business Plan Report",
+      marketTitle: "Business Intelligence Report",
+      preparingPlan: "## Business Plan Report\n\nPreparing the first sections...",
+      preparingMarket: "## Business Intelligence Report\n\nPreparing live market research...",
+      waitingSection: "This section is waiting for AI output.",
+      sectionFallback: "AI output could not be received for this section.",
+      genericError: "Something went wrong.",
+      retryError: "Something went wrong. Please try again.",
+      marketError: "Something went wrong during market analysis.",
+      marketRetryError: "Something went wrong during market analysis. Please try again.",
       planClarification:
-        "Lütfen planlamak istediğin iş fikrini birkaç kelimeyle yaz. Örneğin: premium hastane zinciri, AI hukuk asistanı veya lüks otel markası.",
+        "Please enter the business idea you want to plan. For example: luxury hotel brand, AI legal assistant, or premium private hospital chain.",
       marketClarification:
-        "Lütfen analiz etmemi istediğin iş fikri veya sektörü yaz. Örneğin: lüks otel markası, elektrikli yat şirketi veya EV batarya üreticisi.",
+        "Please enter the business idea or industry you want analyzed. For example: luxury hotel brand, electric yacht company, or EV battery manufacturer.",
     };
   }
 
@@ -645,9 +595,7 @@ function createClarificationQuestionForLanguage(
   const copy = getLanguageCopy(language);
 
   if (mode === "chat") {
-    return language === "Turkish"
-      ? "Nasıl yardımcı olmamı istersin? İş, strateji, ürün, finans veya genel bir konuda kısa bir soru yazabilirsin."
-      : "How can I help? You can ask about business, strategy, product, finance, or any general topic.";
+    return "How can I help? You can ask about business, strategy, product, finance, or any general topic.";
   }
 
   return mode === "market" ? copy.marketClarification : copy.planClarification;
@@ -727,9 +675,7 @@ function isReportPreparingPreview(content: string) {
 
   return (
     preview.includes("preparing the first sections") ||
-    preview.includes("preparing live market research") ||
-    preview.includes("ilk bölümler hazırlanıyor") ||
-    preview.includes("canlı pazar araştırması hazırlanıyor")
+    preview.includes("preparing live market research")
   );
 }
 
@@ -3187,7 +3133,7 @@ const ReportPanel = memo(function ReportPanel({
     }
 
     if (!pdfFontBase64) {
-      setPdfError("PDF fontu yükleniyor. Lütfen birkaç saniye sonra tekrar deneyin.");
+      setPdfError("PDF font is still loading. Please try again in a few seconds.");
       return;
     }
 
@@ -4097,7 +4043,7 @@ const ReportPanel = memo(function ReportPanel({
         if (!openedWindow) {
           URL.revokeObjectURL(url);
           setPdfError(
-            "Safari PDF sekmesini engelledi. Lütfen açılır pencerelere izin verip tekrar deneyin."
+            "Safari blocked the PDF tab. Please allow pop-ups and try again."
           );
           return;
         }
@@ -4122,7 +4068,7 @@ const ReportPanel = memo(function ReportPanel({
       }
     } catch (error) {
       console.error(error);
-      setPdfError("PDF oluşturulamadı. Lütfen tekrar deneyin.");
+      setPdfError("PDF could not be created. Please try again.");
     } finally {
       setExportingPdf(false);
     }
@@ -4272,7 +4218,7 @@ const ReportPanel = memo(function ReportPanel({
               className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-zinc-900 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:border-white/20 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Download className="h-4 w-4 text-teal-200" />
-              {exportingPdf ? "PDF hazırlanıyor..." : "Download PDF"}
+              {exportingPdf ? "Preparing PDF..." : "Download PDF"}
             </button>
             {pdfError ? (
               <p className="sm:col-span-2 text-sm leading-6 text-red-300">
@@ -5522,7 +5468,7 @@ export default function Planner({
     setCurrentReportSectionName("Preparing report engine");
     const responseLanguage = detectResponseLanguage(submittedPrompt);
     const copy = getLanguageCopy(responseLanguage);
-    const outputFields = localizeReportFields(planReportFields, responseLanguage);
+    const outputFields = localizeReportFields(planReportFields);
     setActiveReportLanguage(responseLanguage);
     const conversationId = activeConversationId;
     const reportRequestId = createMessageId();
@@ -5705,7 +5651,7 @@ export default function Planner({
     setCurrentReportSectionName("Preparing report engine");
     const responseLanguage = detectResponseLanguage(submittedPrompt);
     const copy = getLanguageCopy(responseLanguage);
-    const outputFields = localizeReportFields(reportFields, responseLanguage);
+    const outputFields = localizeReportFields(reportFields);
     setActiveReportLanguage(responseLanguage);
     const conversationId = activeConversationId;
     const reportRequestId = createMessageId();
@@ -5907,13 +5853,13 @@ export default function Planner({
   const activeReportFields = useMemo(
     () =>
       (activeReportMode === "plan"
-        ? localizeReportFields(planReportFields, currentResponseLanguage)
-        : localizeReportFields(reportFields, currentResponseLanguage)) as Array<{
+        ? localizeReportFields(planReportFields)
+        : localizeReportFields(reportFields)) as Array<{
         field: keyof (MarketReport & PlanReport);
         title: string;
         icon: LucideIcon;
       }>,
-    [activeReportMode, currentResponseLanguage]
+    [activeReportMode]
   );
   const currentReportTitle = activeReportMode === "plan"
     ? currentLanguageCopy.planTitle

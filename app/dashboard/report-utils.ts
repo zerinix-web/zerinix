@@ -189,7 +189,7 @@ function normalizeSections(row: ReportRow) {
 
   return fallbackContent
     ? [{ title: "Report", content: fallbackContent }]
-    : [{ title: "Report", content: "Bu raporun detay içeriği henüz kaydedilmemiş." }];
+    : [{ title: "Report", content: "Detailed report content has not been saved yet." }];
 }
 
 export function normalizeReport(row: ReportRow): DashboardReport {

@@ -96,11 +96,11 @@ export default async function DashboardPage() {
                     USER DASHBOARD
                   </div>
                   <h1 className="mt-4 text-4xl font-bold tracking-tight text-white md:text-5xl">
-                    Workspace Merkezi
+                    Workspace Center
                   </h1>
                   <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
-                    ZERINIX raporlarını workspace&apos;lere ayır, ekipli düşün ve iş
-                    kararlarını düzenli bir rapor sistemi içinde yönet.
+                    Organize ZERINIX reports into focused workspaces and manage
+                    business decisions through a structured intelligence system.
                   </p>
                 </div>
 
@@ -167,7 +167,7 @@ export default async function DashboardPage() {
 
           {error ? (
             <div className="mt-6 rounded-3xl border border-amber-300/20 bg-amber-950/20 p-5 text-sm leading-6 text-amber-100">
-              Supabase workspace verileri şu anda okunamadı: {error}
+              Workspace data could not be loaded right now: {error}
             </div>
           ) : null}
 

@@ -240,30 +240,7 @@ const fieldLabelsByLanguage: Record<
   Record<MarketReportField, string>
 > = {
   English: fieldLabels,
-  Turkish: {
-    executiveSummary: "Yönetici Özeti",
-    marketOverview: "Pazar Genel Görünümü",
-    tamSamSom: "TAM / SAM / SOM",
-    industryTrends: "Sektör Trendleri",
-    targetCustomer: "Hedef Müşteri",
-    competitorAnalysis: "Rakip Analizi",
-    customerPainPoints: "Müşteri Acı Noktaları",
-    opportunities: "Fırsatlar",
-    threats: "Tehditler",
-    swotAnalysis: "SWOT Analizi",
-    portersFiveForces: "Porter'ın Beş Gücü",
-    unitEconomics: "Birim Ekonomisi",
-    financialDashboard: "Finansal Dashboard",
-    scenarioAnalysis: "Senaryo Analizi: Kötü / Baz / İyi",
-    kpiDashboard: "KPI Dashboard",
-    executiveRecommendation: "Yönetici Tavsiyesi",
-    entryStrategy: "Pazara Giriş Stratejisi",
-    validationPlan: "Doğrulama Planı",
-    keyMetrics: "Temel Metrikler",
-    founderRoadmap: "Kurucu Yol Haritası",
-    sourcesAssumptions: "Kaynaklar / Varsayımlar",
-    sources: "Kaynaklar",
-  },
+  Turkish: fieldLabels,
 };
 
 const marketReportTermReplacements: Array<[RegExp, string]> = [
@@ -601,10 +578,8 @@ function isWeakMarketPrompt(value: string) {
   return isAmbiguousBusinessRequest(value);
 }
 
-function clarificationMessage(language: ResponseLanguage) {
-  return language === "Turkish"
-    ? "Daha güçlü bir pazar analizi için lütfen iş fikrini veya sektörü, hedef müşteriyi ve hedef ülke/pazarı biraz daha detaylandır."
-    : "Please add a little more detail for a useful market analysis: the business idea or industry, target customer, and target country or market.";
+function clarificationMessage() {
+  return "Please add a little more detail for a useful market analysis: the business idea or industry, target customer, and target country or market.";
 }
 
 export async function POST(req: Request) {
@@ -677,7 +652,7 @@ export async function POST(req: Request) {
 
     if (isWeakMarketPrompt(promptText)) {
       return NextResponse.json(
-        { error: clarificationMessage(responseLanguage) },
+        { error: clarificationMessage() },
         { status: 422 }
       );
     }

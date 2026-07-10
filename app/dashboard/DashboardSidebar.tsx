@@ -31,7 +31,7 @@ export default function DashboardSidebar() {
               ZERINIX
             </span>
             <span className="mt-0.5 block text-xs text-zinc-500">
-              AI işletim sistemi
+              AI operating system
             </span>
           </span>
           <ChevronRight className="ml-auto h-4 w-4 text-zinc-700 transition group-hover:text-teal-200" />

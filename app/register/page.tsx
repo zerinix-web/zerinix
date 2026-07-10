@@ -7,11 +7,11 @@ export default async function RegisterPage() {
   return (
     <AuthShell
       eyebrow="ZERINIX ACCESS"
-      title="Private beta erişimi kontrollü olarak açılıyor."
-      subtitle="ZERINIX, girişimciler için AI iş planlama, pazar zekası ve stratejik raporları premium bir çalışma alanında birleştirir."
-      footerText="Zaten hesabın var mı?"
+      title="ZERINIX Private Beta"
+      subtitle="AI business planning, market intelligence and strategic reports for founders building serious companies."
+      footerText="Already invited?"
       footerHref="/login"
-      footerLinkText="Giriş yap"
+      footerLinkText="Sign in"
     >
       <div className="rounded-[28px] border border-teal-300/20 bg-teal-300/[0.055] p-5">
         <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-teal-200/25 bg-teal-200/10 text-xl">
@@ -25,11 +25,11 @@ export default async function RegisterPage() {
         </h2>
         <div className="mt-5 space-y-4 text-sm leading-7 text-zinc-300">
           <p>
-            Şu anda yalnızca davet edilen kullanıcılar hesap oluşturabilir.
+            ZERINIX is currently available by invitation only.
           </p>
           <p>
-            ZERINIX&apos;i en yüksek kalite standartlarında geliştirebilmek için
-            yeni kullanıcıları kontrollü olarak kabul ediyoruz.
+            We are onboarding new founders in small groups while we refine the
+            platform.
           </p>
         </div>
 
@@ -37,7 +37,7 @@ export default async function RegisterPage() {
           href="mailto:admin@zerinix.com?subject=ZERINIX%20Private%20Beta"
           className="mt-7 inline-flex h-12 w-full items-center justify-center rounded-2xl bg-white px-5 text-sm font-semibold text-black shadow-lg shadow-white/10 transition duration-200 hover:-translate-y-0.5 hover:bg-zinc-200"
         >
-          Erken Erişim Talep Et
+          Request Early Access
         </a>
       </div>
     </AuthShell>

@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "ZERINIX",
-  description: "Girişimciler için premium AI işletim sistemi.",
+  description: "A premium AI operating system for founders.",
 };
 
 export default function RootLayout({

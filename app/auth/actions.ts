@@ -32,7 +32,7 @@ export async function loginWithPassword(
 
   if (!email || !password) {
     return {
-      error: "E-posta ve şifre alanlarını doldur.",
+      error: "Enter your email and password.",
     };
   }
 
@@ -45,7 +45,7 @@ export async function loginWithPassword(
 
   if (error) {
     return {
-      error: "Giriş bilgilerini kontrol edip tekrar dene.",
+      error: "Check your email and password, then try again.",
     };
   }
 

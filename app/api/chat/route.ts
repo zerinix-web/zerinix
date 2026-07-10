@@ -509,31 +509,11 @@ function getEssentialAdvisorQuestions(
 }
 
 function buildAdvisorClarification(
-  prompt: string,
+  _prompt: string,
   missing: string[],
   expert: AiExpert
 ) {
-  const language = detectResponseLanguage(prompt);
   const requested = missing;
-
-  if (language === "Turkish") {
-    const labels: Record<string, string> = {
-      country: "ülke / hedef pazar",
-      budget: "bütçe",
-      "risk tolerance": "risk toleransı",
-      experience: "deneyim",
-      "available time": "ayırabileceğin zaman",
-      goals: "ana hedef",
-    };
-
-    return [
-      `${expert} olarak sana gerçekten uygulanabilir öneriler verebilmem için birkaç bilgiye ihtiyacım var:`,
-      "",
-      ...requested.map((item, index) => `${index + 1}. ${labels[item] || item}?`),
-      "",
-      "Kısa cevap verebilirsin; sonra önerileri sıralayıp yatırım tutarı, zaman çizelgesi, riskler ve sonraki adımlarla çıkaracağım.",
-    ].join("\n");
-  }
 
   const labels: Record<string, string> = {
     country: "country / target market",

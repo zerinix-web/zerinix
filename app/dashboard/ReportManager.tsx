@@ -14,10 +14,10 @@ import type { DashboardReport } from "./report-utils";
 
 function formatDate(value: string) {
   if (!value) {
-    return "Tarih yok";
+    return "No date";
   }
 
-  return new Intl.DateTimeFormat("tr-TR", {
+  return new Intl.DateTimeFormat("en-US", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -83,7 +83,7 @@ export default function ReportManager({ reports }: { reports: DashboardReport[] 
               </div>
 
               <p className="mt-5 inline-flex rounded-xl border border-teal-300/15 bg-teal-300/[0.06] px-3 py-2 text-sm font-medium text-teal-100 transition duration-200 group-hover:border-teal-300/30 group-hover:bg-teal-300/10">
-                Raporu aç
+                Open report
               </p>
             </Link>
           );
@@ -96,10 +96,10 @@ export default function ReportManager({ reports }: { reports: DashboardReport[] 
             <FileText className="h-6 w-6 text-teal-200" />
           </div>
           <h2 className="mt-5 text-2xl font-semibold text-white">
-            Henüz kayıtlı rapor yok
+            No saved reports yet
           </h2>
           <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-zinc-500">
-            İlk ZERINIX raporunu oluşturduğunda burada listelenecek.
+            Your first ZERINIX report will appear here once it is created.
           </p>
           <Link
             href="/plan"

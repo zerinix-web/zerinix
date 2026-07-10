@@ -170,64 +170,40 @@ const FULL_REPORT_MAX_OUTPUT_TOKENS = 12_000;
 
 type ResponseLanguage = "English" | "Turkish";
 
+const englishPlanFieldLabels: Record<PlanReportField, string> = {
+  executiveSummary: "Executive Summary",
+  problem: "Problem",
+  solution: "Solution",
+  targetCustomer: "Target Customer / ICP",
+  marketOpportunity: "Market Opportunity",
+  competitorLandscape: "Competitor Landscape",
+  businessModel: "Business Model",
+  tamSamSom: "TAM / SAM / SOM",
+  swotAnalysis: "SWOT Analysis",
+  portersFiveForces: "Porter's Five Forces",
+  pricingStrategy: "Pricing Strategy",
+  goToMarketPlan: "Go-to-Market Plan",
+  salesStrategy: "Sales Strategy",
+  unitEconomics: "Unit Economics",
+  financialDashboard: "Financial Dashboard",
+  scenarioAnalysis: "Scenario Analysis: Worst / Base / Best Case",
+  kpiDashboard: "KPI Dashboard",
+  executiveRecommendation: "Executive Recommendation",
+  risks: "Risks",
+  kpis: "KPIs",
+  founderRoadmap: "Founder Roadmap",
+  roadmap306090: "30-60-90 Day Roadmap",
+  financialAssumptions: "Financial Assumptions",
+  founderScore: "Founder Score",
+  sourcesAssumptions: "Sources / Assumptions",
+};
+
 const planFieldLabels: Record<
   ResponseLanguage,
   Record<PlanReportField, string>
 > = {
-  English: {
-    executiveSummary: "Executive Summary",
-    problem: "Problem",
-    solution: "Solution",
-    targetCustomer: "Target Customer / ICP",
-    marketOpportunity: "Market Opportunity",
-    competitorLandscape: "Competitor Landscape",
-    businessModel: "Business Model",
-    tamSamSom: "TAM / SAM / SOM",
-    swotAnalysis: "SWOT Analysis",
-    portersFiveForces: "Porter's Five Forces",
-    pricingStrategy: "Pricing Strategy",
-    goToMarketPlan: "Go-to-Market Plan",
-    salesStrategy: "Sales Strategy",
-    unitEconomics: "Unit Economics",
-    financialDashboard: "Financial Dashboard",
-    scenarioAnalysis: "Scenario Analysis: Worst / Base / Best Case",
-    kpiDashboard: "KPI Dashboard",
-    executiveRecommendation: "Executive Recommendation",
-    risks: "Risks",
-    kpis: "KPIs",
-    founderRoadmap: "Founder Roadmap",
-    roadmap306090: "30-60-90 Day Roadmap",
-    financialAssumptions: "Financial Assumptions",
-    founderScore: "Founder Score",
-    sourcesAssumptions: "Sources / Assumptions",
-  },
-  Turkish: {
-    executiveSummary: "Yönetici Özeti",
-    problem: "Problem",
-    solution: "Çözüm",
-    targetCustomer: "Hedef Müşteri / ICP",
-    marketOpportunity: "Pazar Fırsatı",
-    competitorLandscape: "Rakip Haritası",
-    businessModel: "İş Modeli",
-    tamSamSom: "TAM / SAM / SOM",
-    swotAnalysis: "SWOT Analizi",
-    portersFiveForces: "Porter'ın Beş Gücü",
-    pricingStrategy: "Fiyatlandırma Stratejisi",
-    goToMarketPlan: "Pazara Giriş Planı",
-    salesStrategy: "Satış Stratejisi",
-    unitEconomics: "Birim Ekonomisi",
-    financialDashboard: "Finansal Dashboard",
-    scenarioAnalysis: "Senaryo Analizi: Kötü / Baz / İyi",
-    kpiDashboard: "KPI Dashboard",
-    executiveRecommendation: "Yönetici Tavsiyesi",
-    risks: "Riskler",
-    kpis: "KPI'lar",
-    founderRoadmap: "Kurucu Yol Haritası",
-    roadmap306090: "30-60-90 Gün Yol Haritası",
-    financialAssumptions: "Finansal Varsayımlar",
-    founderScore: "Kurucu Skoru",
-    sourcesAssumptions: "Kaynaklar / Varsayımlar",
-  },
+  English: englishPlanFieldLabels,
+  Turkish: englishPlanFieldLabels,
 };
 
 function detectLanguage(value: string): ResponseLanguage {
@@ -516,10 +492,8 @@ function isWeakBusinessPrompt(value: string) {
   return isAmbiguousBusinessRequest(value);
 }
 
-function clarificationMessage(language: ResponseLanguage) {
-  return language === "Turkish"
-    ? "Daha güçlü bir iş raporu hazırlamam için lütfen iş fikrini biraz daha aç: ürün/hizmet nedir, hedef müşteri kimdir ve hangi pazarda başlamak istiyorsun?"
-    : "Please add a little more detail so I can generate a useful business report: what is the product or service, who is the target customer, and which market do you want to start in?";
+function clarificationMessage() {
+  return "Please add a little more detail so I can generate a useful business report: what is the product or service, who is the target customer, and which market do you want to start in?";
 }
 
 export async function POST(req: Request) {
@@ -591,7 +565,7 @@ export async function POST(req: Request) {
 
     if (isWeakBusinessPrompt(promptText)) {
       return NextResponse.json(
-        { error: clarificationMessage(responseLanguage) },
+        { error: clarificationMessage() },
         { status: 422 }
       );
     }

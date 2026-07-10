@@ -621,7 +621,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
     }
 
     if (!fontBase64) {
-      setError("PDF fontu yükleniyor. Lütfen birkaç saniye sonra tekrar deneyin.");
+      setError("PDF font is still loading. Please try again in a few seconds.");
       return;
     }
 
@@ -912,8 +912,8 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
       const meta = `${report.type} - ${
         report.createdAt
-          ? new Date(report.createdAt).toLocaleDateString("tr-TR")
-          : "Tarih yok"
+          ? new Date(report.createdAt).toLocaleDateString("en-US")
+          : "No date"
       }`;
       pdf.setFontSize(8.5);
       pdf.setTextColor("#a1a1aa");
@@ -1612,7 +1612,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
         if (!openedWindow) {
           URL.revokeObjectURL(url);
-          setError("Safari PDF sekmesini engelledi. Lütfen açılır pencerelere izin verip tekrar deneyin.");
+          setError("Safari blocked the PDF tab. Please allow pop-ups and try again.");
           return;
         }
 
@@ -1632,7 +1632,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       }
     } catch (downloadError) {
       console.error(downloadError);
-      setError("PDF oluşturulamadı. Lütfen tekrar deneyin.");
+      setError("PDF could not be created. Please try again.");
     } finally {
       setExporting(false);
     }
@@ -1647,7 +1647,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl border border-teal-200/30 bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/30 transition hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Download className="h-4 w-4 text-black" />
-        {exporting ? "PDF hazırlanıyor..." : "Download PDF"}
+        {exporting ? "Preparing PDF..." : "Download PDF"}
       </button>
       {error ? (
         <p className="mt-3 max-w-xs text-sm leading-6 text-red-300">{error}</p>
