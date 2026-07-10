@@ -164,6 +164,23 @@ test("PDF OCR normalizer covers final production token examples", () => {
   assert.equal(pdfNormalizerSource.includes("1\\s*[-–]\\s*80\\s+days?"), true);
 });
 
+test("PDF OCR normalizer fixes final production artifact list", () => {
+  const normalize = (value) => normalizePdfText(value).replace(/\u00a0/g, " ");
+
+  assert.equal(normalize("lastmile delivery"), "last mile delivery");
+  assert.equal(normalize("publicsector procurement"), "public sector procurement");
+  assert.equal(normalize("minimumrevenue guarantee"), "minimum revenue guarantee");
+  assert.equal(normalize("wellfunded incumbent"), "well funded incumbent");
+  assert.equal(normalize("onepager brief"), "one-pager brief");
+  assert.equal(normalize("thirdparty operator"), "third-party operator");
+  assert.equal(normalize("EScooter permits"), "E-Scooter permits");
+  assert.equal(normalize("post2026 regulation"), "post-2026 regulation");
+  assert.equal(normalize("3month pilot"), "3-month pilot");
+  assert.equal(normalize("12month runway"), "12-month runway");
+  assert.equal(normalize("1224 month validation"), "12–24 months validation");
+  assert.equal(normalize("1224-month contract"), "12–24-month contract");
+});
+
 test("PDF bullet wrapping removes orphan SWOT heading bullets", () => {
   for (const file of pdfSurfaceFiles) {
     const source = readFileSync(file, "utf8");
@@ -238,10 +255,10 @@ test("PDF final rendered text path applies shared OCR normalization before orpha
 
   assert.match(output, /Year 1/);
   assert.match(output, /Month 12/);
-  assert.match(output, /last-mile/);
+  assert.match(output, /last mile/);
   assert.match(output, /public sector/);
   assert.match(output, /minimum revenue/);
-  assert.match(output, /well-funded/);
+  assert.match(output, /well funded/);
   assert.match(output, /one-pager/);
   assert.match(output, /post-2026/);
   assert.match(output, /2 municipal/);
