@@ -109,6 +109,29 @@ const security = [
   "AI usage accounting and cost limits",
 ];
 
+const faqs = [
+  {
+    question: "Who is ZERINIX built for?",
+    answer:
+      "ZERINIX is built for founders, operators and early teams who need sharper business planning, market diligence and investor-ready strategic reports before committing time or capital.",
+  },
+  {
+    question: "Does ZERINIX replace consultants or analysts?",
+    answer:
+      "No. ZERINIX helps founders structure decisions faster, pressure-test assumptions and prepare better inputs for investors, advisors and internal teams.",
+  },
+  {
+    question: "Can I export reports?",
+    answer:
+      "Yes. Saved reports can be opened from the dashboard and exported as polished PDFs for review, sharing and decision meetings.",
+  },
+  {
+    question: "Is ZERINIX available publicly?",
+    answer:
+      "ZERINIX is currently in private beta. Early access is controlled so we can keep quality, reliability and cost discipline high while the product matures.",
+  },
+];
+
 export default function Home() {
   return (
     <main className="min-h-screen overflow-x-hidden bg-black text-white">
@@ -183,6 +206,10 @@ export default function Home() {
               <ChevronRight className="h-4 w-4" />
             </Link>
           </div>
+          <p className="mt-4 max-w-xl text-sm leading-6 text-zinc-500">
+            No public signup yet. Request early access or sign in if you already
+            have an invited account.
+          </p>
 
           <div className="mt-10 grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3">
             {[
@@ -403,6 +430,65 @@ export default function Home() {
               </div>
             </article>
           ))}
+        </div>
+      </section>
+
+      <section className="mx-auto w-full max-w-7xl px-5 py-20 sm:px-8">
+        <div className="grid gap-8 lg:grid-cols-[0.82fr_1.18fr]">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-teal-200">
+              FAQ
+            </p>
+            <h2 className="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+              Clear answers before you enter the workspace.
+            </h2>
+            <p className="mt-5 max-w-md text-sm leading-7 text-zinc-500">
+              ZERINIX is focused on serious founder work: planning, market
+              analysis, reports, decisions and secure workspace history.
+            </p>
+          </div>
+
+          <div className="grid gap-3">
+            {faqs.map((item) => (
+              <article
+                key={item.question}
+                className="rounded-3xl border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/20 backdrop-blur-xl"
+              >
+                <h3 className="text-lg font-semibold tracking-tight text-white">
+                  {item.question}
+                </h3>
+                <p className="mt-3 text-sm leading-7 text-zinc-400">
+                  {item.answer}
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
+        <div className="overflow-hidden rounded-[2rem] border border-teal-300/20 bg-teal-300/[0.06] p-8 shadow-2xl shadow-teal-950/20 backdrop-blur-2xl sm:p-10">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-teal-100/80">
+                Private beta
+              </p>
+              <h2 className="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-white sm:text-5xl">
+                Build the next version of your company with a sharper operating system.
+              </h2>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row lg:flex-col xl:flex-row">
+              <WaitlistForm />
+              <Link
+                href="/login?next=/plan"
+                prefetch={false}
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-white/12 bg-white/[0.055] px-6 py-3 text-sm font-semibold text-white transition hover:border-white/30 hover:bg-white/[0.1]"
+              >
+                Developer Login
+                <ChevronRight className="h-4 w-4" />
+              </Link>
+            </div>
+          </div>
         </div>
       </section>
 
