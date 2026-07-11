@@ -594,16 +594,17 @@ const ChatBubble = memo(function ChatBubble({
   return (
     <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser ? (
-        <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-teal-300/20 bg-teal-300/10">
+        <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-teal-300/20 bg-teal-300/10 shadow-lg shadow-teal-950/10">
           <Bot className="h-5 w-5 text-teal-100" />
         </div>
       ) : null}
       <article
-        className={`w-full min-w-0 max-w-3xl rounded-[1.5rem] border p-5 shadow-xl shadow-black/20 ${
+        className={`w-full min-w-0 max-w-3xl rounded-[1.65rem] border p-5 shadow-xl shadow-black/20 transition duration-300 ${
           isUser
             ? "border-teal-300/20 bg-teal-300/10"
             : "border-white/10 bg-zinc-950/80"
         }`}
+        style={{ contain: message.status === "streaming" ? "layout paint" : undefined }}
       >
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs font-semibold tracking-[0.2em] text-zinc-500">
@@ -619,7 +620,7 @@ const ChatBubble = memo(function ChatBubble({
             <button
               type="button"
               onClick={copyMessage}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1 text-xs text-zinc-300 transition hover:bg-white/10 hover:text-white"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1 text-xs text-zinc-300 transition hover:border-teal-300/20 hover:bg-white/10 hover:text-white"
             >
               {copied ? (
                 <ClipboardCheck className="h-3.5 w-3.5 text-teal-200" />
@@ -635,7 +636,7 @@ const ChatBubble = memo(function ChatBubble({
                   setDraft(message.content);
                   setEditing(true);
                 }}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1 text-xs text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1 text-xs text-zinc-300 transition hover:border-teal-300/20 hover:bg-white/10 hover:text-white"
               >
                 <Edit3 className="h-3.5 w-3.5 text-teal-200" />
                 Edit
@@ -644,7 +645,7 @@ const ChatBubble = memo(function ChatBubble({
               <button
                 type="button"
                 onClick={onRegenerate}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1 text-xs text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1 text-xs text-zinc-300 transition hover:border-teal-300/20 hover:bg-white/10 hover:text-white"
               >
                 <RefreshCcw className="h-3.5 w-3.5 text-teal-200" />
                 Regenerate
@@ -678,7 +679,14 @@ const ChatBubble = memo(function ChatBubble({
             </div>
           </div>
         ) : message.status === "streaming" && !message.content ? (
-          <TypingIndicator />
+          <div className="min-h-28 rounded-2xl border border-white/10 bg-black/25 p-4">
+            <TypingIndicator />
+            <div className="mt-5 space-y-2">
+              <div className="h-2.5 animate-pulse rounded-full bg-white/10" />
+              <div className="h-2.5 w-10/12 animate-pulse rounded-full bg-white/10" />
+              <div className="h-2.5 w-7/12 animate-pulse rounded-full bg-white/10" />
+            </div>
+          </div>
         ) : (
           <MarkdownRenderer
             content={message.content}
@@ -701,7 +709,7 @@ const ChatBubble = memo(function ChatBubble({
         ) : null}
       </article>
       {isUser ? (
-        <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06]">
+        <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] shadow-lg shadow-black/10">
           <User className="h-5 w-5 text-zinc-100" />
         </div>
       ) : null}
@@ -1577,9 +1585,11 @@ export default function AIChatWorkspace({
       ) : null}
 
       {isDraggingFiles ? (
-        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xl">
-          <div className="rounded-[2rem] border border-teal-200/30 bg-zinc-950/90 p-8 text-center shadow-2xl shadow-teal-950/30">
-            <FileUp className="mx-auto h-10 w-10 text-teal-200" />
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xl">
+          <div className="rounded-[2rem] border border-dashed border-teal-200/35 bg-zinc-950/90 p-8 text-center shadow-2xl shadow-teal-950/30">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl border border-teal-200/25 bg-teal-200/10">
+              <FileUp className="h-7 w-7 text-teal-200" />
+            </div>
             <p className="mt-4 text-lg font-semibold">Drop files into ZERINIX Chat</p>
             <p className="mt-2 text-sm text-zinc-500">
               Text files are read as context; other files are attached as references.
@@ -1610,7 +1620,7 @@ export default function AIChatWorkspace({
         <button
           type="button"
           onClick={() => void createNewConversation()}
-          className="mt-6 inline-flex items-center justify-center gap-2 rounded-2xl border border-teal-200/25 bg-teal-200/10 px-4 py-3 text-sm font-semibold text-teal-50 transition hover:bg-teal-200/15"
+          className="mt-6 inline-flex items-center justify-center gap-2 rounded-2xl border border-teal-200/25 bg-teal-200/10 px-4 py-3 text-sm font-semibold text-teal-50 shadow-lg shadow-teal-950/10 transition hover:-translate-y-0.5 hover:bg-teal-200/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
         >
           <Plus className="h-4 w-4" />
           New conversation
@@ -1619,13 +1629,13 @@ export default function AIChatWorkspace({
         <div className="mt-4 grid grid-cols-2 gap-2">
           <Link
             href="/plan"
-            className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-center text-xs font-semibold text-zinc-300 transition hover:bg-white/10 hover:text-white"
+            className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-center text-xs font-semibold text-zinc-300 transition hover:-translate-y-0.5 hover:bg-white/10 hover:text-white"
           >
             AI Plan
           </Link>
           <Link
             href="/plan"
-            className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-center text-xs font-semibold text-zinc-300 transition hover:bg-white/10 hover:text-white"
+            className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-center text-xs font-semibold text-zinc-300 transition hover:-translate-y-0.5 hover:bg-white/10 hover:text-white"
           >
             Market Analysis
           </Link>
@@ -1664,10 +1674,10 @@ export default function AIChatWorkspace({
             return (
               <div
                 key={conversation.id}
-                className={`group rounded-2xl border p-3 transition ${
+                className={`group rounded-2xl border p-3 shadow-lg shadow-black/10 transition duration-300 ${
                   selected
                     ? "border-teal-200/30 bg-teal-200/10"
-                    : "border-white/10 bg-white/[0.035] hover:bg-white/[0.06]"
+                    : "border-white/10 bg-white/[0.035] hover:-translate-y-0.5 hover:bg-white/[0.06]"
                 }`}
               >
                 <button
@@ -1916,8 +1926,9 @@ export default function AIChatWorkspace({
         />
       ) : null}
 
-      <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-3 border-b border-white/10 bg-black/80 px-4 py-4 backdrop-blur-xl sm:px-6">
+      <section className="relative flex min-w-0 flex-1 flex-col">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.15),transparent_34%),linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.032)_1px,transparent_1px)] bg-[size:auto,54px_54px,54px_54px] opacity-80" />
+        <header className="relative z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-black/80 px-4 py-4 shadow-xl shadow-black/20 backdrop-blur-xl sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
@@ -1927,7 +1938,7 @@ export default function AIChatWorkspace({
             >
               <Menu className="h-4 w-4" />
             </button>
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10 shadow-lg shadow-teal-950/10">
               <Bot className="h-5 w-5 text-teal-100" />
             </div>
             <div className="min-w-0">
@@ -1974,7 +1985,7 @@ export default function AIChatWorkspace({
           </div>
         </header>
 
-        <div ref={scrollerRef} className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+        <div ref={scrollerRef} className="relative z-10 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
           <div className="mx-auto flex max-w-5xl flex-col gap-5 pb-44">
             {conversationError ? (
               <div className="rounded-3xl border border-red-300/20 bg-red-950/30 p-4 text-sm leading-6 text-red-100 shadow-2xl shadow-black/30">
@@ -1985,7 +1996,7 @@ export default function AIChatWorkspace({
 
             {messages.length === 0 ? (
               <div className="flex min-h-[52vh] items-center justify-center text-center">
-                <div className="w-full max-w-4xl rounded-[2rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/40 backdrop-blur-2xl sm:p-8">
+                <div className="w-full max-w-4xl rounded-[2rem] border border-white/10 bg-white/[0.05] p-6 shadow-2xl shadow-black/40 ring-1 ring-white/[0.03] backdrop-blur-2xl sm:p-8">
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl border border-teal-200/20 bg-teal-200/10 shadow-2xl shadow-teal-950/20">
                     <Sparkles className="h-6 w-6 text-teal-200" />
                   </div>
@@ -2001,7 +2012,7 @@ export default function AIChatWorkspace({
                         key={starter}
                         type="button"
                         onClick={() => setPrompt(starter)}
-                        className="rounded-2xl border border-white/10 bg-black/30 p-4 text-sm leading-6 text-zinc-300 transition hover:border-teal-200/30 hover:bg-teal-200/[0.06] hover:text-white"
+                        className="rounded-2xl border border-white/10 bg-black/30 p-4 text-sm leading-6 text-zinc-300 shadow-lg shadow-black/10 transition hover:-translate-y-0.5 hover:border-teal-200/30 hover:bg-teal-200/[0.06] hover:text-white"
                       >
                         {starter}
                       </button>
@@ -2022,7 +2033,7 @@ export default function AIChatWorkspace({
           </div>
         </div>
 
-        <div className="border-t border-white/10 bg-black/80 px-4 py-4 backdrop-blur-2xl sm:px-6">
+        <div className="relative z-10 border-t border-white/10 bg-black/80 px-4 py-4 shadow-2xl shadow-black/40 backdrop-blur-2xl sm:px-6">
           <div className="mx-auto max-w-5xl">
             {attachments.length > 0 ? (
               <div className="mb-3 flex flex-wrap gap-2">
@@ -2047,7 +2058,7 @@ export default function AIChatWorkspace({
               </div>
             ) : null}
 
-            <div className="rounded-[2rem] border border-white/10 bg-white/[0.055] p-3 shadow-2xl shadow-black/50 backdrop-blur-2xl">
+            <div className="rounded-[2rem] border border-white/10 bg-white/[0.06] p-3 shadow-2xl shadow-black/50 ring-1 ring-white/[0.03] backdrop-blur-2xl">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-2 pt-1">
                 <span className="rounded-full border border-teal-200/20 bg-teal-200/10 px-3 py-1 text-xs font-medium text-teal-100">
                   AI Chat
@@ -2066,13 +2077,13 @@ export default function AIChatWorkspace({
                     void sendMessage();
                   }
                 }}
-                className="min-h-28 w-full resize-none rounded-2xl bg-black/30 p-3 text-base leading-7 text-white outline-none ring-1 ring-white/5 transition placeholder:text-zinc-600 focus:ring-teal-200/25"
+                className="min-h-28 w-full resize-none rounded-2xl bg-black/35 p-4 text-base leading-7 text-white outline-none ring-1 ring-white/5 transition placeholder:text-zinc-600 focus:ring-teal-200/25"
                 placeholder="Ask ZERINIX anything, paste context, or upload a file..."
               />
 
               <div className="flex flex-col gap-3 pt-3 md:flex-row md:items-center md:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-zinc-200 transition hover:bg-white/10">
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-zinc-200 transition hover:-translate-y-0.5 hover:bg-white/10">
                     <Paperclip className="h-4 w-4 text-teal-200" />
                     Upload files
                     <input
@@ -2113,7 +2124,7 @@ export default function AIChatWorkspace({
                     type="button"
                     disabled={!prompt.trim() || loading}
                     onClick={() => void sendMessage()}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/40 transition hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/40 transition hover:-translate-y-0.5 hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
                   >
                     {loading ? "Streaming..." : "Send"}
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

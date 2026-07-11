@@ -258,21 +258,21 @@ const modeEmptyState: Record<ChatMode, { title: string; description: string; pla
       title: "Ask ZERINIX anything.",
       description:
         "Use a continuous AI chat with conversation memory, markdown answers, file context, and fast model routing.",
-      placeholder: "Ask a question, paste context, or upload a file for ZERINIX to analyze...",
+      placeholder: "Ask a strategy question, paste notes, or upload context for ZERINIX to analyze...",
     },
     plan: {
       title: "Create an investor-ready business plan.",
       description:
-        "Describe the company, customer, market, constraints, and goals. ZERINIX will generate the structured Business Plan report.",
+        "Describe the company, customer, market, constraints and goals. ZERINIX will turn it into a structured Business Plan report.",
       placeholder:
-        "Describe your business idea, target customer, pricing, geography, budget, and constraints...",
+        "Example: AI CRM for private clinics in Germany, €99/month, sold to clinic owners, first market Berlin...",
     },
     market: {
       title: "Analyze a market with strategic depth.",
       description:
-        "Enter a market, product category, geography, or business idea. ZERINIX will generate a structured Market Analysis report.",
+        "Enter a market, product category, geography or strategic question. ZERINIX will generate a structured Market Analysis report.",
       placeholder:
-        "Describe the market, geography, customer segment, competitors, and strategic question...",
+        "Example: Premium gym franchise market in Turkey, urban professionals, competitors, pricing and entry risk...",
     },
   };
 
@@ -287,21 +287,21 @@ const modeCards: Array<{
     mode: "plan",
     label: "AI Plan",
     description: "Structured investor-grade business plan.",
-    output: "PDF-ready strategic report",
+    output: "Board-ready report",
     icon: BriefcaseBusiness,
   },
   {
     mode: "market",
     label: "Market Analysis",
     description: "Market sizing, competition, risks and entry logic.",
-    output: "Market intelligence memo",
+    output: "Diligence memo",
     icon: BarChart3,
   },
   {
     mode: "chat",
     label: "AI Chat",
     description: "Fast conversational advisor with memory.",
-    output: "Streaming markdown answer",
+    output: "Live advisor response",
     icon: Bot,
   },
 ];
@@ -2983,14 +2983,14 @@ function WorkflowPanel({
   }
 
   return (
-    <div className="rounded-[2rem] border border-teal-200/15 bg-white/[0.045] p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl">
+    <div className="rounded-[2rem] border border-teal-200/15 bg-[linear-gradient(135deg,rgba(94,234,212,0.08),rgba(255,255,255,0.035))] p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl">
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-semibold tracking-[0.28em] text-teal-300/70">
             LIVE AI WORKFLOW
           </p>
           <p className="mt-2 text-sm text-zinc-500">
-            ZERINIX is building the answer step by step.
+            ZERINIX is preparing a stable output before rendering the final result.
           </p>
         </div>
         <div className="rounded-full border border-teal-300/20 bg-teal-300/10 px-3 py-1 text-xs font-medium text-teal-100">
@@ -3006,7 +3006,7 @@ function WorkflowPanel({
           return (
             <div
               key={step}
-              className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition ${
+              className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm shadow-lg shadow-black/10 transition ${
                 done
                   ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
                   : current
@@ -3208,7 +3208,7 @@ function ConversationSidebar({
       </div>
     ) : null}
 
-    <aside className="flex min-h-0 border-b border-white/10 bg-black/80 p-4 backdrop-blur-2xl md:h-screen md:w-[21.5rem] md:flex-col md:border-b-0 md:border-r md:bg-black/70">
+    <aside className="flex min-h-0 border-b border-white/10 bg-black/85 p-4 shadow-2xl shadow-black/30 backdrop-blur-2xl md:h-screen md:w-[21.5rem] md:flex-col md:border-b-0 md:border-r md:bg-black/75">
       <div className="flex w-full items-center justify-between gap-3 md:block">
         <div>
           <div className="flex items-center gap-3">
@@ -3236,7 +3236,7 @@ function ConversationSidebar({
         <button
           type="button"
           onClick={() => void onCreateConversation()}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10 text-teal-100 transition hover:border-teal-200/40 hover:bg-teal-200/15 md:mt-5 md:w-full md:gap-2 md:px-4 md:text-sm md:font-semibold"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10 text-teal-100 shadow-lg shadow-teal-950/10 transition hover:-translate-y-0.5 hover:border-teal-200/40 hover:bg-teal-200/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30 md:mt-5 md:w-full md:gap-2 md:px-4 md:text-sm md:font-semibold"
           aria-label="New conversation"
           title="New conversation"
         >
@@ -3311,10 +3311,10 @@ function ConversationSidebar({
             key={conversation.id}
             type="button"
             onClick={() => onSelectConversation(conversation.id)}
-            className={`group min-w-72 rounded-3xl border p-4 text-left text-sm transition md:w-full ${
+            className={`group min-w-72 rounded-3xl border p-4 text-left text-sm shadow-lg shadow-black/10 transition duration-300 md:w-full ${
               conversation.id === activeConversationId
                 ? "border-teal-300/30 bg-teal-300/10 shadow-lg shadow-teal-950/10"
-                : "border-white/10 bg-white/[0.03] hover:border-teal-300/30 hover:bg-white/[0.055]"
+                : "border-white/10 bg-white/[0.03] hover:-translate-y-0.5 hover:border-teal-300/30 hover:bg-white/[0.055]"
             }`}
           >
             <div className="flex items-start justify-between gap-2">
@@ -4803,8 +4803,8 @@ function ReportGenerationShell({
   const safeProgress = Math.max(0, Math.min(100, progress));
 
   return (
-    <section className="min-h-[640px] overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-950/70 shadow-2xl shadow-black/50 backdrop-blur-2xl">
-      <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.14),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-5 sm:p-7">
+    <section className="min-h-[640px] overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-950/75 shadow-2xl shadow-black/50 backdrop-blur-2xl">
+      <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.18),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02))] p-5 sm:p-7">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
@@ -4814,17 +4814,19 @@ function ReportGenerationShell({
               {title}
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
-              ZERINIX is generating the complete report before rendering the final document.
+              ZERINIX is generating the complete report in the background so the
+              final document appears without layout shift or partial sections.
             </p>
           </div>
-          <div className="w-fit rounded-full border border-teal-300/20 bg-teal-300/10 px-4 py-2 text-sm text-teal-100">
+          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-teal-300/20 bg-teal-300/10 px-4 py-2 text-sm text-teal-100">
+            <Loader2 className="h-4 w-4 animate-spin" />
             Generating
           </div>
         </div>
       </div>
 
       <div className="p-4 sm:p-5">
-        <div className="rounded-[1.75rem] border border-teal-200/15 bg-[linear-gradient(135deg,rgba(94,234,212,0.1),rgba(255,255,255,0.025))] p-5">
+        <div className="rounded-[1.75rem] border border-teal-200/15 bg-[linear-gradient(135deg,rgba(94,234,212,0.12),rgba(255,255,255,0.025))] p-5 shadow-2xl shadow-teal-950/10">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
@@ -4838,7 +4840,7 @@ function ReportGenerationShell({
               {Math.round(safeProgress)}%
             </p>
           </div>
-          <div className="mt-5 h-3 overflow-hidden rounded-full bg-white/10">
+          <div className="mt-5 h-3 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/5">
             <div
               className="h-full rounded-full bg-teal-200 transition-[width] duration-500 ease-out"
               style={{ width: `${safeProgress}%` }}
@@ -4857,10 +4859,10 @@ function ReportGenerationShell({
           ].map((label, index) => (
             <div
               key={label}
-              className="min-h-40 rounded-[1.75rem] border border-white/10 bg-black/35 p-5"
+              className="min-h-40 rounded-[1.75rem] border border-white/10 bg-black/35 p-5 shadow-xl shadow-black/20"
             >
               <div className="flex items-center justify-between">
-                <span className="h-9 w-9 rounded-2xl border border-teal-200/20 bg-teal-200/10" />
+                <span className="h-9 w-9 animate-pulse rounded-2xl border border-teal-200/20 bg-teal-200/10" />
                 <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
                   {String(index + 1).padStart(2, "0")}
                 </span>
@@ -6550,11 +6552,11 @@ export default function Planner({
 
       <section className="relative flex min-w-0 flex-1 flex-col bg-black">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:54px_54px] opacity-35" />
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.17),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.08),transparent_30%),linear-gradient(180deg,rgba(0,0,0,0.1),#000_94%)]" />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.19),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.08),transparent_30%),linear-gradient(180deg,rgba(0,0,0,0.08),#000_94%)]" />
         {isDraggingFiles ? (
-          <div className="pointer-events-none absolute inset-4 z-40 flex items-center justify-center rounded-[2rem] border border-dashed border-teal-300/50 bg-black/70 backdrop-blur-xl">
+          <div className="pointer-events-none absolute inset-4 z-40 flex items-center justify-center rounded-[2rem] border border-dashed border-teal-300/50 bg-black/75 shadow-2xl shadow-teal-950/20 backdrop-blur-xl">
             <div className="text-center">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl border border-teal-300/30 bg-teal-300/10">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl border border-teal-300/30 bg-teal-300/10">
                 <FileUp className="h-6 w-6 text-teal-100" />
               </div>
               <p className="mt-4 text-lg font-semibold text-white">
@@ -6567,7 +6569,7 @@ export default function Planner({
           </div>
         ) : null}
 
-        <header className="relative z-10 flex items-center justify-between gap-4 border-b border-white/10 bg-black/55 px-5 py-4 backdrop-blur-2xl lg:px-8">
+        <header className="relative z-10 flex items-center justify-between gap-4 border-b border-white/10 bg-black/65 px-5 py-4 shadow-xl shadow-black/20 backdrop-blur-2xl lg:px-8">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
@@ -6652,7 +6654,7 @@ export default function Planner({
                         key={suggestion}
                         type="button"
                         onClick={() => setPrompt(suggestion)}
-                        className="rounded-2xl border border-white/10 bg-black/30 p-4 text-sm leading-6 text-zinc-300 transition hover:border-teal-200/30 hover:bg-teal-200/[0.06] hover:text-white"
+                        className="rounded-2xl border border-white/10 bg-black/30 p-4 text-sm leading-6 text-zinc-300 shadow-lg shadow-black/10 transition hover:-translate-y-0.5 hover:border-teal-200/30 hover:bg-teal-200/[0.06] hover:text-white"
                       >
                         {suggestion}
                       </button>
@@ -6695,7 +6697,7 @@ export default function Planner({
           </div>
         </div>
 
-        <div className="relative z-20 border-t border-white/10 bg-black/70 px-4 py-4 backdrop-blur-2xl sm:px-5 lg:px-8">
+        <div className="relative z-20 border-t border-white/10 bg-black/75 px-4 py-4 shadow-2xl shadow-black/40 backdrop-blur-2xl sm:px-5 lg:px-8">
           <div className="mx-auto max-w-6xl">
             {attachments.length > 0 ? (
               <div className="mb-3 flex flex-wrap gap-2">
@@ -6720,7 +6722,7 @@ export default function Planner({
               </div>
             ) : null}
 
-            <div className="rounded-[2rem] border border-white/10 bg-white/[0.055] p-3 shadow-2xl shadow-black/50 backdrop-blur-2xl">
+            <div className="rounded-[2rem] border border-white/10 bg-white/[0.06] p-3 shadow-2xl shadow-black/50 ring-1 ring-white/[0.03] backdrop-blur-2xl">
               <div className="mb-2 flex flex-wrap items-center gap-2 px-2 pt-1">
                 <span className="rounded-full border border-teal-200/20 bg-teal-200/10 px-3 py-1 text-xs font-medium text-teal-100">
                   {activeMode === "plan"
@@ -6761,10 +6763,10 @@ export default function Planner({
                       key={modeCard.mode}
                       type="button"
                       onClick={() => setActiveMode(modeCard.mode)}
-                      className={`rounded-2xl border p-3 text-left transition ${
+                      className={`rounded-2xl border p-3 text-left shadow-lg shadow-black/10 transition duration-300 ${
                         selected
                           ? "border-teal-200/35 bg-teal-200/10 shadow-lg shadow-teal-950/20"
-                          : "border-white/10 bg-black/25 hover:border-white/20 hover:bg-white/[0.055]"
+                          : "border-white/10 bg-black/25 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.055]"
                       }`}
                     >
                       <div className="flex items-center justify-between gap-3">
@@ -6804,13 +6806,13 @@ export default function Planner({
                     void submitPrompt();
                   }
                 }}
-                className="min-h-28 w-full resize-none rounded-2xl bg-black/30 p-3 text-base leading-7 text-white outline-none ring-1 ring-white/5 transition placeholder:text-zinc-600 focus:ring-teal-200/25"
+                className="min-h-28 w-full resize-none rounded-2xl bg-black/35 p-4 text-base leading-7 text-white outline-none ring-1 ring-white/5 transition placeholder:text-zinc-600 focus:ring-teal-200/25"
                 placeholder={activeEmptyState.placeholder}
               />
 
               <div className="flex flex-col gap-3 pt-3 md:flex-row md:items-center md:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-zinc-200 transition hover:bg-white/10">
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-zinc-200 transition hover:-translate-y-0.5 hover:bg-white/10">
                     <Paperclip className="h-4 w-4 text-teal-200" />
                     Upload files
                     <input
@@ -6888,7 +6890,7 @@ export default function Planner({
                   type="button"
                   disabled={!prompt.trim() || isWorking}
                   onClick={() => void submitPrompt()}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/40 transition hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/40 transition hover:-translate-y-0.5 hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
                 >
                   {isWorking ? "Streaming..." : "Send"}
                   <Send className="h-4 w-4" />
