@@ -19,6 +19,23 @@ type UsageRow = {
   created_at?: string | null;
 };
 
+type BillingProfileRow = {
+  plan_tier?: string | null;
+  stripe_subscription_status?: string | null;
+  stripe_current_period_end?: string | null;
+  stripe_cancel_at_period_end?: boolean | null;
+};
+
+type StripeInvoiceRow = {
+  stripe_invoice_id: string;
+  status: string;
+  total_cents: number;
+  currency: string;
+  hosted_invoice_url: string | null;
+  invoice_pdf_url: string | null;
+  created_at: string;
+};
+
 function startOfCurrentBillingPeriod() {
   const now = new Date();
 
@@ -88,14 +105,31 @@ export async function loadBillingOverview(
   const planTier = await getUserPlanTier(supabase, user.id);
   const periodStart = startOfCurrentBillingPeriod();
   const periodEnd = endOfCurrentBillingPeriod();
-  const { data, error } = await supabase
-    .from("ai_usage_events")
-    .select("endpoint,status,estimated_cost_usd,metadata,created_at")
-    .eq("user_id", user.id)
-    .gte("created_at", periodStart.toISOString())
-    .lt("created_at", periodEnd.toISOString())
-    .order("created_at", { ascending: false })
-    .limit(1000);
+  const [usageResult, billingProfileResult, invoicesResult] = await Promise.all([
+    supabase
+      .from("ai_usage_events")
+      .select("endpoint,status,estimated_cost_usd,metadata,created_at")
+      .eq("user_id", user.id)
+      .gte("created_at", periodStart.toISOString())
+      .lt("created_at", periodEnd.toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1000),
+    supabase
+      .from("user_billing_profiles")
+      .select("plan_tier,stripe_subscription_status,stripe_current_period_end,stripe_cancel_at_period_end")
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    supabase
+      .from("stripe_invoices")
+      .select("stripe_invoice_id,status,total_cents,currency,hosted_invoice_url,invoice_pdf_url,created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(12),
+  ]);
+  const data = usageResult.data;
+  const error = usageResult.error;
+  const billingProfile = billingProfileResult.data as BillingProfileRow | null;
+  const invoiceRows = (invoicesResult.data || []) as StripeInvoiceRow[];
   const usageRows = (data || []) as UsageRow[];
   const currentLimits = usageLimits[planTier];
   const aiChatsUsed =
@@ -109,12 +143,16 @@ export async function loadBillingOverview(
     (sum, row) => sum + safeNumber(row.estimated_cost_usd),
     0
   );
-  const subscriptionStatus = planTier === "free" ? "Free plan" : "Active";
+  const subscriptionStatus =
+    billingProfile?.stripe_subscription_status ||
+    (planTier === "free" ? "Free plan" : "Active");
+  const renewalDate =
+    billingProfile?.stripe_current_period_end || periodEnd.toISOString();
 
   return {
     planTier,
     subscriptionStatus,
-    renewalDate: periodEnd.toISOString(),
+    renewalDate,
     billingPeriod: {
       start: periodStart.toISOString(),
       end: periodEnd.toISOString(),
@@ -151,8 +189,26 @@ export async function loadBillingOverview(
       publishable: getStripePublishableStatus(),
     },
     paymentMethod: null as null,
-    invoices: [] as Array<never>,
-    billingHistory: [] as Array<never>,
+    invoices: invoiceRows.map((invoice) => ({
+      id: invoice.stripe_invoice_id,
+      status: invoice.status,
+      totalCents: invoice.total_cents,
+      currency: invoice.currency,
+      hostedInvoiceUrl: invoice.hosted_invoice_url,
+      invoicePdfUrl: invoice.invoice_pdf_url,
+      createdAt: invoice.created_at,
+    })),
+    billingHistory: [
+      ...(billingProfile?.stripe_cancel_at_period_end
+        ? [
+            {
+              id: "cancel_at_period_end",
+              label: "Cancellation scheduled",
+              detail: "Subscription remains active until the current period ends.",
+            },
+          ]
+        : []),
+    ],
   };
 }
 

@@ -17,7 +17,12 @@ import {
 import { createClient } from "@/app/lib/supabase/server";
 import DashboardSidebar from "../DashboardSidebar";
 import { getAuthenticatedUser } from "../report-utils";
-import { confirmDowngrade, requestCancellation, startPlanChange } from "./actions";
+import {
+  confirmDowngrade,
+  openCustomerPortal,
+  requestCancellation,
+  startPlanChange,
+} from "./actions";
 import { loadBillingOverview } from "./billing-data";
 
 export const dynamic = "force-dynamic";
@@ -298,6 +303,14 @@ export default async function BillingPage({
                 Every action is validated on the server. ZERINIX never accepts a
                 customer, price or subscription owner directly from the browser.
               </p>
+              <form action={openCustomerPortal} className="mt-5">
+                <button
+                  type="submit"
+                  className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl bg-white px-4 text-sm font-semibold text-black transition hover:bg-zinc-200"
+                >
+                  Open customer portal
+                </button>
+              </form>
 
               <details className="mt-5 rounded-2xl border border-white/10 bg-black/25 p-4">
                 <summary className="cursor-pointer list-none text-sm font-semibold text-white">
@@ -418,7 +431,31 @@ export default async function BillingPage({
                   No invoices are available yet. Invoice history will appear here
                   after Stripe billing is configured and the first invoice is issued.
                 </div>
-              ) : null}
+              ) : (
+                <div className="mt-5 space-y-3">
+                  {billing.invoices.map((invoice) => (
+                    <a
+                      key={invoice.id}
+                      href={invoice.hostedInvoiceUrl || invoice.invoicePdfUrl || "#"}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-black/25 p-4 text-sm transition hover:border-teal-300/20 hover:bg-white/[0.04]"
+                    >
+                      <span>
+                        <span className="block font-semibold text-white">
+                          {invoice.status}
+                        </span>
+                        <span className="mt-1 block text-xs text-zinc-500">
+                          {formatDate(invoice.createdAt)}
+                        </span>
+                      </span>
+                      <span className="font-semibold text-teal-100">
+                        {formatCurrency(invoice.totalCents / 100)}
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              )}
             </section>
 
             <section className="rounded-[1.85rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl">
@@ -430,7 +467,21 @@ export default async function BillingPage({
                 <div className="mt-5 rounded-2xl border border-white/10 bg-black/25 p-6 text-sm leading-6 text-zinc-500">
                   No billing events have been recorded yet.
                 </div>
-              ) : null}
+              ) : (
+                <div className="mt-5 space-y-3">
+                  {billing.billingHistory.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-white/10 bg-black/25 p-4"
+                    >
+                      <p className="text-sm font-semibold text-white">{item.label}</p>
+                      <p className="mt-1 text-xs leading-5 text-zinc-500">
+                        {item.detail}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           </div>
 

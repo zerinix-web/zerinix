@@ -70,6 +70,21 @@ export function getStripeConfiguration() {
   };
 }
 
+export function getPlanIdForStripePrice(priceId?: string | null): BillingPlanId {
+  const normalizedPriceId = priceId || "";
+  const config = getStripeConfiguration();
+
+  if (normalizedPriceId && normalizedPriceId === config.priceIds.pro) {
+    return "pro";
+  }
+
+  if (normalizedPriceId && normalizedPriceId === config.priceIds.business) {
+    return "business";
+  }
+
+  return "free";
+}
+
 export function getPlanPriceState(planId: BillingPlanId) {
   const plan = billingPlans.find((item) => item.id === planId);
 
@@ -207,6 +222,7 @@ export async function createStripeCheckoutSession(input: {
   userId: string;
   userEmail: string;
   plan: BillingPlanId;
+  existingCustomerId?: string | null;
   idempotencyKey: string;
 }): Promise<IntegrationResult<{ id: string; url: string | null }>> {
   const config = getStripeConfiguration();
@@ -223,12 +239,15 @@ export async function createStripeCheckoutSession(input: {
       mode: "subscription",
       "line_items[0][price]": priceId,
       "line_items[0][quantity]": 1,
-      customer_email: input.userEmail,
+      customer: input.existingCustomerId || undefined,
+      customer_email: input.existingCustomerId ? undefined : input.userEmail,
       client_reference_id: input.userId,
       success_url: `${config.appUrl}/dashboard/billing?checkout=success`,
       cancel_url: `${config.appUrl}/dashboard/billing?checkout=cancelled`,
       "metadata[user_id]": input.userId,
       "metadata[plan]": input.plan,
+      "subscription_data[metadata][user_id]": input.userId,
+      "subscription_data[metadata][plan]": input.plan,
     },
     input.idempotencyKey
   );
@@ -272,13 +291,20 @@ export function normalizeStripeSubscriptionForSync(event: {
   customer?: string;
   status?: string;
   metadata?: Record<string, string>;
+  items?: { data?: Array<{ price?: { id?: string } }> };
   current_period_end?: number;
+  cancel_at_period_end?: boolean;
 }) {
+  const priceId = event.items?.data?.[0]?.price?.id || "";
+
   return {
     subscriptionId: event.id || "",
     customerId: event.customer || "",
     userId: event.metadata?.user_id || "",
     status: event.status || "unknown",
+    priceId,
+    planTier: getPlanIdForStripePrice(priceId),
+    cancelAtPeriodEnd: Boolean(event.cancel_at_period_end),
     currentPeriodEnd: event.current_period_end
       ? new Date(event.current_period_end * 1000).toISOString()
       : null,
@@ -293,6 +319,9 @@ export function normalizeStripeInvoiceForSync(event: {
   total?: number;
   currency?: string;
   hosted_invoice_url?: string;
+  invoice_pdf?: string;
+  period_start?: number;
+  period_end?: number;
   metadata?: Record<string, string>;
 }) {
   return {
@@ -304,6 +333,13 @@ export function normalizeStripeInvoiceForSync(event: {
     totalCents: event.total ?? 0,
     currency: event.currency || "usd",
     hostedInvoiceUrl: event.hosted_invoice_url || null,
+    invoicePdfUrl: event.invoice_pdf || null,
+    periodStart: event.period_start
+      ? new Date(event.period_start * 1000).toISOString()
+      : null,
+    periodEnd: event.period_end
+      ? new Date(event.period_end * 1000).toISOString()
+      : null,
   };
 }
 

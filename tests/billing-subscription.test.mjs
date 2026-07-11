@@ -6,6 +6,13 @@ const billingPage = readFileSync("app/dashboard/billing/page.tsx", "utf8");
 const billingActions = readFileSync("app/dashboard/billing/actions.ts", "utf8");
 const billingData = readFileSync("app/dashboard/billing/billing-data.ts", "utf8");
 const stripeFoundation = readFileSync("app/lib/billing/stripe.ts", "utf8");
+const stripeSync = readFileSync("app/lib/billing/stripe-sync.ts", "utf8");
+const stripeWebhook = readFileSync("app/api/stripe/webhook/route.ts", "utf8");
+const stripeWebhookHandler = readFileSync("app/lib/billing/stripe-webhook.ts", "utf8");
+const stripeMigration = readFileSync(
+  "supabase/migrations/20260711180000_add_stripe_billing_sync.sql",
+  "utf8"
+);
 const governance = readFileSync("app/lib/ai/governance.ts", "utf8");
 
 test("billing page requires authentication before rendering user billing data", () => {
@@ -28,7 +35,9 @@ test("subscription changes validate server-owned plan configuration", () => {
   assert.match(billingActions, /!planConfig\?\.databaseTier/);
   assert.match(billingActions, /getStripeConfiguration\(\)/);
   assert.match(billingActions, /getPlanPriceState\(plan\)/);
-  assert.doesNotMatch(billingActions, /customer_id|subscription_id|price_id/i);
+  assert.match(billingActions, /createStripeCheckoutSession/);
+  assert.match(billingActions, /redirect\(checkout\.data\.url\)/);
+  assert.doesNotMatch(billingActions, /FormData.*customer_id|FormData.*subscription_id|FormData.*price_id/i);
 });
 
 test("duplicate checkout requests are blocked before Stripe work can begin", () => {
@@ -82,14 +91,56 @@ test("downgrade and cancellation flows require explicit confirmation surfaces", 
   assert.match(billingPage, /Confirm downgrade/);
   assert.match(billingPage, /Cancel subscription/);
   assert.match(billingPage, /Request cancellation/);
+  assert.match(billingPage, /Open customer portal/);
   assert.match(billingActions, /confirmDowngrade/);
   assert.match(billingActions, /requestCancellation/);
+  assert.match(billingActions, /openCustomerPortal/);
+  assert.match(billingActions, /createStripeCustomerPortalSession/);
 });
 
 test("empty invoices and billing history render without mock payment data", () => {
-  assert.match(billingData, /invoices: \[\] as Array<never>/);
-  assert.match(billingData, /billingHistory: \[\] as Array<never>/);
+  assert.match(billingData, /stripe_invoices/);
+  assert.match(billingData, /invoiceRows\.map/);
   assert.match(billingPage, /No invoices are available yet/);
   assert.match(billingPage, /No billing events have been recorded yet/);
   assert.doesNotMatch(billingPage, /4242|Visa ending|Mastercard ending/i);
+});
+
+test("stripe webhook verifies signatures and syncs subscriptions invoices and checkout sessions", () => {
+  assert.match(stripeWebhook, /handleStripeWebhookPayload/);
+  assert.match(stripeWebhookHandler, /verifyStripeWebhookSignature/);
+  assert.match(stripeWebhook, /stripe-signature/);
+  assert.match(stripeWebhook, /req\.text\(\)/);
+  assert.match(stripeWebhookHandler, /checkout\.session\.completed/);
+  assert.match(stripeWebhookHandler, /customer\.subscription\.updated/);
+  assert.match(stripeWebhookHandler, /invoice\.paid/);
+  assert.match(stripeWebhookHandler, /stripe_webhook_events/);
+  assert.match(stripeWebhook, /duplicate/);
+  assert.match(stripeWebhookHandler, /createServiceRoleClient/);
+});
+
+test("stripe sync stores subscription and invoice records using server-owned fields", () => {
+  assert.match(stripeSync, /syncCheckoutSession/);
+  assert.match(stripeSync, /syncSubscription/);
+  assert.match(stripeSync, /syncInvoice/);
+  assert.match(stripeSync, /user_billing_profiles/);
+  assert.match(stripeSync, /stripe_invoices/);
+  assert.match(stripeSync, /planTierFromStripePrice/);
+  assert.match(stripeFoundation, /subscription_data\[metadata\]\[user_id\]/);
+  assert.match(stripeFoundation, /getPlanIdForStripePrice/);
+});
+
+test("stripe migration adds billing sync columns invoices and webhook idempotency", () => {
+  for (const token of [
+    "stripe_customer_id",
+    "stripe_subscription_id",
+    "stripe_subscription_status",
+    "stripe_current_period_end",
+    "stripe_invoices",
+    "stripe_webhook_events",
+    "enable row level security",
+    "Users can read own stripe invoices",
+  ]) {
+    assert.match(stripeMigration, new RegExp(token));
+  }
 });
