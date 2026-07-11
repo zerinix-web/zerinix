@@ -65,7 +65,7 @@ test("admin shell renders authenticated admin header and global search", () => {
   assert.match(search, /\/api\/admin\/search/);
   assert.match(search, /ArrowDown/);
   assert.match(search, /ArrowUp/);
-  assert.match(search, /encodeURIComponent/);
+  assert.match(search, /URLSearchParams/);
 });
 
 test("service-role access is isolated to server-only admin modules", () => {
@@ -193,9 +193,25 @@ test("admin health endpoint uses cached server-side status and no paid provider 
   assert.doesNotMatch(adminData, /createOpenAiClient|responses\.create|fetch\(/);
 });
 
+test("admin notifications endpoint is authorized and backed by stored activity", () => {
+  const route = read("app/api/admin/notifications/route.ts");
+  const adminData = read("app/admin/admin-data.ts");
+  const realtime = read("app/admin/AdminRealtimeNotifications.tsx");
+
+  assert.match(route, /requireAdminApi/);
+  assert.match(route, /validateApiRequest/);
+  assert.match(route, /loadAdminNotifications/);
+  assert.match(adminData, /newUsers/);
+  assert.match(adminData, /failedJobs/);
+  assert.match(realtime, /\/api\/admin\/notifications/);
+  assert.match(realtime, /60_000/);
+  assert.match(realtime, /Realtime notifications/);
+});
+
 test("admin global search is authorized, validated, grouped, and server-side", () => {
   const route = read("app/api/admin/search/route.ts");
   const adminData = read("app/admin/admin-data.ts");
+  const search = read("app/admin/AdminGlobalSearch.tsx");
 
   assert.match(route, /requireAdminApi/);
   assert.match(route, /validateApiRequest/);
@@ -206,12 +222,20 @@ test("admin global search is authorized, validated, grouped, and server-side", (
   assert.match(adminData, /Users/);
   assert.match(adminData, /Reports/);
   assert.match(adminData, /Conversations/);
+  assert.match(adminData, /stripe_invoices/);
+  assert.match(adminData, /admin_audit_log/);
+  assert.match(search, /activeFilters/);
+  assert.match(search, /filters: activeFilters\.join/);
+  assert.match(search, /Payments/);
+  assert.match(search, /Logs/);
   assert.match(adminData, /limit\(5\)/);
 });
 
 test("admin dashboard includes revenue placeholders, cost controls, charts, and activity feed", () => {
   const dashboard = read("app/admin/page.tsx");
   const charts = read("app/admin/AdminCharts.tsx");
+  const controls = read("app/admin/AdminDateRangeControls.tsx");
+  const exports = read("app/admin/AdminExports.tsx");
   const adminData = read("app/admin/admin-data.ts");
 
   assert.match(dashboard, /ExecutiveOverview/);
@@ -231,6 +255,14 @@ test("admin dashboard includes revenue placeholders, cost controls, charts, and 
   assert.match(dashboard, /calculateTrend/);
   assert.match(dashboard, /Last 24h/);
   assert.match(dashboard, /Recent activity/);
+  assert.match(dashboard, /AdminDateRangeControls/);
+  assert.match(dashboard, /AdminRealtimeNotifications/);
+  assert.match(dashboard, /AdminExports/);
+  assert.match(controls, /24h/);
+  assert.match(controls, /Apply custom/);
+  assert.match(exports, /exportCsv/);
+  assert.match(exports, /exportPdf/);
+  assert.match(exports, /Analytics exports/);
   assert.match(charts, /live analytics chart/);
   assert.match(charts, /TrendPill/);
   assert.match(charts, /No data available/);
@@ -241,7 +273,9 @@ test("admin dashboard includes revenue placeholders, cost controls, charts, and 
   assert.match(adminData, /calculateCostControl/);
   assert.match(adminData, /getModelPricing/);
   assert.match(adminData, /loadRecentActivity/);
-  assert.match(adminData, /buildDailySeries/);
+  assert.match(adminData, /resolveAdminDateRange/);
+  assert.match(adminData, /buildTimeSeries/);
+  assert.match(adminData, /buildExportTables/);
 });
 
 test("admin dashboard cards use animated counters and premium transitions", () => {

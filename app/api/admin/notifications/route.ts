@@ -1,4 +1,4 @@
-import { requireAdminApi, searchAdminRecords } from "@/app/admin/admin-data";
+import { loadAdminNotifications, requireAdminApi, resolveAdminDateRange } from "@/app/admin/admin-data";
 import { noStoreJson } from "@/app/lib/security/api-response";
 import { validateApiRequest } from "@/app/lib/security/request-validation";
 
@@ -21,16 +21,13 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const query = String(url.searchParams.get("q") || "").trim();
-  const filters = String(url.searchParams.get("filters") || "").trim();
+  const range = resolveAdminDateRange({
+    range: url.searchParams.get("range") || "24h",
+    from: url.searchParams.get("from") || undefined,
+    to: url.searchParams.get("to") || undefined,
+  });
 
-  if (query.length < 2) {
-    return noStoreJson({ groups: [] });
-  }
-
-  if (query.length > 80) {
-    return noStoreJson({ error: "Search query is too long." }, { status: 400 });
-  }
-
-  return noStoreJson({ groups: await searchAdminRecords(query, { filters }) });
+  return noStoreJson({
+    notifications: await loadAdminNotifications(range),
+  });
 }

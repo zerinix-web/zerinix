@@ -16,9 +16,16 @@ import {
   XCircle,
 } from "lucide-react";
 import { AdminAnimatedValue, type AdminAnimatedValueFormat } from "./AdminAnimatedValue";
+import { AdminDateRangeControls } from "./AdminDateRangeControls";
+import { AdminExports } from "./AdminExports";
+import { AdminRealtimeNotifications } from "./AdminRealtimeNotifications";
 import { AdminShell } from "./AdminShell";
 import { AdminSystemHealth } from "./AdminSystemHealth";
-import { loadAdminDashboardData, type AdminActivityItem } from "./admin-data";
+import {
+  loadAdminDashboardData,
+  resolveAdminDateRange,
+  type AdminActivityItem,
+} from "./admin-data";
 
 const AdminCharts = dynamic(
   () => import("./AdminCharts"),
@@ -398,8 +405,18 @@ function Distribution({
   );
 }
 
-export default async function AdminDashboardPage() {
-  const data = await loadAdminDashboardData();
+export default async function AdminDashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const params = await searchParams;
+  const dateRange = resolveAdminDateRange({
+    range: params.range,
+    from: params.from,
+    to: params.to,
+  });
+  const data = await loadAdminDashboardData({ range: dateRange });
   const lastUserGrowthPoint = data.charts.userGrowth.at(-1);
   const lastReportPoint = data.charts.reportsGenerated.at(-1);
   const activeAlerts =
@@ -504,6 +521,19 @@ export default async function AdminDashboardPage() {
         activeAlerts={activeAlerts}
       />
 
+      <AdminDateRangeControls
+        activeRange={data.dateRange.key}
+        fromIso={data.dateRange.fromIso}
+        toIso={data.dateRange.toIso}
+      />
+
+      <AdminRealtimeNotifications
+        initialSummary={data.notifications}
+        rangeKey={data.dateRange.key}
+        fromIso={data.dateRange.fromIso}
+        toIso={data.dateRange.toIso}
+      />
+
       <AdminSystemHealth initialStatuses={data.systemStatus} />
 
       <div className="mt-5 grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
@@ -577,6 +607,8 @@ export default async function AdminDashboardPage() {
       <div className="mt-5">
         <AdminCharts charts={chartConfigs} />
       </div>
+
+      <AdminExports tables={data.exportTables} />
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.25)] backdrop-blur-xl">
