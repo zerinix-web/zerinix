@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import {
   Activity,
   BarChart3,
+  Bell,
+  Bot,
   CreditCard,
   FileText,
   Headphones,
@@ -15,9 +17,13 @@ import {
   SlidersHorizontal,
   Users,
 } from "lucide-react";
+import { signOut } from "@/app/auth/actions";
+import { requireAdminPage } from "./admin-data";
+import { AdminGlobalSearch } from "./AdminGlobalSearch";
 
 const navItems = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
+  { label: "AI CEO", href: "/admin/ai-ceo", icon: Bot },
   { label: "Users", href: "/admin/users", icon: Users },
   { label: "Reports", href: "/admin/reports", icon: FileText },
   { label: "Subscriptions", href: "/admin/subscriptions", icon: Receipt },
@@ -31,7 +37,15 @@ const navItems = [
   { label: "Settings", href: "/admin/settings", icon: Settings },
 ];
 
-export function AdminShell({
+function formatRole(role: string) {
+  return role
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+export async function AdminShell({
   children,
   eyebrow,
   title,
@@ -42,6 +56,11 @@ export function AdminShell({
   title: string;
   subtitle: string;
 }) {
+  const admin = await requireAdminPage();
+  const email = admin.user.email || "Admin user";
+  const role = formatRole(admin.role);
+  const initials = email.slice(0, 2).toUpperCase();
+
   return (
     <main className="min-h-screen bg-black text-white">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.13),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.055),transparent_26%)]" />
@@ -95,6 +114,69 @@ export function AdminShell({
         </aside>
 
         <section className="flex-1 px-5 py-6 sm:px-8 xl:px-10 xl:py-9">
+          <header className="mb-5 flex flex-col gap-4 rounded-[1.75rem] border border-white/10 bg-white/[0.045] p-4 shadow-2xl shadow-black/25 backdrop-blur-2xl lg:flex-row lg:items-center lg:justify-between">
+            <AdminGlobalSearch />
+
+            <div className="flex items-center gap-3">
+              <Link
+                href="/admin/logs"
+                className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-black/30 text-zinc-300 transition hover:border-teal-300/30 hover:text-white"
+                aria-label="Admin notifications"
+              >
+                <Bell className="h-4 w-4" />
+              </Link>
+              <Link
+                href="/admin/settings"
+                className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-black/30 text-zinc-300 transition hover:border-teal-300/30 hover:text-white"
+                aria-label="Admin settings"
+              >
+                <Settings className="h-4 w-4" />
+              </Link>
+              <details className="group relative">
+                <summary className="flex cursor-pointer list-none items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-3 py-2 transition hover:border-teal-300/30">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-200 text-xs font-black tracking-[0.12em] text-black">
+                    {initials}
+                  </span>
+                  <span className="hidden text-left sm:block">
+                    <span className="block max-w-48 truncate text-sm font-semibold text-white">
+                      {email}
+                    </span>
+                    <span className="text-xs text-zinc-500">{role}</span>
+                  </span>
+                </summary>
+                <div className="absolute right-0 top-14 z-40 w-72 rounded-3xl border border-white/10 bg-zinc-950/95 p-4 shadow-2xl shadow-black/40 backdrop-blur-2xl">
+                  <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">
+                    Signed in as
+                  </p>
+                  <p className="mt-2 truncate text-sm font-semibold text-white">{email}</p>
+                  <p className="mt-1 text-xs text-teal-100">{role}</p>
+                  <div className="mt-4 grid gap-2">
+                    <Link
+                      href="/dashboard/settings"
+                      className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-300 transition hover:border-teal-300/30 hover:text-white"
+                    >
+                      Account settings
+                    </Link>
+                    <Link
+                      href="/admin/security"
+                      className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-300 transition hover:border-teal-300/30 hover:text-white"
+                    >
+                      Security settings
+                    </Link>
+                    <form action={signOut}>
+                      <button
+                        type="submit"
+                        className="w-full rounded-2xl border border-white/10 bg-white px-3 py-2 text-left text-sm font-semibold text-black transition hover:bg-zinc-200"
+                      >
+                        Sign out
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </header>
+
           <div className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/35 backdrop-blur-2xl sm:p-8">
             <p className="text-xs font-semibold uppercase tracking-[0.35em] text-teal-200/70">
               {eyebrow}

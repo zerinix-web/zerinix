@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logServerError } from "@/app/lib/security/errors";
 import { QUOTA_COUNTING_USAGE_KIND_EXCLUSION } from "@/app/lib/ai/quota-rules.mjs";
+import { estimateModelCostUsd } from "@/app/lib/ai/pricing";
 
 export type PlanTier = "free" | "pro" | "business";
 export type AiRequestKind =
@@ -93,14 +94,6 @@ export const usageLimits: Record<PlanTier, UsageLimitSet> = {
   },
 };
 
-const modelPricingPerMillionTokens: Record<
-  string,
-  { input: number; output: number }
-> = {
-  "gpt-5-mini": { input: 0.25, output: 2 },
-  "gpt-5-nano": { input: 0.05, output: 0.4 },
-};
-
 function normalizePlanTier(value: unknown): PlanTier {
   return value === "pro" || value === "business" ? value : "free";
 }
@@ -128,14 +121,7 @@ export function selectAiModel(kind: AiRequestKind) {
 }
 
 export function estimateAiCostUsd(model: string, tokenUsage: TokenUsage) {
-  const pricing = modelPricingPerMillionTokens[model] ?? modelPricingPerMillionTokens["gpt-5-mini"];
-
-  return Number(
-    (
-      (tokenUsage.promptTokens / 1_000_000) * pricing.input +
-      (tokenUsage.completionTokens / 1_000_000) * pricing.output
-    ).toFixed(6)
-  );
+  return estimateModelCostUsd(model, tokenUsage) ?? estimateModelCostUsd("gpt-5-mini", tokenUsage) ?? 0;
 }
 
 export function extractTokenUsage(response: unknown): TokenUsage {

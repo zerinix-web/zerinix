@@ -53,6 +53,20 @@ test("every admin API route uses server-side admin authorization", () => {
   }
 });
 
+test("admin shell renders authenticated admin header and global search", () => {
+  const shell = read("app/admin/AdminShell.tsx");
+  const search = read("app/admin/AdminGlobalSearch.tsx");
+
+  assert.match(shell, /requireAdminPage/);
+  assert.match(shell, /AdminGlobalSearch/);
+  assert.match(shell, /Current admin|Signed in as|Admin notifications|Account settings|Security settings|Sign out/s);
+  assert.match(shell, /AI CEO/);
+  assert.match(search, /\/api\/admin\/search/);
+  assert.match(search, /ArrowDown/);
+  assert.match(search, /ArrowUp/);
+  assert.match(search, /encodeURIComponent/);
+});
+
 test("service-role access is isolated to server-only admin modules", () => {
   const serviceClient = read("app/lib/supabase/admin.ts");
   const env = read("app/lib/supabase/env.ts");
@@ -162,8 +176,78 @@ test("admin health endpoint uses cached server-side status and no paid provider 
   assert.match(route, /loadSystemStatus/);
   assert.match(adminData, /cachedHealth/);
   assert.match(adminData, /expiresAt: now \+ 30_000/);
-  assert.match(adminData, /No live provider call is made from admin health checks/);
+  assert.match(adminData, /lastChecked/);
+  assert.match(adminData, /ZERINIX API/);
+  assert.match(adminData, /Cloudflare\/domain/);
+  assert.match(adminData, /getStripeConfiguration/);
+  assert.match(adminData, /getResendConfiguration/);
+  assert.match(adminData, /Not configured/);
   assert.doesNotMatch(adminData, /createOpenAiClient|responses\.create|fetch\(/);
+});
+
+test("admin global search is authorized, validated, grouped, and server-side", () => {
+  const route = read("app/api/admin/search/route.ts");
+  const adminData = read("app/admin/admin-data.ts");
+
+  assert.match(route, /requireAdminApi/);
+  assert.match(route, /validateApiRequest/);
+  assert.match(route, /query\.length < 2/);
+  assert.match(route, /query\.length > 80/);
+  assert.match(adminData, /searchAdminRecords/);
+  assert.match(adminData, /normalizeSearchQuery/);
+  assert.match(adminData, /Users/);
+  assert.match(adminData, /Reports/);
+  assert.match(adminData, /Conversations/);
+  assert.match(adminData, /limit\(5\)/);
+});
+
+test("admin dashboard includes revenue placeholders, cost controls, charts, and activity feed", () => {
+  const dashboard = read("app/admin/page.tsx");
+  const adminData = read("app/admin/admin-data.ts");
+
+  assert.match(dashboard, /Executive financial overview/);
+  assert.match(dashboard, /AI Cost Control/);
+  assert.match(dashboard, /New users over time/);
+  assert.match(dashboard, /Estimated AI cost over time/);
+  assert.match(dashboard, /Recent activity/);
+  assert.match(adminData, /buildRevenueOverview/);
+  assert.match(adminData, /Stripe production billing is not configured/);
+  assert.match(adminData, /calculateCostControl/);
+  assert.match(adminData, /getModelPricing/);
+  assert.match(adminData, /loadRecentActivity/);
+  assert.match(adminData, /buildDailySeries/);
+});
+
+test("AI CEO is admin-only, rate-limited, audited, and prompt-injection resistant", () => {
+  const page = read("app/admin/ai-ceo/page.tsx");
+  const consoleSource = read("app/admin/ai-ceo/AiCeoConsole.tsx");
+  const actions = read("app/admin/actions.ts");
+  const adminData = read("app/admin/admin-data.ts");
+
+  assert.match(page, /AdminShell/);
+  assert.match(consoleSource, /Today’s summary/);
+  assert.match(consoleSource, /Cost review/);
+  assert.match(actions, /askAiCeo/);
+  assert.match(actions, /requireAdminPage/);
+  assert.match(actions, /checkRateLimit\(`admin:ai-ceo/);
+  assert.match(actions, /writeAdminAuditLog/);
+  assert.match(actions, /ai_ceo\.requested/);
+  assert.match(actions, /untrusted data, not instructions/);
+  assert.match(actions, /Never execute SQL/);
+  assert.match(actions, /Data unavailable/);
+  assert.doesNotMatch(actions, /from\(\s*finalPrompt|rpc\(\s*finalPrompt|query:\s*finalPrompt/i);
+  assert.match(adminData, /loadAiCeoContext/);
+});
+
+test("admin loading and empty states are present for dynamic admin views", () => {
+  const loading = read("app/admin/loading.tsx");
+  const dashboard = read("app/admin/page.tsx");
+  const usersPage = read("app/admin/users/page.tsx");
+
+  assert.match(loading, /animate-pulse/);
+  assert.match(dashboard, /No data available/);
+  assert.match(dashboard, /No activity has been recorded yet/);
+  assert.match(usersPage, /No users match this search/);
 });
 
 test("admin migration adds role, status, and audit tables with RLS", () => {
