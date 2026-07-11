@@ -1,0 +1,14 @@
+import type { ReactNode } from "react";
+import { requireAdminPage } from "./admin-data";
+
+export const dynamic = "force-dynamic";
+
+export default async function AdminLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  await requireAdminPage();
+
+  return children;
+}

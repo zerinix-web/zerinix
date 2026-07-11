@@ -17,6 +17,10 @@ export function getSupabasePublishableKey() {
   );
 }
 
+export function getSupabaseServiceRoleKey() {
+  return readEnv("SUPABASE_SERVICE_ROLE_KEY");
+}
+
 export function hasSupabaseConfig() {
   return Boolean(getSupabaseUrl() && getSupabasePublishableKey());
 }
