@@ -179,6 +179,22 @@ test("admin migration adds role, status, and audit tables with RLS", () => {
   assert.match(migration, /Users can read own account status/);
 });
 
+test("production admin role migration grants admin safely without app email checks", () => {
+  const migration = read("supabase/migrations/20260711210000_grant_production_admin_role.sql");
+  const adminData = read("app/admin/admin-data.ts");
+
+  assert.match(migration, /create table if not exists public\.admin_roles/);
+  assert.match(migration, /alter table public\.admin_roles enable row level security/);
+  assert.match(migration, /alter table public\.admin_roles force row level security/);
+  assert.match(migration, /revoke all on table public\.admin_roles from anon/);
+  assert.match(migration, /revoke all on table public\.admin_roles from authenticated/);
+  assert.match(migration, /lower\(email\) = 'admin@zerinix\.com'/);
+  assert.match(migration, /on conflict \(user_id\)/);
+  assert.match(migration, /role = excluded\.role/);
+  assert.match(migration, /active = true/);
+  assert.doesNotMatch(adminData, /admin@zerinix\.com/);
+});
+
 test("admin navigation includes required modules with coming-soon fallbacks", () => {
   const shell = read("app/admin/AdminShell.tsx");
   const sectionPage = read("app/admin/[section]/page.tsx");
