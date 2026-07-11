@@ -21,6 +21,9 @@ export type AdminUserRow = {
   accountStatus: string;
   reportCount: number;
   conversationCount: number;
+  aiRequestCount: number;
+  totalTokens: number;
+  failedRequestCount: number;
   estimatedAiCostUsd: number;
 };
 
@@ -35,6 +38,12 @@ export type AdminDashboardData = {
   reportTypeDistribution: Array<{ label: string; value: number }>;
   planDistribution: Array<{ label: string; value: number }>;
   recentUsers: AdminUserRow[];
+  recentActivity: Array<{
+    id: string;
+    label: string;
+    detail: string;
+    createdAt: string;
+  }>;
   usageSummary: {
     totalRequests: number;
     totalTokens: number;
@@ -48,6 +57,8 @@ export type AdminDashboardData = {
 const ADMIN_CLAIMS = new Set(["admin", "owner"]);
 const PAGE_SIZE_DEFAULT = 20;
 const PAGE_SIZE_MAX = 50;
+const ADMIN_AUTH_SCAN_PAGE_SIZE = 1000;
+const ADMIN_AUTH_SCAN_MAX_USERS = 5000;
 let cachedHealth:
   | { expiresAt: number; data: Array<{ label: string; status: string; detail: string }> }
   | null = null;
@@ -57,7 +68,17 @@ function readString(value: unknown, fallback = "") {
 }
 
 function readNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
 }
 
 function normalizePlan(value: unknown) {
@@ -188,6 +209,27 @@ async function listAuthUsers(page: number, perPage: number) {
   return data;
 }
 
+async function listAuthUsersForAdminScan() {
+  const firstPage = await listAuthUsers(1, ADMIN_AUTH_SCAN_PAGE_SIZE);
+  const users = [...firstPage.users];
+  const total = firstPage.total;
+  const pagesToRead = Math.min(
+    Math.ceil(total / ADMIN_AUTH_SCAN_PAGE_SIZE),
+    Math.ceil(ADMIN_AUTH_SCAN_MAX_USERS / ADMIN_AUTH_SCAN_PAGE_SIZE)
+  );
+
+  for (let page = 2; page <= pagesToRead; page += 1) {
+    const pageData = await listAuthUsers(page, ADMIN_AUTH_SCAN_PAGE_SIZE);
+    users.push(...pageData.users);
+  }
+
+  return {
+    users: users.slice(0, ADMIN_AUTH_SCAN_MAX_USERS),
+    total,
+    scanned: Math.min(users.length, ADMIN_AUTH_SCAN_MAX_USERS),
+  };
+}
+
 async function loadUserAggregates(userIds: string[]) {
   const serviceClient = createServiceRoleClient();
   const [billing, statuses, reports, conversations, usage] = await Promise.all([
@@ -203,7 +245,7 @@ async function loadUserAggregates(userIds: string[]) {
     serviceClient.from("ai_conversations").select("user_id").in("user_id", userIds),
     serviceClient
       .from("ai_usage_events")
-      .select("user_id,estimated_cost_usd")
+      .select("user_id,status,total_tokens,estimated_cost_usd")
       .in("user_id", userIds),
   ]);
 
@@ -217,12 +259,36 @@ async function loadUserAggregates(userIds: string[]) {
     ])
   );
 
+  const requestCountMap = new Map<string, number>();
+  const tokenMap = new Map<string, number>();
+  const failedRequestMap = new Map<string, number>();
+  const costMap = new Map<string, number>();
+
+  (usage.data || []).forEach((row) => {
+    const userId = readString(row.user_id);
+
+    if (!userId) {
+      return;
+    }
+
+    requestCountMap.set(userId, (requestCountMap.get(userId) || 0) + 1);
+    tokenMap.set(userId, (tokenMap.get(userId) || 0) + readNumber(row.total_tokens));
+    costMap.set(userId, (costMap.get(userId) || 0) + readNumber(row.estimated_cost_usd));
+
+    if (readString(row.status).toLowerCase() === "failed") {
+      failedRequestMap.set(userId, (failedRequestMap.get(userId) || 0) + 1);
+    }
+  });
+
   return {
     planMap,
     statusMap,
     reportCountMap: buildCountMap(reports.data || [], "user_id"),
     conversationCountMap: buildCountMap(conversations.data || [], "user_id"),
-    costMap: buildCountMap(usage.data || [], "user_id", "estimated_cost_usd"),
+    requestCountMap,
+    tokenMap,
+    failedRequestMap,
+    costMap,
   };
 }
 
@@ -244,6 +310,9 @@ function toAdminUserRow(
     accountStatus: aggregates.statusMap.get(user.id) || "active",
     reportCount: aggregates.reportCountMap.get(user.id) || 0,
     conversationCount: aggregates.conversationCountMap.get(user.id) || 0,
+    aiRequestCount: aggregates.requestCountMap.get(user.id) || 0,
+    totalTokens: aggregates.tokenMap.get(user.id) || 0,
+    failedRequestCount: aggregates.failedRequestMap.get(user.id) || 0,
     estimatedAiCostUsd: aggregates.costMap.get(user.id) || 0,
   };
 }
@@ -274,6 +343,9 @@ export async function loadAdminUsers(input: {
         statusMap: new Map<string, string>(),
         reportCountMap: new Map<string, number>(),
         conversationCountMap: new Map<string, number>(),
+        requestCountMap: new Map<string, number>(),
+        tokenMap: new Map<string, number>(),
+        failedRequestMap: new Map<string, number>(),
         costMap: new Map<string, number>(),
       };
 
@@ -300,7 +372,7 @@ export async function loadAdminUserDetail(userId: string) {
   }
 
   const aggregates = await loadUserAggregates([userId]);
-  const [reports, conversations, audit] = await Promise.all([
+  const [reports, conversations, usage, audit] = await Promise.all([
     serviceClient
       .from("reports")
       .select("id,title,report_type,status,created_at")
@@ -314,6 +386,12 @@ export async function loadAdminUserDetail(userId: string) {
       .order("updated_at", { ascending: false })
       .limit(10),
     serviceClient
+      .from("ai_usage_events")
+      .select("id,endpoint,model,status,total_tokens,estimated_cost_usd,cache_hit,created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(20),
+    serviceClient
       .from("admin_audit_log")
       .select("id,action,metadata,created_at")
       .eq("target_user_id", userId)
@@ -325,6 +403,7 @@ export async function loadAdminUserDetail(userId: string) {
     user: toAdminUserRow(data.user, aggregates),
     reports: reports.data || [],
     conversations: conversations.data || [],
+    usage: usage.data || [],
     auditLog: audit.data || [],
   };
 }
@@ -344,13 +423,30 @@ async function countTable(table: string) {
 
 async function loadRecentUsage() {
   const serviceClient = createServiceRoleClient();
-  const { data } = await serviceClient
+  const { data, count } = await serviceClient
     .from("ai_usage_events")
-    .select("id,endpoint,status,total_tokens,estimated_cost_usd,cache_hit,created_at")
+    .select("id,endpoint,status,total_tokens,estimated_cost_usd,cache_hit,created_at", {
+      count: "exact",
+    })
     .order("created_at", { ascending: false })
-    .limit(1000);
+    .limit(5000);
 
-  return data || [];
+  return {
+    rows: data || [],
+    totalRequests: count || (data || []).length,
+  };
+}
+
+async function loadAllAccountStatuses() {
+  const serviceClient = createServiceRoleClient();
+  const { data } = await serviceClient.from("user_account_statuses").select("user_id,status");
+
+  return new Map(
+    (data || []).map((row) => [
+      readString(row.user_id),
+      readString(row.status, "active").toLowerCase(),
+    ])
+  );
 }
 
 async function loadReportDistribution() {
@@ -380,7 +476,7 @@ async function loadPlanDistribution() {
 }
 
 async function loadUserGrowth() {
-  const authData = await listAuthUsers(1, 1000);
+  const authData = await listAuthUsersForAdminScan();
   const map = new Map<string, number>();
 
   authData.users.forEach((user) => {
@@ -447,17 +543,21 @@ export async function loadSystemStatus() {
 }
 
 export async function loadAdminDashboardData(): Promise<AdminDashboardData> {
-  const [authData, reportsGenerated, aiConversations, usage, recentUsers, systemStatus] =
+  const [authData, reportsGenerated, aiConversations, usageResult, recentUsers, systemStatus, statuses] =
     await Promise.all([
-      listAuthUsers(1, 1000),
+      listAuthUsersForAdminScan(),
       countTable("reports"),
       countTable("ai_conversations"),
       loadRecentUsage(),
       loadAdminUsers({ page: 1, pageSize: 5 }),
       loadSystemStatus(),
+      loadAllAccountStatuses(),
     ]);
   const totalUsers = authData.total;
-  const activeUsers = authData.users.filter((user) => user.last_sign_in_at).length;
+  const activeUsers = authData.users.filter(
+    (user) => user.last_sign_in_at && statuses.get(user.id) !== "suspended"
+  ).length;
+  const usage = usageResult.rows;
   const aiApiCost = usage.reduce(
     (sum, row) => sum + readNumber(row.estimated_cost_usd),
     0
@@ -475,8 +575,14 @@ export async function loadAdminDashboardData(): Promise<AdminDashboardData> {
     reportTypeDistribution: await loadReportDistribution(),
     planDistribution: await loadPlanDistribution(),
     recentUsers: recentUsers.users,
+    recentActivity: usage.slice(0, 8).map((row) => ({
+      id: readString(row.id),
+      label: readString(row.endpoint, "AI request"),
+      detail: `${readString(row.status, "completed")} · ${readNumber(row.total_tokens).toLocaleString("en-US")} tokens`,
+      createdAt: readString(row.created_at),
+    })),
     usageSummary: {
-      totalRequests: usage.length,
+      totalRequests: usageResult.totalRequests,
       totalTokens: usage.reduce((sum, row) => sum + readNumber(row.total_tokens), 0),
       cacheHits: usage.filter((row) => Boolean(row.cache_hit)).length,
       failedRequests: failedRequests.length,

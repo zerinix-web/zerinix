@@ -135,6 +135,18 @@ export default async function AdminDashboardPage() {
       icon: Bot,
     },
     {
+      label: "Total AI requests",
+      value: formatNumber(data.usageSummary.totalRequests),
+      detail: "Stored usage events",
+      icon: Activity,
+    },
+    {
+      label: "Token usage",
+      value: formatNumber(data.usageSummary.totalTokens),
+      detail: "Prompt and completion tokens",
+      icon: Bot,
+    },
+    {
       label: "Monthly recurring revenue",
       value: formatCurrency(data.monthlyRecurringRevenue),
       detail: "Payment provider not connected",
@@ -222,6 +234,24 @@ export default async function AdminDashboardPage() {
                   </p>
                 </div>
               ))}
+            </div>
+          </div>
+
+          <div className="rounded-[1.75rem] border border-white/10 bg-white/[0.045] p-5 shadow-2xl shadow-black/25 backdrop-blur-xl">
+            <h2 className="text-lg font-semibold text-white">Recent activity</h2>
+            <div className="mt-4 space-y-3">
+              {data.recentActivity.length ? (
+                data.recentActivity.map((item) => (
+                  <div key={item.id} className="rounded-2xl border border-white/10 bg-black/25 p-4 text-sm">
+                    <p className="font-medium text-white">{item.label}</p>
+                    <p className="mt-1 text-zinc-500">{item.detail} · {formatDate(item.createdAt)}</p>
+                  </div>
+                ))
+              ) : (
+                <p className="rounded-2xl border border-white/10 bg-black/25 p-4 text-sm text-zinc-500">
+                  No activity has been recorded yet.
+                </p>
+              )}
             </div>
           </div>
 

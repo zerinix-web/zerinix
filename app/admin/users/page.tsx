@@ -78,7 +78,7 @@ export default async function AdminUsersPage({ searchParams }: UsersPageProps) {
 
       <div className="mt-5 overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.045] shadow-2xl shadow-black/25 backdrop-blur-xl">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1180px] text-left text-sm">
+          <table className="w-full min-w-[1360px] text-left text-sm">
             <thead className="border-b border-white/10 bg-black/25 text-xs uppercase tracking-[0.18em] text-zinc-500">
               <tr>
                 <th className="px-5 py-4">User</th>
@@ -89,6 +89,9 @@ export default async function AdminUsersPage({ searchParams }: UsersPageProps) {
                 <th className="px-5 py-4">Status</th>
                 <th className="px-5 py-4">Reports</th>
                 <th className="px-5 py-4">Conversations</th>
+                <th className="px-5 py-4">AI requests</th>
+                <th className="px-5 py-4">Tokens</th>
+                <th className="px-5 py-4">Errors</th>
                 <th className="px-5 py-4">AI cost</th>
                 <th className="px-5 py-4">Actions</th>
               </tr>
@@ -109,6 +112,9 @@ export default async function AdminUsersPage({ searchParams }: UsersPageProps) {
                   <td className="px-5 py-4 capitalize">{user.accountStatus}</td>
                   <td className="px-5 py-4">{user.reportCount}</td>
                   <td className="px-5 py-4">{user.conversationCount}</td>
+                  <td className="px-5 py-4">{user.aiRequestCount}</td>
+                  <td className="px-5 py-4">{user.totalTokens.toLocaleString("en-US")}</td>
+                  <td className="px-5 py-4">{user.failedRequestCount}</td>
                   <td className="px-5 py-4">{formatCurrency(user.estimatedAiCostUsd)}</td>
                   <td className="px-5 py-4">
                     <div className="flex flex-wrap items-center gap-2">

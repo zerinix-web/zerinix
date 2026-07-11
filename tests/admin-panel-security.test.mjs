@@ -104,11 +104,39 @@ test("admin users page implements server-side search, pagination, and safe empty
   const adminData = read("app/admin/admin-data.ts");
 
   assert.match(usersPage, /Search by email or display name/);
+  assert.match(usersPage, /AI requests/);
+  assert.match(usersPage, /Tokens/);
+  assert.match(usersPage, /Errors/);
   assert.match(usersPage, /pageHref/);
   assert.match(usersPage, /No users match this search/);
   assert.match(adminData, /pageSize/);
   assert.match(adminData, /sourceUsers\.slice/);
   assert.match(adminData, /email\.includes\(search\)/);
+});
+
+test("admin dashboard and user detail expose real stored usage monitoring", () => {
+  const dashboard = read("app/admin/page.tsx");
+  const detail = read("app/admin/users/[id]/page.tsx");
+  const adminData = read("app/admin/admin-data.ts");
+
+  assert.match(dashboard, /Total AI requests/);
+  assert.match(dashboard, /Token usage/);
+  assert.match(dashboard, /Recent activity/);
+  assert.match(detail, /AI usage monitoring/);
+  assert.match(detail, /Cache hit/);
+  assert.match(adminData, /requestCountMap/);
+  assert.match(adminData, /tokenMap/);
+  assert.match(adminData, /failedRequestMap/);
+  assert.match(adminData, /count: "exact"/);
+});
+
+test("admin cost and token aggregation handles Supabase numeric strings", () => {
+  const adminData = read("app/admin/admin-data.ts");
+
+  assert.match(adminData, /typeof value === "string"/);
+  assert.match(adminData, /Number\(value\)/);
+  assert.match(adminData, /estimated_cost_usd/);
+  assert.match(adminData, /total_tokens/);
 });
 
 test("admin UI never renders passwords, tokens, card data, or secret values", () => {

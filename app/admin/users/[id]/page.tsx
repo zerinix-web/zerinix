@@ -24,6 +24,18 @@ function formatDate(value: unknown) {
   }).format(new Date(value));
 }
 
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 4,
+  }).format(value);
+}
+
 function DetailCard({
   label,
   value,
@@ -82,12 +94,17 @@ export default async function AdminUserDetailPage({ params }: UserDetailPageProp
         <DetailCard label="Last sign-in" value={formatDate(detail.user.lastSignInAt)} />
         <DetailCard label="Reports" value={detail.user.reportCount} />
         <DetailCard label="Conversations" value={detail.user.conversationCount} />
+        <DetailCard label="AI requests" value={formatNumber(detail.user.aiRequestCount)} />
+        <DetailCard label="Token usage" value={formatNumber(detail.user.totalTokens)} />
+        <DetailCard label="AI failures" value={formatNumber(detail.user.failedRequestCount)} />
+        <DetailCard label="AI cost" value={formatCurrency(detail.user.estimatedAiCostUsd)} />
       </div>
 
       <div className="mt-6 grid gap-5 xl:grid-cols-3">
         {[
           { title: "Recent reports", rows: detail.reports },
           { title: "Recent conversations", rows: detail.conversations },
+          { title: "AI usage monitoring", rows: detail.usage },
           { title: "Admin audit log", rows: detail.auditLog },
         ].map((section) => (
           <div
@@ -103,11 +120,25 @@ export default async function AdminUserDetailPage({ params }: UserDetailPageProp
                   return (
                   <div key={String(record.id)} className="rounded-2xl border border-white/10 bg-black/25 p-4">
                     <p className="text-sm font-medium text-white">
-                      {readRowString(record, ["title", "action", "id"])}
+                      {readRowString(record, ["title", "action", "endpoint", "id"])}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">
                       {formatDate(record.created_at || record.updated_at)}
                     </p>
+                    {"endpoint" in record ? (
+                      <div className="mt-3 grid gap-2 text-xs text-zinc-400">
+                        <span>Endpoint: {readRowString(record, ["endpoint"]) || "Unknown"}</span>
+                        <span>Status: {readRowString(record, ["status"]) || "Unknown"}</span>
+                        <span>Model: {readRowString(record, ["model"]) || "Not recorded"}</span>
+                        <span>
+                          Tokens: {formatNumber(Number(record.total_tokens) || 0)}
+                        </span>
+                        <span>
+                          Cost: {formatCurrency(Number(record.estimated_cost_usd) || 0)}
+                        </span>
+                        <span>Cache hit: {record.cache_hit ? "Yes" : "No"}</span>
+                      </div>
+                    ) : null}
                   </div>
                 );
                 })
