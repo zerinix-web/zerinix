@@ -992,12 +992,13 @@ export async function POST(req: Request) {
         forgotten: memoryApplyResult.forgotten,
         failed: memoryApplyResult.failed,
         storage: memoryApplyResult.storage,
+        error: memoryApplyResult.error || null,
       });
     }
 
     if (memoryApplyResult.failed > 0) {
       return textStream(
-        "I could not save that to persistent memory because the memory database write failed. Please try again later."
+        `I could not save that to persistent memory because the memory database write failed.\n\n${memoryApplyResult.error || "No Supabase error details were returned."}`
       );
     }
 
@@ -1021,7 +1022,7 @@ export async function POST(req: Request) {
     if (memoryOperations.length > 0) {
       if (memoryApplyResult.storage !== "table") {
         return textStream(
-          "I could not save that to public.user_memories, so I will not claim it was saved. Please verify the memory table migration and RLS policies."
+          `I could not save that to public.user_memories, so I will not claim it was saved.\n\nStorage used: ${memoryApplyResult.storage}.\n${memoryApplyResult.error || "No Supabase table-write error was returned."}`
         );
       }
 

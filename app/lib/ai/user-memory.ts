@@ -33,6 +33,7 @@ export type UserMemoryApplyResult = {
   forgotten: number;
   failed: number;
   storage: "table" | "metadata" | "none";
+  error?: string;
   fallbackMemories?: UserMemory[];
 };
 
@@ -41,6 +42,12 @@ type UserMemoryRow = {
   memory_type: UserMemoryType;
   content: string;
   updated_at: string;
+};
+
+type UserMemoryError = {
+  code?: string;
+  message?: string;
+  status?: number | string;
 };
 
 const MAX_MEMORY_CONTENT_LENGTH = 240;
@@ -87,6 +94,14 @@ function isMissingUserMemoriesTableError(error: { code?: string; message?: strin
     error.code === "PGRST205" ||
     /user_memories/i.test(message) && /schema cache|relation|table|does not exist/i.test(message)
   );
+}
+
+function formatMemoryError(error: UserMemoryError, phase: string) {
+  const code = error.code ? ` code=${error.code}` : "";
+  const status = error.status ? ` status=${error.status}` : "";
+  const message = error.message || "Unknown Supabase memory error";
+
+  return `${phase} failed:${code}${status} message=${message}`;
 }
 
 function inferMemoryType(content: string): UserMemoryType {
@@ -221,6 +236,8 @@ export async function loadUserMemories(
 
   if (error) {
     console.error("[user_memories select failed]", {
+      phase: "load",
+      userId,
       message: error.message,
       code: error.code,
     });
@@ -383,6 +400,7 @@ async function applyUserMemoryOperationsToMetadata(
       forgotten: 0,
       failed: operations.length,
       storage: "none",
+      error: formatMemoryError(error, "metadata_update"),
     };
   }
 
@@ -409,6 +427,8 @@ export async function loadUserMemoriesForUser(
 
   if (error) {
     console.error("[user_memories select failed]", {
+      phase: "load_for_user",
+      userId: user.id,
       message: error.message,
       code: error.code,
     });
@@ -458,6 +478,9 @@ export async function applyUserMemoryOperations(
 
       if (existingError) {
         console.error("[user_memories duplicate check failed]", {
+          phase: "duplicate_check",
+          userId,
+          memoryType: operation.type,
           message: existingError.message,
           code: existingError.code,
         });
@@ -467,6 +490,7 @@ export async function applyUserMemoryOperations(
         }
 
         result.failed += 1;
+        result.error = formatMemoryError(existingError, "duplicate_check");
         continue;
       }
 
@@ -494,6 +518,9 @@ export async function applyUserMemoryOperations(
 
         if (updateError) {
           console.error("[user_memories update failed]", {
+            phase: "update",
+            userId,
+            memoryType: operation.type,
             message: updateError.message,
             code: updateError.code,
           });
@@ -503,6 +530,7 @@ export async function applyUserMemoryOperations(
           }
 
           result.failed += 1;
+          result.error = formatMemoryError(updateError, "update");
           continue;
         }
 
@@ -521,6 +549,9 @@ export async function applyUserMemoryOperations(
 
           if (cleanupError) {
             console.error("[user_memories duplicate cleanup failed]", {
+              phase: "duplicate_cleanup",
+              userId,
+              memoryType: operation.type,
               message: cleanupError.message,
               code: cleanupError.code,
             });
@@ -539,6 +570,9 @@ export async function applyUserMemoryOperations(
 
       if (error) {
         console.error("[user_memories insert failed]", {
+          phase: "insert",
+          userId,
+          memoryType: operation.type,
           message: error.message,
           code: error.code,
         });
@@ -548,6 +582,7 @@ export async function applyUserMemoryOperations(
         }
 
         result.failed += 1;
+        result.error = formatMemoryError(error, "insert");
       } else {
         result.remembered += 1;
       }
@@ -562,6 +597,8 @@ export async function applyUserMemoryOperations(
 
     if (selectError) {
       console.error("[user_memories forget select failed]", {
+        phase: "forget_select",
+        userId,
         message: selectError.message,
         code: selectError.code,
       });
@@ -571,6 +608,7 @@ export async function applyUserMemoryOperations(
       }
 
       result.failed += 1;
+      result.error = formatMemoryError(selectError, "forget_select");
       continue;
     }
 
@@ -603,6 +641,8 @@ export async function applyUserMemoryOperations(
 
     if (error) {
       console.error("[user_memories delete failed]", {
+        phase: "delete",
+        userId,
         message: error.message,
         code: error.code,
       });
@@ -612,6 +652,7 @@ export async function applyUserMemoryOperations(
       }
 
       result.failed += 1;
+      result.error = formatMemoryError(error, "delete");
     } else {
       result.forgotten += idsToDelete.length;
     }
