@@ -13,6 +13,7 @@ import {
 import Link from "next/link";
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 import {
+  AlertCircle,
   Bot,
   Check,
   Clipboard,
@@ -748,6 +749,7 @@ export default function AIChatWorkspace({
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
+  const [clearProfileConfirmOpen, setClearProfileConfirmOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [activeReportMemoryId] = useState(() =>
@@ -913,16 +915,9 @@ export default function AIChatWorkspace({
   }
 
   async function clearProfile() {
-    const shouldClear = window.confirm(
-      "Clear your saved AI Chat profile? Future chats will stop using these preferences."
-    );
-
-    if (!shouldClear) {
-      return;
-    }
-
     setProfileSaving(true);
     setProfileMessage("");
+    setClearProfileConfirmOpen(false);
 
     const userId = await getCurrentUserId();
 
@@ -1584,6 +1579,42 @@ export default function AIChatWorkspace({
         </div>
       ) : null}
 
+      {clearProfileConfirmOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl">
+          <div className="w-full max-w-md rounded-[2rem] border border-amber-300/20 bg-zinc-950 p-6 shadow-2xl shadow-black/60">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-300/20 bg-amber-300/10">
+              <AlertCircle className="h-5 w-5 text-amber-200" />
+            </div>
+            <p className="mt-5 text-xs font-semibold uppercase tracking-[0.26em] text-amber-100/70">
+              Clear AI profile
+            </p>
+            <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">
+              Remove saved chat preferences?
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">
+              Future conversations will stop using your saved country, industry,
+              budget, risk and goal preferences until you save a new profile.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setClearProfileConfirmOpen(false)}
+                className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void clearProfile()}
+                className="inline-flex flex-1 items-center justify-center rounded-2xl border border-amber-300/20 bg-amber-300/15 px-4 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/20"
+              >
+                Clear profile
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {isDraggingFiles ? (
         <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xl">
           <div className="rounded-[2rem] border border-dashed border-teal-200/35 bg-zinc-950/90 p-8 text-center shadow-2xl shadow-teal-950/30">
@@ -1898,7 +1929,7 @@ export default function AIChatWorkspace({
                 </button>
                 <button
                   type="button"
-                  onClick={() => void clearProfile()}
+                  onClick={() => setClearProfileConfirmOpen(true)}
                   disabled={profileSaving || !hasProfileContent(profile)}
                   className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
                 >
