@@ -1,12 +1,12 @@
-import { NextResponse } from "next/server";
 import { getStripeConfiguration } from "@/app/lib/billing/stripe";
 import { handleStripeWebhookPayload } from "@/app/lib/billing/stripe-webhook";
+import { noStoreJson } from "@/app/lib/security/api-response";
 
 export async function POST(req: Request) {
   const config = getStripeConfiguration();
 
   if (!config.configured || !config.hasWebhookSecret) {
-    return NextResponse.json(
+    return noStoreJson(
       { error: "Stripe webhooks are not configured." },
       { status: 503 }
     );
@@ -19,10 +19,10 @@ export async function POST(req: Request) {
   });
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: result.status });
+    return noStoreJson({ error: result.error }, { status: result.status });
   }
 
-  return NextResponse.json({
+  return noStoreJson({
     received: true,
     duplicate: result.duplicate,
   });

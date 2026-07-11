@@ -13,6 +13,8 @@ const stripe = readFileSync("app/lib/billing/stripe.ts", "utf8");
 test("production integration environment variables are documented", () => {
   for (const name of [
     "ENABLE_STRIPE_BILLING",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "ZERINIX_VERBOSE_LOGS",
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",
     "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
@@ -21,6 +23,8 @@ test("production integration environment variables are documented", () => {
     "ENABLE_RESEND_EMAILS",
     "RESEND_API_KEY",
     "RESEND_FROM_EMAIL",
+    "RESEND_REPLY_TO_EMAIL",
+    "RESEND_MAX_RETRIES",
     "ENABLE_SUPABASE_STORAGE",
     "SUPABASE_STORAGE_AVATAR_BUCKET",
     "SUPABASE_STORAGE_USER_FILES_BUCKET",

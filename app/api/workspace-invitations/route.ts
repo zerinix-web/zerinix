@@ -1,20 +1,33 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { createClient } from "@/app/lib/supabase/server";
 import { sendWorkspaceInvitationEmail } from "@/app/lib/integrations/email-events";
 import { checkRateLimit, getClientIpFromRequest } from "@/app/lib/security/rate-limit";
+import { noStoreJson } from "@/app/lib/security/api-response";
+import { validateApiRequest } from "@/app/lib/security/request-validation";
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 export async function POST(request: NextRequest) {
+  const requestValidation = validateApiRequest(request, {
+    maxBodyBytes: 10_000,
+  });
+
+  if (!requestValidation.ok) {
+    return noStoreJson(
+      { error: requestValidation.message },
+      { status: requestValidation.status }
+    );
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    return noStoreJson({ error: "Authentication required." }, { status: 401 });
   }
 
   const rateLimit = checkRateLimit(
@@ -26,7 +39,7 @@ export async function POST(request: NextRequest) {
   );
 
   if (!rateLimit.allowed) {
-    return NextResponse.json({ error: "Too many invitation attempts." }, { status: 429 });
+    return noStoreJson({ error: "Too many invitation attempts." }, { status: 429 });
   }
 
   const body = (await request.json().catch(() => ({}))) as {
@@ -37,7 +50,7 @@ export async function POST(request: NextRequest) {
   const recipientEmail = String(body.recipientEmail || "").trim().toLowerCase();
 
   if (!workspaceId || !isValidEmail(recipientEmail)) {
-    return NextResponse.json({ error: "Invitation request is invalid." }, { status: 400 });
+    return noStoreJson({ error: "Invitation request is invalid." }, { status: 400 });
   }
 
   const { data: workspace, error } = await supabase
@@ -48,7 +61,7 @@ export async function POST(request: NextRequest) {
     .maybeSingle();
 
   if (error || !workspace) {
-    return NextResponse.json({ error: "Workspace not found." }, { status: 404 });
+    return noStoreJson({ error: "Workspace not found." }, { status: 404 });
   }
 
   const result = await sendWorkspaceInvitationEmail({
@@ -60,11 +73,11 @@ export async function POST(request: NextRequest) {
   });
 
   if (!result.ok) {
-    return NextResponse.json(
+    return noStoreJson(
       { error: result.message, missing: result.missing || [] },
       { status: result.reason === "not_configured" ? 503 : 400 }
     );
   }
 
-  return NextResponse.json({ ok: true });
+  return noStoreJson({ ok: true });
 }

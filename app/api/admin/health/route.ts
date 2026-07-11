@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import { requireAdminApi, loadSystemStatus } from "@/app/admin/admin-data";
+import { noStoreJson } from "@/app/lib/security/api-response";
 import { validateApiRequest } from "@/app/lib/security/request-validation";
 
 export async function GET(req: Request) {
@@ -8,7 +8,7 @@ export async function GET(req: Request) {
   });
 
   if (!requestValidation.ok) {
-    return NextResponse.json(
+    return noStoreJson(
       { error: requestValidation.message },
       { status: requestValidation.status }
     );
@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     return admin.response;
   }
 
-  return NextResponse.json({
+  return noStoreJson({
     cached: true,
     status: await loadSystemStatus(),
   });

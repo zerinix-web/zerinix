@@ -41,6 +41,8 @@ test("production security headers are configured with development-safe exception
     "X-Frame-Options",
     "X-Content-Type-Options",
     "Referrer-Policy",
+    "Cross-Origin-Opener-Policy",
+    "Cross-Origin-Resource-Policy",
     "Permissions-Policy",
     "Strict-Transport-Security",
   ]) {
@@ -50,6 +52,7 @@ test("production security headers are configured with development-safe exception
   assert.match(config, /frame-ancestors 'none'/);
   assert.match(config, /object-src 'none'/);
   assert.match(config, /base-uri 'self'/);
+  assert.match(config, /same-origin/);
   assert.match(config, /upgrade-insecure-requests/);
   assert.match(config, /!\s*isDevelopment/);
 });
@@ -79,6 +82,31 @@ test("AI API routes validate origin and request size before parsing JSON", () =>
   assert.match(validator, /Request body is too large/);
   assert.match(validator, /content-length/);
   assert.match(validator, /origin/);
+});
+
+test("operational API routes validate requests and disable response caching", () => {
+  const routes = [
+    "app/api/admin/health/route.ts",
+    "app/api/reports/[id]/notify/route.ts",
+    "app/api/workspace-invitations/route.ts",
+  ];
+  const responseHelper = read("app/lib/security/api-response.ts");
+
+  assert.match(responseHelper, /Cache-Control/);
+  assert.match(responseHelper, /no-store/);
+  assert.match(responseHelper, /Pragma/);
+
+  for (const route of routes) {
+    const source = read(route);
+
+    assert.match(source, /validateApiRequest/);
+    assert.match(source, /noStoreJson/);
+  }
+
+  const stripeWebhook = read("app/api/stripe/webhook/route.ts");
+
+  assert.match(stripeWebhook, /noStoreJson/);
+  assert.match(stripeWebhook, /handleStripeWebhookPayload/);
 });
 
 test("chat file attachments are bounded and sanitized on the server", () => {
