@@ -21,6 +21,7 @@ import { createClient } from "@/app/lib/supabase/server";
 import DashboardSidebar from "../DashboardSidebar";
 import { getAuthenticatedUser, loadUserReport } from "../report-utils";
 import ReportPdfButton from "./ReportPdfButton";
+import { CopySectionButton, ReportScrollProgress } from "./ReportViewerEnhancements";
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 
 export const dynamic = "force-dynamic";
@@ -1120,7 +1121,7 @@ function hasReportSectionVisual(title: string) {
 function getReportArticleClass(title: string) {
   const normalizedTitle = title.toLowerCase();
   const base =
-    "relative overflow-hidden rounded-[1.75rem] border p-5 shadow-xl shadow-black/30";
+    "relative overflow-hidden rounded-[1.75rem] border p-5 shadow-xl shadow-black/30 transition duration-300 hover:-translate-y-0.5 hover:shadow-2xl hover:shadow-black/40 sm:p-6";
 
   if (normalizedTitle.includes("executive summary")) {
     return `${base} border-teal-200/20 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.12),transparent_34%),rgba(0,0,0,0.62)]`;
@@ -1160,9 +1161,12 @@ function AnalysisNotes({
   }
 
   return (
-    <details className="group rounded-2xl border border-white/10 bg-black/25 p-4">
-      <summary className="cursor-pointer list-none text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500 transition hover:text-zinc-300">
-        {label}
+    <details className="group rounded-2xl border border-white/10 bg-black/25 p-4 transition duration-200 open:bg-black/35">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500 transition hover:text-zinc-300">
+        <span>{label}</span>
+        <span className="text-[10px] tracking-[0.16em] text-teal-200/60 transition group-open:rotate-45">
+          +
+        </span>
       </summary>
       <div className="mt-4 border-t border-white/10 pt-4">
         {children}
@@ -1348,7 +1352,7 @@ function ReportText({ content }: { content: string }) {
   }
 
   return (
-    <div className="space-y-4 text-[15px] leading-8 text-zinc-300">
+    <div className="space-y-5 text-[15px] leading-8 text-zinc-300 md:text-base">
       {blocks.map((block, blockIndex) => {
         const lines = block
           .split("\n")
@@ -1356,12 +1360,29 @@ function ReportText({ content }: { content: string }) {
           .filter(Boolean);
         const isList = lines.every((line) => /^[-*]\s+/.test(line));
         const isTable = lines.length > 1 && lines.every((line) => line.startsWith("|") && line.includes("|"));
+        const isCodeBlock = block.startsWith("```") && block.endsWith("```");
+
+        if (isCodeBlock) {
+          const code = block
+            .replace(/^```[\w-]*\n?/, "")
+            .replace(/\n?```$/, "")
+            .trim();
+
+          return (
+            <pre
+              key={`code-${blockIndex}-${code.slice(0, 24)}`}
+              className="overflow-x-auto rounded-2xl border border-white/10 bg-black/50 p-4 text-sm leading-7 text-teal-100 shadow-inner shadow-black/40"
+            >
+              <code>{code}</code>
+            </pre>
+          );
+        }
 
         if (isList) {
           return (
-            <ul key={`list-${blockIndex}`} className="space-y-2.5 text-zinc-300">
+            <ul key={`list-${blockIndex}`} className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] p-4 text-zinc-300">
               {lines.map((line, lineIndex) => (
-                <li key={`line-${blockIndex}-${lineIndex}-${line}`} className="flex gap-3">
+                <li key={`line-${blockIndex}-${lineIndex}-${line}`} className="flex gap-3 leading-7">
                   <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
                   <span>{renderInlineMarkdown(line.replace(/^[-*]\s+/, ""))}</span>
                 </li>
@@ -1382,12 +1403,12 @@ function ReportText({ content }: { content: string }) {
           const [headerRow, ...bodyRows] = rows;
 
           return (
-            <div key={`table-${blockIndex}`} className="overflow-hidden rounded-2xl border border-white/10">
-              <table className="w-full border-collapse text-left text-sm">
+            <div key={`table-${blockIndex}`} className="overflow-x-auto rounded-2xl border border-white/10 bg-black/20">
+              <table className="w-full min-w-[42rem] border-collapse text-left text-sm">
                 <thead className="bg-white/[0.06] text-xs uppercase tracking-[0.18em] text-zinc-400">
                   <tr>
                     {headerRow?.map((cell, cellIndex) => (
-                      <th key={`header-${blockIndex}-${cellIndex}-${cell}`} className="px-4 py-3 font-semibold">
+                      <th key={`header-${blockIndex}-${cellIndex}-${cell}`} className="px-4 py-3 font-semibold text-zinc-300">
                         {cell}
                       </th>
                     ))}
@@ -1397,7 +1418,7 @@ function ReportText({ content }: { content: string }) {
                   {bodyRows.map((row, rowIndex) => (
                     <tr key={`${row.join("-")}-${rowIndex}`}>
                       {row.map((cell, cellIndex) => (
-                        <td key={`${cell}-${cellIndex}`} className="px-4 py-3 align-top">
+                        <td key={`${cell}-${cellIndex}`} className="px-4 py-3 align-top leading-7">
                           {renderInlineMarkdown(cell)}
                         </td>
                       ))}
@@ -1411,7 +1432,7 @@ function ReportText({ content }: { content: string }) {
 
         if (block.startsWith("### ")) {
           return (
-            <h3 key={`h3-${blockIndex}`} className="pt-2 text-base font-semibold text-white">
+            <h3 key={`h3-${blockIndex}`} className="pt-3 text-lg font-semibold tracking-tight text-white">
               {renderInlineMarkdown(block.slice(4))}
             </h3>
           );
@@ -1419,7 +1440,7 @@ function ReportText({ content }: { content: string }) {
 
         if (block.startsWith("## ")) {
           return (
-            <h2 key={`h2-${blockIndex}`} className="pt-2 text-lg font-semibold text-white">
+            <h2 key={`h2-${blockIndex}`} className="pt-3 text-xl font-semibold tracking-tight text-white">
               {renderInlineMarkdown(block.slice(3))}
             </h2>
           );
@@ -1468,7 +1489,9 @@ export default async function ReportDetailPage({
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
+      <ReportScrollProgress />
       <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.16),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.08),transparent_28%)]" />
+      <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.025)_1px,transparent_1px)] bg-[size:72px_72px]" />
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <DashboardSidebar />
 
@@ -1535,7 +1558,7 @@ export default async function ReportDetailPage({
               <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
                 ZERINIX EXECUTIVE REPORT
               </p>
-              <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white">
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white md:text-4xl">
                 {report.type}
               </h2>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
@@ -1543,94 +1566,163 @@ export default async function ReportDetailPage({
               </p>
             </div>
 
-            <div className="space-y-5 p-4 sm:p-5">
-            {visibleSections.map((section, index) => {
-              const Icon = getSectionIcon(section.title);
-              const isFinancialDashboard = section.title
-                .toLowerCase()
-                .includes("financial dashboard");
-              const detailsContent = isFinancialDashboard
-                ? ""
-                : section.content;
-
-              return (
-              <article
-                key={getReportSectionKey(section)}
-                className={getReportArticleClass(section.title)}
-              >
-                <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-teal-200/30 to-transparent" />
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-inner shadow-white/5">
-                    <Icon className="h-5 w-5 text-teal-200" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <h2 className="text-xl font-semibold tracking-tight text-white">
-                        {section.title}
-                      </h2>
-                      <span className="w-fit rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
-                        Section {String(index + 1).padStart(2, "0")}
-                      </span>
-                    </div>
-                    <div className="mt-4 border-t border-white/10 pt-4">
-                      <ExecutiveSummaryVisual
-                        title={section.title}
-                        content={section.content}
-                      />
-                      {hasReportSectionVisual(section.title) &&
-                      !section.title.toLowerCase().includes("executive summary") &&
-                      !isFinancialDashboard ? (
-                        <ExecutiveInsightBanner content={section.content} />
-                      ) : null}
-                      <ReportSectionVisual
-                        title={section.title}
-                        content={section.content}
-                      />
-                      {detailsContent.trim() ? (
-                        <AnalysisNotes
-                          compact={hasReportSectionVisual(section.title)}
-                          label={isFinancialDashboard ? "Metric Details" : "Full analysis notes"}
-                        >
-                          <ReportText content={detailsContent} />
-                        </AnalysisNotes>
-                      ) : null}
-                    </div>
-                  </div>
+            {visibleSections.length === 0 ? (
+              <div className="p-5 sm:p-7">
+                <div className="rounded-[1.75rem] border border-white/10 bg-black/35 p-8 text-center">
+                  <FileText className="mx-auto h-8 w-8 text-teal-200" />
+                  <h3 className="mt-4 text-xl font-semibold text-white">
+                    No report sections saved yet
+                  </h3>
+                  <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-zinc-400">
+                    This report shell exists, but no readable analysis sections were saved.
+                    Create a new report when you are ready to generate the full memo.
+                  </p>
                 </div>
-              </article>
-              );
-            })}
-            </div>
-
-            {sourceSections.length > 0 ? (
-              <div className="border-t border-white/10 p-4 sm:p-5">
-                <article className="rounded-[2rem] border border-teal-200/15 bg-teal-200/[0.045] p-5 shadow-xl shadow-black/30">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10">
-                      <BookOpen className="h-5 w-5 text-teal-100" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200/80">
-                        Research Appendix
-                      </p>
-                      <h2 className="mt-1 text-xl font-semibold tracking-tight text-white">
-                        Sources
-                      </h2>
-                      <div className="mt-4 space-y-5">
-                        {sourceSections.map((section) => (
-                          <div
-                            key={getReportSectionKey(section)}
-                            className="border-t border-white/10 pt-4 first:border-t-0 first:pt-0"
-                          >
-                            <CitationList content={section.content} />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </article>
               </div>
-            ) : null}
+            ) : (
+              <div className="grid gap-5 p-4 sm:p-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
+                <aside className="xl:sticky xl:top-8 xl:self-start">
+                  <nav className="rounded-[1.5rem] border border-white/10 bg-black/35 p-4 shadow-xl shadow-black/20 backdrop-blur-xl">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200/75">
+                          Contents
+                        </p>
+                        <p className="mt-1 text-sm text-zinc-500">
+                          {visibleSections.length} sections
+                        </p>
+                      </div>
+                      <FileText className="h-5 w-5 text-teal-200" />
+                    </div>
+                    <div className="mt-4 max-h-[60vh] space-y-1 overflow-y-auto pr-1 [scrollbar-color:rgba(94,234,212,0.35)_transparent] [scrollbar-width:thin]">
+                      {visibleSections.map((section, index) => (
+                        <a
+                          key={`toc-${getReportSectionKey(section)}`}
+                          href={`#report-section-${index + 1}`}
+                          className="group flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-zinc-400 transition duration-200 hover:bg-white/[0.06] hover:text-white"
+                        >
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-[11px] text-zinc-500 group-hover:border-teal-200/30 group-hover:text-teal-100">
+                            {String(index + 1).padStart(2, "0")}
+                          </span>
+                          <span className="line-clamp-2">{section.title}</span>
+                        </a>
+                      ))}
+                      {sourceSections.length > 0 ? (
+                        <a
+                          href="#report-sources"
+                          className="group flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-zinc-400 transition duration-200 hover:bg-white/[0.06] hover:text-white"
+                        >
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-teal-200/20 bg-teal-200/10 text-[11px] text-teal-100">
+                            Ref
+                          </span>
+                          <span>Sources</span>
+                        </a>
+                      ) : null}
+                    </div>
+                  </nav>
+                </aside>
+
+                <div className="space-y-5">
+                  {visibleSections.map((section, index) => {
+                    const Icon = getSectionIcon(section.title);
+                    const isFinancialDashboard = section.title
+                      .toLowerCase()
+                      .includes("financial dashboard");
+                    const detailsContent = isFinancialDashboard ? "" : section.content;
+
+                    return (
+                      <article
+                        id={`report-section-${index + 1}`}
+                        key={getReportSectionKey(section)}
+                        className={`${getReportArticleClass(section.title)} scroll-mt-8`}
+                      >
+                        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-teal-200/30 to-transparent" />
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-inner shadow-white/5">
+                            <Icon className="h-5 w-5 text-teal-200" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <span className="w-fit rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
+                                  Section {String(index + 1).padStart(2, "0")}
+                                </span>
+                                <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">
+                                  {section.title}
+                                </h2>
+                              </div>
+                              <CopySectionButton content={section.content} />
+                            </div>
+                            <div className="mt-5 border-t border-white/10 pt-5">
+                              <ExecutiveSummaryVisual
+                                title={section.title}
+                                content={section.content}
+                              />
+                              {hasReportSectionVisual(section.title) &&
+                              !section.title.toLowerCase().includes("executive summary") &&
+                              !isFinancialDashboard ? (
+                                <ExecutiveInsightBanner content={section.content} />
+                              ) : null}
+                              <ReportSectionVisual
+                                title={section.title}
+                                content={section.content}
+                              />
+                              {detailsContent.trim() ? (
+                                <AnalysisNotes
+                                  compact={hasReportSectionVisual(section.title)}
+                                  label={isFinancialDashboard ? "Metric Details" : "Full analysis notes"}
+                                >
+                                  <ReportText content={detailsContent} />
+                                </AnalysisNotes>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+
+                  {sourceSections.length > 0 ? (
+                    <article
+                      id="report-sources"
+                      className="scroll-mt-8 rounded-[2rem] border border-teal-200/15 bg-teal-200/[0.045] p-5 shadow-xl shadow-black/30 sm:p-6"
+                    >
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10">
+                          <BookOpen className="h-5 w-5 text-teal-100" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200/80">
+                                Research Appendix
+                              </p>
+                              <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white">
+                                Sources
+                              </h2>
+                            </div>
+                            <CopySectionButton
+                              content={sourceSections.map((section) => section.content).join("\n\n")}
+                              label="Copy sources"
+                            />
+                          </div>
+                          <div className="mt-5 space-y-5 border-t border-white/10 pt-5">
+                            {sourceSections.map((section) => (
+                              <div
+                                key={getReportSectionKey(section)}
+                                className="border-t border-white/10 pt-4 first:border-t-0 first:pt-0"
+                              >
+                                <CitationList content={section.content} />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                  ) : null}
+                </div>
+              </div>
+            )}
           </div>
         </section>
       </div>
