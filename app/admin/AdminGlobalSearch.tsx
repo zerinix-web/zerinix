@@ -130,7 +130,7 @@ export function AdminGlobalSearch() {
   }
 
   return (
-    <div className="relative w-full max-w-xl">
+    <div className="relative w-full max-w-2xl">
       <label className="relative block">
         <span className="sr-only">Search admin records</span>
         <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
@@ -139,7 +139,7 @@ export function AdminGlobalSearch() {
           onChange={(event) => handleQueryChange(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Search users, reports, conversations..."
-          className="h-12 w-full rounded-2xl border border-white/10 bg-black/35 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-purple-300/35 focus:ring-2 focus:ring-purple-300/10"
+          className="h-11 w-full rounded-[1rem] border border-white/10 bg-black/35 pl-11 pr-4 text-[13px] text-white shadow-inner shadow-white/[0.02] outline-none transition duration-300 placeholder:text-zinc-600 focus:border-purple-300/35 focus:bg-black/45 focus:ring-2 focus:ring-purple-300/10"
         />
       </label>
 
@@ -152,10 +152,10 @@ export function AdminGlobalSearch() {
               key={filter.id}
               type="button"
               onClick={() => toggleFilter(filter.id)}
-              className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition ${
+              className={`rounded-full border px-2.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] transition duration-300 ${
                 active
                   ? "border-purple-300/30 bg-purple-400/10 text-purple-100"
-                  : "border-white/10 bg-black/25 text-zinc-500 hover:text-white"
+                  : "border-white/10 bg-black/25 text-zinc-500 hover:border-white/15 hover:text-white"
               }`}
             >
               {filter.label}
@@ -165,7 +165,7 @@ export function AdminGlobalSearch() {
       </div>
 
       {query.trim().length >= 2 ? (
-        <div className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/95 p-3 shadow-2xl shadow-black/40 backdrop-blur-2xl">
+        <div className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-[1.35rem] border border-white/10 bg-zinc-950/95 p-3 shadow-2xl shadow-black/40 backdrop-blur-2xl">
           {status === "loading" ? (
             <p className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-zinc-500">
               Searching admin records...
@@ -186,7 +186,7 @@ export function AdminGlobalSearch() {
 
           {groups.map((group) => (
             <div key={group.label} className="py-2">
-              <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+              <p className="px-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
                 {group.label}
               </p>
               <div className="mt-2 space-y-1">
@@ -197,7 +197,7 @@ export function AdminGlobalSearch() {
                     <Link
                       key={`${group.label}:${result.id}`}
                       href={result.href}
-                      className={`block rounded-2xl border px-3 py-2 text-sm transition ${
+                      className={`block rounded-[1rem] border px-3 py-2.5 text-sm transition duration-200 ${
                         resultIndex === activeIndex
                           ? "border-purple-300/30 bg-purple-400/10"
                           : "border-transparent hover:border-white/10 hover:bg-white/[0.04]"
