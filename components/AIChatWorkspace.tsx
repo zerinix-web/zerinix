@@ -1998,7 +1998,11 @@ export default function AIChatWorkspace({
         }`}
       >
         <div className="flex items-center justify-between gap-3">
-          <Link href="/" className="text-xl font-semibold tracking-[0.16em] text-white">
+          <Link
+            href="/dashboard"
+            aria-label="Go to dashboard home"
+            className="rounded-xl text-xl font-semibold tracking-[0.16em] text-white transition hover:text-teal-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
+          >
             ZERINIX
           </Link>
           <button
@@ -2303,12 +2307,16 @@ export default function AIChatWorkspace({
           ) : null}
         </div>
 
-        <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.035] p-3">
+        <Link
+          href="/dashboard/settings"
+          aria-label="Open account settings"
+          className="mt-4 block rounded-2xl border border-white/10 bg-white/[0.035] p-3 transition hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
+        >
           <p className="text-xs font-medium text-white">Signed in</p>
           <p className="mt-1 truncate text-xs text-zinc-500">
             {userEmail || "Authenticated user"}
           </p>
-        </div>
+        </Link>
       </aside>
 
       {sidebarOpen ? (
@@ -2478,9 +2486,15 @@ export default function AIChatWorkspace({
                 onFocus={preserveMessageScrollAfterViewportChange}
                 onBlur={preserveMessageScrollAfterViewportChange}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
                     event.preventDefault();
-                    void sendMessage();
+                    if (prompt.trim() && !loading) {
+                      void sendMessage();
+                    }
                   }
                 }}
                 className="max-h-[32dvh] min-h-24 w-full resize-none overflow-y-auto rounded-2xl bg-black/35 p-4 text-base leading-7 text-white outline-none ring-1 ring-white/5 transition placeholder:text-zinc-600 focus:ring-teal-200/25 sm:min-h-28"
@@ -2542,7 +2556,7 @@ export default function AIChatWorkspace({
             <div className="mt-3 flex flex-wrap items-center justify-center gap-3 text-center text-xs text-zinc-600">
               <span className="inline-flex items-center gap-1">
                 <CornerDownLeft className="h-3.5 w-3.5" />
-                Cmd/Ctrl + Enter to send
+                Enter to send · Shift + Enter for newline
               </span>
               <span className="inline-flex items-center gap-1">
                 <MoreHorizontal className="h-3.5 w-3.5" />

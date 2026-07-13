@@ -179,6 +179,14 @@ test("PDF OCR normalizer fixes final production artifact list", () => {
   assert.equal(normalize("12month runway"), "12-month runway");
   assert.equal(normalize("1224 month validation"), "12–24 months validation");
   assert.equal(normalize("1224-month contract"), "12–24-month contract");
+  assert.equal(normalize("50müşteri"), "50 müşteri");
+  assert.equal(normalize("10müşteri"), "10 müşteri");
+  assert.equal(normalize("22Müşteri"), "22 Müşteri");
+  assert.equal(normalize("KPI value 30b"), "KPI value 30B");
+  assert.equal(
+    normalize("fiyat sıkıştırma by yerel danışmanlar"),
+    "yerel danışmanların fiyat baskısı"
+  );
 });
 
 test("PDF bullet wrapping removes orphan SWOT heading bullets", () => {

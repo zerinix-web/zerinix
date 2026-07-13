@@ -25,7 +25,8 @@ export default function DashboardSidebar() {
     <aside className={`flex ${dashboardTheme.sidebar} lg:sticky lg:top-0 lg:min-h-screen lg:w-72 lg:flex-col lg:px-5 lg:py-6`}>
       <div className="hidden lg:block">
         <Link
-          href="/"
+          href="/dashboard"
+          aria-label="Go to dashboard home"
           className="group flex items-center gap-3 rounded-[1.65rem] border border-white/10 bg-white/[0.045] p-3 shadow-xl shadow-black/20 ring-1 ring-white/[0.025] transition duration-300 hover:-translate-y-0.5 hover:border-teal-300/25 hover:bg-white/[0.065] hover:shadow-2xl hover:shadow-teal-950/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
         >
           <span className="flex h-11 w-11 items-center justify-center rounded-[1.15rem] bg-white text-sm font-black tracking-[0.12em] text-black shadow-lg shadow-white/10">

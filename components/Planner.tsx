@@ -3212,7 +3212,11 @@ function ConversationSidebar({
     <aside className="flex min-h-0 border-b border-white/10 bg-black/85 p-4 shadow-2xl shadow-black/30 backdrop-blur-2xl md:h-screen md:w-[21.5rem] md:flex-col md:border-b-0 md:border-r md:bg-black/75">
       <div className="flex w-full items-center justify-between gap-3 md:block">
         <div>
-          <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard"
+            aria-label="Go to dashboard home"
+            className="flex items-center gap-3 rounded-2xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
+          >
             <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10 shadow-lg shadow-teal-950/20">
               <Sparkles className="h-5 w-5 text-teal-200" />
             </span>
@@ -3222,7 +3226,7 @@ function ConversationSidebar({
               </p>
               <p className="mt-0.5 text-xs text-zinc-500">Founder workspace</p>
             </div>
-          </div>
+          </Link>
           <div className="mt-5 hidden grid-cols-2 gap-2 md:grid">
             <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-3">
               <p className="text-lg font-semibold text-white">{conversations.length}</p>
@@ -3260,7 +3264,7 @@ function ConversationSidebar({
           </span>
         </Link>
         <Link
-          href="/dashboard"
+          href="/dashboard#workspaces"
           className="flex items-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-medium text-zinc-400 transition hover:bg-white/[0.05] hover:text-white"
         >
           <LayoutDashboard className="h-4 w-4 text-zinc-500" />
@@ -3308,16 +3312,19 @@ function ConversationSidebar({
         ) : null}
 
         {visibleConversations.map((conversation) => (
-          <button
+          <div
             key={conversation.id}
-            type="button"
-            onClick={() => onSelectConversation(conversation.id)}
             className={`group min-w-72 rounded-3xl border p-4 text-left text-sm shadow-lg shadow-black/10 transition duration-300 md:w-full ${
               conversation.id === activeConversationId
                 ? "border-teal-300/30 bg-teal-300/10 shadow-lg shadow-teal-950/10"
                 : "border-white/10 bg-white/[0.03] hover:-translate-y-0.5 hover:border-teal-300/30 hover:bg-white/[0.055]"
             }`}
           >
+            <button
+              type="button"
+              onClick={() => onSelectConversation(conversation.id)}
+              className="block w-full rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
+            >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <p className="line-clamp-1 font-medium text-white">
@@ -3333,55 +3340,43 @@ function ConversationSidebar({
                 </span>
               </div>
             </div>
+            </button>
 
             <div className="mt-3 flex items-center gap-2">
               <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/30 px-2 py-1 text-[11px] text-zinc-400">
                 <MessageSquare className="h-3 w-3 text-teal-200" />
                 {conversation.messages.length}
               </span>
-              <span
-                role="button"
-                tabIndex={0}
+              <button
+                type="button"
                 onClick={(event) => {
                   event.stopPropagation();
                   startRename(conversation);
                 }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.stopPropagation();
-                    startRename(conversation);
-                  }
-                }}
-                className="rounded-full border border-white/10 bg-black/30 px-2 py-1 text-[11px] text-zinc-400 transition hover:text-white"
+                className="rounded-full border border-white/10 bg-black/30 px-2 py-1 text-[11px] text-zinc-400 transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
               >
                 Rename
-              </span>
-              <span
-                role="button"
-                tabIndex={0}
+              </button>
+              <button
+                type="button"
                 onClick={(event) => {
                   event.stopPropagation();
                   setDeleteTarget(conversation);
                 }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.stopPropagation();
-                    setDeleteTarget(conversation);
-                  }
-                }}
-                className="rounded-full border border-red-300/10 bg-red-300/5 px-2 py-1 text-[11px] text-red-200 transition hover:bg-red-300/10"
+                className="rounded-full border border-red-300/10 bg-red-300/5 px-2 py-1 text-[11px] text-red-200 transition hover:bg-red-300/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200/30"
               >
                 Delete
-              </span>
+              </button>
             </div>
-          </button>
+          </div>
         ))}
       </div>
 
       <div className="mt-4 hidden rounded-3xl border border-white/10 bg-white/[0.03] p-3 md:block">
         <Link
-          href="/login"
+          href="/dashboard/settings"
           prefetch={false}
+          aria-label="Open account settings"
           className="flex items-center justify-between rounded-2xl px-3 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.05] hover:text-white"
         >
           <span className="inline-flex items-center gap-2">
@@ -6621,7 +6616,11 @@ export default function Planner({
               <RefreshCcw className="h-4 w-4 text-teal-200" />
               <span className="hidden sm:inline">Regenerate response</span>
             </button>
-            <div className="hidden items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 lg:flex">
+            <Link
+              href="/dashboard/settings"
+              aria-label="Open account settings"
+              className="hidden items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30 lg:flex"
+            >
               <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white text-sm font-semibold text-black">
                 {(userEmail || "Z").slice(0, 1).toUpperCase()}
               </div>
@@ -6631,7 +6630,7 @@ export default function Planner({
                   {userEmail || "Authenticated user"}
                 </p>
               </div>
-            </div>
+            </Link>
           </div>
         </header>
 
@@ -6817,6 +6816,19 @@ export default function Planner({
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
                 onKeyDown={(event) => {
+                  if (
+                    activeMode === "chat" &&
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+                    if (prompt.trim() && !isWorking) {
+                      void submitPrompt();
+                    }
+                    return;
+                  }
+
                   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
                     event.preventDefault();
                     void submitPrompt();
@@ -6917,7 +6929,9 @@ export default function Planner({
             <div className="mt-3 flex flex-wrap items-center justify-center gap-3 text-center text-xs text-zinc-600">
               <span className="inline-flex items-center gap-1">
                 <CornerDownLeft className="h-3.5 w-3.5" />
-                Cmd/Ctrl + Enter to send
+                {activeMode === "chat"
+                  ? "Enter to send · Shift + Enter for newline"
+                  : "Cmd/Ctrl + Enter to send"}
               </span>
               <span className="inline-flex items-center gap-1">
                 <Search className="h-3.5 w-3.5" />

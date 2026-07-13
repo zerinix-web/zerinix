@@ -24,6 +24,7 @@ import { createAiJobDescriptor } from "@/app/lib/ai/queue";
 import {
   createCanonicalFinancialAssumptions,
   formatCanonicalFinancialAssumptions,
+  type AiFinancialModelContext,
 } from "@/app/lib/ai/financial-assumptions";
 import { isReportGenerationFailureText } from "@/app/lib/report-errors";
 import {
@@ -43,6 +44,7 @@ import {
   buildDecisionSupportDirectives,
   buildFullReportStructureDirectives,
 } from "@/app/lib/ai/report-quality-directives";
+import { normalizePdfText } from "@/app/lib/pdf-normalization.mjs";
 
 const fieldPrompts = {
   executiveSummary: {
@@ -282,10 +284,12 @@ const marketReportTermReplacements: Array<[RegExp, string]> = [
 ];
 
 function sanitizeMarketReportContent(value: string) {
-  return marketReportTermReplacements.reduce(
+  const sanitized = marketReportTermReplacements.reduce(
     (content, [pattern, replacement]) => content.replace(pattern, replacement),
     sanitizeAiResponseText(value)
-  )
+  );
+
+  return normalizePdfText(sanitized)
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -371,8 +375,156 @@ function createFullReportJsonSchema(name: string, fields: readonly string[]) {
   };
 }
 
+function hasMeaningfulSwotGroup(content: string, label: string) {
+  const groupMatch = content.match(
+    new RegExp(
+      `${label}\\s*[:\\-–—]?\\s*([\\s\\S]*?)(?=\\n\\s*(?:Strengths|Weaknesses|Opportunities|Threats)\\s*[:\\-–—]?|$)`,
+      "i"
+    )
+  );
+  const groupContent = sanitizeMarketReportContent(groupMatch?.[1] || "");
+
+  return groupContent
+    .split(/\n|•|-/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 18).length > 0;
+}
+
+function formatBulletGroup(label: string, items: string[]) {
+  const bullets = items
+    .map((item) => sanitizeMarketReportContent(item).replace(/^[-*•]\s*/, ""))
+    .filter((item) => item.length > 8)
+    .slice(0, 3);
+
+  return `${label}:\n${bullets.map((item) => `- ${item}`).join("\n")}`;
+}
+
+function extractFallbackBullets(content: string, fallback: string) {
+  const bullets = sanitizeMarketReportContent(content)
+    .split(/\n|•|-/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 24 && !/^(opportunities|threats|strengths|weaknesses)$/i.test(item))
+    .slice(0, 3);
+
+  return bullets.length ? bullets : [fallback];
+}
+
+function buildCanonicalSwotSection(
+  report: Record<MarketReportField, string>,
+  context: AiFinancialModelContext
+) {
+  const strengths = context.investmentScore.strengths.length
+    ? context.investmentScore.strengths
+    : [
+        `${context.inputs.industry} model has a focused market-entry thesis and ${context.metrics.grossMargin.displayValue} gross-margin planning input.`,
+      ];
+  const weaknesses = context.investmentScore.weaknesses.length
+    ? context.investmentScore.weaknesses
+    : [
+        `Primary validation is still required for ${context.inputs.targetCustomer}, pricing, and repeatable acquisition.`,
+      ];
+  const opportunities = extractFallbackBullets(
+    report.opportunities,
+    `${context.metrics.sam.displayValue} serviceable market gives the founder a focused beachhead to validate before expanding.`
+  );
+  const threats = context.investmentScore.topRisks.length
+    ? context.investmentScore.topRisks
+    : extractFallbackBullets(
+        report.threats,
+        "Competitive response, acquisition cost inflation, and weak retention could reduce investability."
+      );
+
+  return [
+    formatBulletGroup("Strengths", strengths),
+    formatBulletGroup("Weaknesses", weaknesses),
+    formatBulletGroup("Opportunities", opportunities),
+    formatBulletGroup("Threats", threats),
+  ].join("\n\n");
+}
+
+function ensureMetricLine(content: string, label: string, value: string, detail: string) {
+  const normalizedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const linePattern = new RegExp(`\\b${normalizedLabel}\\s*[:\\-–—]\\s*(?:—|-|–|\\s*)(?=\\s|$)`, "i");
+
+  if (linePattern.test(content)) {
+    return content.replace(linePattern, `${label}: ${value}`);
+  }
+
+  if (new RegExp(`\\b${normalizedLabel}\\s*[:\\-–—]`, "i").test(content)) {
+    return content;
+  }
+
+  return `${content.trim()}\n- ${label}: ${value} — ${detail}`.trim();
+}
+
+function ensureMarketReportQuality(
+  report: Record<MarketReportField, string>,
+  context?: AiFinancialModelContext
+) {
+  const normalized = { ...report };
+
+  for (const field of reportFields) {
+    normalized[field] = sanitizeMarketReportContent(normalized[field] || "");
+  }
+
+  if (!context) {
+    return normalized;
+  }
+
+  const model = context.metrics;
+
+  normalized.tamSamSom = sanitizeMarketReportContent(
+    [
+      `TAM: ${model.tam.displayValue}`,
+      `SAM: ${model.sam.displayValue}`,
+      `SOM: ${model.som.displayValue}`,
+      normalized.tamSamSom,
+    ]
+      .filter(Boolean)
+      .join("\n")
+  );
+
+  for (const field of ["unitEconomics", "financialDashboard", "kpiDashboard"] as const) {
+    normalized[field] = sanitizeMarketReportContent(
+      ensureMetricLine(
+        normalized[field],
+        "Gross Margin",
+        model.grossMargin.displayValue,
+        `${model.grossMargin.formula}; ${model.grossMargin.benchmarkComparison.toLowerCase()}.`
+      )
+    );
+  }
+
+  const confidence = context.investmentScore.confidence;
+  const confidenceLabel =
+    confidence >= 75 ? "high" : confidence >= 55 ? "moderate" : "low";
+
+  normalized.executiveRecommendation = sanitizeMarketReportContent(
+    ensureMetricLine(
+      normalized.executiveRecommendation,
+      "Conviction",
+      `${confidence}%`,
+      `This is a ${confidenceLabel}-conviction recommendation based on the same market, financial, and execution model.`
+    )
+  );
+
+  if (
+    !hasMeaningfulSwotGroup(normalized.swotAnalysis, "Strengths") ||
+    !hasMeaningfulSwotGroup(normalized.swotAnalysis, "Weaknesses") ||
+    !hasMeaningfulSwotGroup(normalized.swotAnalysis, "Opportunities") ||
+    !hasMeaningfulSwotGroup(normalized.swotAnalysis, "Threats")
+  ) {
+    normalized.swotAnalysis = sanitizeMarketReportContent(
+      buildCanonicalSwotSection(normalized, context)
+    );
+  }
+
+  return normalized;
+}
+
 function parseFullMarketReport(
-  value: string
+  value: string,
+  context?: AiFinancialModelContext
 ): {
   report: Record<MarketReportField, string>;
   missingFields: MarketReportField[];
@@ -406,7 +558,11 @@ function parseFullMarketReport(
     report[field] = sanitizeMarketReportContent(content.trim());
   }
 
-  return { report, missingFields, invalidFields };
+  return {
+    report: ensureMarketReportQuality(report, context),
+    missingFields,
+    invalidFields,
+  };
 }
 
 async function countAiCallsForReport({
@@ -854,7 +1010,10 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
         let cachedInvalidFields: MarketReportField[] = [];
 
         try {
-          const parsedCachePayload = parseFullMarketReport(cachedFullReport.responseText);
+          const parsedCachePayload = parseFullMarketReport(
+            cachedFullReport.responseText,
+            canonicalFinancialAssumptions
+          );
 
           parsedCachedReport = parsedCachePayload.report;
           cachedMissingFields = parsedCachePayload.missingFields;
@@ -1056,7 +1215,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
           report: parsedReport,
           missingFields,
           invalidFields,
-        } = parseFullMarketReport(responseText);
+        } = parseFullMarketReport(responseText, canonicalFinancialAssumptions);
         const cacheResponseText = JSON.stringify(parsedReport);
         const isPartialReport = Boolean(missingFields.length || invalidFields.length);
 

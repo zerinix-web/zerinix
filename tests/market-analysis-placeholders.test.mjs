@@ -66,6 +66,22 @@ test("Market Analysis supports mobility-specific financial routing", () => {
   assert.match(benchmarkSource, /Mobility \/ scooter rental/);
 });
 
+test("Market Analysis post-processing repairs visible report quality defects", () => {
+  const routeSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
+  const normalizerSource = readFileSync("app/lib/pdf-normalization.mjs", "utf8");
+
+  assert.match(routeSource, /function ensureMarketReportQuality/);
+  assert.match(routeSource, /buildCanonicalSwotSection/);
+  assert.match(routeSource, /Gross Margin/);
+  assert.match(routeSource, /context\.metrics\.grossMargin\.displayValue/);
+  assert.match(routeSource, /context\.investmentScore\.confidence/);
+  assert.match(routeSource, /parseFullMarketReport\(responseText, canonicalFinancialAssumptions\)/);
+  assert.match(routeSource, /parseFullMarketReport\([\s\S]*cachedFullReport\.responseText[\s\S]*canonicalFinancialAssumptions/);
+  assert.match(normalizerSource, /fiyat\\s\+sıkıştırma\\s\+by\\s\+yerel\\s\+danışmanlar/);
+  assert.match(normalizerSource, /müşteri/);
+  assert.match(normalizerSource, /\(\\d\+\(\?:\[\.,\]\\d\+\)\?\)b/);
+});
+
 test("Market Analysis visuals protect TAM cards, citations, and metric number wrapping", () => {
   const plannerSource = readFileSync("components/Planner.tsx", "utf8");
   const detailSource = readFileSync("app/dashboard/[id]/page.tsx", "utf8");
