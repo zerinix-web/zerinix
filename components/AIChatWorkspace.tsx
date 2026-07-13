@@ -259,7 +259,7 @@ function ChatStatusNotice({
                 <button
                   type="button"
                   onClick={onRetry}
-                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-white/10"
+                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-white/10"
                 >
                   <RefreshCcw className="h-3.5 w-3.5" />
                   Try again
@@ -269,7 +269,7 @@ function ChatStatusNotice({
                 <button
                   type="button"
                   onClick={onDismiss}
-                  className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-300 transition hover:bg-white/10"
+                  className="min-h-10 rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-300 transition hover:bg-white/10"
                 >
                   Dismiss
                 </button>
@@ -473,13 +473,13 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
   }
 
   return (
-    <div className="my-4 overflow-hidden rounded-2xl border border-white/10 bg-black/70">
+    <div className="my-4 min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/70">
       <div className="flex items-center justify-between border-b border-white/10 bg-white/[0.035] px-4 py-2">
         <span className="text-xs font-medium text-zinc-500">{language || "code"}</span>
         <button
           type="button"
           onClick={copyCode}
-          className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-2.5 py-1 text-xs text-zinc-300 transition hover:bg-white/10 hover:text-white"
+          className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300 transition hover:bg-white/10 hover:text-white"
         >
           {copied ? (
             <ClipboardCheck className="h-3.5 w-3.5 text-teal-200" />
@@ -489,7 +489,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <pre className="overflow-x-auto p-4 text-sm leading-6 text-zinc-200">
+      <pre className="max-w-full overflow-x-auto overscroll-x-contain p-4 text-sm leading-6 text-zinc-200">
         <code dangerouslySetInnerHTML={{ __html: highlightCode(code) }} />
       </pre>
     </div>
@@ -547,7 +547,7 @@ function MarkdownTable({ lines }: { lines: string[] }) {
   }
 
   return (
-    <div className="my-4 overflow-x-auto rounded-2xl border border-white/10">
+    <div className="my-4 max-w-full overflow-x-auto overscroll-x-contain rounded-2xl border border-white/10">
       <table className="w-full min-w-[520px] border-collapse text-left text-sm">
         <thead className="bg-white/[0.04] text-zinc-200">
           <tr>
@@ -586,7 +586,7 @@ function MarkdownRenderer({
   const blocks = renderedContent.split(/```/g);
 
   return (
-    <div className="min-w-0 space-y-4 text-[15px] leading-8 text-zinc-300 [overflow-wrap:anywhere]">
+    <div className="min-w-0 max-w-full space-y-4 text-[15px] leading-8 text-zinc-300 [overflow-wrap:anywhere]">
       {blocks.map((block, blockIndex) => {
         if (blockIndex % 2 === 1) {
           const [language = "", ...codeLines] = block.replace(/^\n/, "").split("\n");
@@ -784,7 +784,7 @@ const ChatBubble = memo(function ChatBubble({
         </div>
       ) : null}
       <article
-        className={`w-full min-w-0 max-w-3xl rounded-[1.65rem] border p-5 shadow-xl shadow-black/20 transition duration-300 ${
+        className={`w-full min-w-0 max-w-[min(48rem,100%)] rounded-[1.65rem] border p-4 shadow-xl shadow-black/20 transition duration-300 sm:p-5 ${
           isUser
             ? "border-teal-300/20 bg-teal-300/10"
             : "border-white/10 bg-zinc-950/80"
@@ -809,7 +809,7 @@ const ChatBubble = memo(function ChatBubble({
             <button
               type="button"
               onClick={copyMessage}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1 text-xs text-zinc-300 transition hover:border-teal-300/20 hover:bg-white/10 hover:text-white"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300 transition hover:border-teal-300/20 hover:bg-white/10 hover:text-white"
             >
               {copied ? (
                 <ClipboardCheck className="h-3.5 w-3.5 text-teal-200" />
@@ -825,7 +825,7 @@ const ChatBubble = memo(function ChatBubble({
                   setDraft(message.content);
                   setEditing(true);
                 }}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1 text-xs text-zinc-300 transition hover:border-teal-300/20 hover:bg-white/10 hover:text-white"
+                className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300 transition hover:border-teal-300/20 hover:bg-white/10 hover:text-white"
               >
                 <Edit3 className="h-3.5 w-3.5 text-teal-200" />
                 Edit
@@ -835,7 +835,7 @@ const ChatBubble = memo(function ChatBubble({
                 type="button"
                 onClick={onRegenerate}
                 disabled={actionDisabled}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1 text-xs text-zinc-300 transition hover:border-teal-300/20 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300 transition hover:border-teal-300/20 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <RefreshCcw className="h-3.5 w-3.5 text-teal-200" />
                 {message.status === "failed" ? "Retry" : "Regenerate"}
@@ -887,10 +887,10 @@ const ChatBubble = memo(function ChatBubble({
             {message.attachments.map((attachment) => (
               <span
                 key={attachment.id}
-                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/30 px-3 py-1 text-xs text-zinc-300"
+                className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/10 bg-black/30 px-3 py-1 text-xs text-zinc-300"
               >
                 <Paperclip className="h-3.5 w-3.5 text-teal-200" />
-                {attachment.name}
+                <span className="min-w-0 truncate">{attachment.name}</span>
               </span>
             ))}
           </div>
@@ -951,6 +951,7 @@ export default function AIChatWorkspace({
   const abortControllerRef = useRef<AbortController | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
+  const preservedScrollTopRef = useRef(0);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   const activeConversation = conversations.find(
@@ -1041,6 +1042,27 @@ export default function AIChatWorkspace({
 
     const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
     shouldAutoScrollRef.current = distanceFromBottom < 180;
+  }
+
+  function preserveMessageScrollAfterViewportChange() {
+    const scroller = scrollerRef.current;
+
+    if (!scroller) {
+      return;
+    }
+
+    updateScrollIntent(scroller);
+    preservedScrollTopRef.current = scroller.scrollTop;
+
+    window.setTimeout(() => {
+      const nextScroller = scrollerRef.current;
+
+      if (!nextScroller || shouldAutoScrollRef.current) {
+        return;
+      }
+
+      nextScroller.scrollTop = preservedScrollTopRef.current;
+    }, 80);
   }
 
   function updateConversation(
@@ -1497,6 +1519,7 @@ export default function AIChatWorkspace({
 
     setLoading(true);
     setConversationError("");
+    shouldAutoScrollRef.current = true;
     const conversationId = activeConversationId;
     const conversation = conversations.find((item) => item.id === conversationId);
     const title = shouldAutoTitleConversation(conversation?.title || "New conversation")
@@ -1713,7 +1736,7 @@ export default function AIChatWorkspace({
 
   return (
     <main
-      className="flex h-screen overflow-hidden bg-black text-white"
+      className="flex h-[100dvh] min-h-[100svh] overflow-hidden bg-black text-white"
       onDragEnter={(event) => {
         event.preventDefault();
         setIsDraggingFiles(true);
@@ -1874,7 +1897,7 @@ export default function AIChatWorkspace({
       ) : null}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-80 flex-col border-r border-white/10 bg-zinc-950/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-2xl transition-transform md:static md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex h-[100dvh] max-h-[100dvh] w-[min(20rem,calc(100vw-1.25rem))] flex-col border-r border-white/10 bg-zinc-950/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-2xl transition-transform [padding-bottom:max(1rem,env(safe-area-inset-bottom))] md:static md:w-80 md:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -1885,7 +1908,7 @@ export default function AIChatWorkspace({
           <button
             type="button"
             onClick={() => setSidebarOpen(false)}
-            className="rounded-xl border border-white/10 p-2 text-zinc-300 md:hidden"
+            className="min-h-11 min-w-11 rounded-xl border border-white/10 p-2 text-zinc-300 md:hidden"
             aria-label="Close sidebar"
           >
             <X className="h-4 w-4" />
@@ -1904,13 +1927,13 @@ export default function AIChatWorkspace({
         <div className="mt-4 grid grid-cols-2 gap-2">
           <Link
             href="/plan"
-            className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-center text-xs font-semibold text-zinc-300 transition hover:-translate-y-0.5 hover:bg-white/10 hover:text-white"
+            className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-center text-xs font-semibold text-zinc-300 transition hover:-translate-y-0.5 hover:bg-white/10 hover:text-white"
           >
             AI Plan
           </Link>
           <Link
             href="/plan"
-            className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-center text-xs font-semibold text-zinc-300 transition hover:-translate-y-0.5 hover:bg-white/10 hover:text-white"
+            className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-center text-xs font-semibold text-zinc-300 transition hover:-translate-y-0.5 hover:bg-white/10 hover:text-white"
           >
             Market Analysis
           </Link>
@@ -1958,7 +1981,7 @@ export default function AIChatWorkspace({
                 <button
                   type="button"
                   onClick={() => selectConversation(conversation.id)}
-                  className="block w-full text-left"
+                  className="block min-h-11 w-full text-left"
                 >
                   <span className="line-clamp-1 text-sm font-semibold text-white">
                     {conversation.title}
@@ -1975,7 +1998,7 @@ export default function AIChatWorkspace({
                     <button
                       type="button"
                       onClick={() => startRename(conversation)}
-                      className="rounded-lg border border-white/10 p-1.5 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+                      className="min-h-10 min-w-10 rounded-lg border border-white/10 p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
                       aria-label="Rename conversation"
                     >
                       <Edit3 className="h-3.5 w-3.5" />
@@ -1983,7 +2006,7 @@ export default function AIChatWorkspace({
                     <button
                       type="button"
                       onClick={() => setDeleteTarget(conversation)}
-                      className="rounded-lg border border-white/10 p-1.5 text-zinc-400 transition hover:bg-red-400/10 hover:text-red-200"
+                      className="min-h-10 min-w-10 rounded-lg border border-white/10 p-2 text-zinc-400 transition hover:bg-red-400/10 hover:text-red-200"
                       aria-label="Delete conversation"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -2201,14 +2224,14 @@ export default function AIChatWorkspace({
         />
       ) : null}
 
-      <section className="relative flex min-w-0 flex-1 flex-col">
+      <section className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.15),transparent_34%),linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.032)_1px,transparent_1px)] bg-[size:auto,54px_54px,54px_54px] opacity-80" />
-        <header className="relative z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-black/80 px-4 py-4 shadow-xl shadow-black/20 backdrop-blur-xl sm:px-6">
+        <header className="relative z-10 flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-black/80 px-4 py-3 shadow-xl shadow-black/20 backdrop-blur-xl sm:px-6 sm:py-4">
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
               onClick={() => setSidebarOpen(true)}
-              className="rounded-xl border border-white/10 p-2 text-zinc-200 md:hidden"
+              className="min-h-11 min-w-11 rounded-xl border border-white/10 p-2 text-zinc-200 md:hidden"
               aria-label="Open sidebar"
             >
               <Menu className="h-4 w-4" />
@@ -2252,7 +2275,7 @@ export default function AIChatWorkspace({
               type="button"
               onClick={regenerateResponse}
               disabled={loading || !messages.some((message) => message.role === "user")}
-              className="rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              className="min-h-11 min-w-11 rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Regenerate response"
             >
               <RefreshCcw className="h-4 w-4" />
@@ -2263,9 +2286,9 @@ export default function AIChatWorkspace({
         <div
           ref={scrollerRef}
           onScroll={(event) => updateScrollIntent(event.currentTarget)}
-          className="relative z-10 flex-1 overflow-y-auto px-4 py-6 sm:px-6"
+          className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-6"
         >
-          <div className="mx-auto flex max-w-5xl flex-col gap-5 pb-44">
+          <div className="mx-auto flex max-w-5xl flex-col gap-5 pb-48 sm:pb-44">
             {conversationIssue ? (
               <ChatStatusNotice
                 issue={conversationIssue}
@@ -2316,22 +2339,24 @@ export default function AIChatWorkspace({
           </div>
         </div>
 
-        <div className="relative z-10 border-t border-white/10 bg-black/80 px-4 py-4 shadow-2xl shadow-black/40 backdrop-blur-2xl sm:px-6">
+        <div className="relative z-10 shrink-0 border-t border-white/10 bg-black/80 px-4 pt-3 shadow-2xl shadow-black/40 backdrop-blur-2xl [padding-bottom:max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:pt-4">
           <div className="mx-auto max-w-5xl">
             {attachments.length > 0 ? (
               <div className="mb-3 flex flex-wrap gap-2">
                 {attachments.map((attachment) => (
                   <span
                     key={attachment.id}
-                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-300"
+                    className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/10 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-300"
                   >
                     <Paperclip className="h-3.5 w-3.5 text-teal-200" />
-                    {attachment.name}
+                    <span className="min-w-0 max-w-[13rem] truncate sm:max-w-xs">
+                      {attachment.name}
+                    </span>
                     <span className="text-zinc-600">{formatFileSize(attachment.size)}</span>
                     <button
                       type="button"
                       onClick={() => removeAttachment(attachment.id)}
-                      className="rounded-full p-0.5 transition hover:bg-white/10"
+                      className="min-h-8 min-w-8 rounded-full p-1 transition hover:bg-white/10"
                       aria-label="Remove attachment"
                     >
                       <X className="h-3.5 w-3.5" />
@@ -2354,19 +2379,21 @@ export default function AIChatWorkspace({
                 ref={composerRef}
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
+                onFocus={preserveMessageScrollAfterViewportChange}
+                onBlur={preserveMessageScrollAfterViewportChange}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
                     event.preventDefault();
                     void sendMessage();
                   }
                 }}
-                className="min-h-28 w-full resize-none rounded-2xl bg-black/35 p-4 text-base leading-7 text-white outline-none ring-1 ring-white/5 transition placeholder:text-zinc-600 focus:ring-teal-200/25"
+                className="max-h-[32dvh] min-h-24 w-full resize-none overflow-y-auto rounded-2xl bg-black/35 p-4 text-base leading-7 text-white outline-none ring-1 ring-white/5 transition placeholder:text-zinc-600 focus:ring-teal-200/25 sm:min-h-28"
                 placeholder="Ask ZERINIX anything, paste context, or upload a file..."
               />
 
               <div className="flex flex-col gap-3 pt-3 md:flex-row md:items-center md:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-zinc-200 transition hover:-translate-y-0.5 hover:bg-white/10">
+                  <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-zinc-200 transition hover:-translate-y-0.5 hover:bg-white/10">
                     <Paperclip className="h-4 w-4 text-teal-200" />
                     Upload files
                     <input
@@ -2381,7 +2408,7 @@ export default function AIChatWorkspace({
                     onChange={(event) =>
                       setModelPreference(event.target.value as ChatModelPreference)
                     }
-                    className="rounded-2xl border border-white/10 bg-black/40 px-4 py-2 text-sm font-medium text-zinc-200 outline-none transition hover:bg-white/10"
+                    className="min-h-11 rounded-2xl border border-white/10 bg-black/40 px-4 py-2 text-sm font-medium text-zinc-200 outline-none transition hover:bg-white/10"
                     aria-label="Select chat model"
                   >
                     {modelOptions.map((option) => (
@@ -2397,7 +2424,7 @@ export default function AIChatWorkspace({
                     <button
                       type="button"
                       onClick={stopGeneration}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-red-300/20 bg-red-400/10 px-5 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-400/15"
+                      className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-red-300/20 bg-red-400/10 px-5 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-400/15"
                     >
                       <Square className="h-4 w-4" />
                       Stop
@@ -2407,7 +2434,7 @@ export default function AIChatWorkspace({
                     type="button"
                     disabled={!prompt.trim() || loading}
                     onClick={() => void sendMessage()}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/40 transition hover:-translate-y-0.5 hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+                    className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/40 transition hover:-translate-y-0.5 hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
                   >
                     {loading ? "Streaming..." : "Send"}
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
