@@ -41,7 +41,7 @@ export function AdminDateRangeControls({
   }
 
   return (
-    <section className="mt-6 rounded-[1.45rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.22)] backdrop-blur-xl">
+    <section className="mt-6 rounded-[1.55rem] border border-white/10 bg-white/[0.055] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.24)] backdrop-blur-xl">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-[1rem] border border-purple-300/20 bg-purple-400/10">
@@ -54,7 +54,7 @@ export function AdminDateRangeControls({
         </div>
 
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <div className="flex rounded-[1rem] border border-white/10 bg-black/25 p-1 shadow-inner shadow-white/[0.02]">
+          <div className="flex rounded-[1.05rem] border border-white/10 bg-white/[0.045] p-1 shadow-inner shadow-white/[0.03]">
             {ranges.map((range) => (
               <button
                 key={range.key}
@@ -76,13 +76,13 @@ export function AdminDateRangeControls({
               type="date"
               value={from}
               onChange={(event) => setFrom(event.target.value)}
-              className="h-10 rounded-[0.9rem] border border-white/10 bg-black/30 px-3 text-xs text-white outline-none transition focus:border-purple-300/35"
+              className="h-10 rounded-[0.9rem] border border-white/10 bg-white/[0.045] px-3 text-xs text-white outline-none transition focus:border-purple-300/35"
             />
             <input
               type="date"
               value={to}
               onChange={(event) => setTo(event.target.value)}
-              className="h-10 rounded-[0.9rem] border border-white/10 bg-black/30 px-3 text-xs text-white outline-none transition focus:border-purple-300/35"
+              className="h-10 rounded-[0.9rem] border border-white/10 bg-white/[0.045] px-3 text-xs text-white outline-none transition focus:border-purple-300/35"
             />
             <button
               type="button"

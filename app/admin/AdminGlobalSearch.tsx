@@ -133,13 +133,13 @@ export function AdminGlobalSearch() {
     <div className="relative w-full max-w-2xl">
       <label className="relative block">
         <span className="sr-only">Search admin records</span>
-        <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+        <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-purple-200/45" />
         <input
           value={query}
           onChange={(event) => handleQueryChange(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Search users, reports, conversations..."
-          className="h-11 w-full rounded-[1rem] border border-white/10 bg-black/35 pl-11 pr-4 text-[13px] text-white shadow-inner shadow-white/[0.02] outline-none transition duration-300 placeholder:text-zinc-600 focus:border-purple-300/35 focus:bg-black/45 focus:ring-2 focus:ring-purple-300/10"
+          className="h-11 w-full rounded-[1.05rem] border border-white/10 bg-white/[0.045] pl-11 pr-4 text-[13px] text-white shadow-inner shadow-white/[0.03] outline-none transition duration-300 placeholder:text-zinc-500 focus:border-purple-300/40 focus:bg-white/[0.07] focus:ring-2 focus:ring-purple-300/12"
         />
       </label>
 
@@ -155,7 +155,7 @@ export function AdminGlobalSearch() {
               className={`rounded-full border px-2.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] transition duration-300 ${
                 active
                   ? "border-purple-300/30 bg-purple-400/10 text-purple-100"
-                  : "border-white/10 bg-black/25 text-zinc-500 hover:border-white/15 hover:text-white"
+                  : "border-white/10 bg-white/[0.035] text-zinc-500 hover:border-white/15 hover:bg-white/[0.055] hover:text-white"
               }`}
             >
               {filter.label}
@@ -165,7 +165,7 @@ export function AdminGlobalSearch() {
       </div>
 
       {query.trim().length >= 2 ? (
-        <div className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-[1.35rem] border border-white/10 bg-zinc-950/95 p-3 shadow-2xl shadow-black/40 backdrop-blur-2xl">
+        <div className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-[1.45rem] border border-white/10 bg-[#17151f]/96 p-3 shadow-2xl shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl">
           {status === "loading" ? (
             <p className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-zinc-500">
               Searching admin records...

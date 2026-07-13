@@ -97,7 +97,7 @@ export function AdminRealtimeNotifications({
   ];
 
   return (
-    <section className="mt-5 rounded-[1.45rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+    <section className="mt-5 rounded-[1.55rem] border border-white/10 bg-white/[0.055] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.25)] backdrop-blur-xl">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <span className="relative flex h-10 w-10 items-center justify-center rounded-[1rem] border border-purple-300/20 bg-purple-400/10">
@@ -111,7 +111,7 @@ export function AdminRealtimeNotifications({
             </p>
           </div>
         </div>
-        <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[11px] text-zinc-500">
+        <span className="rounded-full border border-white/10 bg-white/[0.045] px-3 py-1 text-[11px] text-zinc-500">
           {status === "refreshing" ? "Refreshing..." : status === "error" ? "Retrying" : "Live"}
         </span>
       </div>
@@ -124,7 +124,7 @@ export function AdminRealtimeNotifications({
             <Link
               key={group.label}
               href={group.href}
-              className="rounded-[1.1rem] border border-white/10 bg-black/25 p-4 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/25 hover:bg-white/[0.05]"
+              className="rounded-[1.2rem] border border-white/10 bg-white/[0.045] p-4 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/28 hover:bg-white/[0.07]"
             >
               <div className="flex items-center justify-between gap-3">
                 <span className={`flex h-9 w-9 items-center justify-center rounded-[0.95rem] border ${group.className}`}>

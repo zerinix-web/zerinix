@@ -84,20 +84,20 @@ function exportPdf(table: ExportTable) {
 
 export function AdminExports({ tables }: { tables: ExportTable[] }) {
   return (
-    <section className="mt-6 rounded-[1.45rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+    <section className="mt-6 rounded-[1.55rem] border border-white/10 bg-white/[0.055] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.25)] backdrop-blur-xl">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold tracking-tight text-white">Analytics exports</h2>
           <p className="mt-1.5 text-sm text-zinc-500">Download every analytics table as CSV or print-ready PDF.</p>
         </div>
-        <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-xs text-zinc-500">
+        <span className="rounded-full border border-white/10 bg-white/[0.045] px-3 py-1 text-xs text-zinc-500">
           {tables.length} tables
         </span>
       </div>
 
       <div className="mt-5 grid gap-3.5 md:grid-cols-2 xl:grid-cols-3">
         {tables.map((table) => (
-          <div key={table.id} className="rounded-[1.1rem] border border-white/10 bg-black/25 p-4 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/20 hover:bg-white/[0.04]">
+          <div key={table.id} className="rounded-[1.2rem] border border-white/10 bg-white/[0.045] p-4 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/24 hover:bg-white/[0.07]">
             <p className="font-semibold text-white">{table.title}</p>
             <p className="mt-1 text-xs text-zinc-500">{table.rows.length} rows</p>
             <div className="mt-4 flex gap-2">

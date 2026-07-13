@@ -108,7 +108,7 @@ export function AdminSystemHealth({ initialStatuses }: AdminSystemHealthProps) {
   }, [refreshHealth]);
 
   return (
-    <section className="mt-5 rounded-[1.45rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+    <section className="mt-5 rounded-[1.55rem] border border-white/10 bg-white/[0.055] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.25)] backdrop-blur-xl">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-[15px] font-semibold text-white">System Health</h2>
@@ -121,7 +121,7 @@ export function AdminSystemHealth({ initialStatuses }: AdminSystemHealthProps) {
           onClick={() => {
             void refreshHealth();
           }}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-[0.95rem] border border-white/10 bg-black/25 px-3.5 text-xs text-zinc-300 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-[0.95rem] border border-white/10 bg-white/[0.045] px-3.5 text-xs text-zinc-300 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/30 hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
           disabled={refreshing}
         >
           <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
@@ -131,7 +131,7 @@ export function AdminSystemHealth({ initialStatuses }: AdminSystemHealthProps) {
 
       <div className="mt-5 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
         {statuses.map((item) => (
-          <div key={item.label} className="rounded-[1.1rem] border border-white/10 bg-black/25 p-4 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/15 hover:bg-white/[0.035]">
+          <div key={item.label} className="rounded-[1.2rem] border border-white/10 bg-white/[0.045] p-4 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/18 hover:bg-white/[0.07]">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-center gap-2">
                 <span className="relative flex h-2.5 w-2.5">

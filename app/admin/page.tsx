@@ -223,15 +223,15 @@ function MetricCard({
   const TrendIcon = trend?.direction === "down" ? TrendingDown : TrendingUp;
 
   return (
-    <article className={`group relative min-h-[10.5rem] overflow-hidden rounded-[1.25rem] border border-white/10 p-[1.125rem] shadow-[0_20px_80px_rgba(0,0,0,0.25)] backdrop-blur-xl transition duration-300 ease-out hover:-translate-y-1 hover:border-purple-300/25 hover:bg-white/[0.07] hover:shadow-[0_24px_90px_rgba(168,85,247,0.12)] ${
+    <article className={`group relative min-h-[11.75rem] overflow-hidden rounded-[1.55rem] border border-white/10 p-5 shadow-[0_20px_80px_rgba(0,0,0,0.25)] backdrop-blur-xl transition duration-300 ease-out hover:-translate-y-1 hover:border-purple-300/28 hover:bg-white/[0.075] hover:shadow-[0_28px_100px_rgba(147,51,234,0.16)] ${
       priority === "primary"
-        ? "bg-[linear-gradient(135deg,rgba(168,85,247,0.13),rgba(255,255,255,0.055))]"
-        : "bg-white/[0.045]"
+        ? "bg-[linear-gradient(135deg,rgba(147,51,234,0.18),rgba(255,255,255,0.07))]"
+        : "bg-white/[0.055]"
     }`}>
       <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-purple-300/40 to-transparent opacity-0 transition duration-300 group-hover:opacity-100" />
       <div className="flex items-center justify-between gap-4">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-purple-300/20 bg-purple-400/10 transition duration-300 group-hover:scale-105 group-hover:border-purple-200/35">
-          <Icon className="h-4 w-4 text-purple-100" />
+        <span className="flex h-11 w-11 items-center justify-center rounded-[1.15rem] border border-purple-300/22 bg-purple-400/12 transition duration-300 group-hover:scale-105 group-hover:border-purple-200/40">
+          <Icon className="h-5 w-5 text-purple-100" />
         </span>
         {trend ? (
           <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${trendClass(trend.direction)}`}>
@@ -239,7 +239,7 @@ function MetricCard({
             {trend.label}
           </span>
         ) : (
-          <span className="rounded-full border border-white/10 bg-black/25 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+          <span className="rounded-full border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
             Live
           </span>
         )}
@@ -247,7 +247,7 @@ function MetricCard({
       <p className="mt-5 text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
         {label}
       </p>
-      <p className={`${priority === "primary" ? "text-[2.25rem]" : "text-[1.95rem]"} mt-2 font-semibold leading-none tracking-tight text-white transition duration-300 group-hover:text-purple-50`}>
+      <p className={`${priority === "primary" ? "text-[2.45rem]" : "text-[2.1rem]"} mt-2 font-semibold leading-none tracking-[-0.03em] text-white transition duration-300 group-hover:text-purple-50`}>
         {typeof animatedValue === "number" ? (
           <AdminAnimatedValue
             value={animatedValue}
@@ -313,8 +313,9 @@ function ExecutiveOverview({
   });
 
   return (
-    <section className="relative overflow-hidden rounded-[2.1rem] border border-white/10 bg-[linear-gradient(135deg,rgba(168,85,247,0.18),rgba(255,255,255,0.06)_38%,rgba(0,0,0,0.32))] p-6 shadow-[0_32px_130px_rgba(0,0,0,0.44)] backdrop-blur-2xl sm:p-8">
-      <div className="pointer-events-none absolute right-0 top-0 h-64 w-64 rounded-full bg-purple-400/20 blur-3xl" />
+    <section className="relative overflow-hidden rounded-[2.25rem] border border-white/10 bg-[linear-gradient(135deg,rgba(147,51,234,0.24),rgba(255,255,255,0.075)_40%,rgba(23,21,31,0.74))] p-7 shadow-[0_36px_150px_rgba(0,0,0,0.46)] backdrop-blur-2xl sm:p-9">
+      <div className="pointer-events-none absolute right-0 top-0 h-72 w-72 rounded-full bg-purple-400/24 blur-3xl" />
+      <div className="pointer-events-none absolute -left-20 bottom-0 h-64 w-64 rounded-full bg-violet-500/12 blur-3xl" />
       <div className="pointer-events-none absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-purple-300/50 to-transparent" />
       <div className="relative grid gap-7 xl:grid-cols-[1.15fr_0.85fr] xl:items-end">
         <div>
@@ -322,10 +323,10 @@ function ExecutiveOverview({
             <Sparkles className="h-3.5 w-3.5" />
             Executive Overview
           </p>
-          <h1 className="mt-6 text-4xl font-semibold tracking-[-0.035em] text-white md:text-5xl">
+          <h1 className="mt-6 text-[2.75rem] font-semibold leading-[0.96] tracking-[-0.045em] text-white md:text-6xl">
             {getGreeting()}, Admin.
           </h1>
-          <p className="mt-4 max-w-3xl text-[15px] leading-7 text-zinc-400 md:text-base">
+          <p className="mt-5 max-w-3xl text-[15px] leading-7 text-zinc-300/82 md:text-base">
             {summary}
           </p>
         </div>
@@ -356,12 +357,12 @@ function ExecutiveOverview({
           ].map((item) => (
             <div
               key={item.label}
-              className="rounded-[1.35rem] border border-white/10 bg-black/30 p-[1.125rem] shadow-inner shadow-white/[0.02] transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/25 hover:bg-black/40"
+              className="rounded-[1.45rem] border border-white/10 bg-white/[0.055] p-5 shadow-inner shadow-white/[0.03] transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/28 hover:bg-white/[0.075]"
             >
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
                 {item.label}
               </p>
-              <p className="mt-2.5 text-[1.7rem] font-semibold leading-none tracking-tight text-white">
+              <p className="mt-3 text-[1.85rem] font-semibold leading-none tracking-[-0.03em] text-white">
                 <AdminAnimatedValue
                   value={item.value}
                   format={item.format}
@@ -386,7 +387,7 @@ function Distribution({
   const max = Math.max(1, ...data.map((item) => item.value));
 
   return (
-    <div className="rounded-[1.35rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.24)] backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/20 hover:bg-white/[0.06]">
+    <div className="rounded-[1.55rem] border border-white/10 bg-white/[0.055] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.26)] backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/22 hover:bg-white/[0.07]">
       <h2 className="text-[15px] font-semibold text-white">{title}</h2>
       <div className="mt-5 space-y-4">
         {data.length ? (
@@ -405,7 +406,7 @@ function Distribution({
             </div>
           ))
         ) : (
-          <p className="rounded-[1rem] border border-white/10 bg-black/25 p-4 text-sm text-zinc-500">
+          <p className="rounded-[1rem] border border-white/10 bg-white/[0.045] p-4 text-sm text-zinc-500">
             Not configured
           </p>
         )}
@@ -429,7 +430,7 @@ function SectionHeader({
         <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-purple-200/70">
           {eyebrow}
         </p>
-        <h2 className="mt-1 text-2xl font-semibold tracking-[-0.025em] text-white">{title}</h2>
+        <h2 className="mt-1 text-[1.65rem] font-semibold tracking-[-0.035em] text-white">{title}</h2>
       </div>
       <p className="max-w-2xl text-sm leading-6 text-zinc-500">{description}</p>
     </div>
@@ -584,7 +585,7 @@ export default async function AdminDashboardPage({
         ))}
       </div>
 
-      <div className="mt-6 rounded-[1.45rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+      <div className="mt-6 rounded-[1.55rem] border border-white/10 bg-white/[0.055] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.25)] backdrop-blur-xl">
         <SectionHeader
           eyebrow="Revenue"
           title="Executive financial overview"
@@ -592,7 +593,7 @@ export default async function AdminDashboardPage({
         />
         <div className="mt-5 grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
           {data.revenueOverview.map((item) => (
-            <div key={item.label} className="rounded-[1.1rem] border border-white/10 bg-black/25 p-4 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/20 hover:bg-white/[0.04]">
+            <div key={item.label} className="rounded-[1.2rem] border border-white/10 bg-white/[0.045] p-4 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/24 hover:bg-white/[0.07]">
               <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">{item.label}</p>
               <p className="mt-3 text-xl font-semibold text-white">{item.value}</p>
               <p className="mt-2 text-sm text-zinc-500">{item.detail}</p>
@@ -601,7 +602,7 @@ export default async function AdminDashboardPage({
         </div>
       </div>
 
-      <div className="mt-6 rounded-[1.45rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+      <div className="mt-6 rounded-[1.55rem] border border-white/10 bg-white/[0.055] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.25)] backdrop-blur-xl">
         <SectionHeader
           eyebrow="Cost intelligence"
           title="AI Cost Control"
@@ -618,7 +619,7 @@ export default async function AdminDashboardPage({
             ["Failed AI requests", formatNumber(data.costControl.failedAiRequests)],
             ["Cost trend", formatPercent(data.costControl.costTrendPercent)],
           ].map(([label, value]) => (
-            <div key={label} className="rounded-[1.1rem] border border-white/10 bg-black/25 p-4 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/20 hover:bg-white/[0.04]">
+            <div key={label} className="rounded-[1.2rem] border border-white/10 bg-white/[0.045] p-4 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/24 hover:bg-white/[0.07]">
               <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</p>
               <p className="mt-3 text-xl font-semibold text-white">{value}</p>
             </div>
@@ -660,7 +661,7 @@ export default async function AdminDashboardPage({
       <AdminExports tables={data.exportTables} />
 
       <div className="mt-6 grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="rounded-[1.45rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+        <div className="rounded-[1.55rem] border border-white/10 bg-white/[0.055] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.25)] backdrop-blur-xl">
           <div className="flex items-center justify-between gap-4">
             <div>
               <h2 className="text-xl font-semibold tracking-tight text-white">Recent users</h2>
@@ -684,30 +685,30 @@ export default async function AdminDashboardPage({
               <tbody>
                 {data.recentUsers.map((user) => (
                   <tr key={user.id} className="group text-zinc-300 transition">
-                    <td className="rounded-l-[1rem] border-y border-l border-white/10 bg-black/25 px-3 py-3.5 transition group-hover:border-purple-300/20 group-hover:bg-white/[0.035]">
+                    <td className="rounded-l-[1.05rem] border-y border-l border-white/10 bg-white/[0.04] px-3 py-3.5 transition group-hover:border-purple-300/22 group-hover:bg-white/[0.07]">
                       <span className="block font-medium text-white">{user.email}</span>
                       <span className="text-xs text-zinc-500">
                         {user.displayName || "No display name"}
                       </span>
                     </td>
-                    <td className="border-y border-white/10 bg-black/25 px-3 py-3.5 transition group-hover:border-purple-300/20 group-hover:bg-white/[0.035]">
+                    <td className="border-y border-white/10 bg-white/[0.04] px-3 py-3.5 transition group-hover:border-purple-300/22 group-hover:bg-white/[0.07]">
                       <span className="rounded-full border border-purple-300/20 bg-purple-400/10 px-2.5 py-1 text-xs font-medium capitalize text-purple-100">
                         {user.plan}
                       </span>
                     </td>
-                    <td className="border-y border-white/10 bg-black/25 px-3 py-3.5 transition group-hover:border-purple-300/20 group-hover:bg-white/[0.035]">
+                    <td className="border-y border-white/10 bg-white/[0.04] px-3 py-3.5 transition group-hover:border-purple-300/22 group-hover:bg-white/[0.07]">
                       <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium capitalize text-zinc-300">
                         {user.accountStatus}
                       </span>
                     </td>
-                    <td className="border-y border-white/10 bg-black/25 px-3 py-3.5 transition group-hover:border-purple-300/20 group-hover:bg-white/[0.035]">{formatNumber(user.reportCount)}</td>
-                    <td className="rounded-r-[1rem] border-y border-r border-white/10 bg-black/25 px-3 py-3.5 transition group-hover:border-purple-300/20 group-hover:bg-white/[0.035]">{formatDate(user.lastSignInAt)}</td>
+                    <td className="border-y border-white/10 bg-white/[0.04] px-3 py-3.5 transition group-hover:border-purple-300/22 group-hover:bg-white/[0.07]">{formatNumber(user.reportCount)}</td>
+                    <td className="rounded-r-[1.05rem] border-y border-r border-white/10 bg-white/[0.04] px-3 py-3.5 transition group-hover:border-purple-300/22 group-hover:bg-white/[0.07]">{formatDate(user.lastSignInAt)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             {!data.recentUsers.length ? (
-              <p className="rounded-2xl border border-white/10 bg-black/25 p-4 text-sm text-zinc-500">
+              <p className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 text-sm text-zinc-500">
                 No users found yet.
               </p>
             ) : null}
@@ -715,7 +716,7 @@ export default async function AdminDashboardPage({
         </div>
 
         <div className="space-y-5">
-          <div className="rounded-[1.45rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+          <div className="rounded-[1.55rem] border border-white/10 bg-white/[0.055] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.25)] backdrop-blur-xl">
             <h2 className="text-xl font-semibold tracking-tight text-white">AI usage summary</h2>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {[
@@ -724,7 +725,7 @@ export default async function AdminDashboardPage({
                 ["Cache hits", data.usageSummary.cacheHits],
                 ["Failures", data.usageSummary.failedRequests],
               ].map(([label, value]) => (
-                <div key={label} className="rounded-[1.1rem] border border-white/10 bg-black/25 p-4 transition duration-300 hover:border-purple-300/20 hover:bg-white/[0.035]">
+                <div key={label} className="rounded-[1.2rem] border border-white/10 bg-white/[0.045] p-4 transition duration-300 hover:border-purple-300/24 hover:bg-white/[0.07]">
                   <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</p>
                   <p className="mt-2.5 text-2xl font-semibold text-white">
                     {formatNumber(Number(value))}
@@ -734,7 +735,7 @@ export default async function AdminDashboardPage({
             </div>
           </div>
 
-          <div className="rounded-[1.45rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+          <div className="rounded-[1.55rem] border border-white/10 bg-white/[0.055] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.25)] backdrop-blur-xl">
             <div className="flex items-center justify-between gap-4">
               <h2 className="text-xl font-semibold tracking-tight text-white">Recent activity</h2>
               <Link href="/admin/logs" className="text-xs font-medium text-purple-100 transition hover:text-white">
@@ -777,25 +778,25 @@ export default async function AdminDashboardPage({
                     <Link
                       key={item.id}
                       href={item.href}
-                      className="block rounded-[1.1rem] border border-white/10 bg-black/25 p-4 text-sm transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/25 hover:bg-white/[0.05]"
+                      className="block rounded-[1.2rem] border border-white/10 bg-white/[0.045] p-4 text-sm transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/25 hover:bg-white/[0.07]"
                     >
                       {content}
                     </Link>
                   ) : (
-                    <div key={item.id} className="rounded-[1.1rem] border border-white/10 bg-black/25 p-4 text-sm">
+                    <div key={item.id} className="rounded-[1.2rem] border border-white/10 bg-white/[0.045] p-4 text-sm">
                       {content}
                     </div>
                   );
                 })
               ) : (
-                <p className="rounded-[1.1rem] border border-white/10 bg-black/25 p-4 text-sm text-zinc-500">
+                <p className="rounded-[1.1rem] border border-white/10 bg-white/[0.045] p-4 text-sm text-zinc-500">
                   No activity has been recorded yet.
                 </p>
               )}
             </div>
           </div>
 
-          <div className="rounded-[1.45rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+          <div className="rounded-[1.55rem] border border-white/10 bg-white/[0.055] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.25)] backdrop-blur-xl">
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-amber-200" />
               <h2 className="text-xl font-semibold tracking-tight text-white">Failed jobs / recent errors</h2>
@@ -809,7 +810,7 @@ export default async function AdminDashboardPage({
                   </div>
                 ))
               ) : (
-                <p className="rounded-[1.1rem] border border-white/10 bg-black/25 p-4 text-sm text-zinc-500">
+                <p className="rounded-[1.1rem] border border-white/10 bg-white/[0.045] p-4 text-sm text-zinc-500">
                   No failed usage events recorded.
                 </p>
               )}
