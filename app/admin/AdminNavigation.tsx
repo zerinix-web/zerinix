@@ -79,18 +79,18 @@ export function AdminNavigation() {
                   aria-current={active ? "page" : undefined}
                   className={`group relative flex h-[2.65rem] shrink-0 items-center gap-2.5 rounded-[1rem] px-2.5 text-[13px] font-medium transition duration-300 xl:w-full ${
                     active
-                      ? "border border-purple-400/28 bg-[#1b2030] text-white shadow-[0_18px_58px_rgba(0,0,0,0.24)]"
-                      : "border border-transparent text-zinc-400 hover:-translate-y-0.5 hover:border-[#272c37] hover:bg-[#171b24] hover:text-white"
+                      ? "border border-purple-400/24 bg-white/[0.065] text-white shadow-[0_16px_48px_rgba(0,0,0,0.22)]"
+                      : "border border-transparent text-zinc-400 hover:-translate-y-0.5 hover:border-[#262626] hover:bg-white/[0.045] hover:text-white"
                   }`}
                 >
                   {active ? (
-                    <span className="absolute left-0 top-1/2 hidden h-7 w-1 -translate-y-1/2 rounded-r-full bg-purple-300 shadow-[0_0_24px_rgba(216,180,254,0.7)] xl:block" />
+                    <span className="absolute left-0 top-1/2 hidden h-7 w-1 -translate-y-1/2 rounded-r-full bg-purple-300 shadow-[0_0_16px_rgba(216,180,254,0.38)] xl:block" />
                   ) : null}
                   <span
                     className={`flex h-7 w-7 items-center justify-center rounded-[0.75rem] transition duration-300 ${
                       active
-                        ? "bg-[#7c3aed] text-white shadow-[0_10px_30px_rgba(124,58,237,0.22)]"
-                        : "bg-[#1b202a] text-zinc-300 group-hover:bg-[#202634] group-hover:text-purple-200"
+                        ? "bg-[#7c3aed] text-white shadow-[0_10px_24px_rgba(124,58,237,0.16)]"
+                        : "bg-white/[0.045] text-zinc-300 group-hover:bg-white/[0.075] group-hover:text-purple-200"
                     }`}
                   >
                     <Icon className="h-3.5 w-3.5" />

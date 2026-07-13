@@ -84,7 +84,7 @@ function trendClass(direction: Trend["direction"]) {
     return "border-purple-300/25 bg-purple-400/10 text-purple-100";
   }
 
-  return "border-white/10 bg-white/[0.04] text-zinc-400";
+  return "border-[#262626] bg-white/[0.04] text-zinc-400";
 }
 
 function MetricCard({
@@ -117,7 +117,7 @@ function MetricCard({
   }[accent];
 
   return (
-    <article className="group relative min-h-[10.25rem] overflow-hidden rounded-[1.35rem] border border-[#252b36] bg-[#151922] p-4.5 shadow-[0_18px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl transition duration-300 ease-out hover:-translate-y-1 hover:border-[#343b49] hover:bg-[#181d27] hover:shadow-[0_24px_90px_rgba(0,0,0,0.34)]">
+    <article className="group relative min-h-[10.25rem] overflow-hidden rounded-[1.35rem] border border-[#262626] bg-white/[0.045] p-4.5 shadow-[0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-xl transition duration-300 ease-out hover:-translate-y-1 hover:border-[#343434] hover:bg-white/[0.065] hover:shadow-[0_24px_76px_rgba(0,0,0,0.3)]">
       <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-white/18 to-transparent opacity-0 transition duration-300 group-hover:opacity-100" />
       <div className="flex items-center justify-between gap-4">
         <span className={`flex h-10 w-10 items-center justify-center rounded-[1rem] border transition duration-300 group-hover:scale-105 ${accentClasses}`}>
@@ -129,7 +129,7 @@ function MetricCard({
             {trend.label}
           </span>
         ) : (
-          <span className="rounded-full border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+          <span className="rounded-full border border-[#262626] bg-black/25 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
             Live
           </span>
         )}
@@ -177,7 +177,7 @@ function LineChartCard({
     .join(" ");
 
   return (
-    <section className="rounded-[1.35rem] border border-[#252b36] bg-[#151922] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl xl:col-span-6">
+    <section className="rounded-[1.35rem] border border-[#262626] bg-white/[0.045] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-xl xl:col-span-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-[17px] font-semibold tracking-tight text-white">{title}</h2>
@@ -187,7 +187,7 @@ function LineChartCard({
           {formatNumber(latest)}
         </div>
       </div>
-      <div className="mt-5 h-[21rem] overflow-hidden rounded-[1.1rem] border border-[#252b36] bg-[#10141c] p-4">
+      <div className="mt-5 h-[21rem] overflow-hidden rounded-[1.1rem] border border-[#262626] bg-black/25 p-4">
         {data.length ? (
           <svg className="h-full w-full overflow-visible" viewBox="0 0 100 100" role="img" aria-label={`${title} chart`}>
             <defs>
@@ -226,7 +226,7 @@ function LineChartCard({
                   cx={x}
                   cy={y}
                   r="2.6"
-                  className="fill-[#10141c] stroke-purple-300"
+                  className="fill-[#0b0b0f] stroke-purple-300"
                   strokeWidth="1.5"
                 />
               );
@@ -263,14 +263,14 @@ function DonutChartCard({
     : "rgba(255,255,255,0.08) 0% 100%";
 
   return (
-    <section className="rounded-[1.35rem] border border-[#252b36] bg-[#151922] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl xl:col-span-3">
+    <section className="rounded-[1.35rem] border border-[#262626] bg-white/[0.045] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-xl xl:col-span-3">
       <h2 className="text-[17px] font-semibold tracking-tight text-white">{title}</h2>
       <div className="mt-5 flex items-center justify-center">
         <div
-          className="relative h-40 w-40 rounded-full border border-[#2a303b] shadow-[0_22px_80px_rgba(0,0,0,0.22)]"
+          className="relative h-40 w-40 rounded-full border border-[#262626] shadow-[0_22px_70px_rgba(0,0,0,0.2)]"
           style={{ background: `conic-gradient(${gradient})` }}
         >
-          <div className="absolute inset-7 rounded-full border border-[#2a303b] bg-[#151922]" />
+          <div className="absolute inset-7 rounded-full border border-[#262626] bg-[#101217]" />
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <span className="text-2xl font-semibold tracking-tight text-white">{formatNumber(total)}</span>
             <span className="mt-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Total</span>
@@ -289,7 +289,7 @@ function DonutChartCard({
             </div>
           ))
         ) : (
-          <p className="rounded-[1rem] border border-white/10 bg-white/[0.045] p-4 text-sm text-zinc-500">
+          <p className="rounded-[1rem] border border-[#262626] bg-black/25 p-4 text-sm text-zinc-500">
             Not configured
           </p>
         )}
@@ -384,7 +384,7 @@ export default async function AdminDashboardPage({
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-[1.45fr_0.85fr] [&>section]:mt-0">
-        <div className="rounded-[1.35rem] border border-[#252b36] bg-[#151922] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl">
+        <div className="rounded-[1.35rem] border border-[#262626] bg-white/[0.045] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-xl">
           <div className="flex items-center justify-between gap-4">
             <div>
               <h2 className="text-[17px] font-semibold tracking-tight text-white">Recent users</h2>
@@ -408,30 +408,30 @@ export default async function AdminDashboardPage({
               <tbody>
                 {data.recentUsers.map((user) => (
                   <tr key={user.id} className="group text-zinc-300 transition">
-                    <td className="rounded-l-[0.95rem] border-y border-l border-[#252b36] bg-[#111620] px-3 py-3 transition group-hover:border-[#343b49] group-hover:bg-[#181d27]">
+                    <td className="rounded-l-[0.95rem] border-y border-l border-[#262626] bg-black/25 px-3 py-3 transition group-hover:border-[#343434] group-hover:bg-white/[0.055]">
                       <span className="block font-medium text-white">{user.email}</span>
                       <span className="text-xs text-zinc-500">
                         {user.displayName || "No display name"}
                       </span>
                     </td>
-                    <td className="border-y border-[#252b36] bg-[#111620] px-3 py-3 transition group-hover:border-[#343b49] group-hover:bg-[#181d27]">
+                    <td className="border-y border-[#262626] bg-black/25 px-3 py-3 transition group-hover:border-[#343434] group-hover:bg-white/[0.055]">
                       <span className="rounded-full border border-purple-400/18 bg-purple-400/10 px-2.5 py-1 text-xs font-medium capitalize text-purple-100">
                         {user.plan}
                       </span>
                     </td>
-                    <td className="border-y border-[#252b36] bg-[#111620] px-3 py-3 transition group-hover:border-[#343b49] group-hover:bg-[#181d27]">
-                      <span className="rounded-full border border-[#2a303b] bg-[#1a1f29] px-2.5 py-1 text-xs font-medium capitalize text-zinc-300">
+                    <td className="border-y border-[#262626] bg-black/25 px-3 py-3 transition group-hover:border-[#343434] group-hover:bg-white/[0.055]">
+                      <span className="rounded-full border border-[#262626] bg-white/[0.045] px-2.5 py-1 text-xs font-medium capitalize text-zinc-300">
                         {user.accountStatus}
                       </span>
                     </td>
-                    <td className="border-y border-[#252b36] bg-[#111620] px-3 py-3 transition group-hover:border-[#343b49] group-hover:bg-[#181d27]">{formatNumber(user.reportCount)}</td>
-                    <td className="rounded-r-[0.95rem] border-y border-r border-[#252b36] bg-[#111620] px-3 py-3 transition group-hover:border-[#343b49] group-hover:bg-[#181d27]">{formatDate(user.lastSignInAt)}</td>
+                    <td className="border-y border-[#262626] bg-black/25 px-3 py-3 transition group-hover:border-[#343434] group-hover:bg-white/[0.055]">{formatNumber(user.reportCount)}</td>
+                    <td className="rounded-r-[0.95rem] border-y border-r border-[#262626] bg-black/25 px-3 py-3 transition group-hover:border-[#343434] group-hover:bg-white/[0.055]">{formatDate(user.lastSignInAt)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             {!data.recentUsers.length ? (
-              <p className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 text-sm text-zinc-500">
+              <p className="rounded-2xl border border-[#262626] bg-black/25 p-4 text-sm text-zinc-500">
                 No users found yet.
               </p>
             ) : null}

@@ -44,7 +44,7 @@ export function AdminDateRangeControls({
 
   const controls = (
     <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-      <div className="flex rounded-[0.95rem] border border-[#2a303b] bg-[#1a1f29] p-1 shadow-inner shadow-white/[0.025]">
+      <div className="flex rounded-[0.95rem] border border-[#262626] bg-black/25 p-1 shadow-inner shadow-white/[0.025]">
         {ranges.map((range) => (
           <button
             key={range.key}
@@ -52,7 +52,7 @@ export function AdminDateRangeControls({
             onClick={() => updateRange(range.key)}
             className={`rounded-[0.72rem] px-3 py-1.5 text-[11px] font-semibold transition duration-300 ${
               activeRange === range.key
-                ? "bg-[#f5f7fb] text-black shadow-[0_10px_30px_rgba(255,255,255,0.10)]"
+                ? "bg-white text-black shadow-[0_10px_26px_rgba(255,255,255,0.08)]"
                 : "text-zinc-400 hover:text-white"
             }`}
           >
@@ -66,13 +66,13 @@ export function AdminDateRangeControls({
           type="date"
           value={from}
           onChange={(event) => setFrom(event.target.value)}
-          className="h-9 rounded-[0.8rem] border border-[#2a303b] bg-[#1a1f29] px-2.5 text-[11px] text-white outline-none transition focus:border-purple-300/35"
+          className="h-9 rounded-[0.8rem] border border-[#262626] bg-black/25 px-2.5 text-[11px] text-white outline-none transition focus:border-purple-300/30"
         />
         <input
           type="date"
           value={to}
           onChange={(event) => setTo(event.target.value)}
-          className="h-9 rounded-[0.8rem] border border-[#2a303b] bg-[#1a1f29] px-2.5 text-[11px] text-white outline-none transition focus:border-purple-300/35"
+          className="h-9 rounded-[0.8rem] border border-[#262626] bg-black/25 px-2.5 text-[11px] text-white outline-none transition focus:border-purple-300/30"
         />
         <button
           type="button"
@@ -90,7 +90,7 @@ export function AdminDateRangeControls({
   }
 
   return (
-    <section className="mt-6 rounded-[1.55rem] border border-[#252b36] bg-[#151922] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl">
+    <section className="mt-6 rounded-[1.55rem] border border-[#262626] bg-white/[0.045] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-xl">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-[1rem] border border-purple-300/20 bg-purple-400/10">
