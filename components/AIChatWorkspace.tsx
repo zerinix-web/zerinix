@@ -53,6 +53,7 @@ type ChatMessage = {
   mode?: "chat" | "plan" | "market";
   attachments?: ChatAttachment[];
   status?: "streaming" | "complete" | "failed";
+  regenerating?: boolean;
   createdAt: number;
 };
 
@@ -74,6 +75,13 @@ type ChatProfile = {
   business_interests: string[];
   risk_tolerance: string;
   long_term_goals: string[];
+};
+
+type ChatIssue = {
+  title: string;
+  message: string;
+  tone: "info" | "warning" | "error";
+  retryable: boolean;
 };
 
 type AIChatWorkspaceProps = {
@@ -125,6 +133,154 @@ const promptStarters = [
   "Compare bootstrapping versus raising capital for my company.",
   "Analyze this customer segment and suggest a better ICP.",
 ];
+
+function getChatIssue(rawValue: string): ChatIssue {
+  const raw = rawValue.trim();
+  const normalized = raw.toLowerCase();
+
+  if (!raw) {
+    return {
+      title: "Something went wrong",
+      message: "The response could not be completed. Please try again.",
+      tone: "error",
+      retryable: true,
+    };
+  }
+
+  if (/stopped|abort|previous answer is still available/.test(normalized)) {
+    return {
+      title: "Generation stopped",
+      message: "Your prompt and conversation are safe. You can retry when you are ready.",
+      tone: "info",
+      retryable: true,
+    };
+  }
+
+  if (/timeout|timed out|stream completed|too long to finish|too long to/.test(normalized)) {
+    return {
+      title: "Response timed out",
+      message: "ZERINIX took too long to finish the answer. Your prompt was kept, and you can retry safely.",
+      tone: "warning",
+      retryable: true,
+    };
+  }
+
+  if (
+    /too many|rate[- ]limit|429|daily ai usage|quota|limit reached|current usage limit/.test(
+      normalized
+    )
+  ) {
+    return {
+      title: "Usage limit reached",
+      message: "Your current usage limit is active. Please wait before trying again or review your plan.",
+      tone: "warning",
+      retryable: false,
+    };
+  }
+
+  if (/network|failed to fetch|load failed|connection|offline|connection dropped/.test(normalized)) {
+    return {
+      title: "Connection interrupted",
+      message: "The network connection dropped before ZERINIX could finish. Your prompt was kept, and you can retry.",
+      tone: "warning",
+      retryable: true,
+    };
+  }
+
+  if (/auth|sign in|authenticated|session/.test(normalized)) {
+    return {
+      title: "Session needs attention",
+      message: "Your session could not be verified. Sign in again, then continue the conversation.",
+      tone: "warning",
+      retryable: false,
+    };
+  }
+
+  if (
+    /server|500|provider|openai|response failed|temporarily unavailable|service could not complete/.test(
+      normalized
+    )
+  ) {
+    return {
+      title: "AI response unavailable",
+      message: "The AI service could not complete this response. Your prompt was kept, and you can retry.",
+      tone: "error",
+      retryable: true,
+    };
+  }
+
+  return {
+    title: "Chat needs a retry",
+    message: "The last action could not be completed cleanly. Your conversation is safe, and you can try again.",
+    tone: "error",
+    retryable: true,
+  };
+}
+
+function ChatStatusNotice({
+  issue,
+  onRetry,
+  onDismiss,
+}: {
+  issue: ChatIssue;
+  onRetry?: () => void;
+  onDismiss?: () => void;
+}) {
+  const toneClasses =
+    issue.tone === "info"
+      ? "border-teal-300/20 bg-teal-300/[0.08] text-teal-50"
+      : issue.tone === "warning"
+        ? "border-amber-300/20 bg-amber-300/[0.08] text-amber-50"
+        : "border-red-300/20 bg-red-400/[0.08] text-red-50";
+  const iconClasses =
+    issue.tone === "info"
+      ? "border-teal-300/20 bg-teal-300/10 text-teal-100"
+      : issue.tone === "warning"
+        ? "border-amber-300/20 bg-amber-300/10 text-amber-100"
+        : "border-red-300/20 bg-red-400/10 text-red-100";
+
+  return (
+    <div
+      className={`rounded-3xl border p-4 text-sm leading-6 shadow-2xl shadow-black/25 ${toneClasses}`}
+      role={issue.tone === "error" ? "alert" : "status"}
+    >
+      <div className="flex gap-3">
+        <div
+          className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border ${iconClasses}`}
+        >
+          <AlertCircle className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-white">{issue.title}</p>
+          <p className="mt-1 text-zinc-300">{issue.message}</p>
+          {onRetry || onDismiss ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {onRetry && issue.retryable ? (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-white/10"
+                >
+                  <RefreshCcw className="h-3.5 w-3.5" />
+                  Try again
+                </button>
+              ) : null}
+              {onDismiss ? (
+                <button
+                  type="button"
+                  onClick={onDismiss}
+                  className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-300 transition hover:bg-white/10"
+                >
+                  Dismiss
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function createMessageId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -560,13 +716,29 @@ function MarkdownRenderer({
 
 function TypingIndicator() {
   return (
-    <div className="flex items-center gap-2 text-sm text-zinc-400">
-      <span>ZERINIX is thinking</span>
-      <span className="flex gap-1">
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-teal-200 [animation-delay:-0.2s]" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-teal-200 [animation-delay:-0.1s]" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-teal-200" />
-      </span>
+    <div className="rounded-2xl border border-teal-300/15 bg-teal-300/[0.055] p-4 shadow-inner shadow-black/20">
+      <div className="flex items-center gap-3">
+        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-teal-300/20 bg-black/30">
+          <span className="absolute h-6 w-6 animate-ping rounded-full bg-teal-200/15" />
+          <Loader2 className="relative h-4 w-4 animate-spin text-teal-100" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-white">AI is thinking</p>
+          <p className="text-xs text-zinc-500">
+            Preparing a careful response before streaming begins.
+          </p>
+        </div>
+        <span className="ml-auto flex gap-1.5">
+          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-teal-200 [animation-delay:-0.2s]" />
+          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-teal-200 [animation-delay:-0.1s]" />
+          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-teal-200" />
+        </span>
+      </div>
+      <div className="mt-5 space-y-2" aria-hidden="true">
+        <div className="h-2.5 animate-pulse rounded-full bg-white/10" />
+        <div className="h-2.5 w-10/12 animate-pulse rounded-full bg-white/10" />
+        <div className="h-2.5 w-7/12 animate-pulse rounded-full bg-white/10" />
+      </div>
     </div>
   );
 }
@@ -627,7 +799,11 @@ const ChatBubble = memo(function ChatBubble({
             {message.status === "streaming" ? (
               <span className="inline-flex items-center gap-1.5 rounded-lg border border-teal-300/20 px-2 py-1 text-xs text-teal-100">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                {message.content ? "Regenerating" : "Streaming"}
+                {message.regenerating
+                  ? "Regenerating"
+                  : message.content
+                    ? "Generating"
+                    : "Thinking"}
               </span>
             ) : null}
             <button
@@ -662,7 +838,7 @@ const ChatBubble = memo(function ChatBubble({
                 className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1 text-xs text-zinc-300 transition hover:border-teal-300/20 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <RefreshCcw className="h-3.5 w-3.5 text-teal-200" />
-                Regenerate
+                {message.status === "failed" ? "Retry" : "Regenerate"}
               </button>
             )}
           </div>
@@ -693,14 +869,12 @@ const ChatBubble = memo(function ChatBubble({
             </div>
           </div>
         ) : message.status === "streaming" && !message.content ? (
-          <div className="min-h-28 rounded-2xl border border-white/10 bg-black/25 p-4">
-            <TypingIndicator />
-            <div className="mt-5 space-y-2">
-              <div className="h-2.5 animate-pulse rounded-full bg-white/10" />
-              <div className="h-2.5 w-10/12 animate-pulse rounded-full bg-white/10" />
-              <div className="h-2.5 w-7/12 animate-pulse rounded-full bg-white/10" />
-            </div>
-          </div>
+          <TypingIndicator />
+        ) : message.status === "failed" ? (
+          <ChatStatusNotice
+            issue={getChatIssue(message.content)}
+            onRetry={actionDisabled ? undefined : onRegenerate}
+          />
         ) : (
           <MarkdownRenderer
             content={message.content}
@@ -776,6 +950,7 @@ export default function AIChatWorkspace({
   );
   const abortControllerRef = useRef<AbortController | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   const activeConversation = conversations.find(
@@ -847,11 +1022,26 @@ export default function AIChatWorkspace({
   }, []);
 
   useEffect(() => {
-    scrollerRef.current?.scrollTo({
-      top: scrollerRef.current.scrollHeight,
+    const scroller = scrollerRef.current;
+
+    if (!scroller || !shouldAutoScrollRef.current) {
+      return;
+    }
+
+    scroller.scrollTo({
+      top: scroller.scrollHeight,
       behavior: "smooth",
     });
   }, [messages.length, latestMessageContent]);
+
+  function updateScrollIntent(element: HTMLDivElement | null) {
+    if (!element) {
+      return;
+    }
+
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    shouldAutoScrollRef.current = distanceFromBottom < 180;
+  }
 
   function updateConversation(
     conversationId: string,
@@ -1089,8 +1279,7 @@ export default function AIChatWorkspace({
 
     if (error) {
       console.error("[ai_conversations delete failed]", error);
-      setConversationError(error.message);
-      window.alert("Conversation could not be deleted. Please try again.");
+      setConversationError("Conversation could not be deleted. Please try again.");
       return false;
     }
 
@@ -1222,12 +1411,13 @@ export default function AIChatWorkspace({
     messageId: string,
     content: string,
     status: ChatMessage["status"],
-    conversationId: string
+    conversationId: string,
+    regenerating = false
   ) {
     updateConversation(conversationId, (conversation) => ({
       ...conversation,
       messages: conversation.messages.map((message) =>
-        message.id === messageId ? { ...message, content, status } : message
+        message.id === messageId ? { ...message, content, status, regenerating } : message
       ),
       updatedAt: getClientTimestamp(),
     }));
@@ -1367,7 +1557,7 @@ export default function AIChatWorkspace({
         ...current,
         messages: current.messages.map((message) =>
           message.id === replacementAssistantMessageId
-            ? { ...message, status: "streaming" }
+            ? { ...message, status: "streaming", regenerating: true }
             : message
         ),
         updatedAt: getClientTimestamp(),
@@ -1439,6 +1629,7 @@ export default function AIChatWorkspace({
         : error instanceof Error
           ? error.message
           : "Chat response failed. Please try again.";
+      const friendlyMessage = getChatIssue(errorMessage).message;
 
       if (replacementAssistantMessageId) {
         updateAssistantMessage(
@@ -1448,8 +1639,8 @@ export default function AIChatWorkspace({
           conversationId
         );
       } else {
-        updateAssistantMessage(assistantMessageId, errorMessage, "failed", conversationId);
-        void updatePersistedMessage(assistantMessageId, errorMessage, "failed");
+        updateAssistantMessage(assistantMessageId, friendlyMessage, "failed", conversationId);
+        void updatePersistedMessage(assistantMessageId, friendlyMessage, "failed");
       }
       if (!aborted) {
         setConversationError(errorMessage);
@@ -1502,7 +1693,23 @@ export default function AIChatWorkspace({
     );
   }
 
+  function retryAfterStatusNotice() {
+    if (loading) {
+      return;
+    }
+
+    if (messages.some((message) => message.role === "user")) {
+      void regenerateResponse();
+      return;
+    }
+
+    if (prompt.trim()) {
+      void sendMessage();
+    }
+  }
+
   const activeModel = modelOptions.find((option) => option.value === modelPreference);
+  const conversationIssue = conversationError ? getChatIssue(conversationError) : null;
 
   return (
     <main
@@ -2053,13 +2260,20 @@ export default function AIChatWorkspace({
           </div>
         </header>
 
-        <div ref={scrollerRef} className="relative z-10 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+        <div
+          ref={scrollerRef}
+          onScroll={(event) => updateScrollIntent(event.currentTarget)}
+          className="relative z-10 flex-1 overflow-y-auto px-4 py-6 sm:px-6"
+        >
           <div className="mx-auto flex max-w-5xl flex-col gap-5 pb-44">
-            {conversationError ? (
-              <div className="rounded-3xl border border-red-300/20 bg-red-950/30 p-4 text-sm leading-6 text-red-100 shadow-2xl shadow-black/30">
-                <p className="font-semibold text-red-50">Chat persistence warning</p>
-                <p className="mt-1 break-words text-red-100/80">{conversationError}</p>
-              </div>
+            {conversationIssue ? (
+              <ChatStatusNotice
+                issue={conversationIssue}
+                onRetry={
+                  conversationIssue.retryable && !loading ? retryAfterStatusNotice : undefined
+                }
+                onDismiss={() => setConversationError("")}
+              />
             ) : null}
 
             {messages.length === 0 ? (
