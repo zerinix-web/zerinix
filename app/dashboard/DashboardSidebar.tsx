@@ -8,6 +8,7 @@ import {
   LogOut,
   Plus,
   ShieldCheck,
+  UserRound,
 } from "lucide-react";
 import { signOut } from "@/app/auth/actions";
 import { dashboardTheme } from "@/app/lib/ui/dashboard-theme";
@@ -19,6 +20,7 @@ export default function DashboardSidebar() {
     { label: "AI Chat", href: "/chat", icon: Bot },
     { label: "Workspaces", href: "/dashboard#workspaces", icon: Folder },
     { label: "Usage", href: "/dashboard/usage", icon: Activity },
+    { label: "Account", href: "/dashboard/settings", icon: UserRound },
   ];
 
   return (
