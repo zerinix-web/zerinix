@@ -131,7 +131,7 @@ export default async function WorkspaceReportsPage({
 
           {data.error ? (
             <div className="mt-6 rounded-3xl border border-amber-300/20 bg-amber-950/20 p-5 text-sm leading-6 text-amber-100">
-              Workspace reports could not be loaded right now: {data.error}
+              Workspace reports could not be loaded right now. Please refresh the page or try again shortly.
             </div>
           ) : null}
 

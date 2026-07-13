@@ -109,7 +109,7 @@ export default async function UsageDashboardPage() {
 
           {summary.error ? (
             <div className="mt-6 rounded-3xl border border-amber-300/20 bg-amber-950/20 p-5 text-sm leading-6 text-amber-100">
-              Usage telemetry is not available yet: {summary.error}
+              Usage telemetry is not available right now. Please refresh the page or try again shortly.
             </div>
           ) : null}
 
@@ -174,7 +174,7 @@ export default async function UsageDashboardPage() {
 
               {adminSummary.error ? (
                 <p className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-950/20 p-4 text-sm text-amber-100">
-                  Admin telemetry is limited by current database access: {adminSummary.error}
+                  Admin telemetry is limited right now. Please refresh the page or try again shortly.
                 </p>
               ) : null}
 

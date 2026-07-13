@@ -165,7 +165,7 @@ export default async function BillingPage({
 
           {error ? (
             <div className="mt-6 rounded-3xl border border-red-300/20 bg-red-950/30 p-5 text-sm leading-6 text-red-100">
-              {error}
+              Billing action could not be completed. Please try again shortly.
             </div>
           ) : null}
 
@@ -266,7 +266,7 @@ export default async function BillingPage({
 
               {billing.usageError ? (
                 <div className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-950/20 p-4 text-sm leading-6 text-amber-100">
-                  Usage data could not be loaded right now: {billing.usageError}
+                  Usage data could not be loaded right now. Please refresh the page or try again shortly.
                 </div>
               ) : null}
 

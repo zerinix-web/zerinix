@@ -1133,7 +1133,7 @@ export default function AIChatWorkspace({
 
     if (error) {
       console.error("[ai_chat_profiles upsert failed]", error);
-      setProfileMessage(error.message);
+      setProfileMessage("AI profile could not be saved. Please try again shortly.");
       return;
     }
 
@@ -1165,7 +1165,7 @@ export default function AIChatWorkspace({
 
     if (error) {
       console.error("[ai_chat_profiles delete failed]", error);
-      setProfileMessage(error.message);
+      setProfileMessage("AI profile could not be cleared. Please try again shortly.");
       return;
     }
 

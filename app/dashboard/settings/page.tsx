@@ -104,7 +104,7 @@ export default async function SettingsPage({
 
           {error ? (
             <div className="mt-6 rounded-3xl border border-red-300/20 bg-red-950/30 p-5 text-sm leading-6 text-red-100">
-              {error}
+              Settings could not be updated. Please try again shortly.
             </div>
           ) : null}
 

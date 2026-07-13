@@ -5252,8 +5252,7 @@ export default function Planner({
 
     if (error) {
       console.error("[ai_conversations delete failed]", error);
-      setConversationError(error.message);
-      window.alert("Conversation could not be deleted. Please try again.");
+      setConversationError("Conversation could not be deleted. Please try again.");
       return false;
     }
 
@@ -6541,7 +6540,7 @@ export default function Planner({
 
   return (
     <main
-      className="flex h-screen flex-col overflow-hidden bg-black text-white md:flex-row"
+      className="flex h-[100dvh] min-h-[100svh] flex-col overflow-hidden bg-black text-white md:flex-row"
       onDragEnter={(event) => {
         event.preventDefault();
         setIsDraggingFiles(true);
@@ -6648,7 +6647,7 @@ export default function Planner({
                   Conversation history could not be loaded or saved.
                 </p>
                 <p className="mt-1 break-words text-red-100/80">
-                  {conversationError}
+                  Your workspace is safe. Please refresh the page or try again shortly.
                 </p>
               </div>
             ) : null}
