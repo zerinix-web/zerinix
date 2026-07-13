@@ -71,7 +71,9 @@ function formatResponseTime(value: number | null) {
 export function AdminSystemHealth({ initialStatuses }: AdminSystemHealthProps) {
   const [statuses, setStatuses] = useState(initialStatuses);
   const [refreshing, setRefreshing] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState(new Date().toISOString());
+  const [lastRefresh, setLastRefresh] = useState(
+    initialStatuses.find((item) => item.lastChecked)?.lastChecked || ""
+  );
 
   const refreshHealth = useCallback(async () => {
     setRefreshing(true);
@@ -108,7 +110,7 @@ export function AdminSystemHealth({ initialStatuses }: AdminSystemHealthProps) {
   }, [refreshHealth]);
 
   return (
-    <section className="mt-5 rounded-[1.35rem] border border-white/10 bg-white/[0.052] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.25)] backdrop-blur-xl">
+    <section className="mt-5 rounded-[1.35rem] border border-[#252b36] bg-[#151922] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-[17px] font-semibold tracking-tight text-white">System Status</h2>
@@ -119,7 +121,7 @@ export function AdminSystemHealth({ initialStatuses }: AdminSystemHealthProps) {
           onClick={() => {
             void refreshHealth();
           }}
-          className="inline-flex h-9 items-center justify-center gap-2 rounded-[0.85rem] border border-white/10 bg-white/[0.045] px-3 text-[11px] text-zinc-300 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/30 hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-9 items-center justify-center gap-2 rounded-[0.85rem] border border-[#2a303b] bg-[#1a1f29] px-3 text-[11px] text-zinc-300 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/30 hover:bg-[#202634] hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
           disabled={refreshing}
         >
           <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
@@ -129,7 +131,7 @@ export function AdminSystemHealth({ initialStatuses }: AdminSystemHealthProps) {
 
       <div className="mt-4 space-y-2.5">
         {statuses.map((item) => (
-          <div key={item.label} className="rounded-[1rem] border border-white/10 bg-white/[0.04] p-3 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/18 hover:bg-white/[0.065]">
+          <div key={item.label} className="rounded-[1rem] border border-[#252b36] bg-[#111620] p-3 transition duration-300 hover:-translate-y-0.5 hover:border-[#343b49] hover:bg-[#181d27]">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -146,11 +148,11 @@ export function AdminSystemHealth({ initialStatuses }: AdminSystemHealthProps) {
               </span>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-              <div className="rounded-xl border border-white/10 bg-white/[0.035] p-2.5">
+              <div className="rounded-xl border border-[#252b36] bg-[#151922] p-2.5">
                 <p className="text-zinc-600">Response</p>
                 <p className="mt-1 font-medium text-zinc-300">{formatResponseTime(item.responseTimeMs)}</p>
               </div>
-              <div className="rounded-xl border border-white/10 bg-white/[0.035] p-2.5">
+              <div className="rounded-xl border border-[#252b36] bg-[#151922] p-2.5">
                 <p className="text-zinc-600">Success</p>
                 <p className="mt-1 font-medium text-zinc-300">{formatTime(item.lastSuccessfulCheck)}</p>
               </div>

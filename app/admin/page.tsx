@@ -92,34 +92,36 @@ function MetricCard({
   value,
   detail,
   icon: Icon,
+  accent,
   animatedValue,
   valueFormat = "integer",
   animatedEmptyLabel,
   trend,
-  priority = "standard",
 }: {
   label: string;
   value: string;
   detail: string;
   icon: typeof Users;
+  accent: "green" | "blue" | "orange" | "purple";
   animatedValue?: number;
   valueFormat?: AdminAnimatedValueFormat;
   animatedEmptyLabel?: string;
   trend?: Trend;
-  priority?: "primary" | "standard";
 }) {
   const TrendIcon = trend?.direction === "down" ? TrendingDown : TrendingUp;
+  const accentClasses = {
+    green: "border-emerald-400/18 bg-emerald-400/10 text-emerald-200 group-hover:border-emerald-300/30",
+    blue: "border-sky-400/18 bg-sky-400/10 text-sky-200 group-hover:border-sky-300/30",
+    orange: "border-orange-400/18 bg-orange-400/10 text-orange-200 group-hover:border-orange-300/30",
+    purple: "border-purple-400/20 bg-purple-400/10 text-purple-200 group-hover:border-purple-300/32",
+  }[accent];
 
   return (
-    <article className={`group relative min-h-[10.25rem] overflow-hidden rounded-[1.35rem] border border-white/10 p-4.5 shadow-[0_20px_80px_rgba(0,0,0,0.25)] backdrop-blur-xl transition duration-300 ease-out hover:-translate-y-1 hover:border-purple-300/28 hover:bg-white/[0.075] hover:shadow-[0_28px_100px_rgba(147,51,234,0.16)] ${
-      priority === "primary"
-        ? "bg-[linear-gradient(135deg,rgba(147,51,234,0.16),rgba(255,255,255,0.065))]"
-        : "bg-white/[0.05]"
-    }`}>
-      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-purple-300/38 to-transparent opacity-0 transition duration-300 group-hover:opacity-100" />
+    <article className="group relative min-h-[10.25rem] overflow-hidden rounded-[1.35rem] border border-[#252b36] bg-[#151922] p-4.5 shadow-[0_18px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl transition duration-300 ease-out hover:-translate-y-1 hover:border-[#343b49] hover:bg-[#181d27] hover:shadow-[0_24px_90px_rgba(0,0,0,0.34)]">
+      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-white/18 to-transparent opacity-0 transition duration-300 group-hover:opacity-100" />
       <div className="flex items-center justify-between gap-4">
-        <span className="flex h-10 w-10 items-center justify-center rounded-[1rem] border border-purple-300/20 bg-purple-400/12 transition duration-300 group-hover:scale-105 group-hover:border-purple-200/40">
-          <Icon className="h-5 w-5 text-purple-100" />
+        <span className={`flex h-10 w-10 items-center justify-center rounded-[1rem] border transition duration-300 group-hover:scale-105 ${accentClasses}`}>
+          <Icon className="h-5 w-5" />
         </span>
         {trend ? (
           <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${trendClass(trend.direction)}`}>
@@ -135,7 +137,7 @@ function MetricCard({
       <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
         {label}
       </p>
-      <p className={`${priority === "primary" ? "text-[2.25rem]" : "text-[1.95rem]"} mt-2 font-semibold leading-none tracking-[-0.035em] text-white transition duration-300 group-hover:text-purple-50`}>
+      <p className="mt-2 text-[2.15rem] font-semibold leading-none tracking-[-0.035em] text-white transition duration-300 group-hover:text-zinc-50">
         {typeof animatedValue === "number" ? (
           <AdminAnimatedValue
             value={animatedValue}
@@ -175,23 +177,23 @@ function LineChartCard({
     .join(" ");
 
   return (
-    <section className="rounded-[1.35rem] border border-white/10 bg-white/[0.052] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.26)] backdrop-blur-xl xl:col-span-6">
+    <section className="rounded-[1.35rem] border border-[#252b36] bg-[#151922] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl xl:col-span-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-[17px] font-semibold tracking-tight text-white">{title}</h2>
           <p className="mt-1 text-xs text-zinc-500">{periodLabel}</p>
         </div>
-        <div className="rounded-full border border-purple-300/20 bg-purple-400/10 px-3 py-1 text-xs font-semibold text-purple-100">
+        <div className="rounded-full border border-purple-400/18 bg-purple-400/10 px-3 py-1 text-xs font-semibold text-purple-100">
           {formatNumber(latest)}
         </div>
       </div>
-      <div className="mt-5 h-[21rem] overflow-hidden rounded-[1.1rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.055),rgba(23,21,31,0.38))] p-4">
+      <div className="mt-5 h-[21rem] overflow-hidden rounded-[1.1rem] border border-[#252b36] bg-[#10141c] p-4">
         {data.length ? (
           <svg className="h-full w-full overflow-visible" viewBox="0 0 100 100" role="img" aria-label={`${title} chart`}>
             <defs>
               <linearGradient id="admin-user-growth-area" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor="rgb(192 132 252)" stopOpacity="0.36" />
-                <stop offset="100%" stopColor="rgb(192 132 252)" stopOpacity="0.03" />
+                <stop offset="0%" stopColor="rgb(168 85 247)" stopOpacity="0.24" />
+                <stop offset="100%" stopColor="rgb(168 85 247)" stopOpacity="0.02" />
               </linearGradient>
             </defs>
             {[24, 48, 72].map((line) => (
@@ -201,14 +203,14 @@ function LineChartCard({
                 x2="100"
                 y1={line}
                 y2={line}
-                stroke="rgba(255,255,255,0.08)"
+                stroke="rgba(255,255,255,0.055)"
                 strokeWidth="0.6"
               />
             ))}
             <polyline fill="url(#admin-user-growth-area)" points={`0,100 ${points} 100,100`} />
             <polyline
               fill="none"
-              stroke="rgb(216 180 254)"
+              stroke="rgb(168 85 247)"
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth="3"
@@ -224,7 +226,7 @@ function LineChartCard({
                   cx={x}
                   cy={y}
                   r="2.6"
-                  className="fill-[#17151f] stroke-purple-200"
+                  className="fill-[#10141c] stroke-purple-300"
                   strokeWidth="1.5"
                 />
               );
@@ -261,14 +263,14 @@ function DonutChartCard({
     : "rgba(255,255,255,0.08) 0% 100%";
 
   return (
-    <section className="rounded-[1.35rem] border border-white/10 bg-white/[0.052] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.26)] backdrop-blur-xl xl:col-span-3">
+    <section className="rounded-[1.35rem] border border-[#252b36] bg-[#151922] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl xl:col-span-3">
       <h2 className="text-[17px] font-semibold tracking-tight text-white">{title}</h2>
       <div className="mt-5 flex items-center justify-center">
         <div
-          className="relative h-40 w-40 rounded-full border border-white/10 shadow-[0_24px_90px_rgba(147,51,234,0.12)]"
+          className="relative h-40 w-40 rounded-full border border-[#2a303b] shadow-[0_22px_80px_rgba(0,0,0,0.22)]"
           style={{ background: `conic-gradient(${gradient})` }}
         >
-          <div className="absolute inset-7 rounded-full border border-white/10 bg-[#17151f]" />
+          <div className="absolute inset-7 rounded-full border border-[#2a303b] bg-[#151922]" />
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <span className="text-2xl font-semibold tracking-tight text-white">{formatNumber(total)}</span>
             <span className="mt-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Total</span>
@@ -314,6 +316,7 @@ export default async function AdminDashboardPage({
       value: formatNumber(data.totalUsers),
       detail: "Supabase Auth users",
       icon: Users,
+      accent: "green" as const,
       animatedValue: data.totalUsers,
       valueFormat: "integer" as const,
       trend: calculateTrend(data.charts.userGrowth, "Last 24h"),
@@ -323,6 +326,7 @@ export default async function AdminDashboardPage({
       value: formatNumber(data.reportsGenerated),
       detail: "Saved report records",
       icon: FileText,
+      accent: "blue" as const,
       animatedValue: data.reportsGenerated,
       valueFormat: "integer" as const,
       trend: calculateTrend(data.charts.reportsGenerated, "Last 24h"),
@@ -332,6 +336,7 @@ export default async function AdminDashboardPage({
       value: formatNumber(data.aiConversations),
       detail: "Stored conversations",
       icon: Bot,
+      accent: "orange" as const,
       animatedValue: data.aiConversations,
       valueFormat: "integer" as const,
     },
@@ -340,6 +345,7 @@ export default async function AdminDashboardPage({
       value: formatCurrency(data.monthlyRecurringRevenue),
       detail: "Payment provider not connected",
       icon: DollarSign,
+      accent: "purple" as const,
     },
   ];
 
@@ -362,8 +368,8 @@ export default async function AdminDashboardPage({
       }
     >
       <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
-        {cards.map((card, index) => (
-          <MetricCard key={card.label} {...card} priority={index < 3 ? "primary" : "standard"} />
+        {cards.map((card) => (
+          <MetricCard key={card.label} {...card} />
         ))}
       </div>
 
@@ -378,13 +384,13 @@ export default async function AdminDashboardPage({
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-[1.45fr_0.85fr] [&>section]:mt-0">
-        <div className="rounded-[1.35rem] border border-white/10 bg-white/[0.052] p-5 shadow-[0_22px_90px_rgba(0,0,0,0.25)] backdrop-blur-xl">
+        <div className="rounded-[1.35rem] border border-[#252b36] bg-[#151922] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl">
           <div className="flex items-center justify-between gap-4">
             <div>
               <h2 className="text-[17px] font-semibold tracking-tight text-white">Recent users</h2>
               <p className="mt-1 text-xs text-zinc-500">Latest accounts from Supabase Auth.</p>
             </div>
-            <Link href="/admin/users" className="rounded-full border border-purple-300/20 bg-purple-400/10 px-3 py-1 text-xs font-semibold text-purple-100 transition hover:bg-purple-400/15">
+            <Link href="/admin/users" className="rounded-full border border-purple-400/18 bg-purple-400/10 px-3 py-1 text-xs font-semibold text-purple-100 transition hover:bg-purple-400/15">
               Manage
             </Link>
           </div>
@@ -402,24 +408,24 @@ export default async function AdminDashboardPage({
               <tbody>
                 {data.recentUsers.map((user) => (
                   <tr key={user.id} className="group text-zinc-300 transition">
-                    <td className="rounded-l-[0.95rem] border-y border-l border-white/10 bg-white/[0.04] px-3 py-3 transition group-hover:border-purple-300/22 group-hover:bg-white/[0.07]">
+                    <td className="rounded-l-[0.95rem] border-y border-l border-[#252b36] bg-[#111620] px-3 py-3 transition group-hover:border-[#343b49] group-hover:bg-[#181d27]">
                       <span className="block font-medium text-white">{user.email}</span>
                       <span className="text-xs text-zinc-500">
                         {user.displayName || "No display name"}
                       </span>
                     </td>
-                    <td className="border-y border-white/10 bg-white/[0.04] px-3 py-3 transition group-hover:border-purple-300/22 group-hover:bg-white/[0.07]">
-                      <span className="rounded-full border border-purple-300/20 bg-purple-400/10 px-2.5 py-1 text-xs font-medium capitalize text-purple-100">
+                    <td className="border-y border-[#252b36] bg-[#111620] px-3 py-3 transition group-hover:border-[#343b49] group-hover:bg-[#181d27]">
+                      <span className="rounded-full border border-purple-400/18 bg-purple-400/10 px-2.5 py-1 text-xs font-medium capitalize text-purple-100">
                         {user.plan}
                       </span>
                     </td>
-                    <td className="border-y border-white/10 bg-white/[0.04] px-3 py-3 transition group-hover:border-purple-300/22 group-hover:bg-white/[0.07]">
-                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium capitalize text-zinc-300">
+                    <td className="border-y border-[#252b36] bg-[#111620] px-3 py-3 transition group-hover:border-[#343b49] group-hover:bg-[#181d27]">
+                      <span className="rounded-full border border-[#2a303b] bg-[#1a1f29] px-2.5 py-1 text-xs font-medium capitalize text-zinc-300">
                         {user.accountStatus}
                       </span>
                     </td>
-                    <td className="border-y border-white/10 bg-white/[0.04] px-3 py-3 transition group-hover:border-purple-300/22 group-hover:bg-white/[0.07]">{formatNumber(user.reportCount)}</td>
-                    <td className="rounded-r-[0.95rem] border-y border-r border-white/10 bg-white/[0.04] px-3 py-3 transition group-hover:border-purple-300/22 group-hover:bg-white/[0.07]">{formatDate(user.lastSignInAt)}</td>
+                    <td className="border-y border-[#252b36] bg-[#111620] px-3 py-3 transition group-hover:border-[#343b49] group-hover:bg-[#181d27]">{formatNumber(user.reportCount)}</td>
+                    <td className="rounded-r-[0.95rem] border-y border-r border-[#252b36] bg-[#111620] px-3 py-3 transition group-hover:border-[#343b49] group-hover:bg-[#181d27]">{formatDate(user.lastSignInAt)}</td>
                   </tr>
                 ))}
               </tbody>

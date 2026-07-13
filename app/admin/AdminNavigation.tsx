@@ -79,8 +79,8 @@ export function AdminNavigation() {
                   aria-current={active ? "page" : undefined}
                   className={`group relative flex h-[2.65rem] shrink-0 items-center gap-2.5 rounded-[1rem] px-2.5 text-[13px] font-medium transition duration-300 xl:w-full ${
                     active
-                      ? "border border-purple-300/28 bg-[linear-gradient(135deg,rgba(147,51,234,0.22),rgba(255,255,255,0.07))] text-white shadow-[0_18px_58px_rgba(147,51,234,0.16)]"
-                      : "border border-transparent text-zinc-400 hover:-translate-y-0.5 hover:border-white/10 hover:bg-white/[0.055] hover:text-white"
+                      ? "border border-purple-400/28 bg-[#1b2030] text-white shadow-[0_18px_58px_rgba(0,0,0,0.24)]"
+                      : "border border-transparent text-zinc-400 hover:-translate-y-0.5 hover:border-[#272c37] hover:bg-[#171b24] hover:text-white"
                   }`}
                 >
                   {active ? (
@@ -89,8 +89,8 @@ export function AdminNavigation() {
                   <span
                     className={`flex h-7 w-7 items-center justify-center rounded-[0.75rem] transition duration-300 ${
                       active
-                        ? "bg-purple-300 text-black shadow-[0_10px_30px_rgba(216,180,254,0.22)]"
-                        : "bg-white/[0.055] text-purple-200 group-hover:bg-purple-300/12"
+                        ? "bg-[#7c3aed] text-white shadow-[0_10px_30px_rgba(124,58,237,0.22)]"
+                        : "bg-[#1b202a] text-zinc-300 group-hover:bg-[#202634] group-hover:text-purple-200"
                     }`}
                   >
                     <Icon className="h-3.5 w-3.5" />

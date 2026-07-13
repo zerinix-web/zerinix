@@ -287,7 +287,7 @@ test("admin dashboard cards use animated counters and premium transitions", () =
   assert.match(counter, /AdminAnimatedValueFormat/);
   assert.match(dashboard, /hover:-translate-y-1/);
   assert.match(dashboard, /duration-300/);
-  assert.match(dashboard, /shadow-\[0_20px_80px/);
+  assert.match(dashboard, /shadow-\[0_18px_70px/);
   assert.match(counter, /requestAnimationFrame/);
 });
 
@@ -301,7 +301,7 @@ test("admin dashboard renders the requested recent users and system status row",
   assert.match(dashboard, /user\.id/);
   assert.match(dashboard, /AdminSystemHealth/);
   assert.match(dashboard, /initialStatuses=\{data\.systemStatus\}/);
-  assert.match(dashboard, /hover:border-purple-300\/22/);
+  assert.match(dashboard, /hover:border-\[#343b49\]/);
 });
 
 test("AI CEO is admin-only, rate-limited, audited, and prompt-injection resistant", () => {
