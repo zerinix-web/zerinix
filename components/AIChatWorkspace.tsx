@@ -489,15 +489,15 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <pre className="max-w-full overflow-x-auto overscroll-x-contain p-4 text-sm leading-6 text-zinc-200">
-        <code dangerouslySetInnerHTML={{ __html: highlightCode(code) }} />
+      <pre className="max-w-full overflow-x-auto overscroll-x-contain p-4 font-mono text-sm leading-6 text-zinc-200 [tab-size:2]">
+        <code className="block min-w-max whitespace-pre" dangerouslySetInnerHTML={{ __html: highlightCode(code) }} />
       </pre>
     </div>
   );
 }
 
 function InlineMarkdown({ text }: { text: string }) {
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  const parts = text.split(/(`[^`\n]+`|\*\*[^*]+\*\*)/g);
 
   return (
     <>
@@ -506,7 +506,7 @@ function InlineMarkdown({ text }: { text: string }) {
           return (
             <code
               key={`${part}-${index}`}
-              className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[0.92em] text-teal-100"
+              className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[0.92em] text-teal-100"
             >
               {part.slice(1, -1)}
             </code>
@@ -574,6 +574,67 @@ function MarkdownTable({ lines }: { lines: string[] }) {
   );
 }
 
+function parseMarkdownSegments(content: string) {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const segments: Array<
+    | { type: "markdown"; content: string }
+    | { type: "code"; language: string; code: string }
+  > = [];
+  let markdownLines: string[] = [];
+  let codeLines: string[] = [];
+  let codeLanguage = "";
+  let inCode = false;
+
+  const flushMarkdown = () => {
+    if (!markdownLines.length) {
+      return;
+    }
+
+    segments.push({ type: "markdown", content: markdownLines.join("\n") });
+    markdownLines = [];
+  };
+
+  const flushCode = () => {
+    segments.push({
+      type: "code",
+      language: codeLanguage,
+      code: codeLines.join("\n").replace(/\n$/, ""),
+    });
+    codeLines = [];
+    codeLanguage = "";
+  };
+
+  for (const line of lines) {
+    const fence = line.match(/^```\s*([A-Za-z0-9_+.-]*)\s*$/);
+
+    if (fence) {
+      if (inCode) {
+        flushCode();
+        inCode = false;
+      } else {
+        flushMarkdown();
+        inCode = true;
+        codeLanguage = fence[1] || "";
+      }
+      continue;
+    }
+
+    if (inCode) {
+      codeLines.push(line);
+    } else {
+      markdownLines.push(line);
+    }
+  }
+
+  if (inCode) {
+    flushCode();
+  } else {
+    flushMarkdown();
+  }
+
+  return segments;
+}
+
 function MarkdownRenderer({
   content,
   streaming = false,
@@ -583,27 +644,27 @@ function MarkdownRenderer({
 }) {
   const deferredContent = useDeferredValue(content);
   const renderedContent = streaming ? deferredContent : content;
-  const blocks = renderedContent.split(/```/g);
+  const blocks = parseMarkdownSegments(renderedContent);
 
   return (
     <div className="min-w-0 max-w-full space-y-4 text-[15px] leading-8 text-zinc-300 [overflow-wrap:anywhere]">
       {blocks.map((block, blockIndex) => {
-        if (blockIndex % 2 === 1) {
-          const [language = "", ...codeLines] = block.replace(/^\n/, "").split("\n");
+        if (block.type === "code") {
           return (
             <CodeBlock
               key={`code-${blockIndex}`}
-              language={language.trim()}
-              code={codeLines.join("\n").trimEnd()}
+              language={block.language}
+              code={block.code}
             />
           );
         }
 
-        const lines = block.split("\n");
+        const lines = block.content.split("\n");
         const elements: ReactNode[] = [];
         let paragraph: string[] = [];
         let table: string[] = [];
         let list: string[] = [];
+        let listOrdered = false;
 
         const flushParagraph = () => {
           if (!paragraph.length) {
@@ -634,19 +695,30 @@ function MarkdownRenderer({
             return;
           }
 
+          const ListTag = listOrdered ? "ol" : "ul";
+
           elements.push(
-            <ul key={`list-${blockIndex}-${elements.length}`} className="space-y-2.5">
+            <ListTag
+              key={`list-${blockIndex}-${elements.length}`}
+              className={listOrdered ? "list-decimal space-y-2.5 pl-5" : "space-y-2.5"}
+            >
               {list.map((item, itemIndex) => (
-                <li key={`item-${blockIndex}-${itemIndex}-${item}`} className="flex gap-3 text-zinc-300">
-                  <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
-                  <span>
-                    <InlineMarkdown text={item.replace(/^[-*]\s+/, "")} />
+                <li
+                  key={`item-${blockIndex}-${itemIndex}-${item}`}
+                  className={listOrdered ? "pl-1 text-zinc-300" : "flex gap-3 text-zinc-300"}
+                >
+                  {!listOrdered ? (
+                    <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
+                  ) : null}
+                  <span className="min-w-0">
+                    <InlineMarkdown text={item.replace(/^[-*]\s+/, "").replace(/^\d+[.)]\s+/, "")} />
                   </span>
                 </li>
               ))}
-            </ul>
+            </ListTag>
           );
           list = [];
+          listOrdered = false;
         };
 
         lines.forEach((line) => {
@@ -681,9 +753,16 @@ function MarkdownRenderer({
             return;
           }
 
-          if (/^[-*]\s+/.test(line)) {
+          if (/^[-*]\s+/.test(line) || /^\d+[.)]\s+/.test(line)) {
             flushParagraph();
             flushTable();
+            const ordered = /^\d+[.)]\s+/.test(line);
+
+            if (list.length && ordered !== listOrdered) {
+              flushList();
+            }
+
+            listOrdered = ordered;
             list.push(line);
             return;
           }
