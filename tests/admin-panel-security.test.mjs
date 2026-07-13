@@ -55,13 +55,14 @@ test("every admin API route uses server-side admin authorization", () => {
 
 test("admin shell renders authenticated admin header and global search", () => {
   const shell = read("app/admin/AdminShell.tsx");
+  const navigation = read("app/admin/AdminNavigation.tsx");
   const search = read("app/admin/AdminGlobalSearch.tsx");
 
   assert.match(shell, /requireAdminPage/);
   assert.match(shell, /AdminGlobalSearch/);
   assert.match(shell, /hidePageHeader/);
   assert.match(shell, /Current admin|Signed in as|Admin notifications|Account settings|Security settings|Sign out/s);
-  assert.match(shell, /AI CEO/);
+  assert.match(navigation, /AI CEO/);
   assert.match(search, /\/api\/admin\/search/);
   assert.match(search, /ArrowDown/);
   assert.match(search, /ArrowUp/);
@@ -134,9 +135,9 @@ test("admin dashboard and user detail expose real stored usage monitoring", () =
   const detail = read("app/admin/users/[id]/page.tsx");
   const adminData = read("app/admin/admin-data.ts");
 
-  assert.match(dashboard, /Total AI requests/);
-  assert.match(dashboard, /Token usage/);
-  assert.match(dashboard, /Recent activity/);
+  assert.match(dashboard, /AI Conversations/);
+  assert.match(dashboard, /Generated Reports/);
+  assert.match(dashboard, /System overview and statistics/);
   assert.match(detail, /AI usage monitoring/);
   assert.match(detail, /Cache hit/);
   assert.match(adminData, /requestCountMap/);
@@ -231,48 +232,46 @@ test("admin global search is authorized, validated, grouped, and server-side", (
   assert.match(adminData, /limit\(5\)/);
 });
 
-test("admin dashboard includes revenue placeholders, cost controls, charts, and activity feed", () => {
+test("admin dashboard matches the reference-style executive layout", () => {
   const dashboard = read("app/admin/page.tsx");
-  const charts = read("app/admin/AdminCharts.tsx");
   const controls = read("app/admin/AdminDateRangeControls.tsx");
   const exports = read("app/admin/AdminExports.tsx");
   const adminData = read("app/admin/admin-data.ts");
 
-  assert.match(dashboard, /ExecutiveOverview/);
-  assert.match(dashboard, /Good morning|Good afternoon|Good evening/s);
-  assert.match(dashboard, /AI executive summary/);
-  assert.match(dashboard, /New users today/);
-  assert.match(dashboard, /Reports today/);
-  assert.match(dashboard, /AI cost today/);
-  assert.match(dashboard, /Active alerts/);
+  assert.match(dashboard, /title="Dashboard"/);
+  assert.match(dashboard, /subtitle="System overview and statistics"/);
   assert.match(dashboard, /hidePageHeader/);
-  assert.match(dashboard, /Executive financial overview/);
-  assert.match(dashboard, /AI Cost Control/);
-  assert.match(dashboard, /New users over time/);
-  assert.match(dashboard, /AI cost over time/);
-  assert.match(dashboard, /Awaiting Stripe/);
-  assert.match(dashboard, /dynamic\(/);
+  assert.match(dashboard, /AdminDateRangeControls/);
+  assert.match(dashboard, /variant="inline"/);
+  assert.match(dashboard, /AdminExports/);
+  assert.match(dashboard, /variant="button"/);
+  assert.match(dashboard, /Total users/);
+  assert.match(dashboard, /Generated Reports/);
+  assert.match(dashboard, /AI Conversations/);
+  assert.match(dashboard, /Total Revenue/);
+  assert.match(dashboard, /User Growth/);
+  assert.match(dashboard, /LineChartCard/);
+  assert.match(dashboard, /Report Distribution/);
+  assert.match(dashboard, /Subscription Plans/);
+  assert.match(dashboard, /DonutChartCard/);
+  assert.match(dashboard, /Recent users/);
+  assert.match(dashboard, /AdminSystemHealth/);
+  assert.doesNotMatch(dashboard, /ExecutiveOverview/);
+  assert.doesNotMatch(dashboard, /Dashboard range/);
+  assert.doesNotMatch(dashboard, /AdminRealtimeNotifications/);
   assert.match(dashboard, /calculateTrend/);
   assert.match(dashboard, /Last 24h/);
-  assert.match(dashboard, /Recent activity/);
-  assert.match(dashboard, /AdminDateRangeControls/);
-  assert.match(dashboard, /AdminRealtimeNotifications/);
-  assert.match(dashboard, /AdminExports/);
   assert.match(controls, /24h/);
   assert.match(controls, /Apply custom/);
+  assert.match(controls, /variant === "inline"/);
   assert.match(exports, /exportCsv/);
   assert.match(exports, /exportPdf/);
+  assert.match(exports, /Export Data/);
   assert.match(exports, /Analytics exports/);
-  assert.match(charts, /live analytics chart/);
-  assert.match(charts, /TrendPill/);
-  assert.match(charts, /No data available/);
-  assert.match(dashboard, /Revenue over time/);
-  assert.match(dashboard, /Awaiting Stripe/);
   assert.match(adminData, /buildRevenueOverview/);
   assert.match(adminData, /Stripe production billing is not configured/);
   assert.match(adminData, /calculateCostControl/);
   assert.match(adminData, /getModelPricing/);
-  assert.match(adminData, /loadRecentActivity/);
   assert.match(adminData, /resolveAdminDateRange/);
   assert.match(adminData, /buildTimeSeries/);
   assert.match(adminData, /buildExportTables/);
@@ -292,16 +291,17 @@ test("admin dashboard cards use animated counters and premium transitions", () =
   assert.match(counter, /requestAnimationFrame/);
 });
 
-test("admin recent activity uses icons, event colors, relative time, and record links", () => {
+test("admin dashboard renders the requested recent users and system status row", () => {
   const dashboard = read("app/admin/page.tsx");
 
-  assert.match(dashboard, /activityPresentation/);
-  assert.match(dashboard, /UserPlus/);
-  assert.match(dashboard, /MessageSquare/);
-  assert.match(dashboard, /XCircle/);
-  assert.match(dashboard, /formatRelativeTime/);
-  assert.match(dashboard, /View related record/);
-  assert.match(dashboard, /hover:border-teal-300\/25/);
+  assert.match(dashboard, /Recent users/);
+  assert.match(dashboard, /Latest accounts from Supabase Auth/);
+  assert.match(dashboard, /\/admin\/users/);
+  assert.match(dashboard, /data\.recentUsers\.map/);
+  assert.match(dashboard, /user\.id/);
+  assert.match(dashboard, /AdminSystemHealth/);
+  assert.match(dashboard, /initialStatuses=\{data\.systemStatus\}/);
+  assert.match(dashboard, /hover:border-purple-300\/22/);
 });
 
 test("AI CEO is admin-only, rate-limited, audited, and prompt-injection resistant", () => {
@@ -328,12 +328,11 @@ test("AI CEO is admin-only, rate-limited, audited, and prompt-injection resistan
 test("admin loading and empty states are present for dynamic admin views", () => {
   const loading = read("app/admin/loading.tsx");
   const dashboard = read("app/admin/page.tsx");
-  const charts = read("app/admin/AdminCharts.tsx");
   const usersPage = read("app/admin/users/page.tsx");
 
   assert.match(loading, /animate-pulse/);
-  assert.match(charts, /No data available/);
-  assert.match(dashboard, /No activity has been recorded yet/);
+  assert.match(dashboard, /No data available/);
+  assert.match(dashboard, /No users found yet/);
   assert.match(usersPage, /No users match this search/);
 });
 
@@ -368,6 +367,7 @@ test("production admin role migration grants admin safely without app email chec
 
 test("admin navigation includes required modules with coming-soon fallbacks", () => {
   const shell = read("app/admin/AdminShell.tsx");
+  const navigation = read("app/admin/AdminNavigation.tsx");
   const sectionPage = read("app/admin/[section]/page.tsx");
 
   for (const label of [
@@ -384,7 +384,7 @@ test("admin navigation includes required modules with coming-soon fallbacks", ()
     "API Management",
     "Settings",
   ]) {
-    assert.match(shell, new RegExp(label));
+    assert.match(navigation, new RegExp(label));
   }
 
   assert.match(sectionPage, /AdminComingSoon/);

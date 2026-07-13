@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/app/lib/supabase/server";
 import { createServiceRoleClient } from "@/app/lib/supabase/admin";
+import { getSupabaseServiceRoleKey } from "@/app/lib/supabase/env";
 import { getStripeConfiguration } from "@/app/lib/billing/stripe";
 import { getResendConfiguration } from "@/app/lib/integrations/resend";
 import { getModelPricing } from "@/app/lib/ai/pricing";
@@ -147,6 +148,10 @@ const ADMIN_AUTH_SCAN_MAX_USERS = 5000;
 let cachedHealth:
   | { expiresAt: number; data: AdminSystemStatus[] }
   | null = null;
+
+function isLocalAdminMockMode() {
+  return process.env.NODE_ENV !== "production" && !getSupabaseServiceRoleKey();
+}
 
 function readString(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -325,6 +330,248 @@ function normalizeStatusFromFailureRate(failed: number, total: number): AdminSys
   return "Operational";
 }
 
+function buildMockSeries(range: AdminDateRange, seed: number): AdminChartSeries[] {
+  return buildTimeSeries(
+    Array.from({ length: range.bucket === "hour" ? 10 : 7 }, (_, index) => {
+      const bucketMs = range.bucket === "hour" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+      const createdAt = new Date(new Date(range.fromIso).getTime() + index * bucketMs).toISOString();
+
+      return {
+        created_at: createdAt,
+        value: Math.max(0, Math.round(seed + Math.sin(index + seed) * seed * 0.24 + index * 1.7)),
+      };
+    }),
+    range,
+    "created_at",
+    "value"
+  );
+}
+
+function buildMockAdminUsers(): AdminUserRow[] {
+  const now = new Date();
+
+  return [
+    {
+      id: "00000000-0000-4000-8000-000000000001",
+      email: "founder@zerinix.local",
+      displayName: "Local Founder",
+      registeredAt: new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000).toISOString(),
+      lastSignInAt: new Date(now.getTime() - 40 * 60 * 1000).toISOString(),
+      plan: "business",
+      subscriptionStatus: "Active",
+      accountStatus: "active",
+      reportCount: 14,
+      conversationCount: 28,
+      aiRequestCount: 76,
+      totalTokens: 184_200,
+      failedRequestCount: 1,
+      estimatedAiCostUsd: 18.42,
+    },
+    {
+      id: "00000000-0000-4000-8000-000000000002",
+      email: "operator@zerinix.local",
+      displayName: "Local Operator",
+      registeredAt: new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+      lastSignInAt: new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString(),
+      plan: "pro",
+      subscriptionStatus: "Active",
+      accountStatus: "active",
+      reportCount: 7,
+      conversationCount: 15,
+      aiRequestCount: 39,
+      totalTokens: 91_450,
+      failedRequestCount: 0,
+      estimatedAiCostUsd: 8.71,
+    },
+    {
+      id: "00000000-0000-4000-8000-000000000003",
+      email: "reviewer@zerinix.local",
+      displayName: "Local Reviewer",
+      registeredAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      lastSignInAt: "",
+      plan: "free",
+      subscriptionStatus: "Not configured",
+      accountStatus: "active",
+      reportCount: 2,
+      conversationCount: 4,
+      aiRequestCount: 9,
+      totalTokens: 18_600,
+      failedRequestCount: 1,
+      estimatedAiCostUsd: 1.64,
+    },
+  ];
+}
+
+function buildMockSystemStatus(): AdminSystemStatus[] {
+  const lastChecked = new Date().toISOString();
+
+  return [
+    {
+      label: "ZERINIX API",
+      status: "Operational",
+      detail: "Local admin mock data is active",
+      lastChecked,
+      lastSuccessfulCheck: lastChecked,
+      responseTimeMs: 0,
+    },
+    {
+      label: "Supabase",
+      status: "Not configured",
+      detail: "Admin database credential is missing in local development",
+      lastChecked,
+      lastSuccessfulCheck: null,
+      responseTimeMs: null,
+    },
+    {
+      label: "OpenAI",
+      status: "Unknown",
+      detail: "Not probed by local admin mock mode",
+      lastChecked,
+      lastSuccessfulCheck: null,
+      responseTimeMs: null,
+    },
+    {
+      label: "Stripe",
+      status: "Not configured",
+      detail: "Billing remains disabled unless production credentials are configured",
+      lastChecked,
+      lastSuccessfulCheck: null,
+      responseTimeMs: null,
+    },
+  ];
+}
+
+function buildMockAdminActivity(range: AdminDateRange): AdminActivityItem[] {
+  const now = new Date(range.toIso);
+
+  return [
+    {
+      id: "mock:user:1",
+      label: "User registered",
+      detail: "founder@zerinix.local",
+      severity: "success",
+      createdAt: new Date(now.getTime() - 70 * 60 * 1000).toISOString(),
+      href: "/admin/users/00000000-0000-4000-8000-000000000001",
+    },
+    {
+      id: "mock:report:1",
+      label: "Report created",
+      detail: "Local investor report validation",
+      severity: "info",
+      createdAt: new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString(),
+      href: "/admin/reports",
+    },
+    {
+      id: "mock:conversation:1",
+      label: "AI conversation created",
+      detail: "Local admin workspace test",
+      severity: "info",
+      createdAt: new Date(now.getTime() - 3 * 60 * 60 * 1000).toISOString(),
+      href: "/admin/ai-usage",
+    },
+    {
+      id: "mock:failure:1",
+      label: "AI request failed",
+      detail: "Local mock failed job example",
+      severity: "error",
+      createdAt: new Date(now.getTime() - 5 * 60 * 60 * 1000).toISOString(),
+      href: "/admin/logs",
+    },
+  ];
+}
+
+function buildMockAdminDashboardData(dateRange: AdminDateRange): AdminDashboardData {
+  const recentUsers = buildMockAdminUsers();
+  const recentActivity = buildMockAdminActivity(dateRange);
+  const charts = {
+    userGrowth: buildMockSeries(dateRange, 4),
+    activeUsers: buildMockSeries(dateRange, 3),
+    reportsGenerated: buildMockSeries(dateRange, 6),
+    aiRequests: buildMockSeries(dateRange, 18),
+    tokenUsage: buildMockSeries(dateRange, 6800),
+    estimatedAiCost: buildMockSeries(dateRange, 3),
+    revenue: [],
+  };
+  const usageSummary = {
+    totalRequests: 124,
+    totalTokens: 294_250,
+    cacheHits: 18,
+    failedRequests: 2,
+  };
+  const recentErrors = [
+    {
+      id: "mock:error:1",
+      endpoint: "/api/plan",
+      status: "failed",
+      createdAt: new Date(new Date(dateRange.toIso).getTime() - 5 * 60 * 60 * 1000).toISOString(),
+    },
+  ];
+
+  return {
+    dateRange,
+    totalUsers: recentUsers.length,
+    activeUsers: recentUsers.filter((user) => user.lastSignInAt).length,
+    reportsGenerated: 23,
+    aiConversations: 47,
+    monthlyRecurringRevenue: null,
+    aiApiCost: 28.77,
+    userGrowth: [
+      { label: "Local", value: recentUsers.length },
+      { label: "Mock", value: 5 },
+    ],
+    reportTypeDistribution: [
+      { label: "Business Plan", value: 14 },
+      { label: "Market Analysis", value: 9 },
+    ],
+    planDistribution: [
+      { label: "free", value: 1 },
+      { label: "pro", value: 1 },
+      { label: "business", value: 1 },
+    ],
+    recentUsers,
+    recentActivity,
+    charts,
+    revenueOverview: buildRevenueOverview(),
+    costControl: {
+      totalTokensToday: 42_800,
+      totalTokensThisMonth: usageSummary.totalTokens,
+      estimatedCostToday: 4.18,
+      estimatedCostThisMonth: 28.77,
+      averageCostPerConversation: 0.61,
+      averageCostPerReport: 1.25,
+      failedAiRequests: usageSummary.failedRequests,
+      costTrendPercent: 8.4,
+      highestUsageUsers: recentUsers.map((user) => ({
+        userId: user.id,
+        tokens: user.totalTokens,
+        costUsd: user.estimatedAiCostUsd,
+      })),
+      highestCostRoutes: [
+        { route: "/api/plan", requests: 38, costUsd: 15.2 },
+        { route: "/api/market-analysis", requests: 19, costUsd: 8.6 },
+        { route: "/api/chat", requests: 67, costUsd: 4.97 },
+      ],
+      dateRanges: ["24 hours", "7 days", "30 days", "Custom range"],
+    },
+    usageSummary,
+    recentErrors,
+    systemStatus: buildMockSystemStatus(),
+    exportTables: buildExportTables({
+      recentUsers,
+      recentActivity,
+      recentErrors,
+      usageSummary,
+      charts,
+    }),
+    notifications: {
+      generatedAt: new Date().toISOString(),
+      newUsers: recentActivity.filter((item) => item.id.includes("user")).slice(0, 5),
+      reports: recentActivity.filter((item) => item.id.includes("report")).slice(0, 5),
+      failedJobs: recentActivity.filter((item) => item.id.includes("failure")).slice(0, 5),
+    },
+  };
+}
+
 function hasAdminClaim(user: User) {
   const role = readString(user.app_metadata?.role).toLowerCase();
   const roles = Array.isArray(user.app_metadata?.roles)
@@ -340,6 +587,10 @@ function hasAdminClaim(user: User) {
 async function loadAdminRole(user: User) {
   if (hasAdminClaim(user)) {
     return readString(user.app_metadata?.role, "admin");
+  }
+
+  if (isLocalAdminMockMode()) {
+    return "admin";
   }
 
   const serviceClient = createServiceRoleClient();
@@ -553,6 +804,32 @@ export async function loadAdminUsers(input: {
   pageSize?: number;
   search?: string;
 }) {
+  if (isLocalAdminMockMode()) {
+    const page = Math.max(1, input.page || 1);
+    const pageSize = Math.min(PAGE_SIZE_MAX, Math.max(1, input.pageSize || PAGE_SIZE_DEFAULT));
+    const search = readString(input.search).toLowerCase();
+    const sourceUsers = buildMockAdminUsers().filter((user) => {
+      if (!search) {
+        return true;
+      }
+
+      return (
+        user.email.toLowerCase().includes(search) ||
+        user.displayName.toLowerCase().includes(search)
+      );
+    });
+    const users = sourceUsers.slice((page - 1) * pageSize, page * pageSize);
+
+    return {
+      users,
+      page,
+      pageSize,
+      totalUsers: sourceUsers.length,
+      totalPages: Math.max(1, Math.ceil(sourceUsers.length / pageSize)),
+      search,
+    };
+  }
+
   const page = Math.max(1, input.page || 1);
   const pageSize = Math.min(PAGE_SIZE_MAX, Math.max(1, input.pageSize || PAGE_SIZE_DEFAULT));
   const search = readString(input.search).toLowerCase();
@@ -591,6 +868,49 @@ export async function loadAdminUsers(input: {
 }
 
 export async function loadAdminUserDetail(userId: string) {
+  if (isLocalAdminMockMode()) {
+    const user = buildMockAdminUsers().find((item) => item.id === userId);
+
+    if (!user) {
+      return null;
+    }
+
+    return {
+      user,
+      reports: [
+        {
+          id: "mock-report-1",
+          title: "Local investor report validation",
+          report_type: "Business Plan",
+          status: "complete",
+          created_at: new Date().toISOString(),
+        },
+      ],
+      conversations: [
+        {
+          id: "mock-conversation-1",
+          title: "Local admin workspace test",
+          mode: "chat",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ],
+      usage: [
+        {
+          id: "mock-usage-1",
+          endpoint: "/api/chat",
+          model: "mock",
+          status: "complete",
+          total_tokens: user.totalTokens,
+          estimated_cost_usd: user.estimatedAiCostUsd,
+          cache_hit: false,
+          created_at: new Date().toISOString(),
+        },
+      ],
+      auditLog: [],
+    };
+  }
+
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) {
     return null;
   }
@@ -994,6 +1314,10 @@ async function loadRecentActivity(authUsers: User[], range: AdminDateRange) {
 }
 
 export async function loadAdminNotifications(range = resolveAdminDateRange({ range: "24h" })) {
+  if (isLocalAdminMockMode()) {
+    return buildMockAdminDashboardData(range).notifications;
+  }
+
   const authData = await listAuthUsersForAdminScan();
   const recentActivity = await loadRecentActivity(authData.users, range);
 
@@ -1006,6 +1330,10 @@ export async function loadAdminNotifications(range = resolveAdminDateRange({ ran
 }
 
 export async function loadSystemStatus() {
+  if (isLocalAdminMockMode()) {
+    return buildMockSystemStatus();
+  }
+
   const now = Date.now();
 
   if (cachedHealth && cachedHealth.expiresAt > now) {
@@ -1170,6 +1498,11 @@ export async function loadAdminDashboardData(input?: {
   range?: AdminDateRange;
 }): Promise<AdminDashboardData> {
   const dateRange = input?.range || resolveAdminDateRange();
+
+  if (isLocalAdminMockMode()) {
+    return buildMockAdminDashboardData(dateRange);
+  }
+
   const [authData, reportsGenerated, aiConversations, usageResult, recentUsers, systemStatus, statuses] =
     await Promise.all([
       listAuthUsersForAdminScan(),
@@ -1269,6 +1602,37 @@ export async function searchAdminRecords(
 
   if (normalized.length < 2) {
     return [];
+  }
+
+  if (isLocalAdminMockMode()) {
+    const lower = normalized.toLowerCase();
+    const filters = parseAdminSearchFilters(options?.filters);
+    const users = filters.includes("users")
+      ? buildMockAdminUsers()
+          .filter((user) => user.email.toLowerCase().includes(lower) || user.displayName.toLowerCase().includes(lower))
+          .slice(0, 5)
+          .map((user) => ({
+            id: user.id,
+            title: user.email,
+            detail: user.displayName || "Local mock user",
+            href: `/admin/users/${user.id}`,
+          }))
+      : [];
+    const reports = filters.includes("reports") && "local investor report validation".includes(lower)
+      ? [
+          {
+            id: "mock-report-1",
+            title: "Local investor report validation",
+            detail: "Business Plan",
+            href: "/admin/reports",
+          },
+        ]
+      : [];
+
+    return [
+      { label: "Users", results: users },
+      { label: "Reports", results: reports },
+    ].filter((group) => group.results.length > 0);
   }
 
   const serviceClient = createServiceRoleClient();
@@ -1402,6 +1766,10 @@ export async function writeAdminAuditLog(input: {
   targetUserId?: string;
   metadata?: Record<string, unknown>;
 }) {
+  if (isLocalAdminMockMode()) {
+    return;
+  }
+
   const serviceClient = createServiceRoleClient();
 
   await serviceClient.from("admin_audit_log").insert({

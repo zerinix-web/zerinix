@@ -61,10 +61,10 @@ export function AdminNavigation() {
   const pathname = usePathname();
 
   return (
-    <nav className="mt-6 flex gap-3 overflow-x-auto pb-2 xl:block xl:space-y-6 xl:overflow-visible xl:pb-0">
+    <nav className="mt-5 flex gap-3 overflow-x-auto pb-2 xl:block xl:space-y-5 xl:overflow-visible xl:pb-0">
       {navGroups.map((group) => (
         <div key={group.label} className="min-w-max xl:min-w-0">
-          <p className="mb-2.5 hidden px-3 text-[9px] font-semibold uppercase tracking-[0.26em] text-zinc-500/80 xl:block">
+          <p className="mb-2 hidden px-3 text-[9px] font-semibold uppercase tracking-[0.24em] text-zinc-500/75 xl:block">
             {group.label}
           </p>
           <div className="flex gap-2 xl:block xl:space-y-1">
@@ -77,17 +77,17 @@ export function AdminNavigation() {
                   key={item.href}
                   href={item.href}
                   aria-current={active ? "page" : undefined}
-                  className={`group relative flex h-[2.95rem] shrink-0 items-center gap-3 rounded-[1.15rem] px-3 text-[13px] font-medium transition duration-300 xl:w-full ${
+                  className={`group relative flex h-[2.65rem] shrink-0 items-center gap-2.5 rounded-[1rem] px-2.5 text-[13px] font-medium transition duration-300 xl:w-full ${
                     active
-                      ? "border border-purple-300/30 bg-[linear-gradient(135deg,rgba(147,51,234,0.24),rgba(255,255,255,0.075))] text-white shadow-[0_20px_70px_rgba(147,51,234,0.18)]"
+                      ? "border border-purple-300/28 bg-[linear-gradient(135deg,rgba(147,51,234,0.22),rgba(255,255,255,0.07))] text-white shadow-[0_18px_58px_rgba(147,51,234,0.16)]"
                       : "border border-transparent text-zinc-400 hover:-translate-y-0.5 hover:border-white/10 hover:bg-white/[0.055] hover:text-white"
                   }`}
                 >
                   {active ? (
-                    <span className="absolute left-0 top-1/2 hidden h-8 w-1 -translate-y-1/2 rounded-r-full bg-purple-300 shadow-[0_0_24px_rgba(216,180,254,0.7)] xl:block" />
+                    <span className="absolute left-0 top-1/2 hidden h-7 w-1 -translate-y-1/2 rounded-r-full bg-purple-300 shadow-[0_0_24px_rgba(216,180,254,0.7)] xl:block" />
                   ) : null}
                   <span
-                    className={`flex h-[1.875rem] w-[1.875rem] items-center justify-center rounded-[0.85rem] transition duration-300 ${
+                    className={`flex h-7 w-7 items-center justify-center rounded-[0.75rem] transition duration-300 ${
                       active
                         ? "bg-purple-300 text-black shadow-[0_10px_30px_rgba(216,180,254,0.22)]"
                         : "bg-white/[0.055] text-purple-200 group-hover:bg-purple-300/12"
