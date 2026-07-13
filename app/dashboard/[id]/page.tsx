@@ -325,7 +325,7 @@ function MiniProgressCircle({
   const degrees = (value ?? 0) * 3.6;
 
   return (
-    <div className="rounded-[1.4rem] border border-white/10 bg-black/30 p-4">
+    <div className="rounded-[1.4rem] border border-white/10 bg-black/30 p-4 shadow-lg shadow-black/15 ring-1 ring-white/[0.02]">
       <div
         className="flex h-16 w-16 items-center justify-center rounded-full"
         style={{
@@ -390,7 +390,7 @@ function ExecutiveSummaryVisual({
   ];
 
   return (
-    <div className="mb-5 overflow-hidden rounded-[2.25rem] border border-teal-200/15 bg-[radial-gradient(circle_at_20%_10%,rgba(94,234,212,0.22),transparent_28%),radial-gradient(circle_at_90%_20%,rgba(20,184,166,0.12),transparent_32%),linear-gradient(135deg,rgba(255,255,255,0.075),rgba(255,255,255,0.018))]">
+    <div className="mb-6 overflow-hidden rounded-[2.25rem] border border-teal-200/15 bg-[radial-gradient(circle_at_20%_10%,rgba(94,234,212,0.22),transparent_28%),radial-gradient(circle_at_90%_20%,rgba(20,184,166,0.12),transparent_32%),linear-gradient(135deg,rgba(255,255,255,0.075),rgba(255,255,255,0.018))] shadow-2xl shadow-teal-950/10 ring-1 ring-teal-200/10">
       <div className="border-b border-white/10 px-5 py-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -440,7 +440,7 @@ function ExecutiveSummaryVisual({
             {kpis.map((kpi) => (
               <div
                 key={kpi.label}
-                className={`rounded-3xl border border-white/10 bg-gradient-to-br ${kpi.accent} p-4`}
+                className={`min-h-32 rounded-3xl border border-white/10 bg-gradient-to-br ${kpi.accent} p-4 shadow-xl shadow-black/15 ring-1 ring-white/[0.02]`}
               >
                 <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
                   {kpi.label}
@@ -451,13 +451,13 @@ function ExecutiveSummaryVisual({
               </div>
             ))}
           </div>
-          <div className="mt-4 rounded-3xl border border-white/10 bg-black/30 p-4">
+          <div className="mt-4 rounded-3xl border border-white/10 bg-black/30 p-4 shadow-inner shadow-black/25">
             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-teal-200/70">
               Executive Highlights
             </p>
             <div className="mt-3 grid gap-2">
               {(highlights.length > 0 ? highlights : [extractFirstInsight(content)]).map((highlight) => (
-                <div key={highlight} className="flex gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-sm leading-6 text-zinc-300">
+                <div key={highlight} className="flex gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-sm leading-6 text-zinc-300 shadow-sm shadow-black/10">
                   <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200" />
                   <span className="line-clamp-2">{highlight}</span>
                 </div>
@@ -483,7 +483,7 @@ function ExecutiveInsightBanner({
   }
 
   return (
-    <div className="mb-5 rounded-[1.75rem] border border-teal-200/15 bg-[linear-gradient(135deg,rgba(94,234,212,0.1),rgba(255,255,255,0.025))] p-4">
+    <div className="mb-6 rounded-[1.75rem] border border-teal-200/15 bg-[linear-gradient(135deg,rgba(94,234,212,0.1),rgba(255,255,255,0.025))] p-4 shadow-xl shadow-black/15 ring-1 ring-teal-200/5">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-teal-200/80">
@@ -503,7 +503,7 @@ function ExecutiveInsightBanner({
 
 function GaugeCircle({ label, score }: { label: string; score: number }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+    <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 shadow-lg shadow-black/15 ring-1 ring-white/[0.02]">
       <div
         className="mx-auto flex h-20 w-20 items-center justify-center rounded-full"
         style={{
@@ -1121,14 +1121,14 @@ function hasReportSectionVisual(title: string) {
 function getReportArticleClass(title: string) {
   const normalizedTitle = title.toLowerCase();
   const base =
-    "relative overflow-hidden rounded-[1.75rem] border p-5 shadow-xl shadow-black/30 transition duration-300 hover:-translate-y-0.5 hover:shadow-2xl hover:shadow-black/40 sm:p-6";
+    "relative overflow-hidden rounded-[1.85rem] border p-5 shadow-2xl shadow-black/30 ring-1 ring-white/[0.025] transition duration-300 hover:-translate-y-0.5 hover:border-teal-300/20 hover:shadow-2xl hover:shadow-black/45 sm:p-6";
 
   if (normalizedTitle.includes("executive summary")) {
-    return `${base} border-teal-200/20 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.12),transparent_34%),rgba(0,0,0,0.62)]`;
+    return `${base} border-teal-200/20 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.13),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.045),rgba(0,0,0,0.64))]`;
   }
 
   if (normalizedTitle.includes("financial dashboard") || normalizedTitle.includes("kpi")) {
-    return `${base} border-white/10 bg-[linear-gradient(135deg,rgba(10,10,10,0.92),rgba(20,83,75,0.16))]`;
+    return `${base} border-white/10 bg-[linear-gradient(135deg,rgba(10,10,10,0.92),rgba(20,83,75,0.17))]`;
   }
 
   if (normalizedTitle.includes("swot") || normalizedTitle.includes("porter") || normalizedTitle.includes("scenario") || normalizedTitle.includes("market")) {
@@ -1144,7 +1144,7 @@ function getReportArticleClass(title: string) {
     return `${base} border-teal-200/15 bg-[linear-gradient(135deg,rgba(94,234,212,0.08),rgba(0,0,0,0.66))]`;
   }
 
-  return `${base} border-white/10 bg-black/45`;
+  return `${base} border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.035),rgba(0,0,0,0.48))]`;
 }
 
 function AnalysisNotes({
@@ -1161,7 +1161,7 @@ function AnalysisNotes({
   }
 
   return (
-    <details className="group rounded-2xl border border-white/10 bg-black/25 p-4 transition duration-200 open:bg-black/35">
+    <details className="group rounded-2xl border border-white/10 bg-black/25 p-4 shadow-inner shadow-black/25 ring-1 ring-white/[0.015] transition duration-300 open:bg-black/35">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500 transition hover:text-zinc-300">
         <span>{label}</span>
         <span className="text-[10px] tracking-[0.16em] text-teal-200/60 transition group-open:rotate-45">
@@ -1288,7 +1288,7 @@ function parseCitations(content: string): CitationData[] {
 
 function CitationCard({ citation }: { citation: CitationData }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+    <div className="rounded-2xl border border-white/10 bg-black/25 px-4 py-4 shadow-lg shadow-black/15 ring-1 ring-white/[0.02] transition duration-300 hover:border-teal-200/20 hover:bg-white/[0.035]">
       <p className="text-sm font-semibold leading-6 text-white">{citation.sourceTitle}</p>
       <div className="mt-3 grid gap-2 text-xs text-zinc-400 sm:grid-cols-2">
         <p>
@@ -1313,7 +1313,7 @@ function CitationCard({ citation }: { citation: CitationData }) {
           href={citation.url}
           target="_blank"
           rel="noreferrer"
-          className="mt-2 block truncate text-xs text-teal-200/80 underline-offset-4 hover:text-teal-100 hover:underline"
+          className="mt-3 block truncate rounded-xl border border-teal-200/10 bg-teal-200/[0.045] px-3 py-2 text-xs text-teal-200/80 underline-offset-4 transition hover:border-teal-200/25 hover:text-teal-100 hover:underline"
         >
           {citation.url}
         </a>
@@ -1330,7 +1330,7 @@ function CitationList({ content }: { content: string }) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="grid gap-3 md:grid-cols-2">
       {citations.map((citation, index) => (
         <CitationCard
           key={`${citation.organization}-${citation.sourceTitle}-${citation.publicationYear || ""}-${citation.url || ""}-${index}`}
@@ -1352,7 +1352,7 @@ function ReportText({ content }: { content: string }) {
   }
 
   return (
-    <div className="space-y-5 text-[15px] leading-8 text-zinc-300 md:text-base">
+    <div className="space-y-6 text-[15px] leading-8 text-zinc-300 md:text-base md:leading-8">
       {blocks.map((block, blockIndex) => {
         const lines = block
           .split("\n")
@@ -1371,7 +1371,7 @@ function ReportText({ content }: { content: string }) {
           return (
             <pre
               key={`code-${blockIndex}-${code.slice(0, 24)}`}
-              className="overflow-x-auto rounded-2xl border border-white/10 bg-black/50 p-4 text-sm leading-7 text-teal-100 shadow-inner shadow-black/40"
+              className="max-w-full overflow-x-auto overscroll-x-contain rounded-2xl border border-white/10 bg-black/55 p-4 text-sm leading-7 text-teal-100 shadow-inner shadow-black/40 ring-1 ring-white/[0.02]"
             >
               <code>{code}</code>
             </pre>
@@ -1380,11 +1380,11 @@ function ReportText({ content }: { content: string }) {
 
         if (isList) {
           return (
-            <ul key={`list-${blockIndex}`} className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] p-4 text-zinc-300">
+            <ul key={`list-${blockIndex}`} className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 text-zinc-300 shadow-inner shadow-black/15">
               {lines.map((line, lineIndex) => (
                 <li key={`line-${blockIndex}-${lineIndex}-${line}`} className="flex gap-3 leading-7">
                   <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
-                  <span>{renderInlineMarkdown(line.replace(/^[-*]\s+/, ""))}</span>
+                  <span className="min-w-0">{renderInlineMarkdown(line.replace(/^[-*]\s+/, ""))}</span>
                 </li>
               ))}
             </ul>
@@ -1403,9 +1403,9 @@ function ReportText({ content }: { content: string }) {
           const [headerRow, ...bodyRows] = rows;
 
           return (
-            <div key={`table-${blockIndex}`} className="overflow-x-auto rounded-2xl border border-white/10 bg-black/20">
+            <div key={`table-${blockIndex}`} className="max-w-full overflow-x-auto overscroll-x-contain rounded-2xl border border-white/10 bg-black/25 shadow-xl shadow-black/15 ring-1 ring-white/[0.02]">
               <table className="w-full min-w-[42rem] border-collapse text-left text-sm">
-                <thead className="bg-white/[0.06] text-xs uppercase tracking-[0.18em] text-zinc-400">
+                <thead className="bg-white/[0.07] text-xs uppercase tracking-[0.18em] text-zinc-400">
                   <tr>
                     {headerRow?.map((cell, cellIndex) => (
                       <th key={`header-${blockIndex}-${cellIndex}-${cell}`} className="px-4 py-3 font-semibold text-zinc-300">
@@ -1416,7 +1416,7 @@ function ReportText({ content }: { content: string }) {
                 </thead>
                 <tbody className="divide-y divide-white/10 text-zinc-300">
                   {bodyRows.map((row, rowIndex) => (
-                    <tr key={`${row.join("-")}-${rowIndex}`}>
+                    <tr key={`${row.join("-")}-${rowIndex}`} className="transition hover:bg-white/[0.025]">
                       {row.map((cell, cellIndex) => (
                         <td key={`${cell}-${cellIndex}`} className="px-4 py-3 align-top leading-7">
                           {renderInlineMarkdown(cell)}
@@ -1432,7 +1432,7 @@ function ReportText({ content }: { content: string }) {
 
         if (block.startsWith("### ")) {
           return (
-            <h3 key={`h3-${blockIndex}`} className="pt-3 text-lg font-semibold tracking-tight text-white">
+            <h3 key={`h3-${blockIndex}`} className="pt-4 text-lg font-semibold tracking-[-0.015em] text-white">
               {renderInlineMarkdown(block.slice(4))}
             </h3>
           );
@@ -1440,7 +1440,7 @@ function ReportText({ content }: { content: string }) {
 
         if (block.startsWith("## ")) {
           return (
-            <h2 key={`h2-${blockIndex}`} className="pt-3 text-xl font-semibold tracking-tight text-white">
+            <h2 key={`h2-${blockIndex}`} className="pt-4 text-xl font-semibold tracking-[-0.02em] text-white">
               {renderInlineMarkdown(block.slice(3))}
             </h2>
           );
@@ -1495,13 +1495,13 @@ export default async function ReportDetailPage({
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <DashboardSidebar />
 
-        <section className="flex-1 px-5 py-6 sm:px-8 lg:px-10 lg:py-8">
-          <div className="rounded-[2rem] border border-white/10 bg-white/[0.035] p-5 shadow-2xl shadow-black/30 backdrop-blur-xl sm:p-7">
+        <section className="flex-1 px-4 py-5 sm:px-8 lg:px-10 lg:py-8">
+          <div className="overflow-hidden rounded-[2.15rem] border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/35 ring-1 ring-white/[0.025] backdrop-blur-xl transition duration-300 hover:border-teal-300/15 hover:bg-white/[0.048] sm:p-7">
             <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
               <div className="min-w-0">
                 <Link
                   href="/dashboard"
-                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-2 text-sm font-medium text-zinc-400 transition duration-200 hover:-translate-y-0.5 hover:border-teal-200/25 hover:text-white"
+                  className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-2 text-sm font-medium text-zinc-400 shadow-lg shadow-black/10 transition duration-300 hover:-translate-y-0.5 hover:border-teal-200/25 hover:bg-white/[0.04] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
                 >
                   <ArrowLeft className="h-4 w-4" />
                   Back to Dashboard
@@ -1509,16 +1509,16 @@ export default async function ReportDetailPage({
                 <p className="mt-6 text-xs font-semibold tracking-[0.35em] text-teal-300/70">
                   ZERINIX REPORT
                 </p>
-                <h1 className="mt-3 max-w-4xl text-4xl font-bold tracking-tight text-white md:text-5xl">
+                <h1 className="mt-3 max-w-4xl text-4xl font-bold tracking-[-0.035em] text-white md:text-5xl">
                   {report.title}
                 </h1>
               </div>
 
-              <div className="flex flex-row items-center gap-3 md:shrink-0">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center md:shrink-0">
                 <ReportPdfButton report={report} />
                 <Link
                   href="/plan"
-                  className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-white/10 transition duration-200 hover:-translate-y-0.5 hover:bg-zinc-200"
+                  className="inline-flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black shadow-xl shadow-white/10 ring-1 ring-white/20 transition duration-300 hover:-translate-y-0.5 hover:bg-zinc-200 hover:shadow-2xl hover:shadow-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
                 >
                   <Plus className="h-4 w-4" />
                   Create New Report
@@ -1528,14 +1528,14 @@ export default async function ReportDetailPage({
           </div>
 
           <div className="mt-6 grid gap-4 md:grid-cols-3">
-            <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/20 transition duration-200 hover:-translate-y-0.5 hover:border-teal-200/20">
+            <div className="min-h-[8.5rem] rounded-[1.5rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/20 ring-1 ring-white/[0.02] transition duration-300 hover:-translate-y-0.5 hover:border-teal-200/20 hover:bg-white/[0.045]">
               <div className="flex items-center gap-3">
                 <Sparkles className="h-5 w-5 text-teal-200" />
                 <p className="text-sm text-zinc-500">Report Type</p>
               </div>
               <p className="mt-3 text-lg font-semibold text-white">{report.type}</p>
             </div>
-            <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/20 transition duration-200 hover:-translate-y-0.5 hover:border-teal-200/20">
+            <div className="min-h-[8.5rem] rounded-[1.5rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/20 ring-1 ring-white/[0.02] transition duration-300 hover:-translate-y-0.5 hover:border-teal-200/20 hover:bg-white/[0.045]">
               <div className="flex items-center gap-3">
                 <CalendarDays className="h-5 w-5 text-teal-200" />
                 <p className="text-sm text-zinc-500">Created</p>
@@ -1544,7 +1544,7 @@ export default async function ReportDetailPage({
                 {formatDate(report.createdAt)}
               </p>
             </div>
-            <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/20 transition duration-200 hover:-translate-y-0.5 hover:border-teal-200/20">
+            <div className="min-h-[8.5rem] rounded-[1.5rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/20 ring-1 ring-white/[0.02] transition duration-300 hover:-translate-y-0.5 hover:border-teal-200/20 hover:bg-white/[0.045]">
               <div className="flex items-center gap-3">
                 <CheckCircle2 className="h-5 w-5 text-teal-200" />
                 <p className="text-sm text-zinc-500">Status</p>
@@ -1553,8 +1553,8 @@ export default async function ReportDetailPage({
             </div>
           </div>
 
-          <div className="mt-6 overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-950/70 shadow-2xl shadow-black/50">
-            <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.14),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-5 sm:p-7">
+          <div className="mt-6 overflow-hidden rounded-[2.15rem] border border-white/10 bg-zinc-950/70 shadow-2xl shadow-black/50 ring-1 ring-white/[0.025]">
+            <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.14),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.065),rgba(255,255,255,0.02))] p-5 sm:p-7">
               <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
                 ZERINIX EXECUTIVE REPORT
               </p>
@@ -1568,7 +1568,7 @@ export default async function ReportDetailPage({
 
             {visibleSections.length === 0 ? (
               <div className="p-5 sm:p-7">
-                <div className="rounded-[1.75rem] border border-white/10 bg-black/35 p-8 text-center">
+                <div className="rounded-[1.75rem] border border-dashed border-white/10 bg-black/35 p-8 text-center shadow-inner shadow-black/25">
                   <FileText className="mx-auto h-8 w-8 text-teal-200" />
                   <h3 className="mt-4 text-xl font-semibold text-white">
                     No report sections saved yet
@@ -1582,7 +1582,7 @@ export default async function ReportDetailPage({
             ) : (
               <div className="grid gap-5 p-4 sm:p-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
                 <aside className="xl:sticky xl:top-8 xl:self-start">
-                  <nav className="rounded-[1.5rem] border border-white/10 bg-black/35 p-4 shadow-xl shadow-black/20 backdrop-blur-xl">
+                  <nav className="rounded-[1.55rem] border border-white/10 bg-black/35 p-4 shadow-xl shadow-black/20 ring-1 ring-white/[0.02] backdrop-blur-xl">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200/75">
@@ -1599,7 +1599,7 @@ export default async function ReportDetailPage({
                         <a
                           key={`toc-${getReportSectionKey(section)}`}
                           href={`#report-section-${index + 1}`}
-                          className="group flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-zinc-400 transition duration-200 hover:bg-white/[0.06] hover:text-white"
+                          className="group flex min-h-11 items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-zinc-400 transition duration-300 hover:-translate-y-0.5 hover:bg-white/[0.06] hover:text-white"
                         >
                           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-[11px] text-zinc-500 group-hover:border-teal-200/30 group-hover:text-teal-100">
                             {String(index + 1).padStart(2, "0")}
@@ -1610,7 +1610,7 @@ export default async function ReportDetailPage({
                       {sourceSections.length > 0 ? (
                         <a
                           href="#report-sources"
-                          className="group flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-zinc-400 transition duration-200 hover:bg-white/[0.06] hover:text-white"
+                          className="group flex min-h-11 items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-zinc-400 transition duration-300 hover:-translate-y-0.5 hover:bg-white/[0.06] hover:text-white"
                         >
                           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-teal-200/20 bg-teal-200/10 text-[11px] text-teal-100">
                             Ref
@@ -1622,7 +1622,7 @@ export default async function ReportDetailPage({
                   </nav>
                 </aside>
 
-                <div className="space-y-5">
+                <div className="space-y-6">
                   {visibleSections.map((section, index) => {
                     const Icon = getSectionIcon(section.title);
                     const isFinancialDashboard = section.title
@@ -1647,7 +1647,7 @@ export default async function ReportDetailPage({
                                 <span className="w-fit rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
                                   Section {String(index + 1).padStart(2, "0")}
                                 </span>
-                                <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">
+                                <h2 className="mt-3 text-2xl font-semibold tracking-[-0.025em] text-white">
                                   {section.title}
                                 </h2>
                               </div>
@@ -1685,7 +1685,7 @@ export default async function ReportDetailPage({
                   {sourceSections.length > 0 ? (
                     <article
                       id="report-sources"
-                      className="scroll-mt-8 rounded-[2rem] border border-teal-200/15 bg-teal-200/[0.045] p-5 shadow-xl shadow-black/30 sm:p-6"
+                    className="scroll-mt-8 rounded-[2rem] border border-teal-200/15 bg-teal-200/[0.045] p-5 shadow-xl shadow-black/30 ring-1 ring-teal-200/5 sm:p-6"
                     >
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10">

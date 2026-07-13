@@ -1992,7 +1992,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         type="button"
         onClick={downloadPdf}
         disabled={exporting || failedReport}
-        className="group inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl border border-teal-200/40 bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/30 transition duration-200 hover:-translate-y-0.5 hover:bg-teal-200 hover:shadow-teal-950/40 focus:outline-none focus:ring-2 focus:ring-teal-200/40 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
+        className="group inline-flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-2xl border border-teal-100/50 bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-xl shadow-teal-950/30 ring-1 ring-white/20 transition duration-300 hover:-translate-y-0.5 hover:bg-teal-200 hover:shadow-2xl hover:shadow-teal-950/40 focus:outline-none focus:ring-2 focus:ring-teal-200/40 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
       >
         <Download className="h-4 w-4 text-black transition group-hover:-translate-y-0.5" />
         {exporting ? "Preparing PDF..." : "Download PDF"}
