@@ -216,7 +216,7 @@ function normalizeMessages(value: unknown): ChatInputMessage[] {
       };
     })
     .filter((message): message is ChatInputMessage => Boolean(message))
-    .slice(-16);
+    .slice(-10);
 }
 
 function normalizeAttachments(value: unknown): ChatAttachmentInput[] {
@@ -271,12 +271,74 @@ function normalizeReportId(value: unknown) {
   return typeof value === "string" ? value.trim().slice(0, 128) : "";
 }
 
-function buildReportMemoryContext(report: DashboardReport | null): ReportMemoryContext | null {
+function getRelevantReportSectionTitles(
+  report: DashboardReport,
+  prompt: string,
+  messages: ChatInputMessage[]
+) {
+  const query = [...messages.slice(-3).map((message) => message.content), prompt]
+    .join("\n")
+    .toLowerCase();
+
+  if (/\b(full report|entire report|whole report|summari[sz]e|overview|executive summary|investment memo)\b/i.test(query)) {
+    return null;
+  }
+
+  const titleMatchers: RegExp[] = [];
+
+  if (/\b(tam|sam|som|market size|market opportunity|cagr)\b/i.test(query)) {
+    titleMatchers.push(/tam|sam|som|market|opportun|size|trend/i);
+  }
+
+  if (/\b(competitors?|competition|porter|swot|threats?|moat)\b/i.test(query)) {
+    titleMatchers.push(/compet|porter|swot|threat|risk|market/i);
+  }
+
+  if (/\b(risks?|weakness|threat|regulation|downside)\b/i.test(query)) {
+    titleMatchers.push(/risk|swot|threat|weakness|recommend/i);
+  }
+
+  if (/\b(financial|revenue|arr|mrr|cac|ltv|gross margin|burn|runway|payback|unit economics|kpi|scenario)\b/i.test(query)) {
+    titleMatchers.push(/financial|unit economics|kpi|scenario|pricing|business model|assumption/i);
+  }
+
+  if (/\b(recommendation|decision|invest|go|no go|wait|next action)\b/i.test(query)) {
+    titleMatchers.push(/recommend|executive|scenario|risk|financial/i);
+  }
+
+  if (/\b(source|citation|reference|assumption)\b/i.test(query)) {
+    titleMatchers.push(/source|citation|reference|assumption/i);
+  }
+
+  if (titleMatchers.length === 0) {
+    return null;
+  }
+
+  const selectedTitles = new Set<string>();
+
+  for (const section of report.sections) {
+    const title = section.title.trim();
+
+    if (/executive summary/i.test(title) || titleMatchers.some((matcher) => matcher.test(title))) {
+      selectedTitles.add(title);
+    }
+  }
+
+  return selectedTitles.size ? selectedTitles : null;
+}
+
+function buildReportMemoryContext(
+  report: DashboardReport | null,
+  prompt = "",
+  messages: ChatInputMessage[] = []
+): ReportMemoryContext | null {
   if (!report || report.status.toLowerCase() !== "completed" || report.sections.length === 0) {
     return null;
   }
 
+  const relevantTitles = getRelevantReportSectionTitles(report, prompt, messages);
   const sectionBlocks = report.sections
+    .filter((section) => !relevantTitles || relevantTitles.has(section.title.trim()))
     .map((section) => {
       const title = section.title.trim();
       const content = section.content.replace(/\s+/g, " ").trim();
@@ -382,6 +444,72 @@ function buildProfileContext(profile: AiChatProfile | null) {
   ].filter(Boolean);
 
   return lines.length ? lines.join("\n") : "";
+}
+
+function hasProfileContext(profile: AiChatProfile | null) {
+  return Boolean(buildProfileContext(profile));
+}
+
+function shouldAttachProfileContext(input: {
+  prompt: string;
+  messages: ChatInputMessage[];
+  profile: AiChatProfile | null;
+  intent: ChatIntent;
+  advisorRequest: boolean;
+  reportQuestion: boolean;
+  hasAttachments: boolean;
+}) {
+  if (!hasProfileContext(input.profile)) {
+    return false;
+  }
+
+  if (
+    input.advisorRequest ||
+    input.reportQuestion ||
+    input.hasAttachments ||
+    input.intent !== "General"
+  ) {
+    return true;
+  }
+
+  const text = [...input.messages.slice(-3).map((message) => message.content), input.prompt]
+    .join("\n")
+    .toLowerCase();
+
+  return /\b(my profile|my preferences?|preferred|preference|country|market|budget|risk tolerance|language|writing style|experience|available time|goals?|business interests?|industry|industries)\b/i.test(
+    text
+  );
+}
+
+function shouldAttachUserMemoryContext(input: {
+  prompt: string;
+  messages: ChatInputMessage[];
+  memories: UserMemory[];
+  intent: ChatIntent;
+  advisorRequest: boolean;
+  reportQuestion: boolean;
+  hasAttachments: boolean;
+}) {
+  if (input.memories.length === 0) {
+    return false;
+  }
+
+  if (
+    input.advisorRequest ||
+    input.reportQuestion ||
+    input.hasAttachments ||
+    input.intent !== "General"
+  ) {
+    return true;
+  }
+
+  const text = [...input.messages.slice(-3).map((message) => message.content), input.prompt]
+    .join("\n")
+    .toLowerCase();
+
+  return /\b(who am i|my name|my company|my preferences?|remember|saved about me|what do you know about me|language preference|writing style|long[-\s]?term goal|always|prefer)\b/i.test(
+    text
+  );
 }
 
 function detectResponseLanguage(value: string) {
@@ -494,11 +622,13 @@ function shouldUseChatCache(input: {
   messages: ChatInputMessage[];
   requestKind: AiRequestKind;
   reportMemory: ReportMemoryContext | null;
+  profileContext: string;
   userMemoryContext: string;
 }) {
   return (
     input.attachments.length === 0 &&
     !input.reportMemory &&
+    !input.profileContext &&
     !input.userMemoryContext &&
     input.requestKind !== "file_analysis" &&
     input.messages.length <= 2
@@ -1044,7 +1174,6 @@ export async function POST(req: Request) {
     }
 
     const chatProfile = normalizeProfile(profileData);
-    const profileContext = buildProfileContext(chatProfile);
     const memoryOperations = extractExplicitMemoryOperations(prompt);
     const memoryApplyResult = memoryOperations.length > 0
       ? await applyUserMemoryOperations(supabase, user.id, memoryOperations, user)
@@ -1074,17 +1203,7 @@ export async function POST(req: Request) {
       user,
       memoryApplyResult.fallbackMemories
     );
-    const userMemoryContext = buildUserMemoryContext(userMemories);
     const rememberedName = getUserNameFromMemories(userMemories);
-
-    logOperationalInfo("[api:chat] persistent memory loaded", {
-      userId: user.id,
-      conversationId: conversationId || null,
-      memoryCount: userMemories.length,
-      memoryContextAttached: Boolean(userMemoryContext),
-      hasRememberedName: Boolean(rememberedName),
-      storage: memoryApplyResult.storage,
-    });
 
     if (memoryOperations.length > 0) {
       if (memoryApplyResult.storage !== "table") {
@@ -1115,16 +1234,20 @@ export async function POST(req: Request) {
       return textStream("That memory is already saved.");
     }
 
-    const loadedReport = reportId ? await loadUserReport(supabase, user, reportId) : null;
-    const reportMemory = buildReportMemoryContext(loadedReport);
+    const reportQuestion = isReportMemoryQuestion(prompt, messages);
+    const loadedReport = reportId && reportQuestion
+      ? await loadUserReport(supabase, user, reportId)
+      : null;
+    const reportMemory = buildReportMemoryContext(loadedReport, prompt, messages);
     const reportMemoryDebugReason = reportMemory
       ? "attached"
       : reportId
-        ? loadedReport
-          ? "Report was found but is not completed or has no saved sections."
-          : `Report id ${reportId} was not found for the authenticated user.`
+        ? reportQuestion
+          ? loadedReport
+            ? "Report was found but is not completed or has no saved sections."
+            : `Report id ${reportId} was not found for the authenticated user.`
+          : "Report id was provided but this message did not require report memory."
         : "No report id was provided with this chat request.";
-    const reportQuestion = isReportMemoryQuestion(prompt, messages);
     const { intent: selectedIntent, expert: selectedExpert } = classifyExpert(
       messages,
       prompt,
@@ -1143,6 +1266,37 @@ export async function POST(req: Request) {
       advisorRequest
     );
     const responseLanguage = detectResponseLanguage(prompt);
+    const profileContext = shouldAttachProfileContext({
+      prompt,
+      messages,
+      profile: chatProfile,
+      intent: selectedIntent,
+      advisorRequest,
+      reportQuestion,
+      hasAttachments: attachments.length > 0,
+    })
+      ? buildProfileContext(chatProfile)
+      : "";
+    const userMemoryContext = shouldAttachUserMemoryContext({
+      prompt,
+      messages,
+      memories: userMemories,
+      intent: selectedIntent,
+      advisorRequest,
+      reportQuestion,
+      hasAttachments: attachments.length > 0,
+    })
+      ? buildUserMemoryContext(userMemories)
+      : "";
+
+    logOperationalInfo("[api:chat] persistent memory loaded", {
+      userId: user.id,
+      conversationId: conversationId || null,
+      memoryCount: userMemories.length,
+      memoryContextAttached: Boolean(userMemoryContext),
+      hasRememberedName: Boolean(rememberedName),
+      storage: memoryApplyResult.storage,
+    });
 
     const recallType = getMemoryRecallType(prompt);
     const recalledMemory = recallType ? getUserMemoryByType(userMemories, recallType) : "";
@@ -1231,6 +1385,7 @@ export async function POST(req: Request) {
       messages,
       requestKind,
       reportMemory,
+      profileContext,
       userMemoryContext,
     });
     const chatCacheKey = createAiCacheKey({
@@ -1359,22 +1514,6 @@ export async function POST(req: Request) {
         role: message.role,
         content: message.content,
       })),
-      ...(profileContext
-        ? [
-            {
-              role: "user" as const,
-              content: `Persistent user profile context:\n\n${profileContext}`,
-            },
-          ]
-        : []),
-      ...(userMemoryContext
-        ? [
-            {
-              role: "user" as const,
-              content: `Persistent user memory context:\n\n${userMemoryContext}`,
-            },
-          ]
-        : []),
       ...(attachmentContext
         ? [
             {

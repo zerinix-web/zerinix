@@ -46,7 +46,6 @@ export default async function ChatPage({ searchParams }: ChatPageProps) {
   const reportId =
     (params.reportId || params.report || "").trim() ||
     getReportIdFromReferrer(requestHeaders.get("referer")) ||
-    conversationResult.latestReport?.id ||
     "";
   const report = reportId ? await loadUserReport(supabase, user, reportId) : null;
 

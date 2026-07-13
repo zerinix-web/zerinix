@@ -171,6 +171,16 @@ function getStoredActiveReportId() {
   }
 }
 
+function shouldSendReportContext(prompt: string, messages: ChatMessage[]) {
+  const text = [...messages.slice(-4).map((message) => message.content), prompt]
+    .join("\n")
+    .toLowerCase();
+
+  return /\b(my report|the report|this report|attached report|report memory|tam|sam|som|competitors?|risks?|cagr|gross margin|market size|executive summary|swot|porter|financial dashboard|unit economics|sources?|recommendation|scenario|kpis?)\b/i.test(
+    text
+  );
+}
+
 function shouldAutoTitleConversation(title: string) {
   return (
     title === "New conversation" ||
@@ -752,6 +762,9 @@ export default function AIChatWorkspace({
   const [clearProfileConfirmOpen, setClearProfileConfirmOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [activeReportMemoryExplicit] = useState(() =>
+    Boolean(initialReportMemory?.id || getReportIdFromLocation())
+  );
   const [activeReportMemoryId] = useState(() =>
     initialReportMemory?.id || getReportIdFromLocation() || getStoredActiveReportId()
   );
@@ -1307,6 +1320,12 @@ export default function AIChatWorkspace({
       : conversation?.title || generateConversationTitle(submittedPrompt);
     const currentAttachments = attachments;
     const currentMessages = conversation?.messages || [];
+    const reportContextId =
+      activeReportMemoryId &&
+      (shouldSendReportContext(submittedPrompt, currentMessages) ||
+        (activeReportMemoryExplicit && currentMessages.length === 0))
+        ? activeReportMemoryId
+        : "";
     const memoryMessages = currentMessages
       .filter(
         (message) =>
@@ -1314,7 +1333,7 @@ export default function AIChatWorkspace({
           message.id !== supersededAssistantMessageId &&
           message.status !== "failed"
       )
-      .slice(-16)
+      .slice(-8)
       .map((message) => ({
         role: message.role,
         content: message.content,
@@ -1383,7 +1402,7 @@ export default function AIChatWorkspace({
             textContent: attachment.textContent || "",
           })),
           messages: memoryMessages,
-          reportId: activeReportMemoryId,
+          reportId: reportContextId,
         }),
       });
 
