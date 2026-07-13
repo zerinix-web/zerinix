@@ -39,11 +39,15 @@ import {
   extractExplicitMemoryOperations,
   loadUserMemoriesForUser,
 } from "@/app/lib/ai/user-memory";
+import {
+  buildDecisionSupportDirectives,
+  buildFullReportStructureDirectives,
+} from "@/app/lib/ai/report-quality-directives";
 
 const fieldPrompts = {
   executiveSummary: {
     prompt:
-      "Write an investor-grade Executive Summary with one job only: market verdict. It must read like a partner-level investment memo opening, not an AI answer. Cover market attractiveness, demand signal, competitive intensity, entry timing, strategic gap, and the founder's most important market decision. Do not repeat TAM/SAM/SOM, SWOT, Porter, competitor, entry-plan, KPI, or source detail. Do not use internal labels or confidence tags. Do not write a heading. Max 115 words.",
+      "Write an investor-grade Executive Summary with one job only: market verdict. Start with Proceed / Hold for validation / Decline and conviction, then cover market attractiveness, demand signal, competitive intensity, entry timing, strategic gap, and the founder's most important market decision. Do not repeat TAM/SAM/SOM, SWOT, Porter, competitor, entry-plan, KPI, or source detail. Do not use internal labels or confidence tags. Do not write a heading. Max 115 words.",
     maxTokens: 1000,
   },
   marketOverview: {
@@ -78,17 +82,17 @@ const fieldPrompts = {
   },
   opportunities: {
     prompt:
-      "Identify only market opportunities: underserved segments, channel openings, pricing gaps, partnership angles, product wedges, regulatory/timing advantages, and why incumbents may not address them. Do not repeat SWOT, entry strategy, or competitor analysis. Do not write a heading. Max 135 words.",
+      "Identify only market opportunities: underserved segments, channel openings, pricing gaps, partnership angles, product wedges, regulatory/timing advantages, and why incumbents may not address them. Each opportunity must include the founder implication or validation action. Do not repeat SWOT, entry strategy, or competitor analysis. Do not write a heading. Max 135 words.",
     maxTokens: 1000,
   },
   threats: {
     prompt:
-      "Identify only market threats with severity and probability: competitive pressure, demand uncertainty, switching costs, regulation, platform dependency, price compression, trust barriers, data access, and distribution risk. Do not repeat SWOT or Executive Recommendation. Do not write a heading. Max 135 words.",
+      "Identify only market threats with severity, probability, leading indicator, and mitigation: competitive pressure, demand uncertainty, switching costs, regulation, platform dependency, price compression, trust barriers, data access, and distribution risk. Do not repeat SWOT or Executive Recommendation. Do not write a heading. Max 135 words.",
     maxTokens: 1000,
   },
   swotAnalysis: {
     prompt:
-      "Create SWOT with distinct bullets only. Strengths and Weaknesses must focus on internal market-entry position; Opportunities and Threats must be external but must not repeat Opportunities, Threats, Competitor Analysis, or Executive Summary. Keep bullets short and decision-relevant. Do not write a heading. Max 145 words.",
+      "Create SWOT with exactly four labeled groups: Strengths, Weaknesses, Opportunities, Threats. Use 2-4 distinct bullets per group. Strengths and Weaknesses must focus on internal market-entry position; Opportunities and Threats must be external but must not repeat Opportunities, Threats, Competitor Analysis, or Executive Summary. Each bullet must state why it matters for market entry. Do not write a heading. Max 145 words.",
     maxTokens: 1300,
   },
   portersFiveForces: {
@@ -108,7 +112,7 @@ const fieldPrompts = {
   },
   scenarioAnalysis: {
     prompt:
-      "Create only future scenarios: Worst Case, Base Case, and Best Case. For each case include demand signal, pricing/MRR implication, CAC/payback implication, burn/runway implication, market risk, and founder decision. Do not repeat Financial Dashboard or Executive Recommendation wording. Do not write a heading. Max 170 words.",
+      "Create only future scenarios with three distinct cases: Worst Case, Base Case, and Best Case. For each case include demand signal, pricing/MRR implication, CAC/payback implication, burn/runway implication, market risk, and founder decision. Do not reuse the same text across cases. Do not repeat Financial Dashboard or Executive Recommendation wording. Do not write a heading. Max 170 words.",
     maxTokens: 1200,
   },
   kpiDashboard: {
@@ -118,7 +122,7 @@ const fieldPrompts = {
   },
   executiveRecommendation: {
     prompt:
-      "Write only final investment decision in investment-committee language. Include exactly five elements: selected decision, conviction level, biggest risks, next actions, and why the calculated decision model supports it. Select exactly one visible option and no second option: Proceed, Hold for validation, or Decline. Do not use internal recommendation codes, confidence-label jargon, or internal scoring terminology. Do not restate market overview, SWOT, entry plan, or financial dashboard. Do not write a heading. Max 95 words.",
+      "Write only final investment decision in investment-committee language. Include exactly five elements: selected decision, conviction level, the single key reason, biggest risks, and next concrete action. Select exactly one visible option and no second option: Proceed, Hold for validation, or Decline. Do not use internal recommendation codes, confidence-label jargon, or internal scoring terminology. Do not restate market overview, SWOT, entry plan, or financial dashboard. Do not write a heading. Max 95 words.",
     maxTokens: 850,
   },
   entryStrategy: {
@@ -571,6 +575,7 @@ function buildLanguageInstructions(language: ResponseLanguage) {
     "Distinguish facts, planning inputs, and hypotheses. Never present guesses as facts.",
     "Be honest about uncertainty; do not invent precise figures.",
     "Do not give generic advice. State what the founder should decide, why, what evidence supports it, and what could disprove it.",
+    ...buildDecisionSupportDirectives("market_analysis"),
     "Before writing any visible output, silently build one Integrated Market Strategy Model for the whole opportunity. Do not reveal this internal model directly.",
     "The hidden Integrated Market Strategy Model must contain: Business Model, Customer, ICP, Market, Competition, TAM/SAM/SOM, Pricing, Revenue, GTM, Risks, Financial planning inputs, and Founder priorities.",
     "Every section must be derived from that same hidden model. No section may be written as a standalone independent answer.",
@@ -965,6 +970,9 @@ ${userMemoryInstruction ? `\n${userMemoryInstruction}\n` : ""}
 Generate the complete Market Analysis report as one structured JSON object.
 Return exactly these JSON keys and no others:
 ${reportFields.map((fieldName) => `- ${fieldName}: ${fieldLabelsByLanguage[responseLanguage][fieldName]} — ${fieldPrompts[fieldName].prompt}`).join("\n")}
+
+Deterministic report contract:
+${buildFullReportStructureDirectives("market_analysis").map((directive) => `- ${directive}`).join("\n")}
 
 First perform current web research in this single request. Use reliable sources for market size, competitor companies, industry trends, target customers, recent news, pricing models, SWOT inputs, Porter's Five Forces inputs, and entry strategy signals.
 Before writing visible output, silently construct the full Integrated Market Strategy Model. Do not output the model.
