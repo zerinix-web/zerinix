@@ -97,14 +97,14 @@ export function AdminExports({ tables }: { tables: ExportTable[] }) {
 
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {tables.map((table) => (
-          <div key={table.id} className="rounded-2xl border border-white/10 bg-black/25 p-4">
+          <div key={table.id} className="rounded-2xl border border-white/10 bg-black/25 p-4 transition duration-300 hover:border-purple-300/20 hover:bg-white/[0.04]">
             <p className="font-medium text-white">{table.title}</p>
             <p className="mt-1 text-xs text-zinc-500">{table.rows.length} rows</p>
             <div className="mt-4 flex gap-2">
               <button
                 type="button"
                 onClick={() => exportCsv(table)}
-                className="inline-flex h-9 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-zinc-300 transition hover:border-teal-300/30 hover:text-white"
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-zinc-300 transition hover:border-purple-300/30 hover:text-white"
               >
                 <Download className="h-3.5 w-3.5" />
                 CSV
@@ -112,7 +112,7 @@ export function AdminExports({ tables }: { tables: ExportTable[] }) {
               <button
                 type="button"
                 onClick={() => exportPdf(table)}
-                className="inline-flex h-9 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-zinc-300 transition hover:border-teal-300/30 hover:text-white"
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-zinc-300 transition hover:border-purple-300/30 hover:text-white"
               >
                 <FileText className="h-3.5 w-3.5" />
                 PDF

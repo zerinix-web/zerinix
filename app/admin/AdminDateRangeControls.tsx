@@ -44,8 +44,8 @@ export function AdminDateRangeControls({
     <section className="mt-5 rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-4 shadow-[0_20px_80px_rgba(0,0,0,0.22)] backdrop-blur-xl">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-teal-300/20 bg-teal-300/10">
-            <CalendarDays className="h-5 w-5 text-teal-100" />
+          <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-purple-300/20 bg-purple-400/10">
+            <CalendarDays className="h-5 w-5 text-purple-100" />
           </span>
           <div>
             <h2 className="text-sm font-semibold text-white">Dashboard range</h2>
@@ -76,18 +76,18 @@ export function AdminDateRangeControls({
               type="date"
               value={from}
               onChange={(event) => setFrom(event.target.value)}
-              className="h-10 rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-white outline-none focus:border-teal-300/35"
+              className="h-10 rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-white outline-none focus:border-purple-300/35"
             />
             <input
               type="date"
               value={to}
               onChange={(event) => setTo(event.target.value)}
-              className="h-10 rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-white outline-none focus:border-teal-300/35"
+              className="h-10 rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-white outline-none focus:border-purple-300/35"
             />
             <button
               type="button"
               onClick={() => updateRange("custom", from, to)}
-              className="h-10 rounded-xl border border-teal-300/25 bg-teal-300/10 px-3 text-xs font-semibold text-teal-100 transition hover:bg-teal-300/15"
+              className="h-10 rounded-xl border border-purple-300/25 bg-purple-400/10 px-3 text-xs font-semibold text-purple-100 transition hover:bg-purple-400/15"
             >
               Apply custom
             </button>

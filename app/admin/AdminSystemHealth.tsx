@@ -121,7 +121,7 @@ export function AdminSystemHealth({ initialStatuses }: AdminSystemHealthProps) {
           onClick={() => {
             void refreshHealth();
           }}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-4 text-sm text-zinc-300 transition hover:border-teal-300/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-4 text-sm text-zinc-300 transition hover:border-purple-300/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
           disabled={refreshing}
         >
           <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
@@ -131,7 +131,7 @@ export function AdminSystemHealth({ initialStatuses }: AdminSystemHealthProps) {
 
       <div className="mt-5 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
         {statuses.map((item) => (
-          <div key={item.label} className="rounded-2xl border border-white/10 bg-black/25 p-4">
+          <div key={item.label} className="rounded-2xl border border-white/10 bg-black/25 p-4 transition duration-300 hover:border-purple-300/15 hover:bg-white/[0.035]">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-center gap-2">
                 <span className="relative flex h-2.5 w-2.5">

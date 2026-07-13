@@ -12,6 +12,8 @@ type ChartConfig = {
   data: ChartPoint[];
   valuePrefix?: string;
   unavailableLabel?: string;
+  periodLabel?: string;
+  featured?: boolean;
 };
 
 export type AdminChartsProps = {
@@ -52,7 +54,7 @@ function TrendPill({ data }: { data: ChartPoint[] }) {
     trend.direction === "down"
       ? "border-red-300/20 bg-red-950/20 text-red-100"
       : trend.direction === "up"
-        ? "border-teal-300/20 bg-teal-300/10 text-teal-100"
+        ? "border-purple-300/25 bg-purple-400/10 text-purple-100"
         : "border-white/10 bg-white/[0.04] text-zinc-400";
 
   return (
@@ -68,6 +70,8 @@ function AnalyticsChart({
   data,
   valuePrefix = "",
   unavailableLabel = "No data available",
+  periodLabel = "Selected range",
+  featured = false,
 }: ChartConfig) {
   const max = Math.max(1, ...data.map((item) => item.value));
   const latest = data.at(-1)?.value ?? 0;
@@ -81,11 +85,11 @@ function AnalyticsChart({
     .join(" ");
 
   return (
-    <article className="group rounded-[1.4rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.26)] backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-teal-300/20 hover:bg-white/[0.06]">
+    <article className={`group rounded-[1.4rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.26)] backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/20 hover:bg-white/[0.06] ${featured ? "md:col-span-2 2xl:col-span-2" : ""}`}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold text-white">{title}</p>
-          <p className="mt-1 text-xs text-zinc-500">Last 7d</p>
+          <p className="mt-1 text-xs text-zinc-500">{periodLabel}</p>
         </div>
         {data.length ? <TrendPill data={data} /> : null}
       </div>
@@ -103,12 +107,12 @@ function AnalyticsChart({
             </div>
           </div>
 
-          <div className="mt-5 h-36 rounded-2xl border border-white/10 bg-black/20 p-3" aria-label={`${title} live analytics chart`}>
+          <div className={`${featured ? "h-52" : "h-36"} mt-5 rounded-2xl border border-white/10 bg-black/20 p-3`} aria-label={`${title} live analytics chart`}>
             <svg className="h-full w-full overflow-visible" viewBox="0 0 100 100" role="img">
               <defs>
                 <linearGradient id={`${title.replace(/\W+/g, "-")}-area`} x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="rgb(45 212 191)" stopOpacity="0.34" />
-                  <stop offset="100%" stopColor="rgb(45 212 191)" stopOpacity="0.02" />
+                  <stop offset="0%" stopColor="rgb(192 132 252)" stopOpacity="0.34" />
+                  <stop offset="100%" stopColor="rgb(192 132 252)" stopOpacity="0.02" />
                 </linearGradient>
               </defs>
               <polyline
@@ -117,7 +121,7 @@ function AnalyticsChart({
               />
               <polyline
                 fill="none"
-                stroke="rgb(94 234 212)"
+                stroke="rgb(216 180 254)"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth="3"
@@ -133,7 +137,7 @@ function AnalyticsChart({
                     cx={x}
                     cy={y}
                     r="2.6"
-                    className="fill-black stroke-teal-200"
+                    className="fill-black stroke-purple-200"
                     strokeWidth="1.5"
                   />
                 );
@@ -160,8 +164,8 @@ function AnalyticsChart({
 export function AdminCharts({ charts }: AdminChartsProps) {
   return (
     <div className="grid gap-5 md:grid-cols-2 2xl:grid-cols-3">
-      {charts.map((chart) => (
-        <AnalyticsChart key={chart.title} {...chart} />
+      {charts.map((chart, index) => (
+        <AnalyticsChart key={chart.title} {...chart} featured={index === 0} />
       ))}
     </div>
   );

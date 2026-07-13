@@ -139,7 +139,7 @@ export function AdminGlobalSearch() {
           onChange={(event) => handleQueryChange(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Search users, reports, conversations..."
-          className="h-12 w-full rounded-2xl border border-white/10 bg-black/35 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-teal-300/35 focus:ring-2 focus:ring-teal-300/10"
+          className="h-12 w-full rounded-2xl border border-white/10 bg-black/35 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-purple-300/35 focus:ring-2 focus:ring-purple-300/10"
         />
       </label>
 
@@ -154,7 +154,7 @@ export function AdminGlobalSearch() {
               onClick={() => toggleFilter(filter.id)}
               className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition ${
                 active
-                  ? "border-teal-300/30 bg-teal-300/10 text-teal-100"
+                  ? "border-purple-300/30 bg-purple-400/10 text-purple-100"
                   : "border-white/10 bg-black/25 text-zinc-500 hover:text-white"
               }`}
             >
@@ -199,7 +199,7 @@ export function AdminGlobalSearch() {
                       href={result.href}
                       className={`block rounded-2xl border px-3 py-2 text-sm transition ${
                         resultIndex === activeIndex
-                          ? "border-teal-300/30 bg-teal-300/10"
+                          ? "border-purple-300/30 bg-purple-400/10"
                           : "border-transparent hover:border-white/10 hover:bg-white/[0.04]"
                       }`}
                     >
