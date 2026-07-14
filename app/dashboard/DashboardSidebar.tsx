@@ -14,6 +14,10 @@ import {
 } from "lucide-react";
 import { signOut } from "@/app/auth/actions";
 import { dashboardTheme } from "@/app/lib/ui/dashboard-theme";
+import {
+  MobileBottomNavigation,
+  MobileHeader,
+} from "@/components/MobileNavigation";
 
 export default function DashboardSidebar() {
   const navigationGroups = [
@@ -47,7 +51,10 @@ export default function DashboardSidebar() {
   ];
 
   return (
-    <aside className={`flex ${dashboardTheme.sidebar} lg:sticky lg:top-0 lg:min-h-screen lg:w-72 lg:flex-col lg:px-5 lg:py-6`}>
+    <>
+      <MobileHeader />
+      <MobileBottomNavigation />
+      <aside className={`hidden ${dashboardTheme.sidebar} lg:sticky lg:top-0 lg:flex lg:min-h-screen lg:w-72 lg:flex-col lg:px-5 lg:py-6`}>
       <div className="hidden lg:block">
         <Link
           href="/dashboard"
@@ -119,6 +126,7 @@ export default function DashboardSidebar() {
           <span className="whitespace-nowrap">Logout</span>
         </button>
       </form>
-    </aside>
+      </aside>
+    </>
   );
 }

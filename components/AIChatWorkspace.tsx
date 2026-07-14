@@ -12,6 +12,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
+import { MobileBottomNavigation } from "@/components/MobileNavigation";
 import {
   AlertCircle,
   Bot,
@@ -1833,7 +1834,7 @@ export default function AIChatWorkspace({
 
   return (
     <main
-      className="flex h-[100dvh] min-h-[100svh] overflow-hidden bg-black text-white"
+      className="flex h-[100dvh] min-h-[100svh] overflow-hidden bg-black pb-20 text-white md:pb-0"
       onDragEnter={(event) => {
         event.preventDefault();
         setIsDraggingFiles(true);
@@ -1849,6 +1850,7 @@ export default function AIChatWorkspace({
       }}
       onDrop={handleDropFiles}
     >
+      <MobileBottomNavigation />
       {renameTarget ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl">
           <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-zinc-950 p-6 shadow-2xl shadow-black/60">

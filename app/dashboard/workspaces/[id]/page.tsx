@@ -275,7 +275,7 @@ export default async function WorkspaceReportsPage({
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <DashboardSidebar />
 
-        <section className="flex-1 px-4 py-5 sm:px-8 lg:px-10 lg:py-9">
+        <section className="flex-1 px-4 pt-5 pb-28 sm:px-8 lg:px-10 lg:py-9">
           <div className="overflow-hidden rounded-[2.25rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/35 ring-1 ring-white/[0.025] backdrop-blur-2xl transition duration-300 hover:border-teal-300/15 hover:bg-white/[0.052] sm:p-8 lg:p-10">
             <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
               <div>

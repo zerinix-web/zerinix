@@ -122,7 +122,7 @@ export default async function BillingPage({
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <DashboardSidebar />
 
-        <section className="flex-1 px-5 py-6 sm:px-8 lg:px-10 lg:py-9">
+        <section className="flex-1 px-5 pt-6 pb-28 sm:px-8 lg:px-10 lg:py-9">
           <div className="overflow-hidden rounded-[2.35rem] border border-white/10 bg-white/[0.045] shadow-2xl shadow-black/35 backdrop-blur-2xl">
             <div className="relative p-6 sm:p-8 lg:p-10">
               <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.09),transparent_38%),radial-gradient(circle_at_85%_20%,rgba(45,212,191,0.16),transparent_34%)]" />

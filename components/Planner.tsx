@@ -50,6 +50,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
+import { MobileBottomNavigation } from "@/components/MobileNavigation";
 import { createClient } from "@/app/lib/supabase/client";
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 import { logOperationalInfo } from "@/app/lib/security/logging";
@@ -6554,7 +6555,7 @@ export default function Planner({
 
   return (
     <main
-      className="flex h-[100dvh] min-h-[100svh] flex-col overflow-hidden bg-black text-white md:flex-row"
+      className="flex h-[100dvh] min-h-[100svh] flex-col overflow-hidden bg-black pb-20 text-white md:flex-row md:pb-0"
       onDragEnter={(event) => {
         event.preventDefault();
         setIsDraggingFiles(true);
@@ -6570,6 +6571,7 @@ export default function Planner({
       }}
       onDrop={handleDropFiles}
     >
+      <MobileBottomNavigation />
       <ConversationSidebar
         conversations={conversations}
         activeConversationId={activeConversationId}

@@ -93,7 +93,7 @@ export default async function UsageDashboardPage() {
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <DashboardSidebar />
 
-        <section className="flex-1 px-5 py-6 sm:px-8 lg:px-10 lg:py-9">
+        <section className="flex-1 px-5 pt-6 pb-28 sm:px-8 lg:px-10 lg:py-9">
           <div className="overflow-hidden rounded-[2.25rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/35 backdrop-blur-2xl sm:p-8 lg:p-10">
             <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
               AI OPERATIONS

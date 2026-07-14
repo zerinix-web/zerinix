@@ -1639,7 +1639,7 @@ export default async function ReportDetailPage({
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <DashboardSidebar />
 
-        <section className="flex-1 px-4 py-5 sm:px-8 lg:px-10 lg:py-8">
+        <section className="flex-1 px-4 pt-5 pb-28 sm:px-8 lg:px-10 lg:py-8">
           <div className="overflow-hidden rounded-[2.15rem] border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/35 ring-1 ring-white/[0.025] backdrop-blur-xl transition duration-300 hover:border-teal-300/15 hover:bg-white/[0.048] sm:p-7">
             <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
               <div className="min-w-0">
