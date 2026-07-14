@@ -23,6 +23,7 @@ import { getAuthenticatedUser, loadUserReport } from "../report-utils";
 import ReportPdfButton from "./ReportPdfButton";
 import {
   CopySectionButton,
+  MobileReportSection,
   ReportScrollProgress,
   ShareReportButton,
 } from "./ReportViewerEnhancements";
@@ -1625,11 +1626,23 @@ export default async function ReportDetailPage({
   const getReportSectionKey = (section: (typeof report.sections)[number]) =>
     `${report.id}:${section.field || section.title}`;
   const decisionSummaryItems = getDecisionSummaryItems(visibleSections);
+  const decisionSignalItem =
+    decisionSummaryItems.find((item) => item.label === "Decision Signal") ||
+    decisionSummaryItems[0];
+  const mainInsightItem =
+    decisionSummaryItems.find((item) => item.label === "Main Insight") ||
+    decisionSummaryItems[1];
+  const nextStepItem =
+    decisionSummaryItems.find((item) => item.label === "Recommended Next Step") ||
+    decisionSummaryItems[2];
   const continueAnalysisHref = `/chat?reportId=${encodeURIComponent(report.id)}`;
   const workspaceHref = workspace?.id
     ? `/dashboard/workspaces/${workspace.id}`
     : "/dashboard#workspaces";
   const workspaceName = typeof workspace?.name === "string" ? workspace.name : "Workspace";
+  const executiveSummaryIndex = visibleSections.findIndex((section) =>
+    section.title.toLowerCase().includes("executive summary")
+  );
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
@@ -1640,6 +1653,201 @@ export default async function ReportDetailPage({
         <DashboardSidebar />
 
         <section className="flex-1 px-4 pt-5 pb-28 sm:px-8 lg:px-10 lg:py-8">
+          <div className="space-y-4 lg:hidden">
+            <div className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-2xl shadow-black/30 ring-1 ring-white/[0.025] backdrop-blur-2xl">
+              <Link
+                href="/dashboard"
+                className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-2 text-sm font-medium text-zinc-400 shadow-lg shadow-black/10 transition duration-300 hover:border-teal-200/25 hover:bg-white/[0.04] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Dashboard
+              </Link>
+              <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.24em] text-teal-200/70">
+                Mobile Report Reader
+              </p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-[-0.035em] text-white">
+                {report.title}
+              </h1>
+              <div className="mt-4 flex flex-wrap gap-2 text-xs text-zinc-400">
+                <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1">
+                  {report.type}
+                </span>
+                <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 capitalize">
+                  {report.status}
+                </span>
+                <Link
+                  href={workspaceHref}
+                  className="rounded-full border border-teal-200/20 bg-teal-200/10 px-3 py-1 text-teal-100"
+                >
+                  {workspaceName}
+                </Link>
+              </div>
+            </div>
+
+            <section className="overflow-hidden rounded-[2rem] border border-teal-200/15 bg-teal-200/[0.055] shadow-2xl shadow-black/30 ring-1 ring-teal-200/10 backdrop-blur-xl">
+              <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.16),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.02))] p-5">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-teal-100/75">
+                  Decision Snapshot
+                </p>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
+                  {decisionSignalItem?.value || "Review required"}
+                </h2>
+                <p className="mt-3 text-sm leading-6 text-zinc-300">
+                  {decisionSignalItem?.detail || "Review the decision evidence before moving forward."}
+                </p>
+              </div>
+              <div className="grid gap-3 p-4">
+                <div className="rounded-[1.35rem] border border-white/10 bg-black/30 p-4 shadow-lg shadow-black/15">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-200/70">
+                    Main Insight
+                  </p>
+                  <p className="mt-2 text-base font-semibold leading-6 text-white">
+                    {mainInsightItem?.value || "Primary insight requires review."}
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-zinc-500">
+                    {mainInsightItem?.detail || "Risk profile is detailed in the report."}
+                  </p>
+                </div>
+                <Link
+                  href={continueAnalysisHref}
+                  className="rounded-[1.35rem] border border-teal-300/20 bg-teal-300/[0.1] p-4 shadow-lg shadow-teal-950/10 transition duration-300 hover:border-teal-300/35 hover:bg-teal-300/[0.14] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-100/75">
+                        Recommended Next Action
+                      </p>
+                      <p className="mt-2 text-xl font-semibold leading-7 text-white">
+                        {nextStepItem?.value || "Continue analysis"}
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-zinc-300">
+                        {nextStepItem?.detail || "Use this report as advisor context."}
+                      </p>
+                    </div>
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-teal-200 text-black">
+                      <MessageSquareText className="h-4 w-4" />
+                    </span>
+                  </div>
+                </Link>
+              </div>
+            </section>
+
+            <div className="grid gap-3">
+              <Link
+                href={continueAnalysisHref}
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black shadow-xl shadow-white/10 ring-1 ring-white/20"
+              >
+                <MessageSquareText className="h-4 w-4" />
+                Continue Analysis
+              </Link>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <ShareReportButton title={report.title} />
+                <ReportPdfButton report={report} />
+              </div>
+            </div>
+
+            {visibleSections.length > 0 ? (
+              <nav
+                aria-label="Report sections"
+                className="overflow-x-auto rounded-[1.35rem] border border-white/10 bg-white/[0.045] p-2 shadow-xl shadow-black/20 ring-1 ring-white/[0.025]"
+              >
+                <div className="flex min-w-max gap-2">
+                  {visibleSections.map((section, index) => (
+                    <a
+                      key={`mobile-nav-${getReportSectionKey(section)}`}
+                      href={`#mobile-report-section-${index + 1}`}
+                      className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-2 text-xs font-semibold text-zinc-300 transition hover:border-teal-200/30 hover:bg-teal-200/10 hover:text-teal-100"
+                    >
+                      <span className="text-zinc-600">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      {section.title}
+                    </a>
+                  ))}
+                  {sourceSections.length > 0 ? (
+                    <a
+                      href="#mobile-report-sources"
+                      className="inline-flex min-h-10 items-center gap-2 rounded-full border border-teal-200/20 bg-teal-200/10 px-3 py-2 text-xs font-semibold text-teal-100"
+                    >
+                      Sources
+                    </a>
+                  ) : null}
+                </div>
+              </nav>
+            ) : null}
+
+            <section className="space-y-3">
+              {visibleSections.length === 0 ? (
+                <div className="rounded-[1.55rem] border border-dashed border-white/10 bg-black/35 p-6 text-center shadow-inner shadow-black/25">
+                  <FileText className="mx-auto h-7 w-7 text-teal-200" />
+                  <h2 className="mt-4 text-xl font-semibold text-white">
+                    No report sections saved yet
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-zinc-500">
+                    This report shell exists, but no readable analysis sections were saved.
+                  </p>
+                </div>
+              ) : (
+                visibleSections.map((section, index) => {
+                  const isFinancialDashboard = section.title
+                    .toLowerCase()
+                    .includes("financial dashboard");
+                  const detailsContent = isFinancialDashboard ? "" : section.content;
+
+                  return (
+                    <div
+                      id={`mobile-report-section-${index + 1}`}
+                      key={`mobile-${getReportSectionKey(section)}`}
+                      className="scroll-mt-24"
+                    >
+                      <MobileReportSection
+                        title={section.title}
+                        eyebrow={`Section ${String(index + 1).padStart(2, "0")}`}
+                        defaultOpen={index === executiveSummaryIndex || index === 0}
+                      >
+                        <div className="space-y-4">
+                          <ReportSectionVisual
+                            title={section.title}
+                            content={section.content}
+                          />
+                          {detailsContent.trim() ? (
+                            <div className="rounded-[1.25rem] border border-white/10 bg-black/25 p-4">
+                              <ReportText content={detailsContent} />
+                            </div>
+                          ) : null}
+                          <CopySectionButton content={section.content} />
+                        </div>
+                      </MobileReportSection>
+                    </div>
+                  );
+                })
+              )}
+
+              {sourceSections.length > 0 ? (
+                <div id="mobile-report-sources" className="scroll-mt-24">
+                  <MobileReportSection
+                    title="Sources"
+                    eyebrow="Research Appendix"
+                  >
+                    <div className="space-y-4">
+                      {sourceSections.map((section) => (
+                        <CitationList
+                          key={`mobile-source-${getReportSectionKey(section)}`}
+                          content={section.content}
+                        />
+                      ))}
+                      <CopySectionButton
+                        content={sourceSections.map((section) => section.content).join("\n\n")}
+                        label="Copy sources"
+                      />
+                    </div>
+                  </MobileReportSection>
+                </div>
+              ) : null}
+            </section>
+          </div>
+
+          <div className="hidden lg:block">
           <div className="overflow-hidden rounded-[2.15rem] border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/35 ring-1 ring-white/[0.025] backdrop-blur-xl transition duration-300 hover:border-teal-300/15 hover:bg-white/[0.048] sm:p-7">
             <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
               <div className="min-w-0">
@@ -1923,6 +2131,7 @@ export default async function ReportDetailPage({
                 </div>
               </div>
             )}
+          </div>
           </div>
         </section>
       </div>

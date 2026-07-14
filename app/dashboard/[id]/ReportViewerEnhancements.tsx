@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Check, Copy, Share2 } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Check, ChevronDown, Copy, Share2 } from "lucide-react";
 
 export function ReportScrollProgress() {
   const [progress, setProgress] = useState(0);
@@ -114,5 +114,51 @@ export function ShareReportButton({ title }: { title: string }) {
       {shared ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
       {shared ? "Link copied" : "Share Report"}
     </button>
+  );
+}
+
+export function MobileReportSection({
+  title,
+  eyebrow,
+  children,
+  defaultOpen = false,
+}: {
+  title: string;
+  eyebrow: string;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <article className="overflow-hidden rounded-[1.55rem] border border-white/10 bg-white/[0.045] shadow-xl shadow-black/25 ring-1 ring-white/[0.025]">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="flex min-h-16 w-full items-center justify-between gap-4 p-4 text-left transition duration-300 hover:bg-white/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-200/30"
+      >
+        <span className="min-w-0">
+          <span className="block text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-200/70">
+            {eyebrow}
+          </span>
+          <span className="mt-1 block text-base font-semibold leading-6 text-white">
+            {title}
+          </span>
+        </span>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-black/25">
+          <ChevronDown
+            className={`h-4 w-4 text-teal-200 transition duration-300 ${
+              open ? "rotate-180" : ""
+            }`}
+          />
+        </span>
+      </button>
+      {open ? (
+        <div className="border-t border-white/10 p-4">
+          {children}
+        </div>
+      ) : null}
+    </article>
   );
 }
