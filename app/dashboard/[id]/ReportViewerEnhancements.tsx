@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Share2 } from "lucide-react";
 
 export function ReportScrollProgress() {
   const [progress, setProgress] = useState(0);
@@ -72,6 +72,47 @@ export function CopySectionButton({
     >
       {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
       {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+export function ShareReportButton({ title }: { title: string }) {
+  const [shared, setShared] = useState(false);
+
+  async function shareReport() {
+    const url = window.location.href;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title,
+          text: "ZERINIX decision intelligence report",
+          url,
+        });
+        setShared(true);
+        window.setTimeout(() => setShared(false), 1600);
+        return;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+      }
+    }
+
+    await navigator.clipboard.writeText(url);
+    setShared(true);
+    window.setTimeout(() => setShared(false), 1600);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={shareReport}
+      className="inline-flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-2xl border border-white/10 bg-white/[0.045] px-5 py-3 text-sm font-semibold text-zinc-200 shadow-xl shadow-black/15 ring-1 ring-white/[0.02] transition duration-300 hover:-translate-y-0.5 hover:border-teal-200/30 hover:bg-teal-200/10 hover:text-teal-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
+      aria-label="Share report"
+    >
+      {shared ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
+      {shared ? "Link copied" : "Share Report"}
     </button>
   );
 }

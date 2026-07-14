@@ -9,8 +9,8 @@ import {
   CheckCircle2,
   FileText,
   Flag,
+  MessageSquareText,
   Gauge,
-  Plus,
   Sparkles,
   Target,
   TrendingUp,
@@ -21,7 +21,11 @@ import { createClient } from "@/app/lib/supabase/server";
 import DashboardSidebar from "../DashboardSidebar";
 import { getAuthenticatedUser, loadUserReport } from "../report-utils";
 import ReportPdfButton from "./ReportPdfButton";
-import { CopySectionButton, ReportScrollProgress } from "./ReportViewerEnhancements";
+import {
+  CopySectionButton,
+  ReportScrollProgress,
+  ShareReportButton,
+} from "./ReportViewerEnhancements";
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 
 export const dynamic = "force-dynamic";
@@ -283,6 +287,131 @@ function extractKeywordInsight(content: string, keywords: string[]) {
     lines[0] ||
     ""
   );
+}
+
+function getSectionContentByFieldOrTitle(
+  sections: Array<{ field?: string; title: string; content: string }>,
+  matchers: string[]
+) {
+  const normalizedMatchers = matchers.map((matcher) => matcher.toLowerCase());
+  const section = sections.find((item) => {
+    const field = item.field?.toLowerCase() || "";
+    const title = item.title.toLowerCase();
+
+    return normalizedMatchers.some(
+      (matcher) => field.includes(matcher) || title.includes(matcher)
+    );
+  });
+
+  return section?.content || "";
+}
+
+function cleanDecisionSummaryText(value: string, fallback: string) {
+  const cleaned = sanitizeAiResponseText(value || "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^[-*•]\s+/, "")
+    .replace(/\*\*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned) {
+    return fallback;
+  }
+
+  const firstSentence = cleaned
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .find((sentence) => sentence.length > 18);
+  const candidate = firstSentence || cleaned;
+
+  if (candidate.length <= 170) {
+    return candidate;
+  }
+
+  const clipped = candidate.slice(0, 171);
+  const lastSpace = clipped.lastIndexOf(" ");
+
+  return `${clipped.slice(0, Math.max(80, lastSpace)).trim()}…`;
+}
+
+function getDecisionSummaryItems(
+  sections: Array<{ field?: string; title: string; content: string }>
+) {
+  const fullContent = sections.map((section) => `${section.title}\n${section.content}`).join("\n\n");
+  const executiveRecommendation = getSectionContentByFieldOrTitle(sections, [
+    "executiverecommendation",
+    "executive recommendation",
+    "recommendation",
+  ]);
+  const executiveSummary = getSectionContentByFieldOrTitle(sections, [
+    "executivesummary",
+    "executive summary",
+  ]);
+  const marketOpportunity = getSectionContentByFieldOrTitle(sections, [
+    "marketopportunity",
+    "market opportunity",
+    "marketoverview",
+    "market overview",
+  ]);
+  const risks = getSectionContentByFieldOrTitle(sections, ["risk", "threat"]);
+  const decisionSignal =
+    detectRecommendation(`${executiveRecommendation}\n${executiveSummary}\n${fullContent}`) ||
+    extractMetricValue(executiveRecommendation, "Decision") ||
+    extractMetricValue(executiveRecommendation, "Recommendation") ||
+    "Review required";
+  const nextStep =
+    extractMetricValue(executiveRecommendation, "Next Critical Action") ||
+    extractMetricValue(executiveRecommendation, "Next Action") ||
+    extractMetricValue(fullContent, "Next Critical Action") ||
+    extractMetricValue(fullContent, "Next Action") ||
+    extractKeywordInsight(executiveRecommendation || executiveSummary || fullContent, [
+      "next",
+      "validate",
+      "launch",
+      "pilot",
+      "action",
+    ]);
+  const mainInsight =
+    extractMetricValue(executiveSummary, "Main Insight") ||
+    extractKeywordInsight(executiveSummary || marketOpportunity || fullContent, [
+      "market",
+      "opportunity",
+      "revenue",
+      "growth",
+      "customer",
+    ]);
+  const mainRisk =
+    extractMetricValue(executiveRecommendation, "Main Risk") ||
+    extractMetricValue(risks, "Main Risk") ||
+    extractKeywordInsight(risks || fullContent, ["risk", "threat", "regulation", "competition"]);
+
+  return [
+    {
+      label: "Decision Signal",
+      value: cleanDecisionSummaryText(decisionSignal, "Review required"),
+      detail: cleanDecisionSummaryText(
+        extractMetricValue(executiveRecommendation, "Decision Rationale") ||
+          extractMetricValue(executiveRecommendation, "Recommendation") ||
+          extractMetricValue(executiveRecommendation, "Summary") ||
+          executiveRecommendation ||
+          executiveSummary,
+        "Review the decision evidence before moving forward."
+      ),
+      icon: Sparkles,
+    },
+    {
+      label: "Main Insight",
+      value: cleanDecisionSummaryText(mainInsight, "Primary market signal requires review."),
+      detail: cleanDecisionSummaryText(mainRisk, "Risk profile is detailed in the report."),
+      icon: Target,
+    },
+    {
+      label: "Recommended Next Step",
+      value: cleanDecisionSummaryText(nextStep, "Create a follow-up validation plan."),
+      detail: "Use the full report context to continue the decision file.",
+      icon: Flag,
+    },
+  ];
 }
 
 function extractPercentScore(content: string, label: string) {
@@ -1475,6 +1604,15 @@ export default async function ReportDetailPage({
     notFound();
   }
 
+  const { data: workspace } = report.workspaceId
+    ? await supabase
+        .from("report_workspaces")
+        .select("id,name")
+        .eq("user_id", user.id)
+        .eq("id", report.workspaceId)
+        .maybeSingle()
+    : { data: null };
+
   const uniqueReportSections = Array.from(
     new Map(report.sections.map((section) => [section.field || section.title, section])).values()
   );
@@ -1486,6 +1624,12 @@ export default async function ReportDetailPage({
   );
   const getReportSectionKey = (section: (typeof report.sections)[number]) =>
     `${report.id}:${section.field || section.title}`;
+  const decisionSummaryItems = getDecisionSummaryItems(visibleSections);
+  const continueAnalysisHref = `/chat?reportId=${encodeURIComponent(report.id)}`;
+  const workspaceHref = workspace?.id
+    ? `/dashboard/workspaces/${workspace.id}`
+    : "/dashboard#workspaces";
+  const workspaceName = typeof workspace?.name === "string" ? workspace.name : "Workspace";
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
@@ -1515,19 +1659,20 @@ export default async function ReportDetailPage({
               </div>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center md:shrink-0">
+                <ShareReportButton title={report.title} />
                 <ReportPdfButton report={report} />
                 <Link
-                  href="/plan?new=1&mode=plan"
+                  href={continueAnalysisHref}
                   className="inline-flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black shadow-xl shadow-white/10 ring-1 ring-white/20 transition duration-300 hover:-translate-y-0.5 hover:bg-zinc-200 hover:shadow-2xl hover:shadow-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
                 >
-                  <Plus className="h-4 w-4" />
-                  Create Strategic Report
+                  <MessageSquareText className="h-4 w-4" />
+                  Continue Analysis
                 </Link>
               </div>
             </div>
           </div>
 
-          <div className="mt-6 grid gap-4 md:grid-cols-3">
+          <div className="mt-6 grid gap-4 md:grid-cols-4">
             <div className="min-h-[8.5rem] rounded-[1.5rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/20 ring-1 ring-white/[0.02] transition duration-300 hover:-translate-y-0.5 hover:border-teal-200/20 hover:bg-white/[0.045]">
               <div className="flex items-center gap-3">
                 <Sparkles className="h-5 w-5 text-teal-200" />
@@ -1551,7 +1696,62 @@ export default async function ReportDetailPage({
               </div>
               <p className="mt-3 text-lg font-semibold text-white">{report.status}</p>
             </div>
+            <Link
+              href={workspaceHref}
+              className="min-h-[8.5rem] rounded-[1.5rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/20 ring-1 ring-white/[0.02] transition duration-300 hover:-translate-y-0.5 hover:border-teal-200/20 hover:bg-white/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
+            >
+              <div className="flex items-center gap-3">
+                <BookOpen className="h-5 w-5 text-teal-200" />
+                <p className="text-sm text-zinc-500">Workspace</p>
+              </div>
+              <p className="mt-3 line-clamp-2 text-lg font-semibold text-white">
+                {workspaceName}
+              </p>
+            </Link>
           </div>
+
+          <section className="mt-6 overflow-hidden rounded-[2.15rem] border border-teal-200/15 bg-teal-200/[0.045] shadow-2xl shadow-black/35 ring-1 ring-teal-200/5 backdrop-blur-xl">
+            <div className="flex flex-col gap-5 border-b border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.14),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.065),rgba(255,255,255,0.02))] p-5 sm:p-6 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
+                  DECISION INTELLIGENCE
+                </p>
+                <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white">
+                  Decision summary
+                </h2>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
+                  Review the decision signal, main insight and next step before moving into the full report.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-3">
+              {decisionSummaryItems.map((item) => {
+                const Icon = item.icon;
+
+                return (
+                  <article
+                    key={item.label}
+                    className="min-h-[13rem] rounded-[1.55rem] border border-white/10 bg-black/35 p-5 shadow-xl shadow-black/20 ring-1 ring-white/[0.02]"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10">
+                        <Icon className="h-4 w-4 text-teal-100" />
+                      </span>
+                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200/70">
+                        {item.label}
+                      </p>
+                    </div>
+                    <p className="mt-4 break-words text-xl font-semibold leading-7 tracking-tight text-white [overflow-wrap:anywhere]">
+                      {item.value}
+                    </p>
+                    <p className="mt-3 break-words text-sm leading-6 text-zinc-400 [overflow-wrap:anywhere]">
+                      {item.detail}
+                    </p>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
 
           <div className="mt-6 overflow-hidden rounded-[2.15rem] border border-white/10 bg-zinc-950/70 shadow-2xl shadow-black/50 ring-1 ring-white/[0.025]">
             <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.14),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.065),rgba(255,255,255,0.02))] p-5 sm:p-7">
