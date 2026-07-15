@@ -74,7 +74,7 @@ const fieldPrompts = {
   },
   competitorAnalysis: {
     prompt:
-      "Analyze only competitors and substitutes: direct competitors, indirect substitutes, incumbent alternatives, positioning map, switching barriers, pricing signals, likely response, and entrant gap. Do not repeat SWOT, threats, market overview, or entry strategy. Do not write a heading. Max 170 words.",
+      "Analyze only competitors and substitutes. For each important competitor or substitute include available pricing, target customer, funding, employee size, strengths, weaknesses, positioning, and how the analyzed company can outperform. Omit unknown fields rather than inventing them. Include incumbent alternatives, switching barriers, pricing signals, likely response, and entrant gap. End with AI Executive Insight explaining the competitive decision implication. Do not repeat SWOT, threats, market overview, or entry strategy. Do not write a heading. Max 220 words.",
     maxTokens: 1400,
   },
   customerPainPoints: {
@@ -84,12 +84,12 @@ const fieldPrompts = {
   },
   opportunities: {
     prompt:
-      "Identify only market opportunities: underserved segments, channel openings, pricing gaps, partnership angles, product wedges, regulatory/timing advantages, and why incumbents may not address them. Each opportunity must include the founder implication or validation action. Do not repeat SWOT, entry strategy, or competitor analysis. Do not write a heading. Max 135 words.",
+      "Identify only market opportunities: underserved segments, channel openings, pricing gaps, partnership angles, product wedges, regulatory/timing advantages, and why incumbents may not address them. Include a compact Market Opportunity Score with Demand Score, Competition Score, Timing Score, Execution Difficulty, Revenue Potential, overall Opportunity Score 0-100, and one-line calculation explanation. Each opportunity must include the founder implication or validation action. End with AI Executive Insight explaining why the opportunity changes priority. Do not repeat SWOT, entry strategy, or competitor analysis. Do not write a heading. Max 190 words.",
     maxTokens: 1000,
   },
   threats: {
     prompt:
-      "Identify only market threats with severity, probability, leading indicator, and mitigation: competitive pressure, demand uncertainty, switching costs, regulation, platform dependency, price compression, trust barriers, data access, and distribution risk. Do not repeat SWOT or Executive Recommendation. Do not write a heading. Max 135 words.",
+      "Identify only market threats as a professional Risk Matrix. Each material threat must include Probability, Impact, Severity, Mitigation, and Early Warning Signal. Cover competitive pressure, demand uncertainty, switching costs, regulation, platform dependency, price compression, trust barriers, data access, and distribution risk. End with AI Executive Insight explaining which risk should change the entry plan first. Do not repeat SWOT or Executive Recommendation. Do not write a heading. Max 205 words.",
     maxTokens: 1000,
   },
   swotAnalysis: {
@@ -119,12 +119,12 @@ const fieldPrompts = {
   },
   kpiDashboard: {
     prompt:
-      "Create only market validation operating metrics. Include demand, conversion, willingness to pay, sales cycle, channel CAC, retention intent, competitor displacement, market pull, and target/warning thresholds. Do not repeat Unit Economics or Validation Plan except as a concise threshold. Do not write a heading. Max 135 words.",
+      "Create only market validation operating metrics. Include demand, conversion, willingness to pay, sales cycle, channel CAC, retention intent, competitor displacement, market pull, and target/warning thresholds. Add Executive KPIs with Market Readiness, Product Readiness, Go-To-Market Readiness, Investor Readiness, Scalability, and AI Readiness, each with a score and one-line explanation. Do not repeat Unit Economics or Validation Plan except as a concise threshold. Do not write a heading. Max 185 words.",
     maxTokens: 1000,
   },
   executiveRecommendation: {
     prompt:
-      "Write only final investment decision in investment-committee language. Include exactly five elements: selected decision, conviction level, the single key reason, biggest risks, and next concrete action. Select exactly one visible option and no second option: Proceed, Hold for validation, or Decline. Do not use internal recommendation codes, confidence-label jargon, or internal scoring terminology. Do not restate market overview, SWOT, entry plan, or financial dashboard. Do not write a heading. Max 95 words.",
+      "Write only final investment decision in investment-committee language. Include selected decision, the single key reason, biggest risks, and next concrete action. Replace any single conviction score with AI Confidence Breakdown: Market Confidence, Competition Confidence, Financial Confidence, Execution Confidence, Product Confidence, each with weighted explanation. Add Founder Decision Engine answering: If I were the founder, what would I do first, postpone, spend money on, and absolutely avoid? Select exactly one visible option and no second option: Proceed, Hold for validation, or Decline. Do not use internal recommendation codes or internal scoring terminology. Do not restate market overview, SWOT, entry plan, or financial dashboard. Do not write a heading. Max 210 words.",
     maxTokens: 850,
   },
   entryStrategy: {
@@ -144,17 +144,17 @@ const fieldPrompts = {
   },
   founderRoadmap: {
     prompt:
-      "Create only founder execution roadmap with Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months. Each step must depend on the prior market proof point and decision gate. Include only execution actions for market validation, competitive learning, pricing proof, and entry readiness. Do not repeat validation plan or KPI thresholds. Do not write a heading. Max 165 words.",
+      "Create only the AI Action Plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Each step must depend on the prior market proof point, decision gate, and expected business impact. Include only execution actions for market validation, competitive learning, pricing proof, and entry readiness. Do not repeat validation plan or KPI thresholds. Do not write a heading. Max 205 words.",
     maxTokens: 1200,
   },
   sourcesAssumptions: {
     prompt:
-      "List only verified sources, evidence basis, planning inputs, and missing validation data. Do not repeat market or financial analysis. Prefer real organizations over generic references, especially OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant. For each verified source use this exact compact format when possible: Organization — Source title (Year). Include the URL only when it is available from the source context. Then add one line: Confidence: High, Medium, or Low. If no verified source metadata exists, omit the citation item and write a concise planning-input note instead. Do not invent URLs, report names, publications, or fake citations. If uncertain, mark the item as a planning input instead of fabricating a citation. Do not write vague source claims such as 'industry reports' unless a specific source is named. Do not write a heading. Max 160 words.",
+      "List only verified sources, evidence basis, planning inputs, and missing validation data. Do not repeat market or financial analysis. Prefer real organizations over generic references, especially OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant. For each verified source include publisher, confidence, publication year, source type, and URL only when available. If no verified source metadata exists, omit the citation item and write a concise planning-input note instead. Do not invent URLs, report names, publications, or fake citations. If uncertain, mark the item as a planning input instead of fabricating a citation. Do not write vague source claims such as 'industry reports' unless a specific source is named. Do not write a heading. Max 190 words.",
     maxTokens: 1300,
   },
   sources: {
     prompt:
-      "List only 4-6 reliable verified sources used or most relevant for validating this market. Prefer real organizations over generic references, especially OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant. For each verified source use this exact compact format when possible: Organization — Source title (Year). Include the URL only when it is available from the source context. Then add one line for the group or source: Confidence: High, Medium, or Low. If no verified source metadata exists, omit the citation item and write a concise planning-input note instead. Do not invent URLs, report names, publications, or fake citations. If uncertain, mark the item as a planning input instead of fabricating a citation. Do not use generic phrases such as 'industry reports' as verified evidence. Do not repeat analysis. Do not write a heading.",
+      "List only 4-6 reliable verified sources used or most relevant for validating this market, then close the report with CEO Brief. Prefer real organizations over generic references, especially OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant. For each verified source include publisher, confidence, publication year, source type, and URL only when available. If no verified source metadata exists, omit the citation item and write a concise planning-input note instead. Do not invent URLs, report names, publications, or fake citations. End with CEO Brief containing top 5 priorities, top 3 mistakes to avoid, biggest opportunity, biggest hidden risk, and one-sentence executive conclusion. Do not use generic phrases such as 'industry reports' as verified evidence. Do not repeat analysis outside CEO Brief. Do not write a heading.",
     maxTokens: 1400,
   },
 } as const;
@@ -442,6 +442,128 @@ function buildCanonicalSwotSection(
   ].join("\n\n");
 }
 
+function scorePercent(score: number, maximumScore: number) {
+  return maximumScore > 0 ? Math.round((score / maximumScore) * 100) : 0;
+}
+
+function appendIntelligenceBlock(content: string, title: string, lines: string[]) {
+  const cleanLines = lines.map((line) => sanitizeMarketReportContent(line).trim()).filter(Boolean);
+
+  if (!cleanLines.length || new RegExp(`\\b${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(content)) {
+    return content;
+  }
+
+  return sanitizeMarketReportContent(`${content.trim()}\n\n${title}:\n${cleanLines.join("\n")}`);
+}
+
+function buildMarketExecutiveInsight(context: AiFinancialModelContext, focus: string) {
+  return `AI Executive Insight: ${focus} matters because the founder should validate ${context.investmentScore.nextCriticalAction.toLowerCase()} before committing spend against the ${context.metrics.som.displayValue} obtainable market and ${context.metrics.cacPayback.displayValue} payback assumption.`;
+}
+
+function buildMarketOpportunityScore(context: AiFinancialModelContext) {
+  const engine = context.investmentScore.decisionEngine;
+  const demand = scorePercent(engine.marketScore.score, engine.marketScore.maximumScore);
+  const competition = scorePercent(engine.competitionScore.score, engine.competitionScore.maximumScore);
+  const timing = Math.round((demand + scorePercent(engine.technologyScore.score, engine.technologyScore.maximumScore)) / 2);
+  const executionDifficulty = 100 - scorePercent(engine.executionScore.score, engine.executionScore.maximumScore);
+  const revenuePotential = scorePercent(engine.financialScore.score, engine.financialScore.maximumScore);
+  const overall = Math.round(
+    demand * 0.25 +
+      competition * 0.15 +
+      timing * 0.2 +
+      (100 - executionDifficulty) * 0.2 +
+      revenuePotential * 0.2
+  );
+
+  return [
+    `- Demand Score: ${demand}/100`,
+    `- Competition Score: ${competition}/100`,
+    `- Timing Score: ${timing}/100`,
+    `- Execution Difficulty: ${executionDifficulty}/100`,
+    `- Revenue Potential: ${revenuePotential}/100`,
+    `- Overall Opportunity Score: ${overall}/100 — weighted by demand 25%, competition 15%, timing 20%, execution feasibility 20%, and revenue potential 20%.`,
+  ];
+}
+
+function buildMarketConfidenceBreakdown(context: AiFinancialModelContext) {
+  const engine = context.investmentScore.decisionEngine;
+  const market = scorePercent(engine.marketScore.score, engine.marketScore.maximumScore);
+  const competition = scorePercent(engine.competitionScore.score, engine.competitionScore.maximumScore);
+  const financial = scorePercent(engine.financialScore.score, engine.financialScore.maximumScore);
+  const execution = scorePercent(engine.executionScore.score, engine.executionScore.maximumScore);
+  const product = scorePercent(engine.technologyScore.score, engine.technologyScore.maximumScore);
+  const weighted = Math.round(
+    market * 0.25 +
+      competition * 0.15 +
+      financial * 0.25 +
+      execution * 0.2 +
+      product * 0.15
+  );
+
+  return [
+    `- Market Confidence: ${market}% × 25% weight — ${engine.marketScore.explanation}`,
+    `- Competition Confidence: ${competition}% × 15% weight — ${engine.competitionScore.explanation}`,
+    `- Financial Confidence: ${financial}% × 25% weight — ${engine.financialScore.explanation}`,
+    `- Execution Confidence: ${execution}% × 20% weight — ${engine.executionScore.explanation}`,
+    `- Product Confidence: ${product}% × 15% weight — technology/product readiness affects differentiation and defensibility.`,
+    `- Weighted Confidence: ${weighted}% — weighted toward market proof and financial viability because they drive the entry decision.`,
+  ];
+}
+
+function buildMarketRiskMatrix(context: AiFinancialModelContext) {
+  const risks = context.investmentScore.topRisks.length
+    ? context.investmentScore.topRisks
+    : ["Demand validation risk", "Competitive response risk", "CAC and payback risk"];
+
+  return risks.slice(0, 4).map((risk, index) => {
+    const probability = index === 0 ? "High" : "Medium";
+    const impact = index <= 1 ? "High" : "Medium";
+    const severity = probability === "High" && impact === "High" ? "Critical" : "Material";
+
+    return `- ${risk} | Probability: ${probability} | Impact: ${impact} | Severity: ${severity} | Mitigation: validate the market signal before scaling entry spend | Early Warning Signal: conversion, pricing, or CAC misses the threshold.`;
+  });
+}
+
+function buildMarketFounderDecisionEngine(context: AiFinancialModelContext) {
+  return [
+    `- If I were the founder: I would first validate ${context.investmentScore.nextCriticalAction.toLowerCase()}.`,
+    "- What to postpone: broad geographic expansion and multi-channel acquisition until the beachhead proof is repeatable.",
+    `- Where to spend money: customer interviews, pricing tests, competitor displacement tests, and the smallest launch asset that proves ${context.metrics.som.displayValue} obtainable demand.`,
+    "- What to avoid: treating category growth as proof of obtainable revenue before willingness-to-pay evidence exists.",
+  ];
+}
+
+function buildMarketExecutiveKpis(context: AiFinancialModelContext) {
+  const engine = context.investmentScore.decisionEngine;
+
+  return [
+    `- Market Readiness: ${scorePercent(engine.marketScore.score, engine.marketScore.maximumScore)}/100 — ${engine.marketScore.explanation}`,
+    `- Product Readiness: ${scorePercent(engine.technologyScore.score, engine.technologyScore.maximumScore)}/100 — readiness depends on differentiated value and early user proof.`,
+    `- Go-To-Market Readiness: ${scorePercent(engine.executionScore.score, engine.executionScore.maximumScore)}/100 — readiness depends on channel CAC and repeatable sales learning.`,
+    `- Investor Readiness: ${context.investmentScore.confidence}/100 — confidence reflects evidence quality across market, economics, and execution.`,
+    `- Scalability: ${scorePercent(engine.financialScore.score, engine.financialScore.maximumScore)}/100 — scalability depends on ${context.metrics.grossMargin.displayValue} gross margin and ${context.metrics.cacPayback.displayValue} payback.`,
+    `- AI Readiness: ${scorePercent(engine.technologyScore.score, engine.technologyScore.maximumScore)}/100 — AI readiness matters only if it improves differentiation, cost, or speed.`,
+  ];
+}
+
+function buildMarketCeoBrief(context: AiFinancialModelContext) {
+  return [
+    "Top 5 priorities:",
+    `- ${context.investmentScore.nextCriticalAction}`,
+    `- Validate the beachhead customer for ${context.inputs.targetCustomer}.`,
+    `- Prove willingness to pay before assuming ${context.metrics.som.displayValue} obtainable demand.`,
+    `- Keep payback at or below ${context.metrics.cacPayback.displayValue}.`,
+    "- Build one repeatable channel before expanding the entry plan.",
+    "Top 3 mistakes to avoid:",
+    "- Confusing broad market growth with reachable demand.",
+    "- Underestimating incumbent/substitute response.",
+    "- Scaling acquisition before pricing and conversion are proven.",
+    `Biggest opportunity: Use a narrow entry wedge to capture the first credible share of ${context.metrics.som.displayValue}.`,
+    `Biggest hidden risk: ${context.investmentScore.topRisks[0] || "The market may look attractive before buyer urgency is proven."}`,
+    `One-sentence executive conclusion: ${context.investmentScore.recommendation} should depend on whether the founder proves the riskiest market-entry assumption before scaling capital.`,
+  ];
+}
+
 function ensureMetricLine(content: string, label: string, value: string, detail: string) {
   const normalizedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const linePattern = new RegExp(`\\b${normalizedLabel}\\s*[:\\-–—]\\s*(?:—|-|–|\\s*)(?=\\s|$)`, "i");
@@ -483,6 +605,21 @@ function ensureMarketReportQuality(
       .filter(Boolean)
       .join("\n")
   );
+  normalized.tamSamSom = appendIntelligenceBlock(
+    normalized.tamSamSom,
+    "AI Executive Insight",
+    [buildMarketExecutiveInsight(context, "Market sizing")]
+  );
+  normalized.opportunities = appendIntelligenceBlock(
+    normalized.opportunities,
+    "Market Opportunity Score",
+    buildMarketOpportunityScore(context)
+  );
+  normalized.competitorAnalysis = appendIntelligenceBlock(
+    normalized.competitorAnalysis,
+    "AI Executive Insight",
+    [buildMarketExecutiveInsight(context, "Competitive position")]
+  );
 
   for (const field of ["unitEconomics", "financialDashboard", "kpiDashboard"] as const) {
     normalized[field] = sanitizeMarketReportContent(
@@ -506,6 +643,42 @@ function ensureMarketReportQuality(
       `${confidence}%`,
       `This is a ${confidenceLabel}-conviction recommendation based on the same market, financial, and execution model.`
     )
+  );
+  normalized.executiveRecommendation = appendIntelligenceBlock(
+    normalized.executiveRecommendation,
+    "AI Confidence Breakdown",
+    buildMarketConfidenceBreakdown(context)
+  );
+  normalized.executiveRecommendation = appendIntelligenceBlock(
+    normalized.executiveRecommendation,
+    "Founder Decision Engine",
+    buildMarketFounderDecisionEngine(context)
+  );
+  normalized.threats = appendIntelligenceBlock(
+    normalized.threats,
+    "Risk Matrix",
+    buildMarketRiskMatrix(context)
+  );
+  normalized.kpiDashboard = appendIntelligenceBlock(
+    normalized.kpiDashboard,
+    "Executive KPIs",
+    buildMarketExecutiveKpis(context)
+  );
+  normalized.founderRoadmap = appendIntelligenceBlock(
+    normalized.founderRoadmap,
+    "AI Action Plan",
+    [
+      `- Immediate Actions: ${context.investmentScore.nextCriticalAction}. Expected impact: resolves the highest-risk market-entry decision.`,
+      "- Next 30 Days: validate demand, pricing, and buyer urgency. Expected impact: separates real pull from generic interest.",
+      "- Next 90 Days: prove one repeatable channel and competitor displacement signal. Expected impact: improves GTM confidence.",
+      "- Next 6 Months: confirm retention intent, payback, and operating cadence. Expected impact: protects capital efficiency.",
+      "- Next 12 Months: expand only after the entry wedge is repeatable. Expected impact: scales from evidence, not narrative.",
+    ]
+  );
+  normalized.sources = appendIntelligenceBlock(
+    normalized.sources,
+    "CEO Brief",
+    buildMarketCeoBrief(context)
   );
 
   if (

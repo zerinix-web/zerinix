@@ -321,6 +321,26 @@ const founderRoadmapSteps = [
   "12 Months",
 ];
 
+const roadmapStepAliases: Record<string, string[]> = {
+  Tomorrow: ["Tomorrow", "Immediate Actions", "Today", "First 24 Hours"],
+  "This Week": ["This Week", "Next 7 Days", "Week 1"],
+  "30 Days": ["30 Days", "Next 30 Days"],
+  "90 Days": ["90 Days", "Next 90 Days"],
+  "180 Days": ["180 Days", "6 Months", "Next 6 Months"],
+  "12 Months": ["12 Months", "Next 12 Months", "Year 1"],
+};
+
+const competitorFieldLabels = [
+  "Company",
+  "Competitor",
+  "Positioning",
+  "Strengths",
+  "Weaknesses",
+  "Competitive Threat",
+  "Threat",
+  "Target Customer",
+];
+
 const founderScoreMetrics = [
   "Overall Score",
   "Innovation",
@@ -799,6 +819,113 @@ function extractShortDescription(content: string, aliases: string[] | readonly s
     .join(" ")
     .replace(/\s*\|\s*/g, " ")
     .trim();
+}
+
+function cleanPdfExecutiveText(value: string, maxLength = 130) {
+  const cleaned = normalizePdfText(value)
+    .replace(/^[-*•]\s+/, "")
+    .replace(/^\d+[.)]\s+/, "")
+    .replace(/\*\*/g, "")
+    .replace(/\s*\|\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
+
+  const truncated = cleaned.slice(0, maxLength).replace(/\s+\S*$/, "");
+
+  return `${truncated || cleaned.slice(0, maxLength)}…`;
+}
+
+function parseInlineCompetitorField(line: string, label: string) {
+  const stopLabels = competitorFieldLabels
+    .filter((item) => item !== label)
+    .map(escapeRegExp)
+    .join("|");
+  const match = line.match(
+    new RegExp(`${escapeRegExp(label)}\\s*[:\\-–—]\\s*([\\s\\S]*?)(?=\\s+(?:${stopLabels})\\s*[:\\-–—]|$)`, "i")
+  );
+
+  return match?.[1]?.trim() || "";
+}
+
+function extractCompetitorRows(content: string) {
+  const normalized = normalizePdfText(content).replace(/\*\*/g, "");
+  const rows: Array<{
+    company: string;
+    positioning: string;
+    strengths: string;
+    weaknesses: string;
+    threat: string;
+  }> = [];
+  const tableRows = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("|") && line.endsWith("|") && !/^\|\s*-/.test(line));
+
+  if (tableRows.length > 1) {
+    const headers = tableRows[0].split("|").map((cell) => cell.trim().toLowerCase()).filter(Boolean);
+
+    tableRows.slice(1).forEach((row) => {
+      const cells = row.split("|").map((cell) => cell.trim()).filter(Boolean);
+      const read = (keys: string[]) => {
+        const index = headers.findIndex((header) => keys.some((key) => header.includes(key)));
+        return index >= 0 ? cells[index] || "" : "";
+      };
+
+      rows.push({
+        company: cleanPdfExecutiveText(read(["company", "competitor", "rakip"]), 44),
+        positioning: cleanPdfExecutiveText(read(["position", "konum"]), 88),
+        strengths: cleanPdfExecutiveText(read(["strength", "güç"]), 76),
+        weaknesses: cleanPdfExecutiveText(read(["weakness", "zayıf"]), 76),
+        threat: cleanPdfExecutiveText(read(["threat", "risk"]), 64),
+      });
+    });
+
+    return rows.filter((row) => row.company || row.positioning || row.strengths || row.weaknesses || row.threat).slice(0, 4);
+  }
+
+  normalized
+    .split("\n")
+    .map((line) => line.trim().replace(/^[-*•]\s+/, ""))
+    .filter((line) => line.length > 14)
+    .forEach((line) => {
+      const company =
+        parseInlineCompetitorField(line, "Company") ||
+        parseInlineCompetitorField(line, "Competitor") ||
+        line.match(/^([A-Z0-9][A-Za-z0-9 .&()/-]{1,42})\s*[:—–-]\s+/)?.[1]?.trim() ||
+        "";
+      const positioning = parseInlineCompetitorField(line, "Positioning") || parseInlineCompetitorField(line, "Target Customer");
+      const strengths = parseInlineCompetitorField(line, "Strengths");
+      const weaknesses = parseInlineCompetitorField(line, "Weaknesses");
+      const threat = parseInlineCompetitorField(line, "Competitive Threat") || parseInlineCompetitorField(line, "Threat");
+
+      if (company || positioning || strengths || weaknesses || threat) {
+        rows.push({
+          company: cleanPdfExecutiveText(company || "Market participant", 44),
+          positioning: cleanPdfExecutiveText(positioning || line, 88),
+          strengths: cleanPdfExecutiveText(strengths || "Validation required", 76),
+          weaknesses: cleanPdfExecutiveText(weaknesses || "Validation required", 76),
+          threat: cleanPdfExecutiveText(threat || "Validation required", 64),
+        });
+      }
+    });
+
+  return rows.slice(0, 4);
+}
+
+function extractRoadmapAction(content: string, step: string) {
+  const aliases = roadmapStepAliases[step] || [step];
+  const allAliases = Object.values(roadmapStepAliases).flat();
+  const snippet =
+    extractAliasedSectionSnippet(content, aliases, allAliases) ||
+    aliases.map((alias) => extractKeywordInsight(content, [alias])).find(Boolean) ||
+    "";
+  const bullet = extractBullets(snippet, step)[0] || snippet;
+
+  return cleanPdfExecutiveText(bullet || "Validation required", 92);
 }
 
 function extractKpiValue(content: string, label: string) {
@@ -1735,18 +1862,78 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           return 48;
         }
 
+        if (normalizedTitle.includes("competitor")) {
+          const rows = extractCompetitorRows(content);
+          const columns = [
+            { label: "Company", width: bodyWidth * 0.19 },
+            { label: "Positioning", width: bodyWidth * 0.27 },
+            { label: "Strengths", width: bodyWidth * 0.2 },
+            { label: "Weaknesses", width: bodyWidth * 0.2 },
+            { label: "Threat", width: bodyWidth * 0.14 },
+          ];
+          const headerHeight = 8;
+          const rowHeight = 15;
+          let x = bodyX;
+
+          pdf.setFillColor("#101113");
+          pdf.setDrawColor("#27272a");
+          pdf.roundedRect(bodyX, visualY, bodyWidth, headerHeight + Math.max(1, rows.length) * rowHeight, 3, 3, "FD");
+          pdf.setFontSize(5.8);
+          pdf.setTextColor("#5eead4");
+          columns.forEach((column) => {
+            pdf.text(column.label.toUpperCase(), x + 2, visualY + 5.2, { maxWidth: column.width - 4 });
+            x += column.width;
+          });
+
+          if (rows.length === 0) {
+            pdf.setFontSize(6.2);
+            pdf.setTextColor("#a1a1aa");
+            pdf.text("VALIDATION REQUIRED: competitor records were not structured enough for table rendering.", bodyX + 3, visualY + 14, {
+              maxWidth: bodyWidth - 6,
+            });
+            return headerHeight + rowHeight + 4;
+          }
+
+          rows.forEach((row, rowIndex) => {
+            const rowY = visualY + headerHeight + rowIndex * rowHeight;
+            const values = [row.company, row.positioning, row.strengths, row.weaknesses, row.threat];
+            let cellX = bodyX;
+
+            pdf.setDrawColor("#27272a");
+            pdf.line(bodyX, rowY, bodyX + bodyWidth, rowY);
+            values.forEach((value, cellIndex) => {
+              const width = columns[cellIndex]?.width ?? 20;
+              pdf.setFontSize(cellIndex === 0 ? 6.3 : 5.5);
+              pdf.setTextColor(cellIndex === 0 ? "#f4f4f5" : "#d4d4d8");
+              pdf.text(wrapPdfText(value || "Validation required", width - 4).slice(0, 2), cellX + 2, rowY + 4.7, {
+                lineHeightFactor: 1.1,
+                maxWidth: width - 4,
+              });
+              cellX += width;
+            });
+          });
+
+          return headerHeight + Math.max(1, rows.length) * rowHeight + 4;
+        }
+
         if (normalizedTitle.includes("roadmap")) {
           const stepWidth = (bodyWidth - 10) / 6;
           founderRoadmapSteps.forEach((step, index) => {
             const x = bodyX + index * (stepWidth + 2);
             pdf.setFillColor("#18181b");
             pdf.setDrawColor("#27272a");
-            pdf.roundedRect(x, visualY, stepWidth, 9, 2, 2, "FD");
+            pdf.roundedRect(x, visualY, stepWidth, 28, 2, 2, "FD");
             pdf.setFontSize(6.2);
             pdf.setTextColor("#ccfbf1");
             pdf.text(step, x + 2, visualY + 5.7, { maxWidth: stepWidth - 4 });
+            pdf.setFontSize(5.2);
+            pdf.setTextColor("#a1a1aa");
+            pdf.text(wrapPdfText(extractRoadmapAction(content, step), stepWidth - 4).slice(0, 4), x + 2, visualY + 11, {
+              lineHeightFactor: 1.1,
+              maxWidth: stepWidth - 4,
+            });
           });
-          return 12;
+          return 31;
         }
 
         if (normalizedTitle.includes("porter")) {
@@ -1977,6 +2164,15 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           return 26;
         }
 
+        if (normalizedTitle.includes("competitor")) {
+          const rows = extractCompetitorRows(section.content);
+          return 8 + Math.max(1, rows.length) * 15 + 4;
+        }
+
+        if (normalizedTitle.includes("roadmap")) {
+          return 31;
+        }
+
         if (normalizedTitle.includes("kpi")) {
           return 62;
         }
@@ -1989,7 +2185,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           return 48;
         }
 
-        return /founder score|scenario|roadmap|porter|kpi|risk|unit economics/i.test(section.title)
+        return /founder score|scenario|roadmap|competitor|porter|kpi|risk|unit economics/i.test(section.title)
           ? 22
           : 0;
       };

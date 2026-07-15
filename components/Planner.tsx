@@ -1564,6 +1564,29 @@ const founderRoadmapSteps = [
   "12 Months",
 ];
 
+const roadmapStepAliases: Record<string, string[]> = {
+  Tomorrow: ["Tomorrow", "Immediate Actions", "Today", "First 24 Hours"],
+  "This Week": ["This Week", "Next 7 Days", "Week 1"],
+  "30 Days": ["30 Days", "Next 30 Days"],
+  "90 Days": ["90 Days", "Next 90 Days"],
+  "180 Days": ["180 Days", "6 Months", "Next 6 Months"],
+  "12 Months": ["12 Months", "Next 12 Months", "Year 1"],
+};
+
+const competitorFieldLabels = [
+  "Company",
+  "Positioning",
+  "Strengths",
+  "Weaknesses",
+  "Competitive Threat",
+  "Threat",
+  "Pricing",
+  "Target Customer",
+  "Funding",
+  "Employee Size",
+  "How ZERINIX can outperform",
+];
+
 function extractMetricValue(content: string, label: string) {
   const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = content.match(
@@ -1606,6 +1629,183 @@ function formatMetricCardValue(value: string) {
     .replace(/(\d)\.\s+(\d)(\s*[kKmMbB%])?/g, "$1.$2$3")
     .replace(/(\d),\s+(\d{3})/g, "$1,$2")
     .trim();
+}
+
+function cleanExecutiveText(value: string, maxLength = 180) {
+  const cleaned = normalizePdfText(value)
+    .replace(/^[-*•]\s+/, "")
+    .replace(/^\d+[.)]\s+/, "")
+    .replace(/\*\*/g, "")
+    .replace(/\s*\|\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
+
+  const truncated = cleaned.slice(0, maxLength).replace(/\s+\S*$/, "");
+
+  return `${truncated || cleaned.slice(0, maxLength)}…`;
+}
+
+function extractMeaningfulBullets(content: string, limit = 4) {
+  const normalized = normalizePdfText(content);
+  const bulletLines = normalized
+    .split("\n")
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^[-*•]\s+/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .replace(/\*\*/g, "")
+        .trim()
+    )
+    .filter((line) => line.length > 16 && !isOrphanBulletText(line));
+
+  if (bulletLines.length > 0) {
+    return bulletLines.slice(0, limit).map((line) => cleanExecutiveText(line, 150));
+  }
+
+  return normalized
+    .replace(/\*\*/g, "")
+    .split(/(?<=[.!?])\s+/)
+    .map((line) => cleanExecutiveText(line, 150))
+    .filter((line) => line.length > 16 && !isOrphanBulletText(line))
+    .slice(0, limit);
+}
+
+function extractMarketLevelDescription(content: string, label: string) {
+  const value = extractMarketSizeValue(content, label);
+  const snippet = extractSectionSnippet(content, label) || extractKeywordInsight(content, [label]);
+  const description = snippet
+    .replace(new RegExp(`^${escapeRegExp(label)}\\s*[:\\-–—]?`, "i"), "")
+    .replace(value, "")
+    .replace(/\b(?:formula|source|confidence|assumption)\b\s*[:\-–—].*$/i, "")
+    .trim();
+
+  return cleanExecutiveText(description || `${label} validation requires verified market data.`, 140);
+}
+
+function getReportMarketRows(content: string) {
+  return [
+    {
+      label: "TAM",
+      name: "Total Addressable Market",
+      value: extractMarketSizeValue(content, "TAM") || "NO DATA",
+      description: extractMarketLevelDescription(content, "TAM"),
+      tone: "from-teal-200 to-cyan-100",
+    },
+    {
+      label: "SAM",
+      name: "Serviceable Available Market",
+      value: extractMarketSizeValue(content, "SAM") || "NO DATA",
+      description: extractMarketLevelDescription(content, "SAM"),
+      tone: "from-teal-400 to-teal-200",
+    },
+    {
+      label: "SOM",
+      name: "Serviceable Obtainable Market",
+      value: extractMarketSizeValue(content, "SOM") || "VALIDATION REQUIRED",
+      description: extractMarketLevelDescription(content, "SOM"),
+      tone: "from-emerald-400 to-teal-300",
+    },
+  ];
+}
+
+function parseInlineField(line: string, label: string) {
+  const labels = competitorFieldLabels
+    .filter((item) => item !== label)
+    .map(escapeRegExp)
+    .join("|");
+  const match = line.match(
+    new RegExp(`${escapeRegExp(label)}\\s*[:\\-–—]\\s*([\\s\\S]*?)(?=\\s+(?:${labels})\\s*[:\\-–—]|$)`, "i")
+  );
+
+  return match?.[1]?.trim() || "";
+}
+
+function extractCompetitorRows(content: string) {
+  const normalized = normalizePdfText(content).replace(/\*\*/g, "");
+  const tableRows = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("|") && line.endsWith("|") && !/^\|\s*-/.test(line));
+
+  if (tableRows.length > 1) {
+    const headers = tableRows[0]
+      .split("|")
+      .map((cell) => cell.trim().toLowerCase())
+      .filter(Boolean);
+
+    return tableRows
+      .slice(1)
+      .map((row) => row.split("|").map((cell) => cell.trim()).filter(Boolean))
+      .map((cells) => {
+        const read = (keys: string[]) => {
+          const index = headers.findIndex((header) => keys.some((key) => header.includes(key)));
+          return index >= 0 ? cells[index] || "" : "";
+        };
+
+        return {
+          company: read(["company", "competitor", "rakip"]),
+          positioning: read(["position", "konum"]),
+          strengths: read(["strength", "güç"]),
+          weaknesses: read(["weakness", "zayıf"]),
+          threat: read(["threat", "risk"]),
+        };
+      })
+      .filter((row) => row.company || row.positioning || row.strengths || row.weaknesses || row.threat)
+      .slice(0, 5);
+  }
+
+  const lines = normalized
+    .split("\n")
+    .map((line) => line.trim().replace(/^[-*•]\s+/, ""))
+    .filter((line) => line.length > 14);
+  const rows: Array<{
+    company: string;
+    positioning: string;
+    strengths: string;
+    weaknesses: string;
+    threat: string;
+  }> = [];
+
+  lines.forEach((line) => {
+    const company =
+      parseInlineField(line, "Company") ||
+      parseInlineField(line, "Competitor") ||
+      line.match(/^([A-Z0-9][A-Za-z0-9 .&()/-]{1,42})\s*[:—–-]\s+/)?.[1]?.trim() ||
+      "";
+    const positioning = parseInlineField(line, "Positioning") || parseInlineField(line, "Target Customer");
+    const strengths = parseInlineField(line, "Strengths");
+    const weaknesses = parseInlineField(line, "Weaknesses");
+    const threat = parseInlineField(line, "Competitive Threat") || parseInlineField(line, "Threat");
+
+    if (company || positioning || strengths || weaknesses || threat) {
+      rows.push({
+        company: cleanExecutiveText(company || "Market participant", 52),
+        positioning: cleanExecutiveText(positioning || line, 120),
+        strengths: cleanExecutiveText(strengths || extractKeywordInsight(line, ["strength", "advantage"]) || "VALIDATION REQUIRED", 110),
+        weaknesses: cleanExecutiveText(weaknesses || extractKeywordInsight(line, ["weakness", "gap"]) || "VALIDATION REQUIRED", 110),
+        threat: cleanExecutiveText(threat || extractKeywordInsight(line, ["threat", "risk"]) || "VALIDATION REQUIRED", 90),
+      });
+    }
+  });
+
+  return rows.slice(0, 5);
+}
+
+function extractRoadmapAction(content: string, step: string) {
+  const aliases = roadmapStepAliases[step] || [step];
+  const allAliases = Object.values(roadmapStepAliases).flat();
+  const snippet =
+    extractAliasedSectionSnippet(content, aliases, allAliases) ||
+    aliases.map((alias) => extractKeywordInsight(content, [alias])).find(Boolean) ||
+    "";
+  const action = extractMeaningfulBullets(snippet, 1)[0] || cleanExecutiveText(snippet, 150);
+
+  return action || "VALIDATION REQUIRED";
 }
 
 function compactPdfMetricValue(value: string) {
@@ -2405,48 +2605,49 @@ function PremiumSectionVisual({ section }: { section: ReportSection }) {
   const field = section.field;
 
   if (field === "tamSamSom") {
-    const bars = [
-      { label: "TAM", aliases: ["TAM"], width: "100%", color: "from-teal-200 to-cyan-100" },
-      { label: "SAM", aliases: ["SAM"], width: "62%", color: "from-teal-400 to-teal-200" },
-      { label: "SOM", aliases: ["SOM"], width: "28%", color: "from-emerald-400 to-teal-300" },
-    ];
+    const rows = getReportMarketRows(section.content);
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.12),transparent_30%),rgba(255,255,255,0.025)] p-5">
         <div className="mb-5 flex items-end justify-between gap-4">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
-              Market Sizing Blocks
+              Market Sizing Stack
             </p>
-            <p className="mt-2 text-sm text-zinc-400">TAM, SAM and SOM shown as investable opportunity layers.</p>
+            <p className="mt-2 text-sm text-zinc-400">
+              TAM, SAM and SOM separated into decision-ready opportunity layers.
+            </p>
           </div>
           <div className="hidden h-16 w-16 rounded-full border border-teal-200/20 bg-teal-200/10 sm:block" />
         </div>
-        <div className="space-y-4">
-          {bars.map((bar) => {
-            const value = extractMetricValueFromAliases(section.content, bar.aliases);
-
-            return (
-              <div key={bar.label} className="grid items-center gap-3 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(7rem,auto)]">
-                <div className="rounded-2xl border border-white/10 bg-black/35 p-3 text-center">
-                  <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">
-                    {bar.label}
+        <div className="grid gap-3 lg:grid-cols-3">
+          {rows.map((row, index) => (
+            <div key={row.label} className="min-h-44 rounded-3xl border border-white/10 bg-black/35 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
+                    {row.label}
                   </p>
+                  <p className="mt-1 text-sm font-medium text-zinc-300">{row.name}</p>
                 </div>
-                <div className="h-14 rounded-2xl border border-white/10 bg-zinc-950 p-1.5">
-                  <div
-                    className={`h-full rounded-[1.1rem] bg-gradient-to-r ${bar.color} shadow-lg shadow-teal-950/20`}
-                    style={{ width: bar.width }}
-                  />
-                </div>
-                {value ? (
-                  <p className="min-w-0 truncate whitespace-nowrap rounded-2xl border border-white/10 bg-black/35 px-3 py-2 text-right text-sm font-semibold text-white">
-                    {formatMetricCardValue(value)}
-                  </p>
-                ) : null}
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-400">
+                  Layer {index + 1}
+                </span>
               </div>
-            );
-          })}
+              <p className="mt-5 truncate whitespace-nowrap text-3xl font-semibold tracking-tight text-white">
+                {row.value}
+              </p>
+              <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className={`h-full rounded-full bg-gradient-to-r ${row.tone}`}
+                  style={{ width: `${[100, 68, 36][index]}%` }}
+                />
+              </div>
+              <p className="mt-4 line-clamp-3 text-sm leading-6 text-zinc-400">
+                {row.description}
+              </p>
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -2631,28 +2832,55 @@ if (field === "swotAnalysis") {
   }
 
   if (field === "competitorAnalysis" || field === "competitorLandscape") {
+    const competitors = extractCompetitorRows(section.content);
+
     return (
-      <div className="mb-5 rounded-[2rem] border border-white/10 bg-white/[0.025] p-5">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
-          Competitive Positioning Map
-        </p>
-        <div className="relative mt-5 h-64 rounded-3xl border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.035),rgba(94,234,212,0.07))]">
-          <div className="absolute left-1/2 top-0 h-full w-px bg-white/10" />
-          <div className="absolute left-0 top-1/2 h-px w-full bg-white/10" />
-          {[
-            ["Incumbents", "24%", "32%"],
-            ["Specialists", "70%", "30%"],
-            ["ZERINIX Thesis", "58%", "62%"],
-            ["Low-end", "28%", "75%"],
-          ].map(([label, left, top], index) => (
-            <div key={label} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left, top }}>
-              <div className={`h-4 w-4 rounded-full ${index === 2 ? "bg-teal-200" : "bg-white/35"}`} />
-              <p className="mt-2 whitespace-nowrap rounded-full border border-white/10 bg-black/65 px-2 py-1 text-xs font-semibold text-zinc-200">
-                {label}
-              </p>
-            </div>
-          ))}
+      <div className="mb-5 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.025]">
+        <div className="border-b border-white/10 p-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+            Competitive Intelligence Table
+          </p>
+          <p className="mt-2 text-sm text-zinc-400">
+            Positioning, strengths, weaknesses and threat level from the generated analysis.
+          </p>
         </div>
+        {competitors.length > 0 ? (
+          <div className="overflow-x-auto">
+            <div className="min-w-[760px]">
+              <div className="grid grid-cols-[1fr_1.35fr_1.15fr_1.15fr_0.9fr] gap-px bg-white/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                {["Company", "Positioning", "Strengths", "Weaknesses", "Threat"].map((label) => (
+                  <div key={label} className="bg-zinc-950/80 px-4 py-3">
+                    {label}
+                  </div>
+                ))}
+              </div>
+              <div className="grid gap-px bg-white/10">
+                {competitors.map((row, index) => (
+                  <div
+                    key={`${row.company}-${index}`}
+                    className="grid grid-cols-[1fr_1.35fr_1.15fr_1.15fr_0.9fr] bg-black/35 text-sm leading-6 text-zinc-300"
+                  >
+                    <div className="px-4 py-4 font-semibold text-white">{row.company}</div>
+                    <div className="px-4 py-4">{row.positioning || "VALIDATION REQUIRED"}</div>
+                    <div className="px-4 py-4">{row.strengths}</div>
+                    <div className="px-4 py-4">{row.weaknesses}</div>
+                    <div className="px-4 py-4">
+                      <span className="rounded-full border border-teal-200/20 bg-teal-200/10 px-2.5 py-1 text-xs font-semibold text-teal-100">
+                        {row.threat}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex min-h-36 items-center justify-center p-6 text-center">
+            <p className="max-w-md text-sm leading-6 text-zinc-400">
+              VALIDATION REQUIRED: competitor records were not structured enough to render a comparison table.
+            </p>
+          </div>
+        )}
       </div>
     );
   }
@@ -2854,7 +3082,18 @@ if (field === "swotAnalysis") {
           <div className="rounded-3xl border border-white/10 bg-black/30 p-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Next Actions Checklist</p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {["Validate demand", "Protect runway", "Refine ICP", "Measure conversion"].map((action) => (
+              {(extractMeaningfulBullets(
+                extractAliasedSectionSnippet(section.content, ["Next Action", "Next Critical Action", "Immediate Actions"], ["Main Risk", "Confidence", "Investment Needed"]) ||
+                  extractKeywordInsight(section.content, ["next action", "critical action", "validate"]),
+                4
+              ).length > 0
+                ? extractMeaningfulBullets(
+                    extractAliasedSectionSnippet(section.content, ["Next Action", "Next Critical Action", "Immediate Actions"], ["Main Risk", "Confidence", "Investment Needed"]) ||
+                      extractKeywordInsight(section.content, ["next action", "critical action", "validate"]),
+                    4
+                  )
+                : ["VALIDATION REQUIRED"]
+              ).map((action) => (
                 <div key={action} className="flex items-center gap-2 text-sm text-zinc-300">
                   <span className="h-4 w-4 rounded-full border border-teal-200/40 bg-teal-200/10" />
                   {action}
@@ -2870,10 +3109,18 @@ if (field === "swotAnalysis") {
   if (field === "founderRoadmap" || field === "roadmap306090") {
     return (
       <div className="mb-5 overflow-x-auto rounded-[2rem] border border-white/10 bg-[linear-gradient(90deg,rgba(94,234,212,0.08),rgba(255,255,255,0.02))] p-5">
-        <div className="relative grid min-w-[840px] grid-cols-6 gap-4">
+        <div className="mb-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+            Founder Action Timeline
+          </p>
+          <p className="mt-2 text-sm text-zinc-400">
+            Time-bound priorities converted into an execution-ready roadmap.
+          </p>
+        </div>
+        <div className="relative grid min-w-[960px] grid-cols-6 gap-4">
         <div className="absolute left-8 right-8 top-8 h-px bg-gradient-to-r from-teal-200/10 via-teal-200/50 to-teal-200/10" />
         {founderRoadmapSteps.map((step, index) => (
-          <div key={step} className="relative rounded-[1.4rem] border border-white/10 bg-black/45 p-4">
+          <div key={step} className="relative min-h-48 rounded-[1.4rem] border border-white/10 bg-black/45 p-4">
             <div className="flex flex-col gap-3">
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-200 text-xs font-bold text-black">
                 {index + 1}
@@ -2882,6 +3129,9 @@ if (field === "swotAnalysis") {
               <span className="w-fit rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
                 {index < 2 ? "Priority" : index < 4 ? "Build" : "Scale"}
               </span>
+              <p className="line-clamp-5 text-xs leading-5 text-zinc-400">
+                {extractRoadmapAction(section.content, step)}
+              </p>
             </div>
           </div>
         ))}

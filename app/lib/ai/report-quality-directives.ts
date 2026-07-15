@@ -7,6 +7,12 @@ const sharedDecisionSupportDirectives = [
   "SWOT must render as four clearly labeled groups: Strengths, Weaknesses, Opportunities, and Threats. Each group needs distinct, non-empty, decision-relevant bullets.",
   "Separate opportunities from risks: opportunities are openings to exploit; risks are obstacles with a leading indicator and mitigation path.",
   "Recommendations must be action-oriented: decision, conviction/confidence, key reason, main risk, and next concrete action.",
+  "Every major analytical section must include a compact AI Executive Insight line that explains why the section changes the CEO/founder decision. This must be specific, not a generic summary.",
+  "Confidence must be decomposed where relevant into Market, Competition, Financial, Execution, and Product confidence. Explain the weighted logic using report findings; do not present a single unexplained score.",
+  "Competitor analysis must name only credible competitors or substitutes available from the input/model context. For each important competitor, include pricing, target customer, funding, employee size, strengths, weaknesses, positioning, and how the analyzed company can outperform when available; omit unknown fields instead of inventing them.",
+  "Risk analysis must use a professional risk matrix: probability, impact, severity, mitigation, and early warning signal for each material risk.",
+  "Roadmap/action sections must be written as an AI Action Plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Every action needs expected business impact.",
+  "End the final available report section with a concise CEO Brief: top 5 priorities, top 3 mistakes to avoid, biggest opportunity, biggest hidden risk, and one-sentence executive conclusion.",
 ];
 
 const businessPlanDirectives = [

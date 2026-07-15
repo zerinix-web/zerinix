@@ -68,12 +68,12 @@ const planPrompts = {
   },
   marketOpportunity: {
     prompt:
-      "Analyze only market opportunity without calculating TAM/SAM/SOM. Cover category, demand drivers, reachable initial niche, expansion path, venture-scale potential, and validation gates before significant investment. Do not repeat ICP details, competitor mapping, product description, pricing, go-to-market tactics, or market-sizing numbers owned by TAM/SAM/SOM. Max 155 words.",
+      "Analyze only market opportunity without calculating TAM/SAM/SOM. Cover category, demand drivers, reachable initial niche, expansion path, venture-scale potential, and validation gates before significant investment. Include a compact Market Opportunity Score with Demand Score, Competition Score, Timing Score, Execution Difficulty, Revenue Potential, overall Opportunity Score 0-100, and a one-line calculation explanation. End with AI Executive Insight explaining why this opportunity matters for the founder decision. Do not repeat ICP details, competitor mapping, product description, pricing, go-to-market tactics, or market-sizing numbers owned by TAM/SAM/SOM. Max 190 words.",
     maxTokens: 800,
   },
   competitorLandscape: {
     prompt:
-      "Map only competitors and substitutes. Include direct competitors, indirect substitutes, incumbent response, positioning map, switching barriers, and the gap for a new entrant. Do not repeat market sizing, SWOT, risks, GTM, or product description. Max 170 words.",
+      "Map only competitors and substitutes. For each important competitor or substitute include available pricing, target customer, funding, employee size, strengths, weaknesses, positioning, and how the analyzed company can outperform. Omit unknown fields rather than inventing them. Include incumbent response, switching barriers, and the gap for a new entrant. End with AI Executive Insight explaining the competitive decision implication. Do not repeat market sizing, SWOT, risks, GTM, or product description. Max 220 words.",
     maxTokens: 850,
   },
   businessModel: {
@@ -128,17 +128,17 @@ const planPrompts = {
   },
   kpiDashboard: {
     prompt:
-      "Create only the executive KPI Dashboard. Include the 6-8 operating metrics that prove whether the plan is working: acquisition, activation, retention, pipeline, product quality, learning velocity, and revenue signal. Use target threshold and warning threshold only. Do not include CAC, LTV, Gross Margin, Payback, ARR, MRR, Burn, or Runway; those belong to Unit Economics and Financial Dashboard. Do not include roadmap tasks or market claims. Max 135 words.",
+      "Create only the executive KPI Dashboard. Include the 6-8 operating metrics that prove whether the plan is working: acquisition, activation, retention, pipeline, product quality, learning velocity, and revenue signal. Add an Executive KPI block with scores and one-line explanations for Market Readiness, Product Readiness, Go-To-Market Readiness, Investor Readiness, Scalability, and AI Readiness. Use target threshold and warning threshold only. Do not include CAC, LTV, Gross Margin, Payback, ARR, MRR, Burn, or Runway; those belong to Unit Economics and Financial Dashboard. Do not include roadmap tasks or market claims. Max 185 words.",
     maxTokens: 850,
   },
   executiveRecommendation: {
     prompt:
-      "Write only final investment decision. Include exactly five elements: selected decision, confidence level from the Investment Scoring Engine, the single key reason, biggest risks, and the next concrete action. Select exactly one option and no second option: GO, WAIT, or PASS. Confidence must align with evidence quality and the Investment Scoring Engine. Do not quote the user's prompt, internal instructions, or analysis question. Do not restate the business model, market summary, SWOT, roadmap, or financial dashboard. Max 95 words.",
+      "Write only final investment decision. Include selected decision, the single key reason, biggest risks, and the next concrete action. Replace any single confidence score with an AI Confidence Breakdown: Market Confidence, Competition Confidence, Financial Confidence, Execution Confidence, Product Confidence, each with a weighted explanation. Add Founder Decision Engine answering: If I were the founder, what would I do first, postpone, spend money on, and absolutely avoid? Select exactly one option and no second option: GO, WAIT, or PASS. Confidence must align with evidence quality and the Investment Scoring Engine. Do not quote the user's prompt, internal instructions, or analysis question. Do not restate the business model, market summary, SWOT, roadmap, or financial dashboard. Max 210 words.",
     maxTokens: 650,
   },
   risks: {
     prompt:
-      "Write only risks. Include severity, probability, leading indicator, and mitigation for the top market, product, distribution, pricing, regulatory, funding, and execution risks where relevant. Do not repeat SWOT threats, scenario cases, or recommendation wording. Max 155 words.",
+      "Write only risks as a professional Risk Matrix. Each material risk must include Probability, Impact, Severity, Mitigation, and Early Warning Signal. Cover market, product, distribution, pricing, regulatory, funding, and execution risks where relevant. End with AI Executive Insight explaining which risk should change capital allocation first. Do not repeat SWOT threats, scenario cases, or recommendation wording. Max 210 words.",
     maxTokens: 800,
   },
   kpis: {
@@ -148,12 +148,12 @@ const planPrompts = {
   },
   roadmap306090: {
     prompt:
-      "Create only the 30-60-90 style milestone timeline with four dependent horizons: 30 Days, 90 Days, 180 Days, and 12 Months. Each horizon must contain milestones and decision gates only. Do not repeat GTM, sales process, KPIs, or founder execution detail from Founder Roadmap. Max 165 words.",
+      "Create only the AI Action Plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Each horizon must contain milestones, decision gates, and expected business impact. Do not repeat GTM, sales process, KPIs, or founder execution detail from Founder Roadmap. Max 190 words.",
     maxTokens: 900,
   },
   founderRoadmap: {
     prompt:
-      "Create only the founder execution plan with Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months. Each step must depend on the prior proof point. Focus on founder actions, evidence to collect, owner mindset, and go/no-go threshold. Do not repeat timeline milestones, GTM strategy, or KPIs. Max 185 words.",
+      "Create only the founder execution plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Each step must depend on the prior proof point and explain expected business impact. Include what the founder should do first, what to postpone, where to spend money, and what to avoid if it belongs here. Do not repeat timeline milestones, GTM strategy, or KPIs. Max 210 words.",
     maxTokens: 950,
   },
   financialAssumptions: {
@@ -163,12 +163,12 @@ const planPrompts = {
   },
   founderScore: {
     prompt:
-      "Write only founder evaluation. Include Overall Score plus sub-scores for Innovation, Market Timing, Competition, Capital Intensity, Execution Difficulty, Revenue Potential, and Risk Level. Use 0-100 scores with one concise reason each. Do not repeat recommendation, roadmap, or risk section. Max 140 words.",
+      "Write only executive readiness evaluation. Include Overall Score plus sub-scores for Innovation, Market Timing, Competition, Capital Intensity, Execution Difficulty, Revenue Potential, and Risk Level. Add Executive KPIs with Market Readiness, Product Readiness, Go-To-Market Readiness, Investor Readiness, Scalability, and AI Readiness, each with a score and concise explanation. Use 0-100 scores. Do not repeat recommendation, roadmap, or risk section. Max 190 words.",
     maxTokens: 800,
   },
   sourcesAssumptions: {
     prompt:
-      "List only citation metadata and evidence classification. Deduplicate sources. For each source, include title, publisher, publication year, URL if available, and confidence. Do not invent URLs, report names, or publishers. If no verified source is available, omit the source instead of writing placeholder text. Then separately list User-provided facts, AI assumptions, and Market-derived estimates used by the report. Do not repeat financial or strategic analysis. Do not write vague source claims such as 'industry reports' unless a specific source is named. Max 180 words.",
+      "List citation metadata and evidence classification, then close the report with CEO Brief. Deduplicate sources. For each source include title, publisher, publication year, URL if available, confidence, and source type. Do not invent URLs, report names, or publishers. If no verified source is available, omit the source instead of writing placeholder text. Separately list User-provided facts, AI assumptions, and Market-derived estimates used by the report. End with CEO Brief containing top 5 priorities, top 3 mistakes to avoid, biggest opportunity, biggest hidden risk, and one-sentence executive conclusion. Do not write vague source claims such as 'industry reports' unless a specific source is named. Max 260 words.",
     maxTokens: 1050,
   },
 } as const;
@@ -822,6 +822,136 @@ function buildCanonicalFounderScore(context: AiFinancialModelContext) {
   ].join("\n");
 }
 
+function scorePercent(score: number, maximumScore: number) {
+  return maximumScore > 0 ? Math.round((score / maximumScore) * 100) : 0;
+}
+
+function appendIntelligenceBlock(content: string, title: string, lines: string[]) {
+  const cleanLines = lines.map((line) => line.trim()).filter(Boolean);
+
+  if (!cleanLines.length || new RegExp(`\\b${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(content)) {
+    return content;
+  }
+
+  return `${content.trim()}\n\n${title}:\n${cleanLines.join("\n")}`.trim();
+}
+
+function buildExecutiveInsight(context: AiFinancialModelContext, focus: string) {
+  return `AI Executive Insight: ${focus} matters because the founder should allocate capital only after ${context.investmentScore.nextCriticalAction.toLowerCase()} is validated against the ${context.metrics.cacPayback.displayValue} payback and ${context.metrics.runway.displayValue} runway.`;
+}
+
+function buildConfidenceBreakdown(context: AiFinancialModelContext) {
+  const engine = context.investmentScore.decisionEngine;
+  const market = scorePercent(engine.marketScore.score, engine.marketScore.maximumScore);
+  const competition = scorePercent(engine.competitionScore.score, engine.competitionScore.maximumScore);
+  const financial = scorePercent(engine.financialScore.score, engine.financialScore.maximumScore);
+  const execution = scorePercent(engine.executionScore.score, engine.executionScore.maximumScore);
+  const product = scorePercent(engine.technologyScore.score, engine.technologyScore.maximumScore);
+  const weighted = Math.round(
+    market * 0.25 +
+      competition * 0.15 +
+      financial * 0.25 +
+      execution * 0.2 +
+      product * 0.15
+  );
+
+  return [
+    `- Market Confidence: ${market}% × 25% weight — ${engine.marketScore.explanation}`,
+    `- Competition Confidence: ${competition}% × 15% weight — ${engine.competitionScore.explanation}`,
+    `- Financial Confidence: ${financial}% × 25% weight — ${engine.financialScore.explanation}`,
+    `- Execution Confidence: ${execution}% × 20% weight — ${engine.executionScore.explanation}`,
+    `- Product Confidence: ${product}% × 15% weight — ${engine.technologyScore.explanation}`,
+    `- Weighted Confidence: ${weighted}% — weighted toward market proof and financial viability because those most affect investability.`,
+  ];
+}
+
+function buildOpportunityScore(context: AiFinancialModelContext) {
+  const engine = context.investmentScore.decisionEngine;
+  const demand = scorePercent(engine.marketScore.score, engine.marketScore.maximumScore);
+  const competition = scorePercent(engine.competitionScore.score, engine.competitionScore.maximumScore);
+  const timing = Math.round((demand + scorePercent(engine.technologyScore.score, engine.technologyScore.maximumScore)) / 2);
+  const executionDifficulty = 100 - scorePercent(engine.executionScore.score, engine.executionScore.maximumScore);
+  const revenuePotential = scorePercent(engine.financialScore.score, engine.financialScore.maximumScore);
+  const overall = Math.round(
+    demand * 0.25 +
+      competition * 0.15 +
+      timing * 0.2 +
+      (100 - executionDifficulty) * 0.2 +
+      revenuePotential * 0.2
+  );
+
+  return [
+    `- Demand Score: ${demand}/100`,
+    `- Competition Score: ${competition}/100`,
+    `- Timing Score: ${timing}/100`,
+    `- Execution Difficulty: ${executionDifficulty}/100`,
+    `- Revenue Potential: ${revenuePotential}/100`,
+    `- Overall Opportunity Score: ${overall}/100 — calculated from demand 25%, competition 15%, timing 20%, execution feasibility 20%, and revenue potential 20%.`,
+  ];
+}
+
+function buildFounderDecisionEngine(context: AiFinancialModelContext) {
+  return [
+    `- If I were the founder: I would focus first on ${context.investmentScore.nextCriticalAction.toLowerCase()}.`,
+    `- Do first: validate willingness to pay and acquisition cost before expanding scope.`,
+    `- Postpone: broad hiring, multi-channel GTM, and non-core product expansion until payback evidence improves.`,
+    `- Spend money on: customer discovery, conversion experiments, and the smallest proof asset that confirms ${context.metrics.som.displayValue} obtainable demand.`,
+    `- Absolutely avoid: scaling paid acquisition before CAC, retention, and payback are proven.`,
+  ];
+}
+
+function buildRiskMatrix(context: AiFinancialModelContext) {
+  const risks = context.investmentScore.topRisks.length
+    ? context.investmentScore.topRisks
+    : ["Demand validation risk", "CAC and payback risk", "Execution sequencing risk"];
+
+  return risks.slice(0, 4).map((risk, index) => {
+    const probability = index === 0 ? "High" : index === 1 ? "Medium" : "Medium";
+    const impact = index === 0 ? "High" : "Medium";
+    const severity = probability === "High" && impact === "High" ? "Critical" : "Material";
+
+    return `- ${risk} | Probability: ${probability} | Impact: ${impact} | Severity: ${severity} | Mitigation: run a focused validation sprint before scaling spend | Early Warning Signal: KPI miss against payback, conversion, or retention threshold.`;
+  });
+}
+
+function buildExecutiveKpis(context: AiFinancialModelContext) {
+  const engine = context.investmentScore.decisionEngine;
+
+  return [
+    `- Market Readiness: ${scorePercent(engine.marketScore.score, engine.marketScore.maximumScore)}/100 — ${engine.marketScore.explanation}`,
+    `- Product Readiness: ${scorePercent(engine.technologyScore.score, engine.technologyScore.maximumScore)}/100 — product and technology assumptions still need proof through user behavior.`,
+    `- Go-To-Market Readiness: ${scorePercent(engine.executionScore.score, engine.executionScore.maximumScore)}/100 — execution quality depends on repeatable acquisition and sales learning velocity.`,
+    `- Investor Readiness: ${context.investmentScore.confidence}/100 — confidence reflects financial evidence quality and validation depth.`,
+    `- Scalability: ${scorePercent(engine.financialScore.score, engine.financialScore.maximumScore)}/100 — scalability depends on ${context.metrics.grossMargin.displayValue} gross margin and ${context.metrics.cacPayback.displayValue} payback.`,
+    `- AI Readiness: ${scorePercent(engine.technologyScore.score, engine.technologyScore.maximumScore)}/100 — score reflects whether technology leverage can improve differentiation or operating leverage.`,
+  ];
+}
+
+function buildCeoBrief(context: AiFinancialModelContext) {
+  const priorities = [
+    context.investmentScore.nextCriticalAction,
+    `Validate ${context.inputs.targetCustomer} willingness to pay.`,
+    `Protect ${context.metrics.grossMargin.displayValue} gross-margin assumptions.`,
+    `Keep CAC payback at or below ${context.metrics.cacPayback.displayValue}.`,
+    `Use ${context.metrics.runway.displayValue} runway as the capital allocation constraint.`,
+  ];
+  const mistakes = [
+    "Scaling paid acquisition before repeatable conversion evidence.",
+    "Treating directional market sizing as verified demand.",
+    "Adding product scope before the beachhead use case is proven.",
+  ];
+
+  return [
+    "Top 5 priorities:",
+    ...priorities.map((item) => `- ${item}`),
+    "Top 3 mistakes to avoid:",
+    ...mistakes.map((item) => `- ${item}`),
+    `Biggest opportunity: Convert the focused ${context.metrics.som.displayValue} obtainable market into validated early revenue before expanding.`,
+    `Biggest hidden risk: ${context.investmentScore.topRisks[0] || "The model may look investable before demand and payback evidence are proven."}`,
+    `One-sentence executive conclusion: ${context.investmentScore.recommendation} is justified only if the founder proves the highest-risk assumption before scaling capital.`,
+  ];
+}
+
 function buildCanonicalSwot(context: AiFinancialModelContext, parsed: Record<string, unknown>) {
   const score = context.investmentScore;
   const opportunity =
@@ -894,6 +1024,57 @@ function normalizeFullPlanReport(
   normalized.founderScore = buildCanonicalFounderScore(context);
   normalized.swotAnalysis = buildCanonicalSwot(context, parsed);
   normalized.financialAssumptions = buildCanonicalFinancialAssumptions(context);
+  normalized.marketOpportunity = appendIntelligenceBlock(
+    normalized.marketOpportunity,
+    "Market Opportunity Score",
+    buildOpportunityScore(context)
+  );
+  normalized.competitorLandscape = appendIntelligenceBlock(
+    normalized.competitorLandscape,
+    "AI Executive Insight",
+    [buildExecutiveInsight(context, "Competitive positioning")]
+  );
+  normalized.tamSamSom = appendIntelligenceBlock(
+    normalized.tamSamSom,
+    "AI Executive Insight",
+    [buildExecutiveInsight(context, "Market sizing")]
+  );
+  normalized.risks = appendIntelligenceBlock(
+    normalized.risks,
+    "Risk Matrix",
+    buildRiskMatrix(context)
+  );
+  normalized.executiveRecommendation = appendIntelligenceBlock(
+    normalized.executiveRecommendation,
+    "AI Confidence Breakdown",
+    buildConfidenceBreakdown(context)
+  );
+  normalized.executiveRecommendation = appendIntelligenceBlock(
+    normalized.executiveRecommendation,
+    "Founder Decision Engine",
+    buildFounderDecisionEngine(context)
+  );
+  normalized.kpiDashboard = appendIntelligenceBlock(
+    normalized.kpiDashboard,
+    "Executive KPIs",
+    buildExecutiveKpis(context)
+  );
+  normalized.roadmap306090 = appendIntelligenceBlock(
+    normalized.roadmap306090,
+    "AI Action Plan",
+    [
+      `- Immediate Actions: ${context.investmentScore.nextCriticalAction}. Expected impact: resolves the highest-risk decision gate.`,
+      `- Next 30 Days: prove customer pain, ICP, and pricing signal. Expected impact: turns assumptions into evidence.`,
+      `- Next 90 Days: validate repeatable acquisition and delivery. Expected impact: improves execution confidence.`,
+      `- Next 6 Months: confirm retention, payback, and operating cadence. Expected impact: protects capital efficiency.`,
+      `- Next 12 Months: scale only if thresholds are met. Expected impact: avoids premature growth spend.`,
+    ]
+  );
+  normalized.sourcesAssumptions = appendIntelligenceBlock(
+    normalized.sourcesAssumptions,
+    "CEO Brief",
+    buildCeoBrief(context)
+  );
 
   return normalized;
 }
