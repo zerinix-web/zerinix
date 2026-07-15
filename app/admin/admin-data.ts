@@ -79,6 +79,8 @@ export type AdminDashboardData = {
     costPerUser: number | null;
     costPerReport: number | null;
     costRanges: {
+      today: number | null;
+      thisMonth: number | null;
       last24h: number | null;
       last7d: number | null;
       last30d: number | null;
@@ -95,6 +97,7 @@ export type AdminDashboardData = {
       label: string;
       thresholdUsd: number | null;
       currentUsd: number | null;
+      remainingUsd: number | null;
       status: "configured" | "not_configured";
     }>;
     modelUsage: Array<{
@@ -207,6 +210,10 @@ export type AdminCostControlData = {
   totalTokensThisMonth: number;
   estimatedCostToday: number | null;
   estimatedCostThisMonth: number | null;
+  remainingDailyBudget: number | null;
+  remainingWeeklyBudget: number | null;
+  remainingMonthlyBudget: number | null;
+  remainingPerUserBudget: number | null;
   averageCostPerConversation: number | null;
   averageCostPerReport: number | null;
   failedAiRequests: number;
@@ -264,6 +271,8 @@ type OpenAiCostCenterData = {
   modelUsage: OpenAiModelUsageSummary[];
   dailyCostHistory: AdminChartSeries[];
   costRanges: {
+    today: number | null;
+    thisMonth: number | null;
     last24h: number | null;
     last7d: number | null;
     last30d: number | null;
@@ -681,6 +690,8 @@ function buildMockAdminDashboardData(dateRange: AdminDateRange): AdminDashboardD
       costPerUser: null,
       costPerReport: null,
       costRanges: {
+        today: null,
+        thisMonth: null,
         last24h: null,
         last7d: null,
         last30d: null,
@@ -694,7 +705,7 @@ function buildMockAdminDashboardData(dateRange: AdminDateRange): AdminDashboardD
         { feature: "Other AI features", costUsd: null, status: "NOT CONNECTED" },
       ],
       costAlerts: buildOpenAiCostAlerts(
-        { last24h: null, last7d: null, last30d: null, allTime: null },
+        { today: null, thisMonth: null, last24h: null, last7d: null, last30d: null, allTime: null },
         0,
         []
       ),
@@ -735,6 +746,10 @@ function buildMockAdminDashboardData(dateRange: AdminDateRange): AdminDashboardD
       totalTokensThisMonth: 0,
       estimatedCostToday: null,
       estimatedCostThisMonth: null,
+      remainingDailyBudget: null,
+      remainingWeeklyBudget: null,
+      remainingMonthlyBudget: null,
+      remainingPerUserBudget: null,
       averageCostPerConversation: null,
       averageCostPerReport: null,
       failedAiRequests: 0,
@@ -1622,7 +1637,11 @@ function buildOpenAiCostAlerts(
       id: "openai-cost-daily",
       label: "Daily limit",
       thresholdUsd: dailyThreshold,
-      currentUsd: ranges.last24h,
+      currentUsd: ranges.today,
+      remainingUsd:
+        dailyThreshold !== null && ranges.today !== null
+          ? roundUsd(Math.max(0, dailyThreshold - ranges.today))
+          : null,
       status: dailyThreshold ? "configured" as const : "not_configured" as const,
     },
     {
@@ -1630,13 +1649,21 @@ function buildOpenAiCostAlerts(
       label: "Weekly limit",
       thresholdUsd: weeklyThreshold,
       currentUsd: ranges.last7d,
+      remainingUsd:
+        weeklyThreshold !== null && ranges.last7d !== null
+          ? roundUsd(Math.max(0, weeklyThreshold - ranges.last7d))
+          : null,
       status: weeklyThreshold ? "configured" as const : "not_configured" as const,
     },
     {
       id: "openai-cost-monthly",
       label: "Monthly limit",
       thresholdUsd: monthlyThreshold,
-      currentUsd: ranges.last30d,
+      currentUsd: ranges.thisMonth,
+      remainingUsd:
+        monthlyThreshold !== null && ranges.thisMonth !== null
+          ? roundUsd(Math.max(0, monthlyThreshold - ranges.thisMonth))
+          : null,
       status: monthlyThreshold ? "configured" as const : "not_configured" as const,
     },
     {
@@ -1644,6 +1671,10 @@ function buildOpenAiCostAlerts(
       label: "Per-user cost threshold",
       thresholdUsd: perUserThreshold,
       currentUsd: totalUsers > 0 ? maxUserCost : null,
+      remainingUsd:
+        perUserThreshold !== null && maxUserCost !== null
+          ? roundUsd(Math.max(0, perUserThreshold - maxUserCost))
+          : null,
       status: perUserThreshold ? "configured" as const : "not_configured" as const,
     },
   ];
@@ -1651,6 +1682,8 @@ function buildOpenAiCostAlerts(
 
 function disconnectedOpenAiCostCenter(detail: string): OpenAiCostCenterData {
   const emptyRanges = {
+    today: null,
+    thisMonth: null,
     last24h: null,
     last7d: null,
     last30d: null,
@@ -1693,7 +1726,7 @@ async function loadOpenAiCostCenter(input: {
   const selectedStart = new Date(input.range.fromIso);
 
   try {
-    const [selectedUsage, selectedCosts, costs24h, costs7d, costs30d, costsAllTime] =
+    const [selectedUsage, selectedCosts, costsToday, costsThisMonth, costs24h, costs7d, costs30d, costsAllTime] =
       await Promise.all([
         fetchOpenAiOrganizationData(OPENAI_ORGANIZATION_USAGE_URL, key, {
           start_time: unixSeconds(selectedStart),
@@ -1708,6 +1741,18 @@ async function loadOpenAiCostCenter(input: {
           bucket_width: "1d",
           group_by: "model",
           limit: 180,
+        }),
+        fetchOpenAiOrganizationData(OPENAI_ORGANIZATION_COSTS_URL, key, {
+          start_time: unixSeconds(startOfUtcDay()),
+          end_time: unixSeconds(now),
+          bucket_width: "1d",
+          limit: 7,
+        }),
+        fetchOpenAiOrganizationData(OPENAI_ORGANIZATION_COSTS_URL, key, {
+          start_time: unixSeconds(startOfUtcMonth()),
+          end_time: unixSeconds(now),
+          bucket_width: "1d",
+          limit: 45,
         }),
         fetchOpenAiOrganizationData(OPENAI_ORGANIZATION_COSTS_URL, key, {
           start_time: unixSeconds(startOfUtcHour(-23)),
@@ -1741,6 +1786,8 @@ async function loadOpenAiCostCenter(input: {
       buildOpenAiModelCostMap(selectedCosts)
     );
     const costRanges = {
+      today: roundUsd(sumOpenAiCostBuckets(costsToday)),
+      thisMonth: roundUsd(sumOpenAiCostBuckets(costsThisMonth)),
       last24h: roundUsd(sumOpenAiCostBuckets(costs24h)),
       last7d: roundUsd(sumOpenAiCostBuckets(costs7d)),
       last30d: roundUsd(sumOpenAiCostBuckets(costs30d)),
@@ -1933,8 +1980,16 @@ function calculateCostControl(input: {
   return {
     totalTokensToday: input.official?.status === "LIVE" ? input.official.totalTokens : sumTokens(todayUsage),
     totalTokensThisMonth: input.official?.status === "LIVE" ? input.official.totalTokens : sumTokens(monthUsage),
-    estimatedCostToday: input.official?.costRanges.last24h ?? (todayUsage.length ? todayCost : null),
-    estimatedCostThisMonth: input.official?.costRanges.last30d ?? (monthUsage.length ? monthCost : null),
+    estimatedCostToday: input.official?.costRanges.today ?? (todayUsage.length ? todayCost : null),
+    estimatedCostThisMonth: input.official?.costRanges.thisMonth ?? (monthUsage.length ? monthCost : null),
+    remainingDailyBudget:
+      input.official?.costAlerts.find((alert) => alert.id === "openai-cost-daily")?.remainingUsd ?? null,
+    remainingWeeklyBudget:
+      input.official?.costAlerts.find((alert) => alert.id === "openai-cost-weekly")?.remainingUsd ?? null,
+    remainingMonthlyBudget:
+      input.official?.costAlerts.find((alert) => alert.id === "openai-cost-monthly")?.remainingUsd ?? null,
+    remainingPerUserBudget:
+      input.official?.costAlerts.find((alert) => alert.id === "openai-cost-user")?.remainingUsd ?? null,
     averageCostPerConversation: input.aiConversations > 0
       ? (input.official?.costRanges.last30d ?? monthCost) / input.aiConversations
       : null,
@@ -1985,9 +2040,9 @@ function calculateFinancials(input: {
       input.totalUsers > 0 ? Number((input.aiCost / input.totalUsers).toFixed(4)) : null,
     averageCostPerReport:
       input.reportsGenerated > 0 ? Number((input.aiCost / input.reportsGenerated).toFixed(4)) : null,
-    dailyAiCost: input.openAiCostRanges?.last24h ?? costSince(today),
+    dailyAiCost: input.openAiCostRanges?.today ?? costSince(today),
     weeklyAiCost: input.openAiCostRanges?.last7d ?? costSince(week),
-    monthlyAiCost: input.openAiCostRanges?.last30d ?? costSince(month),
+    monthlyAiCost: input.openAiCostRanges?.thisMonth ?? costSince(month),
     allTimeAiCost: input.openAiCostRanges?.allTime ?? null,
   };
 }
@@ -2087,6 +2142,8 @@ function calculateOpenAiAnalytics(input: {
     costPerReport:
       input.reportsGenerated > 0 ? Number((cost / input.reportsGenerated).toFixed(4)) : null,
     costRanges: {
+      today: null,
+      thisMonth: null,
       last24h: null,
       last7d: null,
       last30d: null,
@@ -2095,7 +2152,7 @@ function calculateOpenAiAnalytics(input: {
     dailyCostHistory: [],
     featureCosts: buildOpenAiFeatureCosts(input.usage, cost, "ESTIMATED"),
     costAlerts: buildOpenAiCostAlerts(
-      { last24h: null, last7d: null, last30d: null, allTime: null },
+      { today: null, thisMonth: null, last24h: null, last7d: null, last30d: null, allTime: null },
       input.totalUsers,
       input.usage
     ),
