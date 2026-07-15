@@ -5943,6 +5943,23 @@ export default function Planner({
     }
   }
 
+  async function attributeReportUsage(reportId: string, reportRequestId: string) {
+    if (!reportId || !reportRequestId) {
+      return;
+    }
+
+    try {
+      await fetch("/api/reports/attribute-usage", {
+        method: "POST",
+        keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportId, reportRequestId }),
+      });
+    } catch (error) {
+      console.error("[report usage attribution failed]", error);
+    }
+  }
+
   async function readStreamingSectionJson(
     response: Response,
     onEvent: (event: ReportStreamEvent) => void,
@@ -6383,6 +6400,7 @@ export default function Planner({
         expectedSectionCount: outputFields.length,
       });
       setActiveReportId(savedReportId);
+      await attributeReportUsage(savedReportId, reportRequestId);
       void notifyReportReady(savedReportId);
     } catch (error) {
       const errorMessage = getReportGenerationErrorMessage(error, copy.retryError);
@@ -6392,7 +6410,7 @@ export default function Planner({
       setReportProgress(0);
       setCurrentReportSectionName("Report failed");
       setWorkflowCompletedSteps(0);
-      await saveGeneratedReport({
+      const failedReportId = await saveGeneratedReport({
         title: copy.planTitle,
         promptText: submittedPrompt,
         reportType: "business_plan",
@@ -6401,6 +6419,7 @@ export default function Planner({
         sections: [],
         expectedSectionCount: outputFields.length,
       });
+      await attributeReportUsage(failedReportId, reportRequestId);
       updateAssistantMessage(
         assistantMessageId,
         errorMessage,
@@ -6587,6 +6606,7 @@ export default function Planner({
         expectedSectionCount: outputFields.length,
       });
       setActiveReportId(savedReportId);
+      await attributeReportUsage(savedReportId, reportRequestId);
       void notifyReportReady(savedReportId);
     } catch (error) {
       const errorMessage = getReportGenerationErrorMessage(
@@ -6599,7 +6619,7 @@ export default function Planner({
       setReportProgress(0);
       setCurrentReportSectionName("Report failed");
       setWorkflowCompletedSteps(0);
-      await saveGeneratedReport({
+      const failedReportId = await saveGeneratedReport({
         title: copy.marketTitle,
         promptText: submittedPrompt,
         reportType: "market_analysis",
@@ -6608,6 +6628,7 @@ export default function Planner({
         sections: [],
         expectedSectionCount: outputFields.length,
       });
+      await attributeReportUsage(failedReportId, reportRequestId);
       updateAssistantMessage(
         assistantMessageId,
         errorMessage,

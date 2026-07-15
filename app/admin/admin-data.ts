@@ -1253,7 +1253,7 @@ async function loadRecentUsage(range: AdminDateRange) {
   const { data, count, error } = await serviceClient
     .from("ai_usage_events")
     .select(
-      "id,user_id,endpoint,report_field,model,status,prompt_tokens,completion_tokens,total_tokens,estimated_cost_usd,cache_hit,metadata,created_at",
+      "id,user_id,endpoint,report_field,report_id,conversation_id,report_request_id,model,status,prompt_tokens,completion_tokens,total_tokens,estimated_cost_usd,cache_hit,metadata,created_at",
       { count: "exact" }
     )
     .gte("created_at", range.fromIso)
@@ -1682,10 +1682,13 @@ function readUsageReportId(row: Record<string, unknown>) {
   const metadata = readUsageMetadata(row);
 
   return (
+    readString(row.report_id) ||
     readString(metadata.report_id) ||
     readString(metadata.reportId) ||
     readString(metadata.saved_report_id) ||
-    readString(metadata.savedReportId)
+    readString(metadata.savedReportId) ||
+    readString(metadata.report_uuid) ||
+    readString(metadata.reportUuid)
   );
 }
 

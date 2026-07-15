@@ -39,6 +39,9 @@ type UsageEventInput = {
   userId: string;
   endpoint: string;
   reportField?: string;
+  reportId?: string | null;
+  conversationId?: string | null;
+  reportRequestId?: string | null;
   promptHash: string;
   model: string;
   planTier: PlanTier;
@@ -63,6 +66,10 @@ type CacheInput = {
   estimatedCostUsd: number;
   expiresInDays?: number;
 };
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
 
 export const dailyAiLimitMessage =
   "Daily AI usage limit reached. Please try again tomorrow or upgrade your plan.";
@@ -401,10 +408,33 @@ export async function recordAiUsage(
   supabase: SupabaseClient,
   input: UsageEventInput
 ) {
+  const metadata = input.metadata ?? {};
+  const metadataReportId =
+    readMetadataString(metadata, "report_id") ||
+    readMetadataString(metadata, "reportId") ||
+    readMetadataString(metadata, "saved_report_id") ||
+    readMetadataString(metadata, "savedReportId");
+  const metadataConversationId =
+    readMetadataString(metadata, "conversation_id") ||
+    readMetadataString(metadata, "conversationId");
+  const metadataReportRequestId =
+    readMetadataString(metadata, "report_request_id") ||
+    readMetadataString(metadata, "reportRequestId");
+  const reportId =
+    input.reportId ?? (metadataReportId || null);
+  const rawConversationId = input.conversationId ?? (metadataConversationId || null);
+  const conversationId = rawConversationId && isUuid(rawConversationId)
+    ? rawConversationId
+    : null;
+  const reportRequestId =
+    input.reportRequestId ?? (metadataReportRequestId || null);
   const { error } = await supabase.from("ai_usage_events").insert({
     user_id: input.userId,
     endpoint: input.endpoint,
     report_field: input.reportField ?? null,
+    report_id: reportId,
+    conversation_id: conversationId,
+    report_request_id: reportRequestId,
     prompt_hash: input.promptHash,
     model: input.model,
     plan_tier: input.planTier,
@@ -415,7 +445,7 @@ export async function recordAiUsage(
     cache_hit: input.cacheHit,
     status: input.status ?? "completed",
     response_time_ms: input.responseTimeMs,
-    metadata: input.metadata ?? {},
+    metadata,
   });
 
   if (error) {
