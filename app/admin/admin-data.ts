@@ -1041,7 +1041,7 @@ function toAdminUserRow(
   aggregates: Awaited<ReturnType<typeof loadUserAggregates>>
 ): AdminUserRow {
   const displayName = readString(user.user_metadata?.full_name);
-  const plan = aggregates.planMap.get(user.id) || "free";
+  const plan = aggregates.planMap.get(user.id) || "Unassigned";
 
   return {
     id: user.id,
@@ -1050,7 +1050,7 @@ function toAdminUserRow(
     registeredAt: user.created_at || "",
     lastSignInAt: user.last_sign_in_at || "",
     plan,
-    subscriptionStatus: plan === "free" ? "Not configured" : "Active",
+    subscriptionStatus: plan === "Unassigned" || plan === "free" ? "Not configured" : "Active",
     accountStatus: aggregates.statusMap.get(user.id) || "active",
     reportCount: aggregates.reportCountMap.get(user.id) || 0,
     conversationCount: aggregates.conversationCountMap.get(user.id) || 0,
@@ -1380,11 +1380,11 @@ async function loadReportStatusSummary(range: AdminDateRange) {
   };
 }
 
-async function loadBillingSummary() {
+async function loadBillingSummary(authUsers: User[]) {
   const serviceClient = createServiceRoleClient();
   const { data, error } = await serviceClient
     .from("user_billing_profiles")
-    .select("plan_tier");
+    .select("user_id,plan_tier");
   const map = new Map<string, number>();
 
   if (error) {
@@ -1394,26 +1394,49 @@ async function loadBillingSummary() {
     });
 
     return {
-      planDistribution: [] as Array<{ label: string; value: number }>,
+      planDistribution: authUsers.length
+        ? [{ label: "Unassigned", value: authUsers.length }]
+        : [] as Array<{ label: string; value: number }>,
       activePaidSubscriptions: 0,
       status: "ERROR" as AdminMetricStatus,
-      detail: "Billing profiles could not be queried.",
+      detail: authUsers.length
+        ? "Billing profiles could not be queried; showing auth users as Unassigned."
+        : "Billing profiles could not be queried.",
     };
   }
 
+  const assignedUserIds = new Set<string>();
+
   (data || []).forEach((row) => {
+    const userId = readString(row.user_id);
     const label = normalizePlan(row.plan_tier);
 
+    if (userId) {
+      assignedUserIds.add(userId);
+    }
     map.set(label, (map.get(label) || 0) + 1);
   });
 
+  const unassignedUsers = authUsers.filter((user) => !assignedUserIds.has(user.id)).length;
+
+  if (unassignedUsers > 0) {
+    map.set("Unassigned", (map.get("Unassigned") || 0) + unassignedUsers);
+  }
+
+  const planDistribution = [...map.entries()].map(([label, value]) => ({ label, value }));
+  const activePaidSubscriptions = planDistribution
+    .filter((item) => !["free", "unassigned", "unknown"].includes(item.label.toLowerCase()))
+    .reduce((sum, item) => sum + item.value, 0);
+
   return {
-    planDistribution: [...map.entries()].map(([label, value]) => ({ label, value })),
-    activePaidSubscriptions: 0,
-    status: (data || []).length ? ("LIVE" as const) : ("NO DATA" as const),
-    detail: (data || []).length
-      ? "Read from user_billing_profiles."
-      : "No billing profile records exist yet.",
+    planDistribution,
+    activePaidSubscriptions,
+    status: planDistribution.length ? ("LIVE" as const) : ("NO DATA" as const),
+    detail: planDistribution.length
+      ? unassignedUsers > 0
+        ? "Read from Supabase Auth users and user_billing_profiles; users without plan records are shown as Unassigned."
+        : "Read from user_billing_profiles."
+      : "No auth users or billing profile records exist yet.",
   };
 }
 
@@ -1677,7 +1700,7 @@ function parseOpenAiUsageBuckets(
     outputTokens,
     cachedTokens,
     totalTokens,
-    modelUsage: modelUsage.sort((a, b) => b.costUsd - a.costUsd),
+    modelUsage: modelUsage.sort((a, b) => b.tokens - a.tokens),
   };
 }
 
@@ -2241,7 +2264,7 @@ function calculateOpenAiAnalytics(input: {
   totalUsers: number;
   official?: OpenAiCostCenterData;
 }) {
-  if (input.official?.status === "LIVE") {
+  if (input.official?.status === "LIVE" && input.usage.length === 0) {
     const cost = input.official.costUsd;
 
     return {
@@ -2319,7 +2342,7 @@ function calculateOpenAiAnalytics(input: {
     modelMap.set(model, summary);
   });
 
-  const modelUsage = [...modelMap.values()].sort((a, b) => b.costUsd - a.costUsd);
+  const modelUsage = [...modelMap.values()].sort((a, b) => b.tokens - a.tokens);
 
   return {
     inputTokens,
@@ -2330,14 +2353,14 @@ function calculateOpenAiAnalytics(input: {
     costPerUser: input.totalUsers > 0 ? Number((cost / input.totalUsers).toFixed(4)) : null,
     costPerReport: null,
     costRanges: {
-      today: null,
-      thisMonth: null,
-      last24h: null,
-      last7d: null,
-      last30d: null,
-      allTime: null,
+      today: input.official?.costRanges.today ?? null,
+      thisMonth: input.official?.costRanges.thisMonth ?? null,
+      last24h: input.official?.costRanges.last24h ?? null,
+      last7d: input.official?.costRanges.last7d ?? null,
+      last30d: input.official?.costRanges.last30d ?? null,
+      allTime: input.official?.costRanges.allTime ?? null,
     },
-    dailyCostHistory: [],
+    dailyCostHistory: input.official?.dailyCostHistory ?? [],
     featureCosts: buildOpenAiFeatureCosts(
       input.usage,
       cost,
@@ -3033,7 +3056,7 @@ export async function loadAdminDashboardData(input?: {
     loadUserGrowth(),
     loadReportDistribution(dateRange),
     loadReportStatusSummary(dateRange),
-    loadBillingSummary(),
+    loadBillingSummary(authData.users),
   ]);
   const revenueValue = revenueSummary.value;
   const planDistribution = billingSummary.planDistribution;
