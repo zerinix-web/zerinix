@@ -2,7 +2,6 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight, Eye, Search } from "lucide-react";
 import { AdminShell } from "../AdminShell";
 import { loadAdminUsers } from "../admin-data";
-import { updateUserAccountStatus, updateUserPlan } from "../actions";
 
 type UsersPageProps = {
   searchParams: Promise<{
@@ -81,18 +80,15 @@ export default async function AdminUsersPage({ searchParams }: UsersPageProps) {
           <table className="w-full min-w-[1360px] text-left text-sm">
             <thead className="border-b border-white/10 bg-black/25 text-xs uppercase tracking-[0.18em] text-zinc-500">
               <tr>
-                <th className="px-5 py-4">User</th>
-                <th className="px-5 py-4">Registered</th>
-                <th className="px-5 py-4">Last sign-in</th>
+                <th className="px-5 py-4">Email</th>
+                <th className="px-5 py-4">Role</th>
                 <th className="px-5 py-4">Plan</th>
-                <th className="px-5 py-4">Subscription</th>
                 <th className="px-5 py-4">Status</th>
                 <th className="px-5 py-4">Reports</th>
-                <th className="px-5 py-4">Conversations</th>
-                <th className="px-5 py-4">AI requests</th>
-                <th className="px-5 py-4">Tokens</th>
-                <th className="px-5 py-4">Errors</th>
-                <th className="px-5 py-4">AI cost</th>
+                <th className="px-5 py-4">Total tokens</th>
+                <th className="px-5 py-4">Total AI cost</th>
+                <th className="px-5 py-4">Registration date</th>
+                <th className="px-5 py-4">Last activity</th>
                 <th className="px-5 py-4">Actions</th>
               </tr>
             </thead>
@@ -105,17 +101,14 @@ export default async function AdminUsersPage({ searchParams }: UsersPageProps) {
                       {user.displayName || "No display name"}
                     </span>
                   </td>
-                  <td className="px-5 py-4">{formatDate(user.registeredAt)}</td>
-                  <td className="px-5 py-4">{formatDate(user.lastSignInAt)}</td>
+                  <td className="px-5 py-4 capitalize">{user.role}</td>
                   <td className="px-5 py-4 capitalize">{user.plan}</td>
-                  <td className="px-5 py-4">{user.subscriptionStatus}</td>
                   <td className="px-5 py-4 capitalize">{user.accountStatus}</td>
                   <td className="px-5 py-4">{user.reportCount}</td>
-                  <td className="px-5 py-4">{user.conversationCount}</td>
-                  <td className="px-5 py-4">{user.aiRequestCount}</td>
                   <td className="px-5 py-4">{user.totalTokens.toLocaleString("en-US")}</td>
-                  <td className="px-5 py-4">{user.failedRequestCount}</td>
                   <td className="px-5 py-4">{formatCurrency(user.estimatedAiCostUsd)}</td>
+                  <td className="px-5 py-4">{formatDate(user.registeredAt)}</td>
+                  <td className="px-5 py-4">{formatDate(user.lastSignInAt)}</td>
                   <td className="px-5 py-4">
                     <div className="flex flex-wrap items-center gap-2">
                       <Link
@@ -125,42 +118,6 @@ export default async function AdminUsersPage({ searchParams }: UsersPageProps) {
                         <Eye className="h-3.5 w-3.5 text-teal-200" />
                         View
                       </Link>
-                      <form action={updateUserAccountStatus}>
-                        <input type="hidden" name="target_user_id" value={user.id} />
-                        <input
-                          type="hidden"
-                          name="status"
-                          value={user.accountStatus === "suspended" ? "active" : "suspended"}
-                        />
-                        <button
-                          type="submit"
-                          className="h-9 rounded-xl border border-white/10 bg-black/25 px-3 text-xs font-medium text-zinc-200 transition hover:border-teal-300/30"
-                        >
-                          {user.accountStatus === "suspended" ? "Activate" : "Suspend"}
-                        </button>
-                      </form>
-                      <form action={updateUserPlan} className="flex items-center gap-2">
-                        <input type="hidden" name="target_user_id" value={user.id} />
-                        <label className="sr-only" htmlFor={`plan-${user.id}`}>
-                          Change plan
-                        </label>
-                        <select
-                          id={`plan-${user.id}`}
-                          name="plan"
-                          defaultValue={user.plan}
-                          className="h-9 rounded-xl border border-white/10 bg-black/60 px-2 text-xs text-white outline-none"
-                        >
-                          <option value="free">Free</option>
-                          <option value="pro">Pro</option>
-                          <option value="business">Business</option>
-                        </select>
-                        <button
-                          type="submit"
-                          className="h-9 rounded-xl border border-teal-300/20 bg-teal-300/10 px-3 text-xs font-medium text-teal-100 transition hover:border-teal-300/40"
-                        >
-                          Save
-                        </button>
-                      </form>
                     </div>
                   </td>
                 </tr>

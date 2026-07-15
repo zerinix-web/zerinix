@@ -17,6 +17,7 @@ export type AdminUserContext = {
 export type AdminUserRow = {
   id: string;
   email: string;
+  role: string;
   displayName: string;
   registeredAt: string;
   lastSignInAt: string;
@@ -591,6 +592,7 @@ function buildMockAdminUsers(): AdminUserRow[] {
     {
       id: "00000000-0000-4000-8000-000000000001",
       email: "founder@zerinix.local",
+      role: "admin",
       displayName: "Local Founder",
       registeredAt: new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000).toISOString(),
       lastSignInAt: new Date(now.getTime() - 40 * 60 * 1000).toISOString(),
@@ -607,6 +609,7 @@ function buildMockAdminUsers(): AdminUserRow[] {
     {
       id: "00000000-0000-4000-8000-000000000002",
       email: "operator@zerinix.local",
+      role: "user",
       displayName: "Local Operator",
       registeredAt: new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000).toISOString(),
       lastSignInAt: new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString(),
@@ -623,6 +626,7 @@ function buildMockAdminUsers(): AdminUserRow[] {
     {
       id: "00000000-0000-4000-8000-000000000003",
       email: "reviewer@zerinix.local",
+      role: "user",
       displayName: "Local Reviewer",
       registeredAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString(),
       lastSignInAt: "",
@@ -1042,10 +1046,18 @@ function toAdminUserRow(
 ): AdminUserRow {
   const displayName = readString(user.user_metadata?.full_name);
   const plan = aggregates.planMap.get(user.id) || "Unassigned";
+  const appRole = readString(user.app_metadata?.role);
+  const appRoles = Array.isArray(user.app_metadata?.roles)
+    ? user.app_metadata.roles
+        .map((item) => readString(item))
+        .filter(Boolean)
+    : [];
+  const role = appRole || appRoles[0] || "user";
 
   return {
     id: user.id,
     email: user.email || "No email",
+    role,
     displayName,
     registeredAt: user.created_at || "",
     lastSignInAt: user.last_sign_in_at || "",
