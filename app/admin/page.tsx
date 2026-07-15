@@ -6,13 +6,13 @@ import {
   CircleDollarSign,
   DollarSign,
   Gauge,
-  RefreshCw,
   TrendingDown,
   TrendingUp,
   WalletCards,
   type LucideIcon,
 } from "lucide-react";
 import { AdminAnimatedValue, type AdminAnimatedValueFormat } from "./AdminAnimatedValue";
+import { AdminDashboardRefresh } from "./AdminDashboardRefresh";
 import { AdminDateRangeControls } from "./AdminDateRangeControls";
 import { AdminExports } from "./AdminExports";
 import { AdminShell } from "./AdminShell";
@@ -157,19 +157,6 @@ function trendClass(direction: Trend["direction"]) {
   }
 
   return "border-white/10 bg-white/[0.04] text-zinc-400";
-}
-
-function buildRefreshHref(data: AdminDashboardData) {
-  const params = new URLSearchParams({ range: data.dateRange.key });
-
-  if (data.dateRange.key === "custom") {
-    params.set("from", data.dateRange.fromIso.slice(0, 10));
-    params.set("to", data.dateRange.toIso.slice(0, 10));
-  }
-
-  params.set("refresh", String(Date.now()));
-
-  return `/admin?${params.toString()}`;
 }
 
 function Sparkline({
@@ -610,7 +597,6 @@ export default async function AdminDashboardPage({
     to: params.to,
   });
   const data = await loadAdminDashboardData({ range: dateRange });
-  const refreshHref = buildRefreshHref(data);
   const profitSeries =
     data.financials.revenue === null
       ? []
@@ -688,13 +674,7 @@ export default async function AdminDashboardPage({
             toIso={data.dateRange.toIso}
             variant="inline"
           />
-          <Link
-            href={refreshHref}
-            className="inline-flex h-9 items-center gap-2 rounded-[0.85rem] border border-white/10 bg-black/25 px-3 text-[11px] font-semibold text-zinc-300 transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/30 hover:bg-white/[0.065] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-200/30"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </Link>
+          <AdminDashboardRefresh />
           <AdminExports tables={data.exportTables} variant="button" />
         </>
       }

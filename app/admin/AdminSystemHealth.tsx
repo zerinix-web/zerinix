@@ -5,7 +5,7 @@ import { RefreshCw } from "lucide-react";
 
 type SystemStatus = {
   label: string;
-  status: "Operational" | "Degraded" | "Down" | "Not configured" | "Unknown";
+  status: "Healthy" | "Degraded" | "Down" | "Not Connected" | "Unknown";
   detail: string;
   lastChecked: string;
   lastSuccessfulCheck: string | null;
@@ -17,7 +17,7 @@ export type AdminSystemHealthProps = {
 };
 
 function statusClass(status: SystemStatus["status"]) {
-  if (status === "Operational") {
+  if (status === "Healthy") {
     return "border-emerald-300/20 bg-emerald-300/10 text-emerald-100";
   }
 
@@ -33,7 +33,7 @@ function statusClass(status: SystemStatus["status"]) {
 }
 
 function dotClass(status: SystemStatus["status"]) {
-  if (status === "Operational") {
+  if (status === "Healthy") {
     return "bg-emerald-300 shadow-[0_0_18px_rgba(52,211,153,0.45)]";
   }
 
@@ -61,14 +61,6 @@ function formatTime(value: string | null) {
 }
 
 function statusLabel(status: SystemStatus["status"]) {
-  if (status === "Operational") {
-    return "Healthy";
-  }
-
-  if (status === "Not configured") {
-    return "Not Connected";
-  }
-
   return status;
 }
 
@@ -100,6 +92,8 @@ export function AdminSystemHealth({ initialStatuses }: AdminSystemHealthProps) {
         setStatuses(payload.status);
         setLastRefresh(new Date().toISOString());
       }
+    } catch {
+      console.warn("[admin:system-health] refresh failed; keeping previous status");
     } finally {
       setRefreshing(false);
     }

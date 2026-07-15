@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/app/lib/supabase/server";
 import { createServiceRoleClient } from "@/app/lib/supabase/admin";
-import { getSupabaseServiceRoleKey } from "@/app/lib/supabase/env";
+import { getSupabaseServiceRoleKey, getSupabaseUrl } from "@/app/lib/supabase/env";
 import { getStripeConfiguration } from "@/app/lib/billing/stripe";
 import { getResendConfiguration } from "@/app/lib/integrations/resend";
 import { getModelPricing } from "@/app/lib/ai/pricing";
@@ -171,7 +171,7 @@ export type AdminDateRange = {
 
 export type AdminSystemStatus = {
   label: string;
-  status: "Operational" | "Degraded" | "Down" | "Not configured" | "Unknown";
+  status: "Healthy" | "Degraded" | "Down" | "Not Connected" | "Unknown";
   detail: string;
   lastChecked: string;
   lastSuccessfulCheck: string | null;
@@ -246,6 +246,7 @@ let cachedHealth:
   | null = null;
 
 const HEALTH_CHECK_TIMEOUT_MS = 2500;
+const HEALTH_DEGRADED_LATENCY_MS = 2000;
 const OPENAI_COST_CENTER_START = new Date(Date.UTC(2020, 0, 1));
 const OPENAI_ORGANIZATION_USAGE_URL = "https://api.openai.com/v1/organization/usage/completions";
 const OPENAI_ORGANIZATION_COSTS_URL = "https://api.openai.com/v1/organization/costs";
@@ -478,24 +479,6 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function normalizeStatusFromFailureRate(failed: number, total: number): AdminSystemStatus["status"] {
-  if (total <= 0) {
-    return "Unknown";
-  }
-
-  const rate = failed / total;
-
-  if (rate >= 0.5) {
-    return "Down";
-  }
-
-  if (rate >= 0.15) {
-    return "Degraded";
-  }
-
-  return "Operational";
-}
-
 function combineMetricStatuses(...statuses: AdminMetricStatus[]): AdminMetricStatus {
   if (statuses.includes("ERROR")) {
     return "ERROR";
@@ -514,6 +497,10 @@ function combineMetricStatuses(...statuses: AdminMetricStatus[]): AdminMetricSta
   }
 
   return "NO DATA";
+}
+
+function isFailedAiUsageStatus(value: unknown) {
+  return readString(value).toLowerCase() === "failed";
 }
 
 async function fetchHealth(
@@ -547,6 +534,41 @@ async function fetchHealth(
   } finally {
     clearTimeout(timer);
   }
+}
+
+function statusFromHealth(
+  check: Awaited<ReturnType<typeof fetchHealth>>,
+  options?: {
+    allowStatuses?: number[];
+    degradedStatuses?: number[];
+    downStatuses?: number[];
+  }
+): AdminSystemStatus["status"] {
+  if (check.ok || options?.allowStatuses?.includes(check.status)) {
+    return check.responseTimeMs > HEALTH_DEGRADED_LATENCY_MS ? "Degraded" : "Healthy";
+  }
+
+  if (options?.degradedStatuses?.includes(check.status) || check.status === 429) {
+    return "Degraded";
+  }
+
+  if (options?.downStatuses?.includes(check.status) || check.status === 401 || check.status === 403) {
+    return "Down";
+  }
+
+  if (check.status === 0) {
+    return "Degraded";
+  }
+
+  if (check.status >= 500) {
+    return "Down";
+  }
+
+  return "Degraded";
+}
+
+function successfulCheckTime(status: AdminSystemStatus["status"], lastChecked: string) {
+  return status === "Healthy" || status === "Degraded" ? lastChecked : null;
 }
 
 function buildMockAdminUsers(): AdminUserRow[] {
@@ -610,15 +632,15 @@ function buildMockSystemStatus(): AdminSystemStatus[] {
   return [
     {
       label: "ZERINIX API",
-      status: "Operational",
+      status: "Unknown",
       detail: "Local admin mock data is active",
       lastChecked,
-      lastSuccessfulCheck: lastChecked,
-      responseTimeMs: 0,
+      lastSuccessfulCheck: null,
+      responseTimeMs: null,
     },
     {
       label: "Supabase",
-      status: "Not configured",
+      status: "Not Connected",
       detail: "Admin database credential is missing in local development",
       lastChecked,
       lastSuccessfulCheck: null,
@@ -634,7 +656,7 @@ function buildMockSystemStatus(): AdminSystemStatus[] {
     },
     {
       label: "Stripe",
-      status: "Not configured",
+      status: "Not Connected",
       detail: "Billing remains disabled unless production credentials are configured",
       lastChecked,
       lastSuccessfulCheck: null,
@@ -984,7 +1006,7 @@ async function loadUserAggregates(userIds: string[]) {
     tokenMap.set(userId, (tokenMap.get(userId) || 0) + readNumber(row.total_tokens));
     costMap.set(userId, (costMap.get(userId) || 0) + readNumber(row.estimated_cost_usd));
 
-    if (readString(row.status).toLowerCase() === "failed") {
+    if (isFailedAiUsageStatus(row.status)) {
       failedRequestMap.set(userId, (failedRequestMap.get(userId) || 0) + 1);
     }
   });
@@ -1330,9 +1352,14 @@ async function loadReportStatusSummary(range: AdminDateRange) {
 
 async function loadBillingSummary() {
   const serviceClient = createServiceRoleClient();
-  const { data, error } = await serviceClient
+  const result = await serviceClient
     .from("user_billing_profiles")
     .select("plan_tier,stripe_subscription_status");
+  const fallbackResult = result.error
+    ? await serviceClient.from("user_billing_profiles").select("plan_tier")
+    : null;
+  const data = result.error ? fallbackResult?.data : result.data;
+  const error = fallbackResult?.error || (fallbackResult ? null : result.error);
   const map = new Map<string, number>();
   let activePaidSubscriptions = 0;
 
@@ -1352,7 +1379,9 @@ async function loadBillingSummary() {
 
   (data || []).forEach((row) => {
     const label = normalizePlan(row.plan_tier);
-    const subscriptionStatus = readString(row.stripe_subscription_status).toLowerCase();
+    const subscriptionStatus = readString(
+      "stripe_subscription_status" in row ? row.stripe_subscription_status : null
+    ).toLowerCase();
 
     map.set(label, (map.get(label) || 0) + 1);
 
@@ -2105,7 +2134,7 @@ function calculateCostControl(input: {
     averageCostPerReport: input.reportsGenerated > 0
       ? (input.official?.costRanges.last30d ?? monthCost) / input.reportsGenerated
       : null,
-    failedAiRequests: input.usage.filter((row) => readString(row.status).toLowerCase() === "failed").length,
+    failedAiRequests: input.usage.filter((row) => isFailedAiUsageStatus(row.status)).length,
     costTrendPercent:
       previousCost > 0 ? ((currentCost - previousCost) / previousCost) * 100 : null,
     highestUsageUsers: [...userMap.values()].sort((a, b) => b.tokens - a.tokens).slice(0, 5),
@@ -2514,41 +2543,83 @@ export async function loadAdminNotifications(range = resolveAdminDateRange({ ran
 }
 
 export async function loadSystemStatus() {
-  if (isLocalAdminMockMode()) {
-    return buildMockSystemStatus();
-  }
-
   const now = Date.now();
 
   if (cachedHealth && cachedHealth.expiresAt > now) {
     return cachedHealth.data;
   }
 
-  const serviceClient = createServiceRoleClient();
   const lastChecked = new Date().toISOString();
-  const supabaseStartedAt = Date.now();
-  const { error } = await serviceClient
-    .from("ai_usage_events")
-    .select("id", { count: "exact", head: true })
-    .limit(1);
-  const supabaseResponseTimeMs = Date.now() - supabaseStartedAt;
-  const usageStartedAt = Date.now();
-  const { data: recentUsage } = await serviceClient
-    .from("ai_usage_events")
-    .select("status,created_at")
-    .gte("created_at", toIso(startOfUtcDay(-1)))
-    .order("created_at", { ascending: false })
-    .limit(100);
-  const usageResponseTimeMs = Date.now() - usageStartedAt;
-  const recentAiFailures = (recentUsage || []).filter(
-    (row) => readString(row.status).toLowerCase() === "failed"
-  ).length;
   const stripe = getStripeConfiguration();
   const resend = getResendConfiguration();
-  const openAiKey =
-    process.env.NODE_ENV === "production"
-      ? process.env.OPENAI_API_KEY_PROD
-      : process.env.OPENAI_API_KEY_DEV;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL || "";
+  const normalizedAppUrl = appUrl
+    ? appUrl.startsWith("http")
+      ? appUrl
+      : `https://${appUrl}`
+    : "";
+  const productionDomain = process.env.NEXT_PUBLIC_APP_URL || "";
+
+  const supabaseUrl = getSupabaseUrl();
+  const supabaseServiceRoleKey = getSupabaseServiceRoleKey();
+  let supabaseStatus: AdminSystemStatus = {
+    label: "Supabase",
+    status: "Not Connected",
+    detail: "Supabase URL or service-role key is missing.",
+    lastChecked,
+    lastSuccessfulCheck: null,
+    responseTimeMs: null,
+  };
+  let recentUsage: Array<{ status: string | null }> = [];
+
+  if (supabaseUrl && supabaseServiceRoleKey) {
+    const startedAt = Date.now();
+
+    try {
+      const serviceClient = createServiceRoleClient();
+      const { error } = await serviceClient
+        .from("ai_usage_events")
+        .select("id", { count: "exact", head: true })
+        .limit(1);
+      const responseTimeMs = Date.now() - startedAt;
+
+      supabaseStatus = {
+        label: "Supabase",
+        status: error
+          ? "Down"
+          : responseTimeMs > HEALTH_DEGRADED_LATENCY_MS
+            ? "Degraded"
+            : "Healthy",
+        detail: error ? "Supabase database health query failed." : "Supabase database query succeeded.",
+        lastChecked,
+        lastSuccessfulCheck: error ? null : lastChecked,
+        responseTimeMs,
+      };
+
+      if (!error) {
+        const { data } = await serviceClient
+          .from("ai_usage_events")
+          .select("status")
+          .gte("created_at", toIso(startOfUtcDay(-1)))
+          .order("created_at", { ascending: false })
+          .limit(100);
+
+        recentUsage = data || [];
+      }
+    } catch {
+      supabaseStatus = {
+        label: "Supabase",
+        status: "Down",
+        detail: "Supabase service-role client could not complete a database health query.",
+        lastChecked,
+        lastSuccessfulCheck: null,
+        responseTimeMs: Date.now() - startedAt,
+      };
+    }
+  }
+
+  const recentAiFailures = recentUsage.filter((row) => isFailedAiUsageStatus(row.status)).length;
+  const openAiKey = getOpenAiCostCenterKey();
   const openAiCheck = openAiKey
     ? await fetchHealth("https://api.openai.com/v1/models", {
         headers: {
@@ -2556,6 +2627,9 @@ export async function loadSystemStatus() {
         },
       })
     : null;
+  const openAiStatus: AdminSystemStatus["status"] = openAiCheck
+    ? statusFromHealth(openAiCheck)
+    : "Not Connected";
   const stripeCheck =
     stripe.configured && stripe.enabled
       ? await fetchHealth("https://api.stripe.com/v1/balance", {
@@ -2564,6 +2638,9 @@ export async function loadSystemStatus() {
           },
         })
       : null;
+  const stripeStatus: AdminSystemStatus["status"] = stripeCheck
+    ? statusFromHealth(stripeCheck)
+    : "Not Connected";
   const resendCheck =
     resend.configured && resend.enabled
       ? await fetchHealth("https://api.resend.com/domains", {
@@ -2572,12 +2649,9 @@ export async function loadSystemStatus() {
           },
         })
       : null;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL || "";
-  const normalizedAppUrl = appUrl
-    ? appUrl.startsWith("http")
-      ? appUrl
-      : `https://${appUrl}`
-    : "";
+  const resendStatus: AdminSystemStatus["status"] = resendCheck
+    ? statusFromHealth(resendCheck)
+    : "Not Connected";
   const vercelCheck = normalizedAppUrl
     ? await fetchHealth(normalizedAppUrl, {
         headers: {
@@ -2585,80 +2659,88 @@ export async function loadSystemStatus() {
         },
       })
     : null;
-  const openAiStatus: AdminSystemStatus["status"] = openAiCheck
-    ? openAiCheck.ok
-      ? normalizeStatusFromFailureRate(recentAiFailures, (recentUsage || []).length)
-      : "Degraded"
-    : "Not configured";
-  const stripeStatus: AdminSystemStatus["status"] = stripeCheck
-    ? stripeCheck.ok
-      ? "Operational"
-      : "Degraded"
-    : "Not configured";
-  const resendStatus: AdminSystemStatus["status"] = resendCheck
-    ? resendCheck.ok
-      ? "Operational"
-      : "Degraded"
-    : "Not configured";
+  const vercelStatus: AdminSystemStatus["status"] = vercelCheck
+    ? statusFromHealth(vercelCheck)
+    : "Unknown";
+  const domainUrl = productionDomain
+    ? productionDomain.startsWith("http")
+      ? productionDomain
+      : `https://${productionDomain}`
+    : "";
+  const domainCheck = domainUrl
+    ? await fetchHealth(domainUrl, {
+        headers: {
+          Accept: "text/html",
+        },
+      })
+    : null;
+  const domainStatus: AdminSystemStatus["status"] = domainCheck
+    ? statusFromHealth(domainCheck)
+    : "Not Connected";
+  const apiCheck = normalizedAppUrl
+    ? await fetchHealth(`${normalizedAppUrl.replace(/\/$/, "")}/api/admin/health`, {
+        headers: {
+          Accept: "application/json",
+        },
+      })
+    : null;
+  const apiStatus: AdminSystemStatus["status"] = apiCheck
+    ? statusFromHealth(apiCheck, { allowStatuses: [401, 403] })
+    : "Unknown";
 
   const data: AdminSystemStatus[] = [
     {
       label: "ZERINIX API",
-      status: "Operational" as const,
-      detail: "Admin server rendered successfully",
+      status: apiStatus,
+      detail: apiCheck
+        ? apiCheck.ok
+          ? "Admin health endpoint returned a successful response."
+          : apiCheck.status === 401 || apiCheck.status === 403
+            ? "Admin health endpoint is reachable and protected."
+            : `Admin health endpoint failed with status ${apiCheck.status || "network"}.`
+        : "No application URL is configured for an internal API health check.",
       lastChecked,
-      lastSuccessfulCheck: lastChecked,
-      responseTimeMs: 0,
+      lastSuccessfulCheck: successfulCheckTime(apiStatus, lastChecked),
+      responseTimeMs: apiCheck?.responseTimeMs ?? null,
     },
-    {
-      label: "Supabase",
-      status: error ? ("Degraded" as const) : ("Operational" as const),
-      detail: error ? "Database query failed" : "Database reachable",
-      lastChecked,
-      lastSuccessfulCheck: error ? null : lastChecked,
-      responseTimeMs: supabaseResponseTimeMs,
-    },
+    supabaseStatus,
     {
       label: "OpenAI",
       status: openAiStatus,
       detail: openAiCheck
         ? openAiCheck.ok
-          ? "OpenAI models endpoint reachable; recent failures are inferred from stored usage."
+          ? recentAiFailures > 0
+            ? "OpenAI models endpoint is reachable; recent failed AI jobs were found in stored usage."
+            : "OpenAI models endpoint returned a successful authenticated response."
           : `OpenAI health probe failed with status ${openAiCheck.status || "network"}.`
-        : `OpenAI credentials are not configured for ${process.env.NODE_ENV}.`,
+        : "OpenAI credentials are not configured.",
       lastChecked,
-      lastSuccessfulCheck: openAiStatus === "Operational" ? lastChecked : null,
-      responseTimeMs: openAiCheck ? openAiCheck.responseTimeMs : usageResponseTimeMs,
+      lastSuccessfulCheck: successfulCheckTime(openAiStatus, lastChecked),
+      responseTimeMs: openAiCheck?.responseTimeMs ?? null,
     },
     {
       label: "Vercel application",
-      status: vercelCheck
-        ? vercelCheck.ok
-          ? ("Operational" as const)
-          : ("Degraded" as const)
-        : ("Unknown" as const),
+      status: vercelStatus,
       detail: vercelCheck
         ? vercelCheck.ok
           ? "Configured application URL is reachable."
           : `Application URL probe failed with status ${vercelCheck.status || "network"}.`
         : "No application URL is configured for a server-side health probe",
       lastChecked,
-      lastSuccessfulCheck: vercelCheck?.ok ? lastChecked : null,
+      lastSuccessfulCheck: successfulCheckTime(vercelStatus, lastChecked),
       responseTimeMs: vercelCheck?.responseTimeMs ?? null,
     },
     {
       label: "Cloudflare/domain",
-      status: vercelCheck
-        ? vercelCheck.ok
-          ? ("Operational" as const)
-          : ("Degraded" as const)
-        : ("Unknown" as const),
-      detail: vercelCheck
-        ? "Inferred from the configured public application URL reachability."
-        : "No public application URL is configured for a domain probe",
+      status: domainStatus,
+      detail: domainCheck
+        ? domainCheck.ok
+          ? "Configured public domain is reachable."
+          : `Public domain probe failed with status ${domainCheck.status || "network"}.`
+        : "NEXT_PUBLIC_APP_URL is not configured for a production domain probe.",
       lastChecked,
-      lastSuccessfulCheck: vercelCheck?.ok ? lastChecked : null,
-      responseTimeMs: vercelCheck?.responseTimeMs ?? null,
+      lastSuccessfulCheck: successfulCheckTime(domainStatus, lastChecked),
+      responseTimeMs: domainCheck?.responseTimeMs ?? null,
     },
     {
       label: "Stripe",
@@ -2671,7 +2753,7 @@ export async function loadSystemStatus() {
             stripe.enabled ? stripe.missing.join(", ") : "ENABLE_STRIPE_BILLING"
           }.`,
       lastChecked,
-      lastSuccessfulCheck: stripeStatus === "Operational" ? lastChecked : null,
+      lastSuccessfulCheck: successfulCheckTime(stripeStatus, lastChecked),
       responseTimeMs: stripeCheck?.responseTimeMs ?? null,
     },
     {
@@ -2685,7 +2767,7 @@ export async function loadSystemStatus() {
             resend.enabled ? resend.missing.join(", ") : "ENABLE_RESEND_EMAILS"
           }.`,
       lastChecked,
-      lastSuccessfulCheck: resendStatus === "Operational" ? lastChecked : null,
+      lastSuccessfulCheck: successfulCheckTime(resendStatus, lastChecked),
       responseTimeMs: resendCheck?.responseTimeMs ?? null,
     },
   ];
@@ -2802,7 +2884,7 @@ export async function loadAdminDashboardData(input?: {
         ? "ESTIMATED"
         : usageResult.status;
   const aiApiCost = openAiCostCenter.status === "LIVE" ? openAiCostCenter.costUsd : localAiApiCost;
-  const failedRequests = usage.filter((row) => readString(row.status) === "failed");
+  const failedRequests = usage.filter((row) => isFailedAiUsageStatus(row.status));
   const [charts, recentActivity, revenueSummary] = await Promise.all([
     loadAdminChartData(authData.users, dateRange),
     loadRecentActivity(authData.users, dateRange),
