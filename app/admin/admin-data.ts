@@ -104,6 +104,9 @@ export type AdminDashboardData = {
     modelUsage: Array<{
       model: string;
       requests: number;
+      inputTokens: number;
+      outputTokens: number;
+      cachedTokens: number;
       tokens: number;
       costUsd: number;
       status: AdminMetricStatus;
@@ -1352,16 +1355,10 @@ async function loadReportStatusSummary(range: AdminDateRange) {
 
 async function loadBillingSummary() {
   const serviceClient = createServiceRoleClient();
-  const result = await serviceClient
+  const { data, error } = await serviceClient
     .from("user_billing_profiles")
-    .select("plan_tier,stripe_subscription_status");
-  const fallbackResult = result.error
-    ? await serviceClient.from("user_billing_profiles").select("plan_tier")
-    : null;
-  const data = result.error ? fallbackResult?.data : result.data;
-  const error = fallbackResult?.error || (fallbackResult ? null : result.error);
+    .select("plan_tier");
   const map = new Map<string, number>();
-  let activePaidSubscriptions = 0;
 
   if (error) {
     console.error("[admin:data] billing summary query failed", {
@@ -1379,23 +1376,13 @@ async function loadBillingSummary() {
 
   (data || []).forEach((row) => {
     const label = normalizePlan(row.plan_tier);
-    const subscriptionStatus = readString(
-      "stripe_subscription_status" in row ? row.stripe_subscription_status : null
-    ).toLowerCase();
 
     map.set(label, (map.get(label) || 0) + 1);
-
-    if (
-      label !== "free" &&
-      ["active", "trialing"].includes(subscriptionStatus)
-    ) {
-      activePaidSubscriptions += 1;
-    }
   });
 
   return {
     planDistribution: [...map.entries()].map(([label, value]) => ({ label, value })),
-    activePaidSubscriptions,
+    activePaidSubscriptions: 0,
     status: (data || []).length ? ("LIVE" as const) : ("NO DATA" as const),
     detail: (data || []).length
       ? "Read from user_billing_profiles."
@@ -2072,8 +2059,6 @@ function buildRevenueOverview() {
 
 function calculateCostControl(input: {
   usage: Array<Record<string, unknown>>;
-  reportsGenerated: number;
-  aiConversations: number;
   official?: OpenAiCostCenterData;
 }): AdminCostControlData {
   const today = startOfUtcDay();
@@ -2128,12 +2113,8 @@ function calculateCostControl(input: {
       input.official?.costAlerts.find((alert) => alert.id === "openai-cost-monthly")?.remainingUsd ?? null,
     remainingPerUserBudget:
       input.official?.costAlerts.find((alert) => alert.id === "openai-cost-user")?.remainingUsd ?? null,
-    averageCostPerConversation: input.aiConversations > 0
-      ? (input.official?.costRanges.last30d ?? monthCost) / input.aiConversations
-      : null,
-    averageCostPerReport: input.reportsGenerated > 0
-      ? (input.official?.costRanges.last30d ?? monthCost) / input.reportsGenerated
-      : null,
+    averageCostPerConversation: null,
+    averageCostPerReport: null,
     failedAiRequests: input.usage.filter((row) => isFailedAiUsageStatus(row.status)).length,
     costTrendPercent:
       previousCost > 0 ? ((currentCost - previousCost) / previousCost) * 100 : null,
@@ -2148,7 +2129,6 @@ function calculateFinancials(input: {
   aiCost: number;
   aiCostConnected?: boolean;
   totalUsers: number;
-  reportsGenerated: number;
   usage: Array<Record<string, unknown>>;
   openAiCostRanges?: OpenAiCostCenterData["costRanges"];
 }) {
@@ -2176,8 +2156,7 @@ function calculateFinancials(input: {
     netProfit: null,
     averageCostPerUser:
       input.totalUsers > 0 ? Number((input.aiCost / input.totalUsers).toFixed(4)) : null,
-    averageCostPerReport:
-      input.reportsGenerated > 0 ? Number((input.aiCost / input.reportsGenerated).toFixed(4)) : null,
+    averageCostPerReport: null,
     dailyAiCost: input.openAiCostRanges?.today ?? costSince(today),
     weeklyAiCost: input.openAiCostRanges?.last7d ?? costSince(week),
     monthlyAiCost: input.openAiCostRanges?.thisMonth ?? costSince(month),
@@ -2188,7 +2167,6 @@ function calculateFinancials(input: {
 function calculateOpenAiAnalytics(input: {
   usage: Array<Record<string, unknown>>;
   totalUsers: number;
-  reportsGenerated: number;
   official?: OpenAiCostCenterData;
 }) {
   if (input.official?.status === "LIVE") {
@@ -2201,8 +2179,7 @@ function calculateOpenAiAnalytics(input: {
       totalTokens: input.official.totalTokens,
       cost,
       costPerUser: input.totalUsers > 0 ? Number((cost / input.totalUsers).toFixed(4)) : null,
-      costPerReport:
-        input.reportsGenerated > 0 ? Number((cost / input.reportsGenerated).toFixed(4)) : null,
+      costPerReport: null,
       costRanges: input.official.costRanges,
       dailyCostHistory: input.official.dailyCostHistory,
       featureCosts: input.official.featureCosts,
@@ -2210,6 +2187,9 @@ function calculateOpenAiAnalytics(input: {
       modelUsage: input.official.modelUsage.map((model) => ({
         model: model.model,
         requests: model.requests,
+        inputTokens: model.inputTokens,
+        outputTokens: model.outputTokens,
+        cachedTokens: model.cachedTokens,
         tokens: model.tokens,
         costUsd: model.costUsd,
         status: model.status,
@@ -2231,20 +2211,36 @@ function calculateOpenAiAnalytics(input: {
   const cost = input.usage.reduce((sum, row) => sum + readNumber(row.estimated_cost_usd), 0);
   const modelMap = new Map<
     string,
-    { model: string; requests: number; tokens: number; costUsd: number; status: AdminMetricStatus }
+    {
+      model: string;
+      requests: number;
+      inputTokens: number;
+      outputTokens: number;
+      cachedTokens: number;
+      tokens: number;
+      costUsd: number;
+      status: AdminMetricStatus;
+    }
   >();
 
   input.usage.forEach((row) => {
-    const model = readString(row.model, "unknown");
+    const model = readString(row.model, "unknown_model");
+    const metadata = readUsageMetadata(row);
     const summary = modelMap.get(model) || {
       model,
       requests: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
       tokens: 0,
       costUsd: 0,
-      status: getModelPricing(model) ? ("LIVE" as const) : ("NO DATA" as const),
+      status: getModelPricing(model) ? ("ESTIMATED" as const) : ("NO DATA" as const),
     };
 
     summary.requests += 1;
+    summary.inputTokens += readNumber(row.prompt_tokens);
+    summary.outputTokens += readNumber(row.completion_tokens);
+    summary.cachedTokens += readNumber(metadata.cached_tokens);
     summary.tokens += readNumber(row.total_tokens);
     summary.costUsd += readNumber(row.estimated_cost_usd);
     modelMap.set(model, summary);
@@ -2259,8 +2255,7 @@ function calculateOpenAiAnalytics(input: {
     totalTokens,
     cost,
     costPerUser: input.totalUsers > 0 ? Number((cost / input.totalUsers).toFixed(4)) : null,
-    costPerReport:
-      input.reportsGenerated > 0 ? Number((cost / input.reportsGenerated).toFixed(4)) : null,
+    costPerReport: null,
     costRanges: {
       today: null,
       thisMonth: null,
@@ -2930,14 +2925,12 @@ export async function loadAdminDashboardData(input?: {
     aiCost: aiApiCost,
     aiCostConnected: openAiCostCenter.status === "LIVE",
     totalUsers,
-    reportsGenerated,
     usage,
     openAiCostRanges: openAiCostCenter.costRanges,
   });
   const openAiAnalytics = calculateOpenAiAnalytics({
     usage,
     totalUsers,
-    reportsGenerated,
     official: openAiCostCenter,
   });
   const userAnalytics = calculateUserAnalytics({
@@ -2957,6 +2950,9 @@ export async function loadAdminDashboardData(input?: {
   const userSourceStatus: AdminMetricStatus = totalUsers > 0 || newUsers > 0 || activeUsers > 0
     ? "LIVE"
     : "NO DATA";
+  const activeUserDetail = activeUsers > 0
+    ? `${activeUsers} users have last_sign_in_at inside the selected date range.`
+    : "No users have last_sign_in_at activity inside the selected date range.";
   const reportsSourceStatus = combineMetricStatuses(
     reportCount.status,
     conversationCount.status,
@@ -2988,7 +2984,7 @@ export async function loadAdminDashboardData(input?: {
 	        ? openAiCostCenter.detail
 	        : `${usageResult.detail} Official OpenAI organization cost data is unavailable: ${openAiCostCenter.detail}`,
 	      users: userSourceStatus === "LIVE"
-	        ? "Read from Supabase Auth admin users. Total users are all-time; new users and active users use the selected date range."
+	        ? `Read from Supabase Auth admin users. Total users are all-time; new users use created_at in the selected date range. ${activeUserDetail}`
 	        : "Supabase Auth query succeeded, but no users were returned.",
 	      reports: reportsSourceStatus === "LIVE"
 	        ? `Read from reports and ai_conversations tables for the selected date range. ${reportStatusSummary.detail}`
@@ -3010,8 +3006,6 @@ export async function loadAdminDashboardData(input?: {
     revenueOverview: buildRevenueOverview(),
     costControl: calculateCostControl({
       usage,
-      reportsGenerated,
-      aiConversations,
       official: openAiCostCenter,
     }),
     usageSummary,
