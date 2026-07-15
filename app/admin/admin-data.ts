@@ -32,6 +32,17 @@ export type AdminUserRow = {
   estimatedAiCostUsd: number;
 };
 
+export type AdminReportRow = {
+  id: string;
+  title: string;
+  reportType: string;
+  ownerEmail: string;
+  createdAt: string;
+  aiCostUsd: number;
+  totalTokens: number;
+  status: string;
+};
+
 export type AdminDashboardData = {
   dateRange: AdminDateRange;
   totalUsers: number;
@@ -1138,6 +1149,137 @@ export async function loadAdminUsers(input: {
     totalUsers: search ? sourceUsers.length : authData.total,
     totalPages: Math.max(1, Math.ceil((search ? sourceUsers.length : authData.total) / pageSize)),
     search,
+  };
+}
+
+export async function loadAdminReports(input: {
+  search?: string;
+  reportType?: string;
+  dateRange?: AdminDateRange;
+}) {
+  if (isLocalAdminMockMode()) {
+    return {
+      reports: [] as AdminReportRow[],
+      reportTypes: [] as string[],
+      status: "NOT CONNECTED" as AdminMetricStatus,
+      detail: "Report records are unavailable without SUPABASE_SERVICE_ROLE_KEY.",
+    };
+  }
+
+  const serviceClient = createServiceRoleClient();
+  const search = normalizeSearchQuery(input.search || "").toLowerCase();
+  const selectedType = readString(input.reportType);
+  let query = serviceClient
+    .from("reports")
+    .select("id,user_id,title,report_type,status,created_at")
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if (input.dateRange) {
+    query = query
+      .gte("created_at", input.dateRange.fromIso)
+      .lte("created_at", input.dateRange.toIso);
+  }
+
+  if (selectedType) {
+    query = query.eq("report_type", selectedType);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("[admin:reports] reports query failed", {
+      message: error.message,
+      code: error.code,
+    });
+
+    return {
+      reports: [] as AdminReportRow[],
+      reportTypes: [] as string[],
+      status: "ERROR" as AdminMetricStatus,
+      detail: "Reports could not be queried.",
+    };
+  }
+
+  const reportRows = (data || []) as Array<Record<string, unknown>>;
+  const authData = await listAuthUsersForAdminScan();
+  const emailByUserId = new Map(
+    authData.users.map((user) => [user.id, user.email || "No email"])
+  );
+  const reportIds = reportRows.map((row) => readString(row.id)).filter(Boolean);
+  const usageByReportId = new Map<string, { tokens: number; costUsd: number }>();
+
+  if (reportIds.length > 0) {
+    const { data: usageData, error: usageError } = await serviceClient
+      .from("ai_usage_events")
+      .select("report_id,model,prompt_tokens,completion_tokens,total_tokens,estimated_cost_usd,metadata")
+      .in("report_id", reportIds);
+
+    if (usageError) {
+      console.error("[admin:reports] report usage query failed", {
+        message: usageError.message,
+        code: usageError.code,
+      });
+    } else {
+      ((usageData || []) as Array<Record<string, unknown>>).forEach((row) => {
+        const reportId = readString(row.report_id);
+
+        if (!reportId) {
+          return;
+        }
+
+        const current = usageByReportId.get(reportId) || { tokens: 0, costUsd: 0 };
+        const tokens = readUsageTokenCounts(row);
+        const usageCost = getUsageCost(row);
+
+        current.tokens += tokens.totalTokens;
+        current.costUsd += usageCost.costUsd;
+        usageByReportId.set(reportId, current);
+      });
+    }
+  }
+
+  const reportTypes = Array.from(
+    new Set(
+      reportRows
+        .map((row) => readString(row.report_type, "Report"))
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b));
+  const reports = reportRows
+    .map((row): AdminReportRow => {
+      const id = readString(row.id);
+      const usage = usageByReportId.get(id);
+
+      return {
+        id,
+        title: readString(row.title, "Untitled report"),
+        reportType: readString(row.report_type, "Report"),
+        ownerEmail: emailByUserId.get(readString(row.user_id)) || "Unknown owner",
+        createdAt: readString(row.created_at),
+        aiCostUsd: usage?.costUsd || 0,
+        totalTokens: usage?.tokens || 0,
+        status: readString(row.status, "unknown"),
+      };
+    })
+    .filter((report) => {
+      if (!search) {
+        return true;
+      }
+
+      return (
+        report.title.toLowerCase().includes(search) ||
+        report.ownerEmail.toLowerCase().includes(search)
+      );
+    });
+
+  return {
+    reports,
+    reportTypes,
+    status: reports.length ? "LIVE" as AdminMetricStatus : "NO DATA" as AdminMetricStatus,
+    detail: reports.length
+      ? "Read from reports, Supabase Auth users, and attributed ai_usage_events."
+      : "Reports query succeeded, but no reports match the selected filters.",
   };
 }
 
