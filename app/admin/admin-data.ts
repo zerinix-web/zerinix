@@ -1260,16 +1260,28 @@ async function countTableDetailed(table: string, range?: AdminDateRange) {
 
 async function loadRecentUsage(range: AdminDateRange) {
   const serviceClient = createServiceRoleClient();
-  const { data, count, error } = await serviceClient
-    .from("ai_usage_events")
-    .select(
-      "id,user_id,endpoint,report_field,report_id,conversation_id,report_request_id,model,status,prompt_tokens,completion_tokens,total_tokens,estimated_cost_usd,cache_hit,metadata,created_at",
-      { count: "exact" }
-    )
-    .gte("created_at", range.fromIso)
-    .lte("created_at", range.toIso)
-    .order("created_at", { ascending: false })
-    .limit(5000);
+  const usageColumns =
+    "id,user_id,endpoint,report_field,report_id,conversation_id,report_request_id,model,status,prompt_tokens,completion_tokens,total_tokens,estimated_cost_usd,cache_hit,metadata,created_at";
+  const stableUsageColumns =
+    "id,user_id,endpoint,report_field,model,status,prompt_tokens,completion_tokens,total_tokens,estimated_cost_usd,cache_hit,metadata,created_at";
+  const runQuery = (columns: string) =>
+    serviceClient
+      .from("ai_usage_events")
+      .select(columns, { count: "exact" })
+      .gte("created_at", range.fromIso)
+      .lte("created_at", range.toIso)
+      .order("created_at", { ascending: false })
+      .limit(5000);
+  let { data, count, error } = await runQuery(usageColumns);
+  let usedStableColumns = false;
+
+  if (error && /report_id|conversation_id|report_request_id|column/i.test(error.message || "")) {
+    const fallback = await runQuery(stableUsageColumns);
+    data = fallback.data;
+    count = fallback.count;
+    error = fallback.error;
+    usedStableColumns = true;
+  }
 
   if (error) {
     console.error("[admin:data] ai usage query failed", {
@@ -1285,12 +1297,17 @@ async function loadRecentUsage(range: AdminDateRange) {
     };
   }
 
+  const rows = (data || []) as unknown as Array<Record<string, unknown>>;
+  const totalRequests = count || rows.length;
+
   return {
-    rows: data || [],
-    totalRequests: count || (data || []).length,
-    status: (count || (data || []).length) > 0 ? "LIVE" as AdminMetricStatus : "NO DATA" as AdminMetricStatus,
-    detail: (count || (data || []).length) > 0
-      ? "Read from ai_usage_events for the selected date range."
+    rows,
+    totalRequests,
+    status: totalRequests > 0 ? "LIVE" as AdminMetricStatus : "NO DATA" as AdminMetricStatus,
+    detail: totalRequests > 0
+      ? usedStableColumns
+        ? "Read from ai_usage_events for the selected date range. Optional attribution columns are not available in this schema."
+        : "Read from ai_usage_events for the selected date range."
       : "ai_usage_events query succeeded, but no records exist in the selected date range.",
   };
 }
@@ -1686,6 +1703,62 @@ function readUsageMetadata(row: Record<string, unknown>) {
   return row.metadata && typeof row.metadata === "object"
     ? row.metadata as Record<string, unknown>
     : {};
+}
+
+function readUsageTokenCounts(row: Record<string, unknown>) {
+  const metadata = readUsageMetadata(row);
+  const inputTokens = readNumber(row.prompt_tokens);
+  const outputTokens = readNumber(row.completion_tokens);
+  const cachedTokens =
+    readNumber(metadata.cached_tokens) ||
+    readNumber(metadata.cachedTokens) ||
+    readNumber(metadata.input_cached_tokens);
+  const totalTokens = readNumber(row.total_tokens) || inputTokens + outputTokens + cachedTokens;
+
+  return { inputTokens, outputTokens, cachedTokens, totalTokens };
+}
+
+function getUsageCost(row: Record<string, unknown>) {
+  const storedCostUsd = readNumber(row.estimated_cost_usd);
+
+  if (storedCostUsd > 0) {
+    return {
+      costUsd: storedCostUsd,
+      status: "LIVE" as AdminMetricStatus,
+    };
+  }
+
+  const tokens = readUsageTokenCounts(row);
+  const estimatedCostUsd = estimateModelCostUsd(readString(row.model, "unknown_model"), {
+    promptTokens: tokens.inputTokens,
+    completionTokens: tokens.outputTokens,
+    totalTokens: tokens.totalTokens,
+  });
+
+  return {
+    costUsd: estimatedCostUsd ?? 0,
+    status: estimatedCostUsd !== null ? "ESTIMATED" as AdminMetricStatus : "NO DATA" as AdminMetricStatus,
+  };
+}
+
+function summarizeLocalAiUsageStatus(usage: Array<Record<string, unknown>>, fallback: AdminMetricStatus) {
+  if (fallback !== "LIVE") {
+    return fallback;
+  }
+
+  if (usage.length === 0) {
+    return "NO DATA" as AdminMetricStatus;
+  }
+
+  if (usage.some((row) => getUsageCost(row).status === "LIVE")) {
+    return "LIVE" as AdminMetricStatus;
+  }
+
+  if (usage.some((row) => getUsageCost(row).status === "ESTIMATED")) {
+    return "ESTIMATED" as AdminMetricStatus;
+  }
+
+  return "NO DATA" as AdminMetricStatus;
 }
 
 function buildOpenAiFeatureCosts(
@@ -2199,29 +2272,9 @@ function calculateOpenAiAnalytics(input: {
 
   const inputTokens = input.usage.reduce((sum, row) => sum + readNumber(row.prompt_tokens), 0);
   const outputTokens = input.usage.reduce((sum, row) => sum + readNumber(row.completion_tokens), 0);
-  const cachedTokens = input.usage.reduce((sum, row) => {
-    const metadata = row.metadata && typeof row.metadata === "object"
-      ? row.metadata as Record<string, unknown>
-      : {};
-
-    return sum + (
-      readNumber(metadata.cached_tokens) ||
-      readNumber(metadata.cachedTokens) ||
-      readNumber(metadata.input_cached_tokens)
-    );
-  }, 0);
-  const totalTokens = input.usage.reduce((sum, row) => {
-    const metadata = readUsageMetadata(row);
-    const rowInputTokens = readNumber(row.prompt_tokens);
-    const rowOutputTokens = readNumber(row.completion_tokens);
-    const rowCachedTokens =
-      readNumber(metadata.cached_tokens) ||
-      readNumber(metadata.cachedTokens) ||
-      readNumber(metadata.input_cached_tokens);
-
-    return sum + (readNumber(row.total_tokens) || rowInputTokens + rowOutputTokens + rowCachedTokens);
-  }, 0);
-  const cost = input.usage.reduce((sum, row) => sum + readNumber(row.estimated_cost_usd), 0);
+  const cachedTokens = input.usage.reduce((sum, row) => sum + readUsageTokenCounts(row).cachedTokens, 0);
+  const totalTokens = input.usage.reduce((sum, row) => sum + readUsageTokenCounts(row).totalTokens, 0);
+  const cost = input.usage.reduce((sum, row) => sum + getUsageCost(row).costUsd, 0);
   const modelMap = new Map<
     string,
     {
@@ -2238,22 +2291,9 @@ function calculateOpenAiAnalytics(input: {
 
   input.usage.forEach((row) => {
     const model = readString(row.model, "unknown_model");
-    const metadata = readUsageMetadata(row);
-    const rowInputTokens = readNumber(row.prompt_tokens);
-    const rowOutputTokens = readNumber(row.completion_tokens);
-    const rowCachedTokens =
-      readNumber(metadata.cached_tokens) ||
-      readNumber(metadata.cachedTokens) ||
-      readNumber(metadata.input_cached_tokens);
-    const rowTotalTokens = readNumber(row.total_tokens) || rowInputTokens + rowOutputTokens + rowCachedTokens;
-    const storedCostUsd = readNumber(row.estimated_cost_usd);
-    const estimatedCostUsd = storedCostUsd > 0
-      ? storedCostUsd
-      : estimateModelCostUsd(model, {
-          promptTokens: rowInputTokens,
-          completionTokens: rowOutputTokens,
-          totalTokens: rowTotalTokens,
-        });
+    const { inputTokens: rowInputTokens, outputTokens: rowOutputTokens, cachedTokens: rowCachedTokens, totalTokens: rowTotalTokens } =
+      readUsageTokenCounts(row);
+    const usageCost = getUsageCost(row);
     const summary = modelMap.get(model) || {
       model,
       requests: 0,
@@ -2270,10 +2310,10 @@ function calculateOpenAiAnalytics(input: {
     summary.outputTokens += rowOutputTokens;
     summary.cachedTokens += rowCachedTokens;
     summary.tokens += rowTotalTokens;
-    summary.costUsd += estimatedCostUsd ?? 0;
-    if (storedCostUsd > 0) {
+    summary.costUsd += usageCost.costUsd;
+    if (usageCost.status === "LIVE") {
       summary.status = "LIVE";
-    } else if (estimatedCostUsd !== null) {
+    } else if (usageCost.status === "ESTIMATED") {
       summary.status = summary.status === "LIVE" ? "LIVE" : "ESTIMATED";
     }
     modelMap.set(model, summary);
@@ -2950,13 +2990,12 @@ export async function loadAdminDashboardData(input?: {
     usage,
     totalUsers,
   });
-  const localAiApiCost = usage.reduce((sum, row) => sum + readNumber(row.estimated_cost_usd), 0);
+  const localAiApiCost = usage.reduce((sum, row) => sum + getUsageCost(row).costUsd, 0);
+  const localAiUsageStatus = summarizeLocalAiUsageStatus(usage, usageResult.status);
   const aiUsageSourceStatus: AdminMetricStatus =
     openAiCostCenter.status === "LIVE"
       ? "LIVE"
-      : usageResult.status === "LIVE"
-        ? "ESTIMATED"
-        : usageResult.status;
+      : localAiUsageStatus;
   const aiApiCost = openAiCostCenter.status === "LIVE" ? openAiCostCenter.costUsd : localAiApiCost;
   const failedRequests = usage.filter((row) => isFailedAiUsageStatus(row.status));
   const [charts, recentActivity, revenueSummary] = await Promise.all([
@@ -3002,7 +3041,7 @@ export async function loadAdminDashboardData(input?: {
   const financials = calculateFinancials({
     revenue: revenueValue,
     aiCost: aiApiCost,
-    aiCostConnected: openAiCostCenter.status === "LIVE",
+    aiCostConnected: aiUsageSourceStatus === "LIVE" || aiUsageSourceStatus === "ESTIMATED",
     totalUsers,
     usage,
     openAiCostRanges: openAiCostCenter.costRanges,
@@ -3060,7 +3099,9 @@ export async function loadAdminDashboardData(input?: {
 	      revenue: revenueSummary.detail,
 	      aiUsage: openAiCostCenter.status === "LIVE"
 	        ? openAiCostCenter.detail
-	        : `${usageResult.detail} Official OpenAI organization cost data is unavailable: ${openAiCostCenter.detail}`,
+	        : aiUsageSourceStatus === "NO DATA"
+	          ? usageResult.detail
+	          : `${usageResult.detail} Cost is ${aiUsageSourceStatus === "LIVE" ? "read from stored estimated_cost_usd records" : "estimated from stored token counts and centralized model pricing"}. Official OpenAI organization cost data is unavailable: ${openAiCostCenter.detail}`,
 	      users: userSourceStatus === "LIVE"
 	        ? `Read from Supabase Auth admin users. Total users are all-time; new users use created_at in the selected date range. ${activeUserDetail}`
 	        : "Supabase Auth query succeeded, but no users were returned.",
