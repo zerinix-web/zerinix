@@ -21,8 +21,8 @@ import {
   confirmDowngrade,
   openCustomerPortal,
   requestCancellation,
-  startPlanChange,
 } from "./actions";
+import BillingCheckoutButton from "./BillingCheckoutButton";
 import { loadBillingOverview } from "./billing-data";
 
 export const dynamic = "force-dynamic";
@@ -173,7 +173,10 @@ export default async function BillingPage({
           ) : null}
 
           {error ? (
-            <div className="mt-6 rounded-3xl border border-red-300/20 bg-red-950/30 p-5 text-sm leading-6 text-red-100">
+            <div
+              data-billing-error-banner
+              className="mt-6 rounded-3xl border border-red-300/20 bg-red-950/30 p-5 text-sm leading-6 text-red-100"
+            >
               Billing action could not be completed. Please try again shortly.
             </div>
           ) : null}
@@ -439,21 +442,11 @@ export default async function BillingPage({
                       Stripe price is not configured for this plan.
                     </p>
                   ) : null}
-                  <form action={startPlanChange} className="mt-5">
-                    <input type="hidden" name="plan" value={plan.id} />
-                    <button
-                      type="submit"
-                      disabled={!planSelectable}
-                      aria-disabled={!planSelectable}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-teal-200/30 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-zinc-500"
-                    >
-                      {plan.current
-                        ? "Current plan"
-                        : planSelectable
-                          ? "Select plan"
-                          : "Unavailable"}
-                    </button>
-                  </form>
+                  <BillingCheckoutButton
+                    planId={plan.id}
+                    selectable={planSelectable}
+                    current={plan.current}
+                  />
                 </article>
                 );
               })}
