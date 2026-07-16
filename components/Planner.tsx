@@ -3752,7 +3752,7 @@ function ConversationSidebar({
         {visibleConversations.map((conversation) => (
           <div
             key={conversation.id}
-            className={`group min-w-72 rounded-3xl border p-4 text-left text-sm shadow-lg shadow-black/10 transition duration-300 md:w-full ${
+            className={`group min-w-72 rounded-2xl border p-3 text-left text-sm shadow-lg shadow-black/10 transition duration-300 md:w-full ${
               conversation.id === activeConversationId
                 ? "border-teal-300/30 bg-teal-300/10 shadow-lg shadow-teal-950/10"
                 : "border-white/10 bg-white/[0.03] hover:-translate-y-0.5 hover:border-teal-300/30 hover:bg-white/[0.055]"
@@ -3765,10 +3765,10 @@ function ConversationSidebar({
             >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <p className="line-clamp-1 font-medium text-white">
+                <p className="line-clamp-1 font-medium leading-5 text-white">
                   {getAnalysisSessionTitle(conversation.title)}
                 </p>
-                <p className="mt-2 line-clamp-2 text-zinc-500">
+                <p className="mt-1 line-clamp-1 text-xs leading-5 text-zinc-500">
                   {getConversationPreview(conversation)}
                 </p>
               </div>
@@ -3780,7 +3780,7 @@ function ConversationSidebar({
             </div>
             </button>
 
-            <div className="mt-3 flex items-center gap-2">
+            <div className="mt-2 flex items-center gap-2">
               <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/30 px-2 py-1 text-[11px] text-zinc-400">
                 <MessageSquare className="h-3 w-3 text-teal-200" />
                 {conversation.messages.length}
@@ -7682,7 +7682,7 @@ export default function Planner({
                               : "border border-white/10 text-zinc-500"
                           }`}
                         >
-                          {selected ? "Active" : "Select"}
+                          {selected ? "Recommended" : "Select"}
                         </span>
                       </div>
                       <p className="mt-3 text-sm font-semibold text-white">
@@ -7703,7 +7703,7 @@ export default function Planner({
               <div className="overflow-hidden rounded-[1.55rem] border border-white/10 bg-black/35 shadow-inner shadow-black/20 ring-1 ring-white/[0.025] transition focus-within:border-teal-200/30 focus-within:ring-teal-200/15">
                 <div className="flex flex-col gap-2 border-b border-white/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-200/70">
+                    <p className="text-sm font-bold uppercase tracking-[0.18em] text-teal-200/80">
                       Executive brief
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">
@@ -7711,7 +7711,7 @@ export default function Planner({
                     </p>
                   </div>
                   <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-zinc-500">
-                    {prompt.trim().length} chars
+                    {prompt.trim().length} / 5000
                   </span>
                 </div>
                 <div className="grid gap-3 p-4 md:grid-cols-2">
@@ -7739,7 +7739,7 @@ export default function Planner({
                         value={executiveBrief[fieldConfig.field]}
                         onChange={(event) => updateExecutiveBriefField(fieldConfig.field, event.target.value)}
                         onKeyDown={handleExecutiveBriefKeyDown}
-                        className="mt-2 min-h-24 w-full resize-none rounded-2xl border border-white/10 bg-black/35 p-4 text-sm leading-6 text-white outline-none transition placeholder:text-zinc-600 focus:border-teal-300/35 focus:ring-2 focus:ring-teal-200/10"
+                        className="mt-2 min-h-[4.75rem] w-full resize-none rounded-2xl border border-white/10 bg-black/35 p-4 text-sm leading-6 text-white outline-none transition placeholder:text-zinc-600 focus:border-teal-300/35 focus:ring-2 focus:ring-teal-200/10"
                         placeholder={fieldConfig.placeholder}
                       />
                     </label>
