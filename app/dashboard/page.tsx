@@ -76,7 +76,7 @@ function getFirstName(user: Awaited<ReturnType<typeof getAuthenticatedUser>>) {
 
   return firstName
     ? `${firstName.charAt(0).toUpperCase()}${firstName.slice(1)}`
-    : "Founder";
+    : "";
 }
 
 function getWorkspaceActivityDate(workspace: DashboardWorkspace) {
@@ -300,28 +300,6 @@ export default async function DashboardPage() {
       href: "/dashboard#workspaces",
     },
   ];
-  const quickActions = [
-    {
-      title: "Create Strategic Report",
-      description: "Choose a decision goal and generate a professional analysis.",
-      href: "/plan?new=1&mode=plan",
-      icon: Plus,
-      primary: true,
-    },
-    {
-      title: "Reports & Workspaces",
-      description: "Review saved analysis and organize decisions.",
-      href: "/dashboard#reports",
-      icon: Folder,
-    },
-    {
-      title: "Strategic Advisory",
-      description: "Pressure-test decisions after reviewing reports.",
-      href: "/chat",
-      icon: MessageSquareText,
-    },
-  ];
-
   return (
     <main className={dashboardTheme.page}>
       <div className={dashboardTheme.atmosphere} />
@@ -337,7 +315,7 @@ export default async function DashboardPage() {
                 Executive Workspace
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-[-0.035em] text-white">
-                Welcome back, {firstName}.
+                {firstName ? `Welcome back, ${firstName}.` : "Welcome back."}
               </h1>
               <p className="mt-2 text-sm leading-6 text-zinc-500">
                 Your strategic reports, workspaces and AI spend are ready for review.
@@ -492,20 +470,20 @@ export default async function DashboardPage() {
           <div className="overflow-hidden rounded-[2.35rem] border border-white/10 bg-white/[0.045] shadow-2xl shadow-black/35 ring-1 ring-white/[0.025] backdrop-blur-2xl transition duration-500 hover:border-teal-300/15 hover:bg-white/[0.052]">
             <div className="relative p-6 sm:p-8 lg:p-10">
               <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.1),transparent_34%),radial-gradient(circle_at_85%_20%,rgba(45,212,191,0.16),transparent_32%),radial-gradient(circle_at_12%_90%,rgba(255,255,255,0.045),transparent_28%)]" />
-              <div className="relative flex flex-col gap-10 xl:flex-row xl:items-stretch xl:justify-between">
-                <div>
+              <div className="relative">
+                <div className="max-w-5xl">
                   <div className="inline-flex items-center gap-2 rounded-full border border-teal-300/20 bg-teal-300/10 px-3 py-1.5 text-xs font-semibold tracking-[0.24em] text-teal-100 shadow-lg shadow-teal-950/20 ring-1 ring-teal-200/10">
                     <Sparkles className="h-3.5 w-3.5" />
                     PERSONAL EXECUTIVE WORKSPACE
                   </div>
                   <h1 className="mt-5 max-w-3xl text-4xl font-semibold tracking-[-0.04em] text-white md:text-6xl">
-                    Welcome back, {firstName}.
+                    {firstName ? `Welcome back, ${firstName}.` : "Welcome back."}
                   </h1>
                   <p className="mt-4 max-w-2xl text-base leading-8 text-zinc-400">
                     Your decision intelligence workspace is organized around reports,
                     AI spend, active workspaces and the next strategic action.
                   </p>
-                  <div className="mt-6 grid max-w-2xl gap-3 sm:grid-cols-2">
+                  <div className="mt-8 grid max-w-3xl gap-3 sm:grid-cols-2">
                     <div className="rounded-[1.25rem] border border-white/10 bg-black/25 p-4 shadow-lg shadow-black/10 ring-1 ring-white/[0.02]">
                       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
                         Latest report
@@ -531,47 +509,14 @@ export default async function DashboardPage() {
                       </p>
                     </div>
                   </div>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px] xl:max-w-[560px]">
-                  {quickActions.map((action) => {
-                    const Icon = action.icon;
-
-                    return (
-                      <Link
-                        key={action.title}
-                        href={action.href}
-                        className={
-                          action.primary
-                            ? "group min-h-36 rounded-[1.35rem] bg-white p-4 text-black shadow-xl shadow-white/10 ring-1 ring-white/20 transition duration-300 hover:-translate-y-1 hover:bg-zinc-200 hover:shadow-2xl hover:shadow-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-                            : "group min-h-36 rounded-[1.35rem] border border-white/10 bg-black/25 p-4 text-white shadow-xl shadow-black/15 ring-1 ring-white/[0.025] transition duration-300 hover:-translate-y-1 hover:border-teal-300/25 hover:bg-white/[0.065] hover:shadow-2xl hover:shadow-teal-950/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
-                        }
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <span
-                            className={
-                              action.primary
-                                ? "flex h-10 w-10 items-center justify-center rounded-2xl bg-black text-white"
-                                : "flex h-10 w-10 items-center justify-center rounded-2xl border border-teal-300/20 bg-teal-300/10 text-teal-200"
-                            }
-                          >
-                            <Icon className="h-4 w-4" />
-                          </span>
-                          <ArrowRight className="h-4 w-4 opacity-45 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
-                        </div>
-                        <p className="mt-4 text-sm font-semibold tracking-tight">{action.title}</p>
-                        <p
-                          className={
-                            action.primary
-                              ? "mt-1 text-xs leading-5 text-zinc-700"
-                              : "mt-1 text-xs leading-5 text-zinc-500"
-                          }
-                        >
-                          {action.description}
-                        </p>
-                      </Link>
-                    );
-                  })}
+                  <Link
+                    href="/plan?new=1&mode=plan"
+                    className="mt-8 inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black shadow-xl shadow-white/10 ring-1 ring-white/20 transition duration-300 hover:-translate-y-0.5 hover:bg-zinc-200 hover:shadow-2xl hover:shadow-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Create Strategic Report
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
                 </div>
               </div>
 
