@@ -8,7 +8,6 @@ import {
   Clock3,
   FileText,
   Folder,
-  Gauge,
   MessageSquareText,
   Plus,
   Settings,
@@ -46,10 +45,6 @@ function formatDashboardDate(value: string) {
   }).format(new Date(value));
 }
 
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("en-US").format(value);
-}
-
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -63,6 +58,25 @@ function formatCompactNumber(value: number) {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+function getFirstName(user: Awaited<ReturnType<typeof getAuthenticatedUser>>) {
+  const metadata = user?.user_metadata || {};
+  const displayName =
+    typeof metadata.full_name === "string" && metadata.full_name.trim()
+      ? metadata.full_name
+      : typeof metadata.name === "string" && metadata.name.trim()
+        ? metadata.name
+        : "";
+  const source = displayName || user?.email || "";
+  const firstName = source
+    .split("@")[0]
+    .split(/[.\s_-]+/)
+    .find(Boolean);
+
+  return firstName
+    ? `${firstName.charAt(0).toUpperCase()}${firstName.slice(1)}`
+    : "Founder";
 }
 
 function getWorkspaceActivityDate(workspace: DashboardWorkspace) {
@@ -217,10 +231,6 @@ export default async function DashboardPage() {
   const activeWorkspaces = workspaces.filter(
     (workspace) => workspace.reportCount > 0
   ).length;
-  const latestWorkspaceUpdate = workspaces
-    .map((workspace) => workspace.updatedAt || workspace.createdAt)
-    .filter(Boolean)
-    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
   const recentReports = reports.slice(0, 4);
   const completedReports = reports.filter(
     (report) => report.status.toLowerCase() === "completed"
@@ -234,9 +244,11 @@ export default async function DashboardPage() {
     cleanMobileDashboardText(activeWorkspaceReports[0]?.title || "", 132) ||
     "Create a strategic report to establish this workspace context.";
   const latestReport = recentReports[0];
+  const lastReportTime = latestReport?.createdAt || "";
   const latestCompletedReport = reports.find(
     (report) => report.status.toLowerCase() === "completed"
   );
+  const firstName = getFirstName(user);
   const decisionSignal = getDecisionSignal(latestCompletedReport);
   const recommendedAction = getRecommendedDashboardAction({
     activeWorkspace,
@@ -256,15 +268,15 @@ export default async function DashboardPage() {
       : "No platform usage yet";
   const dashboardStats = [
     {
-      label: "Decision Workspaces",
-      value: String(workspaces.length),
-      detail: `${activeWorkspaces} active`,
-      icon: Folder,
+      label: "Last Report",
+      value: formatDashboardDate(lastReportTime),
+      detail: latestReport ? latestReport.title : "Create your first strategic report",
+      icon: Clock3,
       tone: "teal",
-      href: "/dashboard#workspaces",
+      href: latestReport ? `/dashboard/${latestReport.id}` : "/plan?new=1&mode=plan",
     },
     {
-      label: "Strategic Reports",
+      label: "Total Reports",
       value: String(reports.length || totalReports),
       detail: `${completedReports} completed`,
       icon: FileText,
@@ -272,15 +284,7 @@ export default async function DashboardPage() {
       href: "/dashboard#reports",
     },
     {
-      label: "Intelligence Runs",
-      value: formatNumber(usage.totalRequests),
-      detail: `${formatNumber(usage.totalTokens)} tokens recorded`,
-      icon: Gauge,
-      tone: "teal",
-      href: "/dashboard/usage",
-    },
-    {
-      label: "Estimated Platform Cost",
+      label: "AI Spend",
       value: formatCurrency(usage.estimatedCostUsd),
       detail: "Based on stored usage records",
       icon: Activity,
@@ -288,12 +292,12 @@ export default async function DashboardPage() {
       href: "/dashboard/usage",
     },
     {
-      label: "Decision Activity",
-      value: formatDashboardDate(latestWorkspaceUpdate || ""),
-      detail: latestWorkspaceUpdate ? "Last workspace update" : "Create your first report",
-      icon: Clock3,
+      label: "Active Workspaces",
+      value: String(activeWorkspaces),
+      detail: `${workspaces.length} total workspaces`,
+      icon: Folder,
       tone: "zinc",
-      href: latestWorkspaceUpdate ? "/dashboard#workspaces" : "/plan?new=1&mode=plan",
+      href: "/dashboard#workspaces",
     },
   ];
   const quickActions = [
@@ -330,13 +334,13 @@ export default async function DashboardPage() {
             <div className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-2xl shadow-black/30 ring-1 ring-white/[0.025] backdrop-blur-2xl">
               <div className="inline-flex items-center gap-2 rounded-full border border-teal-300/20 bg-teal-300/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-100">
                 <Sparkles className="h-3.5 w-3.5" />
-                Decision Dashboard
+                Executive Workspace
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-[-0.035em] text-white">
-                Your next strategic move.
+                Welcome back, {firstName}.
               </h1>
               <p className="mt-2 text-sm leading-6 text-zinc-500">
-                Review the active workspace, latest decision signal and next recommended action.
+                Your strategic reports, workspaces and AI spend are ready for review.
               </p>
             </div>
 
@@ -488,22 +492,48 @@ export default async function DashboardPage() {
           <div className="overflow-hidden rounded-[2.35rem] border border-white/10 bg-white/[0.045] shadow-2xl shadow-black/35 ring-1 ring-white/[0.025] backdrop-blur-2xl transition duration-500 hover:border-teal-300/15 hover:bg-white/[0.052]">
             <div className="relative p-6 sm:p-8 lg:p-10">
               <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.1),transparent_34%),radial-gradient(circle_at_85%_20%,rgba(45,212,191,0.16),transparent_32%),radial-gradient(circle_at_12%_90%,rgba(255,255,255,0.045),transparent_28%)]" />
-              <div className="relative flex flex-col gap-8 xl:flex-row xl:items-end xl:justify-between">
+              <div className="relative flex flex-col gap-10 xl:flex-row xl:items-stretch xl:justify-between">
                 <div>
                   <div className="inline-flex items-center gap-2 rounded-full border border-teal-300/20 bg-teal-300/10 px-3 py-1.5 text-xs font-semibold tracking-[0.24em] text-teal-100 shadow-lg shadow-teal-950/20 ring-1 ring-teal-200/10">
                     <Sparkles className="h-3.5 w-3.5" />
-                    BUSINESS INTELLIGENCE
+                    PERSONAL EXECUTIVE WORKSPACE
                   </div>
-                  <h1 className="mt-5 max-w-3xl text-4xl font-semibold tracking-[-0.035em] text-white md:text-6xl">
-                    Strategic decisions, backed by structured analysis.
+                  <h1 className="mt-5 max-w-3xl text-4xl font-semibold tracking-[-0.04em] text-white md:text-6xl">
+                    Welcome back, {firstName}.
                   </h1>
                   <p className="mt-4 max-w-2xl text-base leading-8 text-zinc-400">
-                    Create board-ready reports, organize venture workspaces and
-                    use ZERINIX as an advisor around your decision history.
+                    Your decision intelligence workspace is organized around reports,
+                    AI spend, active workspaces and the next strategic action.
                   </p>
+                  <div className="mt-6 grid max-w-2xl gap-3 sm:grid-cols-2">
+                    <div className="rounded-[1.25rem] border border-white/10 bg-black/25 p-4 shadow-lg shadow-black/10 ring-1 ring-white/[0.02]">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                        Latest report
+                      </p>
+                      <p className="mt-2 truncate text-sm font-semibold text-white">
+                        {latestReport?.title || "No report yet"}
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {formatDashboardDate(lastReportTime)}
+                      </p>
+                    </div>
+                    <div className="rounded-[1.25rem] border border-white/10 bg-black/25 p-4 shadow-lg shadow-black/10 ring-1 ring-white/[0.02]">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                        Active workspace
+                      </p>
+                      <p className="mt-2 truncate text-sm font-semibold text-white">
+                        {activeWorkspace?.name || "No active workspace"}
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {activeWorkspace
+                          ? `${activeWorkspace.reportCount} reports`
+                          : "Create a report to start"}
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px]">
+                <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px] xl:max-w-[560px]">
                   {quickActions.map((action) => {
                     const Icon = action.icon;
 
@@ -556,7 +586,7 @@ export default async function DashboardPage() {
             </div>
           </div>
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {dashboardStats.map((stat) => {
               const Icon = stat.icon;
               const cardClass =
