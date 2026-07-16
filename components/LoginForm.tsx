@@ -5,10 +5,15 @@ import {
   loginWithPassword,
   type LoginActionState,
 } from "@/app/auth/actions";
+import type { AppDictionary } from "@/app/lib/i18n/dictionaries";
 
 const initialState: LoginActionState = {};
 
-export default function LoginForm() {
+export default function LoginForm({
+  labels,
+}: {
+  labels: AppDictionary["auth"];
+}) {
   const [state, formAction, pending] = useActionState(
     loginWithPassword,
     initialState
@@ -23,7 +28,7 @@ export default function LoginForm() {
       )}
 
       <label className="block">
-        <span className="text-sm font-medium text-gray-300">Email</span>
+        <span className="text-sm font-medium text-gray-300">{labels.email}</span>
         <input
           type="email"
           name="email"
@@ -34,7 +39,7 @@ export default function LoginForm() {
       </label>
 
       <label className="block">
-        <span className="text-sm font-medium text-gray-300">Password</span>
+        <span className="text-sm font-medium text-gray-300">{labels.password}</span>
         <input
           type="password"
           name="password"
@@ -51,7 +56,7 @@ export default function LoginForm() {
             name="remember"
             className="h-4 w-4 rounded border-white/10 bg-black accent-white"
           />
-          Remember me
+          {labels.rememberMe}
         </label>
       </div>
 
@@ -60,7 +65,7 @@ export default function LoginForm() {
         disabled={pending}
         className="h-12 w-full rounded-2xl bg-white font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {pending ? "Signing in..." : "Sign In"}
+        {pending ? labels.signingIn : labels.signInButton}
       </button>
     </form>
   );

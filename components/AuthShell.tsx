@@ -1,10 +1,15 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import type { AppDictionary } from "@/app/lib/i18n/dictionaries";
+import type { AppLocale } from "@/app/lib/i18n/config";
+import LanguageSelector from "./LanguageSelector";
 
 type AuthShellProps = {
   eyebrow: string;
   title: string;
   subtitle: string;
+  locale: AppLocale;
+  dictionary: AppDictionary;
   children: ReactNode;
   footerText: string;
   footerHref: string;
@@ -15,6 +20,8 @@ export default function AuthShell({
   eyebrow,
   title,
   subtitle,
+  locale,
+  dictionary,
   children,
   footerText,
   footerHref,
@@ -31,12 +38,19 @@ export default function AuthShell({
             ZERINIX
           </Link>
 
-          <Link
-            href="/plan?new=1&mode=plan"
-            className="rounded-full border border-white/10 px-4 py-2 text-sm text-gray-300 transition hover:border-white/30 hover:text-white"
-          >
-            Plan My Business
-          </Link>
+          <div className="flex items-center gap-3">
+            <LanguageSelector
+              locale={locale}
+              labels={dictionary.language}
+              compact
+            />
+            <Link
+              href="/plan?new=1&mode=plan"
+              className="rounded-full border border-white/10 px-4 py-2 text-sm text-gray-300 transition hover:border-white/30 hover:text-white"
+            >
+              {dictionary.common.planMyBusiness}
+            </Link>
+          </div>
         </nav>
 
         <section className="grid flex-1 items-center gap-12 py-16 lg:grid-cols-[1fr_460px]">

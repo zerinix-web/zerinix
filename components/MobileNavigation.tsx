@@ -10,16 +10,20 @@ import {
   LayoutDashboard,
   UserRound,
 } from "lucide-react";
+import type { AppLocale } from "@/app/lib/i18n/config";
+import { dictionaries, type AppDictionary } from "@/app/lib/i18n/dictionaries";
+import LanguageSelector from "./LanguageSelector";
 
-const mobileNavigationItems = [
+function getMobileNavigationItems(labels: AppDictionary["nav"]) {
+  return [
   {
-    label: "Dashboard",
+    label: labels.dashboard,
     href: "/dashboard",
     icon: LayoutDashboard,
     match: (pathname: string) => pathname === "/dashboard",
   },
   {
-    label: "Reports",
+    label: labels.reports,
     href: "/dashboard/reports",
     icon: FileText,
     match: (pathname: string) =>
@@ -32,20 +36,20 @@ const mobileNavigationItems = [
         !pathname.startsWith("/dashboard/advisor")),
   },
   {
-    label: "Workspace",
+    label: labels.workspace,
     href: "/dashboard/workspaces",
     icon: Folder,
     match: (pathname: string) => pathname.startsWith("/dashboard/workspaces"),
   },
   {
-    label: "Advisor",
+    label: labels.advisor,
     href: "/dashboard/advisor",
     icon: Bot,
     match: (pathname: string) =>
       pathname.startsWith("/chat") || pathname.startsWith("/dashboard/advisor"),
   },
   {
-    label: "Account",
+    label: labels.account,
     href: "/dashboard/settings",
     icon: UserRound,
     match: (pathname: string) =>
@@ -53,50 +57,58 @@ const mobileNavigationItems = [
       pathname.startsWith("/dashboard/billing") ||
       pathname.startsWith("/dashboard/usage"),
   },
-];
+  ];
+}
 
-function getMobileTitle(pathname: string) {
+function getMobileTitle(pathname: string, labels: AppDictionary["nav"]) {
   if (pathname.startsWith("/chat")) {
-    return "AI Advisor";
+    return labels.advisor;
   }
 
   if (pathname.startsWith("/plan")) {
-    return "Strategic Report";
+    return labels.createStrategicReport;
   }
 
   if (pathname.startsWith("/dashboard/workspaces")) {
-    return "Workspace";
+    return labels.workspace;
   }
 
   if (pathname.startsWith("/dashboard/reports")) {
-    return "Reports";
+    return labels.reports;
   }
 
   if (pathname.startsWith("/dashboard/advisor")) {
-    return "AI Advisor";
+    return labels.advisor;
   }
 
   if (pathname.startsWith("/dashboard/settings")) {
-    return "Account";
+    return labels.account;
   }
 
   if (pathname.startsWith("/dashboard/billing")) {
-    return "Billing";
+    return labels.billing;
   }
 
   if (pathname.startsWith("/dashboard/usage")) {
-    return "Usage";
+    return labels.usage;
   }
 
   if (pathname.startsWith("/dashboard/")) {
-    return "Report";
+    return labels.reports;
   }
 
-  return "Dashboard";
+  return labels.dashboard;
 }
 
-export function MobileHeader() {
+export function MobileHeader({
+  locale,
+  labels,
+}: {
+  locale?: AppLocale;
+  labels?: AppDictionary;
+}) {
   const pathname = usePathname();
+  const activeLabels = labels || dictionaries.en;
 
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-black/85 px-4 py-3 shadow-2xl shadow-black/25 backdrop-blur-2xl lg:hidden">
@@ -114,24 +126,36 @@ export function MobileHeader() {
               ZERINIX
             </span>
             <span className="block text-[11px] text-zinc-500">
-              Decision intelligence
+              {activeLabels.common.brandSubtitle}
             </span>
           </span>
         </Link>
-        <Link
-          href="/dashboard"
-          aria-label="Go to dashboard home"
-          className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.045] px-4 py-2 text-xs font-semibold text-zinc-300 shadow-lg shadow-black/10 transition hover:border-teal-300/25 hover:bg-white/[0.065] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/35"
-        >
-          {getMobileTitle(pathname)}
-        </Link>
+        <div className="flex items-center gap-2">
+          <LanguageSelector
+            locale={locale || "en"}
+            labels={activeLabels.language}
+            compact
+          />
+          <Link
+            href="/dashboard"
+            aria-label="Go to dashboard home"
+            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.045] px-4 py-2 text-xs font-semibold text-zinc-300 shadow-lg shadow-black/10 transition hover:border-teal-300/25 hover:bg-white/[0.065] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/35"
+          >
+            {getMobileTitle(pathname, activeLabels.nav)}
+          </Link>
+        </div>
       </div>
     </header>
   );
 }
 
-export function MobileBottomNavigation() {
+export function MobileBottomNavigation({
+  labels,
+}: {
+  labels?: AppDictionary["nav"];
+}) {
   const pathname = usePathname();
+  const mobileNavigationItems = getMobileNavigationItems(labels || dictionaries.en.nav);
 
   return (
     <nav

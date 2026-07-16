@@ -18,42 +18,47 @@ import {
   MobileBottomNavigation,
   MobileHeader,
 } from "@/components/MobileNavigation";
+import { getRequestDictionary } from "@/app/lib/i18n/server";
 
-export default function DashboardSidebar() {
+export default async function DashboardSidebar() {
+  const { locale, dictionary } = await getRequestDictionary();
   const navigationGroups = [
     {
-      label: "COMMAND CENTER",
-      items: [{ label: "Dashboard", href: "/dashboard", icon: LayoutDashboard }],
+      label: dictionary.nav.commandCenter,
+      items: [{ label: dictionary.nav.dashboard, href: "/dashboard", icon: LayoutDashboard }],
     },
     {
-      label: "INTELLIGENCE",
+      label: dictionary.nav.intelligence,
       items: [
-        { label: "Create Strategic Report", href: "/plan?new=1&mode=plan", icon: Plus },
-        { label: "Reports", href: "/dashboard#reports", icon: FileText },
-        { label: "Workspaces", href: "/dashboard#workspaces", icon: Folder },
+        { label: dictionary.nav.createStrategicReport, href: "/plan?new=1&mode=plan", icon: Plus },
+        { label: dictionary.nav.reports, href: "/dashboard#reports", icon: FileText },
+        { label: dictionary.nav.workspaces, href: "/dashboard#workspaces", icon: Folder },
       ],
     },
     {
-      label: "ADVISOR",
-      items: [{ label: "Strategic Advisory", href: "/chat", icon: Bot }],
+      label: dictionary.nav.advisor,
+      items: [{ label: dictionary.nav.strategicAdvisory, href: "/chat", icon: Bot }],
     },
     {
-      label: "OPERATIONS",
+      label: dictionary.nav.operations,
       items: [
-        { label: "Billing", href: "/dashboard/billing", icon: WalletCards },
-        { label: "Usage", href: "/dashboard/usage", icon: Activity },
+        { label: dictionary.nav.billing, href: "/dashboard/billing", icon: WalletCards },
+        { label: dictionary.nav.usage, href: "/dashboard/usage", icon: Activity },
       ],
     },
     {
-      label: "ACCOUNT",
-      items: [{ label: "Account", href: "/dashboard/settings", icon: UserRound }],
+      label: dictionary.nav.accountGroup,
+      items: [{ label: dictionary.nav.account, href: "/dashboard/settings", icon: UserRound }],
     },
   ];
 
   return (
     <>
-      <MobileHeader />
-      <MobileBottomNavigation />
+      <MobileHeader
+        locale={locale}
+        labels={dictionary}
+      />
+      <MobileBottomNavigation labels={dictionary.nav} />
       <aside className={`hidden ${dashboardTheme.sidebar} lg:sticky lg:top-0 lg:flex lg:min-h-screen lg:w-72 lg:flex-col lg:px-5 lg:py-6`}>
       <div className="hidden lg:block">
         <Link
@@ -69,7 +74,7 @@ export default function DashboardSidebar() {
               ZERINIX
             </span>
             <span className="mt-0.5 block text-xs text-zinc-500">
-              Decision intelligence
+              {dictionary.common.brandSubtitle}
             </span>
           </span>
           <ChevronRight className="ml-auto h-4 w-4 text-zinc-700 transition group-hover:text-teal-200" />
@@ -81,9 +86,11 @@ export default function DashboardSidebar() {
               <ShieldCheck className="h-5 w-5 text-teal-200" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-white">Secure workspace</p>
+              <p className="text-sm font-semibold text-white">
+                {dictionary.common.secureWorkspace}
+              </p>
               <p className="mt-1 text-xs text-teal-100/65">
-                Reports and decisions
+                {dictionary.common.reportsAndDecisions}
               </p>
             </div>
           </div>
@@ -123,7 +130,7 @@ export default function DashboardSidebar() {
           className="flex min-h-12 items-center gap-3 rounded-[1.15rem] border border-white/10 bg-zinc-950/80 px-4 py-3 text-sm font-medium text-zinc-300 shadow-sm shadow-black/10 transition duration-300 hover:-translate-y-0.5 hover:border-red-300/30 hover:bg-red-950/30 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200/30 lg:w-full"
         >
           <LogOut className="h-4 w-4 text-red-200" />
-          <span className="whitespace-nowrap">Logout</span>
+          <span className="whitespace-nowrap">{dictionary.common.logout}</span>
         </button>
       </form>
       </aside>

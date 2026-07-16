@@ -2,8 +2,13 @@
 
 import { FormEvent, useState } from "react";
 import { ArrowRight, Check, X } from "lucide-react";
+import type { AppDictionary } from "@/app/lib/i18n/dictionaries";
 
-export default function WaitlistForm() {
+export default function WaitlistForm({
+  labels,
+}: {
+  labels: AppDictionary["landing"];
+}) {
   const [open, setOpen] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
@@ -22,7 +27,7 @@ export default function WaitlistForm() {
         }}
         className="inline-flex items-center justify-center gap-2 rounded-full bg-teal-300 px-6 py-3 text-sm font-semibold text-black transition hover:bg-teal-200"
       >
-        Request Early Access
+        {labels.requestEarlyAccess}
         <ArrowRight className="h-4 w-4" />
       </button>
 
@@ -37,20 +42,20 @@ export default function WaitlistForm() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200">
-                  ZERINIX waitlist
+                  {labels.waitlistEyebrow}
                 </p>
                 <h2
                   id="waitlist-title"
                   className="mt-3 text-2xl font-semibold tracking-tight text-white"
                 >
-                  Request early access
+                  {labels.waitlistTitle}
                 </h2>
               </div>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-zinc-300 transition hover:border-white/25 hover:text-white"
-                aria-label="Close waitlist form"
+                aria-label={labels.waitlistClose}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -63,48 +68,48 @@ export default function WaitlistForm() {
                     <Check className="h-4 w-4" />
                   </span>
                   <p className="text-sm font-semibold">
-                    Thanks. We&apos;ll contact you when early access opens.
+                    {labels.waitlistThanks}
                   </p>
                 </div>
               </div>
             ) : (
               <form className="mt-6 space-y-4" onSubmit={submitWaitlist}>
                 <label className="block text-left text-sm font-medium text-zinc-200">
-                  Name
+                  {labels.waitlistName}
                   <input
                     required
                     name="name"
                     autoComplete="name"
                     className="mt-2 w-full rounded-lg border border-white/10 bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-teal-300/70"
-                    placeholder="Your name"
+                    placeholder={labels.waitlistNamePlaceholder}
                   />
                 </label>
                 <label className="block text-left text-sm font-medium text-zinc-200">
-                  Email
+                  {labels.waitlistEmail}
                   <input
                     required
                     type="email"
                     name="email"
                     autoComplete="email"
                     className="mt-2 w-full rounded-lg border border-white/10 bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-teal-300/70"
-                    placeholder="you@company.com"
+                    placeholder={labels.waitlistEmailPlaceholder}
                   />
                 </label>
                 <label className="block text-left text-sm font-medium text-zinc-200">
-                  Company / Project
+                  {labels.waitlistCompany}
                   <input
                     required
                     name="company"
                     autoComplete="organization"
                     className="mt-2 w-full rounded-lg border border-white/10 bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-teal-300/70"
-                    placeholder="Company or project name"
+                    placeholder={labels.waitlistCompanyPlaceholder}
                   />
                 </label>
                 <button
                   type="submit"
                   className="mt-2 inline-flex w-full items-center justify-center rounded-full bg-teal-300 px-5 py-3 text-sm font-semibold text-black transition hover:bg-teal-200"
                 >
-                  Join Waitlist
+                  {labels.joinWaitlist}
                 </button>
               </form>
             )}
