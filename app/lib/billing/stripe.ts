@@ -14,12 +14,14 @@ export const billingPlans: Array<{
   description: string;
   databaseTier?: "free" | "pro" | "business";
   priceEnv?: string;
+  monthlyPriceLabel?: string;
 }> = [
   {
     id: "free",
     name: "Free",
     description: "Starter access for lightweight AI exploration.",
     databaseTier: "free",
+    monthlyPriceLabel: "$0",
   },
   {
     id: "pro",
@@ -27,6 +29,7 @@ export const billingPlans: Array<{
     description: "Higher usage for founders creating regular reports.",
     databaseTier: "pro",
     priceEnv: "STRIPE_PRICE_PRO",
+    monthlyPriceLabel: "$29 / month",
   },
   {
     id: "team",
@@ -40,6 +43,7 @@ export const billingPlans: Array<{
     description: "High-volume report and market-analysis usage for operators.",
     databaseTier: "business",
     priceEnv: "STRIPE_PRICE_BUSINESS",
+    monthlyPriceLabel: "$79 / month",
   },
 ];
 
@@ -126,7 +130,7 @@ export function getPlanPriceState(planId: BillingPlanId) {
 
   return {
     configured: Boolean(priceId),
-    label: priceId ? "Configured in Stripe" : "Not configured",
+    label: priceId && plan.monthlyPriceLabel ? plan.monthlyPriceLabel : "Not configured",
   };
 }
 

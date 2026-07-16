@@ -136,10 +136,22 @@ export async function openCustomerPortal() {
   }
 
   const billingProfile = await getUserBillingProfile(supabase, user.id);
+  const activeSubscriptionStatuses = new Set(["active", "trialing"]);
 
   if (!billingProfile?.stripe_customer_id) {
     billingRedirect({
-      billing_error: "No Stripe customer is connected to this account yet.",
+      billing_notice: "You don't have an active subscription yet.",
+    });
+  }
+
+  if (
+    !billingProfile.stripe_subscription_id ||
+    !activeSubscriptionStatuses.has(
+      String(billingProfile.stripe_subscription_status || "").toLowerCase()
+    )
+  ) {
+    billingRedirect({
+      billing_notice: "You don't have an active subscription yet.",
     });
   }
 
