@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { createClient } from "@/app/lib/supabase/server";
 import { getAuthenticatedUser } from "@/app/dashboard/report-utils";
@@ -150,12 +151,14 @@ export async function POST(req: NextRequest) {
   });
 
   let checkout: Awaited<ReturnType<typeof createStripeCheckoutSession>>;
+  const idempotencyKey = `checkout:${user.id}:${plan}:${randomUUID()}`;
 
   try {
     console.log("[api:stripe:checkout] createCheckoutSession call", {
       userId: user.id,
       plan,
       priceId: checkoutConfig.priceId,
+      idempotencyKey,
     });
 
     checkout = await createStripeCheckoutSession({
@@ -163,7 +166,7 @@ export async function POST(req: NextRequest) {
       userEmail: user.email || "",
       plan,
       existingCustomerId: billingProfile?.stripe_customer_id,
-      idempotencyKey: `checkout:${user.id}:${plan}`,
+      idempotencyKey,
     });
   } catch (error) {
     console.error("[api:stripe:checkout] createCheckoutSession exception", {

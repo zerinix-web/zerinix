@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
 import { createClient } from "@/app/lib/supabase/server";
 import {
@@ -109,7 +110,7 @@ export async function startPlanChange(formData: FormData) {
     userEmail: user.email || "",
     plan,
     existingCustomerId: billingProfile?.stripe_customer_id,
-    idempotencyKey: `checkout:${user.id}:${plan}`,
+    idempotencyKey: `checkout:${user.id}:${plan}:${randomUUID()}`,
   });
 
   if (!checkout.ok) {

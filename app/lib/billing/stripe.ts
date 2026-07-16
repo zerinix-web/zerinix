@@ -299,23 +299,31 @@ async function postStripeForm<T>(
     } catch {
       providerError = "unreadable_error";
     }
+    const stripeRequestId = response.headers.get("request-id") || "";
+    const completeStripeError = {
+      ...stripeError,
+      requestId: stripeRequestId,
+      statusCode: response.status,
+      raw: rawStripeResponseBody,
+    };
 
     console.error("[api:stripe:checkout] Stripe error details", {
       path,
-      error: stripeError,
+      error: completeStripeError,
       type: stripeError?.type,
       code: stripeError?.code,
       message: stripeError?.message,
       param: stripeError?.param,
-      requestId: response.headers.get("request-id") || "",
+      requestId: stripeRequestId,
       statusCode: response.status,
+      raw: rawStripeResponseBody,
       rawStripeResponseBody,
     });
 
     logOperationalError("[stripe:request]", new Error("Stripe rejected the request."), {
       path,
       status: response.status,
-      requestId: response.headers.get("request-id") || "",
+      requestId: stripeRequestId,
       providerError,
     });
 
