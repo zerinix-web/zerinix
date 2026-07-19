@@ -114,6 +114,111 @@ function getCitationDomain(url?: string, organization = "") {
   );
 }
 
+function getCitationSourceName(citation: Pick<CitationData, "sourceTitle" | "organization" | "url">) {
+  return (
+    getCitationDomain(citation.url, citation.organization) ||
+    citation.organization ||
+    citation.sourceTitle ||
+    "Source"
+  );
+}
+
+function getPdfCitationSourceTypeLabel(citation: CitationData) {
+  if (citation.sourceType === "Company reference") {
+    return "Official company website";
+  }
+
+  if (citation.sourceType === "Industry reference") {
+    return "Industry reference";
+  }
+
+  if (citation.sourceType === "Planning assumption") {
+    return "Planning assumption";
+  }
+
+  return "Verified source";
+}
+
+function getPdfCitationTrustLabel(citation: CitationData) {
+  if (!citation.url || citation.sourceType === "Planning assumption") {
+    return "Reference";
+  }
+
+  return "Verified source";
+}
+
+function dedupePdfCitations(citations: CitationData[]) {
+  const unique = new Map<string, CitationData>();
+
+  citations.forEach((citation) => {
+    const domain = getCitationDomain(citation.url, citation.organization);
+    const publisherKey = normalizeCitationKey(citation.organization);
+    const sourceNameKey = normalizeCitationKey(getCitationSourceName(citation));
+    const key = [
+      domain || "no-domain",
+      publisherKey || "unknown-publisher",
+      sourceNameKey || "unknown-source",
+    ].join("|");
+    const existing = unique.get(key);
+
+    unique.set(key, {
+      ...existing,
+      ...citation,
+      ...(existing?.url && !citation.url ? { url: existing.url } : {}),
+      ...(existing?.sourceType && !citation.sourceType ? { sourceType: existing.sourceType } : {}),
+      ...(existing?.confidence && !citation.confidence ? { confidence: existing.confidence } : {}),
+    });
+  });
+
+  return Array.from(unique.values());
+}
+
+function getFinalDedupePdfSources(citations: CitationData[]) {
+  const unique = new Map<
+    string,
+    {
+      sourceName: string;
+      sourceType: string;
+      trustLabel: string;
+    }
+  >();
+
+  dedupePdfCitations(citations).forEach((citation) => {
+    const domain = getCitationDomain(citation.url, citation.organization);
+    const domainNameKey = normalizeCitationKey(domain.split(".")[0] || "");
+    const sourceName = getCitationSourceName(citation);
+    const sourceNameKey = normalizeCitationKey(sourceName);
+    const rawPublisherKey = normalizeCitationKey(citation.organization);
+    const publisherKey =
+      domainNameKey &&
+      (!rawPublisherKey ||
+        rawPublisherKey === "publisher not specified" ||
+        rawPublisherKey === domainNameKey ||
+        rawPublisherKey.startsWith(`${domainNameKey} `) ||
+        sourceNameKey === domainNameKey)
+        ? domainNameKey
+        : rawPublisherKey || "unknown-publisher";
+    const displayKey = sourceNameKey || domainNameKey || "unknown-source";
+    const key = [
+      domain || "no-domain",
+      publisherKey,
+      displayKey,
+    ].join("|");
+    const fallbackDisplayKey = `display:${domain || "no-domain"}|${displayKey}`;
+
+    if (!unique.has(key) && !unique.has(fallbackDisplayKey)) {
+      unique.set(key, {
+        sourceName,
+        sourceType: getPdfCitationSourceTypeLabel(citation),
+        trustLabel: getPdfCitationTrustLabel(citation),
+      });
+      unique.set(fallbackDisplayKey, unique.get(key)!);
+    }
+  });
+
+  return Array.from(new Set(unique.values()));
+}
+
 function normalizeCitationUrl(value = "") {
   const normalized = normalizePdfText(value).trim();
 
@@ -350,31 +455,28 @@ function formatPdfCitationContent(content: string) {
     })
   );
   const citations = parseCitations(sourceContent);
+  const methodologyBlock = [
+    "Methodology & Assumptions",
+    "Market sizing, financial projections and KPI estimates are based on available market signals, benchmark data and planning assumptions.",
+  ].join("\n");
 
   if (citations.length === 0) {
-    return sourceContent;
+    return methodologyBlock;
   }
 
-  return citations
+  const finalDedupeSources = getFinalDedupePdfSources(citations);
+  const sourceLines = finalDedupeSources
     .slice(0, 8)
-    .map((citation) => {
-      const year = citation.publicationYear ? `\n  Year: ${citation.publicationYear}` : "";
-      const confidence = citation.confidence ? `\n  Confidence: ${citation.confidence}` : "";
-      const url = `\n  URL: ${citation.url || "Not verified"}`;
-      const sourceType = citation.sourceType ? `\n  Type: ${citation.sourceType}` : "";
-      const domain = getCitationDomain(citation.url, citation.organization);
-
-      return [
-        `• ${citation.sourceTitle}`,
-        ...(domain ? [`  Domain: ${domain}`] : []),
-        `  Publisher: ${citation.organization}`,
-        year,
-        confidence,
-        sourceType,
-        url,
-      ].join("\n");
-    })
+    .map((source) =>
+      [
+        `• ${source.sourceName}`,
+        `  Source type: ${source.sourceType}`,
+        `  ${source.trustLabel}`,
+      ].join("\n")
+    )
     .join("\n");
+
+  return `${sourceLines}\n\n${methodologyBlock}`;
 }
 
 const founderRoadmapSteps = [
