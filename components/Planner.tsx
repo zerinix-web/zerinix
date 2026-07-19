@@ -1557,52 +1557,44 @@ function Citation({ citation }: { citation?: CitationData }) {
   }
 
   const domain = getCitationDomain(citation.url, citation.organization);
+  const sourceName = domain || citation.organization || citation.sourceTitle;
+  const trustLabel =
+    citation.sourceType === "Planning assumption"
+      ? "Planning assumption"
+      : citation.confidence === "High"
+        ? "High trust"
+        : citation.confidence === "Medium"
+          ? "Moderate trust"
+          : citation.confidence === "Low"
+            ? "Needs validation"
+            : "Trust reviewed";
 
   return (
     <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-      <p className="text-sm font-semibold leading-6 text-white">{citation.sourceTitle}</p>
-      <div className="mt-3 grid gap-2 text-xs text-zinc-400 sm:grid-cols-2">
-        {domain ? (
-          <p>
-            <span className="text-zinc-500">Domain</span>
-            <span className="ml-2 text-zinc-200">{domain}</span>
-          </p>
-        ) : null}
-        <p>
-          <span className="text-zinc-500">Publisher</span>
-          <span className="ml-2 text-zinc-200">{citation.organization}</span>
-        </p>
-        {citation.publicationYear ? (
-          <p>
-            <span className="text-zinc-500">Year</span>
-            <span className="ml-2 text-zinc-200">{citation.publicationYear}</span>
-          </p>
-        ) : null}
-        {citation.confidence ? (
-          <p>
-            <span className="text-zinc-500">Confidence</span>
-            <span className="ml-2 text-zinc-200">{citation.confidence}</span>
-          </p>
-        ) : null}
-        {citation.sourceType ? (
-          <p>
-            <span className="text-zinc-500">Type</span>
-            <span className="ml-2 text-zinc-200">{citation.sourceType}</span>
-          </p>
-        ) : null}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold leading-6 text-white">{sourceName}</p>
+          <p className="mt-1 line-clamp-1 text-xs text-zinc-500">{citation.sourceTitle}</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <span className="rounded-full border border-teal-200/15 bg-teal-200/10 px-2.5 py-1 text-[11px] font-semibold text-teal-100">
+            {citation.sourceType || "Verified source"}
+          </span>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-zinc-300">
+            {trustLabel}
+          </span>
+        </div>
       </div>
       {citation.url ? (
         <a
           href={citation.url}
           target="_blank"
           rel="noreferrer"
-          className="mt-2 block truncate text-xs text-teal-200/80 underline-offset-4 hover:text-teal-100 hover:underline"
+          className="mt-3 inline-flex w-fit items-center rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-xs font-semibold text-teal-100 transition hover:border-teal-200/25 hover:bg-teal-200/10"
         >
-          {citation.url}
+          Open source
         </a>
-      ) : (
-        <p className="mt-2 text-xs text-zinc-500">Not verified</p>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -1627,11 +1619,13 @@ function CitationList({ content }: { content: string }) {
 }
 
 function SourcesCard({ sections }: { sections: ReportSection[] }) {
-  const sectionsWithCitations = sections.filter(
-    (section) => parseCitations(section.content).length > 0
-  );
+  const mergedContent = sections
+    .map((section) => section.content.trim())
+    .filter(Boolean)
+    .join("\n");
+  const citations = parseCitations(mergedContent);
 
-  if (sectionsWithCitations.length === 0) {
+  if (!mergedContent) {
     return null;
   }
 
@@ -1648,17 +1642,23 @@ function SourcesCard({ sections }: { sections: ReportSection[] }) {
           <h3 className="mt-1 text-xl font-semibold tracking-tight text-white">
             Sources
           </h3>
-          <div className="mt-4 space-y-5">
-            {sectionsWithCitations.map((section) => (
-              <div key={section.field || section.title} className="border-t border-white/10 pt-4 first:border-t-0 first:pt-0">
-                {sectionsWithCitations.length > 1 ? (
-                  <p className="mb-2 text-sm font-semibold text-zinc-100">
-                    {section.title}
-                  </p>
-                ) : null}
-                <CitationList content={section.content} />
+          <div className="mt-4 space-y-3">
+            {citations.length > 0 ? (
+              <div className="grid gap-3 md:grid-cols-2">
+                {citations.map((citation, index) => (
+                  <Citation
+                    key={`${getCitationDomain(citation.url, citation.organization)}-${citation.sourceTitle}-${citation.publicationYear || ""}-${index}`}
+                    citation={citation}
+                  />
+                ))}
               </div>
-            ))}
+            ) : null}
+            <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+              <p className="text-sm font-semibold text-white">Methodology &amp; Assumptions</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">
+                Market sizing, financial projections and KPI estimates are based on available market signals, benchmark data and planning assumptions.
+              </p>
+            </div>
           </div>
         </div>
       </div>
