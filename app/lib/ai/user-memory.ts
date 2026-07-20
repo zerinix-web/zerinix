@@ -224,6 +224,10 @@ export function extractExplicitMemoryOperations(prompt: string): UserMemoryOpera
   const name = firstMatch(text, [
     /\bmy name is\s+([^.!?\n]{2,80})/i,
     /\bcall me\s+([^.!?\n]{2,80})/i,
+    /\bbenim ad[ıi]m\s+([^.!?\n]{2,80})/i,
+    /\bad[ıi]m\s+([^.!?\n]{2,80})/i,
+    /\b[İIıi]smim\s+([^.!?\n]{2,80})/i,
+    /\b[İIıi]smin\s+([^.!?\n]{2,80})/i,
   ]);
 
   if (name) {

@@ -494,6 +494,10 @@ function shouldAttachUserMemoryContext(input: {
     return false;
   }
 
+  if (input.memories.some((memory) => memory.type === "name")) {
+    return true;
+  }
+
   if (
     input.advisorRequest ||
     input.reportQuestion ||
@@ -694,7 +698,28 @@ function getMemoryRecallType(prompt: string): UserMemoryType | null {
   return null;
 }
 
-function formatMemorySaveResponse(type: UserMemoryType, content: string) {
+function formatMemorySaveResponse(
+  type: UserMemoryType,
+  content: string,
+  responseLanguage: "English" | "Turkish"
+) {
+  if (responseLanguage === "Turkish") {
+    switch (type) {
+      case "name":
+        return `Adınızı ${content} olarak kaydettim.`;
+      case "company":
+        return `Şirketinizi ${content} olarak kaydettim.`;
+      case "language":
+        return `Dil tercihinizi ${content} olarak kaydettim.`;
+      case "writing_style":
+        return `${content} tercihinizi hatırlayacağım.`;
+      case "long_term_goal":
+        return "Uzun vadeli hedefinizi kaydettim.";
+      default:
+        return "Bunu hatırlayacağım.";
+    }
+  }
+
   switch (type) {
     case "name":
       return `I've saved your name as ${content}.`;
@@ -711,18 +736,39 @@ function formatMemorySaveResponse(type: UserMemoryType, content: string) {
   }
 }
 
-function formatMemoryRecallResponse(type: UserMemoryType, content: string) {
+function formatMemoryRecallResponse(
+  type: UserMemoryType,
+  content: string,
+  responseLanguage: "English" | "Turkish"
+) {
+  if (responseLanguage === "Turkish") {
+    switch (type) {
+      case "name":
+        return `Merhaba ${content}. Bugün nasıl yardımcı olabilirim?`;
+      case "company":
+        return `${content} için nasıl yardımcı olabilirim?`;
+      case "language":
+        return `Elbette, ${content} yanıt vereceğim.`;
+      case "writing_style":
+        return `Elbette, ${content} biçiminde yanıtlayacağım.`;
+      case "long_term_goal":
+        return `Bu hedef doğrultusunda nasıl yardımcı olabilirim?`;
+      default:
+        return content;
+    }
+  }
+
   switch (type) {
     case "name":
-      return `Your name is ${content}.`;
+      return `Hi ${content}. How can I help today?`;
     case "company":
-      return `Your company is ${content}.`;
+      return `How can I help with ${content}?`;
     case "language":
-      return `You prefer ${content}.`;
+      return `Of course, I'll respond in ${content}.`;
     case "writing_style":
-      return `You prefer ${content}.`;
+      return `Of course, I'll use ${content}.`;
     case "long_term_goal":
-      return `Your long-term goal is ${content}.`;
+      return "How can I help with that goal?";
     default:
       return content;
   }
@@ -1165,6 +1211,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Message is required." }, { status: 400 });
     }
 
+    const responseLanguage = detectResponseLanguage(prompt);
     const { data: profileData, error: profileError } = await supabase
       .from("ai_chat_profiles")
       .select(
@@ -1225,7 +1272,9 @@ export async function POST(req: Request) {
           const savedContent =
             getSavedMemoryContent(userMemories, savedOperation.type) || savedOperation.content;
 
-          return textStream(formatMemorySaveResponse(savedOperation.type, savedContent));
+          return textStream(
+            formatMemorySaveResponse(savedOperation.type, savedContent, responseLanguage)
+          );
         }
 
         if (memoryApplyResult.remembered > 0) {
@@ -1269,7 +1318,6 @@ export async function POST(req: Request) {
       attachments,
       advisorRequest
     );
-    const responseLanguage = detectResponseLanguage(prompt);
     const profileContext = shouldAttachProfileContext({
       prompt,
       messages,
@@ -1314,7 +1362,9 @@ export async function POST(req: Request) {
         memoryType: recallType,
       });
 
-      return textStream(formatMemoryRecallResponse(recallType, recalledMemory));
+      return textStream(
+        formatMemoryRecallResponse(recallType, recalledMemory, responseLanguage)
+      );
     }
 
     if (isUserIdentityQuestion(prompt) && rememberedName) {
@@ -1326,7 +1376,9 @@ export async function POST(req: Request) {
         memoryType: "name",
       });
 
-      return textStream(`Your name is ${rememberedName}.`);
+      return textStream(
+        formatMemoryRecallResponse("name", rememberedName, responseLanguage)
+      );
     }
 
     if (isAiTestMode()) {
@@ -1484,6 +1536,7 @@ export async function POST(req: Request) {
     const maxOutputTokens = getChatMaxOutputTokens(requestKind);
     const instructionsText = [
       "You are ZERINIX AI, a premium business operating assistant.",
+      "Always reply in the same language as the user's latest message.",
       `Classified user intent: ${selectedIntent}.`,
       `Selected expert: ${selectedExpert}.`,
       expertInstructions[selectedExpert],

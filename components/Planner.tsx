@@ -8095,7 +8095,18 @@ export default function Planner({
                         <button
 	                          key={modeCard.mode}
 	                          type="button"
-	                          onClick={() => setSelectedDesktopAnalysisMode(modeCard.mode)}
+	                          onClick={() => {
+                              const sharedPrompt = chatPrompt.trim() || latestUserIntentPrompt.trim();
+
+                              if (!sharedPrompt || isWorking) {
+                                return;
+                              }
+
+                              setSelectedDesktopAnalysisMode(modeCard.mode);
+                              void (modeCard.mode === "market"
+                                ? analyzeMarket(sharedPrompt)
+                                : generatePlan(sharedPrompt));
+                            }}
 				                          className={`flex min-h-36 flex-col rounded-[1.25rem] border p-3.5 text-left shadow-lg shadow-black/10 transition duration-200 ease-out hover:-translate-y-0.5 hover:shadow-xl md:shadow-sm ${
 			                            selected
 				                              ? "border-teal-200/35 bg-teal-200/[0.12] shadow-xl shadow-teal-950/30 ring-1 ring-teal-200/20"
@@ -8136,9 +8147,9 @@ export default function Planner({
                               : `${modeCard.output} · ${modeCard.opens}`}
                           </p>
                         </button>
-                      );
-                    })}
-                  </div>
+	                      );
+	                    })}
+	                  </div>
 
 	                </div>
 	              </section>
