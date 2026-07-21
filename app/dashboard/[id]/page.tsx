@@ -413,6 +413,41 @@ function cleanDecisionSummaryText(value: string, fallback: string) {
   return `${clipped.slice(0, Math.max(80, lastSpace)).trim()}…`;
 }
 
+function extractDecisionConfidenceValue(content: string) {
+  const direct =
+    extractMetricValue(content, "Confidence") ||
+    extractMetricValue(content, "Decision Confidence") ||
+    extractMetricValue(content, "Güven") ||
+    extractMetricValue(content, "Karar Güveni");
+  const percent = direct.match(/\d{1,3}\s*%/)?.[0] || content.match(/(?:Confidence|Güven)\s*[:\-–—]\s*(\d{1,3}\s*%)/i)?.[1];
+
+  return percent || direct || "";
+}
+
+function extractDecisionDriverList(content: string, labels: string[]) {
+  const normalized = sanitizeAiResponseText(content);
+
+  for (const label of labels) {
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = normalized.match(
+      new RegExp(
+        `${escapedLabel}\\s*[:\\-–—]?\\s*([\\s\\S]*?)(?=\\n\\s*(?:Positive signals|Risk signals|Pozitif sinyaller|Risk sinyalleri|Decision|Karar|Confidence|Güven)\\s*[:\\-–—]|$)`,
+        "i"
+      )
+    );
+    const bullets = match?.[1]
+      ?.split("\n")
+      .map((line) => line.trim().replace(/^[-*•]\s*/, ""))
+      .filter((line) => line.length > 6);
+
+    if (bullets && bullets.length > 0) {
+      return bullets.slice(0, 3).join(" ");
+    }
+  }
+
+  return "";
+}
+
 function getDecisionSummaryItems(
   sections: Array<{ field?: string; title: string; content: string }>
 ) {
@@ -463,6 +498,15 @@ function getDecisionSummaryItems(
     extractMetricValue(executiveRecommendation, "Main Risk") ||
     extractMetricValue(risks, "Main Risk") ||
     extractKeywordInsight(risks || fullContent, ["risk", "threat", "regulation", "competition"]);
+  const decisionConfidence = extractDecisionConfidenceValue(executiveRecommendation || fullContent);
+  const positiveDrivers = extractDecisionDriverList(executiveRecommendation || fullContent, [
+    "Positive signals",
+    "Pozitif sinyaller",
+  ]);
+  const riskDrivers = extractDecisionDriverList(executiveRecommendation || fullContent, [
+    "Risk signals",
+    "Risk sinyalleri",
+  ]);
 
   return [
     {
@@ -485,6 +529,27 @@ function getDecisionSummaryItems(
       detail: cleanDecisionSummaryText(mainRisk, "Risk profile is detailed in the report."),
       icon: Target,
       evidence: "benchmarkDerived" as EvidenceLevel,
+    },
+    {
+      label: "Decision Confidence",
+      value: cleanDecisionSummaryText(decisionConfidence, "Review required"),
+      detail: "Confidence reflects market, model, financial, validation, and execution drivers.",
+      icon: Gauge,
+      evidence: getDashboardMetricEvidence("Decision Confidence", decisionConfidence, executiveRecommendation || fullContent),
+    },
+    {
+      label: "Positive Drivers",
+      value: cleanDecisionSummaryText(positiveDrivers, "Positive signals require validation."),
+      detail: "Factors increasing decision confidence.",
+      icon: CheckCircle2,
+      evidence: "benchmarkDerived" as EvidenceLevel,
+    },
+    {
+      label: "Risk Drivers",
+      value: cleanDecisionSummaryText(riskDrivers, "Risk signals require review."),
+      detail: "Factors reducing decision confidence.",
+      icon: TriangleAlert,
+      evidence: "validationRequired" as EvidenceLevel,
     },
     {
       label: "Recommended Next Step",

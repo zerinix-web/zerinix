@@ -23,6 +23,7 @@ import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 import { createAiJobDescriptor } from "@/app/lib/ai/queue";
 import {
   createCanonicalFinancialAssumptions,
+  formatDecisionConfidenceReport,
   formatCanonicalFinancialAssumptions,
   formatFinancialConsistencyReport,
   type AiFinancialModelContext,
@@ -1229,6 +1230,7 @@ function buildCanonicalExecutiveRecommendation(context: AiFinancialModelContext,
       `Rationale: The current evidence supports ${finalDecision.toLowerCase()} because runway, payback, validation confidence, and capital efficiency still need to be proven before scale.`,
       `Gerekçe: Mevcut kanıtlar ${visibleDecision.toLowerCase()} kararını destekliyor; çünkü ölçek öncesinde finansal pist, geri ödeme, doğrulama güveni ve sermaye verimliliği kanıtlanmalı.`
     ),
+    formatDecisionConfidenceReport(context, language),
   ].join("\n");
 }
 

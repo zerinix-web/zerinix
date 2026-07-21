@@ -7,6 +7,10 @@ import {
   type FinancialModel,
 } from "@/app/lib/ai/financial-model";
 import {
+  createDecisionConfidenceModel,
+  type DecisionConfidenceModel,
+} from "@/app/lib/ai/decision-confidence";
+import {
   createInvestmentScore,
   formatInvestmentScore,
   type InvestmentScore,
@@ -17,6 +21,7 @@ export type ReportKind = "business_plan" | "market_analysis";
 export type AiFinancialModelContext = FinancialModel & {
   investmentScore: InvestmentScore;
   financialConsistency: FinancialConsistencyCheck;
+  decisionConfidence: DecisionConfidenceModel;
 };
 
 export function createCanonicalFinancialAssumptions(input: {
@@ -24,14 +29,21 @@ export function createCanonicalFinancialAssumptions(input: {
   reportKind: ReportKind;
 }): AiFinancialModelContext {
   const financialModel = createFinancialModel(input);
+  const investmentScore = createInvestmentScore({
+    prompt: input.prompt,
+    financialModel,
+  });
+  const financialConsistency = validateFinancialConsistency(financialModel);
 
   return {
     ...financialModel,
-    investmentScore: createInvestmentScore({
-      prompt: input.prompt,
+    investmentScore,
+    financialConsistency,
+    decisionConfidence: createDecisionConfidenceModel({
       financialModel,
+      investmentScore,
+      financialConsistency,
     }),
-    financialConsistency: validateFinancialConsistency(financialModel),
   };
 }
 
@@ -212,5 +224,79 @@ export function formatFinancialConsistencyReport(
     language === "Turkish"
       ? "- Veri ayrımı: kullanıcı verisi, benchmark varsayımları ve AI planlama varsayımları ayrı değerlendirilmiştir."
       : "- Data separation: user provided data, benchmark assumptions, and AI generated planning assumptions are evaluated separately.",
+  ].join("\n");
+}
+
+export function formatDecisionConfidenceReport(
+  context: AiFinancialModelContext,
+  language: "English" | "Turkish" = "English"
+) {
+  const decision = context.decisionConfidence;
+  const positiveTitle = language === "Turkish" ? "Pozitif sinyaller:" : "Positive signals:";
+  const riskTitle = language === "Turkish" ? "Risk sinyalleri:" : "Risk signals:";
+  const translateFactor = (factor: string) => {
+    if (language !== "Turkish") {
+      return factor;
+    }
+
+    if (factor === "Market opportunity is attractive enough to justify validation.") {
+      return "Pazar fırsatı doğrulamayı hak edecek kadar cazip.";
+    }
+
+    if (factor === "Subscription model creates recurring revenue potential.") {
+      return "Abonelik modeli tekrar eden gelir potansiyeli yaratıyor.";
+    }
+
+    if (factor === "Business model strength is directionally positive.") {
+      return "İş modeli gücü yön olarak olumlu.";
+    }
+
+    if (factor === "Gross margin opportunity is attractive.") {
+      return "Brüt marj fırsatı cazip.";
+    }
+
+    if (factor === "Revenue diversity can reduce single-channel dependence.") {
+      return "Gelir çeşitliliği tek kanala bağımlılığı azaltabilir.";
+    }
+
+    if (factor === "Validation signals are strong enough to increase decision confidence.") {
+      return "Doğrulama sinyalleri karar güvenini artıracak kadar güçlü.";
+    }
+
+    if (factor === "Customer validation gaps remain unresolved.") {
+      return "Müşteri doğrulama boşlukları devam ediyor.";
+    }
+
+    if (factor === "CAC uncertainty remains a material risk.") {
+      return "CAC belirsizliği önemli bir risk olmaya devam ediyor.";
+    }
+
+    if (factor === "Capital efficiency risk requires validation.") {
+      return "Sermaye verimliliği riski doğrulama gerektiriyor.";
+    }
+
+    if (factor === "Competitive risk needs stronger proof of defensibility.") {
+      return "Rekabet riski daha güçlü savunulabilirlik kanıtı gerektiriyor.";
+    }
+
+    if (factor === "Execution complexity could slow the path to proof.") {
+      return "Yürütme karmaşıklığı kanıta ulaşma hızını yavaşlatabilir.";
+    }
+
+    return factor;
+  };
+
+  return [
+    language === "Turkish" ? "AI Karar Güveni:" : "AI Decision Confidence:",
+    `${language === "Turkish" ? "Karar" : "Decision"}: ${decision.decision}`,
+    `${language === "Turkish" ? "Güven" : "Confidence"}: ${decision.confidenceScore}%`,
+    positiveTitle,
+    ...(decision.positiveFactors.length > 0
+      ? decision.positiveFactors.map((factor) => `- ${translateFactor(factor)}`)
+      : [language === "Turkish" ? "- Pozitif sinyal doğrulama gerektiriyor." : "- Positive signals require validation."]),
+    riskTitle,
+    ...(decision.negativeFactors.length > 0
+      ? decision.negativeFactors.map((factor) => `- ${translateFactor(factor)}`)
+      : [language === "Turkish" ? "- Belirgin risk sinyali tespit edilmedi." : "- No material risk signal detected."]),
   ].join("\n");
 }

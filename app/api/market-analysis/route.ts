@@ -23,6 +23,7 @@ import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 import { createAiJobDescriptor } from "@/app/lib/ai/queue";
 import {
   createCanonicalFinancialAssumptions,
+  formatDecisionConfidenceReport,
   formatCanonicalFinancialAssumptions,
   formatFinancialConsistencyReport,
   type AiFinancialModelContext,
@@ -884,6 +885,7 @@ function buildCanonicalMarketExecutiveRecommendation(
     marketText(language, `Investment Recommendation: ${recommendation}`, `Yatırım Tavsiyesi: ${recommendation}`),
     marketText(language, `Main Risk: ${context.investmentScore.topRisks[0] || "Market demand requires validation."}`, `Ana Risk: ${context.investmentScore.topRisks[0] || "Pazar talebi doğrulama gerektiriyor."}`),
     marketText(language, `Next Action: ${context.investmentScore.nextCriticalAction}`, `Sonraki Aksiyon: ${context.investmentScore.nextCriticalAction}`),
+    formatDecisionConfidenceReport(context, language),
   ].join("\n");
 }
 
