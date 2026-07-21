@@ -9,6 +9,7 @@ import {
   formatInvestmentScore,
   type InvestmentScore,
 } from "@/app/lib/ai/investment-score";
+import { getEvidenceLabel, inferEvidenceLevel } from "@/app/lib/report-evidence";
 
 export type ReportKind = "business_plan" | "market_analysis";
 export type AiFinancialModelContext = FinancialModel & {
@@ -31,8 +32,18 @@ export function createCanonicalFinancialAssumptions(input: {
 }
 
 function formatMetricRow(metric: FinancialMetricModel, benchmarkSource: string) {
+  const formattedValue = formatFinancialModelValue(metric);
+  const evidence = getEvidenceLabel(
+    inferEvidenceLevel({
+      label: metric.label,
+      value: formattedValue,
+      context: `${metric.formula}; ${metric.assumptions.join("; ")}; ${metric.benchmarkComparison}; confidence=${metric.confidence}`,
+    })
+  );
+
   return [
-    `- ${metric.label}: ${formatFinancialModelValue(metric)}`,
+    `- ${metric.label}: ${formattedValue}`,
+    `evidence=${evidence}`,
     `formula=${metric.formula}`,
     `assumptions=${metric.assumptions.join("; ")}`,
     `benchmark=${metric.benchmarkComparison}`,
@@ -86,25 +97,26 @@ ${metricRows}
 Revenue forecast:
 ${forecastRows}
 
-	Evidence classification:
-	- Verified data: user-provided facts only, including the submitted idea context (${context.normalizedBusinessIdea}) and any explicit facts stated by the user.
-	- Market benchmark: industry benchmark ranges, market sizing, growth, margin, CAC, LTV, payback, EBITDA, revenue multiple, and operating assumptions from the selected benchmark basis.
-	- Planning assumption: geography multiplier, serviceable market rate, obtainable share rate, customer count, pricing model, burn rate, runway target, startup capex, and break-even timing where direct user data is absent.
+	Evidence model:
+	- Verified: user-provided facts only, including the submitted idea context (${context.normalizedBusinessIdea}) and any explicit facts stated by the user.
+	- Benchmark Derived: industry benchmark ranges, market sizing, growth, margin, CAC, LTV, payback, EBITDA, revenue multiple, and operating assumptions from the selected benchmark basis.
+	- Planning Assumption: geography multiplier, serviceable market rate, obtainable share rate, customer count, pricing model, burn rate, runway target, startup capex, and break-even timing where direct user data is absent.
+	- Validation Required: metrics or claims that require primary research, customer interviews, pricing tests, cohort data, or real operating data before investment decisions.
 
 ${investmentScoreContext}
 
 Financial modeling rules:
 - Use the structured financial model above as the single source of truth for all financial metrics.
 - Do not replace these values with generic ranges, generic templates, or unrelated benchmarks.
-- Explain every major number with its formula, assumptions, benchmark comparison, and confidence level.
-- If confidence is Low, explicitly warn that the estimate needs validation instead of presenting it as precise.
+- Explain every major number with its formula, assumptions, benchmark comparison, and evidence label from the canonical set.
+- If evidence is Validation Required, explicitly warn that the estimate needs validation instead of presenting it as precise.
 - Financial Dashboard, Unit Economics, Scenario Analysis, Executive Summary, Executive Recommendation, KPI Dashboard, and Financial Assumptions must reuse these same values.
 - Scenario Analysis may vary these values for worst/base/best cases, but Base Case must match this calculated model exactly.
 - Use the Investment Scoring Engine as the source of truth for Total Investment Score, confidence, strengths, weaknesses, Founder Score, and investment recommendation logic.
 - Do not invent static investment scores or category scores; reuse the calculated score and category reasoning above.
 - Executive Summary and Executive Recommendation must use the calculated Recommendation, Estimated Valuation, Funding Stage, Top Risks, and Next Critical Action from the Investment Scoring Engine.
 - For recurring software models, ARR and MRR are appropriate. For mobility, retail, hospitality, manufacturing, and other non-subscription models, use business-model-specific revenue labels from the structured model instead of SaaS labels.
-- For revenue, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, show value, formula, assumptions, confidence, and benchmark source when the section is responsible for financial explanation.
-	- Financial Assumptions must be written as a Key Assumptions section that lists every calculation assumption and classifies each as Verified data, Market benchmark, or Planning assumption.
-	- Tag important claims with one concise evidence label only when useful: Verified data, Market benchmark, Planning assumption, Low Confidence, or High Confidence. Do not create fake citations.`;
+- For revenue, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, show value, formula, assumptions, evidence label, and benchmark source when the section is responsible for financial explanation.
+	- Financial Assumptions must be written as a Key Assumptions section that lists every calculation assumption and classifies each as Verified, Benchmark Derived, Planning Assumption, or Validation Required.
+	- Tag important claims with one concise evidence label only when useful: Verified, Benchmark Derived, Planning Assumption, or Validation Required. Do not create fake citations.`;
 }

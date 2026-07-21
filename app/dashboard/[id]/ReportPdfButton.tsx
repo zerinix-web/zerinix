@@ -20,6 +20,10 @@ import {
   normalizePdfSourceDomain,
   repairPdfLineFragments,
 } from "@/app/lib/pdf-normalization.mjs";
+import {
+  getEvidenceLabel,
+  sourceTypeToEvidenceLevel,
+} from "@/app/lib/report-evidence";
 
 type PdfReportSection = DashboardReport["sections"][number];
 
@@ -142,11 +146,9 @@ function getPdfCitationSourceTypeLabel(citation: CitationData) {
 }
 
 function getPdfCitationTrustLabel(citation: CitationData) {
-  if (!citation.url || citation.sourceType === "Planning assumption") {
-    return "Reference";
-  }
-
-  return "Verified source";
+  return getEvidenceLabel(
+    sourceTypeToEvidenceLevel(citation.sourceType || "", Boolean(citation.url))
+  );
 }
 
 function dedupePdfCitations(citations: CitationData[]) {

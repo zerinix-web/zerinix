@@ -29,6 +29,12 @@ import {
   ShareReportButton,
 } from "./ReportViewerEnhancements";
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
+import {
+  getEvidenceBadgeClass,
+  getEvidenceLabel,
+  inferEvidenceLevel,
+  type EvidenceLevel,
+} from "@/app/lib/report-evidence";
 
 export const dynamic = "force-dynamic";
 
@@ -177,6 +183,57 @@ function formatMetricCardValue(value: string) {
     .replace(/(\d)\.\s+(\d)(\s*[kKmMbB%])?/g, "$1.$2$3")
     .replace(/(\d),\s+(\d{3})/g, "$1,$2")
     .trim();
+}
+
+function getDashboardEvidenceLabel(level: EvidenceLevel) {
+  return getEvidenceLabel(level, "Turkish");
+}
+
+function EvidenceBadge({ level }: { level: EvidenceLevel }) {
+  return (
+    <span className={`w-fit shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${getEvidenceBadgeClass(level)}`}>
+      {getDashboardEvidenceLabel(level)}
+    </span>
+  );
+}
+
+function getDashboardMetricEvidence(label: string, value: string, content: string): EvidenceLevel {
+  return inferEvidenceLevel({
+    label,
+    value,
+    context: `${content}\n${extractMetricValue(content, "Evidence")}`,
+  });
+}
+
+function getDashboardSectionEvidence(section: { field?: string; title: string; content: string }): EvidenceLevel {
+  const field = section.field?.toLowerCase() || "";
+  const title = section.title.toLowerCase();
+
+  if (field.includes("source") || title.includes("source") || title.includes("kaynak")) {
+    return "verified";
+  }
+
+  if (field.includes("tam") || title.includes("tam / sam / som") || field.includes("financial") || title.includes("financial") || title.includes("finansal")) {
+    return getDashboardMetricEvidence(
+      section.title,
+      extractMetricValue(section.content, "Gross Margin") || extractMetricValue(section.content, "TAM") || section.title,
+      section.content
+    );
+  }
+
+  if (field.includes("kpi") || title.includes("kpi")) {
+    return "validationRequired";
+  }
+
+  if (field.includes("competitor") || title.includes("competitor") || title.includes("market") || title.includes("pazar")) {
+    return "benchmarkDerived";
+  }
+
+  if (field.includes("executive") || title.includes("executive") || title.includes("summary")) {
+    return getDashboardMetricEvidence(section.title, extractMetricValue(section.content, "Decision") || section.title, section.content);
+  }
+
+  return "planningAssumption";
 }
 
 function isMobilityReportContent(content: string) {
@@ -400,18 +457,21 @@ function getDecisionSummaryItems(
         "Review the decision evidence before moving forward."
       ),
       icon: Sparkles,
+      evidence: getDashboardMetricEvidence("Decision Signal", decisionSignal, `${executiveRecommendation}\n${executiveSummary}`),
     },
     {
       label: "Main Insight",
       value: cleanDecisionSummaryText(mainInsight, "Primary market signal requires review."),
       detail: cleanDecisionSummaryText(mainRisk, "Risk profile is detailed in the report."),
       icon: Target,
+      evidence: "benchmarkDerived" as EvidenceLevel,
     },
     {
       label: "Recommended Next Step",
       value: cleanDecisionSummaryText(nextStep, "Create a follow-up validation plan."),
       detail: "Use the full report context to continue the decision file.",
       icon: Flag,
+      evidence: "planningAssumption" as EvidenceLevel,
     },
   ];
 }
@@ -502,21 +562,25 @@ function ExecutiveSummaryVisual({
       label: "Investment Score",
       value: score === null ? "—" : `${score}/100`,
       accent: "from-teal-200/25 to-cyan-200/5",
+      evidence: getDashboardMetricEvidence("Investment Score", score === null ? "" : `${score}`, content),
     },
     {
       label: "Decision",
       value: recommendation,
       accent: "from-emerald-300/20 to-teal-300/5",
+      evidence: getDashboardMetricEvidence("Decision", recommendation, content),
     },
     {
       label: "Market Signal",
       value: extractMetricValue(content, "Market") || extractMetricValue(content, "TAM") || "Review",
       accent: "from-sky-300/18 to-teal-300/5",
+      evidence: "benchmarkDerived" as EvidenceLevel,
     },
     {
       label: "Risk Posture",
       value: extractMetricValue(content, "Risk") || extractMetricValue(content, "Main Risk") || "Tracked",
       accent: "from-amber-300/18 to-teal-300/5",
+      evidence: "validationRequired" as EvidenceLevel,
     },
   ];
 
@@ -576,6 +640,9 @@ function ExecutiveSummaryVisual({
                 <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
                   {kpi.label}
                 </p>
+                <div className="mt-2">
+                  <EvidenceBadge level={kpi.evidence} />
+                </div>
                 <p className="mt-3 line-clamp-2 text-2xl font-semibold tracking-tight text-white">
                   {kpi.value}
                 </p>
@@ -685,9 +752,12 @@ function ReportSectionVisual({
 
             return (
               <div key={bar.label} className="grid items-center gap-3 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(7rem,auto)]">
-                <div className="rounded-2xl border border-white/10 bg-black/35 p-3 text-center">
-                  <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">{bar.label}</p>
-                </div>
+	                <div className="rounded-2xl border border-white/10 bg-black/35 p-3 text-center">
+	                  <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">{bar.label}</p>
+	                  <div className="mt-2 flex justify-center">
+	                    <EvidenceBadge level={getDashboardMetricEvidence(bar.label, value, content)} />
+	                  </div>
+	                </div>
                 <div className="h-14 rounded-2xl border border-white/10 bg-zinc-950 p-1.5">
                   <div
                     className={`h-full rounded-[1.1rem] bg-gradient-to-r ${bar.color} shadow-lg shadow-teal-950/20`}
@@ -873,14 +943,22 @@ function ReportSectionVisual({
           </p>
         </div>
         <div className="grid gap-px bg-white/10 md:grid-cols-5">
-          {flow.map((metric) => (
-            <div key={metric} className="bg-zinc-950/80 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
-              <p className="mt-3 truncate whitespace-nowrap text-lg font-semibold text-white">
-                {formatMetricCardValue(extractMetricValue(content, metric)) || "—"}
-              </p>
-            </div>
-          ))}
+	          {flow.map((metric) => {
+	            const value = formatMetricCardValue(extractMetricValue(content, metric));
+	            const evidence = getDashboardMetricEvidence(metric, value, content);
+
+	            return (
+	              <div key={metric} className="bg-zinc-950/80 p-4">
+	                <div className="flex items-start justify-between gap-2">
+	                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
+	                  <EvidenceBadge level={evidence} />
+	                </div>
+	                <p className="mt-3 truncate whitespace-nowrap text-lg font-semibold text-white">
+	                  {value || "—"}
+	                </p>
+	              </div>
+	            );
+	          })}
         </div>
       </div>
     );
@@ -930,26 +1008,19 @@ function ReportSectionVisual({
           </span>
         </div>
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-          {getFinancialDashboardMetrics(content).map((metric, index) => {
-            const value = formatMetricCardValue(
-              extractMetricValueFromAliases(content, metric.aliases)
-            );
+	          {getFinancialDashboardMetrics(content).map((metric, index) => {
+	            const value = formatMetricCardValue(
+	              extractMetricValueFromAliases(content, metric.aliases)
+	            );
+	            const evidence = getDashboardMetricEvidence(metric.label, value, content);
 
-            return (
+	            return (
               <div key={metric.label} className="flex min-h-32 min-w-0 flex-col justify-between overflow-hidden rounded-3xl border border-white/10 bg-black/35 p-3.5 shadow-xl shadow-black/20">
                 <div className="flex items-start justify-between gap-3">
                   <p className="line-clamp-2 min-w-0 break-words text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-500">
                     {metric.label}
                   </p>
-                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${
-                    index % 3 === 0
-                      ? "bg-teal-200 text-black"
-                      : index % 3 === 1
-                        ? "bg-amber-300/15 text-amber-200"
-                        : "bg-white/10 text-zinc-300"
-                  }`}>
-                    {index % 3 === 0 ? "On track" : index % 3 === 1 ? "Watch" : "Model"}
-                  </span>
+	                  <EvidenceBadge level={evidence} />
                 </div>
                 <div className="mt-4 min-w-0">
                   <p className="truncate whitespace-nowrap text-[clamp(1.15rem,2.2vw,1.65rem)] font-semibold leading-tight tracking-tight text-white">
@@ -1193,24 +1264,32 @@ function ReportSectionVisual({
 
     return (
       <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {kpiMetrics.map((metric) => (
-          <div key={metric} className="grid grid-cols-[4.25rem_1fr] gap-4 rounded-3xl border border-white/10 bg-white/[0.035] p-4">
-            <MiniProgressCircle label="" value={extractPercentScore(content, metric)} />
-            <div className="min-w-0">
-              <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
-              <p className="mt-2 line-clamp-2 text-xl font-semibold text-white">
-                {extractMetricValue(content, metric) || "Target"}
-              </p>
-              <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-zinc-800">
-                <div
-                  className="h-full rounded-full bg-teal-200/80"
+	        {kpiMetrics.map((metric) => {
+	          const value = extractMetricValue(content, metric);
+	          const evidence = getDashboardMetricEvidence(metric, value, content);
+
+	          return (
+	          <div key={metric} className="grid grid-cols-[4.25rem_1fr] gap-4 rounded-3xl border border-white/10 bg-white/[0.035] p-4">
+	            <MiniProgressCircle label="" value={extractPercentScore(content, metric)} />
+	            <div className="min-w-0">
+	              <div className="flex items-start justify-between gap-2">
+	                <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
+	                <EvidenceBadge level={evidence} />
+	              </div>
+	              <p className="mt-2 line-clamp-2 text-xl font-semibold text-white">
+	                {value || "Target"}
+	              </p>
+	              <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+	                <div
+	                  className="h-full rounded-full bg-teal-200/80"
                   style={{ width: `${extractPercentScore(content, metric) ?? 66}%` }}
                 />
               </div>
-              <p className="mt-2 text-xs text-zinc-500">Analytics widget</p>
-            </div>
-          </div>
-        ))}
+	              <p className="mt-2 text-xs text-zinc-500">Analytics widget</p>
+	            </div>
+	          </div>
+	          );
+	        })}
       </div>
     );
   }
@@ -1999,37 +2078,49 @@ export default async function ReportDetailPage({
 
           <div className="mt-6 grid gap-4 md:grid-cols-4">
             <div className="min-h-[8.5rem] rounded-[1.5rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/20 ring-1 ring-white/[0.02] transition duration-300 hover:-translate-y-0.5 hover:border-teal-200/20 hover:bg-white/[0.045]">
-              <div className="flex items-center gap-3">
-                <Sparkles className="h-5 w-5 text-teal-200" />
-                <p className="text-sm text-zinc-500">Report Type</p>
-              </div>
-              <p className="mt-3 text-lg font-semibold text-white">{report.type}</p>
+	              <div className="flex items-center gap-3">
+	                <Sparkles className="h-5 w-5 text-teal-200" />
+	                <p className="text-sm text-zinc-500">Report Type</p>
+	              </div>
+	              <div className="mt-3">
+	                <EvidenceBadge level="planningAssumption" />
+	              </div>
+	              <p className="mt-3 text-lg font-semibold text-white">{report.type}</p>
             </div>
             <div className="min-h-[8.5rem] rounded-[1.5rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/20 ring-1 ring-white/[0.02] transition duration-300 hover:-translate-y-0.5 hover:border-teal-200/20 hover:bg-white/[0.045]">
-              <div className="flex items-center gap-3">
-                <CalendarDays className="h-5 w-5 text-teal-200" />
-                <p className="text-sm text-zinc-500">Created</p>
-              </div>
-              <p className="mt-3 text-lg font-semibold text-white">
+	              <div className="flex items-center gap-3">
+	                <CalendarDays className="h-5 w-5 text-teal-200" />
+	                <p className="text-sm text-zinc-500">Created</p>
+	              </div>
+	              <div className="mt-3">
+	                <EvidenceBadge level="verified" />
+	              </div>
+	              <p className="mt-3 text-lg font-semibold text-white">
                 {formatDate(report.createdAt)}
               </p>
             </div>
             <div className="min-h-[8.5rem] rounded-[1.5rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/20 ring-1 ring-white/[0.02] transition duration-300 hover:-translate-y-0.5 hover:border-teal-200/20 hover:bg-white/[0.045]">
-              <div className="flex items-center gap-3">
-                <CheckCircle2 className="h-5 w-5 text-teal-200" />
-                <p className="text-sm text-zinc-500">Status</p>
-              </div>
-              <p className="mt-3 text-lg font-semibold text-white">{report.status}</p>
+	              <div className="flex items-center gap-3">
+	                <CheckCircle2 className="h-5 w-5 text-teal-200" />
+	                <p className="text-sm text-zinc-500">Status</p>
+	              </div>
+	              <div className="mt-3">
+	                <EvidenceBadge level="verified" />
+	              </div>
+	              <p className="mt-3 text-lg font-semibold text-white">{report.status}</p>
             </div>
             <Link
               href={workspaceHref}
               className="min-h-[8.5rem] rounded-[1.5rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/20 ring-1 ring-white/[0.02] transition duration-300 hover:-translate-y-0.5 hover:border-teal-200/20 hover:bg-white/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
             >
-              <div className="flex items-center gap-3">
-                <BookOpen className="h-5 w-5 text-teal-200" />
-                <p className="text-sm text-zinc-500">Workspace</p>
-              </div>
-              <p className="mt-3 line-clamp-2 text-lg font-semibold text-white">
+	              <div className="flex items-center gap-3">
+	                <BookOpen className="h-5 w-5 text-teal-200" />
+	                <p className="text-sm text-zinc-500">Workspace</p>
+	              </div>
+	              <div className="mt-3">
+	                <EvidenceBadge level="verified" />
+	              </div>
+	              <p className="mt-3 line-clamp-2 text-lg font-semibold text-white">
                 {workspaceName}
               </p>
             </Link>
@@ -2058,14 +2149,19 @@ export default async function ReportDetailPage({
                     key={item.label}
                     className="min-h-[13rem] rounded-[1.55rem] border border-white/10 bg-black/35 p-5 shadow-xl shadow-black/20 ring-1 ring-white/[0.02]"
                   >
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10">
-                        <Icon className="h-4 w-4 text-teal-100" />
-                      </span>
-                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200/70">
-                        {item.label}
-                      </p>
-                    </div>
+	                    <div className="flex items-center gap-3">
+	                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10">
+	                        <Icon className="h-4 w-4 text-teal-100" />
+	                      </span>
+	                      <div className="min-w-0">
+	                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200/70">
+	                          {item.label}
+	                        </p>
+	                        <div className="mt-2">
+	                          <EvidenceBadge level={item.evidence} />
+	                        </div>
+	                      </div>
+	                    </div>
                     <p className="mt-4 break-words text-xl font-semibold leading-7 tracking-tight text-white [overflow-wrap:anywhere]">
                       {item.value}
                     </p>
@@ -2169,13 +2265,16 @@ export default async function ReportDetailPage({
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                              <div>
-                                <span className="w-fit rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
-                                  Section {String(index + 1).padStart(2, "0")}
-                                </span>
-                                <h2 className="mt-3 text-2xl font-semibold tracking-[-0.025em] text-white">
-                                  {section.title}
-                                </h2>
+	                              <div>
+	                                <span className="w-fit rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
+	                                  Section {String(index + 1).padStart(2, "0")}
+	                                </span>
+	                                <div className="mt-2">
+	                                  <EvidenceBadge level={getDashboardSectionEvidence(section)} />
+	                                </div>
+	                                <h2 className="mt-3 text-2xl font-semibold tracking-[-0.025em] text-white">
+	                                  {section.title}
+	                                </h2>
                               </div>
                               <span className="inline-flex min-h-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.045] px-3.5 py-2 text-xs font-semibold text-zinc-300 ring-1 ring-white/[0.02] transition duration-300 group-hover:border-teal-200/30 group-hover:text-teal-100">
                                 <span className="group-open:hidden">Expand</span>

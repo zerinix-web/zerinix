@@ -1682,8 +1682,8 @@ function buildLanguageInstructions(language: ResponseLanguage) {
     "The Data-Driven Financial Analysis Engine block in the user input contains the calculated base-case financial model. Use those values as the source of truth.",
     "The Investment Decision Inputs block in the user input contains the calculated investment score, visible decision, estimated valuation, funding stage, decision factors, strengths, weaknesses, top risks, and next critical action. Use those values as the source of truth.",
     "Executive Summary, Business Model, Unit Economics, KPI Dashboard, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation must reference the same calculated financial model whenever financial metrics appear.",
-    "For ARR, MRR, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, financial sections must show value, formula, assumptions, confidence, and benchmark source. If confidence is Low, label it as an assumption needing validation instead of presenting it as a verified benchmark.",
-    "Important claims may use one concise evidence label from this controlled set: Real Evidence, Benchmark, Industry Estimate, AI Assumption, Low Confidence, High Confidence. Do not over-label ordinary sentences.",
+    "For ARR, MRR, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, financial sections must show value, formula, assumptions, evidence label, and benchmark source. Use only this evidence set: Verified, Benchmark Derived, Planning Assumption, Validation Required.",
+    "Add concise evidence metadata where it materially improves trust for market data, financial metrics, KPI assumptions, TAM/SAM/SOM, and competitor insights. Do not over-label ordinary sentences.",
     "Make reasoning deeply industry-specific for SaaS, AI, Cybersecurity, Healthcare, Logistics, Restaurant, Drone, Marketplace, FinTech, E-commerce, EV Charging, and other detected sectors. KPIs, risks, roadmap logic, and financial interpretation must reflect that sector's economics.",
     "Keep payback, LTV:CAC, CAC, and runway realistic for the sector and capital intensity. If a result looks unusually strong, label it as a sensitivity or low-confidence assumption rather than a base case.",
     "Decision Confidence must match evidence quality and the calculated decision inputs. Use exactly one visible decision from PASS, HOLD, VALIDATE, or REJECT. Early-stage ideas with validation gaps should prefer HOLD or VALIDATE; reserve REJECT for clearly non-investable economics or execution risk.",
@@ -1694,14 +1694,14 @@ function buildLanguageInstructions(language: ResponseLanguage) {
     "Use analytical framing: market attractiveness, strategic wedge, competitive gap, monetization logic, execution risk, and investor verdict.",
     "Prefer compact bullets, decision criteria, quantified ranges, and distinct section-specific insights.",
     ...buildDecisionSupportDirectives("business_plan"),
-    "If precise market data is unavailable, give transparent assumptions and confidence rather than invented precision.",
+    "If precise market data is unavailable, give transparent assumptions and evidence labels rather than invented precision.",
     "Do not recommend vague actions such as 'do market research' unless the exact research question, method, and decision impact are specified.",
     "Before writing any visible output, silently build one Integrated Strategy Model for the whole company. Do not reveal this internal model directly.",
     "The hidden Integrated Strategy Model must contain: Business Model, Customer, ICP, Market, Competition, TAM/SAM/SOM, Pricing, Revenue, GTM, Risks, Financial, Assumptions, and Founder priorities.",
     "Every section must be derived from that same hidden model. No section may be written as a standalone independent answer.",
     "Maintain dependency logic across the whole report: Problem changes Solution; Solution changes Pricing; Pricing changes Financial; Financial changes Runway; Runway changes Risk; Risk changes CEO Recommendation.",
     "Financial reasoning must follow this chain: Revenue -> MRR -> Gross Margin -> CAC -> LTV -> Payback -> Burn -> Runway -> EBITDA.",
-    "Use real data first when available. If data is missing, create an explicit assumption, explain why it is reasonable, and assign confidence.",
+    "Use real data first when available. If data is missing, create an explicit assumption, explain why it is reasonable, and assign one canonical evidence label.",
     "When writing Executive Recommendation, select exactly one visible decision: PASS, HOLD, VALIDATE, or REJECT.",
     "Executive Recommendation must include one Decision Confidence from the calculated decision inputs as High / Medium / Low or the calculated percentage.",
     "Founder Score must reuse the calculated decision inputs and separate Idea Quality, Validation Confidence, and Founder Evidence without exposing formulas or internal scoring logic.",
@@ -1882,16 +1882,16 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
 - Use clear headings only if they help this section, but do not repeat the section title.
 - Follow the section ownership contract exactly; do not borrow content assigned to another section.
 - Do not lead every section with the same decision-implication formula. Use it only where the section's job requires it.
-- Use Evidence, Confidence, and Decision implication labels sparingly; do not repeat those labels in every paragraph or bullet.
+- Use Evidence and Decision implication labels sparingly; do not repeat those labels in every paragraph or bullet.
 - Do not repeat ideas, metrics, examples, or conclusions that belong to other sections; this section must add unique value.
 - Remove filler phrases such as "It is important to", "Businesses should", "This strategy can help", "In today's market", and "By leveraging".
 - Maintain exact financial consistency with the same assumption set across Unit Economics, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation.
 - Use the Data-Driven Financial Analysis Engine block as the calculated base-case model for TAM, SAM, SOM, ARPA, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, Break-even Month, Investment Needed, ROI, and Revenue Forecast.
 - Use the Investment Decision Inputs block as the calculated source for Investment Score, visible decision, Decision Confidence, estimated valuation, funding stage, decision factors, strengths, weaknesses, top risks, and next critical action.
-- Reuse that single calculated model everywhere. Do not create conflicting financial values in separate sections. If a value is low-confidence, warn that it needs validation and explain why.
+- Reuse that single calculated model everywhere. Do not create conflicting financial values in separate sections. If a value needs validation, label it Validation Required and explain why.
 - Align Decision Confidence with evidence quality and the calculated decision inputs; avoid extreme confidence values unless the evidence clearly supports them.
-- Distinguish User-provided facts, AI assumptions, and Market-derived estimates whenever factual certainty matters.
-- Use evidence labels sparingly from this exact set when useful: Real Evidence, Benchmark, Industry Estimate, AI Assumption, Low Confidence, High Confidence.
+- Distinguish Verified, Benchmark Derived, Planning Assumption, and Validation Required whenever factual certainty matters.
+- Use evidence labels sparingly from this exact set when useful: Verified, Benchmark Derived, Planning Assumption, Validation Required.
 - Make examples, KPIs, risks, roadmap actions, and financial interpretation specific to the detected industry instead of using generic startup templates.
 - Use honest assumption language instead of vague source claims such as "industry reports".
 - Finish with a complete sentence or complete bullet. Do not end mid-sentence.
@@ -2066,12 +2066,12 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
 - Keep each JSON value concise, dense, analytical, investor-ready, and complete.
 - Do not repeat ideas, metrics, examples, or conclusions across sections.
 - Use the Data-Driven Financial Analysis Engine block as the calculated base-case model for TAM, SAM, SOM, ARPA, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, Break-even Month, Investment Needed, ROI, and Revenue Forecast.
-- Reuse that single calculated model everywhere. Do not create conflicting financial values in separate sections. If a value is low-confidence, warn that it needs validation and explain why.
+- Reuse that single calculated model everywhere. Do not create conflicting financial values in separate sections. If a value needs validation, label it Validation Required and explain why.
 - Executive Recommendation must include one Decision Confidence from the calculated decision inputs as High / Medium / Low or the calculated percentage.
 - Align Decision Confidence with evidence quality; avoid extreme confidence values unless the evidence clearly supports them.
-- Clearly distinguish User-provided facts, AI assumptions, and Market-derived estimates where factual certainty matters.
+- Clearly distinguish Verified, Benchmark Derived, Planning Assumption, and Validation Required where factual certainty matters.
 - Financial Assumptions must function as the Key Assumptions section and list every assumption used in the financial calculations.
-- Sources / Assumptions must deduplicate sources and include title, publisher, publication year, URL if available, and confidence. Do not invent citation metadata.
+- Sources / Assumptions must deduplicate sources and include title, publisher, publication year, URL if available, and one evidence label from Verified, Benchmark Derived, Planning Assumption, or Validation Required. Do not invent citation metadata.
 - Use honest assumption language instead of vague source claims such as "industry reports".
 - Finish every section with a complete sentence or complete bullet. Never end mid-sentence.
 - Do not include markdown code fences, braces inside string values, or commentary outside JSON.`;

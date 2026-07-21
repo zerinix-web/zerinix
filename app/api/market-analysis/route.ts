@@ -1241,7 +1241,7 @@ function buildLanguageInstructions(language: ResponseLanguage) {
       : "If the idea is a premium coffee brand, classify Industry as Food & Beverage / Specialty Coffee and Business Model as D2C + Subscription + B2B unless the user clearly describes a different model.",
     "The user's exact submitted market/business idea is the anchor for the whole report. Every section must name or clearly reference that idea through industry-specific competitors, customer segments, market trends, risks, planning inputs, and validation actions rather than reusable template paragraphs.",
     "Prioritize market overview, TAM/SAM/SOM, industry trends, competitors, gap analysis, customer pain, opportunities, threats, SWOT, Porter's Five Forces, entry strategy, validation, metrics, sources, and an investment-style verdict.",
-    "Write in polished investment memo prose. Do not attach internal evidence tags, confidence tiers, market-source labels, or decision-implication labels to paragraphs.",
+    "Write in polished investment memo prose. Use canonical evidence labels only where they materially improve trust for sources, metrics, TAM/SAM/SOM, competitor claims, or KPI assumptions.",
     "Avoid repeated label patterns. Prefer concise analyst prose with natural language about evidence strength only when uncertainty changes the decision.",
     "Do not use generic AI phrases such as 'It is important to', 'Businesses should', 'This strategy can help', 'In today's market', or 'By leveraging'.",
     "Write like an executive consulting memo: short analytical paragraphs, numbered insights where useful, concrete observations, and no filler conclusions.",
@@ -1258,7 +1258,8 @@ function buildLanguageInstructions(language: ResponseLanguage) {
     "The Data-Driven Financial Analysis Engine block in the user input contains the calculated base-case financial model. Use those values as the source of truth.",
     "The Investment Decision Inputs block in the user input contains the calculated investment score, visible decision, estimated valuation, funding stage, decision factors, strengths, weaknesses, top risks, and next critical action. Use those values as the source of truth.",
     "Unit Economics, KPI Dashboard, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation must reference the same calculated financial model whenever financial metrics appear.",
-    "For ARR, MRR, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, financial sections must show value, formula, planning input, evidence strength, and reference basis without internal labels.",
+    "For ARR, MRR, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, financial sections must show value, formula, planning input, evidence label, and reference basis without internal labels. Use only this evidence set: Verified, Benchmark Derived, Planning Assumption, Validation Required.",
+    "Add concise evidence metadata where it materially improves trust for market data, financial metrics, KPI assumptions, TAM/SAM/SOM, and competitor insights. Do not over-label ordinary sentences.",
     "Do not expose internal grading labels, source-model labels, or internal recommendation codes anywhere in the final report.",
     "Make reasoning deeply industry-specific for SaaS, AI, Cybersecurity, Healthcare, Logistics, Restaurant, Drone, Marketplace, FinTech, E-commerce, EV Charging, and other detected sectors. KPIs, risks, roadmap logic, and financial interpretation must reflect that sector's economics.",
     "Keep payback, LTV:CAC, CAC, and runway realistic for the sector and capital intensity. If a result looks unusually strong, describe it as a sensitivity case requiring validation rather than a base case.",
@@ -1461,7 +1462,7 @@ Before writing visible output, silently construct the full Integrated Market Str
 Derive this section only from that model so market size, ICP, competitors, pricing, GTM, financial implications, risks, and recommendation stay consistent.
 Write the section as an investor-grade market diligence note with practical market-entry recommendations for the founder.
 Do not lead every section with the same decision-implication formula. Use it only where the section's job requires it.
-Do not use internal evidence tags, confidence tiers, market-source labels, planning-input labels, or decision-implication labels.
+Use canonical evidence labels only where they materially improve trust for sources, metrics, TAM/SAM/SOM, competitor claims, or KPI assumptions. Do not expose internal confidence tiers or decision-implication labels.
 Avoid generic filler. Use planning inputs explicitly when evidence is limited and state what would change the verdict.
 Write in concise executive-consulting style: specific observations, short analytical paragraphs, numbered insights when useful, and no boilerplate conclusions.
 Do not repeat the user's prompt verbatim; anchor the analysis in the market, buyer, competitor, and economic context.

@@ -180,9 +180,10 @@ const pdfPresentationLabelPairs = [
     ["WTP", "Ödeme İsteği"],
     ["Sales cycle", "Satış Döngüsü"],
     ["Conversion", "Dönüşüm"],
-    ["Model Based", "Model Tabanlı"],
-    ["Model Estimate", "Model Tahmini"],
-    ["Benchmark-derived", "Benchmark Tabanlı"],
+    ["Model Based", "Benchmark Kaynaklı"],
+    ["Model Estimate", "Benchmark Kaynaklı"],
+    ["Benchmark-derived", "Benchmark Kaynaklı"],
+    ["Benchmark Derived", "Benchmark Kaynaklı"],
     ["Food & Beverage / Specialty Coffee", "Yiyecek & İçecek / Özel Kahve"],
     ["D2C Brand + Subscription + B2B", "D2C Marka + Abonelik + B2B"],
     ["Specialty coffee and premium food & beverage benchmarks adjusted...", "Özel kahve ve premium yiyecek-içecek benchmarklarına göre düzenlenmiştir."],
@@ -432,8 +433,10 @@ export function localizePdfPresentationText(value = "", locale = "en") {
       .replace(/\bType: Primary research required\b/g, "Tür: Birincil araştırma gerekli")
       .replace(/\bPlanning assumption\b/g, "Planlama varsayımı")
       .replace(/\bPlanning Assumption\b/g, "Planlama Varsayımı")
-      .replace(/\bModel Estimate\b/g, "Model Tahmini")
-      .replace(/\bBenchmark-derived\b/g, "Benchmark Tabanlı")
+      .replace(/\bModel Estimate\b/g, "Benchmark Kaynaklı")
+      .replace(/\bModel Based\b/g, "Benchmark Kaynaklı")
+      .replace(/\bBenchmark-derived\b/g, "Benchmark Kaynaklı")
+      .replace(/\bBenchmark Derived\b/g, "Benchmark Kaynaklı")
       .replace(/\bExecution risk\b/gi, "Yürütme Riski")
       .replace(/\bWatch\b/g, "İzleme")
       .replace(/\bOn track\b/g, "Yolunda")
@@ -462,8 +465,10 @@ export function localizePdfPresentationText(value = "", locale = "en") {
     .replace(/\bTür: Birincil araştırma gerekli\b/g, "Type: Primary research required")
     .replace(/\bPlanlama varsayımı\b/g, "Planning assumption")
     .replace(/\bPlanlama Varsayımı\b/g, "Planning Assumption")
-    .replace(/\bModel Tahmini\b/g, "Model Estimate")
-    .replace(/\bBenchmark Tabanlı\b/g, "Benchmark-derived")
+    .replace(/\bModel Tahmini\b/g, "Benchmark Derived")
+    .replace(/\bModel Tabanlı\b/g, "Benchmark Derived")
+    .replace(/\bBenchmark Tabanlı\b/g, "Benchmark Derived")
+    .replace(/\bBenchmark Kaynaklı\b/g, "Benchmark Derived")
     .replace(/\bYürütme Riski\b/g, "Execution risk")
     .replace(/\bİzleme\b/g, "Watch")
     .replace(/\bYolunda\b/g, "On track")

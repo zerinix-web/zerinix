@@ -75,6 +75,14 @@ import {
   normalizePdfSourceDomain,
   repairPdfLineFragments,
 } from "@/app/lib/pdf-normalization.mjs";
+import {
+  getEvidenceBadgeClass,
+  getEvidenceLabel,
+  getEvidenceValidationNeed,
+  inferEvidenceLevel,
+  sourceTypeToEvidenceLevel,
+  type EvidenceLevel,
+} from "@/app/lib/report-evidence";
 
 type ReportSection = {
   field?: keyof (MarketReport & PlanReport);
@@ -1498,11 +1506,9 @@ function getPdfCitationSourceTypeLabel(citation: CitationData) {
 }
 
 function getPdfCitationTrustLabel(citation: CitationData) {
-  if (!citation.url || citation.sourceType === "Planning assumption") {
-    return "Reference";
-  }
-
-  return "Verified source";
+  return getEvidenceLabel(
+    sourceTypeToEvidenceLevel(citation.sourceType || "", Boolean(citation.url))
+  );
 }
 
 function dedupePdfCitations(citations: CitationData[]) {
@@ -2288,11 +2294,7 @@ function dedupePdfFinancialMetricValue(value: string) {
   return compactValue;
 }
 
-type FinancialMetricConfidenceBadge =
-  | "Verified"
-  | "Model Estimate"
-  | "Planning Assumption"
-  | "Validation Required";
+type FinancialMetricConfidenceBadge = EvidenceLevel;
 
 function getFinancialMetricConfidenceBadge(
   label: string,
@@ -2304,43 +2306,15 @@ function getFinancialMetricConfidenceBadge(
     `${label}\n${value}\n${extractMetricDetail(content, aliases)}`
   );
 
-  if (!value || /\b(no data|not available|validation required|needs validation|validate|low confidence)\b/i.test(metricContext)) {
-    return "Validation Required";
-  }
-
-  if (/\b(verified|actual|audited|invoice|bookkeeping|accounting|bank|stripe)\b/i.test(metricContext)) {
-    return "Verified";
-  }
-
-  if (/\b(cac|customer acquisition cost|ltv|lifetime value|payback)\b/i.test(metricContext)) {
-    return "Validation Required";
-  }
-
-  if (/\b(burn|runway|break[\s-]?even|investment needed|planning input|assumption|manual input|founder input|target|threshold|warning)\b/i.test(metricContext)) {
-    return "Planning Assumption";
-  }
-
-  return "Model Estimate";
+  return inferEvidenceLevel({ label, value, context: metricContext });
 }
 
 function getPdfFinancialMetricConfidenceBadge(badge: FinancialMetricConfidenceBadge) {
-  return badge;
+  return getEvidenceLabel(badge);
 }
 
 function getPdfFinancialValidationNeed(badge: FinancialMetricConfidenceBadge) {
-  if (badge === "Verified") {
-    return "Monitor actuals";
-  }
-
-  if (badge === "Model Estimate") {
-    return "Validate with operating data";
-  }
-
-  if (badge === "Planning Assumption") {
-    return "Confirm planning input";
-  }
-
-  return "Validation Required";
+  return getEvidenceValidationNeed(badge);
 }
 
 function buildPdfFinancialMetricDetailLine(
@@ -2350,27 +2324,58 @@ function buildPdfFinancialMetricDetailLine(
   value: string
 ) {
   const compactValue = dedupePdfFinancialMetricValue(value) || "—";
-  const confidence = getPdfFinancialMetricConfidenceBadge(
-    getFinancialMetricConfidenceBadge(label, aliases, content, value)
-  );
+  const confidenceLevel = getFinancialMetricConfidenceBadge(label, aliases, content, value);
+  const confidence = getPdfFinancialMetricConfidenceBadge(confidenceLevel);
 
-  return `${label}: ${compactValue} | Confidence: ${confidence} | Validation needed: ${getPdfFinancialValidationNeed(confidence)}`;
+  return `${label}: ${compactValue} | Evidence: ${confidence} | Validation needed: ${getPdfFinancialValidationNeed(confidenceLevel)}`;
 }
 
 function getFinancialMetricConfidenceBadgeClass(badge: FinancialMetricConfidenceBadge) {
-  if (badge === "Model Estimate") {
-    return "bg-teal-200 text-black";
+  return getEvidenceBadgeClass(badge);
+}
+
+function getDashboardEvidenceLabel(level: EvidenceLevel) {
+  return getEvidenceLabel(level, "Turkish");
+}
+
+function getSectionEvidenceLevel(section: ReportSection): EvidenceLevel {
+  if (section.field === "sources" || section.field === "sourcesAssumptions") {
+    return "verified";
   }
 
-  if (badge === "Validation Required") {
-    return "bg-amber-300/15 text-amber-200";
+  if (section.field === "tamSamSom" || section.field === "financialDashboard" || section.field === "unitEconomics") {
+    return inferEvidenceLevel({
+      label: section.title,
+      value: extractMetricValue(section.content, "Gross Margin") || extractMetricValue(section.content, "TAM") || section.title,
+      context: section.content,
+    });
   }
 
-  if (badge === "Planning Assumption") {
-    return "bg-sky-300/10 text-sky-200";
+  if (section.field === "kpiDashboard" || section.field === "kpis") {
+    return "validationRequired";
   }
 
-  return "bg-white/10 text-zinc-300";
+  if (section.field === "competitorAnalysis" || section.field === "competitorLandscape" || section.field === "marketOverview" || section.field === "marketOpportunity") {
+    return "benchmarkDerived";
+  }
+
+  if (section.field === "executiveSummary" || section.field === "executiveRecommendation") {
+    return inferEvidenceLevel({
+      label: section.title,
+      value: extractMetricValue(section.content, "Decision") || extractMetricValue(section.content, "Recommendation") || section.title,
+      context: section.content,
+    });
+  }
+
+  return "planningAssumption";
+}
+
+function EvidenceBadge({ level }: { level: EvidenceLevel }) {
+  return (
+    <span className={`w-fit shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${getFinancialMetricConfidenceBadgeClass(level)}`}>
+      {getDashboardEvidenceLabel(level)}
+    </span>
+  );
 }
 
 function extractMarketSizeValue(content: string, label: string) {
@@ -3351,21 +3356,25 @@ function ExecutiveSummaryVisual({ section }: { section: ReportSection }) {
       label: "Investment Score",
       value: score === null ? "—" : `${score}/100`,
       accent: "from-teal-200/25 to-cyan-200/5",
+      evidence: inferEvidenceLevel({ label: "Investment Score", value: score === null ? "" : `${score}`, context: section.content }),
     },
     {
       label: "Decision",
       value: recommendation,
       accent: "from-emerald-300/20 to-teal-300/5",
+      evidence: getSectionEvidenceLevel(section),
     },
     {
       label: "Market Signal",
       value: extractMetricValue(section.content, "Market") || extractMetricValue(section.content, "TAM") || "Review",
       accent: "from-sky-300/18 to-teal-300/5",
+      evidence: "benchmarkDerived" as EvidenceLevel,
     },
     {
       label: "Risk Posture",
       value: extractMetricValue(section.content, "Risk") || extractMetricValue(section.content, "Main Risk") || "Tracked",
       accent: "from-amber-300/18 to-teal-300/5",
+      evidence: "validationRequired" as EvidenceLevel,
     },
   ];
 
@@ -3424,7 +3433,10 @@ function ExecutiveSummaryVisual({ section }: { section: ReportSection }) {
               >
                 <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
                   {kpi.label}
-                </p>
+	                </p>
+	                <div className="mt-2">
+	                  <EvidenceBadge level={kpi.evidence as EvidenceLevel} />
+	                </div>
                 <p className="mt-3 line-clamp-2 text-2xl font-semibold tracking-tight text-white">
                   {kpi.value}
                 </p>
@@ -3529,6 +3541,9 @@ function PremiumSectionVisual({ section }: { section: ReportSection }) {
                 <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-400">
                   Layer {index + 1}
                 </span>
+              </div>
+              <div className="mt-3">
+                <EvidenceBadge level={getSectionEvidenceLevel(section)} />
               </div>
               <p className="mt-5 truncate whitespace-nowrap text-3xl font-semibold tracking-tight text-white">
                 {row.value}
@@ -3725,7 +3740,7 @@ if (field === "swotAnalysis") {
                 <div className="flex items-start justify-between gap-2">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
                   <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
-                    {confidenceBadge}
+                    {getDashboardEvidenceLabel(confidenceBadge)}
                   </span>
                 </div>
                 <p className="mt-3 truncate whitespace-nowrap text-lg font-semibold text-white">
@@ -3831,7 +3846,7 @@ if (field === "swotAnalysis") {
                     {metric.label}
                   </p>
                   <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
-                    {confidenceBadge}
+                    {getDashboardEvidenceLabel(confidenceBadge)}
                   </span>
                 </div>
                 <div className="mt-4 min-w-0">
@@ -4117,7 +4132,7 @@ if (field === "swotAnalysis") {
                 <div className="flex items-start justify-between gap-2">
                   <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
                   <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
-                    {confidenceBadge}
+                    {getDashboardEvidenceLabel(confidenceBadge)}
                   </span>
                 </div>
                 <p className="mt-2 line-clamp-2 text-xl font-semibold text-white">
@@ -6066,9 +6081,12 @@ const ReportPanel = memo(function ReportPanel({
                     <h3 className="text-xl font-semibold tracking-tight text-white">
                       {section.title}
                     </h3>
-                    <span className="w-fit rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
-                      Section {String(index + 1).padStart(2, "0")}
-                    </span>
+                    <div className="flex w-fit flex-wrap items-center gap-2">
+                      <EvidenceBadge level={getSectionEvidenceLevel(section)} />
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
+                        Section {String(index + 1).padStart(2, "0")}
+                      </span>
+                    </div>
                   </div>
                   <div className="mt-4 border-t border-white/10 pt-4">
                     {section.field === "executiveSummary" ? (
