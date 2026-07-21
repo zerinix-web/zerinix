@@ -15,6 +15,13 @@ import {
   type ReportIntelligenceModel,
 } from "@/app/lib/ai/report-intelligence";
 import {
+  createSourceIntelligenceModel,
+  type SourceConfidenceLevel,
+  type SourceIntelligenceItem,
+  type SourceIntelligenceModel,
+  type SourceIntelligenceType,
+} from "@/app/lib/ai/source-intelligence";
+import {
   createInvestmentScore,
   formatInvestmentScore,
   type InvestmentScore,
@@ -27,6 +34,7 @@ export type AiFinancialModelContext = FinancialModel & {
   financialConsistency: FinancialConsistencyCheck;
   decisionConfidence: DecisionConfidenceModel;
   reportIntelligence: ReportIntelligenceModel;
+  sourceIntelligence: SourceIntelligenceModel;
 };
 
 export function createCanonicalFinancialAssumptions(input: {
@@ -47,6 +55,10 @@ export function createCanonicalFinancialAssumptions(input: {
     decisionConfidence: createDecisionConfidenceModel({
       financialModel,
       investmentScore,
+      financialConsistency,
+    }),
+    sourceIntelligence: createSourceIntelligenceModel({
+      financialModel,
       financialConsistency,
     }),
   };
@@ -374,5 +386,98 @@ export function formatReportIntelligenceSummary(
       ? intelligence.warnings.map((warning) => `- ${translate(warning)}`)
       : [language === "Turkish" ? "- Çelişki tespit edilmedi." : "- No contradictions detected."]),
     `${language === "Turkish" ? "Güven Özeti" : "Confidence Summary"}: ${translate(intelligence.confidenceSummary)}`,
+  ].join("\n");
+}
+
+function localizeSourceConfidence(level: SourceConfidenceLevel, language: "English" | "Turkish") {
+  if (language !== "Turkish") {
+    return level;
+  }
+
+  if (level === "High Confidence") return "Yüksek Güven";
+  if (level === "Medium Confidence") return "Orta Güven";
+
+  return "Düşük Güven";
+}
+
+function localizeSourceType(type: SourceIntelligenceType, language: "English" | "Turkish") {
+  if (language !== "Turkish") {
+    return type;
+  }
+
+  const labels: Record<SourceIntelligenceType, string> = {
+    "User Provided": "Kullanıcı Sağladı",
+    "Industry Benchmark": "Sektör Benchmarkı",
+    "Market Research": "Pazar Araştırması",
+    "Competitor Data": "Rakip Verisi",
+    "AI Planning Assumption": "AI Planlama Varsayımı",
+    "Requires Validation": "Doğrulama Gerektirir",
+  };
+
+  return labels[type];
+}
+
+function localizeSourceText(value: string, language: "English" | "Turkish") {
+  if (language !== "Turkish") {
+    return value;
+  }
+
+  const dictionary: Record<string, string> = {
+    "User provided business context": "Kullanıcı tarafından sağlanan iş bağlamı",
+    "Market sizing uses benchmark market scope, serviceable-market rate, and obtainable-share assumptions.":
+      "Pazar büyüklüğü benchmark pazar kapsamı, hizmet verilebilir pazar oranı ve elde edilebilir pay varsayımlarını kullanır.",
+    "Validate with primary customer research.": "Birincil müşteri araştırmasıyla doğrulayın.",
+    "Validate market boundaries with current market research and customer interviews.":
+      "Pazar sınırlarını güncel pazar araştırması ve müşteri görüşmeleriyle doğrulayın.",
+    "Competitor claims require confirmation from current public company, pricing, and positioning sources.":
+      "Rakip iddiaları güncel şirket, fiyatlandırma ve konumlandırma kaynaklarıyla doğrulanmalıdır.",
+    "Validate with competitor pricing pages, customer reviews, and direct substitute analysis.":
+      "Rakip fiyat sayfaları, müşteri yorumları ve doğrudan ikame analiziyle doğrulayın.",
+    "Validate with operating data, supplier quotes, and actual contribution margin.":
+      "Operasyon verisi, tedarikçi teklifleri ve gerçek katkı marjıyla doğrulayın.",
+    "KPI thresholds are planning inputs until acquisition, activation, retention, and conversion data exists.":
+      "Edinim, aktivasyon, elde tutma ve dönüşüm verisi oluşana kadar KPI eşikleri planlama girdisidir.",
+    "Validate KPI thresholds with pilot cohorts and funnel tracking.":
+      "KPI eşiklerini pilot kohortlar ve funnel takibiyle doğrulayın.",
+    "Run willingness-to-pay interviews.": "Ödeme isteği görüşmeleri yapın.",
+  };
+
+  return dictionary[value] || value;
+}
+
+function formatSourceItem(item: SourceIntelligenceItem, language: "English" | "Turkish") {
+  const area = item.area;
+
+  return language === "Turkish"
+    ? `- ${area}: ${localizeSourceType(item.sourceType, language)} | ${localizeSourceConfidence(item.confidence, language)} | ${localizeSourceText(item.validationRecommendation, language)}`
+    : `- ${area}: ${item.sourceType} | ${item.confidence} | ${item.validationRecommendation}`;
+}
+
+export function formatSourceIntelligenceSummary(
+  context: AiFinancialModelContext,
+  language: "English" | "Turkish" = "English"
+) {
+  const source = context.sourceIntelligence;
+  const sectionTitle = language === "Turkish" ? "Source Intelligence" : "Source Intelligence";
+  const high = source.summary.highConfidence.length > 0
+    ? source.summary.highConfidence.map((item) => `- ${localizeSourceText(item, language)}`)
+    : [language === "Turkish" ? "- Yüksek güvenli kaynak yok." : "- No high-confidence source available."];
+  const medium = source.summary.mediumConfidence.length > 0
+    ? source.summary.mediumConfidence.map((item) => `- ${localizeSourceText(item, language)}`)
+    : [language === "Turkish" ? "- Orta güvenli kaynak yok." : "- No medium-confidence source available."];
+  const low = source.summary.lowConfidence.length > 0
+    ? source.summary.lowConfidence.map((item) => `- ${localizeSourceText(item, language)}`)
+    : [language === "Turkish" ? "- Düşük güvenli kaynak yok." : "- No low-confidence source available."];
+
+  return [
+    `${sectionTitle}:`,
+    language === "Turkish" ? "Yüksek Güven:" : "High Confidence:",
+    ...high,
+    language === "Turkish" ? "Orta Güven:" : "Medium Confidence:",
+    ...medium,
+    language === "Turkish" ? "Düşük Güven:" : "Low Confidence:",
+    ...low,
+    language === "Turkish" ? "Doğrulama Önerileri:" : "Validation Recommendations:",
+    ...source.items.map((item) => formatSourceItem(item, language)),
   ].join("\n");
 }

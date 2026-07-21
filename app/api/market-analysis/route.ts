@@ -27,6 +27,7 @@ import {
   formatCanonicalFinancialAssumptions,
   formatFinancialConsistencyReport,
   formatReportIntelligenceSummary,
+  formatSourceIntelligenceSummary,
   type AiFinancialModelContext,
 } from "@/app/lib/ai/financial-assumptions";
 import { isReportGenerationFailureText } from "@/app/lib/report-errors";
@@ -1031,6 +1032,11 @@ function ensureMarketReportQuality(
   );
   normalized.sources = appendIntelligenceBlock(
     cleanInternalMarketSourceFallbacks(normalized.sources, language),
+    marketLabel(language, "Source Intelligence", "Source Intelligence"),
+    [formatSourceIntelligenceSummary(context, language)]
+  );
+  normalized.sources = appendIntelligenceBlock(
+    normalized.sources,
     marketLabel(language, "CEO Brief", "CEO Özeti"),
     buildMarketCeoBrief(context, language)
   );
