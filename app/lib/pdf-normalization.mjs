@@ -268,6 +268,40 @@ export function localizePdfPresentationLabel(value = "", locale = "en") {
   return continued || devam ? `${translated} continued` : translated;
 }
 
+function cleanupTurkishPdfLanguageLeakage(value = "") {
+  return String(value)
+    .replace(/\bFood & Beverage \/ Specialty Coffee\b/g, "Yiyecek & İçecek / Özel Kahve")
+    .replace(/\bD2C Brand \+ Subscription \+ B2B\b/g, "D2C Marka + Abonelik + B2B")
+    .replace(/\bRevenue\b/g, "Gelir")
+    .replace(/\bBurn Rate\b/g, "Nakit Yakımı")
+    .replace(/\bMonthly Burn\b/g, "Aylık Nakit Yakımı")
+    .replace(/\bburn\b/gi, "Nakit Yakımı")
+    .replace(/\brunway\b/gi, "Finansal Pist")
+    .replace(/\bCapital efficiency\b/gi, "Sermaye verimliliği")
+    .replace(/\bCapital efficiency:\s*investment need is \$3\.6M against \$768k Year-1 ARR\.?/gi, "Sermaye verimliliği: $3.6M yatırım ihtiyacına karşılık 1. yıl ARR hedefi $768k.")
+    .replace(/\binvestment need is \$3\.6M against \$768k Year-1 ARR\.?/gi, "Sermaye verimliliği: $3.6M yatırım ihtiyacına karşılık 1. yıl ARR hedefi $768k.")
+    .replace(/\bTomorrow\b/g, "Yarın")
+    .replace(/\bThis Week\b/g, "Bu Hafta")
+    .replace(/\b30 Days\b/g, "30 Gün")
+    .replace(/\b90 Days\b/g, "90 Gün")
+    .replace(/\b180 Days\b/g, "180 Gün")
+    .replace(/\b12 Months\b/g, "12 Ay")
+    .replace(/\bturns assumptions into evidence\b/gi, "varsayımları kanıta dönüştürür")
+    .replace(/\bimproves execution confidence\b/gi, "yürütme güvenini artırır")
+    .replace(/\bprotects capital efficiency\b/gi, "sermaye verimliliğini korur")
+    .replace(/\bpricing signal\b/gi, "fiyatlandırma sinyali")
+    .replace(/\bconfirm retention\b/gi, "elde tutmayı doğrula")
+    .replace(/\boperating cadence\b/gi, "operasyon ritmi")
+    .replace(/\bscale only if thresholds are met\b/gi, "yalnızca eşikler karşılanırsa ölçekle")
+    .replace(/\b3\.6 ay\b/g, "3,6 ay")
+    .replace(/\baktivasyonukanıtla\b/gi, "aktivasyonu kanıtla")
+    .replace(/\bdönüşümekadar\b/gi, "dönüşüme kadar")
+    .replace(/\bdoğrulamak için birincil araştırma yap pazar büyüklüğü ve katkı marjı varsayımları\.?\b/gi, "Pazar büyüklüğü ve katkı marjı varsayımlarını doğrulamak için birincil araştırma yapın.")
+    .replace(/\bD2C unit sales, recurring subscriptions, ve B2B wholesale accounts\b/g, "D2C ürün satışları, tekrar eden abonelikler ve B2B toptan hesaplar")
+    .replace(/\bD2C unit sales, recurring subscriptions, and B2B wholesale accounts\b/g, "D2C ürün satışları, tekrar eden abonelikler ve B2B toptan hesaplar")
+    .replace(/\band\b/gi, "ve");
+}
+
 export function localizePdfPresentationText(value = "", locale = "en") {
   const normalized = normalizePdfText(String(value));
 
@@ -309,7 +343,7 @@ export function localizePdfPresentationText(value = "", locale = "en") {
     .join("\n");
 
   if (locale === "tr") {
-    return localized
+    return cleanupTurkishPdfLanguageLeakage(localized
       .replace(/\bSource category: Planning assumption\. External citation metadata was not provided\./g, "Kaynak kategorisi: Planlama varsayımı. Harici kaynak metadatası sağlanmadı.")
       .replace(/\bAI Executive Insight\b/g, "AI Yönetici İçgörüsü")
       .replace(/\bKey insights\b/g, "Temel İçgörüler")
@@ -392,7 +426,7 @@ export function localizePdfPresentationText(value = "", locale = "en") {
       .replace(/\bExecution risk\b/gi, "Yürütme Riski")
       .replace(/\bWatch\b/g, "İzleme")
       .replace(/\bOn track\b/g, "Yolunda")
-      .replace(/\bModel target\b/g, "Model hedefi");
+      .replace(/\bModel target\b/g, "Model hedefi"));
   }
 
   return localized

@@ -13,6 +13,22 @@ export function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
 
+  if (supabaseKey?.startsWith("sb_secret_")) {
+    console.error("[supabase:browser_client] Refusing secret Supabase key in browser config", {
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env
+        .NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        ? "loaded"
+        : "missing",
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        ? "loaded"
+        : "missing",
+    });
+
+    throw new Error(
+      "Invalid Supabase browser configuration. Use NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY with a publishable key, not a secret key."
+    );
+  }
+
   if (!supabaseUrl || !supabaseKey) {
     console.error("[supabase:browser_client] Missing public Supabase config", {
       NEXT_PUBLIC_SUPABASE_URL: supabaseUrl ? "loaded" : "missing",
