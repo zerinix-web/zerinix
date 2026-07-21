@@ -573,6 +573,21 @@ function marketLabel(language: ResponseLanguage, english: string, turkish: strin
   return marketText(language, english, turkish);
 }
 
+function normalizeTurkishMarketSourcePhrases(content: string) {
+  return content
+    .replace(/\bFood & Beverage \/ Specialty Coffee\b/g, "Yiyecek & İçecek / Özel Kahve")
+    .replace(/\bD2C Brand \+ Subscription \+ B2B\b/g, "D2C Marka + Abonelik + B2B")
+    .replace(
+      /\b(?:Revenue|Gelir) expands toward (\$[\d.,]+[kMB]?) with stronger conversion (?:and|ve) retention\.?/gi,
+      "Gelir $1 seviyesine çıkar; daha güçlü dönüşüm ve elde tutma ile desteklenir."
+    )
+    .replace(
+      /\binvestment need is (\$[\d.,]+[kMB]?) against (\$[\d.,]+[kMB]?) Year-1 ARR\.?/gi,
+      "$1 yatırım ihtiyacına karşılık 1. yıl ARR hedefi $2."
+    )
+    .replace(/\$30\/month\b/g, "$30/ay");
+}
+
 function localizeMarketDecision(decision: string, language: ResponseLanguage) {
   if (language !== "Turkish") return decision;
 
@@ -626,7 +641,7 @@ function enforceMarketReportLanguage(
   }
 
   if (language === "Turkish") {
-    return normalized
+    return normalizeTurkishMarketSourcePhrases(normalized)
       .replace(/\bAI Executive Insight\b/g, "AI Yönetici İçgörüsü")
       .replace(/\bMarket Opportunity Score\b/g, "Pazar Fırsatı Skoru")
       .replace(/\bAI Confidence Breakdown\b/g, "AI Güven Dağılımı")
@@ -1210,6 +1225,9 @@ function buildLanguageInstructions(language: ResponseLanguage) {
     `The user's latest message language is ${language}. This overrides saved profile language, persistent memory language, browser locale, and previous conversation language.`,
     `Respond entirely in ${language}.`,
     `Every heading, paragraph, bullet point, table label, markdown label, source note, and sentence must be in ${language}.`,
+    language === "Turkish"
+      ? "Turkish report glossary: write Food & Beverage / Specialty Coffee as Yiyecek & İçecek / Özel Kahve; D2C Brand + Subscription + B2B as D2C Marka + Abonelik + B2B; Revenue as Gelir; burn as Nakit Yakımı; runway as Finansal Pist; $30/month as $30/ay. Keep CAC, LTV, ARPA, ICP, B2B, B2C, D2C, and HoReCa unchanged."
+      : "Use English report labels and financial wording consistently.",
     `If source material is in another language, summarize it only in ${language}.`,
     "Do not switch languages. Do not ask questions or request clarification.",
     "Be current, analytical, evidence-weighted, and decision-oriented for an early-stage founder.",
@@ -1218,7 +1236,9 @@ function buildLanguageInstructions(language: ResponseLanguage) {
     "For Food & Beverage, specialty coffee, D2C consumer brands, ecommerce, or subscription commerce ideas, do not use Professional Services assumptions. Use realistic consumer/FMCG assumptions for ARPA/order value, CAC, gross margin, payback period, repeat purchase, subscription retention, customer volume, inventory/COGS, and B2B wholesale where relevant.",
     "D2C, FMCG, and Food & Beverage models must not use SaaS-style growth curves, SaaS ARR quality, near-zero payback, or enterprise ACV assumptions. Treat customer growth, paid acquisition, inventory, wholesale, retail, and subscription retention as validation-sensitive planning assumptions unless the user provides real traction data.",
     "Founder, execution, risk, and investor-readiness scores must depend on evidence quality. If the user provides only an idea with no sales, waitlist, retention, customer, preorder, or pilot data, lower confidence and avoid aggressive break-even or execution scores.",
-    "If the idea is a premium coffee brand, classify Industry as Food & Beverage / Specialty Coffee and Business Model as D2C + Subscription + B2B unless the user clearly describes a different model.",
+    language === "Turkish"
+      ? "Kullanıcının fikri premium kahve markasıysa, kullanıcı açıkça farklı bir model tarif etmediği sürece sektör adını Yiyecek & İçecek / Özel Kahve ve iş modelini D2C Marka + Abonelik + B2B olarak yaz."
+      : "If the idea is a premium coffee brand, classify Industry as Food & Beverage / Specialty Coffee and Business Model as D2C + Subscription + B2B unless the user clearly describes a different model.",
     "The user's exact submitted market/business idea is the anchor for the whole report. Every section must name or clearly reference that idea through industry-specific competitors, customer segments, market trends, risks, planning inputs, and validation actions rather than reusable template paragraphs.",
     "Prioritize market overview, TAM/SAM/SOM, industry trends, competitors, gap analysis, customer pain, opportunities, threats, SWOT, Porter's Five Forces, entry strategy, validation, metrics, sources, and an investment-style verdict.",
     "Write in polished investment memo prose. Do not attach internal evidence tags, confidence tiers, market-source labels, or decision-implication labels to paragraphs.",

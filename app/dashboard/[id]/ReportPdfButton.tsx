@@ -2464,12 +2464,12 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             pdf.roundedRect(x, boxY, swotLayout.boxWidth, boxHeight, 2.5, 2.5, "FD");
             pdf.setFontSize(7.2);
             pdf.setTextColor("#ccfbf1");
-            pdf.text(label.toUpperCase(), x + 3, boxY + 5);
+            pdf.text(localizePdfPresentationLabel(label, pdfLocale).toUpperCase(), x + 3, boxY + 5);
             pdf.setFontSize(6.2);
             pdf.setTextColor("#d4d4d8");
             let bulletY = boxY + 10;
             bulletLines.forEach((lines) => {
-              pdf.text(lines, x + 3, bulletY, {
+              pdf.text(lines.map((line) => localizePdfPresentationText(line, pdfLocale)), x + 3, bulletY, {
                 lineHeightFactor: 1.14,
                 maxWidth: swotLayout.boxWidth - 6,
               });
@@ -2568,7 +2568,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             pdf.text(localizePdfPresentationLabel(label, pdfLocale).toUpperCase(), itemX + 2, itemY + 3.2);
             pdf.setTextColor("#e4e4e7");
             pdf.setFontSize(6);
-            drawSingleLine(value, itemX + 2, itemY + 7.8, itemWidth - 4, 6);
+            drawSingleLine(localizePdfPresentationText(value, pdfLocale), itemX + 2, itemY + 7.8, itemWidth - 4, 6);
           });
 
           return 48;
@@ -2637,10 +2637,10 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             pdf.roundedRect(x, visualY, stepWidth, 28, 2, 2, "FD");
             pdf.setFontSize(6.2);
             pdf.setTextColor("#ccfbf1");
-            pdf.text(step, x + 2, visualY + 5.7, { maxWidth: stepWidth - 4 });
+            pdf.text(localizePdfPresentationLabel(step, pdfLocale), x + 2, visualY + 5.7, { maxWidth: stepWidth - 4 });
             pdf.setFontSize(5.2);
             pdf.setTextColor("#a1a1aa");
-            pdf.text(wrapPdfText(extractRoadmapAction(content, step), stepWidth - 4).slice(0, 4), x + 2, visualY + 11, {
+            pdf.text(wrapPdfText(localizePdfPresentationText(extractRoadmapAction(content, step), pdfLocale), stepWidth - 4).slice(0, 4), x + 2, visualY + 11, {
               lineHeightFactor: 1.1,
               maxWidth: stepWidth - 4,
             });
@@ -2803,7 +2803,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
               const snippet = extractScenarioSnippet(content, label) || extractKeywordInsight(content, [label]);
               pdf.setTextColor("#f4f4f5");
               pdf.setFontSize(6);
-              pdf.text(pdf.splitTextToSize(snippet || "Scenario path under review.", itemWidth - 4).slice(0, 2), x + 2, itemY + 8.1, {
+              pdf.text(pdf.splitTextToSize(localizePdfPresentationText(snippet || "Scenario path under review.", pdfLocale), itemWidth - 4).slice(0, 2), x + 2, itemY + 8.1, {
                 lineHeightFactor: 1.12,
                 maxWidth: itemWidth - 4,
               });
