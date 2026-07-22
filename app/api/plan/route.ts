@@ -188,6 +188,7 @@ type PlanReportChunk = Partial<Record<PlanReportField, string>>;
 type PlanReportMetadataChunk = {
   reportMetadata: {
     investmentScore: AiFinancialModelContext["investmentScore"];
+    benchmarkFit: AiFinancialModelContext["benchmarkFit"];
   };
 };
 
@@ -330,6 +331,7 @@ function serializePlanReportMetadataChunk(
   const chunk: PlanReportMetadataChunk = {
     reportMetadata: {
       investmentScore: context.investmentScore,
+      benchmarkFit: context.benchmarkFit,
     },
   };
 

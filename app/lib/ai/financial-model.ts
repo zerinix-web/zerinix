@@ -61,6 +61,21 @@ export type FinancialConsistencyCheck = {
   };
 };
 
+export type BenchmarkFitLevel = "Strong Fit" | "Moderate Fit" | "Needs Validation";
+
+export type BenchmarkFit = {
+  version: "benchmark_fit_v1";
+  industryKey: IndustryKey;
+  industry: string;
+  businessModel: string;
+  benchmarkBasis: string;
+  confidence: BenchmarkConfidence;
+  fit: BenchmarkFitLevel;
+  matchedSignals: string[];
+  validationGaps: string[];
+  rationale: string;
+};
+
 export type RevenueForecastYear = {
   year: string;
   customers: number;
@@ -81,6 +96,7 @@ export type FinancialModel = {
     basis: string;
     ranges: IndustryBenchmark["ranges"];
   };
+  benchmarkFit: BenchmarkFit;
   metrics: {
     tam: FinancialMetricModel;
     sam: FinancialMetricModel;
@@ -345,6 +361,53 @@ function confidenceFor(input: {
   return input.base;
 }
 
+function createBenchmarkFit(input: {
+  prompt: string;
+  inputs: FinancialModelingInputs;
+  benchmark: IndustryBenchmark;
+}): BenchmarkFit {
+  const normalized = normalizePrompt(input.prompt);
+  const matchedSignals = [
+    input.inputs.industry,
+    input.inputs.businessModel,
+    input.inputs.targetCustomer,
+    input.inputs.geography,
+    input.inputs.pricingModel,
+  ].filter(Boolean);
+  const hasBusinessSpecificSignal =
+    input.inputs.industryKey !== "services" ||
+    /\b(b2b|b2c|d2c|dtc|subscription|marketplace|ecommerce|e-commerce|retail|kahve|coffee|saas|software|manufacturing|restaurant|mobility|fintech)\b/.test(
+      normalized
+    );
+  const hasValidation = hasValidationEvidence(input.prompt);
+  const validationGaps = [
+    ...(hasValidation ? [] : ["No direct customer, revenue, retention, or acquisition evidence was provided in the request."]),
+    ...(input.benchmark.confidence === "Low"
+      ? ["Benchmark confidence is low for this business model and requires primary validation."]
+      : []),
+    ...(hasBusinessSpecificSignal ? [] : ["Business model signal is broad, so benchmark selection may need refinement."]),
+  ];
+  const fit: BenchmarkFitLevel =
+    input.benchmark.confidence === "High" && hasBusinessSpecificSignal
+      ? "Strong Fit"
+      : input.benchmark.confidence === "Low" || !hasBusinessSpecificSignal
+        ? "Needs Validation"
+        : "Moderate Fit";
+
+  return {
+    version: "benchmark_fit_v1",
+    industryKey: input.inputs.industryKey,
+    industry: input.inputs.industry,
+    businessModel: input.inputs.businessModel,
+    benchmarkBasis: input.benchmark.benchmarkBasis,
+    confidence: input.benchmark.confidence,
+    fit,
+    matchedSignals,
+    validationGaps,
+    rationale: `Benchmark fit is based on detected industry, business model, geography, pricing model, and whether the prompt includes validation evidence. It does not change financial calculations or scoring.`,
+  };
+}
+
 function formatUsd(value: number) {
   const abs = Math.abs(value);
   const sign = value < 0 ? "-" : "";
@@ -576,6 +639,11 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
     `Validation evidence: ${hasValidationEvidence(input.prompt) ? "present in prompt" : "not provided; planning assumptions require validation"}`,
     `Customer ramp multiplier: ${rampMultiplier}`,
   ];
+  const benchmarkFit = createBenchmarkFit({
+    prompt: input.prompt,
+    inputs,
+    benchmark,
+  });
 
   return {
     version: "financial_model_engine_v1",
@@ -596,6 +664,7 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
       basis: benchmark.benchmarkBasis,
       ranges: benchmark.ranges,
     },
+    benchmarkFit,
     metrics: {
       tam: metric({
         label: "TAM",

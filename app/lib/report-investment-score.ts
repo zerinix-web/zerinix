@@ -14,8 +14,22 @@ export type ReportInvestmentScore = {
   decisionEngine?: Record<string, { score?: number; maximumScore?: number; label?: string }>;
 };
 
+export type ReportBenchmarkFit = {
+  version?: string;
+  industryKey?: string;
+  industry?: string;
+  businessModel?: string;
+  benchmarkBasis?: string;
+  confidence?: string;
+  fit?: string;
+  matchedSignals?: string[];
+  validationGaps?: string[];
+  rationale?: string;
+};
+
 export type ReportMetadata = {
   investmentScore?: ReportInvestmentScore;
+  benchmarkFit?: ReportBenchmarkFit;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -201,6 +201,7 @@ type MarketReportChunk = Partial<Record<MarketReportField, string>>;
 type MarketReportMetadataChunk = {
   reportMetadata: {
     investmentScore: AiFinancialModelContext["investmentScore"];
+    benchmarkFit: AiFinancialModelContext["benchmarkFit"];
   };
 };
 type MarketReportWarningChunk = {
@@ -435,6 +436,7 @@ function serializeMarketReportMetadataChunk(
   const chunk: MarketReportMetadataChunk = {
     reportMetadata: {
       investmentScore: context.investmentScore,
+      benchmarkFit: context.benchmarkFit,
     },
   };
 
