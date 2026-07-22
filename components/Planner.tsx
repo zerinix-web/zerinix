@@ -3324,6 +3324,41 @@ function extractKeywordInsight(content: string, keywords: string[]) {
   );
 }
 
+function getExecutiveHighlights(content: string) {
+  const candidates = [
+    extractKeywordInsight(content, ["decision", "recommendation", "karar", "tavsiye"]),
+    extractKeywordInsight(content, ["opportunity", "market", "pazar", "tam", "sam", "som"]),
+    extractKeywordInsight(content, ["risk", "threat", "tehdit"]),
+    extractKeywordInsight(content, ["next action", "critical action", "action", "validate", "aksiyon", "doğrula"]),
+    extractKeywordInsight(content, ["validation", "evidence", "confidence", "doğrulama", "kanıt", "güven"]),
+    extractFirstInsight(content),
+  ];
+  const seen = new Set<string>();
+
+  return candidates
+    .map((highlight) => highlight.trim())
+    .filter((highlight) => {
+      if (!highlight) {
+        return false;
+      }
+
+      const fingerprint = highlight
+        .toLowerCase()
+        .replace(/[*_`#>-]/g, "")
+        .replace(/\b(?:decision|opportunity|risk|action|validation|karar|fırsat|risk|aksiyon|doğrulama)\b/g, "")
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim();
+
+      if (!fingerprint || seen.has(fingerprint)) {
+        return false;
+      }
+
+      seen.add(fingerprint);
+      return true;
+    })
+    .slice(0, 5);
+}
+
 function extractPercentScore(content: string, label: string) {
   const explicitScore = extractScore(content, label);
 
@@ -3394,11 +3429,7 @@ function ExecutiveSummaryVisual({ section }: { section: ReportSection }) {
     extractScore(section.content, "AI Founder Score") ??
     extractConfidence(section.content);
   const recommendation = detectRecommendation(section.content) || "REVIEW";
-  const highlights = [
-    extractKeywordInsight(section.content, ["market", "pazar", "tam", "sam", "som"]),
-    extractKeywordInsight(section.content, ["revenue", "gelir", "pricing", "fiyat"]),
-    extractKeywordInsight(section.content, ["risk", "risk", "threat", "tehdit"]),
-  ].filter(Boolean);
+  const highlights = getExecutiveHighlights(section.content);
   const kpis = [
     {
       label: "Investment Score",

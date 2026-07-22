@@ -375,6 +375,41 @@ function extractKeywordInsight(content: string, keywords: string[]) {
   );
 }
 
+function getExecutiveHighlights(content: string) {
+  const candidates = [
+    extractKeywordInsight(content, ["decision", "recommendation", "karar", "tavsiye"]),
+    extractKeywordInsight(content, ["opportunity", "market", "pazar", "tam", "sam", "som"]),
+    extractKeywordInsight(content, ["risk", "threat", "tehdit"]),
+    extractKeywordInsight(content, ["next action", "critical action", "action", "validate", "aksiyon", "doğrula"]),
+    extractKeywordInsight(content, ["validation", "evidence", "confidence", "doğrulama", "kanıt", "güven"]),
+    extractFirstInsight(content),
+  ];
+  const seen = new Set<string>();
+
+  return candidates
+    .map((highlight) => highlight.trim())
+    .filter((highlight) => {
+      if (!highlight) {
+        return false;
+      }
+
+      const fingerprint = highlight
+        .toLowerCase()
+        .replace(/[*_`#>-]/g, "")
+        .replace(/\b(?:decision|opportunity|risk|action|validation|karar|fırsat|risk|aksiyon|doğrulama)\b/g, "")
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim();
+
+      if (!fingerprint || seen.has(fingerprint)) {
+        return false;
+      }
+
+      seen.add(fingerprint);
+      return true;
+    })
+    .slice(0, 5);
+}
+
 function getSectionContentByFieldOrTitle(
   sections: Array<{ field?: string; title: string; content: string }>,
   matchers: string[]
@@ -734,11 +769,7 @@ function ExecutiveSummaryVisual({
     extractScore(content, "AI Founder Score") ??
     extractConfidence(content);
   const recommendation = detectRecommendation(content) || "REVIEW";
-  const highlights = [
-    extractKeywordInsight(content, ["market", "pazar", "tam", "sam", "som"]),
-    extractKeywordInsight(content, ["revenue", "gelir", "pricing", "fiyat"]),
-    extractKeywordInsight(content, ["risk", "risk", "threat", "tehdit"]),
-  ].filter(Boolean);
+  const highlights = getExecutiveHighlights(content);
   const kpis = [
     {
       label: "Investment Score",
