@@ -79,7 +79,7 @@ const fieldPrompts = {
   },
   competitorAnalysis: {
     prompt:
-      "Analyze only competitors and substitutes. For each important competitor or substitute include available pricing, target customer, funding, employee size, strengths, weaknesses, positioning, and how the analyzed company can outperform. Omit unknown fields rather than inventing them. Include incumbent alternatives, switching barriers, pricing signals, likely response, and entrant gap. End with AI Executive Insight explaining the competitive decision implication. Do not repeat SWOT, threats, market overview, or entry strategy. Do not write a heading. Max 220 words.",
+      "Analyze only competitors and substitutes. For each important competitor or substitute include available pricing, target customer, funding, employee size, strengths, weaknesses, positioning, and how the analyzed company can outperform. Omit unknown fields rather than inventing them. Include incumbent alternatives, switching barriers, pricing signals, likely response, and entrant gap. End with a concise executive implication explaining the competitive decision impact. Do not add a heading. Do not repeat SWOT, threats, market overview, or entry strategy. Do not write a heading. Max 220 words.",
     maxTokens: 1400,
   },
   customerPainPoints: {
@@ -89,12 +89,12 @@ const fieldPrompts = {
   },
   opportunities: {
     prompt:
-      "Identify only market opportunities: underserved segments, channel openings, pricing gaps, partnership angles, product wedges, regulatory/timing advantages, and why incumbents may not address them. Include a compact Market Opportunity Score with Demand Score, Competition Score, Timing Score, Execution Difficulty, Revenue Potential, overall Opportunity Score 0-100, and one-line calculation explanation. Each opportunity must include the founder implication or validation action. End with AI Executive Insight explaining why the opportunity changes priority. Do not repeat SWOT, entry strategy, or competitor analysis. Do not write a heading. Max 190 words.",
+      "Identify only market opportunities: underserved segments, channel openings, pricing gaps, partnership angles, product wedges, regulatory/timing advantages, and why incumbents may not address them. Include a compact Market Opportunity Score with Demand Score, Competition Score, Timing Score, Execution Difficulty, Revenue Potential, overall Opportunity Score 0-100, and one-line calculation explanation. Each opportunity must include the founder implication or validation action. End with a concise executive implication explaining the founder action or validation priority. Do not add a heading. Do not repeat SWOT, entry strategy, or competitor analysis. Do not write a heading. Max 190 words.",
     maxTokens: 1000,
   },
   threats: {
     prompt:
-      "Identify only market threats as a professional Risk Matrix. Each material threat must include Probability, Impact, Severity, Mitigation, and Early Warning Signal. Cover competitive pressure, demand uncertainty, switching costs, regulation, platform dependency, price compression, trust barriers, data access, and distribution risk. End with AI Executive Insight explaining which risk should change the entry plan first. Do not repeat SWOT or Executive Recommendation. Do not write a heading. Max 205 words.",
+      "Identify only market threats as a professional Risk Matrix. Each material threat must include Probability, Impact, Severity, Mitigation, and Early Warning Signal. Cover competitive pressure, demand uncertainty, switching costs, regulation, platform dependency, price compression, trust barriers, data access, and distribution risk. End with a concise executive implication explaining which risk should change the entry plan first. Do not add a heading. Do not repeat SWOT or Executive Recommendation. Do not write a heading. Max 205 words.",
     maxTokens: 1000,
   },
   swotAnalysis: {

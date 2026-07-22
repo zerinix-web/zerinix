@@ -73,12 +73,12 @@ const planPrompts = {
   },
   marketOpportunity: {
     prompt:
-      "Analyze only market opportunity without calculating TAM/SAM/SOM. Cover category, demand drivers, reachable initial niche, expansion path, venture-scale potential, and validation gates before significant investment. Include a compact Market Opportunity Score with Demand Score, Competition Score, Timing Score, Execution Difficulty, Revenue Potential, overall Opportunity Score 0-100, and a one-line calculation explanation. End with AI Executive Insight explaining why this opportunity matters for the founder decision. Do not repeat ICP details, competitor mapping, product description, pricing, go-to-market tactics, or market-sizing numbers owned by TAM/SAM/SOM. Max 190 words.",
+      "Analyze only market opportunity without calculating TAM/SAM/SOM. Cover category, demand drivers, reachable initial niche, expansion path, venture-scale potential, and validation gates before significant investment. Include a compact Market Opportunity Score with Demand Score, Competition Score, Timing Score, Execution Difficulty, Revenue Potential, overall Opportunity Score 0-100, and a one-line calculation explanation. End with a concise executive implication explaining the founder action or validation priority. Do not add a heading. Do not repeat ICP details, competitor mapping, product description, pricing, go-to-market tactics, or market-sizing numbers owned by TAM/SAM/SOM. Max 190 words.",
     maxTokens: 800,
   },
   competitorLandscape: {
     prompt:
-      "Map only competitors and substitutes. For each important competitor or substitute include available pricing, target customer, funding, employee size, strengths, weaknesses, positioning, and how the analyzed company can outperform. Omit unknown fields rather than inventing them. Include incumbent response, switching barriers, and the gap for a new entrant. End with AI Executive Insight explaining the competitive decision implication. Do not repeat market sizing, SWOT, risks, GTM, or product description. Max 220 words.",
+      "Map only competitors and substitutes. For each important competitor or substitute include available pricing, target customer, funding, employee size, strengths, weaknesses, positioning, and how the analyzed company can outperform. Omit unknown fields rather than inventing them. Include incumbent response, switching barriers, and the gap for a new entrant. End with a concise executive implication explaining the competitive decision impact. Do not add a heading. Do not repeat market sizing, SWOT, risks, GTM, or product description. Max 220 words.",
     maxTokens: 850,
   },
   businessModel: {
@@ -143,7 +143,7 @@ const planPrompts = {
   },
   risks: {
     prompt:
-      "Write only risks as a professional Risk Matrix. Each material risk must include Probability, Impact, Severity, Mitigation, and Early Warning Signal. Cover market, product, distribution, pricing, regulatory, funding, and execution risks where relevant. End with AI Executive Insight explaining which risk should change capital allocation first. Do not repeat SWOT threats, scenario cases, or recommendation wording. Max 210 words.",
+      "Write only risks as a professional Risk Matrix. Each material risk must include Probability, Impact, Severity, Mitigation, and Early Warning Signal. Cover market, product, distribution, pricing, regulatory, funding, and execution risks where relevant. End with a concise executive implication explaining which risk should change capital allocation first. Do not add a heading. Do not repeat SWOT threats, scenario cases, or recommendation wording. Max 210 words.",
     maxTokens: 800,
   },
   kpis: {
