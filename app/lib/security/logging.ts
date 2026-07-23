@@ -1,18 +1,39 @@
 type LogMetadata = Record<string, unknown>;
 
 const sensitiveKeyPattern = /secret|token|key|password|authorization|cookie|card|session/i;
+const redacted = "[REDACTED]";
+
+const sensitiveContentPatterns: RegExp[] = [
+  /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/g,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{10,}\b/gi,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g,
+  /\b(?:sk_live|sk_test)_[A-Za-z0-9]{16,}\b/g,
+  /\b(?:sb_secret|sb_publishable|sbp|sbr)_[A-Za-z0-9_-]{16,}\b/g,
+  /\b(?:password|passwd|pwd)\s*[:=]\s*['"]?[^'",\s}]{3,}/gi,
+  /\bAuthorization\s*[:=]\s*(?:Bearer\s+)?[A-Za-z0-9._~+/=-]{10,}/gi,
+  /\bCookie\s*[:=]\s*[^;\n\r]{8,}(?:;[^;\n\r]{3,})*/gi,
+  /\b(?:session|session_id|sessionId|sid)\s*[:=]\s*['"]?[A-Za-z0-9._~+/=-]{10,}/gi,
+  /\b[A-Za-z0-9+/]{80,}={0,2}\b/g,
+];
+
+function sanitizeString(value: string) {
+  return sensitiveContentPatterns.reduce(
+    (sanitized, pattern) => sanitized.replace(pattern, redacted),
+    value
+  );
+}
 
 function sanitizeValue(key: string, value: unknown): unknown {
   if (sensitiveKeyPattern.test(key)) {
-    return "[redacted]";
+    return redacted;
+  }
+
+  if (typeof value === "string") {
+    return sanitizeString(value);
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) =>
-      typeof item === "object" && item !== null
-        ? sanitizeMetadata(item as LogMetadata)
-        : item
-    );
+    return value.map((item) => sanitizeValue("", item));
   }
 
   if (typeof value === "object" && value !== null) {
@@ -48,7 +69,9 @@ export function logOperationalError(
   error: unknown,
   metadata: LogMetadata = {}
 ) {
-  const message = error instanceof Error ? error.message : String(error || "Unknown error");
+  const message = sanitizeString(
+    error instanceof Error ? error.message : String(error || "Unknown error")
+  );
 
   console.error(scope, sanitizeMetadata({ ...metadata, message }));
 }

@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { getAuthRouteRedirectPath } from "@/app/auth/route-access.mjs";
+import { getAuthRouteRedirectPath } from "@/app/auth/route-access";
 import { requireSupabaseConfig } from "./env";
 import { logServerError } from "@/app/lib/security/errors";
 
