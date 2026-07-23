@@ -449,6 +449,22 @@ function OpenAiAnalyticsSection({ data }: { data: AdminDashboardData }) {
         ))}
       </div>
 
+      {data.openAiAnalytics.operationCosts.length ? (
+        <div className="mt-4 grid grid-cols-2 gap-2.5">
+          {data.openAiAnalytics.operationCosts.slice(0, 4).map((operation) => (
+            <div key={operation.operationType} className="rounded-[1rem] border border-white/10 bg-black/20 px-3 py-3">
+              <p className="text-[10px] uppercase tracking-[0.16em] text-zinc-600">
+                {operation.operationType.replace(/_/g, " ")}
+              </p>
+              <p className="mt-1 text-sm font-semibold text-white">{formatCurrency(operation.costUsd)}</p>
+              <p className="mt-1 text-[11px] text-zinc-500">
+                {formatCompactNumber(operation.tokens)} tokens · {formatNumber(operation.requests)} calls
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       <div className="mt-5 flex-1 overflow-hidden rounded-[1.15rem] border border-white/10 bg-black/25">
         <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(4rem,1fr)_minmax(4rem,0.8fr)_minmax(3rem,0.7fr)] gap-3 border-b border-white/10 bg-white/[0.025] px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
           <span>Model</span>

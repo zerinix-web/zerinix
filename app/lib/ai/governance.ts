@@ -5,6 +5,11 @@ import { QUOTA_COUNTING_USAGE_KIND_EXCLUSION } from "@/app/lib/ai/quota-rules.mj
 import { estimateModelCostUsd } from "@/app/lib/ai/pricing";
 
 export type PlanTier = "free" | "pro" | "business";
+export type AIUsageOperationType =
+  | "chat"
+  | "plan_report"
+  | "market_report"
+  | "pdf_export";
 export type AiRequestKind =
   | "simple_chat"
   | "business_advice"
@@ -19,12 +24,32 @@ export type TokenUsage = {
   totalTokens: number;
 };
 
+export type AIUsage = {
+  id: string;
+  userId: string;
+  operationType: AIUsageOperationType;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCost: number;
+  createdAt: string;
+};
+
 type UsageLimit = {
   dailyRequests: number;
   monthlyRequests: number;
 };
 
 type UsageLimitSet = Record<AiRequestKind, UsageLimit>;
+
+type AiOperationLimit = {
+  monthlyReports: number;
+  monthlyChatTokens: number;
+  pdfExports: number;
+};
+
+type AiUsageLimitConfig = Record<PlanTier, AiOperationLimit>;
 
 type CachedAiResponse = {
   responseText: string;
@@ -38,6 +63,7 @@ type CachedAiResponse = {
 type UsageEventInput = {
   userId: string;
   endpoint: string;
+  operationType?: AIUsageOperationType;
   reportField?: string;
   reportId?: string | null;
   conversationId?: string | null;
@@ -51,6 +77,24 @@ type UsageEventInput = {
   status?: "completed" | "failed" | "rate_limited";
   responseTimeMs: number;
   metadata?: Record<string, unknown>;
+};
+
+const defaultAiOperationLimits: AiUsageLimitConfig = {
+  free: {
+    monthlyReports: 3,
+    monthlyChatTokens: 100_000,
+    pdfExports: 10,
+  },
+  pro: {
+    monthlyReports: 50,
+    monthlyChatTokens: 1_000_000,
+    pdfExports: 100,
+  },
+  business: {
+    monthlyReports: 250,
+    monthlyChatTokens: 5_000_000,
+    pdfExports: 500,
+  },
 };
 
 type CacheInput = {
@@ -117,6 +161,146 @@ function startOfUtcMonth() {
 
 function safeNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function safeLimitNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : fallback;
+}
+
+function getAiUsageLimitConfig(): AiUsageLimitConfig {
+  const rawConfig = process.env.AI_COST_CONFIG;
+
+  if (!rawConfig) {
+    return defaultAiOperationLimits;
+  }
+
+  try {
+    const parsed = JSON.parse(rawConfig) as Record<string, unknown>;
+    const limits = parsed.limits && typeof parsed.limits === "object"
+      ? parsed.limits as Record<string, unknown>
+      : {};
+
+    return (["free", "pro", "business"] as const).reduce<AiUsageLimitConfig>(
+      (config, tier) => {
+        const tierLimits = limits[tier] && typeof limits[tier] === "object"
+          ? limits[tier] as Record<string, unknown>
+          : {};
+        const fallback = defaultAiOperationLimits[tier];
+
+        config[tier] = {
+          monthlyReports: safeLimitNumber(tierLimits.monthlyReports, fallback.monthlyReports),
+          monthlyChatTokens: safeLimitNumber(tierLimits.monthlyChatTokens, fallback.monthlyChatTokens),
+          pdfExports: safeLimitNumber(tierLimits.pdfExports, fallback.pdfExports),
+        };
+
+        return config;
+      },
+      { ...defaultAiOperationLimits }
+    );
+  } catch {
+    return defaultAiOperationLimits;
+  }
+}
+
+function inferOperationType(input: {
+  endpoint: string;
+  requestKind?: AiRequestKind;
+  reportField?: string;
+  metadata?: Record<string, unknown>;
+}): AIUsageOperationType {
+  const metadataOperation = readMetadataString(input.metadata, "operation_type");
+
+  if (
+    metadataOperation === "chat" ||
+    metadataOperation === "plan_report" ||
+    metadataOperation === "market_report" ||
+    metadataOperation === "pdf_export"
+  ) {
+    return metadataOperation;
+  }
+
+  if (input.endpoint.includes("market-analysis") || input.requestKind === "market_analysis") {
+    return "market_report";
+  }
+
+  if (input.endpoint.includes("plan") || input.requestKind === "report_generation") {
+    return "plan_report";
+  }
+
+  if (input.endpoint.includes("pdf")) {
+    return "pdf_export";
+  }
+
+  return "chat";
+}
+
+async function loadMonthlyOperationUsage(
+  supabase: SupabaseClient,
+  userId: string,
+  operationType: AIUsageOperationType | AIUsageOperationType[]
+) {
+  const monthStart = startOfUtcMonth().toISOString();
+  const operationTypes = Array.isArray(operationType) ? operationType : [operationType];
+  const selectColumns = "id,total_tokens,status,operation_type,metadata";
+  const primary = await supabase
+    .from("ai_usage_events")
+    .select(selectColumns)
+    .eq("user_id", userId)
+    .eq("status", "completed")
+    .eq("metadata->>quota_consumed", "true")
+    .neq("metadata->>usage_kind", QUOTA_COUNTING_USAGE_KIND_EXCLUSION)
+    .in("operation_type", operationTypes)
+    .gte("created_at", monthStart)
+    .limit(5000);
+  let data: Array<Record<string, unknown>> | null = primary.data as Array<Record<string, unknown>> | null;
+  let error = primary.error;
+
+  if (error && /operation_type|column/i.test(error.message || "")) {
+    const fallback = await supabase
+      .from("ai_usage_events")
+      .select("id,total_tokens,status,metadata")
+      .eq("user_id", userId)
+      .eq("status", "completed")
+      .eq("metadata->>quota_consumed", "true")
+      .neq("metadata->>usage_kind", QUOTA_COUNTING_USAGE_KIND_EXCLUSION)
+      .in("metadata->>operation_type", operationTypes)
+      .gte("created_at", monthStart)
+      .limit(5000);
+
+    data = fallback.data as Array<Record<string, unknown>> | null;
+    error = fallback.error;
+  }
+
+  if (error) {
+    logServerError("ai-governance:operation-usage-limit", error);
+    return {
+      requestCount: 0,
+      totalTokens: 0,
+      error: error.message,
+    };
+  }
+
+  const rows = data ?? [];
+
+  return {
+    requestCount: rows.length,
+    totalTokens: rows.reduce((sum, row) => sum + safeNumber(row.total_tokens), 0),
+    error: "",
+  };
+}
+
+function buildUsageLimitMessage(operationType: AIUsageOperationType) {
+  if (operationType === "chat") {
+    return "Monthly AI chat token limit reached. Please upgrade your plan to continue.";
+  }
+
+  if (operationType === "pdf_export") {
+    return "Monthly PDF export limit reached. Please upgrade your plan to continue.";
+  }
+
+  return "Monthly report generation limit reached. Please upgrade your plan to continue.";
 }
 
 export function selectAiModel(kind: AiRequestKind) {
@@ -269,12 +453,73 @@ export async function checkUsageAllowance(
     };
   }
 
+  const operationType = inferOperationType({
+    endpoint: "",
+    requestKind,
+    reportField: requestKind,
+  });
+  const operationLimits = getAiUsageLimitConfig()[planTier];
+  const meteredOperationTypes =
+    operationType === "plan_report" || operationType === "market_report"
+      ? ["plan_report", "market_report"] as const
+      : [operationType] as const;
+  const monthlyOperationUsage = await loadMonthlyOperationUsage(
+    supabase,
+    userId,
+    [...meteredOperationTypes]
+  );
+
+  if (
+    operationType === "chat" &&
+    monthlyOperationUsage.totalTokens >= operationLimits.monthlyChatTokens
+  ) {
+    return {
+      allowed: false,
+      planTier,
+      requestKind,
+      operationType,
+      dailyUsed,
+      monthlyUsed,
+      monthlyOperationUsed: monthlyOperationUsage.totalTokens,
+      monthlyOperationLimit: operationLimits.monthlyChatTokens,
+      ...limit,
+      reason: buildUsageLimitMessage(operationType),
+    };
+  }
+
+  if (
+    (operationType === "plan_report" || operationType === "market_report") &&
+    monthlyOperationUsage.requestCount >= operationLimits.monthlyReports
+  ) {
+    return {
+      allowed: false,
+      planTier,
+      requestKind,
+      operationType,
+      dailyUsed,
+      monthlyUsed,
+      monthlyOperationUsed: monthlyOperationUsage.requestCount,
+      monthlyOperationLimit: operationLimits.monthlyReports,
+      ...limit,
+      reason: buildUsageLimitMessage(operationType),
+    };
+  }
+
   return {
     allowed: true,
     planTier,
     requestKind,
+    operationType,
     dailyUsed,
     monthlyUsed,
+    monthlyOperationUsed:
+      operationType === "chat"
+        ? monthlyOperationUsage.totalTokens
+        : monthlyOperationUsage.requestCount,
+    monthlyOperationLimit:
+      operationType === "chat"
+        ? operationLimits.monthlyChatTokens
+        : operationLimits.monthlyReports,
     ...limit,
     reason: "",
   };
@@ -409,6 +654,13 @@ export async function recordAiUsage(
   input: UsageEventInput
 ) {
   const metadata = input.metadata ?? {};
+  const operationType =
+    input.operationType ||
+    inferOperationType({
+      endpoint: input.endpoint,
+      reportField: input.reportField,
+      metadata,
+    });
   const metadataReportId =
     readMetadataString(metadata, "report_id") ||
     readMetadataString(metadata, "reportId") ||
@@ -430,6 +682,7 @@ export async function recordAiUsage(
     input.reportRequestId ?? (metadataReportRequestId || null);
   const { error } = await supabase.from("ai_usage_events").insert({
     user_id: input.userId,
+    operation_type: operationType,
     endpoint: input.endpoint,
     report_field: input.reportField ?? null,
     report_id: reportId,
@@ -445,7 +698,10 @@ export async function recordAiUsage(
     cache_hit: input.cacheHit,
     status: input.status ?? "completed",
     response_time_ms: input.responseTimeMs,
-    metadata,
+    metadata: {
+      ...metadata,
+      operation_type: operationType,
+    },
   });
 
   if (error) {

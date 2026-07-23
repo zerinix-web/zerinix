@@ -132,6 +132,13 @@ export type AdminDashboardData = {
       costUsd: number | null;
       status: AdminMetricStatus;
     }>;
+    operationCosts: Array<{
+      operationType: string;
+      requests: number;
+      tokens: number;
+      costUsd: number;
+      status: AdminMetricStatus;
+    }>;
     costAlerts: Array<{
       id: string;
       label: string;
@@ -805,6 +812,7 @@ function buildMockAdminDashboardData(dateRange: AdminDateRange): AdminDashboardD
         { feature: "AI CEO", costUsd: null, status: "NOT CONNECTED" },
         { feature: "Other AI features", costUsd: null, status: "NOT CONNECTED" },
       ],
+      operationCosts: [],
       costAlerts: buildOpenAiCostAlerts(
         { today: null, thisMonth: null, last24h: null, last7d: null, last30d: null, allTime: null },
         0,
@@ -1581,7 +1589,7 @@ async function countTableDetailed(table: string, range?: AdminDateRange) {
 async function loadRecentUsage(range: AdminDateRange) {
   const serviceClient = createServiceRoleClient();
   const usageColumns =
-    "id,user_id,endpoint,report_field,report_id,conversation_id,report_request_id,model,status,prompt_tokens,completion_tokens,total_tokens,estimated_cost_usd,cache_hit,metadata,created_at";
+    "id,user_id,operation_type,endpoint,report_field,report_id,conversation_id,report_request_id,model,status,prompt_tokens,completion_tokens,total_tokens,estimated_cost_usd,cache_hit,metadata,created_at";
   const stableUsageColumns =
     "id,user_id,endpoint,report_field,model,status,prompt_tokens,completion_tokens,total_tokens,estimated_cost_usd,cache_hit,metadata,created_at";
   const runQuery = (columns: string) =>
@@ -2059,6 +2067,31 @@ function readUsageTokenCounts(row: Record<string, unknown>) {
   const totalTokens = readNumber(row.total_tokens) || inputTokens + outputTokens + cachedTokens;
 
   return { inputTokens, outputTokens, cachedTokens, totalTokens };
+}
+
+function readUsageOperationType(row: Record<string, unknown>) {
+  const metadata = readUsageMetadata(row);
+  const operationType = readString(row.operation_type) || readString(metadata.operation_type);
+
+  if (operationType) {
+    return operationType;
+  }
+
+  const endpoint = readString(row.endpoint).toLowerCase();
+
+  if (endpoint.includes("market-analysis")) {
+    return "market_report";
+  }
+
+  if (endpoint.includes("plan")) {
+    return "plan_report";
+  }
+
+  if (endpoint.includes("pdf")) {
+    return "pdf_export";
+  }
+
+  return "chat";
 }
 
 function getUsageCost(row: Record<string, unknown>) {
@@ -2606,6 +2639,7 @@ function calculateOpenAiAnalytics(input: {
       costRanges: input.official.costRanges,
       dailyCostHistory: input.official.dailyCostHistory,
       featureCosts: input.official.featureCosts,
+      operationCosts: [],
       costAlerts: input.official.costAlerts,
       modelUsage: input.official.modelUsage.map((model) => ({
         model: model.model,
@@ -2639,9 +2673,20 @@ function calculateOpenAiAnalytics(input: {
       status: AdminMetricStatus;
     }
   >();
+  const operationMap = new Map<
+    string,
+    {
+      operationType: string;
+      requests: number;
+      tokens: number;
+      costUsd: number;
+      status: AdminMetricStatus;
+    }
+  >();
 
   input.usage.forEach((row) => {
     const model = readString(row.model, "unknown_model");
+    const operationType = readUsageOperationType(row);
     const { inputTokens: rowInputTokens, outputTokens: rowOutputTokens, cachedTokens: rowCachedTokens, totalTokens: rowTotalTokens } =
       readUsageTokenCounts(row);
     const usageCost = getUsageCost(row);
@@ -2668,9 +2713,28 @@ function calculateOpenAiAnalytics(input: {
       summary.status = summary.status === "LIVE" ? "LIVE" : "ESTIMATED";
     }
     modelMap.set(model, summary);
+
+    const operationSummary = operationMap.get(operationType) || {
+      operationType,
+      requests: 0,
+      tokens: 0,
+      costUsd: 0,
+      status: "NO DATA" as AdminMetricStatus,
+    };
+
+    operationSummary.requests += 1;
+    operationSummary.tokens += rowTotalTokens;
+    operationSummary.costUsd += usageCost.costUsd;
+    if (usageCost.status === "LIVE") {
+      operationSummary.status = "LIVE";
+    } else if (usageCost.status === "ESTIMATED" && operationSummary.status !== "LIVE") {
+      operationSummary.status = "ESTIMATED";
+    }
+    operationMap.set(operationType, operationSummary);
   });
 
   const modelUsage = [...modelMap.values()].sort((a, b) => b.tokens - a.tokens);
+  const operationCosts = [...operationMap.values()].sort((a, b) => b.costUsd - a.costUsd);
 
   return {
     inputTokens,
@@ -2694,6 +2758,7 @@ function calculateOpenAiAnalytics(input: {
       cost,
       input.usage.length && cost > 0 ? "LIVE" : "NO DATA"
     ),
+    operationCosts,
     costAlerts: buildOpenAiCostAlerts(
       { today: null, thisMonth: null, last24h: null, last7d: null, last30d: null, allTime: null },
       input.totalUsers,
