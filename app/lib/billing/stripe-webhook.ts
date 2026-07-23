@@ -7,6 +7,7 @@ import { verifyStripeWebhookSignature } from "./stripe";
 import {
   syncCheckoutSession,
   syncInvoice,
+  syncPaymentFailure,
   syncSubscription,
 } from "./stripe-sync";
 
@@ -104,6 +105,10 @@ export async function handleStripeWebhookPayload(input: {
       eventType === "invoice.payment_failed"
     ) {
       const synced = await syncInvoice(supabase, object);
+
+      if (eventType === "invoice.payment_failed") {
+        await syncPaymentFailure(supabase, object);
+      }
 
       if (eventType === "invoice.paid" && synced.ok && synced.userId && synced.invoice) {
         await sendBillingReceiptEmail({

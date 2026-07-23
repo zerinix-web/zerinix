@@ -300,24 +300,13 @@ async function postStripeForm<T>(
       providerError = "unreadable_error";
     }
     const stripeRequestId = response.headers.get("request-id") || "";
-    const completeStripeError = {
-      ...stripeError,
-      requestId: stripeRequestId,
-      statusCode: response.status,
-      raw: rawStripeResponseBody,
-    };
-
     console.error("[api:stripe:checkout] Stripe error details", {
       path,
-      error: completeStripeError,
       type: stripeError?.type,
       code: stripeError?.code,
-      message: stripeError?.message,
       param: stripeError?.param,
       requestId: stripeRequestId,
       statusCode: response.status,
-      raw: rawStripeResponseBody,
-      rawStripeResponseBody,
     });
 
     logOperationalError("[stripe:request]", new Error("Stripe rejected the request."), {
@@ -353,21 +342,15 @@ export async function createStripeCheckoutSession(input: {
   const checkoutConfig = getStripeCheckoutConfiguration(input.plan);
 
   console.log("[stripe:checkout] create session input", {
-    userId: input.userId,
-    userEmail: input.userEmail,
     plan: input.plan,
     hasExistingCustomer: Boolean(input.existingCustomerId),
-    existingCustomerId: input.existingCustomerId || null,
-    priceId: checkoutConfig.priceId,
-    successUrl: `${config.appUrl}/dashboard/billing?checkout=success`,
-    cancelUrl: `${config.appUrl}/dashboard/billing?checkout=cancelled`,
+    configured: checkoutConfig.configured,
   });
 
   if (!checkoutConfig.configured) {
     console.log("[stripe:checkout] missing configuration", {
       plan: input.plan,
       missing: checkoutConfig.missing,
-      priceId: checkoutConfig.priceId,
     });
 
     return getStripeMissingConfigurationResult<{ id: string; url: string | null }>(

@@ -162,6 +162,66 @@ export async function syncInvoice(
   };
 }
 
+export async function syncPaymentFailure(
+  supabase: SupabaseClient,
+  invoice: StripeInvoice
+) {
+  const normalized = normalizeStripeInvoiceForSync(invoice);
+
+  if (!normalized.customerId && !normalized.subscriptionId) {
+    return { ok: false, reason: "missing_customer_or_subscription" };
+  }
+
+  const primaryLookup = normalized.subscriptionId
+    ? await supabase
+        .from("user_billing_profiles")
+        .select("user_id")
+        .eq("stripe_subscription_id", normalized.subscriptionId)
+        .maybeSingle()
+    : { data: null, error: null };
+  const fallbackLookup = !primaryLookup.data && normalized.customerId
+    ? await supabase
+        .from("user_billing_profiles")
+        .select("user_id")
+        .eq("stripe_customer_id", normalized.customerId)
+        .maybeSingle()
+    : { data: primaryLookup.data, error: primaryLookup.error };
+  const { data, error: lookupError } = fallbackLookup;
+  const userId = readUserId(data?.user_id);
+
+  if (lookupError || !userId) {
+    return {
+      ok: false,
+      reason: lookupError?.message || "missing_user",
+    };
+  }
+
+  const updatePayload: Record<string, string> = {
+    plan_tier: "free",
+    stripe_subscription_status: "past_due",
+  };
+
+  if (normalized.customerId) {
+    updatePayload.stripe_customer_id = normalized.customerId;
+  }
+
+  if (normalized.subscriptionId) {
+    updatePayload.stripe_subscription_id = normalized.subscriptionId;
+  }
+
+  const { error } = await supabase
+    .from("user_billing_profiles")
+    .update(updatePayload)
+    .eq("user_id", userId);
+
+  return {
+    ok: !error,
+    reason: error?.message || "",
+    userId,
+    planTier: "free",
+  };
+}
+
 export function planTierFromStripePrice(priceId?: string | null) {
   return getPlanIdForStripePrice(priceId);
 }
