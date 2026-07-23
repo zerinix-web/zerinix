@@ -202,6 +202,8 @@ type MarketReportMetadataChunk = {
   reportMetadata: {
     investmentScore: AiFinancialModelContext["investmentScore"];
     benchmarkFit: AiFinancialModelContext["benchmarkFit"];
+    benchmarkScore: AiFinancialModelContext["benchmarkScore"];
+    reportQuality: AiFinancialModelContext["reportIntelligence"];
   };
 };
 type MarketReportWarningChunk = {
@@ -437,6 +439,8 @@ function serializeMarketReportMetadataChunk(
     reportMetadata: {
       investmentScore: context.investmentScore,
       benchmarkFit: context.benchmarkFit,
+      benchmarkScore: context.benchmarkScore,
+      reportQuality: context.reportIntelligence,
     },
   };
 
@@ -910,10 +914,26 @@ function buildCanonicalMarketExecutiveRecommendation(
       : decision === localizeMarketDecision("PASS", language)
         ? marketText(language, "Pass until market access or economics improve", "Pazar erişimi veya ekonomi iyileşene kadar geç")
         : marketText(language, "Hold for validation before scaling entry spend", "Giriş harcamasını ölçeklemeden önce doğrulama için bekle");
+  const reportQualityConfidence =
+    context.reportIntelligence.confidenceLevel === "High Confidence"
+      ? marketText(language, "High Confidence", "Yüksek Güven")
+      : context.reportIntelligence.confidenceLevel === "Low Confidence"
+        ? marketText(language, "Low Confidence", "Düşük Güven")
+        : marketText(language, "Medium Confidence", "Orta Güven");
+  const benchmarkActions = context.benchmarkScore.actions.slice(0, 2).join("; ");
+  const benchmarkActionsTr = [
+    context.benchmarkScore.dimensions.pricingFit < 65 ? "fiyatlandırmayı doğrula" : "",
+    context.benchmarkScore.deviations.some((deviation) => deviation.metric === "CAC" && deviation.status !== "Within Benchmark")
+      ? "edinim kanallarını test et"
+      : "",
+    context.benchmarkScore.dimensions.financialBenchmarkFit < 65 ? "ilk sermaye riskini azalt" : "",
+  ].filter(Boolean).join("; ") || "benchmark varsayımlarını operasyon verisiyle izle";
 
   return [
     marketText(language, `Decision: ${decision}`, `Karar: ${decision}`),
     marketText(language, `Decision Confidence: ${confidence}% (${confidenceLabel})`, `Karar Güveni: ${confidence}% (${confidenceLabel})`),
+    marketText(language, `Report Quality Confidence: ${reportQualityConfidence} (${context.reportIntelligence.totalScore}/100)`, `Rapor Kalitesi Güveni: ${reportQualityConfidence} (${context.reportIntelligence.totalScore}/100)`),
+    marketText(language, `Benchmark Fit: ${context.benchmarkScore.overallFit}/100 (${context.benchmarkScore.confidence}). ${benchmarkActions}`, `Benchmark Uyumu: ${context.benchmarkScore.overallFit}/100 (${context.benchmarkScore.confidence}). ${benchmarkActionsTr}`),
     marketText(language, `Investment Recommendation: ${recommendation}`, `Yatırım Tavsiyesi: ${recommendation}`),
     marketText(language, `Main Risk: ${context.investmentScore.topRisks[0] || "Market demand requires validation."}`, `Ana Risk: ${context.investmentScore.topRisks[0] || "Pazar talebi doğrulama gerektiriyor."}`),
     marketText(language, `Next Action: ${context.investmentScore.nextCriticalAction}`, `Sonraki Aksiyon: ${context.investmentScore.nextCriticalAction}`),
@@ -1062,7 +1082,7 @@ function ensureMarketReportQuality(
   );
   normalized.validationPlan = appendIntelligenceBlock(
     normalized.validationPlan,
-    marketLabel(language, "Validation Intelligence", "Validation Intelligence"),
+    marketLabel(language, "Validation Intelligence", "Doğrulama Zekası"),
     [formatValidationIntelligenceSummary(context, language)]
   );
   normalized.sources = appendIntelligenceBlock(

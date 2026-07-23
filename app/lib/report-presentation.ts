@@ -1,4 +1,4 @@
-import type { ReportInvestmentScore } from "@/app/lib/report-investment-score";
+import type { ReportInvestmentScore, ReportQualityScore } from "@/app/lib/report-investment-score";
 
 export type ExecutiveSnapshot = {
   decision: string;
@@ -22,6 +22,11 @@ export type ExecutiveSnapshot = {
   why: string[];
   risks: string[];
   actions: string[];
+};
+
+export type ReportQualityBreakdownItem = {
+  label: string;
+  value: string;
 };
 
 export type ReportPresentationLabels = {
@@ -411,6 +416,67 @@ function normalizeFinancialQualityPresentation(value: string, isTurkish: boolean
   return value;
 }
 
+function normalizeExecutiveRiskPresentation(value: string, isTurkish: boolean) {
+  const normalized = stripMarkdown(value).replace(/\s+/g, " ").trim();
+
+  if (
+    /\b(?:Execution risk|Yürütme Riski):?\s*(?:Execution risk|Yürütme Riski)?\s*is healthier when payback/i.test(
+      normalized
+    ) ||
+    /\bYürütme Riski improves when geri ödeme/i.test(normalized)
+  ) {
+    return isTurkish
+      ? "Yürütme Riski, geri ödeme ve başabaş zamanlaması gerçekçi olduğunda, kanıt seviyesi güçlendiğinde ve operasyonel karmaşıklık azaldığında daha yönetilebilir hale gelir."
+      : "Execution risk improves when payback and break-even timing are realistic, evidence is stronger, and operational complexity is lower.";
+  }
+
+  if (isTurkish) {
+    return normalized
+      .replace(/\bExecution risk\b/gi, "Yürütme Riski")
+      .replace(/\bpayback\b/gi, "geri ödeme")
+      .replace(/\bbreak-even timing\b/gi, "başabaş zamanlaması")
+      .replace(/\bvalidation evidence\b/gi, "doğrulama kanıtı");
+  }
+
+  return normalized.replace(/\bExecution risk:\s*Execution risk\b/gi, "Execution risk");
+}
+
+export function getReportQualityBreakdown(
+  reportQuality?: ReportQualityScore,
+  isTurkish = false
+): ReportQualityBreakdownItem[] {
+  if (!reportQuality) {
+    return [];
+  }
+
+  const labels = isTurkish
+    ? {
+        totalScore: "Genel Kalite Skoru",
+        evidenceQuality: "Kanıt Kalitesi",
+        sourceConfidence: "Kaynak Güveni",
+        financialConsistency: "Finansal Tutarlılık",
+        benchmarkFit: "Benchmark Uyumu",
+        validationReadiness: "Doğrulama Hazırlığı",
+      }
+    : {
+        totalScore: "Overall Quality Score",
+        evidenceQuality: "Evidence Quality",
+        sourceConfidence: "Source Confidence",
+        financialConsistency: "Financial Consistency",
+        benchmarkFit: "Benchmark Fit",
+        validationReadiness: "Validation Readiness",
+      };
+
+  return [
+    { label: labels.totalScore, value: `${reportQuality.totalScore}/100` },
+    { label: labels.evidenceQuality, value: `${reportQuality.dimensions.evidenceQuality}/100` },
+    { label: labels.sourceConfidence, value: `${reportQuality.dimensions.sourceConfidence}/100` },
+    { label: labels.financialConsistency, value: `${reportQuality.dimensions.financialConsistency}/100` },
+    { label: labels.benchmarkFit, value: `${reportQuality.dimensions.benchmarkFit}/100` },
+    { label: labels.validationReadiness, value: `${reportQuality.dimensions.validationReadiness}/100` },
+  ];
+}
+
 function inferRiskLevel(content: string, keywords: string[]): "Low" | "Medium" | "High" {
   const normalized = content.toLowerCase();
   const hasKeyword = keywords.some((keyword) => normalized.includes(keyword.toLowerCase()));
@@ -474,9 +540,21 @@ function collectBullets(content: string, keywords: string[], fallback: string[])
     .slice(0, 3);
 }
 
+function localizeReportQualityLevel(value: string, isTurkish: boolean) {
+  if (!isTurkish) {
+    return value === "Moderate Confidence" ? "Medium Confidence" : value;
+  }
+
+  if (value === "High Confidence") return "Yüksek Güven";
+  if (value === "Low Confidence") return "Düşük Güven";
+
+  return "Orta Güven";
+}
+
 export function buildExecutiveSnapshot(
   content: string,
-  investmentScore?: ReportInvestmentScore
+  investmentScore?: ReportInvestmentScore,
+  reportQuality?: ReportQualityScore
 ): ExecutiveSnapshot {
   const normalized = normalizeReportPresentationText(content);
   const isTurkish = isTurkishContent(normalized);
@@ -513,6 +591,9 @@ export function buildExecutiveSnapshot(
       ? ["Öncelik, kritik varsayımları küçük ve ölçülebilir deneylerle doğrulamaktır."]
       : ["The priority is to validate critical assumptions through small measurable tests."]
   );
+  const normalizedRiskBullets = riskBullets.map((risk) =>
+    normalizeExecutiveRiskPresentation(risk, isTurkish)
+  );
 
   return {
     decision: investmentScore?.recommendation || extractDecision(normalized),
@@ -531,12 +612,17 @@ export function buildExecutiveSnapshot(
       ),
       isTurkish
     ),
-    reportQuality: extractQuality(
-      normalized,
-      ["Overall Report Quality", "Report Quality", "Rapor Kalitesi", "Genel Rapor Kalitesi"],
-      isTurkish ? "Orta Güven" : "Moderate Confidence"
+    reportQuality: reportQuality
+      ? localizeReportQualityLevel(reportQuality.confidenceLevel || reportQuality.overallQuality || "Medium Confidence", isTurkish)
+      : extractQuality(
+          normalized,
+          ["Overall Report Quality", "Report Quality", "Rapor Kalitesi", "Genel Rapor Kalitesi"],
+          isTurkish ? "Orta Güven" : "Moderate Confidence"
+        ),
+    mainRisk: normalizeExecutiveRiskPresentation(
+      investmentScore?.topRisks?.[0] || normalizedRiskBullets[0],
+      isTurkish
     ),
-    mainRisk: investmentScore?.topRisks?.[0] || riskBullets[0],
     nextAction: investmentScore?.nextCriticalAction || actionBullets[0],
     riskLevel: inferRiskLevel(normalized, ["risk", "validation", "cac", "funding", "execution", "rekabet", "sermaye"]),
     riskHeatmap: buildRiskHeatmap(normalized),
@@ -548,7 +634,7 @@ export function buildExecutiveSnapshot(
         ? ["Fırsatın çekiciliği, pazar sinyalleri ve iş modeli varsayımlarına bağlıdır."]
         : ["The opportunity depends on market signals and business model assumptions."]
     ),
-    risks: riskBullets,
+    risks: normalizedRiskBullets,
     actions: actionBullets,
   };
 }

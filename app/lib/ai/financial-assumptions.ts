@@ -11,6 +11,10 @@ import {
   type DecisionConfidenceModel,
 } from "@/app/lib/ai/decision-confidence";
 import {
+  createBenchmarkIntelligenceScore,
+  type BenchmarkScore,
+} from "@/app/lib/ai/benchmark-intelligence";
+import {
   createReportIntelligenceModel,
   type ReportIntelligenceModel,
 } from "@/app/lib/ai/report-intelligence";
@@ -41,6 +45,7 @@ export type AiFinancialModelContext = FinancialModel & {
   investmentScore: InvestmentScore;
   financialConsistency: FinancialConsistencyCheck;
   decisionConfidence: DecisionConfidenceModel;
+  benchmarkScore: BenchmarkScore;
   reportIntelligence: ReportIntelligenceModel;
   sourceIntelligence: SourceIntelligenceModel;
   validationIntelligence: ValidationIntelligenceModel;
@@ -60,11 +65,13 @@ export function createCanonicalFinancialAssumptions(input: {
     financialModel,
   });
   const financialConsistency = validateFinancialConsistency(financialModel);
+  const benchmarkScore = createBenchmarkIntelligenceScore(financialModel);
 
   const contextWithoutReportIntelligence = {
     ...financialModel,
     investmentScore,
     financialConsistency,
+    benchmarkScore,
     decisionConfidence: createDecisionConfidenceModel({
       financialModel,
       investmentScore,
@@ -85,7 +92,10 @@ export function createCanonicalFinancialAssumptions(input: {
   return {
     ...contextWithoutReportIntelligence,
     validationIntelligence,
-    reportIntelligence: createReportIntelligenceModel(contextWithoutReportIntelligence),
+    reportIntelligence: createReportIntelligenceModel({
+      ...contextWithoutReportIntelligence,
+      validationIntelligence,
+    }),
   };
 }
 
@@ -352,11 +362,13 @@ export function formatReportIntelligenceSummary(
     language === "Turkish"
       ? {
           "High Confidence": "Yüksek Güven",
+          "Medium Confidence": "Orta Güven",
           "Moderate Confidence": "Orta Güven",
           "Low Confidence": "Düşük Güven",
         }
       : {
           "High Confidence": "High Confidence",
+          "Medium Confidence": "Medium Confidence",
           "Moderate Confidence": "Moderate Confidence",
           "Low Confidence": "Low Confidence",
         };
@@ -384,23 +396,61 @@ export function formatReportIntelligenceSummary(
         "Rapor bulguları karar planlaması için yararlı, ancak doğrulama boşlukları devam ediyor.",
       "Report findings should be treated as early-stage planning input until evidence improves.":
         "Kanıt seviyesi güçlenene kadar rapor bulguları erken aşama planlama girdisi olarak ele alınmalı.",
+      "Evidence base supports directional planning": "Kanıt tabanı yön gösterici planlamayı destekliyor",
+      "Source confidence is sufficient for planning": "Kaynak güveni planlama için yeterli",
+      "Benchmark fit supports the modeled assumptions": "Benchmark uyumu modellenen varsayımları destekliyor",
+      "Source confidence requires stronger validation": "Kaynak güveni daha güçlü doğrulama gerektiriyor",
+      "Benchmark fit needs refinement": "Benchmark uyumu netleştirme gerektiriyor",
+      "Validation roadmap has unresolved experiments": "Doğrulama yol haritasında tamamlanmamış deneyler var",
+      "Collect customer, revenue, retention, or pilot evidence.": "Müşteri, gelir, elde tutma veya pilot kanıtı toplayın.",
+      "Attach verified market sources and benchmark references.": "Doğrulanmış pazar kaynakları ve benchmark referansları ekleyin.",
+      "Validate CAC, LTV, payback, burn, and runway assumptions.": "CAC, LTV, geri ödeme, nakit yakımı ve finansal pist varsayımlarını doğrulayın.",
+      "Refine benchmark selection by industry, model, and geography.": "Benchmark seçimini sektör, model ve coğrafyaya göre netleştirin.",
+      "Run the highest-priority validation experiments before scaling.": "Ölçeklemeden önce en yüksek öncelikli doğrulama deneylerini yürütün.",
     };
 
     return dictionary[value] || value;
   };
+  const dimensionLabels =
+    language === "Turkish"
+      ? {
+          evidenceQuality: "Kanıt Kalitesi",
+          sourceConfidence: "Kaynak Güveni",
+          financialConsistency: "Finansal Tutarlılık",
+          benchmarkFit: "Benchmark Uyumu",
+          validationReadiness: "Doğrulama Hazırlığı",
+        }
+      : {
+          evidenceQuality: "Evidence Quality",
+          sourceConfidence: "Source Confidence",
+          financialConsistency: "Financial Consistency",
+          benchmarkFit: "Benchmark Fit",
+          validationReadiness: "Validation Readiness",
+        };
 
   return [
     `${localizeReportLabel("Report Intelligence", language)}:`,
     `${localizeReportLabel("Report Quality", language)}: ${qualityLabel[intelligence.overallQuality]}`,
-    `${localizeReportLabel("Quality Score", language)}: ${intelligence.qualityScore}/100`,
+    `${localizeReportLabel("Confidence", language)}: ${qualityLabel[intelligence.confidenceLevel]}`,
+    `${localizeReportLabel("Quality Score", language)}: ${intelligence.totalScore}/100`,
+    `${language === "Turkish" ? "Kalite Boyutları" : "Quality Dimensions"}:`,
+    `- ${dimensionLabels.evidenceQuality}: ${intelligence.dimensions.evidenceQuality}/100`,
+    `- ${dimensionLabels.sourceConfidence}: ${intelligence.dimensions.sourceConfidence}/100`,
+    `- ${dimensionLabels.financialConsistency}: ${intelligence.dimensions.financialConsistency}/100`,
+    `- ${dimensionLabels.benchmarkFit}: ${intelligence.dimensions.benchmarkFit}/100`,
+    `- ${dimensionLabels.validationReadiness}: ${intelligence.dimensions.validationReadiness}/100`,
     `${localizeReportLabel("Strengths", language)}:`,
     ...(intelligence.strengths.length > 0
       ? intelligence.strengths.map((strength) => `- ${translate(strength)}`)
       : [language === "Turkish" ? "- Güçlü sinyaller doğrulama gerektiriyor." : "- Strengths require validation."]),
     `${localizeReportLabel("Weaknesses", language)}:`,
-    ...(intelligence.risks.length > 0
-      ? intelligence.risks.map((risk) => `- ${translate(risk)}`)
+    ...(intelligence.weaknesses.length > 0
+      ? intelligence.weaknesses.map((risk) => `- ${translate(risk)}`)
       : [language === "Turkish" ? "- Kritik kalite riski tespit edilmedi." : "- No critical quality risk detected."]),
+    `${language === "Turkish" ? "İyileştirme Aksiyonları" : "Improvement Actions"}:`,
+    ...(intelligence.improvementActions.length > 0
+      ? intelligence.improvementActions.map((action) => `- ${translate(action)}`)
+      : [language === "Turkish" ? "- Ek kalite aksiyonu gerekmiyor." : "- No additional quality action required."]),
     `${localizeReportLabel("Consistency Warnings", language)}:`,
     ...(intelligence.warnings.length > 0
       ? intelligence.warnings.map((warning) => `- ${translate(warning)}`)
@@ -581,7 +631,6 @@ export function formatValidationIntelligenceSummary(
   language: "English" | "Turkish" = "English"
 ) {
   return [
-    `${localizeReportLabel("Validation Roadmap", language)}:`,
     `${localizeReportLabel("Validation Score", language)}: ${localizeValidationScore(context.validationIntelligence.score, language)}`,
     ...context.validationIntelligence.experiments
       .slice(0, 5)

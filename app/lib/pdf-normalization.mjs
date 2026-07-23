@@ -709,6 +709,19 @@ function localizeBenchmarkFitValue(value = "", locale = "en") {
     .replace(/\bNo direct customer, revenue, retention, or acquisition evidence was provided in the request\./g, "İstekte doğrudan müşteri, gelir, elde tutma veya edinim kanıtı sağlanmadı.")
     .replace(/\bBenchmark confidence is low for this business model and requires primary validation\./g, "Bu iş modeli için benchmark güveni düşük; birincil doğrulama gerektiriyor.")
     .replace(/\bBusiness model signal is broad, so benchmark selection may need refinement\./g, "İş modeli sinyali geniş; benchmark seçimi netleştirme gerektirebilir.")
+    .replace(/\bWithin Benchmark\b/g, "Benchmark İçinde")
+    .replace(/\bAbove Benchmark\b/g, "Benchmark Üzerinde")
+    .replace(/\bBelow Benchmark\b/g, "Benchmark Altında")
+    .replace(/\bBenchmark fit is ([a-z]+) confidence at (\d+)\/100\./gi, "Benchmark uyumu $2/100 düzeyinde $1 güven seviyesindedir.")
+    .replace(/\bCAC is the most decision-sensitive benchmark gap\./gi, "CAC en karar-kritik benchmark boşluğudur.")
+    .replace(/\bPayback requires validation before scaling spend\./gi, "Harcama ölçeklenmeden önce geri ödeme doğrulanmalıdır.")
+    .replace(/\bgeri ödeme requires validation before scaling spend\.?/gi, "Harcama ölçeklenmeden önce geri ödeme doğrulanmalıdır.")
+    .replace(/\bFinancial benchmark fit is not strong enough for aggressive scaling\./gi, "Finansal benchmark uyumu agresif ölçekleme için yeterince güçlü değildir.")
+    .replace(/\bValidate pricing with willingness-to-pay tests\./gi, "Fiyatlandırmayı ödeme isteği testleriyle doğrulayın.")
+    .replace(/\bTest acquisition channels before increasing budget\./gi, "Bütçeyi artırmadan önce edinim kanallarını test edin.")
+    .replace(/\bReduce initial capital exposure until economics improve\./gi, "Ekonomi iyileşene kadar ilk sermaye riskini azaltın.")
+    .replace(/\bValidate geographic demand and market access assumptions\./gi, "Coğrafi talep ve pazara erişim varsayımlarını doğrulayın.")
+    .replace(/\bMonitor benchmark assumptions against real operating data\./gi, "Benchmark varsayımlarını gerçek operasyon verisiyle izleyin.")
     .replace(/\bBenchmark fit is based on detected industry, business model, geography, pricing model, ve whether the prompt includes validation evidence\.?\s*It does not change financial calculations or scoring\.?/gi, "Benchmark uyumu; tespit edilen sektör, iş modeli, coğrafya, fiyatlandırma modeli ve doğrulama kanıtına göre değerlendirilir. Finansal hesaplamaları veya skorlamayı değiştirmez.")
     .replace(/\bBenchmark fit is based on detected industry, business model, geography, pricing model, and whether the prompt includes validation evidence\.?\s*It does not change financial calculations or scoring\.?/gi, "Benchmark uyumu; tespit edilen sektör, iş modeli, coğrafya, fiyatlandırma modeli ve doğrulama kanıtına göre değerlendirilir. Finansal hesaplamaları veya skorlamayı değiştirmez.")
     .replace(/\bSeed-stage B2B SaaS subscription, ACV, retention, margin, and founder-led sales benchmarks\.?/gi, "Seed aşaması B2B SaaS abonelik, ACV, elde tutma, marj ve kurucu liderliğindeki satış benchmarkları.")
@@ -718,8 +731,8 @@ function localizeBenchmarkFitValue(value = "", locale = "en") {
     .replace(/\bProfessional services benchmarks adjusted for utilization, delivery capacity, founder-led sales, and margin constraints\.?/gi, "Kapasite kullanımı, teslimat kapasitesi, kurucu liderliğinde satış ve marj kısıtlarına göre ayarlanmış profesyonel hizmet benchmarkları.");
 }
 
-export function createPdfBenchmarkIntelligenceSection(benchmarkFit, locale = "en") {
-  if (!benchmarkFit || typeof benchmarkFit !== "object") {
+export function createPdfBenchmarkIntelligenceSection(benchmarkFit, locale = "en", benchmarkScore) {
+  if ((!benchmarkFit || typeof benchmarkFit !== "object") && (!benchmarkScore || typeof benchmarkScore !== "object")) {
     return null;
   }
 
@@ -727,36 +740,91 @@ export function createPdfBenchmarkIntelligenceSection(benchmarkFit, locale = "en
     locale === "tr"
       ? {
           fitLevel: "Uyum Seviyesi",
+          overallFit: "Genel Uyum",
+          industryFit: "Sektör Uyumu",
+          businessModelFit: "İş Modeli Uyumu",
+          geographyFit: "Coğrafya Uyumu",
+          pricingFit: "Fiyatlandırma Uyumu",
+          financialFit: "Finansal Benchmark Uyumu",
           industry: "Sektör",
           businessModel: "İş Modeli",
           confidence: "Benchmark Güveni",
+          largestGaps: "En Büyük Boşluklar",
+          actions: "Önerilen Aksiyonlar",
+          insights: "İçgörüler",
           validationGaps: "Doğrulama Boşlukları",
           rationale: "Gerekçe",
           noGaps: "Belirgin doğrulama boşluğu yok.",
         }
       : {
           fitLevel: "Fit Level",
+          overallFit: "Overall Fit",
+          industryFit: "Industry Fit",
+          businessModelFit: "Business Model Fit",
+          geographyFit: "Geography Fit",
+          pricingFit: "Pricing Fit",
+          financialFit: "Financial Fit",
           industry: "Industry",
           businessModel: "Business Model",
           confidence: "Benchmark Confidence",
+          largestGaps: "Largest gaps",
+          actions: "Recommended actions",
+          insights: "Insights",
           validationGaps: "Validation Gaps",
           rationale: "Rationale",
           noGaps: "No material validation gaps detected.",
         };
-  const gaps = Array.isArray(benchmarkFit.validationGaps) && benchmarkFit.validationGaps.length
+  const hasBenchmarkScore = benchmarkScore && typeof benchmarkScore === "object";
+  const gaps = Array.isArray(benchmarkFit?.validationGaps) && benchmarkFit.validationGaps.length
     ? benchmarkFit.validationGaps
     : [labels.noGaps];
-  const content = [
-    `${labels.fitLevel}: ${localizeBenchmarkFitValue(benchmarkFit.fit || "—", locale)}`,
-    `${labels.industry}: ${localizeBenchmarkFitValue(benchmarkFit.industry || "—", locale)}`,
-    `${labels.businessModel}: ${localizeBenchmarkFitValue(benchmarkFit.businessModel || "—", locale)}`,
-    `${labels.confidence}: ${localizeBenchmarkFitValue(benchmarkFit.confidence || "—", locale)}`,
+  const dimensions = hasBenchmarkScore && benchmarkScore.dimensions && typeof benchmarkScore.dimensions === "object"
+    ? benchmarkScore.dimensions
+    : null;
+  const deviations = Array.isArray(benchmarkScore?.deviations)
+    ? benchmarkScore.deviations
+    : [];
+  const benchmarkGaps = deviations
+    .filter((deviation) => deviation && deviation.status && deviation.status !== "Within Benchmark")
+    .map((deviation) =>
+      `${deviation.metric}: ${deviation.userValue} vs ${deviation.benchmarkRange} (${deviation.status})`
+    );
+  const scoreContent = hasBenchmarkScore
+    ? [
+        `${labels.overallFit}: ${benchmarkScore.overallFit}/100`,
+        `${labels.industryFit}: ${dimensions?.industryFit ?? "—"}/100`,
+        `${labels.businessModelFit}: ${dimensions?.businessModelFit ?? "—"}/100`,
+        `${labels.geographyFit}: ${dimensions?.geographyFit ?? "—"}/100`,
+        `${labels.pricingFit}: ${dimensions?.pricingFit ?? "—"}/100`,
+        `${labels.financialFit}: ${dimensions?.financialBenchmarkFit ?? "—"}/100`,
+        `${labels.confidence}: ${localizeBenchmarkFitValue(benchmarkScore.confidence || "—", locale)}`,
+        "",
+        `${labels.largestGaps}:`,
+        ...(benchmarkGaps.length ? benchmarkGaps.slice(0, 4).map((gap) => `- ${localizeBenchmarkFitValue(gap, locale)}`) : [`- ${labels.noGaps}`]),
+        "",
+        `${labels.insights}:`,
+        ...(Array.isArray(benchmarkScore.insights) && benchmarkScore.insights.length
+          ? benchmarkScore.insights.slice(0, 4).map((insight) => `- ${localizeBenchmarkFitValue(insight, locale)}`)
+          : [`- ${localizeBenchmarkFitValue(benchmarkFit?.rationale || benchmarkFit?.benchmarkBasis || "Benchmark fit requires validation.", locale)}`]),
+        "",
+        `${labels.actions}:`,
+        ...(Array.isArray(benchmarkScore.actions) && benchmarkScore.actions.length
+          ? benchmarkScore.actions.slice(0, 4).map((action) => `- ${localizeBenchmarkFitValue(action, locale)}`)
+          : [`- ${localizeBenchmarkFitValue("Validate benchmark assumptions with operating data.", locale)}`]),
+      ]
+    : [];
+  const fitContent = [
+    `${labels.fitLevel}: ${localizeBenchmarkFitValue(benchmarkFit?.fit || "—", locale)}`,
+    `${labels.industry}: ${localizeBenchmarkFitValue(benchmarkFit?.industry || "—", locale)}`,
+    `${labels.businessModel}: ${localizeBenchmarkFitValue(benchmarkFit?.businessModel || "—", locale)}`,
+    `${labels.confidence}: ${localizeBenchmarkFitValue(benchmarkFit?.confidence || "—", locale)}`,
     "",
     `${labels.validationGaps}:`,
     ...gaps.slice(0, 4).map((gap) => `- ${localizeBenchmarkFitValue(gap, locale)}`),
     "",
-    `${labels.rationale}: ${localizeBenchmarkFitValue(benchmarkFit.rationale || benchmarkFit.benchmarkBasis || "—", locale)}`,
-  ].join("\n");
+    `${labels.rationale}: ${localizeBenchmarkFitValue(benchmarkFit?.rationale || benchmarkFit?.benchmarkBasis || "—", locale)}`,
+  ];
+  const content = (hasBenchmarkScore ? scoreContent : fitContent).join("\n");
 
   return {
     field: "benchmarkIntelligence",
@@ -765,8 +833,8 @@ export function createPdfBenchmarkIntelligenceSection(benchmarkFit, locale = "en
   };
 }
 
-export function insertPdfBenchmarkIntelligenceSection(sections = [], benchmarkFit, locale = "en") {
-  const benchmarkSection = createPdfBenchmarkIntelligenceSection(benchmarkFit, locale);
+export function insertPdfBenchmarkIntelligenceSection(sections = [], benchmarkFit, locale = "en", benchmarkScore) {
+  const benchmarkSection = createPdfBenchmarkIntelligenceSection(benchmarkFit, locale, benchmarkScore);
 
   if (!benchmarkSection) {
     return sections;

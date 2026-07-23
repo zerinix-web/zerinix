@@ -189,6 +189,8 @@ type PlanReportMetadataChunk = {
   reportMetadata: {
     investmentScore: AiFinancialModelContext["investmentScore"];
     benchmarkFit: AiFinancialModelContext["benchmarkFit"];
+    benchmarkScore: AiFinancialModelContext["benchmarkScore"];
+    reportQuality: AiFinancialModelContext["reportIntelligence"];
   };
 };
 
@@ -332,6 +334,8 @@ function serializePlanReportMetadataChunk(
     reportMetadata: {
       investmentScore: context.investmentScore,
       benchmarkFit: context.benchmarkFit,
+      benchmarkScore: context.benchmarkScore,
+      reportQuality: context.reportIntelligence,
     },
   };
 
@@ -1250,10 +1254,26 @@ function buildCanonicalExecutiveRecommendation(context: AiFinancialModelContext,
         ? reportText(language, "Pass until the economics or execution path is redesigned", "Ekonomi veya yürütme yolu yeniden tasarlanana kadar geç")
         : reportText(language, "Hold for validation before scaling", "Ölçeklemeden önce doğrulama için bekle");
   const visibleDecision = localizeDecision(finalDecision, language);
+  const reportQualityConfidence =
+    context.reportIntelligence.confidenceLevel === "High Confidence"
+      ? reportText(language, "High Confidence", "Yüksek Güven")
+      : context.reportIntelligence.confidenceLevel === "Low Confidence"
+        ? reportText(language, "Low Confidence", "Düşük Güven")
+        : reportText(language, "Medium Confidence", "Orta Güven");
+  const benchmarkActions = context.benchmarkScore.actions.slice(0, 2).join("; ");
+  const benchmarkActionsTr = [
+    context.benchmarkScore.dimensions.pricingFit < 65 ? "fiyatlandırmayı doğrula" : "",
+    context.benchmarkScore.deviations.some((deviation) => deviation.metric === "CAC" && deviation.status !== "Within Benchmark")
+      ? "edinim kanallarını test et"
+      : "",
+    context.benchmarkScore.dimensions.financialBenchmarkFit < 65 ? "ilk sermaye riskini azalt" : "",
+  ].filter(Boolean).join("; ") || "benchmark varsayımlarını operasyon verisiyle izle";
 
   return [
     reportText(language, `Decision: ${visibleDecision}`, `Karar: ${visibleDecision}`),
     reportText(language, `Decision Confidence: ${score.confidence}% (${confidenceLabel})`, `Karar Güveni: ${score.confidence}% (${confidenceLabel})`),
+    reportText(language, `Report Quality Confidence: ${reportQualityConfidence} (${context.reportIntelligence.totalScore}/100)`, `Rapor Kalitesi Güveni: ${reportQualityConfidence} (${context.reportIntelligence.totalScore}/100)`),
+    reportText(language, `Benchmark Fit: ${context.benchmarkScore.overallFit}/100 (${context.benchmarkScore.confidence}). ${benchmarkActions}`, `Benchmark Uyumu: ${context.benchmarkScore.overallFit}/100 (${context.benchmarkScore.confidence}). ${benchmarkActionsTr}`),
     reportText(language, `Investment Recommendation: ${investmentRecommendation}`, `Yatırım Tavsiyesi: ${investmentRecommendation}`),
     reportText(language, `Main Risk: ${score.topRisks[0] || "Primary risk requires validation."}`, `Ana Risk: ${score.topRisks[0] || "Birincil risk doğrulama gerektiriyor."}`),
     reportText(language, `Next Action: ${score.nextCriticalAction}`, `Sonraki Aksiyon: ${score.nextCriticalAction}`),
@@ -1565,7 +1585,7 @@ function normalizeFullPlanReport(
   );
   normalized.roadmap306090 = appendIntelligenceBlock(
     normalized.roadmap306090,
-    reportLabel(language, "Validation Intelligence", "Validation Intelligence"),
+    reportLabel(language, "Validation Intelligence", "Doğrulama Zekası"),
     [formatValidationIntelligenceSummary(context, language)]
   );
   normalized.sourcesAssumptions = appendIntelligenceBlock(

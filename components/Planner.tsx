@@ -59,6 +59,7 @@ import { isAmbiguousBusinessRequest } from "@/app/lib/business-idea-detection";
 import {
   buildExecutiveSnapshot,
   compactExecutiveDecisionMemoSections,
+  getReportQualityBreakdown,
   getReportPresentationLabels,
   getSectionTakeaway,
   isExecutivePresentationSection,
@@ -69,8 +70,10 @@ import {
 } from "@/app/lib/report-presentation";
 import type {
   ReportBenchmarkFit,
+  ReportBenchmarkScore,
   ReportInvestmentScore,
   ReportMetadata,
+  ReportQualityScore,
 } from "@/app/lib/report-investment-score";
 import {
   containsReportGenerationFailure,
@@ -3034,7 +3037,7 @@ function buildPdfFounderScoreCards(
 
 function getPdfSectionCardTitle(section: ReportSection, locale: "en" | "tr") {
   if (section.field === "founderScore") {
-    return locale === "tr" ? "Boyut Skorları" : "Dimension Scores";
+    return locale === "tr" ? "Kurucu Hazırlık Boyutları" : "Founder Readiness Dimensions";
   }
 
   return section.title;
@@ -4036,10 +4039,15 @@ if (field === "swotAnalysis") {
     }
 
     return (
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {scoredMetrics.map(({ metric, score }) => (
-          <GaugeCircle key={metric} label={metric} score={score} />
-        ))}
+      <div className="mb-5 space-y-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-200/70">
+          {founderScoreLocale === "tr" ? "Kurucu Hazırlık Boyutları" : "Founder Readiness Dimensions"}
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {scoredMetrics.map(({ metric, score }) => (
+            <GaugeCircle key={metric} label={metric} score={score} />
+          ))}
+        </div>
       </div>
     );
   }
@@ -4443,16 +4451,22 @@ function SnapshotGauge({
 function ExecutiveSnapshotPanel({
   section,
   investmentScore,
+  reportQuality,
 }: {
   section: ReportSection;
   investmentScore?: ReportInvestmentScore;
+  reportQuality?: ReportQualityScore;
 }) {
   if (!isExecutivePresentationSection(section)) {
     return null;
   }
 
-  const snapshot = buildExecutiveSnapshot(section.content, investmentScore);
+  const snapshot = buildExecutiveSnapshot(section.content, investmentScore, reportQuality);
   const labels = getReportPresentationLabels(section.content);
+  const reportQualityBreakdown = getReportQualityBreakdown(
+    reportQuality,
+    labels.reportQuality === "Rapor Kalitesi"
+  );
   const groups = [
     { label: labels.why, items: snapshot.why },
     { label: labels.mainRisks, items: snapshot.risks },
@@ -4515,6 +4529,23 @@ function ExecutiveSnapshotPanel({
           </div>
         ))}
       </div>
+      {reportQualityBreakdown.length > 0 ? (
+        <div className="mt-3 rounded-2xl border border-white/10 bg-black/25 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-200/70">
+            {labels.reportQuality}
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {reportQualityBreakdown.map((item) => (
+              <div key={item.label} className="rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                  {item.label}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-zinc-100">{item.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-200/70">
@@ -4600,12 +4631,14 @@ function localizeBenchmarkFitValue(value = "", locale: "en" | "tr") {
 
 function BenchmarkIntelligencePanel({
   benchmarkFit,
+  benchmarkScore,
   sourceText,
 }: {
   benchmarkFit?: ReportBenchmarkFit;
+  benchmarkScore?: ReportBenchmarkScore;
   sourceText: string;
 }) {
-  if (!benchmarkFit) {
+  if (!benchmarkFit && !benchmarkScore) {
     return null;
   }
 
@@ -4615,6 +4648,12 @@ function BenchmarkIntelligencePanel({
       ? {
           eyebrow: "Benchmark Zekası",
           title: "Benchmark Intelligence",
+          overallFit: "Genel Uyum",
+          industryFit: "Sektör Uyumu",
+          businessModelFit: "İş Modeli Uyumu",
+          geographyFit: "Coğrafya Uyumu",
+          pricingFit: "Fiyatlandırma Uyumu",
+          financialFit: "Finansal Uyum",
           fitLevel: "Uyum Seviyesi",
           industry: "Sektör",
           businessModel: "İş Modeli",
@@ -4626,6 +4665,12 @@ function BenchmarkIntelligencePanel({
       : {
           eyebrow: "Benchmark Intelligence",
           title: "Benchmark fit",
+          overallFit: "Overall Fit",
+          industryFit: "Industry Fit",
+          businessModelFit: "Business Model Fit",
+          geographyFit: "Geography Fit",
+          pricingFit: "Pricing Fit",
+          financialFit: "Financial Fit",
           fitLevel: "Fit Level",
           industry: "Industry",
           businessModel: "Business Model",
@@ -4634,12 +4679,24 @@ function BenchmarkIntelligencePanel({
           rationale: "Rationale",
           noGaps: "No material validation gaps detected.",
         };
-  const gaps = benchmarkFit.validationGaps?.length ? benchmarkFit.validationGaps : [labels.noGaps];
+  const gaps = benchmarkFit?.validationGaps?.length ? benchmarkFit.validationGaps : [labels.noGaps];
   const summaryItems = [
-    { label: labels.fitLevel, value: benchmarkFit.fit || "—" },
-    { label: labels.industry, value: benchmarkFit.industry || "—" },
-    { label: labels.businessModel, value: benchmarkFit.businessModel || "—" },
-    { label: labels.confidence, value: benchmarkFit.confidence || "—" },
+    ...(benchmarkScore
+      ? [
+          { label: labels.overallFit, value: `${benchmarkScore.overallFit}/100` },
+          { label: labels.industryFit, value: `${benchmarkScore.dimensions.industryFit}/100` },
+          { label: labels.businessModelFit, value: `${benchmarkScore.dimensions.businessModelFit}/100` },
+          { label: labels.geographyFit, value: `${benchmarkScore.dimensions.geographyFit}/100` },
+          { label: labels.pricingFit, value: `${benchmarkScore.dimensions.pricingFit}/100` },
+          { label: labels.financialFit, value: `${benchmarkScore.dimensions.financialBenchmarkFit}/100` },
+          { label: labels.confidence, value: benchmarkScore.confidence || "—" },
+        ]
+      : [
+          { label: labels.fitLevel, value: benchmarkFit?.fit || "—" },
+          { label: labels.industry, value: benchmarkFit?.industry || "—" },
+          { label: labels.businessModel, value: benchmarkFit?.businessModel || "—" },
+          { label: labels.confidence, value: benchmarkFit?.confidence || "—" },
+        ]),
   ];
 
   return (
@@ -4654,7 +4711,7 @@ function BenchmarkIntelligencePanel({
           </h3>
         </div>
         <span className="w-fit rounded-full border border-teal-200/20 bg-teal-200/10 px-3 py-1.5 text-xs font-semibold text-teal-100">
-          {localizeBenchmarkFitValue(benchmarkFit.fit || "—", locale)}
+          {localizeBenchmarkFitValue(benchmarkScore ? `${benchmarkScore.overallFit}/100` : benchmarkFit?.fit || "—", locale)}
         </span>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-4">
@@ -4669,29 +4726,69 @@ function BenchmarkIntelligencePanel({
           </div>
         ))}
       </div>
-      <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1.2fr]">
-        <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
-            {labels.validationGaps}
-          </p>
-          <ul className="mt-3 space-y-2 text-sm leading-6 text-zinc-300">
-            {gaps.slice(0, 3).map((gap) => (
-              <li key={gap} className="flex gap-2">
-                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
-                <span>{localizeBenchmarkFitValue(gap, locale)}</span>
-              </li>
-            ))}
-          </ul>
+      {benchmarkScore ? (
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              {locale === "tr" ? "En Büyük Boşluklar" : "Largest gaps"}
+            </p>
+            <ul className="mt-3 space-y-2 text-sm leading-5 text-zinc-300">
+              {benchmarkScore.deviations
+                .filter((deviation) => deviation.status !== "Within Benchmark")
+                .slice(0, 3)
+                .map((deviation) => (
+                  <li key={`${deviation.metric}-${deviation.status}`} className="flex gap-2">
+                    <span className="mt-2 h-1.5 w-1.5 rounded-full bg-teal-300" />
+                    <span>
+                      {localizeBenchmarkFitValue(
+                        `${deviation.metric}: ${deviation.userValue} vs ${deviation.benchmarkRange} (${deviation.status})`,
+                        locale
+                      )}
+                    </span>
+                  </li>
+                ))}
+            </ul>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              {locale === "tr" ? "Önerilen Aksiyonlar" : "Recommended actions"}
+            </p>
+            <ul className="mt-3 space-y-2 text-sm leading-5 text-zinc-300">
+              {benchmarkScore.actions.slice(0, 3).map((action) => (
+                <li key={action} className="flex gap-2">
+                  <span className="mt-2 h-1.5 w-1.5 rounded-full bg-teal-300" />
+                  <span>{localizeBenchmarkFitValue(action, locale)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
-        <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
-            {labels.rationale}
-          </p>
-          <p className="mt-3 text-sm leading-6 text-zinc-300">
-            {localizeBenchmarkFitValue(benchmarkFit.rationale || benchmarkFit.benchmarkBasis || "—", locale)}
-          </p>
+      ) : null}
+      {!benchmarkScore ? (
+        <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1.2fr]">
+          <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+              {labels.validationGaps}
+            </p>
+            <ul className="mt-3 space-y-2 text-sm leading-6 text-zinc-300">
+              {gaps.slice(0, 3).map((gap) => (
+                <li key={gap} className="flex gap-2">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
+                  <span>{localizeBenchmarkFitValue(gap, locale)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+              {labels.rationale}
+            </p>
+            <p className="mt-3 text-sm leading-6 text-zinc-300">
+              {localizeBenchmarkFitValue(benchmarkFit?.rationale || benchmarkFit?.benchmarkBasis || "—", locale)}
+            </p>
+          </div>
         </div>
-      </div>
+      ) : null}
     </section>
   );
 }
@@ -5329,6 +5426,8 @@ const ReportPanel = memo(function ReportPanel({
   warningMessage,
   investmentScore,
   benchmarkFit,
+  benchmarkScore,
+  reportQuality,
 }: {
   reportData: Partial<MarketReport & PlanReport> | null;
   reportFields: Array<{
@@ -5344,6 +5443,8 @@ const ReportPanel = memo(function ReportPanel({
   warningMessage?: string;
   investmentScore?: ReportInvestmentScore;
   benchmarkFit?: ReportBenchmarkFit;
+  benchmarkScore?: ReportBenchmarkScore;
+  reportQuality?: ReportQualityScore;
 }) {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [pdfError, setPdfError] = useState("");
@@ -5461,7 +5562,8 @@ const ReportPanel = memo(function ReportPanel({
       const pdfBaseSectionsWithBenchmark = insertPdfBenchmarkIntelligenceSection(
         basePdfSections,
         benchmarkFit,
-        pdfLocale
+        pdfLocale,
+        benchmarkScore
       ).map((section) => ({
         ...section,
         icon: "icon" in section ? section.icon : FileText,
@@ -5576,7 +5678,8 @@ const ReportPanel = memo(function ReportPanel({
           isOrphanBulletText
         );
 
-      const executiveSnapshot = buildExecutiveSnapshot(fullReportContent, investmentScore);
+      const executiveSnapshot = buildExecutiveSnapshot(fullReportContent, investmentScore, reportQuality);
+      const reportQualityBreakdown = getReportQualityBreakdown(reportQuality, pdfLocale === "tr");
 
       const drawDecisionGauge = (
         label: string,
@@ -5661,8 +5764,26 @@ const ReportPanel = memo(function ReportPanel({
         drawDecisionGauge("Confidence Gauge", executiveSnapshot.confidenceScore, executiveSnapshot.confidence, margin + 12, 156, gaugeWidth);
         drawDecisionGauge("Founder Readiness Gauge", executiveSnapshot.founderScoreValue, executiveSnapshot.founderScore, margin + 21 + gaugeWidth, 156, gaugeWidth);
 
-        const heatmapY = 195;
+        const heatmapY = reportQualityBreakdown.length ? 211 : 195;
         const panelWidth = (contentWidth - 33) / 2;
+        if (reportQualityBreakdown.length) {
+          const qualityY = 188;
+          const itemWidth = (contentWidth - 34) / 6;
+          pdf.setFillColor("#09090b");
+          pdf.setDrawColor("#27272a");
+          pdf.roundedRect(margin + 12, qualityY, contentWidth - 24, 15, 4, 4, "FD");
+          reportQualityBreakdown.forEach((item, index) => {
+            const itemX = margin + 16 + index * itemWidth;
+            pdf.setFontSize(4.8);
+            pdf.setTextColor("#71717a");
+            pdf.text(localizePdfPresentationLabel(item.label, pdfLocale).toUpperCase(), itemX, qualityY + 5, {
+              maxWidth: itemWidth - 3,
+            });
+            pdf.setFontSize(7.5);
+            pdf.setTextColor("#f4f4f5");
+            pdf.text(item.value, itemX, qualityY + 11.2, { maxWidth: itemWidth - 3 });
+          });
+        }
         pdf.setFillColor("#09090b");
         pdf.setDrawColor("#27272a");
         pdf.roundedRect(margin + 12, heatmapY, panelWidth, 42, 4, 4, "FD");
@@ -6618,6 +6739,7 @@ const ReportPanel = memo(function ReportPanel({
       <div className="space-y-5 p-4 sm:p-5">
         <BenchmarkIntelligencePanel
           benchmarkFit={benchmarkFit}
+          benchmarkScore={benchmarkScore}
           sourceText={`${reportTitle}\n${sourcePrompt || ""}\n${sections
             .map((section) => `${section.title}\n${section.content}`)
             .join("\n\n")}`}
@@ -6672,6 +6794,7 @@ const ReportPanel = memo(function ReportPanel({
                     <ExecutiveSnapshotPanel
                       section={section}
                       investmentScore={investmentScore}
+                      reportQuality={reportQuality}
                     />
                     {hasPremiumSectionVisual(section) &&
                     section.field !== "executiveSummary" &&
@@ -9385,6 +9508,8 @@ export default function Planner({
                   warningMessage={reportGenerationWarning}
                   investmentScore={currentReportInvestmentScore || initialReport?.investmentScore}
                   benchmarkFit={currentReportMetadata?.benchmarkFit || initialReport?.metadata?.benchmarkFit}
+                  benchmarkScore={currentReportMetadata?.benchmarkScore || initialReport?.metadata?.benchmarkScore}
+                  reportQuality={currentReportMetadata?.reportQuality || initialReport?.metadata?.reportQuality}
                 />
 	              ) : null}
               </div>

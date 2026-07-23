@@ -9,6 +9,7 @@ import { dedupeReportSections } from "@/app/lib/report-section-normalization";
 import {
   buildExecutiveSnapshot,
   compactExecutiveDecisionMemoSections,
+  getReportQualityBreakdown,
   normalizeFounderReadinessScoreText,
   readFounderReadinessMetricValue,
   readFounderReadinessScoreValue,
@@ -1477,7 +1478,7 @@ function buildPdfFounderScoreCards(
 
 function getPdfSectionCardTitle(section: PdfReportSection, locale: "en" | "tr") {
   if (section.field === "founderScore") {
-    return locale === "tr" ? "Boyut Skorları" : "Dimension Scores";
+    return locale === "tr" ? "Kurucu Hazırlık Boyutları" : "Founder Readiness Dimensions";
   }
 
   return section.title;
@@ -1851,7 +1852,8 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       const pdfBaseSectionsWithBenchmark = insertPdfBenchmarkIntelligenceSection(
         basePdfSections,
         report.metadata?.benchmarkFit,
-        pdfLocale
+        pdfLocale,
+        report.metadata?.benchmarkScore
       );
       const pdfSections = localizePdfReportSections(pdfBaseSectionsWithBenchmark, pdfLocale);
       const localizedReportTitle = localizePdfPresentationLabel(report.title, pdfLocale);
@@ -2046,7 +2048,15 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             : recommendation === "PASS"
               ? "#fecaca"
               : "#fde68a";
-        const executiveSnapshot = buildExecutiveSnapshot(fullReportContent, report.investmentScore);
+        const executiveSnapshot = buildExecutiveSnapshot(
+          fullReportContent,
+          report.investmentScore,
+          report.metadata?.reportQuality
+        );
+        const reportQualityBreakdown = getReportQualityBreakdown(
+          report.metadata?.reportQuality,
+          pdfLocale === "tr"
+        );
         const founderScore = executiveSnapshot.founderScoreValue ?? investmentScore;
 
         paintPage();
@@ -2172,9 +2182,9 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           });
         });
 
-        const getInsightPanelLayout = (items: string[], panelWidth: number) => {
+        const getInsightPanelLayout = (items: string[], panelWidth: number, maxItems = 3) => {
           const lineBlocks = (items.length ? items : ["See detailed section analysis."])
-            .slice(0, 3)
+            .slice(0, maxItems)
             .map((item) => wrapPdfText(conciseCoverText(item), panelWidth - 15).slice(0, 2));
           const height = Math.max(
             34,
@@ -2220,11 +2230,15 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           executiveSnapshot.riskHeatmap.map((risk) => `${risk.label}: ${risk.level}`),
           insightWidth
         );
+        const confidenceOrQualityItems = reportQualityBreakdown.length
+          ? reportQualityBreakdown.map((item) => `${item.label}: ${item.value}`)
+          : executiveSnapshot.confidenceRadar.map((dimension) =>
+              `${dimension.label}: ${dimension.score === null ? "Validation Required" : `${dimension.score}%`}`
+            );
         const risksLayout = getInsightPanelLayout(
-          executiveSnapshot.confidenceRadar.map((dimension) =>
-            `${dimension.label}: ${dimension.score === null ? "Validation Required" : `${dimension.score}%`}`
-          ),
-          insightWidth
+          confidenceOrQualityItems,
+          insightWidth,
+          reportQualityBreakdown.length ? 6 : 3
         );
         const insightHeight = Math.max(strengthsLayout.height, risksLayout.height);
         const kpiGridHeight = rowHeights.reduce((sum, height) => sum + height, 0) + (rowHeights.length - 1) * 4;
@@ -2239,7 +2253,9 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           "#14b8a6"
         );
         drawInsightPanel(
-          localizePdfPresentationLabel("Confidence Radar", pdfLocale),
+          reportQualityBreakdown.length
+            ? localizePdfPresentationLabel("Report Quality", pdfLocale)
+            : localizePdfPresentationLabel("Confidence Radar", pdfLocale),
           risksLayout.lineBlocks,
           margin + 21 + insightWidth,
           insightY,

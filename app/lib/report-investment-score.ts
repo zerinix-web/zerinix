@@ -27,9 +27,53 @@ export type ReportBenchmarkFit = {
   rationale?: string;
 };
 
+export type ReportQualityScore = {
+  version?: string;
+  totalScore: number;
+  qualityScore?: number;
+  overallQuality?: string;
+  confidenceLevel: "High Confidence" | "Medium Confidence" | "Low Confidence" | string;
+  dimensions: {
+    evidenceQuality: number;
+    sourceConfidence: number;
+    financialConsistency: number;
+    benchmarkFit: number;
+    validationReadiness: number;
+  };
+  strengths: string[];
+  weaknesses: string[];
+  improvementActions: string[];
+  risks?: string[];
+  warnings?: string[];
+  confidenceSummary?: string;
+};
+
+export type ReportBenchmarkScore = {
+  version?: string;
+  overallFit: number;
+  dimensions: {
+    industryFit: number;
+    businessModelFit: number;
+    geographyFit: number;
+    pricingFit: number;
+    financialBenchmarkFit: number;
+  };
+  confidence: "High" | "Medium" | "Low" | string;
+  deviations: Array<{
+    metric: string;
+    userValue: string;
+    benchmarkRange: string;
+    status: string;
+  }>;
+  insights: string[];
+  actions: string[];
+};
+
 export type ReportMetadata = {
   investmentScore?: ReportInvestmentScore;
   benchmarkFit?: ReportBenchmarkFit;
+  benchmarkScore?: ReportBenchmarkScore;
+  reportQuality?: ReportQualityScore;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

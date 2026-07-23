@@ -31,6 +31,7 @@ import {
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 import {
   buildExecutiveSnapshot,
+  getReportQualityBreakdown,
   getReportPresentationLabels,
   getSectionTakeaway,
   isExecutivePresentationSection,
@@ -41,7 +42,9 @@ import {
 } from "@/app/lib/report-presentation";
 import type {
   ReportBenchmarkFit,
+  ReportBenchmarkScore,
   ReportInvestmentScore,
+  ReportQualityScore,
 } from "@/app/lib/report-investment-score";
 import {
   detectPdfPresentationLocale,
@@ -1294,10 +1297,15 @@ function ReportSectionVisual({
     }
 
     return (
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {scoredMetrics.map(({ metric, score }) => (
-          <GaugeCircle key={metric} label={metric} score={score} />
-        ))}
+      <div className="mb-5 space-y-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-200/70">
+          {founderScoreLocale === "tr" ? "Kurucu Hazırlık Boyutları" : "Founder Readiness Dimensions"}
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {scoredMetrics.map(({ metric, score }) => (
+            <GaugeCircle key={metric} label={metric} score={score} />
+          ))}
+        </div>
       </div>
     );
   }
@@ -1679,16 +1687,22 @@ function SnapshotGauge({
 function ExecutiveSnapshotPanel({
   section,
   investmentScore,
+  reportQuality,
 }: {
   section: { field?: string; title: string; content: string };
   investmentScore?: ReportInvestmentScore;
+  reportQuality?: ReportQualityScore;
 }) {
   if (!isExecutivePresentationSection(section)) {
     return null;
   }
 
-  const snapshot = buildExecutiveSnapshot(section.content, investmentScore);
+  const snapshot = buildExecutiveSnapshot(section.content, investmentScore, reportQuality);
   const labels = getReportPresentationLabels(section.content);
+  const reportQualityBreakdown = getReportQualityBreakdown(
+    reportQuality,
+    labels.reportQuality === "Rapor Kalitesi"
+  );
   const groups = [
     { label: labels.why, items: snapshot.why },
     { label: labels.mainRisks, items: snapshot.risks },
@@ -1751,6 +1765,23 @@ function ExecutiveSnapshotPanel({
           </div>
         ))}
       </div>
+      {reportQualityBreakdown.length > 0 ? (
+        <div className="mt-3 rounded-2xl border border-white/10 bg-black/25 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-200/70">
+            {labels.reportQuality}
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {reportQualityBreakdown.map((item) => (
+              <div key={item.label} className="rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                  {item.label}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-zinc-100">{item.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-200/70">
@@ -1836,12 +1867,14 @@ function localizeBenchmarkFitValue(value = "", locale: "en" | "tr") {
 
 function BenchmarkIntelligencePanel({
   benchmarkFit,
+  benchmarkScore,
   sourceText,
 }: {
   benchmarkFit?: ReportBenchmarkFit;
+  benchmarkScore?: ReportBenchmarkScore;
   sourceText: string;
 }) {
-  if (!benchmarkFit) {
+  if (!benchmarkFit && !benchmarkScore) {
     return null;
   }
 
@@ -1851,6 +1884,12 @@ function BenchmarkIntelligencePanel({
       ? {
           eyebrow: "Benchmark Zekası",
           title: "Benchmark Intelligence",
+          overallFit: "Genel Uyum",
+          industryFit: "Sektör Uyumu",
+          businessModelFit: "İş Modeli Uyumu",
+          geographyFit: "Coğrafya Uyumu",
+          pricingFit: "Fiyatlandırma Uyumu",
+          financialFit: "Finansal Uyum",
           fitLevel: "Uyum Seviyesi",
           industry: "Sektör",
           businessModel: "İş Modeli",
@@ -1862,6 +1901,12 @@ function BenchmarkIntelligencePanel({
       : {
           eyebrow: "Benchmark Intelligence",
           title: "Benchmark fit",
+          overallFit: "Overall Fit",
+          industryFit: "Industry Fit",
+          businessModelFit: "Business Model Fit",
+          geographyFit: "Geography Fit",
+          pricingFit: "Pricing Fit",
+          financialFit: "Financial Fit",
           fitLevel: "Fit Level",
           industry: "Industry",
           businessModel: "Business Model",
@@ -1870,12 +1915,24 @@ function BenchmarkIntelligencePanel({
           rationale: "Rationale",
           noGaps: "No material validation gaps detected.",
         };
-  const gaps = benchmarkFit.validationGaps?.length ? benchmarkFit.validationGaps : [labels.noGaps];
+  const gaps = benchmarkFit?.validationGaps?.length ? benchmarkFit.validationGaps : [labels.noGaps];
   const summaryItems = [
-    { label: labels.fitLevel, value: benchmarkFit.fit || "—" },
-    { label: labels.industry, value: benchmarkFit.industry || "—" },
-    { label: labels.businessModel, value: benchmarkFit.businessModel || "—" },
-    { label: labels.confidence, value: benchmarkFit.confidence || "—" },
+    ...(benchmarkScore
+      ? [
+          { label: labels.overallFit, value: `${benchmarkScore.overallFit}/100` },
+          { label: labels.industryFit, value: `${benchmarkScore.dimensions.industryFit}/100` },
+          { label: labels.businessModelFit, value: `${benchmarkScore.dimensions.businessModelFit}/100` },
+          { label: labels.geographyFit, value: `${benchmarkScore.dimensions.geographyFit}/100` },
+          { label: labels.pricingFit, value: `${benchmarkScore.dimensions.pricingFit}/100` },
+          { label: labels.financialFit, value: `${benchmarkScore.dimensions.financialBenchmarkFit}/100` },
+          { label: labels.confidence, value: benchmarkScore.confidence || "—" },
+        ]
+      : [
+          { label: labels.fitLevel, value: benchmarkFit?.fit || "—" },
+          { label: labels.industry, value: benchmarkFit?.industry || "—" },
+          { label: labels.businessModel, value: benchmarkFit?.businessModel || "—" },
+          { label: labels.confidence, value: benchmarkFit?.confidence || "—" },
+        ]),
   ];
 
   return (
@@ -1890,7 +1947,7 @@ function BenchmarkIntelligencePanel({
           </h3>
         </div>
         <span className="w-fit rounded-full border border-teal-200/20 bg-teal-200/10 px-3 py-1.5 text-xs font-semibold text-teal-100">
-          {localizeBenchmarkFitValue(benchmarkFit.fit || "—", locale)}
+          {localizeBenchmarkFitValue(benchmarkScore ? `${benchmarkScore.overallFit}/100` : benchmarkFit?.fit || "—", locale)}
         </span>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-4">
@@ -1905,29 +1962,69 @@ function BenchmarkIntelligencePanel({
           </div>
         ))}
       </div>
-      <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1.2fr]">
-        <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
-            {labels.validationGaps}
-          </p>
-          <ul className="mt-3 space-y-2 text-sm leading-6 text-zinc-300">
-            {gaps.slice(0, 3).map((gap) => (
-              <li key={gap} className="flex gap-2">
-                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
-                <span>{localizeBenchmarkFitValue(gap, locale)}</span>
-              </li>
-            ))}
-          </ul>
+      {benchmarkScore ? (
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              {locale === "tr" ? "En Büyük Boşluklar" : "Largest gaps"}
+            </p>
+            <ul className="mt-3 space-y-2 text-sm leading-5 text-zinc-300">
+              {benchmarkScore.deviations
+                .filter((deviation) => deviation.status !== "Within Benchmark")
+                .slice(0, 3)
+                .map((deviation) => (
+                  <li key={`${deviation.metric}-${deviation.status}`} className="flex gap-2">
+                    <span className="mt-2 h-1.5 w-1.5 rounded-full bg-teal-300" />
+                    <span>
+                      {localizeBenchmarkFitValue(
+                        `${deviation.metric}: ${deviation.userValue} vs ${deviation.benchmarkRange} (${deviation.status})`,
+                        locale
+                      )}
+                    </span>
+                  </li>
+                ))}
+            </ul>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              {locale === "tr" ? "Önerilen Aksiyonlar" : "Recommended actions"}
+            </p>
+            <ul className="mt-3 space-y-2 text-sm leading-5 text-zinc-300">
+              {benchmarkScore.actions.slice(0, 3).map((action) => (
+                <li key={action} className="flex gap-2">
+                  <span className="mt-2 h-1.5 w-1.5 rounded-full bg-teal-300" />
+                  <span>{localizeBenchmarkFitValue(action, locale)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
-        <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
-            {labels.rationale}
-          </p>
-          <p className="mt-3 text-sm leading-6 text-zinc-300">
-            {localizeBenchmarkFitValue(benchmarkFit.rationale || benchmarkFit.benchmarkBasis || "—", locale)}
-          </p>
+      ) : null}
+      {!benchmarkScore ? (
+        <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1.2fr]">
+          <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+              {labels.validationGaps}
+            </p>
+            <ul className="mt-3 space-y-2 text-sm leading-6 text-zinc-300">
+              {gaps.slice(0, 3).map((gap) => (
+                <li key={gap} className="flex gap-2">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
+                  <span>{localizeBenchmarkFitValue(gap, locale)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+              {labels.rationale}
+            </p>
+            <p className="mt-3 text-sm leading-6 text-zinc-300">
+              {localizeBenchmarkFitValue(benchmarkFit?.rationale || benchmarkFit?.benchmarkBasis || "—", locale)}
+            </p>
+          </div>
         </div>
-      </div>
+      ) : null}
     </section>
   );
 }
@@ -2926,6 +3023,7 @@ export default async function ReportDetailPage({
                 <div className="space-y-8 xl:max-w-5xl">
                   <BenchmarkIntelligencePanel
                     benchmarkFit={report.metadata?.benchmarkFit}
+                    benchmarkScore={report.metadata?.benchmarkScore}
                     sourceText={`${report.title}\n${report.prompt}\n${uniqueReportSections
                       .map((section) => `${section.title}\n${section.content}`)
                       .join("\n\n")}`}
@@ -2992,6 +3090,7 @@ export default async function ReportDetailPage({
                               <ExecutiveSnapshotPanel
                                 section={section}
                                 investmentScore={report.investmentScore}
+                                reportQuality={report.metadata?.reportQuality}
                               />
                               {hasReportSectionVisual(section.title) &&
                               !section.title.toLowerCase().includes("executive summary") &&
