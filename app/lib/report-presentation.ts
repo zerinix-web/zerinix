@@ -403,6 +403,14 @@ function extractQuality(content: string, labels: string[], fallback: string) {
   return extractLabelValue(content, labels) || fallback;
 }
 
+function normalizeFinancialQualityPresentation(value: string, isTurkish: boolean) {
+  if (/\bhigh risk\b|yüksek risk/i.test(value)) {
+    return isTurkish ? "Doğrulama Gerekli" : "Needs Validation";
+  }
+
+  return value;
+}
+
 function inferRiskLevel(content: string, keywords: string[]): "Low" | "Medium" | "High" {
   const normalized = content.toLowerCase();
   const hasKeyword = keywords.some((keyword) => normalized.includes(keyword.toLowerCase()));
@@ -515,10 +523,13 @@ export function buildExecutiveSnapshot(
     confidenceScore,
     founderScore: formatScore(founderScoreValue, "/100"),
     founderScoreValue,
-    financialQuality: extractQuality(
-      normalized,
-      ["Financial Quality", "Financial Quality:", "Finansal Kalite"],
-      isTurkish ? "Doğrulama Gerekli" : "Validation Required"
+    financialQuality: normalizeFinancialQualityPresentation(
+      extractQuality(
+        normalized,
+        ["Financial Quality", "Financial Quality:", "Finansal Kalite"],
+        isTurkish ? "Doğrulama Gerekli" : "Validation Required"
+      ),
+      isTurkish
     ),
     reportQuality: extractQuality(
       normalized,

@@ -1512,25 +1512,23 @@ function getCitationDedupeKey(citation: CitationData) {
 }
 
 function getPdfCitationSourceTypeLabel(citation: CitationData) {
-  if (citation.sourceType === "Company reference") {
-    return "Official company website";
-  }
+  const level = sourceTypeToEvidenceLevel(citation.sourceType || "", Boolean(citation.url));
 
-  if (citation.sourceType === "Industry reference") {
-    return "Industry reference";
-  }
+  if (level === "verified") return "Verified Source";
+  if (level === "benchmarkDerived") return "Benchmark Derived";
+  if (level === "planningAssumption") return "Planning Assumption";
 
-  if (citation.sourceType === "Planning assumption") {
-    return "Planning assumption";
-  }
-
-  return "Verified source";
+  return "Validation Required";
 }
 
 function getPdfCitationTrustLabel(citation: CitationData) {
-  return getEvidenceLabel(
-    sourceTypeToEvidenceLevel(citation.sourceType || "", Boolean(citation.url))
-  );
+  const level = sourceTypeToEvidenceLevel(citation.sourceType || "", Boolean(citation.url));
+
+  if (level === "verified") return "Verified";
+  if (level === "benchmarkDerived") return "Benchmark Derived";
+  if (level === "planningAssumption") return "Planning Assumption";
+
+  return "Validation Required";
 }
 
 function dedupePdfCitations(citations: CitationData[]) {
@@ -3163,7 +3161,7 @@ function formatPdfCitationContent(content: string) {
       [
         `• ${source.sourceName}`,
         `  Source type: ${source.sourceType}`,
-        `  ${source.trustLabel}`,
+        `  Confidence: ${source.trustLabel}`,
       ].join("\n")
     )
     .join("\n");
@@ -6025,20 +6023,23 @@ const ReportPanel = memo(function ReportPanel({
             const x = bodyX + (index % 3) * (itemWidth + 5);
             const itemY = visualY + Math.floor(index / 3) * 15;
             const score = item.score;
+            const scoreText = score === null ? "—" : `${score}/100`;
+            const labelLines = (pdf.splitTextToSize(displayLabel, itemWidth - 19) as string[]).slice(0, 2);
 
             pdf.setFillColor("#18181b");
             pdf.setDrawColor("#27272a");
-            pdf.roundedRect(x, itemY, itemWidth, 12, 2.5, 2.5, "FD");
+            pdf.roundedRect(x, itemY, itemWidth, 13.5, 2.5, 2.5, "FD");
             pdf.setDrawColor("#5eead4");
             pdf.circle(x + 7, itemY + 6, 4.2, "S");
-            pdf.setFontSize(6);
+            pdf.setFontSize(scoreText.length > 4 ? 4.8 : 5.8);
             pdf.setTextColor("#ccfbf1");
-            pdf.text(score === null ? "—" : String(score), x + 4.2, itemY + 7.8);
-            pdf.setFontSize(6.5);
+            pdf.text(scoreText, x + 3.6, itemY + 7.6, { maxWidth: 7 });
+            pdf.setFontSize(6.2);
             pdf.setTextColor("#e4e4e7");
-            pdf.text(displayLabel, x + 14, itemY + 5, { maxWidth: itemWidth - 17 });
-            pdf.setTextColor("#71717a");
-            pdf.text(localizePdfPresentationLabel("Score", pdfLocale), x + 14, itemY + 8.8);
+            pdf.text(labelLines, x + 14, itemY + 5, {
+              lineHeightFactor: 1.08,
+              maxWidth: itemWidth - 18,
+            });
           });
 
           return 46;
@@ -6255,17 +6256,15 @@ const ReportPanel = memo(function ReportPanel({
             const kpiValue = typeof typedItem !== "string" && "value" in typedItem && typedItem.value
               ? typedItem.value
               : (score === null ? "—" : `${score}%`);
-            const target = typeof typedItem !== "string" && "target" in typedItem ? typedItem.target || "" : "";
             const status = typeof typedItem !== "string" && "status" in typedItem ? typedItem.status || "Watch" : "Watch";
             pdf.setTextColor("#f4f4f5");
             drawSingleLine(kpiValue, x + 2, itemY + 8.4, itemWidth - 4, 7.5, 4.2, false);
             pdf.setFontSize(5.3);
             pdf.setTextColor("#a1a1aa");
-            pdf.text(`${localizePdfPresentationLabel("Target", pdfLocale)}: ${localizePdfPresentationLabel(target || kpiValue || "—", pdfLocale)}`, x + 2, itemY + 12.1, { maxWidth: itemWidth - 4 });
-            pdf.text(`${localizePdfPresentationLabel("Status", pdfLocale)}: ${localizePdfPresentationLabel(status, pdfLocale)}`, x + 2, itemY + 15.2, { maxWidth: itemWidth - 4 });
+            pdf.text(`${localizePdfPresentationLabel("Status", pdfLocale)}: ${localizePdfPresentationLabel(status, pdfLocale)}`, x + 2, itemY + 12.6, { maxWidth: itemWidth - 4 });
             pdf.setFontSize(4);
             pdf.setTextColor("#5eead4");
-            drawSingleLine(localizePdfPresentationLabel(pdfConfidenceBadge || "Validation Required", pdfLocale), x + 2, itemY + 18.1, itemWidth - 4, 4, 3.4);
+            drawSingleLine(localizePdfPresentationLabel(pdfConfidenceBadge || "Validation Required", pdfLocale), x + 2, itemY + 16.6, itemWidth - 4, 4, 3.4);
             pdf.setFillColor("#27272a");
             pdf.roundedRect(x + 2, itemY + 20.1, itemWidth - 4, 1.5, 0.7, 0.7, "F");
             pdf.setFillColor("#5eead4");
@@ -6433,7 +6432,10 @@ const ReportPanel = memo(function ReportPanel({
 
           const availableHeight =
             pageHeight - margin - y - cardHeaderHeight - activeVisualHeight - cardBottomPadding;
-          const maxLines = Math.max(1, Math.floor(availableHeight / bodyLineHeight));
+          let maxLines = Math.max(1, Math.floor(availableHeight / bodyLineHeight));
+          if (safeBodyLines.length - lineIndex - maxLines === 1 && maxLines > 1) {
+            maxLines -= 1;
+          }
           const lines = safeBodyLines.slice(lineIndex, lineIndex + maxLines);
           const isContinued = lineIndex > 0;
           const cardHeight = Math.max(

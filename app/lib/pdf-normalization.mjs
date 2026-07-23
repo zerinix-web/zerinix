@@ -98,6 +98,7 @@ const pdfPresentationLabelPairs = [
     ["Type: Model assumption", "Tür: Model varsayımı"],
     ["Type: Primary research required", "Tür: Birincil araştırma gerekli"],
     ["Verified source", "Doğrulanmış kaynak"],
+    ["Verified Source", "Doğrulanmış Kaynak"],
     ["Company reference", "Şirket referansı"],
     ["Industry reference", "Sektör referansı"],
     ["Planning assumption", "Planlama varsayımı"],
@@ -330,6 +331,47 @@ export function localizePdfPresentationLabel(value = "", locale = "en") {
   return continued || devam ? `${translated} continued` : translated;
 }
 
+function cleanupRepeatedPdfPhrasing(value = "") {
+  return String(value)
+    .replace(/\b([\p{L}\p{N}][\p{L}\p{N} &/+-]{2,48}):\s*\1\s*[:\-–—]?\s*/giu, "$1: ")
+    .replace(/\b(Validation Intelligence|Validation Roadmap|AI Action Plan):\s*\1\b/gi, "$1")
+    .replace(/\b(Doğrulama Zekası|Doğrulama Yol Haritası|AI Aksiyon Planı):\s*\1\b/gi, "$1")
+    .replace(/\bExecution risk:\s*is healthier when payback[^.\n]*(?:\.[^\n]*)?/gi, "Execution risk: Execution risk improves when payback and break-even timing are realistic, evidence is stronger, and operational complexity is lower.")
+    .replace(/\bExecution risk:\s*Execution risk\b/gi, "Execution risk")
+    .replace(/\bYürütme Riski:\s*Yürütme Riski\b/gi, "Yürütme Riski")
+    .replace(/\bHigh Risk\b/g, "Needs Validation")
+    .replace(/\bYüksek Risk\b/g, "Doğrulama Gerekli");
+}
+
+function cleanupDuplicatePdfHeadingLines(value = "") {
+  const validationHeadingPattern =
+    /^(?:#{1,6}\s*)?(?:Validation Intelligence|Validation Roadmap|AI Action Plan|Doğrulama Zekası|Doğrulama Yol Haritası|AI Aksiyon Planı)\s*:?\s*$/i;
+  let previousHeadingKey = "";
+
+  return String(value)
+    .split("\n")
+    .filter((line) => {
+      const normalizedLine = normalizePdfText(line).replace(/^#{1,6}\s*/, "").replace(/:$/, "");
+      const headingKey = normalizePdfLocalizationKey(normalizedLine);
+
+      if (validationHeadingPattern.test(normalizedLine)) {
+        if (headingKey === previousHeadingKey) {
+          return false;
+        }
+
+        previousHeadingKey = headingKey;
+        return true;
+      }
+
+      if (normalizedLine) {
+        previousHeadingKey = "";
+      }
+
+      return true;
+    })
+    .join("\n");
+}
+
 function cleanupTurkishPdfLanguageLeakage(value = "") {
   return String(value)
     .replace(/\bfinansal[._-]benchmarklar(?:[._-][\p{L}\p{N}_-]+)*\b/giu, "Finansal benchmarklar")
@@ -351,6 +393,14 @@ function cleanupTurkishPdfLanguageLeakage(value = "") {
     .replace(/\bRivalite\b/gi, "Rekabet Yoğunluğu")
     .replace(/\bCustomer validation gaps remain unresolved\.?/gi, "Müşteri doğrulama boşlukları devam ediyor.")
     .replace(/\bMarket sizing uses benchmark market scope[^.\n]*(?:\.[^\n]*)?/gi, "Pazar büyüklüğü, benchmark pazar kapsamı ve planlama varsayımları kullanılarak değerlendirilmiştir.")
+    .replace(/\bYürütme Riski improves when geri ödeme[^.\n]*(?:\.[^\n]*)?/gi, "Yürütme Riski, geri ödeme ve başabaş zamanlaması gerçekçi olduğunda, kanıt seviyesi güçlendiğinde ve operasyonel karmaşıklık azaldığında daha yönetilebilir hale gelir.")
+    .replace(/\bYürütme Riski:\s*is healthier when payback[^.\n]*(?:\.[^\n]*)?/gi, "Yürütme Riski: Geri ödeme ve başabaş zamanlaması gerçekçi olduğunda, kanıt seviyesi güçlendiğinde ve operasyonel karmaşıklık azaldığında daha yönetilebilir hale gelir.")
+    .replace(/\bExecution risk:\s*is healthier when payback[^.\n]*(?:\.[^\n]*)?/gi, "Yürütme Riski: Geri ödeme ve başabaş zamanlaması gerçekçi olduğunda, kanıt seviyesi güçlendiğinde ve operasyonel karmaşıklık azaldığında daha yönetilebilir hale gelir.")
+    .replace(/\b(?:Execution risk|Yürütme Riski):\s*(?:Execution risk|Yürütme Riski)\s+is healthier when payback[^.\n]*(?:\.[^\n]*)?/gi, "Yürütme Riski: Geri ödeme ve başabaş zamanlaması gerçekçi olduğunda, kanıt seviyesi güçlendiğinde ve operasyonel karmaşıklık azaldığında daha yönetilebilir hale gelir.")
+    .replace(/\b(?:Execution risk|Yürütme Riski)\s+is healthier when payback[^.\n]*(?:\.[^\n]*)?/gi, "Yürütme Riski, geri ödeme ve başabaş zamanlaması gerçekçi olduğunda, kanıt seviyesi güçlendiğinde ve operasyonel karmaşıklık azaldığında daha yönetilebilir hale gelir.")
+    .replace(/\bExecution risk\b/gi, "Yürütme Riski")
+    .replace(/\bNeeds Validation\b/g, "Doğrulama Gerekli")
+    .replace(/\bYüksek Risk\b/g, "Doğrulama Gerekli")
     .replace(/\bNext\s+30\s+(?:Days|Gün)\b/gi, "Sonraki 30 Gün")
     .replace(/\bNext\s+90\s+(?:Days|Gün)\b/gi, "Sonraki 90 Gün")
     .replace(/\bNext\s+6\s+(?:Months?|Ay)\b/gi, "Sonraki 6 Ay")
@@ -405,7 +455,7 @@ function cleanupTurkishPdfLanguageLeakage(value = "") {
 export function localizePdfPresentationText(value = "", locale = "en") {
   const normalized = normalizePdfText(String(value));
 
-  const localized = normalized
+  const localized = cleanupDuplicatePdfHeadingLines(cleanupRepeatedPdfPhrasing(normalized))
     .split("\n")
     .map((line) => {
       const trimmed = line.trim();
@@ -431,19 +481,26 @@ export function localizePdfPresentationText(value = "", locale = "en") {
 
       const [, rawLabel, separator, rest] = labelMatch;
       const translatedLabel = localizePdfPresentationLabel(rawLabel.trim(), locale);
+      const translatedRest = rest ? localizePdfPresentationLabel(rest.trim(), locale) : rest;
 
       if (translatedLabel === rawLabel.trim()) {
-        return line;
+        if (translatedRest === rest.trim()) {
+          return line;
+        }
+
+        const rebuiltRestOnly = `${rawLabel.trim()}${separator} ${translatedRest}`.trimEnd();
+        const translated = boldWrapped ? `**${rebuiltRestOnly}**` : rebuiltRestOnly;
+        return `${leadingWhitespace}${bulletPrefix}${headingMarker}${translated}`;
       }
 
-      const rebuilt = `${translatedLabel}${separator} ${rest}`.trimEnd();
+      const rebuilt = `${translatedLabel}${separator} ${translatedRest}`.trimEnd();
       const translated = boldWrapped ? `**${rebuilt}**` : rebuilt;
       return `${leadingWhitespace}${bulletPrefix}${headingMarker}${translated}`;
     })
     .join("\n");
 
   if (locale === "tr") {
-    return cleanupTurkishPdfLanguageLeakage(localized
+    return cleanupDuplicatePdfHeadingLines(cleanupRepeatedPdfPhrasing(cleanupTurkishPdfLanguageLeakage(localized
       .replace(/\bfinansal[._-]benchmarklar(?:[._-][\p{L}\p{N}_-]+)*\b/giu, "Finansal benchmarklar")
       .replace(/\bpazar[._-]büyüklüğü(?:[._-][\p{L}\p{N}_-]+)*\b/giu, "Pazar büyüklüğü")
       .replace(/(^|[\n:•-]\s*)tam(?=$|[\n.;,)]|\s{2,})/giu, "$1TAM / SAM / SOM")
@@ -582,10 +639,11 @@ export function localizePdfPresentationText(value = "", locale = "en") {
       .replace(/\bExecution risk\b/gi, "Yürütme Riski")
       .replace(/\bWatch\b/g, "İzleme")
       .replace(/\bOn track\b/g, "Yolunda")
-      .replace(/\bModel target\b/g, "Model hedefi"));
+      .replace(/\bModel target\b/g, "Model hedefi")
+      .replace(/Yürütme Riski improves when[^\n]*/gi, "Yürütme Riski, geri ödeme ve başabaş zamanlaması gerçekçi olduğunda, kanıt seviyesi güçlendiğinde ve operasyonel karmaşıklık azaldığında daha yönetilebilir hale gelir."))));
   }
 
-  return localized
+  return cleanupDuplicatePdfHeadingLines(cleanupRepeatedPdfPhrasing(localized))
     .replace(/\bKaynak kategorisi: Planlama varsayımı\. Harici kaynak metadatası sağlanmadı\./g, "Source category: Planning assumption. External citation metadata was not provided.")
     .replace(/\bAI Yönetici İçgörüsü\b/g, "AI Executive Insight")
     .replace(/\bTemel İçgörüler\b/g, "Key insights")
