@@ -115,6 +115,11 @@ export type AdminDashboardData = {
     outputTokens: number;
     averageInputTokens: number;
     averageOutputTokens: number;
+    averageResponseTimeMs: number;
+    averageCostPerRequest: number;
+    averageReportSize: number;
+    successRate: number;
+    cacheEfficiency: number;
     cachedTokens: number;
     totalTokens: number;
     cost: number;
@@ -803,6 +808,11 @@ function buildMockAdminDashboardData(dateRange: AdminDateRange): AdminDashboardD
       outputTokens: 0,
       averageInputTokens: 0,
       averageOutputTokens: 0,
+      averageResponseTimeMs: 0,
+      averageCostPerRequest: 0,
+      averageReportSize: 0,
+      successRate: 0,
+      cacheEfficiency: 0,
       cachedTokens: 0,
       totalTokens: 0,
       cost: 0,
@@ -2698,6 +2708,13 @@ function calculateOpenAiAnalytics(input: {
       averageOutputTokens: input.official.modelUsage.length
         ? Math.round(input.official.outputTokens / Math.max(1, input.official.modelUsage.reduce((sum, model) => sum + model.requests, 0)))
         : 0,
+      averageResponseTimeMs: 0,
+      averageCostPerRequest: input.official.modelUsage.length
+        ? Number((cost / Math.max(1, input.official.modelUsage.reduce((sum, model) => sum + model.requests, 0))).toFixed(4))
+        : 0,
+      averageReportSize: 0,
+      successRate: 0,
+      cacheEfficiency: 0,
       cachedTokens: input.official.cachedTokens,
       totalTokens: input.official.totalTokens,
       cost,
@@ -2745,6 +2762,46 @@ function calculateOpenAiAnalytics(input: {
   const aiRequestCount = input.usage.length;
   const averageInputTokens = aiRequestCount > 0 ? Math.round(inputTokens / aiRequestCount) : 0;
   const averageOutputTokens = aiRequestCount > 0 ? Math.round(outputTokens / aiRequestCount) : 0;
+  const averageResponseTimeMs =
+    aiRequestCount > 0
+      ? Math.round(
+          input.usage.reduce((sum, row) => sum + readNumber(row.response_time_ms), 0) /
+            aiRequestCount
+        )
+      : 0;
+  const averageCostPerRequest =
+    aiRequestCount > 0 ? Number((cost / aiRequestCount).toFixed(4)) : 0;
+  const successfulRequests = input.usage.filter((row) => {
+    const status = readString(row.status).toLowerCase();
+    const metadata = readUsageMetadata(row);
+
+    return status === "completed" || metadata.generation_success === true;
+  }).length;
+  const successRate =
+    aiRequestCount > 0 ? Number(((successfulRequests / aiRequestCount) * 100).toFixed(1)) : 0;
+  const cacheEfficiency =
+    cacheHits + cacheMisses > 0
+      ? Number(((cacheHits / (cacheHits + cacheMisses)) * 100).toFixed(1))
+      : 0;
+  const reportResponseSizes = input.usage
+    .filter((row) => {
+      const operationType = readUsageOperationType(row);
+
+      return (
+        operationType === "plan_report" ||
+        operationType === "market_report" ||
+        operationType === "executive_report"
+      );
+    })
+    .map((row) => {
+      const metadata = readUsageMetadata(row);
+
+      return readNumber(metadata.response_length) || readNumber(metadata.responseLength);
+    })
+    .filter((value) => value > 0);
+  const averageReportSize = reportResponseSizes.length
+    ? Math.round(reportResponseSizes.reduce((sum, value) => sum + value, 0) / reportResponseSizes.length)
+    : 0;
   const estimatedTokenSavings = input.usage.reduce((sum, row) => {
     if (!Boolean(row.cache_hit)) {
       return sum;
@@ -2842,6 +2899,11 @@ function calculateOpenAiAnalytics(input: {
     outputTokens,
     averageInputTokens,
     averageOutputTokens,
+    averageResponseTimeMs,
+    averageCostPerRequest,
+    averageReportSize,
+    successRate,
+    cacheEfficiency,
     cachedTokens,
     totalTokens,
     cost,

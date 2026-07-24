@@ -908,6 +908,19 @@ export async function recordAiUsage(
     : null;
   const reportRequestId =
     input.reportRequestId ?? (metadataReportRequestId || null);
+  const status = input.status ?? "completed";
+  const generationSuccess = status === "completed";
+  const isReportOperation =
+    operationType === "plan_report" ||
+    operationType === "market_report" ||
+    operationType === "executive_report";
+  const retryCount =
+    readMetadataNumber(metadata, "retry_count") ||
+    readMetadataNumber(metadata, "retryCount");
+  const responseLength =
+    readMetadataNumber(metadata, "response_length") ||
+    readMetadataNumber(metadata, "responseLength") ||
+    (generationSuccess ? input.tokenUsage.completionTokens * 4 : 0);
   const { error } = await supabase.from("ai_usage_events").insert({
     user_id: input.userId,
     operation_type: operationType,
@@ -924,11 +937,23 @@ export async function recordAiUsage(
     total_tokens: input.tokenUsage.totalTokens,
     estimated_cost_usd: input.estimatedCostUsd,
     cache_hit: input.cacheHit,
-    status: input.status ?? "completed",
+    status,
     response_time_ms: input.responseTimeMs,
     metadata: {
       ...metadata,
       operation_type: operationType,
+      quality_monitoring_version: "v1",
+      report_type: input.reportField ?? operationType,
+      report_completed:
+        typeof metadata.report_completed === "boolean"
+          ? metadata.report_completed
+          : isReportOperation && generationSuccess,
+      generation_success:
+        typeof metadata.generation_success === "boolean"
+          ? metadata.generation_success
+          : generationSuccess,
+      retry_count: retryCount,
+      response_length: responseLength,
       ...(input.cacheHit
         ? {
             cache_event: "hit",
