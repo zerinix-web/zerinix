@@ -7170,6 +7170,191 @@ function useConversations({
   };
 }
 
+function ChatComposer({
+  chatPrompt,
+  chatLoading,
+  isWorking,
+  suggestions,
+  onChange,
+  onSuggestionClick,
+  onSubmit,
+}: {
+  chatPrompt: string;
+  chatLoading: boolean;
+  isWorking: boolean;
+  suggestions: string[];
+  onChange: (value: string) => void;
+  onSuggestionClick: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <section className="rounded-[1.75rem] border border-teal-200/15 bg-white/[0.055] p-3.5 shadow-2xl shadow-black/35 ring-1 ring-teal-200/[0.035] backdrop-blur-2xl sm:p-4">
+      <div className="mb-2">
+        <p className="text-base font-semibold text-white">ZERINIX AI</p>
+        <p className="mt-0.5 text-xs text-zinc-400">
+          Tell ZERINIX what you want to accomplish.
+        </p>
+      </div>
+      <div className="rounded-[1.35rem] border border-white/10 bg-black/35 p-2.5 shadow-inner shadow-black/25 transition duration-200 ease-out focus-within:border-teal-300/50 focus-within:shadow-teal-950/25 focus-within:ring-2 focus-within:ring-teal-200/15">
+        <textarea
+          value={chatPrompt}
+          onChange={(event) => onChange(event.target.value)}
+          className="min-h-12 w-full resize-none border-0 bg-transparent p-1 text-sm leading-5 text-white outline-none transition placeholder:text-zinc-500/80 sm:min-h-14"
+          placeholder="Describe a business decision, opportunity or challenge..."
+        />
+        <div className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap gap-1.5">
+            {suggestions.map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                onClick={() => onSuggestionClick(suggestion)}
+                className="rounded-full border border-white/10 bg-white/[0.035] px-2.5 py-1 text-[11px] font-medium text-zinc-400 transition hover:border-teal-300/25 hover:bg-teal-300/10 hover:text-teal-100"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={!chatPrompt.trim() || isWorking}
+            className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-2xl bg-teal-300 px-4 py-2 text-sm font-semibold text-black shadow-lg shadow-teal-950/30 transition duration-200 ease-out hover:-translate-y-0.5 hover:bg-teal-200 hover:shadow-xl hover:shadow-teal-950/45 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-lg"
+          >
+            {chatLoading ? "ZERINIX is thinking..." : "Send"}
+            <Send className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ChatMessages({
+  messages,
+  onEdit,
+  onSaveEdit,
+  onRegenerate,
+}: {
+  messages: ChatMessage[];
+  onEdit: (message: ChatMessage) => void;
+  onSaveEdit: (messageId: string, content: string) => void;
+  onRegenerate: () => void;
+}) {
+  if (messages.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="min-h-[54vh] rounded-[2rem] border border-white/10 bg-white/[0.045] p-4 shadow-2xl shadow-black/35 ring-1 ring-white/[0.035] backdrop-blur-2xl transition-all duration-200 ease-out sm:p-6">
+      <div className="space-y-6">
+        {messages.map((message) => (
+          <ChatMessageBubble
+            key={message.id}
+            message={message}
+            onEdit={onEdit}
+            onSaveEdit={onSaveEdit}
+            onRegenerate={onRegenerate}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AnalysisModeCards({
+  visible,
+  cards,
+  selectedMode,
+  recommendedMode,
+  chatPrompt,
+  latestUserIntentPrompt,
+  isWorking,
+  onSelectMode,
+}: {
+  visible: boolean;
+  cards: typeof modeCards;
+  selectedMode: ChatMode | null;
+  recommendedMode: ChatMode;
+  chatPrompt: string;
+  latestUserIntentPrompt: string;
+  isWorking: boolean;
+  onSelectMode: (mode: ChatMode, prompt: string) => void;
+}) {
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <section className="transition-all duration-200 ease-out">
+      <div className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.045] p-3.5 shadow-2xl shadow-black/35 ring-1 ring-white/[0.035] backdrop-blur-2xl">
+        <div className="grid gap-3 md:grid-cols-3">
+          {cards.map((modeCard) => {
+            const Icon = modeCard.icon;
+            const selected = selectedMode === modeCard.mode;
+            const recommended = !selectedMode && recommendedMode === modeCard.mode;
+
+            return (
+              <button
+                key={modeCard.mode}
+                type="button"
+                onClick={() => {
+                  const sharedPrompt = chatPrompt.trim() || latestUserIntentPrompt.trim();
+
+                  if (!sharedPrompt || isWorking) {
+                    return;
+                  }
+
+                  onSelectMode(modeCard.mode, sharedPrompt);
+                }}
+                className={`flex min-h-36 flex-col rounded-[1.25rem] border p-3.5 text-left shadow-lg shadow-black/10 transition duration-200 ease-out hover:-translate-y-0.5 hover:shadow-xl md:shadow-sm ${
+                  selected
+                    ? "border-teal-200/35 bg-teal-200/[0.12] shadow-xl shadow-teal-950/30 ring-1 ring-teal-200/20"
+                    : "border-white/10 bg-black/25 hover:border-white/20 hover:bg-white/[0.055] hover:shadow-black/25"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span
+                    className={`flex h-9 w-9 items-center justify-center rounded-xl border ${
+                      selected
+                        ? "border-teal-200/30 bg-teal-200/10"
+                        : "border-white/10 bg-white/[0.04]"
+                    }`}
+                  >
+                    <Icon className={`h-4 w-4 ${selected ? "text-teal-100" : "text-teal-200"}`} />
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] ${
+                      selected
+                        ? "bg-teal-200 text-black"
+                        : recommended
+                          ? "border border-teal-200/25 bg-teal-200/10 text-teal-100"
+                          : "border border-white/10 text-zinc-500"
+                    }`}
+                  >
+                    {selected ? "Selected" : recommended ? "Recommended" : "Option"}
+                  </span>
+                </div>
+                <p className="mt-3 text-sm font-semibold text-white">
+                  {modeCard.label}
+                </p>
+                <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-zinc-500">
+                  {modeCard.description}
+                </p>
+                <p className="mt-auto pt-2 text-[11px] font-medium text-teal-100/80">
+                  {modeCard.mode === "chat"
+                    ? modeCard.output
+                    : `${modeCard.output} · ${modeCard.opens}`}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function Planner({
   initialConversations = [],
   conversationLoadError = "",
@@ -9465,135 +9650,38 @@ export default function Planner({
                 </div>
               ) : null}
 
-						            <section className="rounded-[1.75rem] border border-teal-200/15 bg-white/[0.055] p-3.5 shadow-2xl shadow-black/35 ring-1 ring-teal-200/[0.035] backdrop-blur-2xl sm:p-4">
-		                  <div className="mb-2">
-				                <p className="text-base font-semibold text-white">ZERINIX AI</p>
-		                <p className="mt-0.5 text-xs text-zinc-400">
-		                  Tell ZERINIX what you want to accomplish.
-		                </p>
-		              </div>
-				              <div className="rounded-[1.35rem] border border-white/10 bg-black/35 p-2.5 shadow-inner shadow-black/25 transition duration-200 ease-out focus-within:border-teal-300/50 focus-within:shadow-teal-950/25 focus-within:ring-2 focus-within:ring-teal-200/15">
-		                <textarea
-		                  value={chatPrompt}
-		                  onChange={(event) => setChatPrompt(event.target.value)}
-					              className="min-h-12 w-full resize-none border-0 bg-transparent p-1 text-sm leading-5 text-white outline-none transition placeholder:text-zinc-500/80 sm:min-h-14"
-		                  placeholder="Describe a business decision, opportunity or challenge..."
-		                />
-		                <div className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-		                  <div className="flex flex-wrap gap-1.5">
-		                    {firstInteractionSuggestions.map((suggestion) => (
-		                      <button
-		                        key={suggestion}
-		                        type="button"
-		                        onClick={() => setChatPrompt(suggestion)}
-		                        className="rounded-full border border-white/10 bg-white/[0.035] px-2.5 py-1 text-[11px] font-medium text-zinc-400 transition hover:border-teal-300/25 hover:bg-teal-300/10 hover:text-teal-100"
-		                      >
-		                        {suggestion}
-		                      </button>
-		                    ))}
-		                  </div>
-		                  <button
-		                    type="button"
-		                    onClick={() => void submitChatPrompt()}
-		                    disabled={!chatPrompt.trim() || isWorking}
-					            className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-2xl bg-teal-300 px-4 py-2 text-sm font-semibold text-black shadow-lg shadow-teal-950/30 transition duration-200 ease-out hover:-translate-y-0.5 hover:bg-teal-200 hover:shadow-xl hover:shadow-teal-950/45 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-lg"
-		                  >
-			                    {chatLoading ? "ZERINIX is thinking..." : "Send"}
-			                    <Send className="h-4 w-4" />
-		                  </button>
-		                </div>
-		              </div>
-		            </section>
+              <ChatComposer
+                chatPrompt={chatPrompt}
+                chatLoading={chatLoading}
+                isWorking={isWorking}
+                suggestions={firstInteractionSuggestions}
+                onChange={setChatPrompt}
+                onSuggestionClick={setChatPrompt}
+                onSubmit={() => void submitChatPrompt()}
+              />
 
-		            {messages.length > 0 ? (
-		              <section className="min-h-[54vh] rounded-[2rem] border border-white/10 bg-white/[0.045] p-4 shadow-2xl shadow-black/35 ring-1 ring-white/[0.035] backdrop-blur-2xl transition-all duration-200 ease-out sm:p-6">
-		                <div className="space-y-6">
-		                  {messages.map((message) => (
-		                    <ChatMessageBubble
-		                      key={message.id}
-		                      message={message}
-		                      onEdit={editMessage}
-		                      onSaveEdit={saveEditedMessage}
-		                      onRegenerate={regenerateResponse}
-		                    />
-		                  ))}
-		                </div>
-		              </section>
-		            ) : null}
+              <ChatMessages
+                messages={messages}
+                onEdit={editMessage}
+                onSaveEdit={saveEditedMessage}
+                onRegenerate={regenerateResponse}
+              />
 
-	              {showDesktopAnalysisCards ? (
-		              <section className="transition-all duration-200 ease-out">
-						                <div className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.045] p-3.5 shadow-2xl shadow-black/35 ring-1 ring-white/[0.035] backdrop-blur-2xl">
-		                  <div className="grid gap-3 md:grid-cols-3">
-	                    {modeCards.map((modeCard) => {
-	                      const Icon = modeCard.icon;
-	                      const selected = selectedDesktopAnalysisMode === modeCard.mode;
-	                      const recommended =
-                        !selectedDesktopAnalysisMode && recommendedAnalysisMode === modeCard.mode;
-
-                      return (
-                        <button
-	                          key={modeCard.mode}
-	                          type="button"
-	                          onClick={() => {
-                              const sharedPrompt = chatPrompt.trim() || latestUserIntentPrompt.trim();
-
-                              if (!sharedPrompt || isWorking) {
-                                return;
-                              }
-
-                              setSelectedDesktopAnalysisMode(modeCard.mode);
-                              void (modeCard.mode === "market"
-                                ? analyzeMarket(sharedPrompt)
-                                : generatePlan(sharedPrompt));
-                            }}
-				                          className={`flex min-h-36 flex-col rounded-[1.25rem] border p-3.5 text-left shadow-lg shadow-black/10 transition duration-200 ease-out hover:-translate-y-0.5 hover:shadow-xl md:shadow-sm ${
-			                            selected
-				                              ? "border-teal-200/35 bg-teal-200/[0.12] shadow-xl shadow-teal-950/30 ring-1 ring-teal-200/20"
-			                              : "border-white/10 bg-black/25 hover:border-white/20 hover:bg-white/[0.055] hover:shadow-black/25"
-			                          }`}
-		                        >
-                          <div className="flex items-center justify-between gap-3">
-	                            <span
-		                              className={`flex h-9 w-9 items-center justify-center rounded-xl border ${
-	                                selected
-			                                  ? "border-teal-200/30 bg-teal-200/10"
-			                                  : "border-white/10 bg-white/[0.04]"
-		                              }`}
-		                            >
-				                              <Icon className={`h-4 w-4 ${selected ? "text-teal-100" : "text-teal-200"}`} />
-		                            </span>
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] ${
-                                selected
-		                                  ? "bg-teal-200 text-black"
-                                  : recommended
-                                    ? "border border-teal-200/25 bg-teal-200/10 text-teal-100"
-		                                  : "border border-white/10 text-zinc-500"
-                              }`}
-                            >
-                              {selected ? "Selected" : recommended ? "Recommended" : "Option"}
-                            </span>
-                          </div>
-			                          <p className="mt-3 text-sm font-semibold text-white">
-	                            {modeCard.label}
-	                          </p>
-			                          <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-zinc-500">
-	                            {modeCard.description}
-	                          </p>
-			                          <p className="mt-auto pt-2 text-[11px] font-medium text-teal-100/80">
-                            {modeCard.mode === "chat"
-                              ? modeCard.output
-                              : `${modeCard.output} · ${modeCard.opens}`}
-                          </p>
-                        </button>
-	                      );
-	                    })}
-	                  </div>
-
-		                </div>
-		              </section>
-	              ) : null}
+              <AnalysisModeCards
+                visible={showDesktopAnalysisCards}
+                cards={modeCards}
+                selectedMode={selectedDesktopAnalysisMode}
+                recommendedMode={recommendedAnalysisMode}
+                chatPrompt={chatPrompt}
+                latestUserIntentPrompt={latestUserIntentPrompt}
+                isWorking={isWorking}
+                onSelectMode={(mode, sharedPrompt) => {
+                  setSelectedDesktopAnalysisMode(mode);
+                  void (mode === "market"
+                    ? analyzeMarket(sharedPrompt)
+                    : generatePlan(sharedPrompt));
+                }}
+              />
 
 		              {showDesktopAdvisorPanels ? (
                 <>
