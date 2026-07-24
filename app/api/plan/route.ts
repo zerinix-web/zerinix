@@ -33,6 +33,7 @@ import {
 } from "@/app/lib/ai/financial-assumptions";
 import { createAiCostOptimizationMetrics } from "@/app/lib/ai/token-optimization";
 import { isReportGenerationFailureText } from "@/app/lib/report-errors";
+import { validateGeneratedReportSections } from "@/app/lib/report-quality-validation";
 import {
   createOpenAiClient,
   getAiConfigurationErrorMessage,
@@ -2071,6 +2072,7 @@ Write only the content for this section. Do not write a JSON object, field name,
           canonicalFinancialAssumptions,
           responseLanguage
         );
+        const cachedReportValidation = validateGeneratedReportSections(parsedCachedReport);
 
         await recordAiUsage(supabase, {
           userId: user.id,
@@ -2095,6 +2097,7 @@ Write only the content for this section. Do not write a JSON object, field name,
             usage_kind: "full_report_cache_hit",
             actual_ai_call: false,
             cachedEstimatedCostUsd: cachedFullReport.estimatedCostUsd,
+            ...cachedReportValidation,
           },
         });
 
@@ -2248,6 +2251,7 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
           canonicalFinancialAssumptions,
           responseLanguage
         );
+        const reportValidation = validateGeneratedReportSections(parsedReport);
         const cacheResponseText = JSON.stringify(parsedReport);
 
         if (!isReportGenerationFailureText(cacheResponseText)) {
@@ -2289,6 +2293,7 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
             max_ai_calls_per_report: MAX_AI_CALLS_PER_PLAN_REPORT,
             job: queuedJob,
             ...fullReportInputCostMetrics,
+            ...reportValidation,
           },
         });
 

@@ -120,6 +120,10 @@ export type AdminDashboardData = {
     averageReportSize: number;
     successRate: number;
     cacheEfficiency: number;
+    averageValidationScore: number;
+    validationWarningCount: number;
+    missingSectionCount: number;
+    duplicateSectionCount: number;
     cachedTokens: number;
     totalTokens: number;
     cost: number;
@@ -813,6 +817,10 @@ function buildMockAdminDashboardData(dateRange: AdminDateRange): AdminDashboardD
       averageReportSize: 0,
       successRate: 0,
       cacheEfficiency: 0,
+      averageValidationScore: 0,
+      validationWarningCount: 0,
+      missingSectionCount: 0,
+      duplicateSectionCount: 0,
       cachedTokens: 0,
       totalTokens: 0,
       cost: 0,
@@ -2715,6 +2723,10 @@ function calculateOpenAiAnalytics(input: {
       averageReportSize: 0,
       successRate: 0,
       cacheEfficiency: 0,
+      averageValidationScore: 0,
+      validationWarningCount: 0,
+      missingSectionCount: 0,
+      duplicateSectionCount: 0,
       cachedTokens: input.official.cachedTokens,
       totalTokens: input.official.totalTokens,
       cost,
@@ -2802,6 +2814,27 @@ function calculateOpenAiAnalytics(input: {
   const averageReportSize = reportResponseSizes.length
     ? Math.round(reportResponseSizes.reduce((sum, value) => sum + value, 0) / reportResponseSizes.length)
     : 0;
+  const validationScores = input.usage
+    .map((row) => readNumber(readUsageMetadata(row).validation_score))
+    .filter((score) => score > 0);
+  const averageValidationScore = validationScores.length
+    ? Math.round(validationScores.reduce((sum, score) => sum + score, 0) / validationScores.length)
+    : 0;
+  const validationWarningCount = input.usage.reduce((sum, row) => {
+    const warnings = readUsageMetadata(row).validation_warnings;
+
+    return sum + (Array.isArray(warnings) ? warnings.length : 0);
+  }, 0);
+  const missingSectionCount = input.usage.reduce((sum, row) => {
+    const missingSections = readUsageMetadata(row).missing_sections;
+
+    return sum + (Array.isArray(missingSections) ? missingSections.length : 0);
+  }, 0);
+  const duplicateSectionCount = input.usage.reduce((sum, row) => {
+    const duplicateSections = readUsageMetadata(row).duplicate_sections;
+
+    return sum + (Array.isArray(duplicateSections) ? duplicateSections.length : 0);
+  }, 0);
   const estimatedTokenSavings = input.usage.reduce((sum, row) => {
     if (!Boolean(row.cache_hit)) {
       return sum;
@@ -2904,6 +2937,10 @@ function calculateOpenAiAnalytics(input: {
     averageReportSize,
     successRate,
     cacheEfficiency,
+    averageValidationScore,
+    validationWarningCount,
+    missingSectionCount,
+    duplicateSectionCount,
     cachedTokens,
     totalTokens,
     cost,

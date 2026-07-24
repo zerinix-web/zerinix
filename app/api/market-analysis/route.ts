@@ -33,6 +33,7 @@ import {
 } from "@/app/lib/ai/financial-assumptions";
 import { createAiCostOptimizationMetrics } from "@/app/lib/ai/token-optimization";
 import { isReportGenerationFailureText } from "@/app/lib/report-errors";
+import { validateGeneratedReportSections } from "@/app/lib/report-quality-validation";
 import {
   createOpenAiClient,
   getAiConfigurationErrorMessage,
@@ -1684,6 +1685,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
               source: "cache",
             });
           }
+          const cachedReportValidation = validateGeneratedReportSections(parsedCachedReport);
 
           await recordAiUsage(supabase, {
             userId: user.id,
@@ -1708,6 +1710,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
               usage_kind: "full_report_cache_hit",
               actual_ai_call: false,
               cachedEstimatedCostUsd: cachedFullReport.estimatedCostUsd,
+              ...cachedReportValidation,
             },
           });
 
@@ -1872,6 +1875,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
           canonicalFinancialAssumptions,
           responseLanguage
         );
+        const reportValidation = validateGeneratedReportSections(parsedReport);
         const cacheResponseText = JSON.stringify(parsedReport);
         const isPartialReport = Boolean(missingFields.length || invalidFields.length);
 
@@ -1944,6 +1948,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
             max_ai_calls_per_report: MAX_AI_CALLS_PER_MARKET_REPORT,
             job: queuedJob,
             ...fullReportInputCostMetrics,
+            ...reportValidation,
           },
         });
 
