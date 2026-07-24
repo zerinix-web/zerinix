@@ -7,13 +7,11 @@ import {
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
 import { jsPDF } from "jspdf";
 import type { LucideIcon } from "lucide-react";
 import {
-  ArrowUpRight,
   BarChart3,
   Bot,
   BriefcaseBusiness,
@@ -21,7 +19,6 @@ import {
   Check,
   Clipboard,
   ClipboardCheck,
-  CornerDownLeft,
   Download,
   Edit3,
   FileUp,
@@ -99,7 +96,6 @@ import {
 import {
   getEvidenceBadgeClass,
   getEvidenceLabel,
-  getEvidenceValidationNeed,
   inferEvidenceLevel,
   sourceTypeToEvidenceLevel,
   type EvidenceLevel,
@@ -292,47 +288,6 @@ const CHAT_STREAM_IDLE_TIMEOUT_MS = 60_000;
 const CHAT_REQUEST_TIMEOUT_MS = 75_000;
 const ACTIVE_REPORT_ID_STORAGE_KEY = "zerinix.activeReportId";
 
-const chatModelOptions: Array<{
-  value: ChatModelPreference;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: "fast",
-    label: "Fast",
-    description: "Quick everyday answers",
-  },
-  {
-    value: "balanced",
-    label: "Balanced",
-    description: "Deeper business reasoning",
-  },
-];
-
-const modeEmptyState: Record<ChatMode, { title: string; description: string; placeholder: string }> =
-  {
-    chat: {
-      title: "Pressure-test a strategic decision.",
-      description:
-        "Use a continuous advisory session with memory, markdown answers, file context, and fast model routing.",
-      placeholder: "Ask a strategic question, paste notes, or upload context for ZERINIX to assess...",
-    },
-    plan: {
-      title: "Create a strategic decision report.",
-      description:
-        "Analyze opportunities, markets and business decisions with ZERINIX.",
-      placeholder:
-        "Describe the decision, market or business question you want ZERINIX to analyze.",
-    },
-    market: {
-      title: "Build market intelligence.",
-      description:
-        "Enter a market, product category, geography or strategic question. ZERINIX will generate a structured market intelligence report.",
-      placeholder:
-        "Example: Premium gym franchise market in Turkey, urban professionals, competitors, pricing and entry risk...",
-    },
-  };
-
 const modeCards: Array<{
   mode: ChatMode;
   label: string;
@@ -380,70 +335,6 @@ function inferRecommendedAnalysisMode(promptText: string): ChatMode {
 
   return "plan";
 }
-
-const executiveDecisionExamples: Record<ChatMode, string[]> = {
-  plan: [
-    "Validate an AI procurement platform for mid-market CFOs before raising a seed round.",
-    "Assess whether a premium wellness clinic can scale in Dubai with a membership model.",
-    "Evaluate a B2B SaaS idea for automated compliance reporting in EU financial services.",
-  ],
-  market: [
-    "Analyze the Turkish premium fitness market, buyer segments, pricing and competitive gaps.",
-    "Map the European EV charging software market for fleet operators and municipalities.",
-    "Size the opportunity for AI customer support automation in boutique e-commerce brands.",
-  ],
-  chat: [
-    "Should we enter the enterprise segment now or keep focusing on SMB customers?",
-    "Which GTM risk matters most before we spend on paid acquisition?",
-    "How should we prioritize product, sales and fundraising over the next 90 days?",
-  ],
-};
-
-const executiveDecisionCategories = [
-  { label: "Market entry", detail: "Timing, demand, competitors", icon: BarChart3 },
-  { label: "Business model", detail: "Pricing, margins, scalability", icon: PieChart },
-  { label: "Execution risk", detail: "Team, capital, operations", icon: ShieldAlert },
-];
-
-const executiveBriefFields: Array<{
-  field: ExecutiveBriefField;
-  label: string;
-  placeholder: string;
-  multiline?: boolean;
-}> = [
-  {
-    field: "decisionGoal",
-    label: "Decision Goal",
-    placeholder: "What decision should this report support?",
-  },
-  {
-    field: "company",
-    label: "Company",
-    placeholder: "Company, product or business idea",
-  },
-  {
-    field: "industryMarket",
-    label: "Industry / Market",
-    placeholder: "Industry, category, customer segment",
-  },
-  {
-    field: "region",
-    label: "Target Country or Region",
-    placeholder: "Country, region or launch geography",
-  },
-  {
-    field: "businessObjective",
-    label: "Business Objective",
-    placeholder: "Validation, fundraising, expansion, pricing, GTM...",
-    multiline: true,
-  },
-  {
-    field: "additionalContext",
-    label: "Additional Context",
-    placeholder: "Known constraints, competitors, budget, timeline, assumptions or links",
-    multiline: true,
-  },
-];
 
 const emptyExecutiveBrief: ExecutiveBriefFields = {
   decisionGoal: "",
@@ -503,83 +394,6 @@ function loadPdfFont() {
     .then(arrayBufferToBase64);
 
   return pdfFontPromise;
-}
-
-function looksLikePromptOrInstruction(value: string) {
-  return /\b(based on the entire report|would you invest|should i invest|what do you think|section to generate|report quality rules|write only|business idea\s*\/\s*goal|system prompt|internal instruction|validation prompt)\b/i.test(
-    value
-  );
-}
-
-function getFirstReadableReportSentence(value: string) {
-  const cleaned = normalizePdfText(value)
-    .replace(/[#*_`>-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (!cleaned || looksLikePromptOrInstruction(cleaned)) {
-    return "";
-  }
-
-  const sentence = cleaned.match(/^(.{32,220}?[.!?])\s/)?.[1] || cleaned.slice(0, 180);
-
-  return looksLikePromptOrInstruction(sentence) ? "" : sentence.trim();
-}
-
-function getBusinessIdeaFromPrompt(value: string) {
-  const cleaned = normalizePdfText(value)
-    .replace(/^[-*•]\s*/, "")
-    .replace(/\?+$/g, "")
-    .trim();
-
-  if (!cleaned || looksLikePromptOrInstruction(cleaned)) {
-    return "";
-  }
-
-  if (/\b(who is|what is|why|how|would|should|can you|tell me|analyze|compare)\b/i.test(cleaned)) {
-    return "";
-  }
-
-  return cleaned.slice(0, 180);
-}
-
-function deriveBusinessDescriptionFromSections(
-  sections: ReportSection[],
-  fallbackTitle: string,
-  sourcePrompt = ""
-) {
-  const promptDescription = getBusinessIdeaFromPrompt(sourcePrompt);
-
-  if (promptDescription) {
-    return promptDescription;
-  }
-
-  const priorityFields = [
-    "businessModel",
-    "solution",
-    "executiveSummary",
-    "marketOverview",
-    "marketOpportunity",
-    "targetCustomer",
-  ];
-  const prioritySections = priorityFields
-    .map((field) => sections.find((section) => section.field === field))
-    .filter((section): section is ReportSection => Boolean(section));
-  const remainingSections = sections.filter(
-    (section) => !prioritySections.includes(section)
-  );
-
-  for (const section of [...prioritySections, ...remainingSections]) {
-    const sentence = getFirstReadableReportSentence(section.content);
-
-    if (sentence) {
-      return sentence;
-    }
-  }
-
-  return looksLikePromptOrInstruction(fallbackTitle)
-    ? "Analyzed business/company profile"
-    : normalizePdfText(fallbackTitle || "Analyzed business/company profile");
 }
 
 const reportActions = [
@@ -1761,7 +1575,6 @@ function Citation({ citation }: { citation?: CitationData }) {
     return null;
   }
 
-  const domain = getCitationDomain(citation.url, citation.organization);
   const sourceName = getCitationSourceName(citation);
   const trustLabel = citation.sourceType === "Verified source" && citation.url ? "Verified" : "Reference";
 
@@ -1790,25 +1603,6 @@ function Citation({ citation }: { citation?: CitationData }) {
           Open source
         </a>
       ) : null}
-    </div>
-  );
-}
-
-function CitationList({ content }: { content: string }) {
-  const citations = parseCitations(content);
-
-  if (citations.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="space-y-3">
-      {citations.map((citation, index) => (
-        <Citation
-          key={`${getCitationDomain(citation.url, citation.organization)}-${citation.sourceTitle}-${citation.publicationYear || ""}-${citation.url || ""}-${index}`}
-          citation={citation}
-        />
-      ))}
     </div>
   );
 }
@@ -2340,10 +2134,6 @@ function getPdfFinancialMetricConfidenceBadge(badge: FinancialMetricConfidenceBa
   return getEvidenceLabel(badge);
 }
 
-function getPdfFinancialValidationNeed(badge: FinancialMetricConfidenceBadge) {
-  return getEvidenceValidationNeed(badge);
-}
-
 function cleanPdfEvidenceMetadataText(value: string) {
   return normalizePdfText(value)
     .split("\n")
@@ -2777,26 +2567,6 @@ function extractScenarioSnippet(content: string, scenario: string) {
   }
 
   return "";
-}
-
-function extractShortDescription(content: string, aliases: string[] | readonly string[]) {
-  const detail = cleanPdfEvidenceMetadataText(extractMetricDetail(content, aliases))
-    .replace(/\b(?:formula|assumptions?|benchmark|source|confidence)\s*[:=]\s*/gi, "")
-    .replace(/\s*\|\s*/g, " ")
-    .trim();
-
-  if (detail) {
-    return detail;
-  }
-
-  const raw = normalizePdfText(extractMetricValueFromAliases(content, aliases));
-
-  return cleanPdfEvidenceMetadataText(raw)
-    .split(/\b(?:formula|assumptions?|confidence|benchmark(?: source| comparison)?|explanation|justification|source)\b\s*[:\-–—]/i)
-    .slice(1)
-    .join(" ")
-    .replace(/\s*\|\s*/g, " ")
-    .trim();
 }
 
 function isPlaceholderKpiText(value: string) {
@@ -5545,11 +5315,6 @@ const ReportPanel = memo(function ReportPanel({
       const fullReportContent = basePdfSections
         .map((section) => `${section.title}\n${section.content}`)
         .join("\n\n");
-      const businessIdea = deriveBusinessDescriptionFromSections(
-        localizePdfReportSections(basePdfSections, pdfLocale),
-        localizedReportTitle,
-        sourcePrompt
-      );
       const tocEntries: Array<{ title: string; page: number }> = [];
       let y = margin;
 
@@ -5614,15 +5379,6 @@ const ReportPanel = memo(function ReportPanel({
         pdf.setFontSize(size * 0.52);
         pdf.setTextColor("#ccfbf1");
         pdf.text("Z", x + size * 0.34, logoY + size * 0.68);
-      };
-
-      const drawTag = (label: string, x: number, tagY: number, width: number) => {
-        pdf.setFillColor("#042f2e");
-        pdf.setDrawColor("#115e59");
-        pdf.roundedRect(x, tagY, width, 10, 5, 5, "FD");
-        pdf.setFontSize(7.5);
-        pdf.setTextColor("#ccfbf1");
-        pdf.text(label, x + 4, tagY + 6.4, { maxWidth: width - 8 });
       };
 
       const splitPdfReadableLines = (content: string, width: number) =>
@@ -5881,11 +5637,6 @@ const ReportPanel = memo(function ReportPanel({
 
           return { label, color, value, descriptionLines, rowHeight };
         });
-
-      const getTamVisualHeight = (content: string, width: number) =>
-        getTamRows(content, width).reduce((height, row, index) => {
-          return height + row.rowHeight + (index === 0 ? 0 : 3);
-        }, 0);
 
       const getSwotLayout = (content: string, width: number) => {
         const quadrants = [
@@ -7333,8 +7084,6 @@ export default function Planner({
     additionalContext: regenerationContext?.prompt || "",
   };
   const [prompt, setPrompt] = useState(() => buildExecutiveBriefPrompt(initialExecutiveBrief));
-  const [executiveBrief, setExecutiveBrief] = useState<ExecutiveBriefFields>(initialExecutiveBrief);
-  const [advancedOptionsOpen, setAdvancedOptionsOpen] = useState(false);
   const {
     chatPrompt,
     setChatPrompt,
@@ -7435,8 +7184,7 @@ export default function Planner({
       ? `Existing report context: ${regenerationContext.reportTitle}`
       : ""
   );
-  const [chatModelPreference, setChatModelPreference] =
-    useState<ChatModelPreference>("fast");
+  const [chatModelPreference] = useState<ChatModelPreference>("fast");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(
     getInitialSelectedWorkspaceId(
       initialWorkspaces,
@@ -7476,6 +7224,9 @@ export default function Planner({
 
   useEffect(() => {
     void loadPersistedConversations();
+    // Conversation history should hydrate once on mount; adding the loader function
+    // as a dependency would refetch on every render because it is declared in Planner.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function updateNearBottomState() {
@@ -7924,24 +7675,12 @@ export default function Planner({
     void loadPersistedMessages(conversationId);
   }
 
-  function updateExecutiveBriefField(field: ExecutiveBriefField, value: string) {
-    setExecutiveBrief((current) => {
-      const next = { ...current, [field]: value };
-
-      setPrompt(buildExecutiveBriefPrompt(next));
-
-      return next;
-    });
-  }
-
-  function setComposerPrompt(value: string, field: ExecutiveBriefField = "additionalContext") {
+  function setComposerPrompt(value: string) {
     setPrompt(value);
-    setExecutiveBrief({ ...emptyExecutiveBrief, [field]: value });
   }
 
   function clearComposerPrompt() {
     setPrompt("");
-    setExecutiveBrief(emptyExecutiveBrief);
   }
 
   function addUserMessage(mode: ChatMode, content: string, conversationId = activeConversationId) {
@@ -8180,15 +7919,6 @@ export default function Planner({
 
     await sendChatMessage(submittedPrompt);
     setChatPrompt("");
-  }
-
-  function handleExecutiveBriefKeyDown(
-    event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>
-  ) {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      void (activeMode === "market" ? analyzeMarket(prompt) : generatePlan(prompt));
-    }
   }
 
   async function getGeneralWorkspaceId(
@@ -9056,7 +8786,6 @@ export default function Planner({
     : marketReport || activeMode === "market"
       ? "market"
       : "plan";
-  const activeEmptyState = modeEmptyState[activeMode];
   const activeReportFields = useMemo(
     () =>
       (activeReportMode === "plan"
@@ -9081,10 +8810,6 @@ export default function Planner({
   const shouldHideDesktopCreationOnMobile = mobileWizardActive;
   const shouldShowToolbarRegenerate = true;
   const hasConversationMessages = messages.length > 0;
-  const hasStartedConversation =
-    hasConversationMessages ||
-    chatLoading ||
-    Boolean(activeConversation?.messages?.length);
   const latestUserIntentPrompt =
     [...(activeConversation?.messages || [])]
       .reverse()
