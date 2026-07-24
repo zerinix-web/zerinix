@@ -34,6 +34,7 @@ import {
 import { createAiCostOptimizationMetrics } from "@/app/lib/ai/token-optimization";
 import { isReportGenerationFailureText } from "@/app/lib/report-errors";
 import { validateGeneratedReportSections } from "@/app/lib/report-quality-validation";
+import { evaluateReportConfidence } from "@/app/lib/report-confidence";
 import { scoreReportSources } from "@/app/lib/source-reliability";
 import {
   createOpenAiClient,
@@ -1688,6 +1689,11 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
           }
           const cachedReportValidation = validateGeneratedReportSections(parsedCachedReport);
           const cachedSourceReliability = scoreReportSources(parsedCachedReport);
+          const cachedReportConfidence = evaluateReportConfidence({
+            report: parsedCachedReport,
+            validation: cachedReportValidation,
+            sources: cachedSourceReliability,
+          });
 
           await recordAiUsage(supabase, {
             userId: user.id,
@@ -1714,6 +1720,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
               cachedEstimatedCostUsd: cachedFullReport.estimatedCostUsd,
               ...cachedReportValidation,
               ...cachedSourceReliability,
+              ...cachedReportConfidence,
             },
           });
 
@@ -1880,6 +1887,11 @@ Do not include markdown code fences, braces inside string values, or commentary 
         );
         const reportValidation = validateGeneratedReportSections(parsedReport);
         const sourceReliability = scoreReportSources(parsedReport);
+        const reportConfidence = evaluateReportConfidence({
+          report: parsedReport,
+          validation: reportValidation,
+          sources: sourceReliability,
+        });
         const cacheResponseText = JSON.stringify(parsedReport);
         const isPartialReport = Boolean(missingFields.length || invalidFields.length);
 
@@ -1954,6 +1966,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
             ...fullReportInputCostMetrics,
             ...reportValidation,
             ...sourceReliability,
+            ...reportConfidence,
           },
         });
 

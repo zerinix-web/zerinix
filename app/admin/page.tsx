@@ -454,6 +454,8 @@ function OpenAiAnalyticsSection({ data }: { data: AdminDashboardData }) {
           ["Duplicates", formatCompactNumber(data.openAiAnalytics.duplicateSectionCount)],
           ["Source reliability", data.openAiAnalytics.averageSourceReliability ? `${data.openAiAnalytics.averageSourceReliability}/100` : "NO DATA"],
           ["Weak sources", formatCompactNumber(data.openAiAnalytics.weakSourceReportCount)],
+          ["Confidence", data.openAiAnalytics.averageReportConfidence ? `${data.openAiAnalytics.averageReportConfidence}/100` : "NO DATA"],
+          ["Low confidence", formatCompactNumber(data.openAiAnalytics.lowConfidenceReportCount)],
           ["Cache hits", formatCompactNumber(data.openAiAnalytics.cacheHits)],
           ["Cache misses", formatCompactNumber(data.openAiAnalytics.cacheMisses)],
           ["Token savings", formatCompactNumber(data.openAiAnalytics.estimatedTokenSavings)],
@@ -473,6 +475,21 @@ function OpenAiAnalyticsSection({ data }: { data: AdminDashboardData }) {
           {data.openAiAnalytics.sourceCategoryDistribution.slice(0, 6).map((item) => (
             <span key={item.category} className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-zinc-400">
               {item.category}: {formatCompactNumber(item.count)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {data.openAiAnalytics.confidenceDistribution.length || data.openAiAnalytics.topConfidenceWarnings.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {data.openAiAnalytics.confidenceDistribution.map((item) => (
+            <span key={item.level} className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-zinc-400">
+              {item.level}: {formatCompactNumber(item.count)}
+            </span>
+          ))}
+          {data.openAiAnalytics.topConfidenceWarnings.slice(0, 3).map((item) => (
+            <span key={item.reason} className="rounded-full border border-amber-300/15 bg-amber-300/5 px-2.5 py-1 text-[11px] text-amber-100/80">
+              {item.reason}: {formatCompactNumber(item.count)}
             </span>
           ))}
         </div>

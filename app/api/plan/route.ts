@@ -34,6 +34,7 @@ import {
 import { createAiCostOptimizationMetrics } from "@/app/lib/ai/token-optimization";
 import { isReportGenerationFailureText } from "@/app/lib/report-errors";
 import { validateGeneratedReportSections } from "@/app/lib/report-quality-validation";
+import { evaluateReportConfidence } from "@/app/lib/report-confidence";
 import { scoreReportSources } from "@/app/lib/source-reliability";
 import {
   createOpenAiClient,
@@ -2075,6 +2076,11 @@ Write only the content for this section. Do not write a JSON object, field name,
         );
         const cachedReportValidation = validateGeneratedReportSections(parsedCachedReport);
         const cachedSourceReliability = scoreReportSources(parsedCachedReport);
+        const cachedReportConfidence = evaluateReportConfidence({
+          report: parsedCachedReport,
+          validation: cachedReportValidation,
+          sources: cachedSourceReliability,
+        });
 
         await recordAiUsage(supabase, {
           userId: user.id,
@@ -2101,6 +2107,7 @@ Write only the content for this section. Do not write a JSON object, field name,
             cachedEstimatedCostUsd: cachedFullReport.estimatedCostUsd,
             ...cachedReportValidation,
             ...cachedSourceReliability,
+            ...cachedReportConfidence,
           },
         });
 
@@ -2256,6 +2263,11 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
         );
         const reportValidation = validateGeneratedReportSections(parsedReport);
         const sourceReliability = scoreReportSources(parsedReport);
+        const reportConfidence = evaluateReportConfidence({
+          report: parsedReport,
+          validation: reportValidation,
+          sources: sourceReliability,
+        });
         const cacheResponseText = JSON.stringify(parsedReport);
 
         if (!isReportGenerationFailureText(cacheResponseText)) {
@@ -2299,6 +2311,7 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
             ...fullReportInputCostMetrics,
             ...reportValidation,
             ...sourceReliability,
+            ...reportConfidence,
           },
         });
 

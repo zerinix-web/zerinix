@@ -127,6 +127,10 @@ export type AdminDashboardData = {
     averageSourceReliability: number;
     weakSourceReportCount: number;
     sourceCategoryDistribution: Array<{ category: string; count: number }>;
+    averageReportConfidence: number;
+    lowConfidenceReportCount: number;
+    confidenceDistribution: Array<{ level: string; count: number }>;
+    topConfidenceWarnings: Array<{ reason: string; count: number }>;
     cachedTokens: number;
     totalTokens: number;
     cost: number;
@@ -827,6 +831,10 @@ function buildMockAdminDashboardData(dateRange: AdminDateRange): AdminDashboardD
       averageSourceReliability: 0,
       weakSourceReportCount: 0,
       sourceCategoryDistribution: [],
+      averageReportConfidence: 0,
+      lowConfidenceReportCount: 0,
+      confidenceDistribution: [],
+      topConfidenceWarnings: [],
       cachedTokens: 0,
       totalTokens: 0,
       cost: 0,
@@ -2736,6 +2744,10 @@ function calculateOpenAiAnalytics(input: {
       averageSourceReliability: 0,
       weakSourceReportCount: 0,
       sourceCategoryDistribution: [],
+      averageReportConfidence: 0,
+      lowConfidenceReportCount: 0,
+      confidenceDistribution: [],
+      topConfidenceWarnings: [],
       cachedTokens: input.official.cachedTokens,
       totalTokens: input.official.totalTokens,
       cost,
@@ -2877,6 +2889,49 @@ function calculateOpenAiAnalytics(input: {
     .filter(([, count]) => count > 0)
     .map(([category, count]) => ({ category, count }))
     .sort((a, b) => b.count - a.count);
+  const confidenceScoreMap: Record<string, number> = {
+    high: 85,
+    medium: 62,
+    low: 35,
+  };
+  const confidenceDistributionMap = new Map<string, number>();
+  const confidenceWarningMap = new Map<string, number>();
+  const confidenceScores = input.usage
+    .map((row) => {
+      const metadata = readUsageMetadata(row);
+      const confidence = readString(metadata.overall_confidence).toLowerCase();
+      const reasonCodes = metadata.confidence_reason_codes;
+
+      if (confidence) {
+        const label = confidence.charAt(0).toUpperCase() + confidence.slice(1);
+        confidenceDistributionMap.set(label, (confidenceDistributionMap.get(label) || 0) + 1);
+      }
+
+      if (Array.isArray(reasonCodes)) {
+        reasonCodes.forEach((reason) => {
+          const normalizedReason = readString(reason, "unknown");
+
+          confidenceWarningMap.set(
+            normalizedReason,
+            (confidenceWarningMap.get(normalizedReason) || 0) + 1
+          );
+        });
+      }
+
+      return confidenceScoreMap[confidence] || 0;
+    })
+    .filter((score) => score > 0);
+  const averageReportConfidence = confidenceScores.length
+    ? Math.round(confidenceScores.reduce((sum, score) => sum + score, 0) / confidenceScores.length)
+    : 0;
+  const lowConfidenceReportCount = confidenceDistributionMap.get("Low") || 0;
+  const confidenceDistribution = [...confidenceDistributionMap.entries()]
+    .map(([level, count]) => ({ level, count }))
+    .sort((a, b) => b.count - a.count);
+  const topConfidenceWarnings = [...confidenceWarningMap.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
   const estimatedTokenSavings = input.usage.reduce((sum, row) => {
     if (!Boolean(row.cache_hit)) {
       return sum;
@@ -2986,6 +3041,10 @@ function calculateOpenAiAnalytics(input: {
     averageSourceReliability,
     weakSourceReportCount,
     sourceCategoryDistribution,
+    averageReportConfidence,
+    lowConfidenceReportCount,
+    confidenceDistribution,
+    topConfidenceWarnings,
     cachedTokens,
     totalTokens,
     cost,
