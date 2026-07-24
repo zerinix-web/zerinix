@@ -470,6 +470,10 @@ function OpenAiAnalyticsSection({ data }: { data: AdminDashboardData }) {
           ["Cost trend", data.openAiAnalytics.predictiveCost.costTrend.toUpperCase()],
           ["Anomaly", `${data.openAiAnalytics.predictiveCost.anomaly_score}/100`],
           ["Forecast fit", `${data.openAiAnalytics.predictiveCost.forecast_accuracy}%`],
+          ["Value created", data.openAiAnalytics.totalEstimatedValueCreated ? formatCurrency(data.openAiAnalytics.totalEstimatedValueCreated) : "NO DATA"],
+          ["Avg ROI", data.openAiAnalytics.averageRoiRatio ? `${data.openAiAnalytics.averageRoiRatio}x` : "NO DATA"],
+          ["Value / cost", data.openAiAnalytics.aiCostVsBusinessValue.ratio ? `${data.openAiAnalytics.aiCostVsBusinessValue.ratio}x` : "NO DATA"],
+          ["Hours saved", data.openAiAnalytics.cumulativeHoursSaved ? formatCompactNumber(data.openAiAnalytics.cumulativeHoursSaved) : "NO DATA"],
           ["Cache hits", formatCompactNumber(data.openAiAnalytics.cacheHits)],
           ["Cache misses", formatCompactNumber(data.openAiAnalytics.cacheMisses)],
           ["Token savings", formatCompactNumber(data.openAiAnalytics.estimatedTokenSavings)],
@@ -529,6 +533,21 @@ function OpenAiAnalyticsSection({ data }: { data: AdminDashboardData }) {
           {data.openAiAnalytics.decisionDistribution.map((item) => (
             <span key={item.decision} className="rounded-full border border-teal-300/15 bg-teal-300/5 px-2.5 py-1 text-[11px] text-teal-100/80">
               {item.decision}: {formatCompactNumber(item.count)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {data.openAiAnalytics.valueByReportType.length || data.openAiAnalytics.highestRoiReports.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {data.openAiAnalytics.valueByReportType.slice(0, 4).map((item) => (
+            <span key={item.reportType} className="rounded-full border border-emerald-300/15 bg-emerald-300/5 px-2.5 py-1 text-[11px] text-emerald-100/80">
+              {item.reportType.replace(/_/g, " ")}: {formatCurrency(item.valueUsd)}
+            </span>
+          ))}
+          {data.openAiAnalytics.highestRoiReports.slice(0, 3).map((item) => (
+            <span key={`${item.label}-${item.roiRatio}`} className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-zinc-400">
+              ROI {item.roiRatio}x: {formatCurrency(item.valueUsd)}
             </span>
           ))}
         </div>

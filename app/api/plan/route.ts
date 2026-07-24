@@ -38,6 +38,7 @@ import { evaluateReportConfidence } from "@/app/lib/report-confidence";
 import { scoreReportSources } from "@/app/lib/source-reliability";
 import { aggregateReportEvidence } from "@/app/lib/live-evidence";
 import { createExecutiveDecisionIntelligence } from "@/app/lib/executive-decision-intelligence";
+import { createAiRoiIntelligence } from "@/app/lib/ai-roi-intelligence";
 import {
   createOpenAiClient,
   getAiConfigurationErrorMessage,
@@ -2091,6 +2092,16 @@ Write only the content for this section. Do not write a JSON object, field name,
           evidence: cachedLiveEvidence,
           confidence: cachedReportConfidence,
         });
+        const cachedRoiIntelligence = createAiRoiIntelligence({
+          operationType: "plan_report",
+          estimatedCostUsd: cachedFullReport.estimatedCostUsd,
+          report: parsedCachedReport,
+          validation: cachedReportValidation,
+          sources: cachedSourceReliability,
+          evidence: cachedLiveEvidence,
+          confidence: cachedReportConfidence,
+          decision: cachedDecisionIntelligence,
+        });
 
         await recordAiUsage(supabase, {
           userId: user.id,
@@ -2120,6 +2131,7 @@ Write only the content for this section. Do not write a JSON object, field name,
             ...cachedLiveEvidence,
             ...cachedReportConfidence,
             ...cachedDecisionIntelligence,
+            ...cachedRoiIntelligence,
           },
         });
 
@@ -2288,6 +2300,16 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
           evidence: liveEvidence,
           confidence: reportConfidence,
         });
+        const roiIntelligence = createAiRoiIntelligence({
+          operationType: "plan_report",
+          estimatedCostUsd,
+          report: parsedReport,
+          validation: reportValidation,
+          sources: sourceReliability,
+          evidence: liveEvidence,
+          confidence: reportConfidence,
+          decision: decisionIntelligence,
+        });
         const cacheResponseText = JSON.stringify(parsedReport);
 
         if (!isReportGenerationFailureText(cacheResponseText)) {
@@ -2334,6 +2356,7 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
             ...liveEvidence,
             ...reportConfidence,
             ...decisionIntelligence,
+            ...roiIntelligence,
           },
         });
 

@@ -145,6 +145,16 @@ export type AdminDashboardData = {
     highImpactReportCount: number;
     averageImplementationComplexity: number;
     predictiveCost: PredictiveCostIntelligence;
+    totalEstimatedValueCreated: number;
+    averageRoiRatio: number;
+    valueByReportType: Array<{ reportType: string; valueUsd: number }>;
+    highestRoiReports: Array<{ label: string; roiRatio: number; valueUsd: number }>;
+    aiCostVsBusinessValue: {
+      costUsd: number;
+      valueUsd: number;
+      ratio: number;
+    };
+    cumulativeHoursSaved: number;
     cachedTokens: number;
     totalTokens: number;
     cost: number;
@@ -881,6 +891,12 @@ function buildMockAdminDashboardData(dateRange: AdminDateRange): AdminDashboardD
       highImpactReportCount: 0,
       averageImplementationComplexity: 0,
       predictiveCost: emptyPredictiveCost(),
+      totalEstimatedValueCreated: 0,
+      averageRoiRatio: 0,
+      valueByReportType: [],
+      highestRoiReports: [],
+      aiCostVsBusinessValue: { costUsd: 0, valueUsd: 0, ratio: 0 },
+      cumulativeHoursSaved: 0,
       cachedTokens: 0,
       totalTokens: 0,
       cost: 0,
@@ -2804,6 +2820,12 @@ function calculateOpenAiAnalytics(input: {
       highImpactReportCount: 0,
       averageImplementationComplexity: 0,
       predictiveCost: emptyPredictiveCost(),
+      totalEstimatedValueCreated: 0,
+      averageRoiRatio: 0,
+      valueByReportType: [],
+      highestRoiReports: [],
+      aiCostVsBusinessValue: { costUsd: cost, valueUsd: 0, ratio: 0 },
+      cumulativeHoursSaved: 0,
       cachedTokens: input.official.cachedTokens,
       totalTokens: input.official.totalTokens,
       cost,
@@ -3081,6 +3103,67 @@ function calculateOpenAiAnalytics(input: {
     .map(([decision, count]) => ({ decision, count }))
     .sort((a, b) => b.count - a.count);
   const predictiveCost = createPredictiveCostIntelligence(input.usage);
+  const valueByReportTypeMap = new Map<string, number>();
+  const roiRows: Array<{
+    label: string;
+    roiRatio: number;
+    valueUsd: number;
+  }> = [];
+  let totalEstimatedValueCreated = 0;
+  let cumulativeHoursSaved = 0;
+  const roiRatios: number[] = [];
+
+  input.usage.forEach((row) => {
+    const metadata = readUsageMetadata(row);
+    const estimatedValue = readNumber(metadata.estimated_value_usd);
+    const hoursSaved = readNumber(metadata.estimated_hours_saved);
+    const roiRatio = readNumber(metadata.roi_ratio);
+
+    if (estimatedValue <= 0) {
+      return;
+    }
+
+    const reportType = readUsageOperationType(row);
+    const label =
+      readString(row.report_id) ||
+      readString(row.report_field) ||
+      readString(row.endpoint, reportType);
+
+    totalEstimatedValueCreated += estimatedValue;
+    cumulativeHoursSaved += hoursSaved;
+    valueByReportTypeMap.set(
+      reportType,
+      (valueByReportTypeMap.get(reportType) || 0) + estimatedValue
+    );
+
+    if (roiRatio > 0) {
+      roiRatios.push(roiRatio);
+      roiRows.push({
+        label,
+        roiRatio,
+        valueUsd: estimatedValue,
+      });
+    }
+  });
+  const totalEstimatedValue = roundUsd(totalEstimatedValueCreated);
+  const averageRoiRatio = roiRatios.length
+    ? Number((roiRatios.reduce((sum, value) => sum + value, 0) / roiRatios.length).toFixed(2))
+    : 0;
+  const valueByReportType = [...valueByReportTypeMap.entries()]
+    .map(([reportType, valueUsd]) => ({ reportType, valueUsd: roundUsd(valueUsd) }))
+    .sort((a, b) => b.valueUsd - a.valueUsd);
+  const highestRoiReports = roiRows
+    .sort((a, b) => b.roiRatio - a.roiRatio)
+    .slice(0, 5)
+    .map((item) => ({
+      ...item,
+      valueUsd: roundUsd(item.valueUsd),
+    }));
+  const aiCostVsBusinessValue = {
+    costUsd: roundUsd(cost),
+    valueUsd: totalEstimatedValue,
+    ratio: cost > 0 ? Number((totalEstimatedValue / cost).toFixed(2)) : 0,
+  };
   const estimatedTokenSavings = input.usage.reduce((sum, row) => {
     if (!Boolean(row.cache_hit)) {
       return sum;
@@ -3204,6 +3287,12 @@ function calculateOpenAiAnalytics(input: {
     highImpactReportCount,
     averageImplementationComplexity,
     predictiveCost,
+    totalEstimatedValueCreated: totalEstimatedValue,
+    averageRoiRatio,
+    valueByReportType,
+    highestRoiReports,
+    aiCostVsBusinessValue,
+    cumulativeHoursSaved: Number(cumulativeHoursSaved.toFixed(1)),
     cachedTokens,
     totalTokens,
     cost,
