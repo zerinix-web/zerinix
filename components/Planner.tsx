@@ -50,7 +50,6 @@ import Link from "next/link";
 import { MobileBottomNavigation } from "@/components/MobileNavigation";
 import { createClient } from "@/app/lib/supabase/client";
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
-import { logOperationalInfo } from "@/app/lib/security/logging";
 import { isAmbiguousBusinessRequest } from "@/app/lib/business-idea-detection";
 import {
   buildExecutiveSnapshot,
@@ -76,6 +75,21 @@ import {
   isReportGenerationFailureText,
 } from "@/app/lib/report-errors";
 import { dedupeReportSections } from "@/app/lib/report-section-normalization";
+import {
+  calculateReportProgress,
+  assertReportApiCallBudget,
+  REPORT_GENERATION_MAX_API_CALLS,
+} from "@/app/lib/report-engine/generation-service";
+import {
+  isCompleteReportSectionPayload,
+  sanitizeReportContent,
+  sanitizeReportFieldContent,
+  serializeReportSections,
+} from "@/app/lib/report-engine/formatter";
+import type {
+  ReportFieldDefinition as EngineReportFieldDefinition,
+  ReportStreamEvent as EngineReportStreamEvent,
+} from "@/app/lib/report-engine/schema";
 import {
   cleanPdfLegacyValidationIntelligenceContent,
   detectPdfPresentationLocale,
@@ -170,14 +184,10 @@ type PlanReport = {
 type MarketReportField = keyof MarketReport;
 type PlanReportField = keyof PlanReport;
 
-type ReportStreamEvent = Partial<MarketReport & PlanReport> & {
-  done?: boolean;
-  reportMetadata?: ReportMetadata;
-  warning?: string;
-  missingFields?: Array<MarketReportField | PlanReportField>;
-  invalidFields?: Array<MarketReportField | PlanReportField>;
-  partial?: boolean;
-};
+type ReportStreamEvent = EngineReportStreamEvent<
+  MarketReport & PlanReport,
+  MarketReportField | PlanReportField
+>;
 
 function getReportGenerationErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
@@ -187,11 +197,10 @@ function getReportGenerationErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-type ReportFieldDefinition = {
-  field: keyof (MarketReport & PlanReport);
-  title: string;
-  icon: LucideIcon;
-};
+type ReportFieldDefinition = EngineReportFieldDefinition<
+  keyof (MarketReport & PlanReport),
+  LucideIcon
+>;
 
 type ChatMode = "plan" | "market" | "chat";
 type ChatModelPreference = "fast" | "balanced";
@@ -616,88 +625,6 @@ const emptyPlanReport: PlanReport = {
   founderScore: "",
   sourcesAssumptions: "",
 };
-
-function sanitizeReportContent(content: string) {
-  return sanitizeAiResponseText(content)
-    .replace(/\n\s*(?:sources|kaynaklar)\s*:[\s\S]*$/im, "")
-    .replace(/\[([^\]]+)\]\((?:https?:\/\/|www\.)[^\s)]+\)/gi, "$1")
-    .replace(/(?:https?:\/\/|www\.)[^\s),]+/gi, "")
-    .replace(/\bEarly evidence\b/gi, "Directional")
-    .replace(/\bDeveloping evidence\b/gi, "Developing")
-    .replace(/\bStrong evidence\b/gi, "Verified")
-    .replace(/\bSector view\b/gi, "Market view")
-    .replace(/\bLow[\s-]+Confidence\b/gi, "Directional")
-    .replace(/\bMedium[\s-]+Confidence\b/gi, "Developing")
-    .replace(/\bHigh[\s-]+Confidence\b/gi, "Verified")
-    .replace(/\bIndustry[\s-]+Estimate\b/gi, "Market view")
-    .replace(/\bWAIT\b/g, "Hold for validation")
-    .replace(/\(\s*\)/g, "")
-    .replace(/[ \t]+\n/g, "\n")
-    .trim();
-}
-
-function sanitizeReportFieldContent(
-  field: keyof (MarketReport & PlanReport),
-  content: string
-) {
-  if (field === "sources" || field === "sourcesAssumptions") {
-    return sanitizeAiResponseText(content)
-      .normalize("NFC")
-      .replace(/\r\n/g, "\n")
-      .replace(/\r/g, "\n")
-      .replace(/\bSource\s+unavailable\b/gi, "")
-      .replace(/\bConfidence\s+unavailable\b/gi, "")
-      .replace(/\bT\s*B\s*D\b/gi, "")
-      .replace(/\bPlace\s*holder\b/gi, "")
-      .replace(/\bUn\s*known\b/gi, "")
-      .replace(/\bUn\s*available\b/gi, "")
-      .replace(/[ \t]+\n/g, "\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-  }
-
-  return sanitizeReportContent(content);
-}
-
-function serializeReportSections(
-  reportData: Partial<MarketReport & PlanReport>,
-  fields: ReportFieldDefinition[]
-) {
-  const sections = dedupeReportSections(
-    fields.map(({ field, title }) => ({
-      field,
-      title,
-      content: sanitizeReportFieldContent(field, reportData[field] || ""),
-    }))
-  );
-
-  const invalidSection = sections.find(
-    (section) =>
-      !section.content ||
-      isReportGenerationFailureText(section.content)
-  );
-
-  if (invalidSection) {
-    throw new Error(
-      invalidSection.content && isReportGenerationFailureText(invalidSection.content)
-        ? invalidSection.content
-        : `Report section "${invalidSection.title}" was empty after sanitization.`
-    );
-  }
-
-  return sections;
-}
-
-function isCompleteReportSectionPayload(
-  sections: Array<{ title: string; content: string }>,
-  expectedSectionCount: number
-) {
-  return (
-    sections.length === expectedSectionCount &&
-    sections.every((section) => section.title.trim() && section.content.trim()) &&
-    !containsReportGenerationFailure(sections)
-  );
-}
 
 function needsClarification(value: string) {
   return isAmbiguousBusinessRequest(value);
@@ -8418,7 +8345,6 @@ export default function Planner({
     let reportMetadata: ReportMetadata | undefined;
     const completedFields = new Set<PlanReportField>();
     let reportApiCalls = 0;
-    const maxReportApiCalls = 1;
 
     const markSectionComplete = (field: PlanReportField) => {
       if (completedFields.has(field)) {
@@ -8429,23 +8355,18 @@ export default function Planner({
       setCurrentReportSectionName(
         outputFields.find((item) => item.field === field)?.title || copy.planTitle
       );
-      setReportProgress((completedFields.size / planReportFields.length) * 100);
+      setReportProgress(calculateReportProgress(completedFields.size, planReportFields.length));
     };
 
     const streamFullReport = async () => {
       reportApiCalls += 1;
 
-      logOperationalInfo("[planner] Business Plan AI call count", {
+      assertReportApiCallBudget({
+        logLabel: "[planner] Business Plan AI call count",
         reportRequestId,
         aiCallsForReport: reportApiCalls,
-        maxAiCallsPerReport: maxReportApiCalls,
+        maxAiCallsPerReport: REPORT_GENERATION_MAX_API_CALLS,
       });
-
-      if (reportApiCalls > maxReportApiCalls) {
-        throw new Error(
-          "AI call budget exceeded for this report. Please start a new report request."
-        );
-      }
 
       const res = await fetch("/api/plan", {
         method: "POST",
@@ -8619,7 +8540,6 @@ export default function Planner({
     let reportMetadata: ReportMetadata | undefined;
     const completedFields = new Set<MarketReportField>();
     let reportApiCalls = 0;
-    const maxReportApiCalls = 1;
 
     const markSectionComplete = (field: MarketReportField) => {
       if (completedFields.has(field)) {
@@ -8630,23 +8550,18 @@ export default function Planner({
       setCurrentReportSectionName(
         outputFields.find((item) => item.field === field)?.title || copy.marketTitle
       );
-      setReportProgress((completedFields.size / reportFields.length) * 100);
+      setReportProgress(calculateReportProgress(completedFields.size, reportFields.length));
     };
 
     const streamFullReport = async () => {
       reportApiCalls += 1;
 
-      logOperationalInfo("[planner] Market Analysis AI call count", {
+      assertReportApiCallBudget({
+        logLabel: "[planner] Market Analysis AI call count",
         reportRequestId,
         aiCallsForReport: reportApiCalls,
-        maxAiCallsPerReport: maxReportApiCalls,
+        maxAiCallsPerReport: REPORT_GENERATION_MAX_API_CALLS,
       });
-
-      if (reportApiCalls > maxReportApiCalls) {
-        throw new Error(
-          "AI call budget exceeded for this report. Please start a new report request."
-        );
-      }
 
       const res = await fetch("/api/market-analysis", {
         method: "POST",

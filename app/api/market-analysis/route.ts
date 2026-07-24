@@ -66,6 +66,7 @@ import {
   localizePdfPresentationText,
   normalizePdfText,
 } from "@/app/lib/pdf-normalization.mjs";
+import { serializeReportStreamChunk } from "@/app/lib/report-engine/generation-service";
 
 const fieldPrompts = {
   executiveSummary: {
@@ -431,11 +432,13 @@ function createReportChunk(field: MarketReportField, content: string): MarketRep
 }
 
 function serializeReportChunk(field: MarketReportField, content: string) {
-  return `${JSON.stringify(createReportChunk(field, sanitizeMarketReportContent(content)))}\n`;
+  return serializeReportStreamChunk(
+    createReportChunk(field, sanitizeMarketReportContent(content))
+  );
 }
 
 function serializeWarningChunk(warning: MarketReportWarningChunk) {
-  return `${JSON.stringify(warning)}\n`;
+  return serializeReportStreamChunk(warning);
 }
 
 function serializeMarketReportChunks(report: Record<MarketReportField, string>) {
@@ -458,7 +461,7 @@ function serializeMarketReportMetadataChunk(
     },
   };
 
-  return `${JSON.stringify(chunk)}\n`;
+  return serializeReportStreamChunk(chunk);
 }
 
 function createFallbackMarketReport() {

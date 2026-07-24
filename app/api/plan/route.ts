@@ -65,6 +65,7 @@ import {
   localizePdfPresentationLabel,
   localizePdfPresentationText,
 } from "@/app/lib/pdf-normalization.mjs";
+import { serializeReportStreamChunk } from "@/app/lib/report-engine/generation-service";
 
 const planPrompts = {
   executiveSummary: {
@@ -333,7 +334,7 @@ function createPlanChunk(field: PlanReportField, content: string): PlanReportChu
 }
 
 function serializePlanChunk(field: PlanReportField, content: string) {
-  return `${JSON.stringify(createPlanChunk(field, content))}\n`;
+  return serializeReportStreamChunk(createPlanChunk(field, content));
 }
 
 function serializePlanReportChunks(report: Record<PlanReportField, string>) {
@@ -353,7 +354,7 @@ function serializePlanReportMetadataChunk(
     },
   };
 
-  return `${JSON.stringify(chunk)}\n`;
+  return serializeReportStreamChunk(chunk);
 }
 
 function logPlanStage(
