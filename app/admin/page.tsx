@@ -481,6 +481,10 @@ function OpenAiAnalyticsSection({ data }: { data: AdminDashboardData }) {
           ["Outcome", data.openAiAnalytics.averageOutcomeScore ? `${data.openAiAnalytics.averageOutcomeScore}/100` : "NO DATA"],
           ["Top adoption", data.openAiAnalytics.adoptionDistribution[0]?.range || "NO DATA"],
           ["Exec risk", data.openAiAnalytics.executionRiskDistribution[0]?.risk || "NO DATA"],
+          ["Portfolio", data.openAiAnalytics.portfolio.portfolio_score ? `${data.openAiAnalytics.portfolio.portfolio_score}/100` : "NO DATA"],
+          ["Health", data.openAiAnalytics.portfolio.portfolio_health_score ? `${data.openAiAnalytics.portfolio.portfolio_health_score}/100` : "NO DATA"],
+          ["Portfolio risk", data.openAiAnalytics.portfolio.portfolio_risk.toUpperCase()],
+          ["AI value index", data.openAiAnalytics.portfolio.overallAiValueIndex ? `${data.openAiAnalytics.portfolio.overallAiValueIndex}/100` : "NO DATA"],
           ["Cache hits", formatCompactNumber(data.openAiAnalytics.cacheHits)],
           ["Cache misses", formatCompactNumber(data.openAiAnalytics.cacheMisses)],
           ["Token savings", formatCompactNumber(data.openAiAnalytics.estimatedTokenSavings)],
@@ -605,6 +609,46 @@ function OpenAiAnalyticsSection({ data }: { data: AdminDashboardData }) {
           {data.openAiAnalytics.highestPredictedOutcomeReports.slice(0, 3).map((item) => (
             <span key={`${item.label}-${item.score}`} className="rounded-full border border-cyan-300/15 bg-cyan-300/5 px-2.5 py-1 text-[11px] text-cyan-100/80">
               Outcome {item.score}/100 · {item.category}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {data.openAiAnalytics.portfolio.reportTypeDistribution.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {data.openAiAnalytics.portfolio.reportTypeDistribution.slice(0, 5).map((item) => (
+            <span key={item.reportType} className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-zinc-400">
+              {item.reportType.replace(/_/g, " ")}: {formatCompactNumber(item.count)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {data.openAiAnalytics.portfolio.highRiskReportClusters.length || data.openAiAnalytics.portfolio.costHeavyReportCategories.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {data.openAiAnalytics.portfolio.highRiskReportClusters.slice(0, 4).map((item) => (
+            <span key={item.reportType} className="rounded-full border border-rose-300/15 bg-rose-300/5 px-2.5 py-1 text-[11px] text-rose-100/80">
+              Risk {item.reportType.replace(/_/g, " ")}: {formatCompactNumber(item.count)}
+            </span>
+          ))}
+          {data.openAiAnalytics.portfolio.costHeavyReportCategories.slice(0, 4).map((item) => (
+            <span key={item.reportType} className="rounded-full border border-amber-300/15 bg-amber-300/5 px-2.5 py-1 text-[11px] text-amber-100/80">
+              Cost {item.reportType.replace(/_/g, " ")}: {formatCurrency(item.costUsd)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {data.openAiAnalytics.portfolio.topPerformingCategories.length || data.openAiAnalytics.portfolio.lowestPerformingCategories.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {data.openAiAnalytics.portfolio.topPerformingCategories.slice(0, 3).map((item) => (
+            <span key={`top-${item.reportType}`} className="rounded-full border border-emerald-300/15 bg-emerald-300/5 px-2.5 py-1 text-[11px] text-emerald-100/80">
+              Top {item.reportType.replace(/_/g, " ")}: {item.score}/100
+            </span>
+          ))}
+          {data.openAiAnalytics.portfolio.lowestPerformingCategories.slice(0, 3).map((item) => (
+            <span key={`low-${item.reportType}`} className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-zinc-400">
+              Low {item.reportType.replace(/_/g, " ")}: {item.score}/100
             </span>
           ))}
         </div>

@@ -12,6 +12,11 @@ import {
   createPredictiveCostIntelligence,
   type PredictiveCostIntelligence,
 } from "@/app/lib/predictive-cost-intelligence";
+import {
+  createAiPortfolioIntelligence,
+  EMPTY_PORTFOLIO_INTELLIGENCE,
+  type PortfolioIntelligence,
+} from "@/app/lib/ai-portfolio-intelligence";
 
 export type AdminUserContext = {
   user: User;
@@ -172,6 +177,7 @@ export type AdminDashboardData = {
     adoptionDistribution: Array<{ range: string; count: number }>;
     highestPredictedOutcomeReports: Array<{ label: string; score: number; category: string }>;
     executionRiskDistribution: Array<{ risk: string; count: number }>;
+    portfolio: PortfolioIntelligence;
     cachedTokens: number;
     totalTokens: number;
     cost: number;
@@ -931,6 +937,7 @@ function buildMockAdminDashboardData(dateRange: AdminDateRange): AdminDashboardD
       adoptionDistribution: [],
       highestPredictedOutcomeReports: [],
       executionRiskDistribution: [],
+      portfolio: EMPTY_PORTFOLIO_INTELLIGENCE,
       cachedTokens: 0,
       totalTokens: 0,
       cost: 0,
@@ -2877,6 +2884,7 @@ function calculateOpenAiAnalytics(input: {
       adoptionDistribution: [],
       highestPredictedOutcomeReports: [],
       executionRiskDistribution: [],
+      portfolio: EMPTY_PORTFOLIO_INTELLIGENCE,
       cachedTokens: input.official.cachedTokens,
       totalTokens: input.official.totalTokens,
       cost,
@@ -3381,6 +3389,33 @@ function calculateOpenAiAnalytics(input: {
 
     return sum + (explicitSavings || readUsageTokenCounts(row).totalTokens);
   }, 0);
+  const portfolio = createAiPortfolioIntelligence(
+    input.usage.map((row) => {
+      const metadata = readUsageMetadata(row);
+      const confidence = readString(metadata.overall_confidence).toLowerCase();
+      const confidenceScore =
+        confidence === "high"
+          ? 85
+          : confidence === "medium"
+            ? 62
+            : confidence === "low"
+              ? 35
+              : 0;
+
+      return {
+        reportType: readUsageOperationType(row),
+        costUsd: getUsageCost(row).costUsd,
+        confidenceScore: confidenceScore || readNumber(metadata.decision_score),
+        businessImpactScore: readNumber(metadata.business_impact_score),
+        roiRatio: readNumber(metadata.roi_ratio),
+        outcomeScore: readNumber(metadata.outcome_score),
+        sourceReliability: readNumber(metadata.average_source_score),
+        evidenceCount: readNumber(metadata.evidence_count),
+        decisionScore: readNumber(metadata.decision_score),
+        createdAt: readString(row.created_at),
+      };
+    })
+  );
   const blockedAbuseAttempts = input.abuseEvents.length;
   const topAbuseReasons = summarizeAiAbuseReasons(input.abuseEvents);
   const modelMap = new Map<
@@ -3508,6 +3543,7 @@ function calculateOpenAiAnalytics(input: {
     adoptionDistribution,
     highestPredictedOutcomeReports,
     executionRiskDistribution,
+    portfolio,
     cachedTokens,
     totalTokens,
     cost,
