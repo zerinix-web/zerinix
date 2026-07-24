@@ -41,7 +41,6 @@ export function createFullReportJsonSchema(name: string, fields: readonly string
           field,
           {
             type: "string",
-            minLength: 1,
           },
         ])
       ),

@@ -80,6 +80,8 @@ const fieldLabelsByLanguage = marketFieldLabels;
 const legacySectionToField = legacyMarketSectionToField;
 const FULL_REPORT_FIELD = "fullReport";
 const MAX_AI_CALLS_PER_MARKET_REPORT = 1;
+const FULL_REPORT_OPENAI_TIMEOUT_MS = 180_000;
+const FULL_REPORT_POST_PROCESS_TIMEOUT_MS = 12_000;
 
 type MarketReportChunk = Partial<Record<MarketReportField, string>>;
 type MarketReportMetadataChunk = {
@@ -97,6 +99,63 @@ type MarketReportWarningChunk = {
   invalidFields?: MarketReportField[];
   partial?: boolean;
 };
+
+function createReportTimeoutError(label: string, timeoutMs: number) {
+  return new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+}
+
+async function withReportTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string
+) {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(createReportTimeoutError(label, timeoutMs)),
+          timeoutMs
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+function createReportAbortSignal(parentSignal: AbortSignal, timeoutMs: number) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort(createReportTimeoutError("OpenAI report generation", timeoutMs));
+  }, timeoutMs);
+  const abortFromParent = () => {
+    controller.abort(parentSignal.reason);
+  };
+
+  if (parentSignal.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal.addEventListener("abort", abortFromParent, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    get timedOut() {
+      return timedOut;
+    },
+    cleanup() {
+      clearTimeout(timeoutId);
+      parentSignal.removeEventListener("abort", abortFromParent);
+    },
+  };
+}
 
 const marketReportTermReplacements: Array<[RegExp, string]> = [
   [/\bLow[\s-]+Confidence\b/gi, "Directional"],
@@ -1535,239 +1594,272 @@ Do not include markdown code fences, braces inside string values, or commentary 
       });
       const startedAt = Date.now();
 
-      try {
-        logOperationalInfo("[api:market-analysis] provider call started", {
-          reportField: FULL_REPORT_FIELD,
-          reportRequestId: reportRequestId || null,
-          model,
-          providerCalled: true,
-          quotaConsumed: false,
-        });
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const enqueue = (chunk: string) => {
+            controller.enqueue(encoder.encode(chunk));
+          };
 
-        const client = createOpenAiClient();
-        logAiExecution({
-          endpoint: "/api/market-analysis",
-          source: "real_ai",
-          mode: FULL_REPORT_FIELD,
-          model,
-        });
-        const response = await client.responses.create(
-          {
-            model,
-            instructions,
-            input: fullReportInput,
-            max_output_tokens: 6500,
-            reasoning: {
-              effort: "low",
-            },
-            tools: [
-              {
-                type: "web_search_preview",
-                search_context_size: "low",
-              },
-            ],
-            include: ["web_search_call.action.sources"],
-            text: {
-              verbosity: "medium",
-              format: createFullReportJsonSchema(
-                "zerinix_market_analysis_report",
-                reportFields
-              ),
-            },
-          },
-          { signal: req.signal }
-        );
-        const tokenUsage = extractTokenUsage(response);
-        const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
-        const responseTimeMs = Date.now() - startedAt;
-        const responseText = extractResponseText(response);
-        const {
-          report: parsedReport,
-          missingFields,
-          invalidFields,
-        } = parseFullMarketReport(
-          responseText,
-          canonicalFinancialAssumptions,
-          responseLanguage
-        );
-        const reportMetadataContext = createReportMetadataContext({
-          prompt: promptText,
-          report: parsedReport,
-          context: canonicalFinancialAssumptions,
-          operationType: "market_report",
-          estimatedCostUsd,
-        });
-        const cacheResponseText = JSON.stringify(parsedReport);
-        const isPartialReport = isPartialReportResult(missingFields, invalidFields);
+          enqueue(serializeMarketReportMetadataChunk(canonicalFinancialAssumptions));
 
-        logOperationalInfo("[api:market-analysis] full report section validation", {
-          reportRequestId: reportRequestId || null,
-          model,
-          responseTextLength: responseText.length,
-          completedFields: getCompletedReportFields(reportFields, missingFields, invalidFields),
-          missingFields,
-          invalidFields,
-          partial: isPartialReport,
-        });
-        reportFields.forEach((fieldName) => {
-          logOperationalInfo("[api:market-analysis] section validation step", {
-            reportRequestId: reportRequestId || null,
-            reportField: fieldName,
-            model,
-            status: missingFields.includes(fieldName)
-              ? "missing"
-              : invalidFields.includes(fieldName)
-                ? "invalid"
-                : "completed",
-            contentLength: parsedReport[fieldName]?.length || 0,
-          });
-        });
+          try {
+            logOperationalInfo("[api:market-analysis] provider call started", {
+              reportField: FULL_REPORT_FIELD,
+              reportRequestId: reportRequestId || null,
+              model,
+              providerCalled: true,
+              quotaConsumed: false,
+            });
 
-        if (!isPartialReport && !isReportGenerationFailureText(cacheResponseText)) {
-          await storeCachedAiResponse(supabase, {
-            userId: user.id,
-            cacheKey: fullReportCacheKey,
-            promptHash,
-            endpoint: "/api/market-analysis",
-            reportField: FULL_REPORT_FIELD,
-            language: responseLanguage,
-            model,
-            responseText: cacheResponseText,
-            tokenUsage,
-            estimatedCostUsd,
-            expiresInDays: 3,
-          });
-        } else if (isPartialReport) {
-          logOperationalInfo("[api:market-analysis] skipped cache for partial full report", {
-            reportRequestId: reportRequestId || null,
-            missingFields,
-            invalidFields,
-          });
-        }
+            const client = createOpenAiClient();
+            const reportAbort = createReportAbortSignal(
+              req.signal,
+              FULL_REPORT_OPENAI_TIMEOUT_MS
+            );
+            logAiExecution({
+              endpoint: "/api/market-analysis",
+              source: "real_ai",
+              mode: FULL_REPORT_FIELD,
+              model,
+            });
+            let response: Awaited<ReturnType<typeof client.responses.create>>;
 
-        await recordAiUsage(supabase, {
-          userId: user.id,
-          endpoint: "/api/market-analysis",
-          reportField: FULL_REPORT_FIELD,
-          promptHash,
-          model,
-          planTier,
-          tokenUsage,
-          estimatedCostUsd,
-          cacheHit: false,
-          responseTimeMs,
-          metadata: {
-            quota_event: !productionLimit.quotaAlreadyCharged,
-            quota_mode: "market_analysis",
-            quota_consumed: !productionLimit.quotaAlreadyCharged,
-            report_request_id: reportRequestId || null,
-            usage_kind: "full_report_generation",
-            actual_ai_call: true,
-            max_ai_calls_per_report: MAX_AI_CALLS_PER_MARKET_REPORT,
-            job: queuedJob,
-            ...fullReportInputCostMetrics,
-            ...flattenReportMetadataForUsage(reportMetadataContext),
-          },
-        });
+            try {
+              response = await withReportTimeout(
+                client.responses.create(
+                  {
+                    model,
+                    instructions,
+                    input: fullReportInput,
+                    max_output_tokens: 6500,
+                    reasoning: {
+                      effort: "low",
+                    },
+                    tools: [
+                      {
+                        type: "web_search_preview",
+                        search_context_size: "low",
+                      },
+                    ],
+                    include: ["web_search_call.action.sources"],
+                    text: {
+                      verbosity: "medium",
+                      format: createFullReportJsonSchema(
+                        "zerinix_market_analysis_report",
+                        reportFields
+                      ),
+                    },
+                  },
+                  { signal: reportAbort.signal }
+                ),
+                FULL_REPORT_OPENAI_TIMEOUT_MS,
+                "OpenAI report generation"
+              );
+            } catch (error) {
+              if (reportAbort.timedOut) {
+                throw createReportTimeoutError(
+                  "OpenAI report generation",
+                  FULL_REPORT_OPENAI_TIMEOUT_MS
+                );
+              }
 
-        logOperationalInfo("[api:market-analysis] provider call completed", {
-          reportField: FULL_REPORT_FIELD,
-          reportRequestId: reportRequestId || null,
-          model,
-          providerCalled: true,
-          quotaConsumed: !productionLimit.quotaAlreadyCharged,
-        });
+              throw error;
+            } finally {
+              reportAbort.cleanup();
+            }
 
-        const warning =
-          isPartialReport
-            ? serializeWarningChunk({
-                warning:
-                  "Market analysis returned a partial report. Some areas need additional market validation before they are decision-grade.",
-                missingFields,
-                invalidFields,
-                partial: true,
-              })
-            : "";
+            const tokenUsage = extractTokenUsage(response);
+            const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
+            const responseTimeMs = Date.now() - startedAt;
+            const responseText = extractResponseText(response);
+            const {
+              report: parsedReport,
+              missingFields,
+              invalidFields,
+            } = parseFullMarketReport(
+              responseText,
+              canonicalFinancialAssumptions,
+              responseLanguage
+            );
+            const reportMetadataContext = createReportMetadataContext({
+              prompt: promptText,
+              report: parsedReport,
+              context: canonicalFinancialAssumptions,
+              operationType: "market_report",
+              estimatedCostUsd,
+            });
+            const cacheResponseText = JSON.stringify(parsedReport);
+            const isPartialReport = isPartialReportResult(missingFields, invalidFields);
 
-        return new Response(encoder.encode(
-          serializeMarketReportMetadataChunk(canonicalFinancialAssumptions) +
-            warning +
-            serializeMarketReportChunks(parsedReport)
-        ), {
-          headers: {
-            "Content-Type": "application/x-ndjson; charset=utf-8",
-            "Cache-Control": "no-cache, no-transform",
-          },
-        });
-      } catch (error) {
-        const configurationError = getAiConfigurationErrorMessage(error);
+            logOperationalInfo("[api:market-analysis] full report section validation", {
+              reportRequestId: reportRequestId || null,
+              model,
+              responseTextLength: responseText.length,
+              completedFields: getCompletedReportFields(reportFields, missingFields, invalidFields),
+              missingFields,
+              invalidFields,
+              partial: isPartialReport,
+            });
+            reportFields.forEach((fieldName) => {
+              logOperationalInfo("[api:market-analysis] section validation step", {
+                reportRequestId: reportRequestId || null,
+                reportField: fieldName,
+                model,
+                status: missingFields.includes(fieldName)
+                  ? "missing"
+                  : invalidFields.includes(fieldName)
+                    ? "invalid"
+                    : "completed",
+                contentLength: parsedReport[fieldName]?.length || 0,
+              });
+            });
 
-        if (configurationError) {
-          return NextResponse.json({ error: configurationError }, { status: 500 });
-        }
+            const warning =
+              isPartialReport
+                ? serializeWarningChunk({
+                    warning:
+                      "Market analysis returned a partial report. Some areas need additional market validation before they are decision-grade.",
+                    missingFields,
+                    invalidFields,
+                    partial: true,
+                  })
+                : "";
 
-        await recordAiUsage(supabase, {
-          userId: user.id,
-          endpoint: "/api/market-analysis",
-          reportField: FULL_REPORT_FIELD,
-          promptHash,
-          model,
-          planTier,
-          tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-          estimatedCostUsd: 0,
-          cacheHit: false,
-          status: "failed",
-          responseTimeMs: Date.now() - startedAt,
-          metadata: {
-            quota_event: false,
-            quota_mode: "market_analysis",
-            quota_consumed: false,
-            report_request_id: reportRequestId || null,
-            usage_kind: "full_report_generation",
-            actual_ai_call: true,
-            max_ai_calls_per_report: MAX_AI_CALLS_PER_MARKET_REPORT,
-            job: queuedJob,
-            ...fullReportInputCostMetrics,
-            failure_reason:
-              error instanceof Error && error.message ? error.message : "GenerationFailed",
-          },
-        });
-        logOperationalInfo("[api:market-analysis] provider call failed", {
-          reportField: FULL_REPORT_FIELD,
-          reportRequestId: reportRequestId || null,
-          model,
-          providerCalled: true,
-          quotaConsumed: false,
-          failureReason:
-            error instanceof Error && error.message ? error.message : "GenerationFailed",
-        });
-        logServerError("api:market-analysis:full-report", error);
+            enqueue(warning + serializeMarketReportChunks(parsedReport));
 
-        const failedFields = [...reportFields];
-        const fallbackReport = createFallbackMarketReport();
-        const warning = serializeWarningChunk({
-          warning:
-            "Market analysis returned a partial report because the provider response could not be parsed completely. Please retry to refresh the affected areas.",
-          missingFields: failedFields,
-          invalidFields: [],
-          partial: true,
-        });
+            await withReportTimeout(
+              (async () => {
+                if (!isPartialReport && !isReportGenerationFailureText(cacheResponseText)) {
+                  await storeCachedAiResponse(supabase, {
+                    userId: user.id,
+                    cacheKey: fullReportCacheKey,
+                    promptHash,
+                    endpoint: "/api/market-analysis",
+                    reportField: FULL_REPORT_FIELD,
+                    language: responseLanguage,
+                    model,
+                    responseText: cacheResponseText,
+                    tokenUsage,
+                    estimatedCostUsd,
+                    expiresInDays: 3,
+                  });
+                } else if (isPartialReport) {
+                  logOperationalInfo("[api:market-analysis] skipped cache for partial full report", {
+                    reportRequestId: reportRequestId || null,
+                    missingFields,
+                    invalidFields,
+                  });
+                }
 
-        return new Response(
-          encoder.encode(
-            serializeMarketReportMetadataChunk(canonicalFinancialAssumptions) +
-              warning +
-              serializeMarketReportChunks(fallbackReport)
-          ),
-          {
-            status: 200,
-            headers: {
-              "Content-Type": "application/x-ndjson; charset=utf-8",
-              "Cache-Control": "no-cache, no-transform",
-            },
+                await recordAiUsage(supabase, {
+                  userId: user.id,
+                  endpoint: "/api/market-analysis",
+                  reportField: FULL_REPORT_FIELD,
+                  promptHash,
+                  model,
+                  planTier,
+                  tokenUsage,
+                  estimatedCostUsd,
+                  cacheHit: false,
+                  responseTimeMs,
+                  metadata: {
+                    quota_event: !productionLimit.quotaAlreadyCharged,
+                    quota_mode: "market_analysis",
+                    quota_consumed: !productionLimit.quotaAlreadyCharged,
+                    report_request_id: reportRequestId || null,
+                    usage_kind: "full_report_generation",
+                    actual_ai_call: true,
+                    max_ai_calls_per_report: MAX_AI_CALLS_PER_MARKET_REPORT,
+                    job: queuedJob,
+                    ...fullReportInputCostMetrics,
+                    ...flattenReportMetadataForUsage(reportMetadataContext),
+                  },
+                });
+              })(),
+              FULL_REPORT_POST_PROCESS_TIMEOUT_MS,
+              "Report post-processing"
+            ).catch((error) => {
+              logServerError("api:market-analysis:full-report-post-process", error);
+            });
+
+            logOperationalInfo("[api:market-analysis] provider call completed", {
+              reportField: FULL_REPORT_FIELD,
+              reportRequestId: reportRequestId || null,
+              model,
+              providerCalled: true,
+              quotaConsumed: !productionLimit.quotaAlreadyCharged,
+            });
+          } catch (error) {
+            const configurationError = getAiConfigurationErrorMessage(error);
+            const errorMessage =
+              configurationError ||
+              (error instanceof Error && error.message ? error.message : "GenerationFailed");
+
+            await withReportTimeout(
+              recordAiUsage(supabase, {
+                userId: user.id,
+                endpoint: "/api/market-analysis",
+                reportField: FULL_REPORT_FIELD,
+                promptHash,
+                model,
+                planTier,
+                tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+                estimatedCostUsd: 0,
+                cacheHit: false,
+                status: "failed",
+                responseTimeMs: Date.now() - startedAt,
+                metadata: {
+                  quota_event: false,
+                  quota_mode: "market_analysis",
+                  quota_consumed: false,
+                  report_request_id: reportRequestId || null,
+                  usage_kind: "full_report_generation",
+                  actual_ai_call: true,
+                  max_ai_calls_per_report: MAX_AI_CALLS_PER_MARKET_REPORT,
+                  job: queuedJob,
+                  ...fullReportInputCostMetrics,
+                  failure_reason: errorMessage,
+                },
+              }),
+              FULL_REPORT_POST_PROCESS_TIMEOUT_MS,
+              "Failed report usage write"
+            ).catch((usageError) => {
+              logServerError("api:market-analysis:full-report-failed-usage-write", usageError);
+            });
+            logOperationalInfo("[api:market-analysis] provider call failed", {
+              reportField: FULL_REPORT_FIELD,
+              reportRequestId: reportRequestId || null,
+              model,
+              providerCalled: true,
+              quotaConsumed: false,
+              failureReason: errorMessage,
+            });
+            logServerError("api:market-analysis:full-report", error);
+
+            const failedFields = [...reportFields];
+            const fallbackReport = createFallbackMarketReport();
+            const warning = serializeWarningChunk({
+              warning:
+                "Market analysis returned a partial report because the provider response could not be parsed completely. Please retry to refresh the affected areas.",
+              missingFields: failedFields,
+              invalidFields: [],
+              partial: true,
+            });
+
+            enqueue(warning + serializeMarketReportChunks(fallbackReport));
+          } finally {
+            controller.close();
           }
-        );
-      }
+        },
+      });
+
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/x-ndjson; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+        },
+      });
     }
 
     const cacheKey = createAiCacheKey({

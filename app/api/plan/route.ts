@@ -83,8 +83,67 @@ type PlanReportMetadataChunk = {
 const FULL_REPORT_FIELD = "fullReport";
 const MAX_AI_CALLS_PER_PLAN_REPORT = 1;
 const FULL_REPORT_MAX_OUTPUT_TOKENS = 12_000;
+const FULL_REPORT_OPENAI_TIMEOUT_MS = 180_000;
+const FULL_REPORT_POST_PROCESS_TIMEOUT_MS = 12_000;
 
 type PlanGenerationStage = ReportPipelineStage;
+
+function createReportTimeoutError(label: string, timeoutMs: number) {
+  return new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+}
+
+async function withReportTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string
+) {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(createReportTimeoutError(label, timeoutMs)),
+          timeoutMs
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+function createReportAbortSignal(parentSignal: AbortSignal, timeoutMs: number) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort(createReportTimeoutError("OpenAI report generation", timeoutMs));
+  }, timeoutMs);
+  const abortFromParent = () => {
+    controller.abort(parentSignal.reason);
+  };
+
+  if (parentSignal.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal.addEventListener("abort", abortFromParent, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    get timedOut() {
+      return timedOut;
+    },
+    cleanup() {
+      clearTimeout(timeoutId);
+      parentSignal.removeEventListener("abort", abortFromParent);
+    },
+  };
+}
 
 function detectLanguage(value: string): ResponseLanguage {
   const normalized = value.toLowerCase();
@@ -1917,197 +1976,242 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
       const startedAt = Date.now();
       let fullReportStage: PlanGenerationStage = "provider_call";
 
-      try {
-        fullReportStage = "provider_call";
-        logOperationalInfo("[api:plan] provider call started", {
-          reportField: FULL_REPORT_FIELD,
-          reportRequestId: reportRequestId || null,
-          model,
-          providerCalled: true,
-          quotaConsumed: false,
-        });
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const enqueue = (chunk: string) => {
+            controller.enqueue(encoder.encode(chunk));
+          };
 
-        const client = createOpenAiClient();
-        logAiExecution({
-          endpoint: "/api/plan",
-          source: "real_ai",
-          mode: FULL_REPORT_FIELD,
-          model,
-        });
-        const response = await client.responses.create(
-          {
-            model,
-            instructions,
-            input: fullReportInput,
-            max_output_tokens: FULL_REPORT_MAX_OUTPUT_TOKENS,
-            reasoning: {
-              effort: "low",
-            },
-            text: {
-              verbosity: "medium",
-              format: createFullReportJsonSchema(
-                "zerinix_business_plan_report",
-                planFields
-              ),
-            },
-          },
-          { signal: req.signal }
-        );
-        fullReportStage = "response_status";
-        logPlanStage(fullReportStage, {
-          reportField: FULL_REPORT_FIELD,
-          reportRequestId: reportRequestId || null,
-          status: getOpenAiResponseStatusDetails(response).status,
-        });
-        const tokenUsage = extractTokenUsage(response);
-        const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
-        const responseTimeMs = Date.now() - startedAt;
-        assertCompletedOpenAiResponse(response);
-        fullReportStage = "response_extraction";
-        const responseText = extractResponseText(response);
-        if (!responseText.trim()) {
-          const details = getOpenAiResponseStatusDetails(response);
-          throw new Error(
-            `OpenAI response completed without output_text. status=${details.status} outputLength=0`
-          );
-        }
-        fullReportStage = "json_parse";
-        const parsedReport = parseFullPlanReport(
-          responseText,
-          canonicalFinancialAssumptions,
-          responseLanguage
-        );
-        const reportMetadataContext = createReportMetadataContext({
-          prompt: promptText,
-          report: parsedReport,
-          context: canonicalFinancialAssumptions,
-          operationType: "plan_report",
-          estimatedCostUsd,
-        });
-        const cacheResponseText = JSON.stringify(parsedReport);
+          enqueue(serializePlanReportMetadataChunk(canonicalFinancialAssumptions));
 
-        if (!isReportGenerationFailureText(cacheResponseText)) {
-          fullReportStage = "cache_write";
-          await storeCachedAiResponse(supabase, {
-            userId: user.id,
-            cacheKey: fullReportCacheKey,
-            promptHash,
-            endpoint: "/api/plan",
-            reportField: FULL_REPORT_FIELD,
-            language: responseLanguage,
-            model,
-            responseText: cacheResponseText,
-            tokenUsage,
-            estimatedCostUsd,
-            expiresInDays: 7,
-          });
-        }
+          try {
+            fullReportStage = "provider_call";
+            logOperationalInfo("[api:plan] provider call started", {
+              reportField: FULL_REPORT_FIELD,
+              reportRequestId: reportRequestId || null,
+              model,
+              providerCalled: true,
+              quotaConsumed: false,
+            });
 
-        fullReportStage = "usage_write";
-        await recordAiUsage(supabase, {
-          userId: user.id,
-          endpoint: "/api/plan",
-          reportField: FULL_REPORT_FIELD,
-          promptHash,
-          model,
-          planTier,
-          tokenUsage,
-          estimatedCostUsd,
-          cacheHit: false,
-          responseTimeMs,
-          metadata: {
-            quota_event: !productionLimit.quotaAlreadyCharged,
-            quota_mode: "report_generation",
-            quota_consumed: !productionLimit.quotaAlreadyCharged,
-            report_request_id: reportRequestId || null,
-            usage_kind: "full_report_generation",
-            actual_ai_call: true,
-            max_ai_calls_per_report: MAX_AI_CALLS_PER_PLAN_REPORT,
-            job: queuedJob,
-            ...fullReportInputCostMetrics,
-            ...flattenReportMetadataForUsage(reportMetadataContext),
-          },
-        });
+            const client = createOpenAiClient();
+            const reportAbort = createReportAbortSignal(
+              req.signal,
+              FULL_REPORT_OPENAI_TIMEOUT_MS
+            );
+            logAiExecution({
+              endpoint: "/api/plan",
+              source: "real_ai",
+              mode: FULL_REPORT_FIELD,
+              model,
+            });
+            let response: Awaited<ReturnType<typeof client.responses.create>>;
 
-        logOperationalInfo("[api:plan] provider call completed", {
-          reportField: FULL_REPORT_FIELD,
-          reportRequestId: reportRequestId || null,
-          model,
-          providerCalled: true,
-          quotaConsumed: !productionLimit.quotaAlreadyCharged,
-        });
+            try {
+              response = await withReportTimeout(
+                client.responses.create(
+                  {
+                    model,
+                    instructions,
+                    input: fullReportInput,
+                    max_output_tokens: FULL_REPORT_MAX_OUTPUT_TOKENS,
+                    reasoning: {
+                      effort: "low",
+                    },
+                    text: {
+                      verbosity: "medium",
+                      format: createFullReportJsonSchema(
+                        "zerinix_business_plan_report",
+                        planFields
+                      ),
+                    },
+                  },
+                  { signal: reportAbort.signal }
+                ),
+                FULL_REPORT_OPENAI_TIMEOUT_MS,
+                "OpenAI report generation"
+              );
+            } catch (error) {
+              if (reportAbort.timedOut) {
+                throw createReportTimeoutError(
+                  "OpenAI report generation",
+                  FULL_REPORT_OPENAI_TIMEOUT_MS
+                );
+              }
 
-        fullReportStage = "stream_response";
-        return new Response(encoder.encode(
-          serializePlanReportMetadataChunk(canonicalFinancialAssumptions) +
-            serializePlanReportChunks(parsedReport)
-        ), {
-          headers: {
-            "Content-Type": "application/x-ndjson; charset=utf-8",
-            "Cache-Control": "no-cache, no-transform",
-          },
-        });
-      } catch (error) {
-        const configurationError = getAiConfigurationErrorMessage(error);
+              throw error;
+            } finally {
+              reportAbort.cleanup();
+            }
 
-        if (configurationError) {
-          return NextResponse.json({ error: configurationError }, { status: 500 });
-        }
+            fullReportStage = "response_status";
+            logPlanStage(fullReportStage, {
+              reportField: FULL_REPORT_FIELD,
+              reportRequestId: reportRequestId || null,
+              status: getOpenAiResponseStatusDetails(response).status,
+            });
+            const tokenUsage = extractTokenUsage(response);
+            const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
+            const responseTimeMs = Date.now() - startedAt;
+            assertCompletedOpenAiResponse(response);
+            fullReportStage = "response_extraction";
+            const responseText = extractResponseText(response);
+            if (!responseText.trim()) {
+              const details = getOpenAiResponseStatusDetails(response);
+              throw new Error(
+                `OpenAI response completed without output_text. status=${details.status} outputLength=0`
+              );
+            }
+            fullReportStage = "json_parse";
+            const parsedReport = parseFullPlanReport(
+              responseText,
+              canonicalFinancialAssumptions,
+              responseLanguage
+            );
+            const reportMetadataContext = createReportMetadataContext({
+              prompt: promptText,
+              report: parsedReport,
+              context: canonicalFinancialAssumptions,
+              operationType: "plan_report",
+              estimatedCostUsd,
+            });
+            const cacheResponseText = JSON.stringify(parsedReport);
 
-        await recordAiUsage(supabase, {
-          userId: user.id,
-          endpoint: "/api/plan",
-          reportField: FULL_REPORT_FIELD,
-          promptHash,
-          model,
-          planTier,
-          tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-          estimatedCostUsd: 0,
-          cacheHit: false,
-          status: "failed",
-          responseTimeMs: Date.now() - startedAt,
-          metadata: {
-            quota_event: false,
-            quota_mode: "report_generation",
-            quota_consumed: false,
-            report_request_id: reportRequestId || null,
-            usage_kind: "full_report_generation",
-            actual_ai_call: true,
-            max_ai_calls_per_report: MAX_AI_CALLS_PER_PLAN_REPORT,
-            job: queuedJob,
-            ...fullReportInputCostMetrics,
-            failure_reason:
-              error instanceof Error && error.message ? error.message : "GenerationFailed",
-          },
-        });
-        logOperationalInfo("[api:plan] provider call failed", {
-          reportField: FULL_REPORT_FIELD,
-          reportRequestId: reportRequestId || null,
-          model,
-          providerCalled: true,
-          quotaConsumed: false,
-          failureReason:
-            error instanceof Error && error.message ? error.message : "GenerationFailed",
-        });
-        const errorMessage =
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : "GenerationFailed";
-        console.error("[api:plan] full report failed", {
-          reportField: FULL_REPORT_FIELD,
-          reportRequestId: reportRequestId || null,
-          model,
-          stage: fullReportStage,
-          message: errorMessage,
-          stack: error instanceof Error ? error.stack : null,
-        });
-        logServerError("api:plan:full-report", error);
+            fullReportStage = "stream_response";
+            enqueue(serializePlanReportChunks(parsedReport));
 
-        return NextResponse.json(
-          { error: `Plan report generation failed at ${fullReportStage}: ${errorMessage}` },
-          { status: 502 }
-        );
-      }
+            await withReportTimeout(
+              (async () => {
+                if (!isReportGenerationFailureText(cacheResponseText)) {
+                  fullReportStage = "cache_write";
+                  await storeCachedAiResponse(supabase, {
+                    userId: user.id,
+                    cacheKey: fullReportCacheKey,
+                    promptHash,
+                    endpoint: "/api/plan",
+                    reportField: FULL_REPORT_FIELD,
+                    language: responseLanguage,
+                    model,
+                    responseText: cacheResponseText,
+                    tokenUsage,
+                    estimatedCostUsd,
+                    expiresInDays: 7,
+                  });
+                }
+
+                fullReportStage = "usage_write";
+                await recordAiUsage(supabase, {
+                  userId: user.id,
+                  endpoint: "/api/plan",
+                  reportField: FULL_REPORT_FIELD,
+                  promptHash,
+                  model,
+                  planTier,
+                  tokenUsage,
+                  estimatedCostUsd,
+                  cacheHit: false,
+                  responseTimeMs,
+                  metadata: {
+                    quota_event: !productionLimit.quotaAlreadyCharged,
+                    quota_mode: "report_generation",
+                    quota_consumed: !productionLimit.quotaAlreadyCharged,
+                    report_request_id: reportRequestId || null,
+                    usage_kind: "full_report_generation",
+                    actual_ai_call: true,
+                    max_ai_calls_per_report: MAX_AI_CALLS_PER_PLAN_REPORT,
+                    job: queuedJob,
+                    ...fullReportInputCostMetrics,
+                    ...flattenReportMetadataForUsage(reportMetadataContext),
+                  },
+                });
+              })(),
+              FULL_REPORT_POST_PROCESS_TIMEOUT_MS,
+              "Report post-processing"
+            ).catch((error) => {
+              logServerError("api:plan:full-report-post-process", error);
+            });
+
+            logOperationalInfo("[api:plan] provider call completed", {
+              reportField: FULL_REPORT_FIELD,
+              reportRequestId: reportRequestId || null,
+              model,
+              providerCalled: true,
+              quotaConsumed: !productionLimit.quotaAlreadyCharged,
+            });
+          } catch (error) {
+            const configurationError = getAiConfigurationErrorMessage(error);
+            const errorMessage =
+              configurationError ||
+              (error instanceof Error && error.message.trim()
+                ? error.message
+                : "GenerationFailed");
+
+            await withReportTimeout(
+              recordAiUsage(supabase, {
+                userId: user.id,
+                endpoint: "/api/plan",
+                reportField: FULL_REPORT_FIELD,
+                promptHash,
+                model,
+                planTier,
+                tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+                estimatedCostUsd: 0,
+                cacheHit: false,
+                status: "failed",
+                responseTimeMs: Date.now() - startedAt,
+                metadata: {
+                  quota_event: false,
+                  quota_mode: "report_generation",
+                  quota_consumed: false,
+                  report_request_id: reportRequestId || null,
+                  usage_kind: "full_report_generation",
+                  actual_ai_call: true,
+                  max_ai_calls_per_report: MAX_AI_CALLS_PER_PLAN_REPORT,
+                  job: queuedJob,
+                  ...fullReportInputCostMetrics,
+                  failure_reason: errorMessage,
+                },
+              }),
+              FULL_REPORT_POST_PROCESS_TIMEOUT_MS,
+              "Failed report usage write"
+            ).catch((usageError) => {
+              logServerError("api:plan:full-report-failed-usage-write", usageError);
+            });
+            logOperationalInfo("[api:plan] provider call failed", {
+              reportField: FULL_REPORT_FIELD,
+              reportRequestId: reportRequestId || null,
+              model,
+              providerCalled: true,
+              quotaConsumed: false,
+              failureReason: errorMessage,
+            });
+            console.error("[api:plan] full report failed", {
+              reportField: FULL_REPORT_FIELD,
+              reportRequestId: reportRequestId || null,
+              model,
+              stage: fullReportStage,
+              message: errorMessage,
+              stack: error instanceof Error ? error.stack : null,
+            });
+            logServerError("api:plan:full-report", error);
+            enqueue(
+              serializePlanChunk(
+                "executiveSummary",
+                `Plan report generation failed at ${fullReportStage}: ${errorMessage}`
+              )
+            );
+          } finally {
+            controller.close();
+          }
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "application/x-ndjson; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+        },
+      });
     }
 
     const cacheKey = createAiCacheKey({

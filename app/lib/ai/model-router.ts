@@ -24,6 +24,12 @@ const defaultOperationTiers: Record<AiModelRoutingOperation, AiModelRoutingTier>
   executive_report: "HIGH_QUALITY",
 };
 
+const fallbackTierModels: Record<AiModelRoutingTier, string> = {
+  FAST: "gpt-5-nano",
+  BALANCED: "gpt-5-mini",
+  HIGH_QUALITY: "gpt-5-mini",
+};
+
 function readJsonConfig(name: string) {
   const raw = process.env[name];
 
@@ -73,11 +79,7 @@ function readRoutingConfig(): AiModelRoutingConfig {
 export function resolveAiModelForOperation(operation: AiModelRoutingOperation) {
   const config = readRoutingConfig();
   const tier = config.operations[operation] || defaultOperationTiers[operation];
-  const model = config.tiers[tier];
-
-  if (!model) {
-    throw new Error(`AI model routing is not configured for ${tier}.`);
-  }
+  const model = config.tiers[tier] || fallbackTierModels[tier];
 
   return model;
 }
