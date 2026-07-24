@@ -1,11 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { jsPDF } from "jspdf";
 import { Download } from "lucide-react";
 import type { DashboardReport } from "../report-utils";
 import { isReportGenerationFailureText } from "@/app/lib/report-errors";
 import { dedupeReportSections } from "@/app/lib/report-section-normalization";
+import {
+  applyPdfFont,
+  createPdfDocument,
+  drawPdfFooter,
+  drawPdfLogoMark,
+  getPdfPageMetrics,
+  paintPdfPageBackground,
+} from "@/app/lib/pdf-engine/core";
+import { drawPdfSectionCardFrame } from "@/app/lib/pdf-engine/section-renderer";
+import {
+  splitPdfReadableLines as splitPdfReadableLinesWithEngine,
+  wrapPdfText as wrapPdfTextWithEngine,
+} from "@/app/lib/pdf-engine/utils";
 import {
   buildExecutiveSnapshot,
   compactExecutiveDecisionMemoSections,
@@ -1835,11 +1847,8 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
     setError("");
 
     try {
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 14;
-      const contentWidth = pageWidth - margin * 2;
+      const pdf = createPdfDocument();
+      const { pageWidth, pageHeight, margin, contentWidth } = getPdfPageMetrics(pdf);
       const bodyX = margin + 20;
       const bodyWidth = contentWidth - 28;
       const bodyLineHeight = 5.25;
@@ -1877,24 +1886,10 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       const tocEntries: Array<{ title: string; page: number }> = [];
       let y = margin;
 
-      pdf.addFileToVFS("Geist-Regular.ttf", fontBase64);
-      pdf.addFont("Geist-Regular.ttf", "Geist", "normal");
-      pdf.setFont("Geist", "normal");
-      pdf.setCharSpace(0);
+      applyPdfFont(pdf, fontBase64);
 
       const paintPage = () => {
-        pdf.setFillColor("#000000");
-        pdf.rect(0, 0, pageWidth, pageHeight, "F");
-        pdf.setDrawColor("#0f766e");
-        pdf.setLineWidth(0.15);
-
-        for (let gridX = 0; gridX <= pageWidth; gridX += 18) {
-          pdf.line(gridX, 0, gridX, pageHeight);
-        }
-
-        for (let gridY = 0; gridY <= pageHeight; gridY += 18) {
-          pdf.line(0, gridY, pageWidth, gridY);
-        }
+        paintPdfPageBackground(pdf, { pageWidth, pageHeight });
       };
 
       const ensureSpace = (height: number) => {
@@ -1909,35 +1904,17 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       };
 
       const drawFooter = (includePageCounter = false) => {
-        const currentPage = pdf.getCurrentPageInfo().pageNumber;
-
-        pdf.setFillColor("#000000");
-        pdf.rect(0, pageHeight - 13, pageWidth, 13, "F");
-        pdf.setDrawColor("#27272a");
-        pdf.line(margin, pageHeight - 10, pageWidth - margin, pageHeight - 10);
-
-        if (!includePageCounter) {
-          return;
-        }
-
-        pdf.setFontSize(7);
-        pdf.setTextColor("#71717a");
-        pdf.text(
-          pdfLocale === "tr"
-            ? `Sayfa ${currentPage} / ${pdf.getNumberOfPages()}`
-            : `Page ${currentPage} / ${pdf.getNumberOfPages()}`,
-          pageWidth - margin - 22,
-          pageHeight - 5
-        );
+        drawPdfFooter(pdf, {
+          pageWidth,
+          pageHeight,
+          margin,
+          locale: pdfLocale,
+          includePageCounter,
+        });
       };
 
       const drawLogoMark = (x: number, logoY: number, size = 13) => {
-        pdf.setFillColor("#042f2e");
-        pdf.setDrawColor("#14b8a6");
-        pdf.roundedRect(x, logoY, size, size, 3, 3, "FD");
-        pdf.setFontSize(size * 0.52);
-        pdf.setTextColor("#ccfbf1");
-        pdf.text("Z", x + size * 0.34, logoY + size * 0.68);
+        drawPdfLogoMark(pdf, x, logoY, size);
       };
 
       const drawTag = (label: string, x: number, tagY: number, width: number) => {
@@ -1950,32 +1927,17 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       };
 
       const splitPdfReadableLines = (content: string, width: number) =>
-        repairPdfLineFragments(
-          content.split("\n").flatMap((rawLine) => {
-            const line = normalizePdfText(rawLine);
-
-            if (!line) {
-              return [""];
-            }
-
-            const isBullet = /^[-*•]\s+/.test(line);
-            const isSourceMetaLine = /^(?:Domain|Publisher|Year|Confidence|Type|URL)\s*:/i.test(line);
-            const availableWidth = isBullet || isSourceMetaLine ? width - 4 : width;
-            const wrapped = pdf.splitTextToSize(line, availableWidth) as string[];
-
-            return wrapped.map((wrappedLine, index) => {
-              if (isSourceMetaLine) {
-                return `${index > 0 ? "    " : "  "}${wrappedLine}`;
-              }
-
-              return isBullet && index > 0 ? `  ${wrappedLine}` : wrappedLine;
-            });
-          }),
-          isOrphanBulletText
-        );
+        splitPdfReadableLinesWithEngine({
+          pdf,
+          content,
+          width,
+          normalizeText: normalizePdfText,
+          repairLineFragments: repairPdfLineFragments,
+          isOrphanBulletText,
+        });
 
       const wrapPdfText = (text: string, width: number) =>
-        pdf.splitTextToSize(normalizePdfText(text), width) as string[];
+        wrapPdfTextWithEngine({ pdf, text, width, normalizeText: normalizePdfText });
 
       const conciseCoverText = (text: string, maxLength = 94) => {
         const normalized = normalizePdfText(text)
@@ -3078,24 +3040,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             page: pdf.getCurrentPageInfo().pageNumber,
           });
 
-          pdf.setFillColor("#09090b");
-          pdf.setDrawColor("#27272a");
-          pdf.roundedRect(margin, y, contentWidth, cardHeight, 5, 5, "FD");
-
-          pdf.setFillColor("#111113");
-          pdf.roundedRect(margin, y, contentWidth, 18, 5, 5, "F");
-
-          pdf.setFillColor("#18181b");
-          pdf.setDrawColor("#27272a");
-          pdf.roundedRect(margin + 4, y + 5, 11, 11, 3, 3, "FD");
-
-          pdf.setDrawColor("#99f6e4");
-          pdf.circle(margin + 9.5, y + 10.5, 2.9, "S");
-          pdf.line(margin + 9.5, y + 7.8, margin + 9.5, y + 13.2);
-          pdf.line(margin + 6.8, y + 10.5, margin + 12.2, y + 10.5);
-
-          pdf.setFillColor("#5eead4");
-          pdf.rect(margin, y + 5, 1, cardHeight - 10, "F");
+          drawPdfSectionCardFrame(pdf, { margin, y, contentWidth, cardHeight });
 
           pdf.setFontSize(14);
           pdf.setTextColor("#ffffff");
@@ -3170,24 +3115,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
               cardBottomPadding
           );
 
-          pdf.setFillColor("#09090b");
-          pdf.setDrawColor("#27272a");
-          pdf.roundedRect(margin, y, contentWidth, cardHeight, 5, 5, "FD");
-
-          pdf.setFillColor("#111113");
-          pdf.roundedRect(margin, y, contentWidth, 18, 5, 5, "F");
-
-          pdf.setFillColor("#18181b");
-          pdf.setDrawColor("#27272a");
-          pdf.roundedRect(margin + 4, y + 5, 11, 11, 3, 3, "FD");
-
-          pdf.setDrawColor("#99f6e4");
-          pdf.circle(margin + 9.5, y + 10.5, 2.9, "S");
-          pdf.line(margin + 9.5, y + 7.8, margin + 9.5, y + 13.2);
-          pdf.line(margin + 6.8, y + 10.5, margin + 12.2, y + 10.5);
-
-          pdf.setFillColor("#5eead4");
-          pdf.rect(margin, y + 5, 1, cardHeight - 10, "F");
+          drawPdfSectionCardFrame(pdf, { margin, y, contentWidth, cardHeight });
 
           pdf.setFontSize(14);
           pdf.setTextColor("#ffffff");
