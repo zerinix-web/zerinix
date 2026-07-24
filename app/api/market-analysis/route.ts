@@ -37,6 +37,7 @@ import { validateGeneratedReportSections } from "@/app/lib/report-quality-valida
 import { evaluateReportConfidence } from "@/app/lib/report-confidence";
 import { scoreReportSources } from "@/app/lib/source-reliability";
 import { aggregateReportEvidence } from "@/app/lib/live-evidence";
+import { createExecutiveDecisionIntelligence } from "@/app/lib/executive-decision-intelligence";
 import {
   createOpenAiClient,
   getAiConfigurationErrorMessage,
@@ -1696,6 +1697,13 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
             validation: cachedReportValidation,
             sources: cachedSourceReliability,
           });
+          const cachedDecisionIntelligence = createExecutiveDecisionIntelligence({
+            report: parsedCachedReport,
+            validation: cachedReportValidation,
+            sources: cachedSourceReliability,
+            evidence: cachedLiveEvidence,
+            confidence: cachedReportConfidence,
+          });
 
           await recordAiUsage(supabase, {
             userId: user.id,
@@ -1724,6 +1732,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
               ...cachedSourceReliability,
               ...cachedLiveEvidence,
               ...cachedReportConfidence,
+              ...cachedDecisionIntelligence,
             },
           });
 
@@ -1896,6 +1905,13 @@ Do not include markdown code fences, braces inside string values, or commentary 
           validation: reportValidation,
           sources: sourceReliability,
         });
+        const decisionIntelligence = createExecutiveDecisionIntelligence({
+          report: parsedReport,
+          validation: reportValidation,
+          sources: sourceReliability,
+          evidence: liveEvidence,
+          confidence: reportConfidence,
+        });
         const cacheResponseText = JSON.stringify(parsedReport);
         const isPartialReport = Boolean(missingFields.length || invalidFields.length);
 
@@ -1972,6 +1988,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
             ...sourceReliability,
             ...liveEvidence,
             ...reportConfidence,
+            ...decisionIntelligence,
           },
         });
 

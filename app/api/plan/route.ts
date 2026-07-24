@@ -37,6 +37,7 @@ import { validateGeneratedReportSections } from "@/app/lib/report-quality-valida
 import { evaluateReportConfidence } from "@/app/lib/report-confidence";
 import { scoreReportSources } from "@/app/lib/source-reliability";
 import { aggregateReportEvidence } from "@/app/lib/live-evidence";
+import { createExecutiveDecisionIntelligence } from "@/app/lib/executive-decision-intelligence";
 import {
   createOpenAiClient,
   getAiConfigurationErrorMessage,
@@ -2083,6 +2084,13 @@ Write only the content for this section. Do not write a JSON object, field name,
           validation: cachedReportValidation,
           sources: cachedSourceReliability,
         });
+        const cachedDecisionIntelligence = createExecutiveDecisionIntelligence({
+          report: parsedCachedReport,
+          validation: cachedReportValidation,
+          sources: cachedSourceReliability,
+          evidence: cachedLiveEvidence,
+          confidence: cachedReportConfidence,
+        });
 
         await recordAiUsage(supabase, {
           userId: user.id,
@@ -2111,6 +2119,7 @@ Write only the content for this section. Do not write a JSON object, field name,
             ...cachedSourceReliability,
             ...cachedLiveEvidence,
             ...cachedReportConfidence,
+            ...cachedDecisionIntelligence,
           },
         });
 
@@ -2272,6 +2281,13 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
           validation: reportValidation,
           sources: sourceReliability,
         });
+        const decisionIntelligence = createExecutiveDecisionIntelligence({
+          report: parsedReport,
+          validation: reportValidation,
+          sources: sourceReliability,
+          evidence: liveEvidence,
+          confidence: reportConfidence,
+        });
         const cacheResponseText = JSON.stringify(parsedReport);
 
         if (!isReportGenerationFailureText(cacheResponseText)) {
@@ -2317,6 +2333,7 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
             ...sourceReliability,
             ...liveEvidence,
             ...reportConfidence,
+            ...decisionIntelligence,
           },
         });
 

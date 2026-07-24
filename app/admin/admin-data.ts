@@ -135,6 +135,11 @@ export type AdminDashboardData = {
     reportsWithoutEvidence: number;
     evidenceFreshnessDistribution: Array<{ freshness: string; count: number }>;
     evidenceSourceTypeDistribution: Array<{ type: string; count: number }>;
+    averageDecisionScore: number;
+    decisionDistribution: Array<{ decision: string; count: number }>;
+    highRiskReportCount: number;
+    highImpactReportCount: number;
+    averageImplementationComplexity: number;
     cachedTokens: number;
     totalTokens: number;
     cost: number;
@@ -843,6 +848,11 @@ function buildMockAdminDashboardData(dateRange: AdminDateRange): AdminDashboardD
       reportsWithoutEvidence: 0,
       evidenceFreshnessDistribution: [],
       evidenceSourceTypeDistribution: [],
+      averageDecisionScore: 0,
+      decisionDistribution: [],
+      highRiskReportCount: 0,
+      highImpactReportCount: 0,
+      averageImplementationComplexity: 0,
       cachedTokens: 0,
       totalTokens: 0,
       cost: 0,
@@ -2760,6 +2770,11 @@ function calculateOpenAiAnalytics(input: {
       reportsWithoutEvidence: 0,
       evidenceFreshnessDistribution: [],
       evidenceSourceTypeDistribution: [],
+      averageDecisionScore: 0,
+      decisionDistribution: [],
+      highRiskReportCount: 0,
+      highImpactReportCount: 0,
+      averageImplementationComplexity: 0,
       cachedTokens: input.official.cachedTokens,
       totalTokens: input.official.totalTokens,
       cost,
@@ -2998,6 +3013,44 @@ function calculateOpenAiAnalytics(input: {
     .filter(([, count]) => count > 0)
     .map(([type, count]) => ({ type, count }))
     .sort((a, b) => b.count - a.count);
+  const decisionScores = input.usage
+    .map((row) => readNumber(readUsageMetadata(row).decision_score))
+    .filter((score) => score > 0);
+  const averageDecisionScore = decisionScores.length
+    ? Math.round(decisionScores.reduce((sum, score) => sum + score, 0) / decisionScores.length)
+    : 0;
+  const complexityScores = input.usage
+    .map((row) => readNumber(readUsageMetadata(row).execution_complexity))
+    .filter((score) => score > 0);
+  const averageImplementationComplexity = complexityScores.length
+    ? Math.round(complexityScores.reduce((sum, score) => sum + score, 0) / complexityScores.length)
+    : 0;
+  const decisionDistributionMap = new Map<string, number>();
+  let highRiskReportCount = 0;
+  let highImpactReportCount = 0;
+
+  input.usage.forEach((row) => {
+    const metadata = readUsageMetadata(row);
+    const decision = readString(metadata.recommended_decision);
+    const decisionScore = readNumber(metadata.decision_score);
+    const impactScore = readNumber(metadata.impact_score);
+    const complexityScore = readNumber(metadata.execution_complexity);
+
+    if (decision) {
+      decisionDistributionMap.set(decision, (decisionDistributionMap.get(decision) || 0) + 1);
+    }
+
+    if ((decisionScore > 0 && decisionScore < 45) || complexityScore >= 70) {
+      highRiskReportCount += 1;
+    }
+
+    if (impactScore >= 75) {
+      highImpactReportCount += 1;
+    }
+  });
+  const decisionDistribution = [...decisionDistributionMap.entries()]
+    .map(([decision, count]) => ({ decision, count }))
+    .sort((a, b) => b.count - a.count);
   const estimatedTokenSavings = input.usage.reduce((sum, row) => {
     if (!Boolean(row.cache_hit)) {
       return sum;
@@ -3115,6 +3168,11 @@ function calculateOpenAiAnalytics(input: {
     reportsWithoutEvidence,
     evidenceFreshnessDistribution,
     evidenceSourceTypeDistribution,
+    averageDecisionScore,
+    decisionDistribution,
+    highRiskReportCount,
+    highImpactReportCount,
+    averageImplementationComplexity,
     cachedTokens,
     totalTokens,
     cost,

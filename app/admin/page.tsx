@@ -458,6 +458,10 @@ function OpenAiAnalyticsSection({ data }: { data: AdminDashboardData }) {
           ["Low confidence", formatCompactNumber(data.openAiAnalytics.lowConfidenceReportCount)],
           ["Evidence", formatCompactNumber(data.openAiAnalytics.averageEvidenceCount)],
           ["No evidence", formatCompactNumber(data.openAiAnalytics.reportsWithoutEvidence)],
+          ["Decision", data.openAiAnalytics.averageDecisionScore ? `${data.openAiAnalytics.averageDecisionScore}/100` : "NO DATA"],
+          ["High risk", formatCompactNumber(data.openAiAnalytics.highRiskReportCount)],
+          ["High impact", formatCompactNumber(data.openAiAnalytics.highImpactReportCount)],
+          ["Complexity", data.openAiAnalytics.averageImplementationComplexity ? `${data.openAiAnalytics.averageImplementationComplexity}/100` : "NO DATA"],
           ["Cache hits", formatCompactNumber(data.openAiAnalytics.cacheHits)],
           ["Cache misses", formatCompactNumber(data.openAiAnalytics.cacheMisses)],
           ["Token savings", formatCompactNumber(data.openAiAnalytics.estimatedTokenSavings)],
@@ -507,6 +511,16 @@ function OpenAiAnalyticsSection({ data }: { data: AdminDashboardData }) {
           {data.openAiAnalytics.evidenceSourceTypeDistribution.slice(0, 5).map((item) => (
             <span key={item.type} className="rounded-full border border-emerald-300/15 bg-emerald-300/5 px-2.5 py-1 text-[11px] text-emerald-100/80">
               {item.type}: {formatCompactNumber(item.count)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {data.openAiAnalytics.decisionDistribution.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {data.openAiAnalytics.decisionDistribution.map((item) => (
+            <span key={item.decision} className="rounded-full border border-teal-300/15 bg-teal-300/5 px-2.5 py-1 text-[11px] text-teal-100/80">
+              {item.decision}: {formatCompactNumber(item.count)}
             </span>
           ))}
         </div>
