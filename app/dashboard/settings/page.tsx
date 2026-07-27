@@ -18,8 +18,13 @@ import {
   UserRound,
 } from "lucide-react";
 import { createClient } from "@/app/lib/supabase/server";
+import MobileAccountHome from "@/components/mobile/MobileAccountHome";
 import DashboardSidebar from "../DashboardSidebar";
-import { getAuthenticatedUser } from "../report-utils";
+import {
+  getAuthenticatedUser,
+  loadUserReportCount,
+} from "../report-utils";
+import { loadBillingOverview } from "../billing/billing-data";
 import {
   requestAccountDeletion,
   signOutAllDevices,
@@ -45,9 +50,16 @@ export default async function SettingsPage({
     redirect("/login?next=/dashboard/settings");
   }
 
-  const [{ settings_notice: notice, settings_error: error }, settings] = await Promise.all([
+  const [
+    { settings_notice: notice, settings_error: error },
+    settings,
+    billing,
+    reportCount,
+  ] = await Promise.all([
     searchParams,
     loadUserSettingsProfile(supabase, user),
+    loadBillingOverview(supabase, user),
+    loadUserReportCount(supabase, user),
   ]);
   const displayNameLabel = settings.displayName || "Display name not set";
 
@@ -57,7 +69,18 @@ export default async function SettingsPage({
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <DashboardSidebar />
 
-        <section className="flex-1 px-5 pt-6 pb-28 sm:px-8 lg:px-10 lg:py-9">
+        <section className="flex-1 lg:hidden">
+          <MobileAccountHome
+            settings={settings}
+            billing={billing}
+            reportCount={reportCount.count}
+            hasDataError={Boolean(
+              billing.usageError || reportCount.error
+            )}
+          />
+        </section>
+
+        <section className="hidden flex-1 px-5 pt-6 pb-28 sm:px-8 lg:block lg:px-10 lg:py-9">
           <div className="overflow-hidden rounded-[2.35rem] border border-white/10 bg-white/[0.045] shadow-2xl shadow-black/35 backdrop-blur-2xl">
             <div className="relative p-6 sm:p-8 lg:p-10">
               <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.09),transparent_38%),radial-gradient(circle_at_85%_20%,rgba(45,212,191,0.16),transparent_34%)]" />

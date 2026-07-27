@@ -423,6 +423,21 @@ export async function loadUserReportPreviews(
   };
 }
 
+export async function loadUserReportCount(
+  supabase: SupabaseClient,
+  user: User
+) {
+  const { count, error } = await supabase
+    .from("reports")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
+
+  return {
+    count: error ? 0 : count || 0,
+    error: error?.message || "",
+  };
+}
+
 export async function loadWorkspaceReports(
   supabase: SupabaseClient,
   user: User,

@@ -1,6 +1,46 @@
 export default function WorkspaceReportsLoading() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-black text-white">
+    <>
+      <main className="relative min-h-screen overflow-hidden bg-black px-4 pb-[calc(8.75rem+env(safe-area-inset-bottom))] pt-[calc(1.25rem+env(safe-area-inset-top))] text-white lg:hidden">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_92%_0%,rgba(45,212,191,0.12),transparent_30%)]" />
+        <div className="relative mx-auto max-w-xl">
+          <div className="h-11 w-32 animate-pulse rounded-2xl border border-white/10 bg-white/[0.05]" />
+          <div className="mt-7 h-3 w-24 animate-pulse rounded-full bg-teal-200/10" />
+          <div className="mt-4 h-10 w-56 animate-pulse rounded-xl bg-white/10" />
+          <div className="mt-3 h-5 w-80 max-w-full animate-pulse rounded-full bg-white/[0.07]" />
+          <div className="mt-4 h-8 w-32 animate-pulse rounded-full bg-white/[0.06]" />
+
+          <div className="mt-8 h-3 w-40 animate-pulse rounded-full bg-white/[0.07]" />
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div className="h-32 animate-pulse rounded-[1.35rem] border border-white/10 bg-white/[0.045]" />
+            <div className="h-32 animate-pulse rounded-[1.35rem] border border-white/10 bg-white/[0.045]" />
+          </div>
+          <div className="mt-3 h-12 animate-pulse rounded-2xl bg-white/10" />
+
+          {["reports", "conversations"].map((section) => (
+            <div key={section} className="mt-8">
+              <div className="h-3 w-32 animate-pulse rounded-full bg-white/[0.07]" />
+              <div className="mt-3 overflow-hidden rounded-[1.6rem] border border-white/10 bg-white/[0.04]">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div
+                    key={`${section}-${index}`}
+                    className="flex h-20 items-center gap-3 border-b border-white/[0.07] px-4 last:border-b-0"
+                  >
+                    <div className="h-10 w-10 animate-pulse rounded-xl bg-white/[0.07]" />
+                    <div className="flex-1">
+                      <div className="h-4 w-3/5 animate-pulse rounded-full bg-white/10" />
+                      <div className="mt-2 h-3 w-2/5 animate-pulse rounded-full bg-white/[0.06]" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </main>
+
+      <div className="hidden lg:block">
+        <main className="relative min-h-screen overflow-hidden bg-black text-white">
       <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.12),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.055),transparent_26%)]" />
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <aside className="hidden w-72 border-r border-white/10 bg-zinc-950/80 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl lg:block">
@@ -43,6 +83,8 @@ export default function WorkspaceReportsLoading() {
           </div>
         </section>
       </div>
-    </main>
+        </main>
+      </div>
+    </>
   );
 }
