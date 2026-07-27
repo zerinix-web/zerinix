@@ -52,6 +52,7 @@ import {
   localizePdfPresentationLabel,
   localizePdfPresentationText,
 } from "@/app/lib/pdf-normalization.mjs";
+import { getExecutiveRecommendationDisplayMetrics } from "@/app/lib/report-executive-recommendation.mjs";
 import {
   getEvidenceBadgeClass,
   getEvidenceLabel,
@@ -1015,7 +1016,7 @@ function ReportSectionVisual({
                   />
                 </div>
                 {value ? (
-                  <p className="min-w-0 truncate whitespace-nowrap rounded-2xl border border-white/10 bg-black/35 px-3 py-2 text-right text-sm font-semibold text-white">
+                  <p className="min-w-0 whitespace-normal rounded-2xl border border-white/10 bg-black/35 px-3 py-2 text-left text-sm font-semibold text-white [overflow-wrap:anywhere] sm:truncate sm:whitespace-nowrap sm:text-right">
                     {formatMetricCardValue(value)}
                   </p>
                 ) : null}
@@ -1203,7 +1204,7 @@ function ReportSectionVisual({
 	                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
 	                  <EvidenceBadge level={evidence} />
 	                </div>
-	                <p className="mt-3 truncate whitespace-nowrap text-lg font-semibold text-white">
+	                <p className="mt-3 break-words text-lg font-semibold leading-6 text-white sm:truncate sm:whitespace-nowrap">
 	                  {value || "—"}
 	                </p>
 	              </div>
@@ -1231,7 +1232,7 @@ function ReportSectionVisual({
           ].map(([label, left, top], index) => (
             <div key={label} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left, top }}>
               <div className={`h-4 w-4 rounded-full ${index === 2 ? "bg-teal-200" : "bg-white/35"}`} />
-              <p className="mt-2 whitespace-nowrap rounded-full border border-white/10 bg-black/65 px-2 py-1 text-xs font-semibold text-zinc-200">
+              <p className="mt-2 max-w-24 rounded-full border border-white/10 bg-black/65 px-2 py-1 text-center text-[11px] font-semibold leading-4 text-zinc-200 sm:max-w-none sm:whitespace-nowrap sm:text-xs">
                 {label}
               </p>
             </div>
@@ -1273,7 +1274,7 @@ function ReportSectionVisual({
 	                  <EvidenceBadge level={evidence} />
                 </div>
                 <div className="mt-4 min-w-0">
-                  <p className="truncate whitespace-nowrap text-[clamp(1.15rem,2.2vw,1.65rem)] font-semibold leading-tight tracking-tight text-white">
+                  <p className="break-words text-[clamp(1.15rem,2.2vw,1.65rem)] font-semibold leading-tight tracking-tight text-white sm:truncate sm:whitespace-nowrap">
                     {value || "—"}
                   </p>
                   <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/10">
@@ -1387,11 +1388,16 @@ function ReportSectionVisual({
   if (normalizedTitle.includes("executive recommendation") || normalizedTitle.includes("yönetici tavsiyesi")) {
     const selected = detectRecommendation(content);
     const decisions = ["GO", "NO GO", "WAIT", "PIVOT", "RAISE", "BOOTSTRAP"];
+    const recommendationLocale = detectPdfPresentationLocale(content);
+    const recommendationDisplayMetrics = getExecutiveRecommendationDisplayMetrics(
+      content,
+      recommendationLocale
+    );
     const recommendationMetrics = [
       ["Confidence", extractConfidence(content) ? `${extractConfidence(content)}%` : "—"],
-      ["Investment Needed", extractMetricValue(content, "Investment Needed") || "—"],
-      ["Next Action", extractMetricValue(content, "Next Action") || extractMetricValue(content, "Next Critical Action") || "—"],
-      ["Main Risk", extractMetricValue(content, "Main Risk") || "—"],
+      ["Investment Needed", recommendationDisplayMetrics.investmentNeeded],
+      ["Next Action", recommendationDisplayMetrics.nextAction],
+      ["Main Risk", recommendationDisplayMetrics.mainRisk],
     ];
 
     return (
@@ -1401,7 +1407,7 @@ function ReportSectionVisual({
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200/80">
               Executive Recommendation
             </p>
-            <p className="mt-2 text-5xl font-semibold tracking-tight text-white">
+            <p className="mt-2 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
               {selected || "Review"}
             </p>
           </div>
@@ -1457,7 +1463,7 @@ function ReportSectionVisual({
 
   if (normalizedTitle.includes("roadmap") || normalizedTitle.includes("yol haritası")) {
     return (
-      <div className="mb-5 overflow-x-auto rounded-[2rem] border border-white/10 bg-[linear-gradient(90deg,rgba(94,234,212,0.08),rgba(255,255,255,0.02))] p-5">
+      <div className="mb-5 touch-pan-x overflow-x-auto overscroll-x-contain rounded-[2rem] border border-white/10 bg-[linear-gradient(90deg,rgba(94,234,212,0.08),rgba(255,255,255,0.02))] p-4 [-webkit-overflow-scrolling:touch] [scrollbar-color:rgba(94,234,212,0.3)_transparent] [scrollbar-width:thin] sm:p-5">
         <div className="relative grid min-w-[840px] grid-cols-6 gap-4">
         <div className="absolute left-8 right-8 top-8 h-px bg-gradient-to-r from-teal-200/10 via-teal-200/50 to-teal-200/10" />
         {founderRoadmapSteps.map((step, index) => (
@@ -1500,7 +1506,7 @@ function ReportSectionVisual({
             return (
               <div
                 key={force}
-                className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/10 bg-black/70 px-3 py-1 text-xs font-semibold text-teal-100"
+                className="absolute max-w-24 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/10 bg-black/70 px-2 py-1 text-center text-[11px] font-semibold leading-4 text-teal-100 sm:max-w-none sm:px-3 sm:text-xs"
                 style={{ left: positions[index][0], top: positions[index][1] }}
               >
                 {force}
@@ -2311,11 +2317,17 @@ function CitationCard({ citation }: { citation: CitationData }) {
   );
 }
 
-function CitationList({ content }: { content: string }) {
+function CitationList({
+  content,
+  mobile = false,
+}: {
+  content: string;
+  mobile?: boolean;
+}) {
   const citations = parseCitations(content);
 
   if (citations.length === 0) {
-    return <ReportText content={content} />;
+    return <ReportText content={content} mobile={mobile} />;
   }
 
   return (
@@ -2330,7 +2342,13 @@ function CitationList({ content }: { content: string }) {
   );
 }
 
-function ReportText({ content }: { content: string }) {
+function ReportText({
+  content,
+  mobile = false,
+}: {
+  content: string;
+  mobile?: boolean;
+}) {
   const blocks = normalizeReportPresentationText(
     cleanEvidenceMetadataForDisplay(sanitizeAiResponseText(content))
   )
@@ -2343,13 +2361,22 @@ function ReportText({ content }: { content: string }) {
   }
 
   return (
-    <div className="space-y-6 text-[15px] leading-8 text-zinc-300 md:text-base md:leading-8">
+    <div
+      className={
+        mobile
+          ? "space-y-5 text-[15.5px] leading-7 text-zinc-300 [hyphens:auto] [overflow-wrap:anywhere]"
+          : "space-y-6 text-[15px] leading-8 text-zinc-300 md:text-base md:leading-8"
+      }
+    >
       {blocks.map((block, blockIndex) => {
         const lines = block
           .split("\n")
           .map((line) => line.trim())
           .filter(Boolean);
         const isList = lines.every((line) => /^[-*]\s+/.test(line));
+        const isNumberedList =
+          mobile &&
+          lines.every((line) => /^\d+[.)]\s+/.test(line));
         const isTable = lines.length > 1 && lines.every((line) => line.startsWith("|") && line.includes("|"));
         const isCodeBlock = block.startsWith("```") && block.endsWith("```");
 
@@ -2362,7 +2389,9 @@ function ReportText({ content }: { content: string }) {
           return (
             <pre
               key={`code-${blockIndex}-${code.slice(0, 24)}`}
-              className="max-w-full overflow-x-auto overscroll-x-contain rounded-2xl border border-white/10 bg-black/55 p-4 text-sm leading-7 text-teal-100 shadow-inner shadow-black/40 ring-1 ring-white/[0.02]"
+              className={`max-w-full overflow-x-auto overscroll-x-contain rounded-2xl border border-white/10 bg-black/55 text-sm leading-7 text-teal-100 shadow-inner shadow-black/40 ring-1 ring-white/[0.02] [-webkit-overflow-scrolling:touch] ${
+                mobile ? "touch-pan-x p-3.5" : "p-4"
+              }`}
             >
               <code>{code}</code>
             </pre>
@@ -2371,7 +2400,12 @@ function ReportText({ content }: { content: string }) {
 
         if (isList) {
           return (
-            <ul key={`list-${blockIndex}`} className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 text-zinc-300 shadow-inner shadow-black/15">
+            <ul
+              key={`list-${blockIndex}`}
+              className={`rounded-2xl border border-white/[0.08] bg-white/[0.035] text-zinc-300 shadow-inner shadow-black/15 ${
+                mobile ? "space-y-3.5 p-3.5" : "space-y-3 p-4"
+              }`}
+            >
               {lines.map((line, lineIndex) => (
                 <li key={`line-${blockIndex}-${lineIndex}-${line}`} className="flex gap-3 leading-7">
                   <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
@@ -2379,6 +2413,33 @@ function ReportText({ content }: { content: string }) {
                 </li>
               ))}
             </ul>
+          );
+        }
+
+        if (isNumberedList) {
+          return (
+            <ol
+              key={`ordered-list-${blockIndex}`}
+              className="space-y-3.5 rounded-2xl border border-white/[0.08] bg-white/[0.035] p-3.5 text-zinc-300 shadow-inner shadow-black/15"
+            >
+              {lines.map((line, lineIndex) => {
+                const marker = line.match(/^(\d+)[.)]\s+/)?.[1] || String(lineIndex + 1);
+
+                return (
+                  <li
+                    key={`ordered-line-${blockIndex}-${lineIndex}-${line}`}
+                    className="flex items-start gap-3 leading-7"
+                  >
+                    <span className="mt-0.5 flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full border border-teal-200/20 bg-teal-200/10 px-1 text-[11px] font-semibold text-teal-100">
+                      {marker}
+                    </span>
+                    <span className="min-w-0">
+                      {renderInlineMarkdown(line.replace(/^\d+[.)]\s+/, ""))}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
           );
         }
 
@@ -2394,12 +2455,30 @@ function ReportText({ content }: { content: string }) {
           const [headerRow, ...bodyRows] = rows;
 
           return (
-            <div key={`table-${blockIndex}`} className="max-w-full overflow-x-auto overscroll-x-contain rounded-2xl border border-white/10 bg-black/25 shadow-xl shadow-black/15 ring-1 ring-white/[0.02]">
-              <table className="w-full min-w-[42rem] border-collapse text-left text-sm">
+            <div
+              key={`table-${blockIndex}`}
+              className={`max-w-full overflow-x-auto overscroll-x-contain rounded-2xl border border-white/10 bg-black/25 shadow-xl shadow-black/15 ring-1 ring-white/[0.02] [-webkit-overflow-scrolling:touch] ${
+                mobile
+                  ? "touch-pan-x [scrollbar-color:rgba(94,234,212,0.3)_transparent] [scrollbar-width:thin]"
+                  : ""
+              }`}
+            >
+              <table
+                className={`w-full border-collapse text-left text-sm ${
+                  mobile ? "min-w-[36rem]" : "min-w-[42rem]"
+                }`}
+              >
                 <thead className="bg-white/[0.07] text-xs uppercase tracking-[0.18em] text-zinc-400">
                   <tr>
                     {headerRow?.map((cell, cellIndex) => (
-                      <th key={`header-${blockIndex}-${cellIndex}-${cell}`} className="px-4 py-3 font-semibold text-zinc-300">
+                      <th
+                        key={`header-${blockIndex}-${cellIndex}-${cell}`}
+                        className={`font-semibold text-zinc-300 ${
+                          mobile
+                            ? "min-w-[8.5rem] whitespace-normal px-3.5 py-3 [overflow-wrap:anywhere]"
+                            : "px-4 py-3"
+                        }`}
+                      >
                         {cell}
                       </th>
                     ))}
@@ -2409,7 +2488,14 @@ function ReportText({ content }: { content: string }) {
                   {bodyRows.map((row, rowIndex) => (
                     <tr key={`${row.join("-")}-${rowIndex}`} className="transition hover:bg-white/[0.025]">
                       {row.map((cell, cellIndex) => (
-                        <td key={`${cell}-${cellIndex}`} className="px-4 py-3 align-top leading-7">
+                        <td
+                          key={`${cell}-${cellIndex}`}
+                          className={`align-top leading-7 ${
+                            mobile
+                              ? "whitespace-normal px-3.5 py-3 [overflow-wrap:anywhere]"
+                              : "px-4 py-3"
+                          }`}
+                        >
                           {renderInlineMarkdown(cell)}
                         </td>
                       ))}
@@ -2423,7 +2509,12 @@ function ReportText({ content }: { content: string }) {
 
         if (block.startsWith("### ")) {
           return (
-            <h3 key={`h3-${blockIndex}`} className="pt-4 text-lg font-semibold tracking-[-0.015em] text-white">
+            <h3
+              key={`h3-${blockIndex}`}
+              className={`font-semibold tracking-[-0.015em] text-white ${
+                mobile ? "pt-3 text-lg leading-7" : "pt-4 text-lg"
+              }`}
+            >
               {renderInlineMarkdown(block.slice(4))}
             </h3>
           );
@@ -2431,14 +2522,24 @@ function ReportText({ content }: { content: string }) {
 
         if (block.startsWith("## ")) {
           return (
-            <h2 key={`h2-${blockIndex}`} className="pt-4 text-xl font-semibold tracking-[-0.02em] text-white">
+            <h2
+              key={`h2-${blockIndex}`}
+              className={`font-semibold tracking-[-0.02em] text-white ${
+                mobile ? "pt-3 text-xl leading-7" : "pt-4 text-xl"
+              }`}
+            >
               {renderInlineMarkdown(block.slice(3))}
             </h2>
           );
         }
 
         return (
-          <p key={`p-${blockIndex}`} className="max-w-4xl whitespace-pre-wrap text-zinc-300 [overflow-wrap:anywhere]">
+          <p
+            key={`p-${blockIndex}`}
+            className={`max-w-4xl whitespace-pre-wrap text-zinc-300 [overflow-wrap:anywhere] ${
+              mobile ? "text-pretty" : ""
+            }`}
+          >
             {renderInlineMarkdown(block)}
           </p>
         );
@@ -2523,16 +2624,16 @@ export default async function ReportDetailPage({
   );
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-black text-white">
+    <main className="relative min-h-[100dvh] overflow-x-hidden bg-black text-white lg:min-h-screen lg:overflow-hidden">
       <ReportScrollProgress />
       <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.16),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.08),transparent_28%)]" />
       <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.025)_1px,transparent_1px)] bg-[size:72px_72px]" />
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <DashboardSidebar />
 
-        <section className="flex-1 px-4 pt-5 pb-[calc(9rem+env(safe-area-inset-bottom))] sm:px-8 lg:px-10 lg:py-8">
-          <div className="space-y-4 lg:hidden">
-            <div className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-2xl shadow-black/30 ring-1 ring-white/[0.025] backdrop-blur-2xl">
+        <section className="flex-1 px-4 pt-5 pb-[calc(10rem+env(safe-area-inset-bottom))] sm:px-8 lg:px-10 lg:py-8">
+          <div className="space-y-5 lg:hidden">
+            <div className="rounded-[2rem] border border-white/[0.12] bg-white/[0.045] p-5 shadow-2xl shadow-black/30 ring-1 ring-white/[0.03] backdrop-blur-2xl">
               <Link
                 href="/dashboard"
                 className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-2 text-sm font-medium text-zinc-400 shadow-lg shadow-black/10 transition duration-300 hover:border-teal-200/25 hover:bg-white/[0.04] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
@@ -2543,7 +2644,7 @@ export default async function ReportDetailPage({
               <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.24em] text-teal-200/70">
                 Mobile Report Reader
               </p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-[-0.035em] text-white">
+              <h1 className="mt-2 text-pretty text-3xl font-semibold leading-[1.15] tracking-[-0.035em] text-white [overflow-wrap:anywhere]">
                 {report.title}
               </h1>
               <div className="mt-4 flex flex-wrap gap-2 text-xs text-zinc-400">
@@ -2562,7 +2663,7 @@ export default async function ReportDetailPage({
               </div>
             </div>
 
-            <section className="overflow-hidden rounded-[2rem] border border-teal-200/15 bg-teal-200/[0.055] shadow-2xl shadow-black/30 ring-1 ring-teal-200/10 backdrop-blur-xl">
+            <section className="overflow-hidden rounded-[2rem] border border-teal-200/20 bg-teal-200/[0.055] shadow-2xl shadow-black/30 ring-1 ring-teal-200/10 backdrop-blur-xl">
               <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.16),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.02))] p-5">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-teal-100/75">
                   Decision Snapshot
@@ -2628,7 +2729,7 @@ export default async function ReportDetailPage({
             {visibleSections.length > 0 ? (
               <nav
                 aria-label="Report sections"
-                className="overflow-x-auto rounded-[1.35rem] border border-white/10 bg-white/[0.045] p-2 shadow-xl shadow-black/20 ring-1 ring-white/[0.025]"
+                className="touch-pan-x overflow-x-auto overscroll-x-contain rounded-[1.35rem] border border-white/[0.12] bg-white/[0.045] p-2 shadow-xl shadow-black/20 ring-1 ring-white/[0.03] [-webkit-overflow-scrolling:touch] [scrollbar-color:rgba(94,234,212,0.3)_transparent] [scrollbar-width:thin]"
               >
                 <div className="flex min-w-max gap-2">
                   {visibleSections.map((section, index) => (
@@ -2655,7 +2756,7 @@ export default async function ReportDetailPage({
               </nav>
             ) : null}
 
-            <section className="space-y-3">
+            <section className="space-y-4">
               {visibleSections.length === 0 ? (
                 <div className="rounded-[1.55rem] border border-dashed border-white/10 bg-black/35 p-6 text-center shadow-inner shadow-black/25">
                   <FileText className="mx-auto h-7 w-7 text-teal-200" />
@@ -2691,15 +2792,17 @@ export default async function ReportDetailPage({
                         eyebrow={`Section ${String(index + 1).padStart(2, "0")}`}
                         defaultOpen={index === executiveSummaryIndex || index === 0}
                       >
-                        <div className="space-y-4">
-                          <ReportSectionVisual
-                            title={section.title}
-                            content={section.content}
-                            investmentScore={report.investmentScore}
-                          />
+                        <div className="min-w-0 space-y-5">
+                          <div className="min-w-0 [&>*]:max-w-full">
+                            <ReportSectionVisual
+                              title={section.title}
+                              content={section.content}
+                              investmentScore={report.investmentScore}
+                            />
+                          </div>
                           {detailsContent.trim() ? (
-                            <div className="rounded-[1.25rem] border border-white/10 bg-black/25 p-4">
-                              <ReportText content={detailsContent} />
+                            <div className="min-w-0 rounded-[1.25rem] border border-white/[0.12] bg-black/30 p-3.5 shadow-inner shadow-black/20">
+                              <ReportText content={detailsContent} mobile />
                             </div>
                           ) : null}
                           <CopySectionButton content={section.content} />
@@ -2716,11 +2819,12 @@ export default async function ReportDetailPage({
                     title="Sources"
                     eyebrow="Research Appendix"
                   >
-                    <div className="space-y-4">
+                    <div className="min-w-0 space-y-5">
                       {sourceSections.map((section) => (
                         <CitationList
                           key={`mobile-source-${getReportSectionKey(section)}`}
                           content={section.content}
+                          mobile
                         />
                       ))}
                       <CopySectionButton

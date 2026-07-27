@@ -151,9 +151,9 @@ export function MobileBottomNavigation({
   return (
     <nav
       aria-label="Mobile navigation"
-      className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-black/90 px-2 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-2 shadow-2xl shadow-black/50 backdrop-blur-2xl lg:hidden"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-black/90 px-2 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-2 shadow-2xl shadow-black/50 backdrop-blur-2xl lg:hidden"
     >
-      <div className="mx-auto grid max-w-md grid-cols-5 gap-1 rounded-[1.45rem] border border-white/10 bg-white/[0.045] p-1.5 shadow-xl shadow-black/30 ring-1 ring-white/[0.025]">
+      <div className="pointer-events-auto mx-auto grid max-w-md grid-cols-5 gap-1 rounded-[1.45rem] border border-white/10 bg-white/[0.045] p-1.5 shadow-xl shadow-black/30 ring-1 ring-white/[0.025]">
         {mobileNavigationItems.map((item) => {
           const Icon = item.icon;
           const active = item.match(pathname);

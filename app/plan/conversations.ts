@@ -15,6 +15,7 @@ type ConversationRow = {
 
 type MessageRow = {
   id: string;
+  conversation_id: string;
   role: "user" | "assistant";
   content: string;
   mode: "plan" | "market" | "chat" | null;
@@ -26,6 +27,48 @@ type MessageRow = {
   }>;
   created_at: string;
 };
+
+const MESSAGE_CONVERSATION_ID_CHUNK_SIZE = 25;
+
+function chunkValues<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+
+  return chunks;
+}
+
+async function loadMessagesForConversations(
+  supabase: SupabaseClient,
+  userId: string,
+  conversationIds: string[]
+) {
+  const messages: MessageRow[] = [];
+
+  for (const chunk of chunkValues(conversationIds, MESSAGE_CONVERSATION_ID_CHUNK_SIZE)) {
+    const { data, error } = await supabase
+      .from("ai_messages")
+      .select("id,conversation_id,role,content,mode,status,attachments,created_at")
+      .eq("user_id", userId)
+      .in("conversation_id", chunk)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      return { data: [] as MessageRow[], error };
+    }
+
+    messages.push(...((data || []) as MessageRow[]));
+  }
+
+  messages.sort(
+    (left, right) =>
+      new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+  );
+
+  return { data: messages, error: null };
+}
 
 export async function loadPlanConversations(
   supabase: SupabaseClient,
@@ -50,13 +93,8 @@ export async function loadPlanConversations(
   const conversations = (data || []) as ConversationRow[];
   const conversationIds = conversations.map((conversation) => conversation.id);
   const { data: messages, error: messagesError } = conversationIds.length
-    ? await supabase
-        .from("ai_messages")
-        .select("id,conversation_id,role,content,mode,status,attachments,created_at")
-        .eq("user_id", user.id)
-        .in("conversation_id", conversationIds)
-        .order("created_at", { ascending: true })
-    : { data: [], error: null };
+    ? await loadMessagesForConversations(supabase, user.id, conversationIds)
+    : { data: [] as MessageRow[], error: null };
 
   if (messagesError) {
     console.error("[ai_messages select failed]", messagesError);
@@ -79,7 +117,7 @@ export async function loadPlanConversations(
 
   const messagesByConversation = new Map<string, MessageRow[]>();
 
-  ((messages || []) as Array<MessageRow & { conversation_id: string }>).forEach(
+  (messages || []).forEach(
     (message) => {
       const existing = messagesByConversation.get(message.conversation_id) || [];
       existing.push(message);

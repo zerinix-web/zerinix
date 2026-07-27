@@ -43,7 +43,11 @@ import {
   type InvestmentScore,
 } from "@/app/lib/ai/investment-score";
 import { localizePdfPresentationLabel } from "@/app/lib/pdf-normalization.mjs";
-import { getEvidenceLabel, inferEvidenceLevel } from "@/app/lib/report-evidence";
+import {
+  getEvidenceLabel,
+  inferEvidenceLevel,
+  sourceTypeToEvidenceLevel,
+} from "@/app/lib/report-evidence";
 
 export type ReportKind = "business_plan" | "market_analysis";
 export type AiFinancialModelContext = FinancialModel & {
@@ -157,7 +161,7 @@ export function formatCanonicalFinancialAssumptions(
   const forecastRows = context.revenueForecast
     .map(
       (year) =>
-        `- ${year.year}: ${customerLabel}=${year.customers}, ${monthlyRevenueLabel}=${formatUsd(year.mrr)}, ${yearlyRevenueLabel}=${formatUsd(year.arr)}, revenue=${formatUsd(year.revenue)}, SOM penetration=${Math.round(year.marketPenetration * 100)}%`
+        `- ${year.year}: ${customerLabel}=${year.customers}, ${monthlyRevenueLabel}=${formatUsd(year.mrr)}, ${yearlyRevenueLabel}=${formatUsd(year.arr)}, revenue=${formatUsd(year.revenue)}, SOM penetration=${Math.round(year.marketPenetration * 100)}% | evidence=Assumption | basis=inferred from the canonical benchmark inputs and growth model`
     )
     .join("\n");
   const investmentScoreContext = formatInvestmentScore(context.investmentScore);
@@ -184,16 +188,22 @@ ${forecastRows}
 
 Financial Quality:
 - Status: ${consistency.quality}
-- User provided data: ${consistency.sources.userProvidedData.join("; ")}
-- Benchmark assumptions: ${consistency.sources.benchmarkAssumptions.join("; ")}
-- AI generated planning assumptions: ${consistency.sources.aiPlanningAssumptions.join("; ")}
+- User-provided values (Verified): ${consistency.sources.userProvidedData.join("; ")}
+- Benchmark-derived values (Estimated): ${consistency.sources.benchmarkAssumptions.join("; ")}
+- Inferred values (Assumption): ${consistency.sources.aiPlanningAssumptions.join("; ")}
 ${warningRows}
 
 	Evidence model:
 	- Verified: user-provided facts only, including the submitted idea context (${context.normalizedBusinessIdea}) and any explicit facts stated by the user.
-	- Benchmark Derived: industry benchmark ranges, market sizing, growth, margin, CAC, LTV, payback, EBITDA, revenue multiple, and operating assumptions from the selected benchmark basis.
-	- Planning Assumption: geography multiplier, serviceable market rate, obtainable share rate, customer count, pricing model, burn rate, runway target, startup capex, and break-even timing where direct user data is absent.
-	- Validation Required: metrics or claims that require primary research, customer interviews, pricing tests, cohort data, or real operating data before investment decisions.
+	- Estimated: benchmark-derived values, market sizing, growth, margin, CAC, LTV, payback, EBITDA, revenue multiple, and projections calculated from the selected benchmark basis.
+	- Assumption: inferred planning inputs such as geography multiplier, serviceable market rate, obtainable share rate, customer count, pricing model, burn rate, runway target, startup capex, and break-even timing where direct user data is absent.
+	- AI Analysis: interpretation or reasoning produced from the available inputs; it is not externally verified evidence.
+
+Financial projection provenance:
+- User-provided values must be labeled Verified.
+- Benchmark-derived values must be labeled Estimated and name the benchmark basis.
+- Inferred values must be labeled Assumption and state the input or formula used.
+- Interpretive conclusions must be labeled AI Analysis and must not be presented as external facts.
 
 ${investmentScoreContext}
 
@@ -201,7 +211,7 @@ Financial modeling rules:
 - Use the structured financial model above as the single source of truth for all financial metrics.
 - Do not replace these values with generic ranges, generic templates, or unrelated benchmarks.
 - Explain every major number with its formula, assumptions, benchmark comparison, and evidence label from the canonical set.
-- If evidence is Validation Required, explicitly warn that the estimate needs validation instead of presenting it as precise.
+- If evidence is AI Analysis or Assumption, explicitly warn that the claim needs validation instead of presenting it as precise.
 - Financial Dashboard, Unit Economics, Scenario Analysis, Executive Summary, Executive Recommendation, KPI Dashboard, and Financial Assumptions must reuse these same values.
 - Scenario Analysis may vary these values for worst/base/best cases, but Base Case must match this calculated model exactly.
 - Use the Investment Scoring Engine as the source of truth for Total Investment Score, confidence, strengths, weaknesses, Founder Score, and investment recommendation logic.
@@ -209,8 +219,8 @@ Financial modeling rules:
 - Executive Summary and Executive Recommendation must use the calculated Recommendation, Estimated Valuation, Funding Stage, Top Risks, and Next Critical Action from the Investment Scoring Engine.
 - For recurring software models, ARR and MRR are appropriate. For mobility, retail, hospitality, manufacturing, and other non-subscription models, use business-model-specific revenue labels from the structured model instead of SaaS labels.
 - For revenue, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, show value, formula, assumptions, evidence label, and benchmark source when the section is responsible for financial explanation.
-	- Financial Assumptions must be written as a Key Assumptions section that lists every calculation assumption and classifies each as Verified, Benchmark Derived, Planning Assumption, or Validation Required.
-	- Tag important claims with one concise evidence label only when useful: Verified, Benchmark Derived, Planning Assumption, or Validation Required. Do not create fake citations.`;
+	- Financial Assumptions must be written as a Key Assumptions section that lists every calculation assumption and classifies each as Verified, Estimated, Assumption, or AI Analysis.
+	- Tag every important numeric claim with one concise evidence label from this exact set: Verified, Estimated, Assumption, or AI Analysis. Do not create fake citations.`;
 }
 
 export function formatFinancialConsistencyReport(
@@ -530,10 +540,14 @@ function localizeSourceText(value: string, language: "English" | "Turkish") {
 
 function formatSourceItem(item: SourceIntelligenceItem, language: "English" | "Turkish") {
   const area = localizeReportLabel(item.area, language);
+  const evidence = getEvidenceLabel(
+    sourceTypeToEvidenceLevel(item.sourceType),
+    language
+  );
 
   return language === "Turkish"
-    ? `- ${area}: ${localizeSourceType(item.sourceType, language)} | ${localizeSourceConfidence(item.confidence, language)} | ${localizeSourceText(item.validationRecommendation, language)}`
-    : `- ${area}: ${item.sourceType} | ${item.confidence} | ${item.validationRecommendation}`;
+    ? `- ${area}: ${localizeSourceType(item.sourceType, language)} | Kanıt: ${evidence} | ${localizeSourceConfidence(item.confidence, language)} | ${localizeSourceText(item.validationRecommendation, language)}`
+    : `- ${area}: ${item.sourceType} | Evidence: ${evidence} | ${item.confidence} | ${item.validationRecommendation}`;
 }
 
 export function formatSourceIntelligenceSummary(

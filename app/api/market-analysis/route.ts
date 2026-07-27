@@ -49,6 +49,8 @@ import {
 import {
   buildFullReportStructureDirectives,
 } from "@/app/lib/ai/report-quality-directives";
+import { dedupeReportParagraphsAcrossSections } from "@/app/lib/report-content-quality.mjs";
+import { normalizeReportSourceSection } from "@/app/lib/report-source-normalization.mjs";
 import {
   localizePdfPresentationLabel,
   localizePdfPresentationText,
@@ -502,13 +504,13 @@ function cleanInternalMarketSourceFallbacks(content: string, language: ResponseL
     "Kaynak kategorisi: Planlama varsayımı. Harici atıf metadatası sağlanmadı."
   );
 
-  return content
+  return normalizeReportSourceSection(content
     .replace(/\bsources(?:\.[a-z0-9_-]+)+\b/gi, cleanReplacement)
     .replace(/\bdeduplicated\.none\.provided\.by\.user\b/gi, cleanReplacement)
     .replace(/\bnone\.provided\.by\.user\b/gi, cleanReplacement)
     .replace(/\bundefined\b/gi, marketText(language, "Not verified", "Doğrulanmadı"))
     .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .trim(), { language, allowExternalCitations: true });
 }
 
 function enforceMarketReportLanguage(
@@ -519,7 +521,7 @@ function enforceMarketReportLanguage(
   let normalized = cleanInternalMarketSourceFallbacks(content, language);
 
   if (context) {
-    const confidenceValue = `${context.investmentScore.confidence}%`;
+    const confidenceValue = `${context.reportIntelligence.totalScore}%`;
     normalized = normalized
       .replace(/\b(?:Decision Confidence|Karar Güveni)\s*[:\-–—]\s*\d{1,3}%?(?:\s*\([^)]+\))?/gi, () =>
         language === "Turkish"
@@ -553,6 +555,10 @@ function enforceMarketReportLanguage(
       .replace(/\bTrigger\s*:/g, "Tetikleyici:")
       .replace(/\bAction\s*:/g, "Aksiyon:")
       .replace(/\bStatus\s*:/g, "Durum:")
+      .replace(/\bAI Analysis\b/g, "AI Analizi")
+      .replace(/\bEstimated\b/g, "Tahmini")
+      .replace(/\bAssumption\b/g, "Varsayım")
+      .replace(/\bVerified\b/g, "Doğrulanmış")
       .replace(/\bValidation Required\b/g, "Doğrulama gerekli")
       .replace(/\bModel target\b/g, "Model hedefi")
       .replace(/\bWatch\b/g, "İzleme")
@@ -583,6 +589,10 @@ function enforceMarketReportLanguage(
     .replace(/\bTetikleyici\s*:/g, "Trigger:")
     .replace(/\bAksiyon\s*:/g, "Action:")
     .replace(/\bDurum\s*:/g, "Status:")
+    .replace(/\bAI Analizi\b/g, "AI Analysis")
+    .replace(/\bTahmini\b/g, "Estimated")
+    .replace(/\bVarsayım\b/g, "Assumption")
+    .replace(/\bDoğrulanmış\b/g, "Verified")
     .replace(/\bDoğrulama gerekli\b/gi, "Validation Required")
     .replace(/\bModel hedefi\b/gi, "Model target")
     .replace(/\bİzleme\b/g, "Watch")
@@ -685,7 +695,7 @@ function buildMarketConfidenceBreakdown(context: AiFinancialModelContext, langua
   const execution = scorePercent(engine.executionScore.score, engine.executionScore.maximumScore);
   const product = scorePercent(engine.technologyScore.score, engine.technologyScore.maximumScore);
   return [
-    marketText(language, `- Decision Confidence: ${context.investmentScore.confidence}% — the single Decision Confidence used across this report.`, `- Karar Güveni: ${context.investmentScore.confidence}% — bu rapor genelinde kullanılan tek Karar Güveni değeridir.`),
+    marketText(language, `- Decision Confidence: ${context.reportIntelligence.totalScore}% — derived from evidence quality, source coverage, financial certainty, benchmark fit, and validation readiness.`, `- Karar Güveni: ${context.reportIntelligence.totalScore}% — kanıt kalitesi, kaynak kapsamı, finansal kesinlik, benchmark uyumu ve doğrulama hazırlığından türetilmiştir.`),
     marketText(language, `- Market Confidence: ${market}% — ${engine.marketScore.explanation}`, `- Pazar Güveni: ${market}% — ${engine.marketScore.explanation}`),
     marketText(language, `- Competition Confidence: ${competition}% — ${engine.competitionScore.explanation}`, `- Rekabet Güveni: ${competition}% — ${engine.competitionScore.explanation}`),
     marketText(language, `- Financial Confidence: ${financial}% — ${engine.financialScore.explanation}`, `- Finansal Güven: ${financial}% — ${engine.financialScore.explanation}`),
@@ -706,11 +716,23 @@ function buildMarketRiskMatrix(context: AiFinancialModelContext, language: Respo
     const probability = index === 0 ? marketText(language, "High", "Yüksek") : marketText(language, "Medium", "Orta");
     const impact = index <= 1 ? marketText(language, "High", "Yüksek") : marketText(language, "Medium", "Orta");
     const severity = index === 0 ? marketText(language, "Critical", "Kritik") : marketText(language, "Material", "Önemli");
+    const isEconomicRisk = /\b(cac|payback|capital|fund|margin|price|sermaye|geri ödeme|marj|fiyat)\b/i.test(risk);
+    const isCompetitiveRisk = /\b(compet|substitut|incumbent|rekabet|rakip|ikame)\b/i.test(risk);
+    const mitigation = isEconomicRisk
+      ? marketText(language, `cap entry spend until ${context.metrics.cacPayback.displayValue} payback is observed`, `${context.metrics.cacPayback.displayValue} geri ödeme gözlenene kadar giriş harcamasını sınırla`)
+      : isCompetitiveRisk
+        ? marketText(language, `prove a measurable switching benefit for ${context.inputs.targetCustomer} before broad positioning spend`, `geniş konumlandırma harcamasından önce ${context.inputs.targetCustomer} için ölçülebilir geçiş faydasını kanıtla`)
+        : marketText(language, `test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer} before expanding the entry wedge`, `giriş kamasını genişletmeden önce ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile test et`);
+    const earlyWarning = isEconomicRisk
+      ? marketText(language, `CAC exceeds ${context.metrics.cac.displayValue} or payback exceeds ${context.metrics.cacPayback.displayValue}`, `CAC ${context.metrics.cac.displayValue} üzerine çıkar veya geri ödeme ${context.metrics.cacPayback.displayValue} değerini aşar`)
+      : isCompetitiveRisk
+        ? marketText(language, "qualified buyers prefer the incumbent workflow after a direct offer comparison", "nitelikli alıcılar doğrudan teklif karşılaştırmasından sonra mevcut çözümü tercih eder")
+        : marketText(language, `qualified demand does not convert at the ${context.metrics.arpa.displayValue} planning input`, `nitelikli talep ${context.metrics.arpa.displayValue} planlama girdisinde dönüşmez`);
 
     return marketText(
       language,
-      `- ${risk} | Probability: ${probability} | Impact: ${impact} | Severity: ${severity} | Mitigation: validate the market signal before scaling entry spend | Early Warning Signal: conversion, pricing, or CAC misses the threshold.`,
-      `- ${risk} | Olasılık: ${probability} | Etki: ${impact} | Şiddet: ${severity} | Azaltım: pazara giriş harcamasını ölçeklemeden önce pazar sinyalini doğrula | Erken Uyarı Sinyali: dönüşüm, fiyatlandırma veya CAC eşik altında kalır.`
+      `- ${risk} | Probability: ${probability} | Impact: ${impact} | Severity: ${severity} | Mitigation: ${mitigation} | Early Warning Signal: ${earlyWarning}.`,
+      `- ${risk} | Olasılık: ${probability} | Etki: ${impact} | Şiddet: ${severity} | Azaltım: ${mitigation} | Erken Uyarı Sinyali: ${earlyWarning}.`
     );
   });
 }
@@ -718,9 +740,9 @@ function buildMarketRiskMatrix(context: AiFinancialModelContext, language: Respo
 function buildMarketFounderDecisionEngine(context: AiFinancialModelContext, language: ResponseLanguage) {
   return [
     marketText(language, `- If I were the founder: I would first validate ${context.investmentScore.nextCriticalAction.toLowerCase()}.`, `- Kurucu olsaydım: Önce ${context.investmentScore.nextCriticalAction.toLowerCase()} konusunu doğrulardım.`),
-    marketText(language, "- What to postpone: broad geographic expansion and multi-channel acquisition until the beachhead proof is repeatable.", "- Ertelenecekler: başlangıç pazar kanıtı tekrarlanabilir olana kadar geniş coğrafi yayılım ve çok kanallı edinim."),
-    marketText(language, "- Where to spend money: customer interviews, pricing tests, competitor displacement tests, and the smallest launch asset that proves beachhead demand.", "- Para harcanacak alan: müşteri görüşmeleri, fiyatlandırma testleri, rakipten geçiş testleri ve başlangıç talebini kanıtlayan en küçük lansman varlığı."),
-    marketText(language, "- What to avoid: treating category growth as proof of obtainable revenue before willingness-to-pay evidence exists.", "- Kaçınılacaklar: ödeme isteği kanıtı oluşmadan kategori büyümesini elde edilebilir gelir kanıtı saymak."),
+    marketText(language, `- What to postpone: expansion beyond ${context.inputs.geography} and multi-channel acquisition until ${context.inputs.targetCustomer} conversion is repeatable.`, `- Ertelenecekler: ${context.inputs.targetCustomer} dönüşümü tekrarlanabilir olana kadar ${context.inputs.geography} ötesine genişleme ve çok kanallı edinim.`),
+    marketText(language, `- Where to spend money: ${context.inputs.targetCustomer} interviews, ${context.inputs.pricingModel} pricing tests, competitor-switching proof, and the smallest ${context.inputs.industry} launch asset.`, `- Para harcanacak alan: ${context.inputs.targetCustomer} görüşmeleri, ${context.inputs.pricingModel} fiyat testleri, rakipten geçiş kanıtı ve en küçük ${context.inputs.industry} lansman varlığı.`),
+    marketText(language, `- What to avoid: treating category growth as obtainable revenue before ${context.metrics.arpa.displayValue} willingness-to-pay evidence exists.`, `- Kaçınılacaklar: ${context.metrics.arpa.displayValue} ödeme isteği kanıtı oluşmadan kategori büyümesini elde edilebilir gelir saymak.`),
   ];
 }
 
@@ -757,7 +779,7 @@ function buildCanonicalMarketExecutiveRecommendation(
   context: AiFinancialModelContext,
   language: ResponseLanguage
 ) {
-  const confidence = context.investmentScore.confidence;
+  const confidence = context.reportIntelligence.totalScore;
   const confidenceLabel =
     confidence >= 75
       ? marketText(language, "High", "Yüksek")
@@ -799,6 +821,11 @@ function buildCanonicalMarketExecutiveRecommendation(
     marketText(language, `Investment Recommendation: ${recommendation}`, `Yatırım Tavsiyesi: ${recommendation}`),
     marketText(language, `Main Risk: ${context.investmentScore.topRisks[0] || "Market demand requires validation."}`, `Ana Risk: ${context.investmentScore.topRisks[0] || "Pazar talebi doğrulama gerektiriyor."}`),
     marketText(language, `Next Action: ${context.investmentScore.nextCriticalAction}`, `Sonraki Aksiyon: ${context.investmentScore.nextCriticalAction}`),
+    marketText(
+      language,
+      `Rationale: ${context.normalizedBusinessIdea} should not expand beyond ${context.inputs.geography} until ${context.inputs.targetCustomer} demand supports the ${context.inputs.pricingModel} offer within ${context.metrics.cacPayback.displayValue} payback.`,
+      `Gerekçe: ${context.normalizedBusinessIdea}, ${context.inputs.targetCustomer} talebi ${context.inputs.pricingModel} teklifini ${context.metrics.cacPayback.displayValue} geri ödeme içinde destekleyene kadar ${context.inputs.geography} ötesine genişlememelidir.`
+    ),
     formatDecisionConfidenceReport(context, language),
     formatReportIntelligenceSummary(context, language),
   ].join("\n");
@@ -807,7 +834,7 @@ function buildCanonicalMarketExecutiveRecommendation(
 function buildMarketCeoBrief(context: AiFinancialModelContext, language: ResponseLanguage) {
   const decision = localizeMarketDecision(getVisibleDecision(context), language);
   return [
-    marketText(language, `- Decision posture: ${decision}; Decision Confidence is ${context.investmentScore.confidence}/100.`, `- Karar duruşu: ${decision}; Karar Güveni ${context.investmentScore.confidence}/100.`),
+    marketText(language, `- Decision posture: ${decision}; Decision Confidence is ${context.reportIntelligence.totalScore}/100.`, `- Karar duruşu: ${decision}; Karar Güveni ${context.reportIntelligence.totalScore}/100.`),
     marketText(language, `- Immediate board priority: ${context.investmentScore.nextCriticalAction}`, `- Acil yönetim önceliği: ${context.investmentScore.nextCriticalAction}`),
     marketText(language, `- Validate the beachhead customer for ${context.inputs.targetCustomer} before expanding the entry plan.`, `- Giriş planını genişletmeden önce ${context.inputs.targetCustomer} için başlangıç müşterisini doğrula.`),
     marketText(language, "- Prove willingness to pay before treating the beachhead demand signal as obtainable revenue.", "- Başlangıç talep sinyalini elde edilebilir gelir saymadan önce ödeme isteğini kanıtla."),
@@ -880,7 +907,10 @@ function ensureMarketReportQuality(
       normalized[field] = enforceMarketReportLanguage(normalized[field], language);
     }
 
-    return normalized;
+    return dedupeReportParagraphsAcrossSections(normalized) as Record<
+      MarketReportField,
+      string
+    >;
   }
 
   const model = context.metrics;
@@ -936,10 +966,10 @@ function ensureMarketReportQuality(
     marketLabel(language, "AI Action Plan", "AI Aksiyon Planı"),
     [
       marketText(language, `- Immediate Actions: ${context.investmentScore.nextCriticalAction}. Expected impact: resolves the highest-risk market-entry decision.`, `- Acil Aksiyonlar: ${context.investmentScore.nextCriticalAction}. Beklenen etki: en riskli pazara giriş kararını çözer.`),
-      marketText(language, "- Next 30 Days: validate demand, pricing, and buyer urgency. Expected impact: separates real pull from generic interest.", "- Sonraki 30 Gün: talep, fiyatlandırma ve alıcı aciliyetini doğrula. Beklenen etki: gerçek çekişi genel ilgiden ayırır."),
-      marketText(language, "- Next 90 Days: prove one repeatable channel and competitor displacement signal. Expected impact: improves GTM confidence.", "- Sonraki 90 Gün: tek bir tekrarlanabilir kanal ve rakipten geçiş sinyali kanıtla. Beklenen etki: pazara giriş güvenini artırır."),
-      marketText(language, "- Next 6 Months: confirm retention intent, payback, and operating cadence. Expected impact: protects capital efficiency.", "- Sonraki 6 Ay: elde tutma niyeti, geri ödeme ve operasyon ritmini doğrula. Beklenen etki: sermaye verimliliğini korur."),
-      marketText(language, "- Next 12 Months: expand only after the entry wedge is repeatable. Expected impact: scales from evidence, not narrative.", "- Sonraki 12 Ay: yalnızca giriş kaması tekrarlanabilir olduğunda genişle. Beklenen etki: anlatıdan değil kanıttan ölçeklenir."),
+      marketText(language, `- Next 30 Days: test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer} at the ${context.metrics.arpa.displayValue} planning input. Expected impact: separates paid demand from broad category interest.`, `- Sonraki 30 Gün: ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile ${context.metrics.arpa.displayValue} planlama girdisinde test et. Beklenen etki: ücretli talebi geniş kategori ilgisinden ayırır.`),
+      marketText(language, `- Next 90 Days: repeat one ${context.inputs.industry} acquisition path and document competitor displacement. Expected impact: proves an entry wedge rather than a one-off win.`, `- Sonraki 90 Gün: tek bir ${context.inputs.industry} edinim yolunu tekrarla ve rakipten geçişi belgele. Beklenen etki: tek seferlik başarı yerine giriş kamasını kanıtlar.`),
+      marketText(language, `- Next 6 Months: hold ${context.metrics.grossMargin.displayValue} gross margin while demonstrating ${context.metrics.cacPayback.displayValue} payback and repeat behavior. Expected impact: protects entry capital.`, `- Sonraki 6 Ay: ${context.metrics.cacPayback.displayValue} geri ödeme ve tekrar davranışını gösterirken ${context.metrics.grossMargin.displayValue} brüt marjı koru. Beklenen etki: giriş sermayesini korur.`),
+      marketText(language, `- Next 12 Months: expand beyond the ${context.inputs.geography} beachhead only after those proof gates repeat. Expected impact: scales from market evidence, not narrative.`, `- Sonraki 12 Ay: yalnızca bu kanıt kapıları tekrarlandığında ${context.inputs.geography} başlangıç pazarının ötesine genişle. Beklenen etki: anlatıdan değil pazar kanıtından ölçeklenir.`),
     ]
   );
   normalized.validationPlan = removeLegacyValidationIntelligenceBlock(normalized.validationPlan);
@@ -978,7 +1008,10 @@ function ensureMarketReportQuality(
     normalized[field] = enforceMarketReportLanguage(normalized[field], language, context);
   }
 
-  return normalized;
+  return dedupeReportParagraphsAcrossSections(normalized) as Record<
+    MarketReportField,
+    string
+  >;
 }
 
 function parseFullMarketReport(
@@ -1328,7 +1361,7 @@ Before writing visible output, silently construct the full Integrated Market Str
 Derive this section only from that model so market size, ICP, competitors, pricing, GTM, financial implications, risks, and recommendation stay consistent.
 Write the section as an investor-grade market diligence note with practical market-entry recommendations for the founder.
 Do not lead every section with the same decision-implication formula. Use it only where the section's job requires it.
-Use canonical evidence labels only where they materially improve trust for sources, metrics, TAM/SAM/SOM, competitor claims, or KPI assumptions. Do not expose internal confidence tiers or decision-implication labels.
+Classify every important numeric claim as Verified, Estimated, Assumption, or AI Analysis. User-provided values are Verified; benchmark-derived values are Estimated; inferred values are Assumptions; interpretation is AI Analysis.
 Avoid generic filler. Use planning inputs explicitly when evidence is limited and state what would change the verdict.
 Write in concise executive-consulting style: specific observations, short analytical paragraphs, numbered insights when useful, and no boilerplate conclusions.
 Do not repeat the user's prompt verbatim; anchor the analysis in the market, buyer, competitor, and economic context.
@@ -1346,7 +1379,7 @@ Align Decision Confidence with evidence quality and the calculated decision inpu
 Do not expose internal grading labels, source-model labels, or internal recommendation codes anywhere in the final report.
 Make examples, KPIs, risks, roadmap actions, and financial interpretation specific to the detected industry instead of using generic startup templates.
 Use honest planning-input language instead of vague source claims such as "industry reports".
-When citing sources, prefer real organizations such as OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant; include URLs only when available and never invent URLs or report names.
+Keep user inputs separate from benchmark sources. Deduplicate sources, merge repeated domains, and prioritize primary government, regulatory, academic, and official company sources. Include a URL only when it is present verbatim in source context. If a source cannot be verified, write exactly "AI-derived analysis (not externally verified)".
 Finish with a complete sentence or complete bullet. Do not end mid-sentence.
 Use structured markdown inside the section when useful: short paragraphs, bullets, or compact tables.
 Write only the content for this section. Do not write a JSON object, field name, braces, markdown code block, heading, or any other report section.
@@ -1570,7 +1603,7 @@ Use exactly one visible decision: PASS, HOLD, VALIDATE, or REJECT.
 Do not expose internal grading labels, source-model labels, or internal recommendation codes anywhere in the final report.
 Align Decision Confidence with evidence quality; avoid extreme confidence values unless the evidence clearly supports them.
 Use honest planning-input language instead of vague source claims such as "industry reports".
-When citing sources, prefer real organizations such as OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant; include URLs only when available and never invent URLs or report names.
+Classify important numeric claims as Verified, Estimated, Assumption, or AI Analysis. Keep user inputs separate from benchmark sources. Deduplicate sources, merge repeated domains, and prioritize primary government, regulatory, academic, and official company sources. Include a URL only when it is present verbatim in source context. If a source cannot be verified, write exactly "AI-derived analysis (not externally verified)".
 Write concise executive memo prose with specific observations, numbered insights where useful, and no generic conclusions.
 Do not repeat the user's prompt verbatim; translate it into market context, buyer economics, competitor dynamics, and founder decisions.
 Every section must include at least one concrete business insight that changes sizing, timing, positioning, pricing, distribution, risk, or validation priority.

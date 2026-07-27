@@ -1,0 +1,229 @@
+
+> zerinix@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.9 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.1.4:3000
+- Environments: .env.local
+✓ Ready in 200ms
+
+ GET /dashboard/workspaces 200 in 3.0s (next.js: 90ms, proxy.ts: 1977ms, application-code: 926ms)
+ POST /dashboard/workspaces 200 in 1451ms (next.js: 9ms, proxy.ts: 585ms, application-code: 856ms)
+  └─ ƒ createWorkspace({}) in 413ms app/dashboard/actions.ts
+[browser] Detected `scroll-behavior: smooth` on the `<html>` element. To disable smooth scrolling during route transitions, add `data-scroll-behavior="smooth"` to your <html> element. Learn more: https://nextjs.org/docs/messages/missing-data-scroll-behavior
+ GET /dashboard/workspaces/6028b589-6ab7-40f1-934d-b7699e584503 200 in 1347ms (next.js: 264ms, proxy.ts: 473ms, application-code: 610ms)
+ GET /dashboard/reports 200 in 4.2s (next.js: 33ms, proxy.ts: 888ms, application-code: 3.3s)
+⚠ Blocked cross-origin request to Next.js dev resource /_next/webpack-hmr from "192.168.1.4".
+Cross-origin access to Next.js dev resources is blocked by default for safety.
+
+To allow this host in development, add it to "allowedDevOrigins" in next.config.js and restart the dev server:
+
+// next.config.js
+module.exports = {
+  allowedDevOrigins: ['192.168.1.4'],
+}
+
+Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins
+ GET /dashboard/workspaces 200 in 714ms (next.js: 5ms, proxy.ts: 230ms, application-code: 479ms)
+ GET /dashboard/workspaces 200 in 916ms (next.js: 9ms, proxy.ts: 459ms, application-code: 447ms)
+ GET /dashboard/workspaces 200 in 1253ms (next.js: 8ms, proxy.ts: 732ms, application-code: 513ms)
+ GET /dashboard/workspaces 200 in 1184ms (next.js: 7ms, proxy.ts: 592ms, application-code: 585ms)
+ GET /dashboard/workspaces 200 in 949ms (next.js: 12ms, proxy.ts: 525ms, application-code: 412ms)
+ GET /dashboard/workspaces 200 in 875ms (next.js: 5ms, proxy.ts: 470ms, application-code: 400ms)
+ GET /dashboard/workspaces 200 in 1422ms (next.js: 8ms, proxy.ts: 885ms, application-code: 529ms)
+ GET /dashboard/workspaces/6028b589-6ab7-40f1-934d-b7699e584503 200 in 1355ms (next.js: 13ms, proxy.ts: 533ms, application-code: 808ms)
+[ai_messages select failed] {
+  message: 'TypeError: fetch failed',
+  details: 'TypeError: fetch failed\n' +
+    '\n' +
+    'Caused by: HeadersOverflowError: Headers Overflow Error (UND_ERR_HEADERS_OVERFLOW)\n' +
+    'HeadersOverflowError: Headers Overflow Error\n' +
+    '    at Parser.trackHeader (node:internal/deps/undici/undici:7495:37)\n' +
+    '    at Parser.onHeaderValue (node:internal/deps/undici/undici:7486:14)\n' +
+    '    at wasm_on_header_value (node:internal/deps/undici/undici:7209:34)\n' +
+    '    at wasm://wasm/00034eea:wasm-function[49]:0x994b\n' +
+    '    at wasm://wasm/00034eea:wasm-function[20]:0x7edc\n' +
+    '    at Parser.execute (node:internal/deps/undici/undici:7357:26)\n' +
+    '    at Parser.readMore (node:internal/deps/undici/undici:7333:16)\n' +
+    '    at TLSSocket.onHttpSocketReadable (node:internal/deps/undici/undici:7813:22)\n' +
+    '    at TLSSocket.emit (node:events:509:28)\n' +
+    '    at emitReadable_ (node:internal/streams/readable:836:12)\n' +
+    '    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)',
+  hint: "HTTP headers exceeded server limits (typically 16KB). Your request URL is 16464 characters. If selecting many fields, consider using views. If filtering with large arrays (e.g., .in('id', [200+ IDs])), consider using an RPC function instead.",
+  code: ''
+}
+ GET /plan?new=1&mode=plan&workspaceId=6028b589-6ab7-40f1-934d-b7699e584503 200 in 15.0s (next.js: 88ms, proxy.ts: 259ms, application-code: 14.7s)
+[ai_messages select failed] {
+  message: 'TypeError: fetch failed',
+  details: 'TypeError: fetch failed\n' +
+    '\n' +
+    'Caused by: HeadersOverflowError: Headers Overflow Error (UND_ERR_HEADERS_OVERFLOW)\n' +
+    'HeadersOverflowError: Headers Overflow Error\n' +
+    '    at Parser.trackHeader (node:internal/deps/undici/undici:7495:37)\n' +
+    '    at Parser.onHeaderValue (node:internal/deps/undici/undici:7486:14)\n' +
+    '    at wasm_on_header_value (node:internal/deps/undici/undici:7209:34)\n' +
+    '    at wasm://wasm/00034eea:wasm-function[49]:0x994b\n' +
+    '    at wasm://wasm/00034eea:wasm-function[20]:0x7edc\n' +
+    '    at Parser.execute (node:internal/deps/undici/undici:7357:26)\n' +
+    '    at Parser.readMore (node:internal/deps/undici/undici:7333:16)\n' +
+    '    at TLSSocket.onHttpSocketReadable (node:internal/deps/undici/undici:7813:22)\n' +
+    '    at TLSSocket.emit (node:events:509:28)\n' +
+    '    at emitReadable_ (node:internal/streams/readable:836:12)\n' +
+    '    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)',
+  hint: "HTTP headers exceeded server limits (typically 16KB). Your request URL is 16464 characters. If selecting many fields, consider using views. If filtering with large arrays (e.g., .in('id', [200+ IDs])), consider using an RPC function instead.",
+  code: ''
+}
+ GET /plan?new=1&mode=plan&workspaceId=6028b589-6ab7-40f1-934d-b7699e584503 200 in 11.7s (next.js: 9ms, proxy.ts: 638ms, application-code: 11.1s)
+[ai_messages select failed] {
+  message: 'TypeError: fetch failed',
+  details: 'TypeError: fetch failed\n' +
+    '\n' +
+    'Caused by: HeadersOverflowError: Headers Overflow Error (UND_ERR_HEADERS_OVERFLOW)\n' +
+    'HeadersOverflowError: Headers Overflow Error\n' +
+    '    at Parser.trackHeader (node:internal/deps/undici/undici:7495:37)\n' +
+    '    at Parser.onHeaderValue (node:internal/deps/undici/undici:7486:14)\n' +
+    '    at wasm_on_header_value (node:internal/deps/undici/undici:7209:34)\n' +
+    '    at wasm://wasm/00034eea:wasm-function[49]:0x994b\n' +
+    '    at wasm://wasm/00034eea:wasm-function[20]:0x7edc\n' +
+    '    at Parser.execute (node:internal/deps/undici/undici:7357:26)\n' +
+    '    at Parser.readMore (node:internal/deps/undici/undici:7333:16)\n' +
+    '    at TLSSocket.onHttpSocketReadable (node:internal/deps/undici/undici:7813:22)\n' +
+    '    at TLSSocket.emit (node:events:509:28)\n' +
+    '    at emitReadable_ (node:internal/streams/readable:836:12)\n' +
+    '    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)',
+  hint: "HTTP headers exceeded server limits (typically 16KB). Your request URL is 16464 characters. If selecting many fields, consider using views. If filtering with large arrays (e.g., .in('id', [200+ IDs])), consider using an RPC function instead.",
+  code: ''
+}
+ GET /plan?new=1&mode=plan&workspaceId=6028b589-6ab7-40f1-934d-b7699e584503 200 in 11.7s (next.js: 8ms, proxy.ts: 662ms, application-code: 11.0s)
+[ai_messages select failed] {
+  message: 'TypeError: fetch failed',
+  details: 'TypeError: fetch failed\n' +
+    '\n' +
+    'Caused by: HeadersOverflowError: Headers Overflow Error (UND_ERR_HEADERS_OVERFLOW)\n' +
+    'HeadersOverflowError: Headers Overflow Error\n' +
+    '    at Parser.trackHeader (node:internal/deps/undici/undici:7495:37)\n' +
+    '    at Parser.onHeaderValue (node:internal/deps/undici/undici:7486:14)\n' +
+    '    at wasm_on_header_value (node:internal/deps/undici/undici:7209:34)\n' +
+    '    at wasm://wasm/00034eea:wasm-function[49]:0x994b\n' +
+    '    at wasm://wasm/00034eea:wasm-function[20]:0x7edc\n' +
+    '    at Parser.execute (node:internal/deps/undici/undici:7357:26)\n' +
+    '    at Parser.readMore (node:internal/deps/undici/undici:7333:16)\n' +
+    '    at TLSSocket.onHttpSocketReadable (node:internal/deps/undici/undici:7813:22)\n' +
+    '    at TLSSocket.emit (node:events:509:28)\n' +
+    '    at emitReadable_ (node:internal/streams/readable:836:12)\n' +
+    '    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)',
+  hint: "HTTP headers exceeded server limits (typically 16KB). Your request URL is 16464 characters. If selecting many fields, consider using views. If filtering with large arrays (e.g., .in('id', [200+ IDs])), consider using an RPC function instead.",
+  code: ''
+}
+ GET /plan?new=1&mode=plan&workspaceId=6028b589-6ab7-40f1-934d-b7699e584503 200 in 11.6s (next.js: 7ms, proxy.ts: 615ms, application-code: 11.0s)
+[ai_messages select failed] {
+  message: 'TypeError: fetch failed',
+  details: 'TypeError: fetch failed\n' +
+    '\n' +
+    'Caused by: HeadersOverflowError: Headers Overflow Error (UND_ERR_HEADERS_OVERFLOW)\n' +
+    'HeadersOverflowError: Headers Overflow Error\n' +
+    '    at Parser.trackHeader (node:internal/deps/undici/undici:7495:37)\n' +
+    '    at Parser.onHeaderValue (node:internal/deps/undici/undici:7486:14)\n' +
+    '    at wasm_on_header_value (node:internal/deps/undici/undici:7209:34)\n' +
+    '    at wasm://wasm/00034eea:wasm-function[49]:0x994b\n' +
+    '    at wasm://wasm/00034eea:wasm-function[20]:0x7edc\n' +
+    '    at Parser.execute (node:internal/deps/undici/undici:7357:26)\n' +
+    '    at Parser.readMore (node:internal/deps/undici/undici:7333:16)\n' +
+    '    at TLSSocket.onHttpSocketReadable (node:internal/deps/undici/undici:7813:22)\n' +
+    '    at TLSSocket.emit (node:events:509:28)\n' +
+    '    at emitReadable_ (node:internal/streams/readable:836:12)\n' +
+    '    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)',
+  hint: "HTTP headers exceeded server limits (typically 16KB). Your request URL is 16464 characters. If selecting many fields, consider using views. If filtering with large arrays (e.g., .in('id', [200+ IDs])), consider using an RPC function instead.",
+  code: ''
+}
+ GET /plan?new=1&mode=plan&workspaceId=6028b589-6ab7-40f1-934d-b7699e584503 200 in 11.1s (next.js: 5ms, proxy.ts: 459ms, application-code: 10.7s)
+[ai_messages select failed] {
+  message: 'TypeError: fetch failed',
+  details: 'TypeError: fetch failed\n' +
+    '\n' +
+    'Caused by: HeadersOverflowError: Headers Overflow Error (UND_ERR_HEADERS_OVERFLOW)\n' +
+    'HeadersOverflowError: Headers Overflow Error\n' +
+    '    at Parser.trackHeader (node:internal/deps/undici/undici:7495:37)\n' +
+    '    at Parser.onHeaderValue (node:internal/deps/undici/undici:7486:14)\n' +
+    '    at wasm_on_header_value (node:internal/deps/undici/undici:7209:34)\n' +
+    '    at wasm://wasm/00034eea:wasm-function[49]:0x994b\n' +
+    '    at wasm://wasm/00034eea:wasm-function[20]:0x7edc\n' +
+    '    at Parser.execute (node:internal/deps/undici/undici:7357:26)\n' +
+    '    at Parser.readMore (node:internal/deps/undici/undici:7333:16)\n' +
+    '    at TLSSocket.onHttpSocketReadable (node:internal/deps/undici/undici:7813:22)\n' +
+    '    at TLSSocket.emit (node:events:509:28)\n' +
+    '    at emitReadable_ (node:internal/streams/readable:836:12)\n' +
+    '    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)',
+  hint: "HTTP headers exceeded server limits (typically 16KB). Your request URL is 16464 characters. If selecting many fields, consider using views. If filtering with large arrays (e.g., .in('id', [200+ IDs])), consider using an RPC function instead.",
+  code: ''
+}
+ GET /plan?new=1&mode=plan&workspaceId=6028b589-6ab7-40f1-934d-b7699e584503 200 in 11.0s (next.js: 7ms, proxy.ts: 802ms, application-code: 10.2s)
+[ai_messages select failed] {
+  message: 'TypeError: fetch failed',
+  details: 'TypeError: fetch failed\n' +
+    '\n' +
+    'Caused by: HeadersOverflowError: Headers Overflow Error (UND_ERR_HEADERS_OVERFLOW)\n' +
+    'HeadersOverflowError: Headers Overflow Error\n' +
+    '    at Parser.trackHeader (node:internal/deps/undici/undici:7495:37)\n' +
+    '    at Parser.onHeaderValue (node:internal/deps/undici/undici:7486:14)\n' +
+    '    at wasm_on_header_value (node:internal/deps/undici/undici:7209:34)\n' +
+    '    at wasm://wasm/00034eea:wasm-function[49]:0x994b\n' +
+    '    at wasm://wasm/00034eea:wasm-function[20]:0x7edc\n' +
+    '    at Parser.execute (node:internal/deps/undici/undici:7357:26)\n' +
+    '    at Parser.readMore (node:internal/deps/undici/undici:7333:16)\n' +
+    '    at TLSSocket.onHttpSocketReadable (node:internal/deps/undici/undici:7813:22)\n' +
+    '    at TLSSocket.emit (node:events:509:28)\n' +
+    '    at emitReadable_ (node:internal/streams/readable:836:12)\n' +
+    '    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)',
+  hint: "HTTP headers exceeded server limits (typically 16KB). Your request URL is 16464 characters. If selecting many fields, consider using views. If filtering with large arrays (e.g., .in('id', [200+ IDs])), consider using an RPC function instead.",
+  code: ''
+}
+ GET /plan?new=1&mode=plan&workspaceId=6028b589-6ab7-40f1-934d-b7699e584503 200 in 11.4s (next.js: 17ms, proxy.ts: 383ms, application-code: 11.0s)
+[ai_messages select failed] {
+  message: 'TypeError: fetch failed',
+  details: 'TypeError: fetch failed\n' +
+    '\n' +
+    'Caused by: HeadersOverflowError: Headers Overflow Error (UND_ERR_HEADERS_OVERFLOW)\n' +
+    'HeadersOverflowError: Headers Overflow Error\n' +
+    '    at Parser.trackHeader (node:internal/deps/undici/undici:7495:37)\n' +
+    '    at Parser.onHeaderValue (node:internal/deps/undici/undici:7486:14)\n' +
+    '    at wasm_on_header_value (node:internal/deps/undici/undici:7209:34)\n' +
+    '    at wasm://wasm/00034eea:wasm-function[49]:0x994b\n' +
+    '    at wasm://wasm/00034eea:wasm-function[20]:0x7edc\n' +
+    '    at Parser.execute (node:internal/deps/undici/undici:7357:26)\n' +
+    '    at Parser.readMore (node:internal/deps/undici/undici:7333:16)\n' +
+    '    at TLSSocket.onHttpSocketReadable (node:internal/deps/undici/undici:7813:22)\n' +
+    '    at TLSSocket.emit (node:events:509:28)\n' +
+    '    at emitReadable_ (node:internal/streams/readable:836:12)\n' +
+    '    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)',
+  hint: "HTTP headers exceeded server limits (typically 16KB). Your request URL is 16464 characters. If selecting many fields, consider using views. If filtering with large arrays (e.g., .in('id', [200+ IDs])), consider using an RPC function instead.",
+  code: ''
+}
+ GET /plan?new=1&mode=plan&workspaceId=6028b589-6ab7-40f1-934d-b7699e584503 200 in 13.7s (next.js: 8ms, proxy.ts: 726ms, application-code: 12.9s)
+ GET /dashboard/workspaces 200 in 849ms (next.js: 4ms, proxy.ts: 406ms, application-code: 439ms)
+ POST /dashboard/workspaces 200 in 1625ms (next.js: 7ms, proxy.ts: 756ms, application-code: 862ms)
+ GET /dashboard/workspaces 200 in 2.0s (next.js: 6ms, proxy.ts: 1008ms, application-code: 1025ms)
+ GET /dashboard/workspaces 200 in 1440ms (next.js: 6ms, proxy.ts: 754ms, application-code: 679ms)
+ GET /dashboard/workspaces 200 in 931ms (next.js: 6ms, proxy.ts: 434ms, application-code: 490ms)
+ GET /dashboard/workspaces 200 in 1191ms (next.js: 7ms, proxy.ts: 801ms, application-code: 383ms)
+ GET /dashboard/workspaces 200 in 2.3s (next.js: 7ms, proxy.ts: 1843ms, application-code: 459ms)
+ GET /dashboard/reports 200 in 4.8s (next.js: 7ms, proxy.ts: 581ms, application-code: 4.2s)
+ GET /dashboard/workspaces 200 in 774ms (next.js: 4ms, proxy.ts: 271ms, application-code: 498ms)
+ POST /dashboard/workspaces 200 in 2.3s (next.js: 8ms, proxy.ts: 996ms, application-code: 1268ms)
+ GET /dashboard/workspaces 200 in 854ms (next.js: 8ms, proxy.ts: 419ms, application-code: 427ms)
+ GET /dashboard/workspaces 200 in 1192ms (next.js: 7ms, proxy.ts: 705ms, application-code: 480ms)
+ GET /dashboard/workspaces 200 in 1122ms (next.js: 3ms, proxy.ts: 465ms, application-code: 655ms)
+ GET /dashboard/workspaces 200 in 1021ms (next.js: 3ms, proxy.ts: 578ms, application-code: 440ms)
+ GET /dashboard/workspaces 200 in 1020ms (next.js: 8ms, proxy.ts: 505ms, application-code: 508ms)
+✓ Compiled in 62ms
+ GET /dashboard/workspaces/6028b589-6ab7-40f1-934d-b7699e584503 200 in 1137ms (next.js: 16ms, proxy.ts: 432ms, application-code: 689ms)
+ GET /dashboard/workspaces 200 in 1310ms (next.js: 8ms, proxy.ts: 821ms, application-code: 481ms)
+ GET /dashboard/workspaces 200 in 1018ms (next.js: 7ms, proxy.ts: 541ms, application-code: 471ms)
+ GET /dashboard/workspaces 200 in 1777ms (next.js: 7ms, proxy.ts: 939ms, application-code: 832ms)
+ GET / 200 in 923ms (next.js: 161ms, proxy.ts: 590ms, application-code: 172ms)
+ GET /dashboard 200 in 2.9s (next.js: 36ms, proxy.ts: 124ms, application-code: 2.7s)
+ GET /dashboard/workspaces 200 in 996ms (next.js: 8ms, proxy.ts: 500ms, application-code: 488ms)
+ POST /dashboard/workspaces 200 in 1187ms (next.js: 6ms, proxy.ts: 358ms, application-code: 823ms)
+ GET /dashboard/workspaces 200 in 1158ms (next.js: 8ms, proxy.ts: 567ms, application-code: 584ms)
+ GET /dashboard/workspaces 200 in 1195ms (next.js: 12ms, proxy.ts: 701ms, application-code: 483ms)

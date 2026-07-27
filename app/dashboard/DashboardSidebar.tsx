@@ -20,7 +20,11 @@ import {
 } from "@/components/MobileNavigation";
 import { getRequestDictionary } from "@/app/lib/i18n/server";
 
-export default async function DashboardSidebar() {
+export default async function DashboardSidebar({
+  showMobileNavigation = true,
+}: {
+  showMobileNavigation?: boolean;
+}) {
   const { dictionary } = await getRequestDictionary();
   const navigationGroups = [
     {
@@ -54,10 +58,12 @@ export default async function DashboardSidebar() {
 
   return (
     <>
-      <MobileHeader
-        labels={dictionary}
-      />
-      <MobileBottomNavigation labels={dictionary.nav} />
+      {showMobileNavigation ? (
+        <>
+          <MobileHeader labels={dictionary} />
+          <MobileBottomNavigation labels={dictionary.nav} />
+        </>
+      ) : null}
       <aside className={`hidden ${dashboardTheme.sidebar} lg:sticky lg:top-0 lg:flex lg:min-h-screen lg:w-72 lg:flex-col lg:px-5 lg:py-6`}>
       <div className="hidden lg:block">
         <Link

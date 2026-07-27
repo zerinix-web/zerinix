@@ -12,7 +12,6 @@ type PlanPageProps = {
     new?: string;
     workspaceId?: string;
     reportId?: string;
-    prompt?: string;
   }>;
 };
 
@@ -53,13 +52,13 @@ export default async function PlanPage({ searchParams }: PlanPageProps) {
     : undefined;
   const initialMode = getInitialMode(regenerationMode || params.mode, shouldStartFresh);
   const regenerationContext =
-    regenerationReport || params.prompt
+    regenerationReport
       ? {
           reportId: regenerationReport?.id || "",
           reportTitle: regenerationReport?.title || "Existing report",
           reportType: regenerationReport?.type || (initialMode === "market" ? "Market Analysis" : "Business Plan"),
           workspaceId: regenerationReport?.workspaceId || params.workspaceId || "",
-          prompt: regenerationReport?.prompt || params.prompt || "",
+          prompt: regenerationReport?.prompt || "",
         }
       : null;
 

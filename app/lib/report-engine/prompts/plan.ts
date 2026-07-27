@@ -4,7 +4,7 @@ import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
 export const planPrompts = {
   executiveSummary: {
     prompt:
-      "Write an investor-grade Executive Summary with one job only: executive decision. Start with exactly one final decision from PASS, HOLD, VALIDATE, or REJECT plus Decision Confidence, then cover final thesis, Investment Score, Estimated Valuation, Funding Stage, top 3 strengths, top 3 risks, and next critical action. Early-stage ideas without validation should usually be HOLD or VALIDATE, not REJECT. Do not quote the user's prompt or any analysis question. Do not explain the business model, product, market sizing, SWOT, pricing, GTM, risks, or roadmap. Use only concise evidence labels when they change the verdict. Max 120 words.",
+      "Write an investor-grade Executive Summary with one job only: executive decision. Start with exactly one final decision from PASS, HOLD, VALIDATE, or REJECT plus Decision Confidence, then cover the business-specific thesis, Investment Score, Estimated Valuation, Funding Stage, the decisive evidence gap, primary risk, and next critical action. Keep the same decision spine later used by Executive Recommendation and Roadmap, but do not reuse their wording. Early-stage ideas without validation should usually be HOLD or VALIDATE, not REJECT. Do not quote the user's prompt or any analysis question. Do not explain the business model, product, market sizing, SWOT, pricing, GTM, risks, or roadmap. Use only concise evidence labels when they change the verdict. Max 120 words.",
     maxTokens: 650,
   },
   problem: {
@@ -44,12 +44,12 @@ export const planPrompts = {
   },
   swotAnalysis: {
     prompt:
-      "Create SWOT with exactly four labeled groups: Strengths, Weaknesses, Opportunities, Threats. Use 2-4 distinct bullets per group. Strengths and Weaknesses must focus on internal company/model factors; Opportunities and Threats must be external but must not repeat Risks, Market Opportunity, or Competitor Landscape. Each bullet must state why it matters for the founder. Max 150 words.",
+      "Create SWOT with exactly four labeled groups: Strengths, Weaknesses, Opportunities, Threats. Use 2-4 distinct bullets per group and anchor every bullet to a concrete capability, constraint, customer behavior, channel, asset, geography, or business-model feature from this company. Strengths and Weaknesses own internal company/model factors; Opportunities and Threats own external openings only. Do not include risk mitigations, Porter forces, competitor profiles, financial metrics, or recommendations, and do not repeat Risks, Market Opportunity, or Competitor Landscape. Each bullet must state its decision relevance without generic startup language. Max 150 words.",
     maxTokens: 850,
   },
   portersFiveForces: {
     prompt:
-      "Analyze only industry forces using Porter's Five Forces. Give a qualitative rating and one founder implication for rivalry, new entrants, buyer power, supplier/platform power, and substitutes. Do not repeat SWOT, risks, or competitor descriptions. Max 160 words.",
+      "Analyze only structural industry economics using Porter's Five Forces. Give a qualitative rating and one company-specific implication for rivalry, new entrants, buyer power, supplier/platform power, and substitutes. Tie each force to the actual value chain, switching cost, distribution dependency, or margin pressure of this business. Do not describe company weaknesses, risk mitigations, named competitor profiles, or roadmap actions; those belong to SWOT, Risks, Competitor Landscape, and Roadmap. Max 160 words.",
     maxTokens: 850,
   },
   pricingStrategy: {
@@ -89,12 +89,12 @@ export const planPrompts = {
   },
   executiveRecommendation: {
     prompt:
-      "Write only final investment decision. Include selected decision, the single key reason, biggest risks, and the next concrete action. Use one Decision Confidence value, then add AI Confidence Breakdown dimensions: Market Confidence, Competition Confidence, Financial Confidence, Execution Confidence, Product Confidence, each with a concise investor-relevant explanation. Add Founder Decision Engine answering: If I were the founder, what would I do first, postpone, spend money on, and absolutely avoid? Select exactly one visible option and no second option: PASS, HOLD, VALIDATE, or REJECT. Early-stage ideas without validation should prefer HOLD or VALIDATE, not REJECT. Decision Confidence must align with the calculated decision inputs. Do not quote the user's prompt, internal instructions, or analysis question. Do not use internal scoring terminology. Do not restate the business model, market summary, SWOT, roadmap, or financial dashboard. Max 210 words.",
+      "Write only final investment decision. Preserve the Executive Summary decision and primary risk, then convert them into one business-specific capital decision and one next action that names the responsible actor, target customer or operating object, test method, and proof point. Use one Decision Confidence value, then add AI Confidence Breakdown dimensions: Market Confidence, Competition Confidence, Financial Confidence, Execution Confidence, Product Confidence, each with a concise investor-relevant explanation. Add Founder Decision Engine answering specifically for this business: what to do first, postpone, spend money on, and absolutely avoid. Select exactly one visible option and no second option: PASS, HOLD, VALIDATE, or REJECT. Early-stage ideas without validation should prefer HOLD or VALIDATE, not REJECT. Decision Confidence must align with the calculated decision inputs. Do not quote the user's prompt, internal instructions, or analysis question. Do not use internal scoring terminology. Do not restate the business model, market summary, SWOT, roadmap, or financial dashboard. Max 210 words.",
     maxTokens: 650,
   },
   risks: {
     prompt:
-      "Write only risks as a professional Risk Matrix. Each material risk must include Probability, Impact, Severity, Mitigation, and Early Warning Signal. Cover market, product, distribution, pricing, regulatory, funding, and execution risks where relevant. End with a concise executive implication explaining which risk should change capital allocation first. Do not add a heading. Do not repeat SWOT threats, scenario cases, or recommendation wording. Max 210 words.",
+      "Write only company-specific failure modes as a professional Risk Matrix. Each material risk must include a distinct causal mechanism, Probability, Impact, Severity, tailored Mitigation, and measurable Early Warning Signal. Select only risks relevant to this industry's customer, channel, pricing, regulatory, funding, supply, product, or execution reality. End with a concise capital-allocation implication for the highest-severity risk. Do not add a heading. Do not repeat SWOT threats, Porter forces, scenario cases, or recommendation wording. Max 210 words.",
     maxTokens: 800,
   },
   kpis: {
@@ -104,12 +104,12 @@ export const planPrompts = {
   },
   roadmap306090: {
     prompt:
-      "Create only the AI Action Plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Each horizon must contain milestones, decision gates, and expected business impact. Do not repeat GTM, sales process, KPIs, or founder execution detail from Founder Roadmap. Max 190 words.",
+      "Create only the AI Action Plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Begin with the exact strategic action selected by Executive Recommendation, then translate it into business-specific milestones, owners or operating objects, proof gates, and expected impact. Every later horizon must depend on evidence from the prior horizon. Do not repeat the recommendation rationale, GTM, sales process, KPIs, or founder execution detail from Founder Roadmap. Max 190 words.",
     maxTokens: 900,
   },
   founderRoadmap: {
     prompt:
-      "Create only the founder execution plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Each step must depend on the prior proof point and explain expected business impact. Include what the founder should do first, what to postpone, where to spend money, and what to avoid if it belongs here. Do not repeat timeline milestones, GTM strategy, or KPIs. Max 210 words.",
+      "Create only the founder execution plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Start from the Executive Recommendation next action and make every step specific to this company's buyer, offer, channel, product, geography, regulation, supply chain, or operating model. Each step must depend on the prior proof point and explain expected business impact. Include what the founder should do first, what to postpone, where to spend money, and what to avoid if it belongs here. Do not repeat the recommendation rationale, timeline milestones, GTM strategy, or KPIs. Max 210 words.",
     maxTokens: 950,
   },
   financialAssumptions: {
@@ -124,7 +124,7 @@ export const planPrompts = {
   },
   sourcesAssumptions: {
     prompt:
-      "List citation metadata and evidence classification, then close the report with CEO Brief. Deduplicate sources. For each source include title, publisher, publication year, URL if available, confidence, and source type. Do not invent URLs, report names, or publishers. If no verified source is available, omit the source instead of writing placeholder text. Separately list User-provided facts, AI assumptions, and Market-derived estimates used by the report. End with CEO Brief as a board-level briefing: maximum 10 concise bullets, each directly supported by report findings. Do not write vague source claims such as 'industry reports' unless a specific source is named. Max 260 words.",
+      "List citation metadata and evidence classification, then close the report with CEO Brief. Keep user-provided inputs separate from benchmark sources. Deduplicate repeated sources and merge repeated domains, retaining the most authoritative and complete entry. Prioritize primary government, regulatory, academic, and official-company sources over industry aggregators. Include title, publisher, publication year, source type, and URL only when the URL exists verbatim in supplied source context. Never reconstruct or invent citation metadata. If a source cannot be verified, write exactly 'AI-derived analysis (not externally verified)' instead of presenting it as a citation. Classify entries only as Verified, Estimated, Assumption, or AI Analysis. End with CEO Brief as a board-level briefing: maximum 10 concise bullets, each directly supported by report findings. Max 260 words.",
     maxTokens: 1050,
   },
 } as const;
@@ -227,7 +227,7 @@ export function buildPlanLanguageInstructions(language: ResponseLanguage) {
     "The Data-Driven Financial Analysis Engine block in the user input contains the calculated base-case financial model. Use those values as the source of truth.",
     "The Investment Decision Inputs block in the user input contains the calculated investment score, visible decision, estimated valuation, funding stage, decision factors, strengths, weaknesses, top risks, and next critical action. Use those values as the source of truth.",
     "Executive Summary, Business Model, Unit Economics, KPI Dashboard, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation must reference the same calculated financial model whenever financial metrics appear.",
-    "For ARR, MRR, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, financial sections must show value, formula, assumptions, evidence label, and benchmark source. Use only this evidence set: Verified, Benchmark Derived, Planning Assumption, Validation Required.",
+    "For every important numeric claim, including ARR, MRR, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, show value, formula, assumptions, evidence label, and benchmark source. Use only this evidence set: Verified, Estimated, Assumption, AI Analysis. User-provided values are Verified; benchmark-derived values are Estimated; inferred values are Assumptions; interpretive conclusions are AI Analysis.",
     "Add concise evidence metadata where it materially improves trust for market data, financial metrics, KPI assumptions, TAM/SAM/SOM, and competitor insights. Do not over-label ordinary sentences.",
     "Make reasoning deeply industry-specific for SaaS, AI, Cybersecurity, Healthcare, Logistics, Restaurant, Drone, Marketplace, FinTech, E-commerce, EV Charging, and other detected sectors. KPIs, risks, roadmap logic, and financial interpretation must reflect that sector's economics.",
     "Keep payback, LTV:CAC, CAC, and runway realistic for the sector and capital intensity. If a result looks unusually strong, label it as a sensitivity or low-confidence assumption rather than a base case.",
@@ -253,4 +253,3 @@ export function buildPlanLanguageInstructions(language: ResponseLanguage) {
     "Founder Roadmap must include Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months, with each step dependent on the prior proof point.",
   ].join("\n");
 }
-

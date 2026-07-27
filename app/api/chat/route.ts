@@ -441,6 +441,22 @@ function isReportMemoryQuestion(prompt: string, messages: ChatInputMessage[]) {
   );
 }
 
+function isExplicitSavedReportQuestion(prompt: string) {
+  return /\bmy\s+(saved\s+|attached\s+|generated\s+)?report\b|\b(the|this)\s+(saved|attached|generated)\s+report\b|\b(saved|attached|generated)\s+report\b|\breport\s+(i|we)\s+(saved|attached|generated)\b|\b(kayıtlı|kaydedilmiş|ekli|oluşturduğum)\s+rapor\b|\b(mein|gespeicherte[rs]?|angehängte[rs]?)\s+bericht\b/i.test(
+    prompt
+  );
+}
+
+function formatMissingSavedReportResponse(
+  responseLanguage: "English" | "Turkish"
+) {
+  if (responseLanguage === "Turkish") {
+    return "Kayıtlı rapor bu konuşmada kullanılamıyor. Raporu açarak devam edebilir veya sorunuzu doğrudan sorabilirsiniz; mevcut konuşma bağlamından yanıtlayabilirim.";
+  }
+
+  return "That saved report is not available in this conversation. Open the report to continue from it, or ask your question directly and I can answer from our current conversation.";
+}
+
 function normalizeProfile(value: unknown): AiChatProfile | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -1369,6 +1385,7 @@ export async function POST(req: Request) {
     }
 
     const reportQuestion = isReportMemoryQuestion(prompt, messages);
+    const explicitSavedReportQuestion = isExplicitSavedReportQuestion(prompt);
     const loadedReport = reportId && reportQuestion
       ? await loadUserReport(supabase, user, reportId)
       : null;
@@ -1472,7 +1489,7 @@ export async function POST(req: Request) {
       return textStream(createMockChatResponse(prompt, selectedExpert));
     }
 
-    if (reportQuestion && !reportMemory) {
+    if (explicitSavedReportQuestion && !reportMemory) {
       logOperationalInfo("[api:chat] report memory missing", {
         conversationId: conversationId || null,
         reportId: reportId || null,
@@ -1481,15 +1498,7 @@ export async function POST(req: Request) {
         promptLength: prompt.length,
       });
 
-      return textStream(
-        [
-          "No report is attached to this chat request.",
-          "",
-          `Debug reason: ${reportMemoryDebugReason}`,
-          "",
-          "Open AI Chat from a saved report or pass the report id so I can answer from the report text.",
-        ].join("\n")
-      );
+      return textStream(formatMissingSavedReportResponse(responseLanguage));
     }
 
     if (advisorRequest && essentialAdvisorQuestions.length > 0) {
@@ -1647,7 +1656,7 @@ export async function POST(req: Request) {
             "If the report does not contain the requested information, say that the report does not contain it, then use general reasoning clearly marked as outside-report reasoning.",
             "Keep using this report memory for follow-up questions in this conversation.",
           ].join("\n")
-        : "No saved report memory is attached to this chat request.",
+        : "Answer from the current conversation and general reasoning. Do not mention missing report context unless the user explicitly asks about a saved report.",
       "Answer naturally and directly. You may help with business, strategy, operations, finance, product, marketing, technology, or general questions.",
       "Use the conversation history for context, but do not fabricate facts.",
       "When attached file text is provided, treat it as user-supplied context. If a file has no readable text, say so briefly when relevant.",

@@ -43,7 +43,7 @@ const newsPublishers =
   /\b(reuters|bloomberg|financial times|wall street journal|wsj|economist|techcrunch|forbes|business insider|cnbc|bbc|guardian|nyt|new york times)\b/i;
 const communitySignals = /\b(reddit|quora|medium|substack|forum|discord|telegram|x\.com|twitter|linkedin post|blog)\b/i;
 const aiSignals =
-  /\b(ai generated|planning assumption|model assumption|validation required|no verified source|source metadata was not provided|kaynak bilgisi doğrulanamadı)\b/i;
+  /\b(ai generated|ai-derived analysis|not externally verified|planning assumption|model assumption|validation required|no verified source|source metadata was not provided|kaynak bilgisi doğrulanamadı|harici olarak doğrulanmadı)\b/i;
 
 function emptyDistribution(): Record<SourceReliabilityCategory, number> {
   return Object.fromEntries(categories.map((category) => [category, 0])) as Record<

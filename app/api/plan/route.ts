@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { createClient as createSupabaseClient, type User } from "@supabase/supabase-js";
 import { isPrivateBetaAllowed } from "@/app/lib/beta-access";
 import { isAmbiguousBusinessRequest } from "@/app/lib/business-idea-detection";
 import { createClient } from "@/app/lib/supabase/server";
+import { getSupabasePublishableKey, getSupabaseUrl } from "@/app/lib/supabase/env";
 import {
   checkRateLimit,
   getClientIpFromRequest,
@@ -49,6 +51,8 @@ import {
 import {
   buildFullReportStructureDirectives,
 } from "@/app/lib/ai/report-quality-directives";
+import { dedupeReportParagraphsAcrossSections } from "@/app/lib/report-content-quality.mjs";
+import { normalizeReportSourceSection } from "@/app/lib/report-source-normalization.mjs";
 import {
   localizePdfPresentationLabel,
   localizePdfPresentationText,
@@ -87,6 +91,58 @@ const FULL_REPORT_OPENAI_TIMEOUT_MS = 180_000;
 const FULL_REPORT_POST_PROCESS_TIMEOUT_MS = 12_000;
 
 type PlanGenerationStage = ReportPipelineStage;
+
+function readBearerToken(request: Request) {
+  const authorization = request.headers.get("authorization") || "";
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+
+  return match?.[1]?.trim() || "";
+}
+
+async function createAuthenticatedPlanClient(request: Request) {
+  const cookieClient = await createClient();
+  const accessToken = readBearerToken(request);
+  const {
+    data: { user: cookieUser },
+    error: cookieUserError,
+  } = await cookieClient.auth.getUser();
+
+  if (cookieUser && !cookieUserError) {
+    return { supabase: cookieClient, user: cookieUser };
+  }
+
+  if (!accessToken) {
+    return { supabase: cookieClient, user: null as User | null };
+  }
+
+  const supabaseUrl = getSupabaseUrl();
+  const supabaseKey = getSupabasePublishableKey();
+
+  if (!supabaseUrl || !supabaseKey) {
+    return { supabase: cookieClient, user: null as User | null };
+  }
+
+  const bearerClient = createSupabaseClient(supabaseUrl, supabaseKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  });
+  const {
+    data: { user: bearerUser },
+    error: bearerUserError,
+  } = await bearerClient.auth.getUser(accessToken);
+
+  return {
+    supabase: bearerUser && !bearerUserError ? bearerClient : cookieClient,
+    user: bearerUser && !bearerUserError ? bearerUser : null,
+  };
+}
 
 function createReportTimeoutError(label: string, timeoutMs: number) {
   return new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
@@ -519,13 +575,13 @@ function cleanInternalSourceFallbacks(content: string, language: ResponseLanguag
     "Kaynak kategorisi: Planlama varsayımı. Harici atıf metadatası sağlanmadı."
   );
 
-  return content
+  return normalizeReportSourceSection(content
     .replace(/\bsources(?:\.[a-z0-9_-]+)+\b/gi, cleanReplacement)
     .replace(/\bdeduplicated\.none\.provided\.by\.user\b/gi, cleanReplacement)
     .replace(/\bnone\.provided\.by\.user\b/gi, cleanReplacement)
     .replace(/\bundefined\b/gi, reportText(language, "Not verified", "Doğrulanmadı"))
     .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .trim(), { language, allowExternalCitations: false });
 }
 
 function enforcePlanReportLanguage(
@@ -536,7 +592,7 @@ function enforcePlanReportLanguage(
   let normalized = cleanInternalSourceFallbacks(content, language);
 
   if (context) {
-    const confidenceValue = `${context.investmentScore.confidence}%`;
+    const confidenceValue = `${context.reportIntelligence.totalScore}%`;
     normalized = normalized
       .replace(/\b(?:Decision Confidence|Karar Güveni)\s*[:\-–—]\s*\d{1,3}%?(?:\s*\([^)]+\))?/gi, () =>
         language === "Turkish"
@@ -570,6 +626,10 @@ function enforcePlanReportLanguage(
       .replace(/\bTrigger\s*:/g, "Tetikleyici:")
       .replace(/\bAction\s*:/g, "Aksiyon:")
       .replace(/\bStatus\s*:/g, "Durum:")
+      .replace(/\bAI Analysis\b/g, "AI Analizi")
+      .replace(/\bEstimated\b/g, "Tahmini")
+      .replace(/\bAssumption\b/g, "Varsayım")
+      .replace(/\bVerified\b/g, "Doğrulanmış")
       .replace(/\bValidation Required\b/g, "Doğrulama gerekli")
       .replace(/\bModel target\b/g, "Model hedefi")
       .replace(/\bWatch\b/g, "İzleme")
@@ -600,6 +660,10 @@ function enforcePlanReportLanguage(
     .replace(/\bTetikleyici\s*:/g, "Trigger:")
     .replace(/\bAksiyon\s*:/g, "Action:")
     .replace(/\bDurum\s*:/g, "Status:")
+    .replace(/\bAI Analizi\b/g, "AI Analysis")
+    .replace(/\bTahmini\b/g, "Estimated")
+    .replace(/\bVarsayım\b/g, "Assumption")
+    .replace(/\bDoğrulanmış\b/g, "Verified")
     .replace(/\bDoğrulama gerekli\b/gi, "Validation Required")
     .replace(/\bModel hedefi\b/gi, "Model target")
     .replace(/\bİzleme\b/g, "Watch")
@@ -1079,10 +1143,11 @@ function buildCanonicalKpiGovernance(context: AiFinancialModelContext, language:
 
 function buildCanonicalExecutiveRecommendation(context: AiFinancialModelContext, language: ResponseLanguage) {
   const score = context.investmentScore;
+  const decisionConfidence = context.reportIntelligence.totalScore;
   const confidenceLabel =
-    score.confidence >= 75
+    decisionConfidence >= 75
       ? reportText(language, "High", "Yüksek")
-      : score.confidence >= 55
+      : decisionConfidence >= 55
         ? reportText(language, "Medium", "Orta")
         : reportText(language, "Low", "Düşük");
   const finalDecision =
@@ -1115,7 +1180,7 @@ function buildCanonicalExecutiveRecommendation(context: AiFinancialModelContext,
 
   return [
     reportText(language, `Decision: ${visibleDecision}`, `Karar: ${visibleDecision}`),
-    reportText(language, `Decision Confidence: ${score.confidence}% (${confidenceLabel})`, `Karar Güveni: ${score.confidence}% (${confidenceLabel})`),
+    reportText(language, `Decision Confidence: ${decisionConfidence}% (${confidenceLabel})`, `Karar Güveni: ${decisionConfidence}% (${confidenceLabel})`),
     reportText(language, `Report Quality Confidence: ${reportQualityConfidence} (${context.reportIntelligence.totalScore}/100)`, `Rapor Kalitesi Güveni: ${reportQualityConfidence} (${context.reportIntelligence.totalScore}/100)`),
     reportText(
       language,
@@ -1128,8 +1193,8 @@ function buildCanonicalExecutiveRecommendation(context: AiFinancialModelContext,
     reportText(language, `Next Action: ${score.nextCriticalAction}`, `Sonraki Aksiyon: ${score.nextCriticalAction}`),
     reportText(
       language,
-      `Rationale: The current evidence supports ${finalDecision.toLowerCase()} because runway, payback, validation confidence, and capital efficiency still need to be proven before scale.`,
-      `Gerekçe: Mevcut kanıtlar ${visibleDecision.toLowerCase()} kararını destekliyor; çünkü ölçek öncesinde finansal pist, geri ödeme, doğrulama güveni ve sermaye verimliliği kanıtlanmalı.`
+      `Rationale: For ${context.normalizedBusinessIdea}, ${finalDecision.toLowerCase()} is justified until ${context.inputs.targetCustomer} demand supports the ${context.inputs.pricingModel} model within ${context.metrics.cacPayback.displayValue} payback and ${context.metrics.runway.displayValue} runway.`,
+      `Gerekçe: ${context.normalizedBusinessIdea} için ${visibleDecision.toLowerCase()} kararı; ${context.inputs.targetCustomer} talebi, ${context.inputs.pricingModel} modelini ${context.metrics.cacPayback.displayValue} geri ödeme ve ${context.metrics.runway.displayValue} finansal pist içinde destekleyene kadar gerekçelidir.`
     ),
     formatDecisionConfidenceReport(context, language),
     formatReportIntelligenceSummary(context, language),
@@ -1238,7 +1303,7 @@ function buildConfidenceBreakdown(context: AiFinancialModelContext, language: Re
   const execution = scorePercent(engine.executionScore.score, engine.executionScore.maximumScore);
   const product = scorePercent(engine.technologyScore.score, engine.technologyScore.maximumScore);
   return [
-    reportText(language, `- Decision Confidence: ${context.investmentScore.confidence}% — the single Decision Confidence used across this report.`, `- Karar Güveni: ${context.investmentScore.confidence}% — bu rapor genelinde kullanılan tek Karar Güveni değeridir.`),
+    reportText(language, `- Decision Confidence: ${context.reportIntelligence.totalScore}% — derived from evidence quality, source coverage, financial certainty, benchmark fit, and validation readiness.`, `- Karar Güveni: ${context.reportIntelligence.totalScore}% — kanıt kalitesi, kaynak kapsamı, finansal kesinlik, benchmark uyumu ve doğrulama hazırlığından türetilmiştir.`),
     reportText(language, `- Market Confidence: ${market}% — ${engine.marketScore.explanation}`, `- Pazar Güveni: ${market}% — ${engine.marketScore.explanation}`),
     reportText(language, `- Competition Confidence: ${competition}% — ${engine.competitionScore.explanation}`, `- Rekabet Güveni: ${competition}% — ${engine.competitionScore.explanation}`),
     reportText(language, `- Financial Confidence: ${financial}% — ${engine.financialScore.explanation}`, `- Finansal Güven: ${financial}% — ${engine.financialScore.explanation}`),
@@ -1276,11 +1341,43 @@ function buildOpportunityScore(context: AiFinancialModelContext, language: Respo
 function buildFounderDecisionEngine(context: AiFinancialModelContext, language: ResponseLanguage) {
   return [
     reportText(language, `- If I were the founder: I would focus first on ${context.investmentScore.nextCriticalAction.toLowerCase()}.`, `- Kurucu olsaydım: Önce ${context.investmentScore.nextCriticalAction.toLowerCase()} konusuna odaklanırdım.`),
-    reportText(language, "- Do first: validate willingness to pay and acquisition cost before expanding scope.", "- İlk yapılacak: kapsamı genişletmeden önce ödeme isteğini ve edinim maliyetini doğrula."),
-    reportText(language, "- Postpone: broad hiring, multi-channel GTM, and non-core product expansion until payback evidence improves.", "- Ertele: geri ödeme kanıtı güçlenene kadar geniş işe alım, çok kanallı pazara giriş ve çekirdek dışı ürün genişlemesi."),
-    reportText(language, "- Spend money on: customer discovery, conversion experiments, and the smallest proof asset that confirms beachhead demand.", "- Para harcanacak alan: müşteri keşfi, dönüşüm deneyleri ve başlangıç pazar talebini kanıtlayan en küçük kanıt varlığı."),
-    reportText(language, "- Absolutely avoid: scaling paid acquisition before CAC, retention, and payback are proven.", "- Kesinlikle kaçınılacak: CAC, elde tutma ve geri ödeme kanıtlanmadan ücretli edinimi ölçeklemek."),
+    reportText(language, `- Do first: test ${context.metrics.arpa.displayValue} willingness to pay with ${context.inputs.targetCustomer} through the narrowest ${context.inputs.pricingModel} offer.`, `- İlk yapılacak: ${context.inputs.targetCustomer} ile en dar ${context.inputs.pricingModel} teklif üzerinden ${context.metrics.arpa.displayValue} ödeme isteğini test et.`),
+    reportText(language, `- Postpone: broad hiring and expansion beyond the ${context.inputs.businessModel} beachhead until ${context.metrics.cacPayback.displayValue} payback is observed.`, `- Ertele: ${context.metrics.cacPayback.displayValue} geri ödeme gözlenene kadar geniş işe alımı ve ${context.inputs.businessModel} başlangıç modelinin ötesine genişlemeyi ertele.`),
+    reportText(language, `- Spend money on: ${context.inputs.targetCustomer} discovery, paid conversion proof, and the smallest ${context.inputs.industry} operating asset needed to deliver the promise.`, `- Para harcanacak alan: ${context.inputs.targetCustomer} keşfi, ücretli dönüşüm kanıtı ve vaadi sunmak için gereken en küçük ${context.inputs.industry} operasyon varlığı.`),
+    reportText(language, `- Absolutely avoid: committing ${context.metrics.investmentNeeded.displayValue} before retention and ${context.metrics.cacPayback.displayValue} payback are demonstrated.`, `- Kesinlikle kaçınılacak: elde tutma ve ${context.metrics.cacPayback.displayValue} geri ödeme gösterilmeden ${context.metrics.investmentNeeded.displayValue} sermaye taahhüt etmek.`),
   ];
+}
+
+function buildRiskResponse(
+  risk: string,
+  context: AiFinancialModelContext,
+  language: ResponseLanguage
+) {
+  if (/\b(cac|payback|capital|fund|burn|runway|margin|cash|sermaye|nakit|geri ödeme|marj)\b/i.test(risk)) {
+    return {
+      mitigation: reportText(language, `cap acquisition spend until ${context.metrics.cacPayback.displayValue} payback is observed`, `${context.metrics.cacPayback.displayValue} geri ödeme gözlenene kadar edinim harcamasını sınırla`),
+      signal: reportText(language, `CAC rises above ${context.metrics.cac.displayValue} or gross margin falls below ${context.metrics.grossMargin.displayValue}`, `CAC ${context.metrics.cac.displayValue} üzerine çıkar veya brüt marj ${context.metrics.grossMargin.displayValue} altına iner`),
+    };
+  }
+
+  if (/\b(regulat|compliance|legal|license|privacy|regül|uyum|yasal|lisans|gizlilik)\b/i.test(risk)) {
+    return {
+      mitigation: reportText(language, `complete a ${context.inputs.geography} compliance review before the first scaled ${context.inputs.industry} launch`, `ilk ölçekli ${context.inputs.industry} lansmanından önce ${context.inputs.geography} uyum incelemesini tamamla`),
+      signal: reportText(language, "a required approval, data right, or operating permission remains unresolved at launch gate", "lansman kapısında gerekli onay, veri hakkı veya işletme izni çözümsüz kalır"),
+    };
+  }
+
+  if (/\b(compet|substitut|incumbent|rekabet|rakip|ikame)\b/i.test(risk)) {
+    return {
+      mitigation: reportText(language, `prove a measurable switching benefit for ${context.inputs.targetCustomer} before broad positioning spend`, `geniş konumlandırma harcamasından önce ${context.inputs.targetCustomer} için ölçülebilir geçiş faydasını kanıtla`),
+      signal: reportText(language, "qualified buyers prefer the incumbent workflow after a direct offer comparison", "nitelikli alıcılar doğrudan teklif karşılaştırmasından sonra mevcut çözümü tercih eder"),
+    };
+  }
+
+  return {
+    mitigation: reportText(language, `run paid ${context.inputs.targetCustomer} validation against the ${context.inputs.pricingModel} offer before scaling`, `ölçeklemeden önce ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile ücretli doğrulamaya tabi tut`),
+    signal: reportText(language, `qualified demand does not convert at the ${context.metrics.arpa.displayValue} planning input`, `nitelikli talep ${context.metrics.arpa.displayValue} planlama girdisinde dönüşmez`),
+  };
 }
 
 function buildRiskMatrix(context: AiFinancialModelContext, language: ResponseLanguage) {
@@ -1294,11 +1391,12 @@ function buildRiskMatrix(context: AiFinancialModelContext, language: ResponseLan
     const probability = index === 0 ? reportText(language, "High", "Yüksek") : reportText(language, "Medium", "Orta");
     const impact = index === 0 ? reportText(language, "High", "Yüksek") : reportText(language, "Medium", "Orta");
     const severity = index === 0 ? reportText(language, "Critical", "Kritik") : reportText(language, "Material", "Önemli");
+    const response = buildRiskResponse(risk, context, language);
 
     return reportText(
       language,
-      `- ${risk} | Probability: ${probability} | Impact: ${impact} | Severity: ${severity} | Mitigation: run a focused validation sprint before scaling spend | Early Warning Signal: KPI miss against payback, conversion, or retention threshold.`,
-      `- ${risk} | Olasılık: ${probability} | Etki: ${impact} | Şiddet: ${severity} | Azaltım: harcamayı ölçeklemeden önce odaklı bir doğrulama sprinti yürüt | Erken Uyarı Sinyali: geri ödeme, dönüşüm veya elde tutma eşiğine göre KPI sapması.`
+      `- ${risk} | Probability: ${probability} | Impact: ${impact} | Severity: ${severity} | Mitigation: ${response.mitigation} | Early Warning Signal: ${response.signal}.`,
+      `- ${risk} | Olasılık: ${probability} | Etki: ${impact} | Şiddet: ${severity} | Azaltım: ${response.mitigation} | Erken Uyarı Sinyali: ${response.signal}.`
     );
   });
 }
@@ -1306,7 +1404,7 @@ function buildRiskMatrix(context: AiFinancialModelContext, language: ResponseLan
 function buildCeoBrief(context: AiFinancialModelContext, language: ResponseLanguage) {
   const decision = localizeDecision(getVisibleDecision(context), language);
   return [
-    reportText(language, `- Decision posture: ${decision}; Decision Confidence is ${context.investmentScore.confidence}/100.`, `- Karar duruşu: ${decision}; Karar Güveni ${context.investmentScore.confidence}/100.`),
+    reportText(language, `- Decision posture: ${decision}; Decision Confidence is ${context.reportIntelligence.totalScore}/100.`, `- Karar duruşu: ${decision}; Karar Güveni ${context.reportIntelligence.totalScore}/100.`),
     reportText(language, `- Immediate board priority: ${context.investmentScore.nextCriticalAction}`, `- Acil yönetim önceliği: ${context.investmentScore.nextCriticalAction}`),
     reportText(language, `- Demand proof must come from ${context.inputs.targetCustomer} willingness to pay, not market-size narrative alone.`, `- Talep kanıtı yalnızca pazar büyüklüğü anlatısından değil, ${context.inputs.targetCustomer} ödeme isteğinden gelmelidir.`),
     reportText(language, `- Financial discipline depends on protecting ${context.metrics.grossMargin.displayValue} gross margin and ${context.metrics.cacPayback.displayValue} CAC payback.`, `- Finansal disiplin ${context.metrics.grossMargin.displayValue} brüt marjı ve ${context.metrics.cacPayback.displayValue} CAC geri ödemesini korumaya bağlıdır.`),
@@ -1395,7 +1493,10 @@ function normalizeFullPlanReport(
       normalized[field] = enforcePlanReportLanguage(normalized[field], language);
     }
 
-    return normalized;
+    return dedupeReportParagraphsAcrossSections(normalized) as Record<
+      PlanReportField,
+      string
+    >;
   }
 
   normalized.tamSamSom = buildCanonicalTamSamSomSection(
@@ -1446,10 +1547,10 @@ function normalizeFullPlanReport(
     reportLabel(language, "AI Action Plan", "AI Aksiyon Planı"),
     [
       reportText(language, `- Immediate Actions: ${context.investmentScore.nextCriticalAction}. Expected impact: resolves the highest-risk decision gate.`, `- Acil Aksiyonlar: ${context.investmentScore.nextCriticalAction}. Beklenen etki: en riskli karar kapısını çözer.`),
-      reportText(language, "- Next 30 Days: prove customer pain, ICP, and pricing signal. Expected impact: turns assumptions into evidence.", "- Sonraki 30 Gün: müşteri acısını, ICP'yi ve fiyatlandırma sinyalini kanıtla. Beklenen etki: varsayımları kanıta dönüştürür."),
-      reportText(language, "- Next 90 Days: validate repeatable acquisition and delivery. Expected impact: improves execution confidence.", "- Sonraki 90 Gün: tekrarlanabilir edinim ve teslimatı doğrula. Beklenen etki: yürütme güvenini artırır."),
-      reportText(language, "- Next 6 Months: confirm retention, payback, and operating cadence. Expected impact: protects capital efficiency.", "- Sonraki 6 Ay: elde tutma, geri ödeme ve operasyon ritmini doğrula. Beklenen etki: sermaye verimliliğini korur."),
-      reportText(language, "- Next 12 Months: scale only if thresholds are met. Expected impact: avoids premature growth spend.", "- Sonraki 12 Ay: yalnızca eşikler karşılanırsa ölçekle. Beklenen etki: erken büyüme harcamasını önler."),
+      reportText(language, `- Next 30 Days: test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer} and record paid-conversion evidence at the ${context.metrics.arpa.displayValue} planning input. Expected impact: establishes a credible demand gate.`, `- Sonraki 30 Gün: ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile test et ve ${context.metrics.arpa.displayValue} planlama girdisinde ücretli dönüşüm kanıtını kaydet. Beklenen etki: güvenilir bir talep kapısı oluşturur.`),
+      reportText(language, `- Next 90 Days: repeat the winning acquisition and delivery motion for the ${context.inputs.businessModel} model. Expected impact: tests whether the operating loop is repeatable.`, `- Sonraki 90 Gün: ${context.inputs.businessModel} modeli için kazanan edinim ve teslimat hareketini tekrarla. Beklenen etki: operasyon döngüsünün tekrarlanabilirliğini test eder.`),
+      reportText(language, `- Next 6 Months: hold ${context.metrics.grossMargin.displayValue} gross margin while demonstrating ${context.metrics.cacPayback.displayValue} payback and repeat behavior. Expected impact: proves capital efficiency.`, `- Sonraki 6 Ay: ${context.metrics.cacPayback.displayValue} geri ödeme ve tekrar davranışını gösterirken ${context.metrics.grossMargin.displayValue} brüt marjı koru. Beklenen etki: sermaye verimliliğini kanıtlar.`),
+      reportText(language, `- Next 12 Months: expand the ${context.inputs.industry} model beyond the beachhead only after those proof gates hold in ${context.inputs.geography}. Expected impact: scales from verified operating evidence.`, `- Sonraki 12 Ay: ${context.inputs.industry} modelini yalnızca bu kanıt kapıları ${context.inputs.geography} içinde sağlandıktan sonra başlangıç pazarının ötesine genişlet. Beklenen etki: doğrulanmış operasyon kanıtından ölçeklenir.`),
     ]
   );
   normalized.roadmap306090 = appendIntelligenceBlock(
@@ -1472,7 +1573,10 @@ function normalizeFullPlanReport(
     normalized[field] = enforcePlanReportLanguage(normalized[field], language, context);
   }
 
-  return normalized;
+  return dedupeReportParagraphsAcrossSections(normalized) as Record<
+    PlanReportField,
+    string
+  >;
 }
 
 function parseFullPlanReport(
@@ -1592,6 +1696,13 @@ function clarificationMessage() {
   return "Please add a little more detail so I can generate a useful business report: what is the product or service, who is the target customer, and which market do you want to start in?";
 }
 
+export async function GET() {
+  return NextResponse.json(
+    { error: "Use POST with a JSON body for report generation." },
+    { status: 405, headers: { Allow: "POST" } }
+  );
+}
+
 export async function POST(req: Request) {
   try {
     const requestValidation = validateApiRequest(req, {
@@ -1624,13 +1735,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const supabase = await createClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    const { supabase, user } = await createAuthenticatedPlanClient(req);
 
-    if (userError || !user) {
+    if (!user) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
 
@@ -1669,7 +1776,6 @@ export async function POST(req: Request) {
     const usageReportField = isFullReportRequest ? FULL_REPORT_FIELD : reportField;
     const reportRequestId =
       typeof rawReportRequestId === "string" ? rawReportRequestId.trim().slice(0, 128) : "";
-
     if (isWeakBusinessPrompt(promptText)) {
       return NextResponse.json(
         { error: clarificationMessage() },
@@ -1763,10 +1869,10 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
 - Maintain exact financial consistency with the same assumption set across Unit Economics, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation.
 - Use the Data-Driven Financial Analysis Engine block as the calculated base-case model for TAM, SAM, SOM, ARPA, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, Break-even Month, Investment Needed, ROI, and Revenue Forecast.
 - Use the Investment Decision Inputs block as the calculated source for Investment Score, visible decision, Decision Confidence, estimated valuation, funding stage, decision factors, strengths, weaknesses, top risks, and next critical action.
-- Reuse that single calculated model everywhere. Do not create conflicting financial values in separate sections. If a value needs validation, label it Validation Required and explain why.
+- Reuse that single calculated model everywhere. Do not create conflicting financial values in separate sections. Classify every important numeric claim as Verified, Estimated, Assumption, or AI Analysis.
 - Align Decision Confidence with evidence quality and the calculated decision inputs; avoid extreme confidence values unless the evidence clearly supports them.
-- Distinguish Verified, Benchmark Derived, Planning Assumption, and Validation Required whenever factual certainty matters.
-- Use evidence labels sparingly from this exact set when useful: Verified, Benchmark Derived, Planning Assumption, Validation Required.
+- Distinguish Verified, Estimated, Assumption, and AI Analysis whenever factual certainty matters. User-provided values are Verified; benchmark-derived values are Estimated; inferred values are Assumptions; interpretation is AI Analysis.
+- Use only that exact evidence-label set, and attach a label to every important numeric claim.
 - Make examples, KPIs, risks, roadmap actions, and financial interpretation specific to the detected industry instead of using generic startup templates.
 - Use honest assumption language instead of vague source claims such as "industry reports".
 - Finish with a complete sentence or complete bullet. Do not end mid-sentence.
@@ -1952,12 +2058,11 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
 - Keep each JSON value concise, dense, analytical, investor-ready, and complete.
 - Do not repeat ideas, metrics, examples, or conclusions across sections.
 - Use the Data-Driven Financial Analysis Engine block as the calculated base-case model for TAM, SAM, SOM, ARPA, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, Break-even Month, Investment Needed, ROI, and Revenue Forecast.
-- Reuse that single calculated model everywhere. Do not create conflicting financial values in separate sections. If a value needs validation, label it Validation Required and explain why.
-- Executive Recommendation must include one Decision Confidence from the calculated decision inputs as High / Medium / Low or the calculated percentage.
-- Align Decision Confidence with evidence quality; avoid extreme confidence values unless the evidence clearly supports them.
-- Clearly distinguish Verified, Benchmark Derived, Planning Assumption, and Validation Required where factual certainty matters.
+- Reuse that single calculated model everywhere. Do not create conflicting financial values in separate sections. Classify every important numeric claim as Verified, Estimated, Assumption, or AI Analysis.
+- Executive Recommendation must reuse the deterministic Report Quality Confidence derived from evidence quality, source coverage, financial certainty, benchmark fit, and validation readiness.
+- Clearly distinguish Verified, Estimated, Assumption, and AI Analysis where factual certainty matters.
 - Financial Assumptions must function as the Key Assumptions section and list every assumption used in the financial calculations.
-- Sources / Assumptions must deduplicate sources and include title, publisher, publication year, URL if available, and one evidence label from Verified, Benchmark Derived, Planning Assumption, or Validation Required. Do not invent citation metadata.
+- Sources / Assumptions must keep user inputs separate from benchmark sources, deduplicate repeated sources, merge repeated domains, prioritize authoritative primary sources, and include title, publisher, publication year, URL only when supplied by source context, and one evidence label from Verified, Estimated, Assumption, or AI Analysis. If a source cannot be verified, write exactly "AI-derived analysis (not externally verified)". Do not invent citation metadata.
 - Use honest assumption language instead of vague source claims such as "industry reports".
 - Finish every section with a complete sentence or complete bullet. Never end mid-sentence.
 - Do not include markdown code fences, braces inside string values, or commentary outside JSON.`;

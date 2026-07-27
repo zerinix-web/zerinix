@@ -30,8 +30,12 @@ import {
   type DashboardReport,
   type DashboardWorkspace,
 } from "./report-utils";
+import MobileChatHome from "@/components/mobile/MobileChatHome";
 
 export const dynamic = "force-dynamic";
+const mobileChatHomeEnabled =
+  process.env.NEXT_PUBLIC_MOBILE_CHAT_HOME_ENABLED?.trim().toLowerCase() !==
+  "false";
 
 function formatDashboardDate(value: string) {
   if (!value) {
@@ -309,9 +313,17 @@ export default async function DashboardPage() {
       <div className={dashboardTheme.atmosphere} />
       <div className={dashboardTheme.grid} />
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
-        <DashboardSidebar />
+        <DashboardSidebar showMobileNavigation={!mobileChatHomeEnabled} />
 
-        <section className="flex-1 px-4 pt-5 pb-28 sm:px-8 lg:px-10 lg:py-9">
+        {mobileChatHomeEnabled ? (
+          <MobileChatHome featureFlagEnabled={mobileChatHomeEnabled} />
+        ) : null}
+
+        <section
+          className={`flex-1 px-4 pt-5 pb-28 sm:px-8 lg:px-10 lg:py-9 ${
+            mobileChatHomeEnabled ? "hidden lg:block" : ""
+          }`}
+        >
           <div className="space-y-4 lg:hidden">
             <div className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-2xl shadow-black/30 ring-1 ring-white/[0.025] backdrop-blur-2xl">
               <div className="inline-flex items-center gap-2 rounded-full border border-teal-300/20 bg-teal-300/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-100">

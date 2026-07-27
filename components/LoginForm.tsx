@@ -1,29 +1,81 @@
 "use client";
 
-import { useActionState } from "react";
-import {
-  loginWithPassword,
-  type LoginActionState,
-} from "@/app/auth/actions";
+import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import type { AppDictionary } from "@/app/lib/i18n/dictionaries";
-
-const initialState: LoginActionState = {};
+import {
+  createClient,
+  persistSupabaseSession,
+  restoreSupabaseSession,
+} from "@/app/lib/supabase/client";
 
 export default function LoginForm({
   labels,
 }: {
   labels: AppDictionary["auth"];
 }) {
-  const [state, formAction, pending] = useActionState(
-    loginWithPassword,
-    initialState
-  );
+  const router = useRouter();
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (pending) {
+      return;
+    }
+
+    const formData = new FormData(event.currentTarget);
+    const email = String(formData.get("email") ?? "").trim();
+    const password = String(formData.get("password") ?? "");
+
+    if (!email || !password) {
+      setError("Enter your email and password.");
+      return;
+    }
+
+    setPending(true);
+    setError("");
+
+    try {
+      const supabase = createClient();
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (signInError) {
+        setError("Check your email and password, then try again.");
+        return;
+      }
+
+      persistSupabaseSession(data.session);
+      await restoreSupabaseSession(supabase);
+
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError || !session?.access_token) {
+        setError("Your session could not be saved. Please sign in again.");
+        return;
+      }
+
+      router.replace("/plan");
+      router.refresh();
+    } catch {
+      setError("Sign in failed. Please try again.");
+    } finally {
+      setPending(false);
+    }
+  }
 
   return (
-    <form action={formAction} className="mt-8 space-y-4">
-      {state.error && (
+    <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+      {error && (
         <p className="rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">
-          {state.error}
+          {error}
         </p>
       )}
 

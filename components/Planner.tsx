@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { LucideIcon } from "lucide-react";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   BarChart3,
   Bot,
@@ -47,9 +48,12 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { MobileBottomNavigation } from "@/components/MobileNavigation";
-import { createClient } from "@/app/lib/supabase/client";
+import {
+  MobileConversationExperience,
+  type MobileConversationMessage,
+} from "@/components/planner/MobileConversationExperience";
+import { createClient, restoreSupabaseSession } from "@/app/lib/supabase/client";
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
-import { isAmbiguousBusinessRequest } from "@/app/lib/business-idea-detection";
 import {
   buildExecutiveSnapshot,
   compactExecutiveDecisionMemoSections,
@@ -251,6 +255,17 @@ type Conversation = {
   updatedAt: number;
 };
 
+type PersistedMessageRow = {
+  id: string;
+  conversation_id: string;
+  role: "user" | "assistant";
+  content: string;
+  mode: ChatMode | null;
+  status: ChatMessage["status"];
+  attachments: ChatAttachment[] | null;
+  created_at: string;
+};
+
 type PlannerWorkspace = {
   id: string;
   name: string;
@@ -307,6 +322,65 @@ const workflowSteps = [
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 60_000;
 const CHAT_REQUEST_TIMEOUT_MS = 75_000;
 const ACTIVE_REPORT_ID_STORAGE_KEY = "zerinix.activeReportId";
+const MESSAGE_CONVERSATION_ID_CHUNK_SIZE = 25;
+
+function chunkValues<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+
+  return chunks;
+}
+
+async function loadPersistedMessagesForConversations(
+  supabase: SupabaseClient,
+  userId: string,
+  conversationIds: string[]
+) {
+  const messages: PersistedMessageRow[] = [];
+
+  for (const chunk of chunkValues(conversationIds, MESSAGE_CONVERSATION_ID_CHUNK_SIZE)) {
+    const { data, error } = await supabase
+      .from("ai_messages")
+      .select("id,conversation_id,role,content,mode,status,attachments,created_at")
+      .eq("user_id", userId)
+      .in("conversation_id", chunk)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      return { data: [] as PersistedMessageRow[], error };
+    }
+
+    messages.push(...((data || []) as PersistedMessageRow[]));
+  }
+
+  messages.sort(
+    (left, right) =>
+      new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+  );
+
+  return { data: messages, error: null };
+}
+
+async function getSupabaseAccessToken() {
+  const supabase = createClient();
+  const session = await restoreSupabaseSession(supabase);
+  const accessToken = session?.access_token;
+
+  if (!session) {
+    const reason = "no session: supabase.auth.getSession() returned null";
+    throw new Error(reason);
+  }
+
+  if (!accessToken) {
+    const reason = "no access token: Supabase session exists without access_token";
+    throw new Error(reason);
+  }
+
+  return accessToken;
+}
 
 const modeCards: Array<{
   mode: ChatMode;
@@ -384,8 +458,6 @@ const decisionGoalLabels: Record<ChatMode, string> = {
   market: "Market Intelligence",
   chat: "Strategic Advisory",
 };
-
-const mobileWizardStepLabels = ["Decision type", "Business context", "Generate"];
 
 let pdfFontPromise: Promise<string> | null = null;
 
@@ -637,10 +709,6 @@ const emptyPlanReport: PlanReport = {
   sourcesAssumptions: "",
 };
 
-function needsClarification(value: string) {
-  return isAmbiguousBusinessRequest(value);
-}
-
 function detectResponseLanguage(value: string): ResponseLanguage {
   const normalized = value.toLowerCase();
   const turkishSignals = [
@@ -687,19 +755,6 @@ function getLanguageCopy(language: ResponseLanguage) {
     marketClarification:
       "Please enter the business idea or industry you want analyzed. For example: luxury hotel brand, electric yacht company, or EV battery manufacturer.",
   };
-}
-
-function createClarificationQuestionForLanguage(
-  mode: ChatMode,
-  language: ResponseLanguage
-) {
-  const copy = getLanguageCopy(language);
-
-  if (mode === "chat") {
-    return "How can I help? You can ask about business, strategy, product, finance, or any general topic.";
-  }
-
-  return mode === "market" ? copy.marketClarification : copy.planClarification;
 }
 
 function generateConversationTitle(content: string) {
@@ -805,6 +860,35 @@ function getStoredActiveReportId() {
     return window.sessionStorage.getItem(ACTIVE_REPORT_ID_STORAGE_KEY) || "";
   } catch {
     return "";
+  }
+}
+
+function removeLargePlannerQueryPayloads() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    const url = new URL(window.location.href);
+    const allowedPlannerParams = new Set(["new", "mode", "workspaceId", "reportId"]);
+    let changed = false;
+
+    Array.from(url.searchParams.keys()).forEach((param) => {
+      if (!allowedPlannerParams.has(param)) {
+        url.searchParams.delete(param);
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${url.search}${url.hash}`
+      );
+    }
+  } catch {
+    // URL cleanup is best-effort; report generation still uses POST body below.
   }
 }
 
@@ -4747,7 +4831,7 @@ function ConversationSidebar({
       </div>
     ) : null}
 
-    <aside className="flex min-h-0 border-b border-white/10 bg-black/85 p-4 shadow-2xl shadow-black/30 backdrop-blur-2xl md:h-screen md:w-[21.5rem] md:flex-col md:border-b-0 md:border-r md:bg-black/75">
+    <aside className="hidden min-h-0 border-b border-white/10 bg-black/85 p-4 shadow-2xl shadow-black/30 backdrop-blur-2xl md:flex md:h-screen md:w-[21.5rem] md:flex-col md:border-b-0 md:border-r md:bg-black/75">
       <div className="flex w-full items-center justify-between gap-3 md:block">
         <div>
           <Link
@@ -6865,7 +6949,11 @@ function AnalysisModeCards({
                 onClick={() => {
                   const sharedPrompt = chatPrompt.trim() || latestUserIntentPrompt.trim();
 
-                  if (!sharedPrompt || isWorking) {
+                  if (!sharedPrompt) {
+                    return;
+                  }
+
+                  if (isWorking) {
                     return;
                   }
 
@@ -6954,6 +7042,10 @@ export default function Planner({
     ...emptyExecutiveBrief,
     additionalContext: regenerationContext?.prompt || "",
   };
+  useEffect(() => {
+    removeLargePlannerQueryPayloads();
+  }, []);
+
   const [prompt, setPrompt] = useState(() => buildExecutiveBriefPrompt(initialExecutiveBrief));
   const {
     chatPrompt,
@@ -7035,28 +7127,8 @@ export default function Planner({
   );
   const [selectedDesktopAnalysisMode, setSelectedDesktopAnalysisMode] =
     useState<ChatMode | null>(null);
-  const [mobileWizardActive, setMobileWizardActive] = useState(
-    Boolean(regenerationContext) || !restoredReportMode
-  );
-  const [mobileWizardStep, setMobileWizardStep] = useState<1 | 2 | 3>(
-    regenerationContext ? 2 : 1
-  );
-  const [mobileBusinessIdea, setMobileBusinessIdea] = useState(
-    regenerationContext?.prompt || ""
-  );
-  const [mobileMarket, setMobileMarket] = useState("");
-  const [mobileGoal, setMobileGoal] = useState(
-    regenerationContext
-      ? `Regenerate the ${regenerationContext.reportType.toLowerCase()} with updated strategic analysis.`
-      : ""
-  );
-  const [mobileConstraints, setMobileConstraints] = useState(
-    regenerationContext?.reportTitle
-      ? `Existing report context: ${regenerationContext.reportTitle}`
-      : ""
-  );
   const [chatModelPreference] = useState<ChatModelPreference>("fast");
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(
+  const [selectedWorkspaceId] = useState(
     getInitialSelectedWorkspaceId(
       initialWorkspaces,
       regenerationContext?.workspaceId || initialWorkspaceId,
@@ -7188,12 +7260,6 @@ export default function Planner({
     setWorkflowCompletedSteps(0);
     setReportProgress(0);
     setCurrentReportSectionName("");
-    setMobileWizardActive(true);
-    setMobileWizardStep(1);
-    setMobileBusinessIdea("");
-    setMobileMarket("");
-    setMobileGoal("");
-    setMobileConstraints("");
     await ensurePersistedConversation(id, conversation.title);
   }
 
@@ -7240,6 +7306,7 @@ export default function Planner({
 
   async function getCurrentUserId() {
     const supabase = createClient();
+    await restoreSupabaseSession(supabase);
     const {
       data: { user },
       error,
@@ -7262,7 +7329,6 @@ export default function Planner({
     if (!userId) {
       console.error("[ai_conversations insert skipped] No authenticated user");
       setConversationError("No authenticated user was available for analysis history persistence.");
-      window.location.assign("/login?next=/plan");
       return false;
     }
 
@@ -7400,6 +7466,7 @@ export default function Planner({
 
   async function loadPersistedConversations() {
     const supabase = createClient();
+    await restoreSupabaseSession(supabase);
     const {
       data: { user },
       error: userError,
@@ -7413,7 +7480,7 @@ export default function Planner({
 
     if (!user) {
       console.error("[ai_conversations client auth missing user]");
-      window.location.assign("/login?next=/plan");
+      setConversationError("No authenticated user was available for analysis history persistence.");
       return;
     }
 
@@ -7434,13 +7501,8 @@ export default function Planner({
     const loadedConversations = data || [];
     const conversationIds = loadedConversations.map((conversation) => conversation.id as string);
     const { data: messages, error: messagesError } = conversationIds.length
-      ? await supabase
-          .from("ai_messages")
-          .select("id,conversation_id,role,content,mode,status,attachments,created_at")
-          .eq("user_id", user.id)
-          .in("conversation_id", conversationIds)
-          .order("created_at", { ascending: true })
-      : { data: [], error: null };
+      ? await loadPersistedMessagesForConversations(supabase, user.id, conversationIds)
+      : { data: [] as PersistedMessageRow[], error: null };
 
     if (messagesError) {
       console.error("[ai_messages client select failed]", messagesError);
@@ -7681,7 +7743,11 @@ export default function Planner({
           ? lastRequest
           : null;
 
-    if (!request || isWorking) {
+    if (!request) {
+      return;
+    }
+
+    if (isWorking) {
       return;
     }
 
@@ -7713,71 +7779,6 @@ export default function Planner({
     } else {
       setRegeneratingReportMode(null);
       void sendChatMessage(request.prompt, false, previousAssistantMessage?.id);
-    }
-  }
-
-  async function askForClarification(submittedPrompt: string) {
-    const conversationId = activeConversationId;
-    const responseLanguage = detectResponseLanguage(submittedPrompt);
-    const shouldUpdateTitle = shouldAutoTitleConversation(
-      activeConversation?.title || "New analysis session"
-    );
-    const title =
-      shouldUpdateTitle
-        ? generateConversationTitle(submittedPrompt)
-        : activeConversation?.title || generateConversationTitle(submittedPrompt);
-
-    await ensurePersistedConversation(conversationId, title);
-    const userMessage = addUserMessage(activeMode, submittedPrompt, conversationId);
-    await persistMessage(conversationId, userMessage);
-    if (shouldUpdateTitle) {
-      await persistConversationTitle(conversationId, title);
-    }
-
-    const clarification = createClarificationQuestionForLanguage(
-      activeMode,
-      responseLanguage
-    );
-    const assistantMessageId = addAssistantMessage(
-      activeMode,
-      clarification,
-      "complete",
-      conversationId
-    );
-
-    await persistMessage(conversationId, {
-      id: assistantMessageId,
-      role: "assistant",
-      mode: activeMode,
-      content: clarification,
-      status: "complete",
-      createdAt: Date.now(),
-    });
-    clearComposerPrompt();
-    setResult("");
-    setMarketReport(null);
-    setPlanReport(null);
-    setWorkflowCompletedSteps(0);
-  }
-
-  async function submitPrompt(promptOverride?: string) {
-    const submittedPrompt = (promptOverride ?? prompt).trim();
-
-    if (!submittedPrompt || isWorking) {
-      return;
-    }
-
-    if (activeMode !== "chat" && needsClarification(submittedPrompt)) {
-      await askForClarification(submittedPrompt);
-      return;
-    }
-
-    if (activeMode === "plan") {
-      await generatePlan(submittedPrompt);
-    } else if (activeMode === "market") {
-      await analyzeMarket(submittedPrompt);
-    } else {
-      await sendChatMessage(submittedPrompt);
     }
   }
 
@@ -7866,6 +7867,7 @@ export default function Planner({
       }
 
       const supabase = createClient();
+      await restoreSupabaseSession(supabase);
       const {
         data: { user },
         error: userError,
@@ -8183,9 +8185,14 @@ export default function Planner({
     }, CHAT_REQUEST_TIMEOUT_MS);
 
     try {
+      const accessToken = await getSupabaseAccessToken();
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
         signal: abortController.signal,
         body: JSON.stringify({
           prompt: submittedPrompt,
@@ -8232,7 +8239,11 @@ export default function Planner({
   async function generatePlan(promptOverride = prompt, addToHistory = true) {
     const submittedPrompt = promptOverride.trim();
 
-    if (!submittedPrompt || loading) {
+    if (!submittedPrompt) {
+      return;
+    }
+
+    if (loading) {
       return;
     }
 
@@ -8312,9 +8323,18 @@ export default function Planner({
         maxAiCallsPerReport: REPORT_GENERATION_MAX_API_CALLS,
       });
 
-      const res = await fetch("/api/plan", {
+      removeLargePlannerQueryPayloads();
+      const planRequestUrl = "/api/plan";
+      const accessToken = await getSupabaseAccessToken();
+
+      const res = await fetch(planRequestUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        referrerPolicy: "no-referrer",
         body: JSON.stringify({
           prompt: submittedPrompt,
           field: "fullReport",
@@ -8381,7 +8401,7 @@ export default function Planner({
         reportType: "business_plan",
         workspaceId: selectedWorkspaceId,
         sections: serializedSections,
-        expectedSectionCount: outputFields.length,
+        expectedSectionCount: serializedSections.length,
         metadata: reportMetadata,
       });
       setActiveReportId(savedReportId);
@@ -8507,9 +8527,17 @@ export default function Planner({
         maxAiCallsPerReport: REPORT_GENERATION_MAX_API_CALLS,
       });
 
+      removeLargePlannerQueryPayloads();
+      const accessToken = await getSupabaseAccessToken();
+
       const res = await fetch("/api/market-analysis", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        referrerPolicy: "no-referrer",
         body: JSON.stringify({
           prompt: submittedPrompt,
           field: "fullReport",
@@ -8593,7 +8621,7 @@ export default function Planner({
         reportType: "market_analysis",
         workspaceId: selectedWorkspaceId,
         sections: serializedSections,
-        expectedSectionCount: outputFields.length,
+        expectedSectionCount: serializedSections.length,
         metadata: reportMetadata,
       });
       setActiveReportId(savedReportId);
@@ -8659,14 +8687,6 @@ export default function Planner({
   const currentReportTitle = activeReportMode === "plan"
     ? currentLanguageCopy.planTitle
     : currentLanguageCopy.marketTitle;
-  const selectedMobileModeCard =
-    modeCards.find((modeCard) => modeCard.mode === activeMode) || modeCards[0];
-  const mobileContextReady = Boolean(
-    (mobileBusinessIdea.trim() || mobileGoal.trim()) &&
-      (activeMode === "chat" || mobileBusinessIdea.trim())
-  );
-  const shouldShowMobileWizard = mobileWizardActive;
-  const shouldHideDesktopCreationOnMobile = mobileWizardActive;
   const shouldShowToolbarRegenerate = true;
   const hasConversationMessages = messages.length > 0;
   const latestUserIntentPrompt =
@@ -8727,34 +8747,110 @@ export default function Planner({
         .slice(0, 3),
     [activeConversation]
   );
+  const mobileConversationSummaries = useMemo(
+    () =>
+      [...conversations]
+        .sort((left, right) => right.updatedAt - left.updatedAt)
+        .map((conversation) => ({
+          id: conversation.id,
+          title: getAnalysisSessionTitle(conversation.title),
+          preview: getConversationPreview(conversation),
+          updatedAt: conversation.updatedAt,
+        })),
+    [conversations]
+  );
+  const mobileReportPrompt = useMemo(() => {
+    const currentMessages = (activeConversation?.messages || [])
+      .filter(
+        (message) =>
+          message.content.trim() &&
+          message.status !== "failed" &&
+          message.mode !== "plan" &&
+          message.mode !== "market" &&
+          !isReportPreparingPreview(message.content)
+      )
+      .slice(-12);
+    const latestUserPrompt =
+      [...currentMessages]
+        .reverse()
+        .find((message) => message.role === "user")
+        ?.content.trim() ||
+      initialReport?.prompt.trim() ||
+      "";
 
-  function buildMobileWizardPrompt() {
-    const lines = [
-      `Decision type: ${decisionGoalLabels[activeMode]}`,
-      mobileBusinessIdea.trim()
-        ? `Business idea: ${mobileBusinessIdea.trim()}`
-        : "",
-      mobileMarket.trim() ? `Market: ${mobileMarket.trim()}` : "",
-      mobileGoal.trim() ? `Goal: ${mobileGoal.trim()}` : "",
-      mobileConstraints.trim()
-        ? `Constraints: ${mobileConstraints.trim()}`
-        : "",
-    ].filter(Boolean);
+    if (!latestUserPrompt) {
+      return "";
+    }
 
-    return lines.join("\n");
-  }
+    const conversationContext = currentMessages
+      .map(
+        (message) =>
+          `${message.role === "user" ? "User" : "Assistant"}: ${message.content.trim()}`
+      )
+      .join("\n\n");
 
-  async function submitMobileWizard() {
-    const mobilePrompt = buildMobileWizardPrompt();
+    return [
+      latestUserPrompt,
+      conversationContext
+        ? `Create a professional strategic report using the current conversation as context.\n\nCurrent conversation:\n${conversationContext}`
+        : "Create a professional strategic report from this request.",
+    ].join("\n\n");
+  }, [activeConversation, initialReport?.prompt]);
 
-    if (!mobilePrompt.trim() || isWorking) {
+  function submitMobileChatPrompt() {
+    const submittedPrompt = chatPrompt.trim();
+
+    if (!submittedPrompt || isWorking) {
       return;
     }
 
-    setPrompt(mobilePrompt);
-    setMobileWizardStep(3);
-    await submitPrompt(mobilePrompt);
+    setChatPrompt("");
+    void sendChatMessage(submittedPrompt);
   }
+
+  function generateMobileStrategicReport() {
+    if (!mobileReportPrompt || isWorking) {
+      return;
+    }
+
+    void generatePlan(mobileReportPrompt, false);
+  }
+
+  const mobileReportContent =
+    isReportWorking || planReport || marketReport || result ? (
+      <>
+        <WorkflowPanel active={isReportWorking} completedSteps={workflowCompletedSteps} />
+        {isReportWorking ? (
+          <ReportGenerationShell
+            title={currentReportTitle}
+            currentSection={currentReportSectionName}
+            progress={reportProgress}
+          />
+        ) : (
+          <ReportPanel
+            reportData={planReport || marketReport}
+            reportFields={activeReportFields}
+            reportId={activeReportId}
+            reportTitle={currentReportTitle}
+            sourcePrompt={lastRequest?.prompt}
+            waitingMessage={currentLanguageCopy.waitingSection}
+            result={result}
+            failureMessage={reportGenerationError}
+            warningMessage={reportGenerationWarning}
+            investmentScore={currentReportInvestmentScore || initialReport?.investmentScore}
+            benchmarkFit={
+              currentReportMetadata?.benchmarkFit || initialReport?.metadata?.benchmarkFit
+            }
+            benchmarkScore={
+              currentReportMetadata?.benchmarkScore || initialReport?.metadata?.benchmarkScore
+            }
+            reportQuality={
+              currentReportMetadata?.reportQuality || initialReport?.metadata?.reportQuality
+            }
+          />
+        )}
+      </>
+    ) : null;
 
   return (
     <main
@@ -8804,7 +8900,7 @@ export default function Planner({
           </div>
         ) : null}
 
-        <header className="relative z-10 flex items-center justify-between gap-4 border-b border-white/10 bg-black/65 px-5 py-4 shadow-xl shadow-black/20 backdrop-blur-2xl lg:px-8">
+        <header className="relative z-10 hidden items-center justify-between gap-4 border-b border-white/10 bg-black/65 px-5 py-4 shadow-xl shadow-black/20 backdrop-blur-2xl md:flex lg:px-8">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
@@ -8858,272 +8954,45 @@ export default function Planner({
           </div>
         </header>
 
+        <MobileConversationExperience
+          activeConversationId={activeConversationId}
+          conversationTitle={
+            activeConversation
+              ? getAnalysisSessionTitle(activeConversation.title)
+              : "New conversation"
+          }
+          conversations={mobileConversationSummaries}
+          messages={messages}
+          prompt={chatPrompt}
+          suggestions={firstInteractionSuggestions}
+          chatLoading={chatLoading}
+          isWorking={isWorking}
+          canGenerateReport={Boolean(mobileReportPrompt)}
+          reportContent={mobileReportContent}
+          reportUpdateKey={`${reportProgress}:${currentReportSectionName}:${activeReportId}:${result.length}`}
+          conversationError={conversationError}
+          onPromptChange={setChatPrompt}
+          onSuggestionClick={setChatPrompt}
+          onSubmit={submitMobileChatPrompt}
+          onGenerateReport={generateMobileStrategicReport}
+          onCreateConversation={() => void createNewConversation()}
+          onSelectConversation={selectConversation}
+          renderMessageContent={(message: MobileConversationMessage) => (
+            <MarkdownRenderer
+              content={message.content}
+              streaming={message.status === "streaming"}
+            />
+          )}
+        />
+
         <div
           ref={chatScrollerRef}
           onScroll={updateNearBottomState}
-          className="relative z-10 min-h-0 flex-1 overflow-y-auto scroll-smooth px-4 py-5 sm:px-5 lg:px-8"
+          className="relative z-10 hidden min-h-0 flex-1 overflow-y-auto scroll-smooth px-4 py-5 sm:px-5 md:block lg:px-8"
         >
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 pb-48">
-            {shouldShowMobileWizard ? (
-              <section className="space-y-4 md:hidden">
-                <div className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-2xl shadow-black/30 ring-1 ring-white/[0.025] backdrop-blur-2xl">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-teal-200/70">
-                        Strategic report builder
-                      </p>
-                      <h2 className="mt-2 text-3xl font-semibold tracking-[-0.035em] text-white">
-                        Create a decision report.
-                      </h2>
-                    </div>
-                    <span className="rounded-full border border-teal-300/20 bg-teal-300/10 px-3 py-1 text-xs font-semibold text-teal-100">
-                      Step {mobileWizardStep}/3
-                    </span>
-                  </div>
-                  <div className="mt-5 grid grid-cols-3 gap-2">
-                    {mobileWizardStepLabels.map((label, index) => {
-                      const step = (index + 1) as 1 | 2 | 3;
-                      const active = mobileWizardStep === step;
-                      const complete = mobileWizardStep > step;
-
-                      return (
-                        <div
-                          key={label}
-                          className={`rounded-2xl border px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.12em] ${
-                            active || complete
-                              ? "border-teal-200/30 bg-teal-200/10 text-teal-100"
-                              : "border-white/10 bg-black/25 text-zinc-600"
-                          }`}
-                        >
-                          {label}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {mobileWizardStep === 1 ? (
-                  <div className="grid gap-3">
-                    {modeCards.map((modeCard) => {
-                      const Icon = modeCard.icon;
-                      const selected = activeMode === modeCard.mode;
-                      const mobileLabel =
-                        modeCard.mode === "plan"
-                          ? "Validate Idea"
-                          : modeCard.mode === "market"
-                            ? "Market Intelligence"
-                            : "Strategic Advisory";
-
-                      return (
-                        <button
-                          key={`mobile-${modeCard.mode}`}
-                          type="button"
-                          onClick={() => {
-                            setActiveMode(modeCard.mode);
-                            setMobileWizardStep(2);
-                          }}
-                          className={`rounded-[1.65rem] border p-5 text-left shadow-xl shadow-black/20 transition duration-300 ${
-                            selected
-                              ? "border-teal-200/35 bg-teal-200/10"
-                              : "border-white/10 bg-white/[0.045]"
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-4">
-                            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10">
-                              <Icon className="h-5 w-5 text-teal-200" />
-                            </span>
-                            <span className="rounded-full border border-white/10 bg-black/25 px-2.5 py-1 text-[11px] font-medium text-zinc-400">
-                              Select
-                            </span>
-                          </div>
-                          <h3 className="mt-4 text-xl font-semibold tracking-tight text-white">
-                            {mobileLabel}
-                          </h3>
-                          <p className="mt-2 text-sm leading-6 text-zinc-500">
-                            {modeCard.opens}
-                          </p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-
-                {mobileWizardStep === 2 ? (
-                  <div className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-2xl shadow-black/30 ring-1 ring-white/[0.025] backdrop-blur-xl">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-teal-200/70">
-                          Business context
-                        </p>
-                        <h3 className="mt-2 text-2xl font-semibold tracking-tight text-white">
-                          {selectedMobileModeCard.label}
-                        </h3>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setMobileWizardStep(1)}
-                        className="rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs font-semibold text-zinc-400"
-                      >
-                        Change
-                      </button>
-                    </div>
-
-                    <div className="mt-5 space-y-3">
-                      <label className="block">
-                        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                          Business idea
-                        </span>
-                        <textarea
-                          value={mobileBusinessIdea}
-                          onChange={(event) => setMobileBusinessIdea(event.target.value)}
-                          className="mt-2 min-h-24 w-full resize-none rounded-2xl border border-white/10 bg-black/35 p-4 text-sm leading-6 text-white outline-none transition placeholder:text-zinc-600 focus:border-teal-300/35 focus:ring-2 focus:ring-teal-200/10"
-                          placeholder="Describe the business, product or opportunity."
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                          Market
-                        </span>
-                        <input
-                          value={mobileMarket}
-                          onChange={(event) => setMobileMarket(event.target.value)}
-                          className="mt-2 min-h-12 w-full rounded-2xl border border-white/10 bg-black/35 px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-teal-300/35 focus:ring-2 focus:ring-teal-200/10"
-                          placeholder="Industry, geography or customer segment."
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                          Goal
-                        </span>
-                        <input
-                          value={mobileGoal}
-                          onChange={(event) => setMobileGoal(event.target.value)}
-                          className="mt-2 min-h-12 w-full rounded-2xl border border-white/10 bg-black/35 px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-teal-300/35 focus:ring-2 focus:ring-teal-200/10"
-                          placeholder="What decision should ZERINIX support?"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                          Constraints
-                        </span>
-                        <textarea
-                          value={mobileConstraints}
-                          onChange={(event) => setMobileConstraints(event.target.value)}
-                          className="mt-2 min-h-20 w-full resize-none rounded-2xl border border-white/10 bg-black/35 p-4 text-sm leading-6 text-white outline-none transition placeholder:text-zinc-600 focus:border-teal-300/35 focus:ring-2 focus:ring-teal-200/10"
-                          placeholder="Budget, timeline, risks, geography, team or known limits."
-                        />
-                      </label>
-
-                      {activeMode !== "chat" && initialWorkspaces.length > 0 ? (
-                        <label className="block rounded-2xl border border-white/10 bg-black/25 p-3">
-                          <span className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                            Save to workspace
-                          </span>
-                          <select
-                            value={selectedWorkspaceId}
-                            onChange={(event) => setSelectedWorkspaceId(event.target.value)}
-                            className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-sm font-medium text-zinc-200 outline-none transition focus:border-teal-300/40"
-                          >
-                            {initialWorkspaces.map((workspace) => (
-                              <option key={workspace.id} value={workspace.id}>
-                                {workspace.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-5 grid gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setMobileWizardStep(3)}
-                        disabled={!mobileContextReady}
-                        className="inline-flex min-h-12 items-center justify-center rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black shadow-xl shadow-white/10 transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Review request
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-
-                {mobileWizardStep === 3 ? (
-                  <div className="rounded-[2rem] border border-teal-200/15 bg-teal-200/[0.06] p-5 shadow-2xl shadow-black/30 ring-1 ring-teal-200/10 backdrop-blur-xl">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-teal-100/75">
-                      Generation
-                    </p>
-                    <h3 className="mt-2 text-2xl font-semibold tracking-tight text-white">
-                      {selectedMobileModeCard.label}
-                    </h3>
-                    <p className="mt-2 text-sm leading-6 text-zinc-300">
-                      {isWorking
-                        ? activeMode === "chat"
-                          ? "ZERINIX Advisor is preparing strategic guidance."
-                          : "ZERINIX is generating your strategic report."
-                        : "Review the context and start the existing ZERINIX generation workflow."}
-                    </p>
-
-                    <div className="mt-5 rounded-[1.35rem] border border-white/10 bg-black/30 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                        Request summary
-                      </p>
-                      <p className="mt-2 text-sm leading-6 text-zinc-300">
-                        {buildMobileWizardPrompt().slice(0, 420)}
-                      </p>
-                    </div>
-
-                    {isWorking ? (
-                      <div className="mt-5 rounded-[1.35rem] border border-teal-200/20 bg-black/30 p-4">
-                        <div className="flex items-center justify-between gap-4">
-                          <span className="inline-flex items-center gap-2 text-sm font-semibold text-teal-100">
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            {activeMode === "chat" ? "Advising" : "Generating"}
-                          </span>
-                          <span className="text-sm font-semibold text-white">
-                            {Math.round(reportProgress)}%
-                          </span>
-                        </div>
-                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-                          <div
-                            className="h-full rounded-full bg-teal-200 transition-[width] duration-500"
-                            style={{ width: `${Math.max(8, Math.min(100, reportProgress))}%` }}
-                          />
-                        </div>
-                        <p className="mt-3 text-xs leading-5 text-zinc-500">
-                          {currentReportSectionName || "Preparing analysis engine"}
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="mt-5 grid gap-3">
-                        <button
-                          type="button"
-                          onClick={() => void submitMobileWizard()}
-                          disabled={!mobileContextReady || isWorking}
-                          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/30 transition hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {activeMode === "chat"
-                            ? "Start Advisory Session"
-                            : "Generate Strategic Report"}
-                          <Send className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setMobileWizardStep(2)}
-                          className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-zinc-300"
-                        >
-                          Edit context
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-              </section>
-            ) : null}
-
             <div
-              className={`mx-auto w-full gap-6 pb-14 ${
-                shouldHideDesktopCreationOnMobile ? "hidden md:flex md:flex-col" : "flex flex-col"
-              }`}
+              className="mx-auto flex w-full flex-col gap-6 pb-14"
             >
               <div className="flex min-w-0 flex-col gap-5 transition-all duration-200 ease-out">
               {conversationError ? (

@@ -9,15 +9,15 @@ export type EvidenceLocale = "English" | "Turkish";
 export const evidenceLabels: Record<EvidenceLocale, Record<EvidenceLevel, string>> = {
   English: {
     verified: "Verified",
-    benchmarkDerived: "Benchmark Derived",
-    planningAssumption: "Planning Assumption",
-    validationRequired: "Validation Required",
+    benchmarkDerived: "Estimated",
+    planningAssumption: "Assumption",
+    validationRequired: "AI Analysis",
   },
   Turkish: {
     verified: "Doğrulanmış",
-    benchmarkDerived: "Benchmark Kaynaklı",
-    planningAssumption: "Planlama Varsayımı",
-    validationRequired: "Doğrulama Gerekli",
+    benchmarkDerived: "Tahmini",
+    planningAssumption: "Varsayım",
+    validationRequired: "AI Analizi",
   },
 };
 
@@ -32,15 +32,15 @@ export function normalizeEvidenceLevel(value: string): EvidenceLevel {
     return "verified";
   }
 
-  if (/\b(validation required|needs validation|validate|required|doğrulama gerekli|doğrula|low confidence)\b/i.test(normalized)) {
+  if (/\b(ai analysis|ai-derived analysis|validation required|needs validation|validate|required|ai analizi|doğrulama gerekli|doğrula|low confidence)\b/i.test(normalized)) {
     return "validationRequired";
   }
 
-  if (/\b(planning assumption|assumption|planning input|manual input|founder input|planlama varsayımı)\b/i.test(normalized)) {
+  if (/\b(planning assumption|assumption|planning input|manual input|founder input|varsayım|planlama varsayımı)\b/i.test(normalized)) {
     return "planningAssumption";
   }
 
-  if (/\b(benchmark derived|benchmark-derived|benchmark|market reference|industry reference|market-derived|model-derived|model estimate|model based|benchmark kaynaklı)\b/i.test(normalized)) {
+  if (/\b(estimated|estimate|benchmark derived|benchmark-derived|benchmark|market reference|industry reference|market-derived|model-derived|model estimate|model based|tahmini|benchmark kaynaklı)\b/i.test(normalized)) {
     return "benchmarkDerived";
   }
 
@@ -98,6 +98,10 @@ export function getEvidenceBadgeClass(level: EvidenceLevel) {
 }
 
 export function sourceTypeToEvidenceLevel(value: string, hasUrl = false): EvidenceLevel {
+  if (/\b(user provided|user input|actual operating data)\b/i.test(value)) {
+    return "verified";
+  }
+
   if (/\b(planning assumption|assumption|planning input|model assumption)\b/i.test(value)) {
     return "planningAssumption";
   }

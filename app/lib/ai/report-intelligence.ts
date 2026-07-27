@@ -2,6 +2,7 @@ import type { FinancialConsistencyCheck, FinancialModel } from "@/app/lib/ai/fin
 import type { InvestmentScore } from "@/app/lib/ai/investment-score";
 import type { SourceIntelligenceModel } from "@/app/lib/ai/source-intelligence";
 import type { ValidationIntelligenceModel } from "@/app/lib/ai/validation-intelligence";
+import { deriveReportQualityConfidence } from "@/app/lib/report-confidence-quality.mjs";
 
 export type ReportQualityLevel = "High Confidence" | "Moderate Confidence" | "Low Confidence";
 export type ReportQualityConfidenceLevel = "High Confidence" | "Medium Confidence" | "Low Confidence";
@@ -155,13 +156,48 @@ export function createReportIntelligenceModel(context: ReportIntelligenceInput):
   const sourceConfidence = sourceConfidenceScore(context.sourceIntelligence);
   const benchmarkFit = benchmarkFitScore(context);
   const validationReadiness = validationReadinessScore(context.validationIntelligence);
-  const totalScore = clampScore(
+  const weightedScore = clampScore(
     (evidenceQuality * 0.25) +
       (sourceConfidence * 0.2) +
       (financialConsistency * 0.25) +
       (benchmarkFit * 0.15) +
       (validationReadiness * 0.15)
   );
+  const sourceItems = context.sourceIntelligence?.items || [];
+  const marketItems = sourceItems.filter((item) =>
+    item.area === "TAM/SAM/SOM" || item.area === "Market Size"
+  );
+  const competitorItem = sourceItems.find((item) => item.area === "Competitor Insights");
+  const uncertainFinancialMetricCount = Object.values(context.metrics).filter(
+    (metric) => metric.confidence === "Low"
+  ).length;
+  const assumptionCount =
+    context.financialConsistency.sources.aiPlanningAssumptions.length +
+    context.financialConsistency.sources.benchmarkAssumptions.length;
+  const userProvidedValueCount =
+    context.financialConsistency.sources.userProvidedData.filter((item) =>
+      !/\bno direct operating data\b/i.test(item) &&
+      /\b(user supplied|actual|traction|pilot|sales|waitlist)\b/i.test(item)
+    ).length;
+  const authoritativeSourceCount = sourceItems.filter(
+    (item) =>
+      item.confidence === "High Confidence" &&
+      (item.sourceType === "Market Research" ||
+        item.sourceType === "Competitor Data" ||
+        item.sourceType === "User Provided")
+  ).length;
+  const totalScore = deriveReportQualityConfidence({
+    weightedScore,
+    assumptionCount,
+    missingMarketData:
+      marketItems.length === 0 ||
+      marketItems.every((item) => item.confidence === "Low Confidence"),
+    weakCompetitiveEvidence:
+      !competitorItem || competitorItem.confidence === "Low Confidence",
+    uncertainFinancialMetricCount,
+    authoritativeSourceCount,
+    userProvidedValueCount,
+  });
   const aggressiveDecision =
     context.decisionConfidence.decision === "GO" ||
     context.investmentScore.recommendation === "GO";
@@ -194,6 +230,17 @@ export function createReportIntelligenceModel(context: ReportIntelligenceInput):
   const weaknesses = [
     evidenceQuality < 65 ? "Limited customer validation" : "",
     sourceConfidence < 55 ? "Source confidence requires stronger validation" : "",
+    assumptionCount >= 4 ? "The report relies on multiple unverified assumptions" : "",
+    marketItems.length === 0 ||
+    marketItems.every((item) => item.confidence === "Low Confidence")
+      ? "Market evidence is missing or low confidence"
+      : "",
+    !competitorItem || competitorItem.confidence === "Low Confidence"
+      ? "Competitive evidence is weak"
+      : "",
+    uncertainFinancialMetricCount >= 3
+      ? "Financial projections contain substantial uncertainty"
+      : "",
     context.financialConsistency.quality !== "Healthy"
       ? "Financial assumptions require testing"
       : "",
@@ -205,6 +252,7 @@ export function createReportIntelligenceModel(context: ReportIntelligenceInput):
   const improvementActions = [
     evidenceQuality < 65 ? "Collect customer, revenue, retention, or pilot evidence." : "",
     sourceConfidence < 60 ? "Attach verified market sources and benchmark references." : "",
+    assumptionCount >= 4 ? "Replace the highest-impact assumptions with observed evidence." : "",
     financialConsistency < 65 ? "Validate CAC, LTV, payback, burn, and runway assumptions." : "",
     benchmarkFit < 60 ? "Refine benchmark selection by industry, model, and geography." : "",
     validationReadiness < 60 ? "Run the highest-priority validation experiments before scaling." : "",

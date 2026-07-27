@@ -56,10 +56,21 @@ test("AI Chat cache is disabled when report memory is attached", () => {
   assert.match(chatRouteSource, /report_id: reportMemory\?\.id \|\| null/);
 });
 
-test("AI Chat API returns a clear debug reason when report memory is missing", () => {
+test("AI Chat API keeps report diagnostics internal when report memory is missing", () => {
   assert.match(chatRouteSource, /isReportMemoryQuestion/);
+  assert.match(chatRouteSource, /isExplicitSavedReportQuestion/);
   assert.match(chatRouteSource, /reportMemoryDebugReason/);
-  assert.match(chatRouteSource, /No report is attached to this chat request/);
-  assert.match(chatRouteSource, /Debug reason:/);
+  assert.match(
+    chatRouteSource,
+    /if \(explicitSavedReportQuestion && !reportMemory\)/
+  );
+  assert.doesNotMatch(chatRouteSource, /if \(reportQuestion && !reportMemory\)/);
+  assert.match(
+    chatRouteSource,
+    /Do not mention missing report context unless the user explicitly asks about a saved report/
+  );
+  assert.match(chatRouteSource, /That saved report is not available in this conversation/);
+  assert.doesNotMatch(chatRouteSource, /No report is attached to this chat request/);
+  assert.doesNotMatch(chatRouteSource, /Debug reason:/);
   assert.match(chatRouteSource, /reportMemoryAttached: false/);
 });

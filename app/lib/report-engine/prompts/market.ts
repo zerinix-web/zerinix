@@ -4,7 +4,7 @@ import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
 export const marketPrompts = {
   executiveSummary: {
     prompt:
-      "Write an investor-grade Executive Summary with one job only: market verdict. Start with exactly one final decision from PASS, HOLD, VALIDATE, or REJECT plus Decision Confidence, then cover market attractiveness, demand signal, competitive intensity, entry timing, strategic gap, and the founder's most important market decision. Early-stage ideas without validation should usually be HOLD or VALIDATE, not REJECT. Do not repeat TAM/SAM/SOM, SWOT, Porter, competitor, entry-plan, KPI, or source detail. Do not use internal labels or confidence tags. Do not write a heading. Max 115 words.",
+      "Write an investor-grade Executive Summary with one job only: market verdict. Start with exactly one final decision from PASS, HOLD, VALIDATE, or REJECT plus Decision Confidence, then cover the business-specific market thesis, decisive demand signal, competitive intensity, entry timing, primary evidence gap, and next market decision. Keep the same decision spine later used by Executive Recommendation and Founder Roadmap without reusing their sentences. Early-stage ideas without validation should usually be HOLD or VALIDATE, not REJECT. Do not repeat TAM/SAM/SOM, SWOT, Porter, competitor, entry-plan, KPI, or source detail. Do not use internal labels or confidence tags. Do not write a heading. Max 115 words.",
     maxTokens: 1000,
   },
   marketOverview: {
@@ -44,17 +44,17 @@ export const marketPrompts = {
   },
   threats: {
     prompt:
-      "Identify only market threats as a professional Risk Matrix. Each material threat must include Probability, Impact, Severity, Mitigation, and Early Warning Signal. Cover competitive pressure, demand uncertainty, switching costs, regulation, platform dependency, price compression, trust barriers, data access, and distribution risk. End with a concise executive implication explaining which risk should change the entry plan first. Do not add a heading. Do not repeat SWOT or Executive Recommendation. Do not write a heading. Max 205 words.",
+      "Identify only entrant-specific market failure modes as a professional Risk Matrix. Each material threat must include a distinct causal mechanism, Probability, Impact, Severity, tailored Mitigation, and measurable Early Warning Signal. Select only threats relevant to this market's customer behavior, channel, switching cost, regulation, platform dependency, price pressure, trust, data access, or distribution structure. End with a concise implication explaining which threat changes entry capital first. Do not add a heading. Do not repeat SWOT external observations, Porter forces, scenarios, or Executive Recommendation wording. Do not write a heading. Max 205 words.",
     maxTokens: 1000,
   },
   swotAnalysis: {
     prompt:
-      "Create SWOT with exactly four labeled groups: Strengths, Weaknesses, Opportunities, Threats. Use 2-4 distinct bullets per group. Strengths and Weaknesses must focus on internal market-entry position; Opportunities and Threats must be external but must not repeat Opportunities, Threats, Competitor Analysis, or Executive Summary. Each bullet must state why it matters for market entry. Do not write a heading. Max 145 words.",
+      "Create SWOT with exactly four labeled groups: Strengths, Weaknesses, Opportunities, Threats. Use 2-4 distinct bullets per group and anchor every bullet to this entrant's actual capability, constraint, customer behavior, channel, asset, geography, or business model. Strengths and Weaknesses own internal market-entry position; Opportunities and Threats own external openings only. Do not include risk mitigations, Porter forces, competitor profiles, financial metrics, or recommendations, and do not repeat Opportunities, Threats, Competitor Analysis, or Executive Summary. Each bullet must state why it matters for entry without generic startup language. Do not write a heading. Max 145 words.",
     maxTokens: 1300,
   },
   portersFiveForces: {
     prompt:
-      "Analyze only Porter's Five Forces with a qualitative rating and one founder implication for rivalry, new entrants, buyer power, supplier/platform power, and substitutes. Do not repeat SWOT, threats, or competitor descriptions. Do not write a heading. Max 160 words.",
+      "Analyze only structural industry economics through Porter's Five Forces. Give a qualitative rating and one entrant-specific implication for rivalry, new entrants, buyer power, supplier/platform power, and substitutes. Tie each force to the actual value chain, switching cost, distribution dependency, regulation, or margin pressure of this market. Do not describe company weaknesses, mitigations, named competitor profiles, or roadmap actions; those belong to SWOT, Threats, Competitor Analysis, and Founder Roadmap. Do not write a heading. Max 160 words.",
     maxTokens: 1400,
   },
   unitEconomics: {
@@ -79,7 +79,7 @@ export const marketPrompts = {
   },
   executiveRecommendation: {
     prompt:
-      "Write only final investment decision in investment-committee language. Include selected decision, the single key reason, biggest risks, and next concrete action. Use one Decision Confidence value, then add AI Confidence Breakdown dimensions: Market Confidence, Competition Confidence, Financial Confidence, Execution Confidence, Product Confidence, each with a concise investor-relevant explanation. Add Founder Decision Engine answering: If I were the founder, what would I do first, postpone, spend money on, and absolutely avoid? Select exactly one visible option and no second option: PASS, HOLD, VALIDATE, or REJECT. Early-stage ideas without validation should prefer HOLD or VALIDATE, not REJECT. Do not use internal recommendation codes or internal scoring terminology. Do not restate market overview, SWOT, entry plan, or financial dashboard. Do not write a heading. Max 210 words.",
+      "Write only final investment decision in investment-committee language. Preserve the Executive Summary decision and primary market risk, then convert them into one business-specific capital decision and one next action naming the responsible actor, beachhead customer or channel, test method, and proof point. Use one Decision Confidence value, then add AI Confidence Breakdown dimensions: Market Confidence, Competition Confidence, Financial Confidence, Execution Confidence, Product Confidence, each with a concise investor-relevant explanation. Add Founder Decision Engine answering specifically for this entrant: what to do first, postpone, spend money on, and absolutely avoid. Select exactly one visible option and no second option: PASS, HOLD, VALIDATE, or REJECT. Early-stage ideas without validation should prefer HOLD or VALIDATE, not REJECT. Do not use internal recommendation codes or internal scoring terminology. Do not restate market overview, SWOT, entry plan, roadmap, or financial dashboard. Do not write a heading. Max 210 words.",
     maxTokens: 850,
   },
   entryStrategy: {
@@ -99,17 +99,17 @@ export const marketPrompts = {
   },
   founderRoadmap: {
     prompt:
-      "Create only the AI Action Plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Each step must depend on the prior market proof point, decision gate, and expected business impact. Include only execution actions for market validation, competitive learning, pricing proof, and entry readiness. Do not repeat validation plan or KPI thresholds. Do not write a heading. Max 205 words.",
+      "Create only the AI Action Plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Begin with the next action selected by Executive Recommendation, then translate it into milestones specific to this entrant's buyer, offer, channel, geography, regulation, supply chain, or business model. Each step must depend on the prior market proof point, decision gate, and expected business impact. Include only execution actions for market validation, competitive learning, pricing proof, and entry readiness. Do not repeat the recommendation rationale, validation plan, or KPI thresholds. Do not write a heading. Max 205 words.",
     maxTokens: 1200,
   },
   sourcesAssumptions: {
     prompt:
-      "List only verified sources, evidence basis, planning inputs, and missing validation data. Do not repeat market or financial analysis. Prefer real organizations over generic references, especially OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant. For each verified source include publisher, confidence, publication year, source type, and URL only when available. If no verified source metadata exists, omit the citation item and write a concise planning-input note instead. Do not invent URLs, report names, publications, or fake citations. If uncertain, mark the item as a planning input instead of fabricating a citation. Do not write vague source claims such as 'industry reports' unless a specific source is named. Do not write a heading. Max 190 words.",
+      "List only verified sources, evidence basis, planning inputs, and missing validation data. Keep user-provided inputs separate from benchmark sources. Deduplicate repeated sources and merge repeated domains, retaining the most authoritative and complete entry. Prefer primary government, regulatory, academic, and official company sources before industry aggregators. For each verified source include publisher, publication year, source type, and a URL only when it is present verbatim in source context. Never reconstruct or invent citation metadata. If a source cannot be verified from available context, output exactly 'AI-derived analysis (not externally verified)' instead of presenting it as a citation. Do not write a heading. Max 190 words.",
     maxTokens: 1300,
   },
   sources: {
     prompt:
-      "List only 4-6 reliable verified sources used or most relevant for validating this market, then close the report with CEO Brief. Prefer real organizations over generic references, especially OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant. For each verified source include publisher, confidence, publication year, source type, and URL only when available. If no verified source metadata exists, omit the citation item and write a concise planning-input note instead. Do not invent URLs, report names, publications, or fake citations. End with CEO Brief as a board-level briefing: maximum 10 concise bullets, each directly supported by report findings. Do not use generic phrases such as 'industry reports' as verified evidence. Do not repeat analysis outside CEO Brief. Do not write a heading.",
+      "List only 4-6 reliable verified sources used for this market, then close the report with CEO Brief. Keep user-provided inputs separate from benchmark sources. Deduplicate repeated sources and merge repeated domains, retaining the most authoritative and complete entry. Prioritize primary government, regulatory, academic, and official company sources before industry aggregators. Include publisher, publication year, source type, and a URL only when it is present verbatim in source context. Never reconstruct or invent citation metadata. If a source cannot be verified from available context, output exactly 'AI-derived analysis (not externally verified)' instead of presenting it as a citation. End with CEO Brief as a board-level briefing: maximum 10 concise bullets, each directly supported by report findings. Do not repeat analysis outside CEO Brief. Do not write a heading.",
     maxTokens: 1400,
   },
 } as const;
@@ -262,7 +262,7 @@ export function buildMarketLanguageInstructions(language: ResponseLanguage) {
     "The Data-Driven Financial Analysis Engine block in the user input contains the calculated base-case financial model. Use those values as the source of truth.",
     "The Investment Decision Inputs block in the user input contains the calculated investment score, visible decision, estimated valuation, funding stage, decision factors, strengths, weaknesses, top risks, and next critical action. Use those values as the source of truth.",
     "Unit Economics, KPI Dashboard, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation must reference the same calculated financial model whenever financial metrics appear.",
-    "For ARR, MRR, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, financial sections must show value, formula, planning input, evidence label, and reference basis without internal labels. Use only this evidence set: Verified, Benchmark Derived, Planning Assumption, Validation Required.",
+    "For every important numeric claim, including ARR, MRR, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, show value, formula, planning input, evidence label, and reference basis. Use only this evidence set: Verified, Estimated, Assumption, AI Analysis. User-provided values are Verified; benchmark-derived values are Estimated; inferred values are Assumptions; interpretive conclusions are AI Analysis.",
     "Add concise evidence metadata where it materially improves trust for market data, financial metrics, KPI assumptions, TAM/SAM/SOM, and competitor insights. Do not over-label ordinary sentences.",
     "Do not expose internal grading labels, source-model labels, or internal recommendation codes anywhere in the final report.",
     "Make reasoning deeply industry-specific for SaaS, AI, Cybersecurity, Healthcare, Logistics, Restaurant, Drone, Marketplace, FinTech, E-commerce, EV Charging, and other detected sectors. KPIs, risks, roadmap logic, and financial interpretation must reflect that sector's economics.",
@@ -270,7 +270,7 @@ export function buildMarketLanguageInstructions(language: ResponseLanguage) {
     "Decision Confidence must match evidence quality and the calculated decision inputs. Use exactly one visible decision from PASS, HOLD, VALIDATE, or REJECT. Early-stage ideas with validation gaps should prefer HOLD or VALIDATE; reserve REJECT for clearly non-investable economics or execution risk.",
     "Do not fake source authority. If a precise source is unavailable, use language such as 'Based on comparable sector patterns', 'Needs validation with primary research', or 'Directional until verified'.",
     "When citing sources, prefer real organizations over generic references: OECD, World Bank, IMF, Eurostat, TÜİK, TCMB, Statista, McKinsey, BCG, Deloitte, PwC, EY, KPMG, CB Insights, PitchBook, or Crunchbase when genuinely relevant.",
-    "Include a source URL only when it is available from the source context. Never invent URLs, report names, publications, or fake citations. If a source cannot be verified from available context, mark it as a planning input instead of presenting it as a citation.",
+    "Include a source URL only when it is available verbatim from the source context. Never reconstruct or invent URLs, report names, publications, or citations from memory. If a source cannot be verified from available context, output exactly 'AI-derived analysis (not externally verified)' instead of presenting it as a citation.",
     "Every section must end with a complete sentence or complete bullet. Never end mid-sentence.",
     "Distinguish facts, planning inputs, and hypotheses. Never present guesses as facts.",
     "Be honest about uncertainty; do not invent precise figures.",
@@ -287,4 +287,3 @@ export function buildMarketLanguageInstructions(language: ResponseLanguage) {
     "Founder Roadmap must include Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months, with each step dependent on the prior proof point.",
   ].join("\n");
 }
-

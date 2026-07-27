@@ -155,18 +155,18 @@ export function MobileReportSection({
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <article className="overflow-hidden rounded-[1.55rem] border border-white/10 bg-white/[0.045] shadow-xl shadow-black/25 ring-1 ring-white/[0.025]">
+    <article className="min-w-0 overflow-hidden rounded-[1.55rem] border border-white/[0.12] bg-white/[0.05] shadow-xl shadow-black/25 ring-1 ring-white/[0.03]">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="flex min-h-16 w-full items-center justify-between gap-4 p-4 text-left transition duration-300 hover:bg-white/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-200/30"
+        className="flex min-h-[4.5rem] w-full items-center justify-between gap-4 px-4 py-3.5 text-left transition duration-300 hover:bg-white/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-200/30"
       >
         <span className="min-w-0">
           <span className="block text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-200/70">
             {eyebrow}
           </span>
-          <span className="mt-1 block text-base font-semibold leading-6 text-white">
+          <span className="mt-1 block text-pretty text-base font-semibold leading-6 text-white [overflow-wrap:anywhere]">
             {title}
           </span>
         </span>
@@ -179,7 +179,7 @@ export function MobileReportSection({
         </span>
       </button>
       {open ? (
-        <div className="border-t border-white/10 p-4">
+        <div className="min-w-0 border-t border-white/[0.12] p-4">
           {children}
         </div>
       ) : null}

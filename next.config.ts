@@ -1,6 +1,21 @@
 import type { NextConfig } from "next";
 
 const isDevelopment = process.env.NODE_ENV !== "production";
+const usesCleartextCapacitorServer =
+  process.env.CAPACITOR_SERVER_URL?.trim().startsWith("http://") ?? false;
+const capacitorDevelopmentHostname = (() => {
+  const configuredUrl = process.env.CAPACITOR_SERVER_URL?.trim();
+
+  if (!configuredUrl) {
+    return undefined;
+  }
+
+  try {
+    return new URL(configuredUrl).hostname;
+  } catch {
+    return undefined;
+  }
+})();
 
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -13,7 +28,9 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline'",
   `script-src 'self' 'unsafe-inline'${isDevelopment ? " 'unsafe-eval'" : ""}`,
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.openai.com",
-  ...(!isDevelopment ? ["upgrade-insecure-requests"] : []),
+  ...(!isDevelopment && !usesCleartextCapacitorServer
+    ? ["upgrade-insecure-requests"]
+    : []),
 ].join("; ");
 
 const securityHeaders = [
@@ -65,6 +82,10 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins:
+    isDevelopment && capacitorDevelopmentHostname
+      ? [capacitorDevelopmentHostname]
+      : undefined,
   async headers() {
     return [
       {

@@ -42,7 +42,8 @@ function confidenceFromMetric(value: string): SourceConfidenceLevel {
 
 function hasUserProvidedOperatingData(consistency: FinancialConsistencyCheck) {
   return consistency.sources.userProvidedData.some((item) =>
-    /supplied validation evidence|provided/i.test(item)
+    !/\bno direct operating data\b/i.test(item) &&
+    /\buser supplied validation evidence\b/i.test(item)
   );
 }
 
@@ -88,7 +89,7 @@ export function createSourceIntelligenceModel(input: {
     },
     {
       area: "KPI Assumptions",
-      sourceType: "AI Planning Assumption",
+      sourceType: userDataConfidence === "High Confidence" ? "User Provided" : "AI Planning Assumption",
       confidence: userDataConfidence === "High Confidence" ? "Medium Confidence" : "Low Confidence",
       summary: "KPI thresholds are planning inputs until acquisition, activation, retention, and conversion data exists.",
       validationRecommendation: "Validate KPI thresholds with pilot cohorts and funnel tracking.",
@@ -107,7 +108,9 @@ export function createSourceIntelligenceModel(input: {
     items,
     summary: {
       highConfidence: [
-        "User provided business context",
+        ...(userDataConfidence === "High Confidence"
+          ? ["User-provided operating evidence is separated from inferred and benchmark-derived values."]
+          : []),
         ...items
           .filter((item) => item.confidence === "High Confidence")
           .map((item) => `${item.area}: ${item.summary}`),
