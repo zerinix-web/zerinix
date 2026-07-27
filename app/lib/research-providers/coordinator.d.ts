@@ -16,6 +16,10 @@ import type {
 import type { ResearchQueryPolicy } from "./policy.mjs";
 import type { ResearchProviderRegistry } from "./registry.mjs";
 import type {
+  ResearchQuotaChecker,
+  ResearchQuotaTier,
+} from "./quota.mjs";
+import type {
   ResearchCacheStatus,
   ResearchUsageTracker,
 } from "./usage.mjs";
@@ -32,6 +36,8 @@ export type ResearchExecutionOptions = {
   providerId?: string;
   providerKind?: ResearchProviderKind;
   userId?: string;
+  workspaceId?: string;
+  researchTier?: ResearchQuotaTier;
   maxEstimatedCostUsd?: number;
   allowTopicReuse?: boolean;
   cacheTtlMs?: number;
@@ -45,6 +51,7 @@ export type ResearchCoordinatorOptions = {
   cache?: ResearchCache<ResearchExecutionResult>;
   costController?: ResearchCostController;
   usageTracker?: ResearchUsageTracker;
+  quotaChecker?: ResearchQuotaChecker;
   coalescer?: ResearchRequestCoalescer;
   evidenceCollector?: EvidenceCollector;
 };
@@ -56,4 +63,3 @@ export class ResearchCoordinator {
     options?: ResearchExecutionOptions
   ): Promise<ResearchExecutionResult>;
 }
-

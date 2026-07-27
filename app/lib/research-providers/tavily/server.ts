@@ -3,6 +3,7 @@ import "server-only";
 import { logOperationalError, logOperationalInfo } from "@/app/lib/security/logging";
 import { InMemoryResearchCache } from "../cache.mjs";
 import { ResearchCoordinator } from "../coordinator.mjs";
+import { ResearchQuotaChecker } from "../quota.mjs";
 import { InMemoryResearchUsageTracker } from "../usage.mjs";
 import {
   assertTavilyConfiguration,
@@ -26,7 +27,20 @@ type TavilyCostMetadata = {
 type TavilyServerFactoryOptions = {
   fetchImpl?: typeof fetch;
   cache?: InMemoryResearchCache;
-  usageTracker?: InMemoryResearchUsageTracker;
+  usageTracker?: {
+    record(event: Record<string, unknown>): Promise<void> | void;
+    list(filter?: Record<string, unknown>): Promise<unknown[]> | unknown[];
+  };
+  quotaRules?: Partial<
+    Record<
+      "free" | "paid" | "enterprise",
+      Partial<{
+        dailyResearchCount: number;
+        monthlyResearchCount: number;
+        monthlyEstimatedCostUsd: number;
+      }>
+    >
+  >;
   onCostEstimate?: (
     metadata: TavilyCostMetadata
   ) => Promise<void> | void;
@@ -92,10 +106,16 @@ export function createTavilyResearchCoordinator(
     },
   });
 
+  const usageTracker =
+    options.usageTracker || new InMemoryResearchUsageTracker();
+
   return new ResearchCoordinator({
     providers: [provider],
     cache: options.cache || new InMemoryResearchCache(),
-    usageTracker:
-      options.usageTracker || new InMemoryResearchUsageTracker(),
+    usageTracker,
+    quotaChecker: new ResearchQuotaChecker({
+      usageStore: usageTracker,
+      rules: options.quotaRules,
+    }),
   });
 }

@@ -114,6 +114,7 @@ function mapTavilyResult(item, executedAt, providerId) {
 export class TavilyResearchProvider {
   constructor(options = {}) {
     this.id = options.id || "tavily-search";
+    this.name = "Tavily";
     this.kind = "Search API";
     this.apiKey = String(options.apiKey || "").trim();
     this.fetchImpl = options.fetchImpl || globalThis.fetch;
@@ -305,4 +306,3 @@ export class TavilyResearchProvider {
     }
   }
 }
-

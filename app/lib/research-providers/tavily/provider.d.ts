@@ -49,6 +49,7 @@ export class TavilyTimeoutError extends TavilyProviderError {
 
 export class TavilyResearchProvider implements ResearchProvider {
   readonly id: string;
+  readonly name: "Tavily";
   readonly kind: "Search API";
   constructor(options?: TavilyResearchProviderOptions);
   supports(request: ResearchProviderRequest): boolean;
@@ -56,4 +57,3 @@ export class TavilyResearchProvider implements ResearchProvider {
   buildRequestBody(request: ResearchProviderRequest): Record<string, unknown>;
   research(request: ResearchProviderRequest): Promise<ResearchProviderResult>;
 }
-

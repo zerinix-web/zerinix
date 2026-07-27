@@ -25,9 +25,23 @@ export {
 } from "./registry.mjs";
 export {
   InMemoryResearchUsageTracker,
+  calculateResearchCacheEfficiency,
+  calculateTotalEstimatedSpend,
   createResearchAdminMetrics,
   createResearchUsageEvent,
 } from "./usage.mjs";
+export {
+  DEFAULT_RESEARCH_QUOTA_RULES,
+  RESEARCH_QUOTA_TIERS,
+  ResearchQuotaChecker,
+  ResearchQuotaContextError,
+  ResearchQuotaExceededError,
+  createResearchQuotaRules,
+} from "./quota.mjs";
+export {
+  DEFAULT_PROVIDER_COSTS,
+  ResearchProviderCostCatalog,
+} from "./provider-costs.mjs";
 export { ResearchCoordinator } from "./coordinator.mjs";
 export {
   DEFAULT_TAVILY_COST_PER_CREDIT_USD,

@@ -4,6 +4,8 @@ export * from "./cache.mjs";
 export * from "./cost.mjs";
 export * from "./registry.mjs";
 export * from "./usage.mjs";
+export * from "./quota.mjs";
+export * from "./provider-costs.mjs";
 export * from "./coordinator.mjs";
 export * from "./tavily/config.mjs";
 export * from "./tavily/provider.mjs";

@@ -44,15 +44,23 @@ The cost-control sequence is:
 3. Check exact and optional topic-aware cache reuse.
 4. Coalesce identical in-flight research to prevent duplicate provider calls.
 5. Estimate cost and reject requests above the configured request budget.
-6. Execute the provider.
-7. Normalize, deduplicate, and rank evidence through `EvidenceCollector`.
-8. Store the cache entry.
-9. Emit a usage event through the injected tracking interface.
+6. Check the authenticated user's daily, monthly, and estimated-cost quota and
+   reserve capacity for the in-flight request.
+7. Execute the provider only after the quota reservation succeeds.
+8. Normalize, deduplicate, and rank evidence through `EvidenceCollector`.
+9. Store the cache entry.
+10. Emit a usage event and release the quota reservation.
 
 Cost estimates are expressed in USD with billable units. The default in-memory
 tracker and cache exist for deterministic tests and local composition only;
 future production implementations can replace them without changing provider
 or coordinator contracts.
+
+Quota checks consume only provider executions. Exact cache hits, topic reuse,
+and coalesced requests are tracked for efficiency metrics but do not consume a
+provider-call quota. The dormant server factory wires quota enforcement by
+default and requires a trusted server-derived `userId`; callers must never
+accept tier or identity values directly from a client payload.
 
 ## Cache strategy
 
@@ -80,9 +88,15 @@ Every execution, cache reuse, coalesced request, and failure can emit a
 - cache hit rate;
 - most expensive normalized queries;
 - provider-level calls, cost, cache hits, and failures.
+- daily/monthly per-user usage and remaining quota;
+- cache misses, saved-provider-call estimates, and estimated cost savings;
+- provider usage and cost breakdowns across Tavily, Exa, Bing, and future
+  providers.
 
 No admin UI or database schema is added. A future storage-backed tracker can
-persist these events after a separate schema and privacy review.
+implement `ResearchUsageStore` and persist these events after a separate schema
+and privacy review. Atomic quota reservation must move into that persistent
+implementation before multi-instance production activation.
 
 ## Future integration sequence
 

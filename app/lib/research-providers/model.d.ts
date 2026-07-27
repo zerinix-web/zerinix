@@ -52,6 +52,7 @@ export type ResearchProviderResult = {
  */
 export interface ResearchProvider {
   readonly id: string;
+  readonly name?: string;
   readonly kind: ResearchProviderKind;
   supports(request: ResearchProviderRequest): boolean;
   estimateCost(
@@ -76,4 +77,3 @@ export const RESEARCH_PROVIDER_KINDS: readonly ResearchProviderKind[];
 export const RESEARCH_FRESHNESS_MODES: readonly ResearchFreshnessRequirement["mode"][];
 export function normalizeProviderText(value: unknown, maxLength?: number): string;
 export function stableResearchHash(value: unknown): string;
-
