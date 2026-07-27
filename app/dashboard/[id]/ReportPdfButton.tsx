@@ -1803,6 +1803,13 @@ function createFileName(title: string) {
   return `${slug || "zerinix-report"}.pdf`;
 }
 
+function usesMobilePdfFlow() {
+  return (
+    window.matchMedia("(max-width: 1023px)").matches ||
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+  );
+}
+
 export default function ReportPdfButton({ report }: { report: DashboardReport }) {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
@@ -3164,6 +3171,19 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
       const blob = pdf.output("blob");
       const url = URL.createObjectURL(blob);
+
+      if (usesMobilePdfFlow()) {
+        try {
+          window.location.assign(url);
+        } catch (openError) {
+          console.error(openError);
+          URL.revokeObjectURL(url);
+          setError("PDF could not be opened on this device. Please try again.");
+        }
+
+        return;
+      }
+
       const isSafari =
         /^((?!chrome|android).)*safari/i.test(navigator.userAgent) ||
         navigator.vendor.includes("Apple");
