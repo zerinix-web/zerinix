@@ -29,4 +29,18 @@ export {
   createResearchUsageEvent,
 } from "./usage.mjs";
 export { ResearchCoordinator } from "./coordinator.mjs";
-
+export {
+  DEFAULT_TAVILY_COST_PER_CREDIT_USD,
+  DEFAULT_TAVILY_TIMEOUT_MS,
+  TavilyConfigurationError,
+  TavilyResearchDisabledError,
+  assertTavilyConfiguration,
+  resolveTavilyConfiguration,
+  validateTavilyApiKey,
+} from "./tavily/config.mjs";
+export {
+  TavilyProviderError,
+  TavilyRateLimitError,
+  TavilyResearchProvider,
+  TavilyTimeoutError,
+} from "./tavily/provider.mjs";

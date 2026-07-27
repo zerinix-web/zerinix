@@ -30,7 +30,10 @@ provider.
 Every provider declares whether it supports a prepared request, estimates cost
 before execution, and returns raw evidence, provider metadata, and estimated
 cost. The registry can select an explicit provider or the cheapest compatible
-provider. No concrete provider is included today.
+provider. The Tavily adapter is the first concrete adapter, but its server
+factory is not imported by any application route. It is hard-disabled in
+production and requires an explicit non-production feature flag plus
+server-only `TAVILY_API_KEY` configuration.
 
 ## Cost and duplicate controls
 
@@ -83,12 +86,11 @@ persist these events after a separate schema and privacy review.
 
 ## Future integration sequence
 
-1. Add one server-only provider implementation.
-2. Add encrypted server environment configuration and health checks.
+1. Complete a security and cost review of the dormant Tavily adapter.
+2. Add encrypted deployment configuration and provider health checks.
 3. Add a persistent cache and usage tracker behind existing interfaces.
-4. Run provider contract, cost-limit, redaction, and failure-isolation tests.
-5. Integrate the coordinator into a report research stage behind a feature
-   flag.
+4. Run production-contract, cost-limit, redaction, and failure-isolation tests.
+5. Integrate the coordinator into a report research stage behind a separate
+   production feature flag.
 6. Expose admin metrics only after storage, authorization, and retention rules
    are approved.
-
