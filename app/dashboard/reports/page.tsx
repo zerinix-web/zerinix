@@ -3,7 +3,12 @@ import { createClient } from "@/app/lib/supabase/server";
 import { dashboardTheme } from "@/app/lib/ui/dashboard-theme";
 import DashboardSidebar from "../DashboardSidebar";
 import ReportManager from "../ReportManager";
-import { getAuthenticatedUser, loadUserReports } from "../report-utils";
+import MobileReportsHome from "@/components/mobile/MobileReportsHome";
+import {
+  getAuthenticatedUser,
+  loadUserReportPreviews,
+  type DashboardReport,
+} from "../report-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +20,20 @@ export default async function ReportsPage() {
     redirect("/login?next=/dashboard/reports");
   }
 
-  const { reports, error } = await loadUserReports(supabase, user);
+  const { reports, error } = await loadUserReportPreviews(supabase, user);
+  const desktopReports: DashboardReport[] = reports.map((report) => ({
+    id: report.id,
+    workspaceId: report.workspaceId,
+    title: report.title,
+    prompt: report.summary,
+    createdAt: report.createdAt,
+    type:
+      report.type === "Market Analysis"
+        ? "Market Analysis"
+        : "Business Plan",
+    status: report.status,
+    sections: [],
+  }));
 
   return (
     <main className={dashboardTheme.page}>
@@ -24,7 +42,11 @@ export default async function ReportsPage() {
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <DashboardSidebar />
 
-        <section className="flex-1 px-4 pb-28 pt-5 sm:px-8 lg:px-10 lg:py-9">
+        <section className="flex-1 lg:hidden">
+          <MobileReportsHome reports={reports} hasError={Boolean(error)} />
+        </section>
+
+        <section className="hidden flex-1 px-4 pb-28 pt-5 sm:px-8 lg:block lg:px-10 lg:py-9">
           <div className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-2xl shadow-black/30 ring-1 ring-white/[0.025] backdrop-blur-2xl sm:p-6">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200/70">
               Reports
@@ -43,7 +65,7 @@ export default async function ReportsPage() {
             </div>
           ) : null}
 
-          <ReportManager reports={reports} workspaceName="All reports" />
+          <ReportManager reports={desktopReports} workspaceName="All reports" />
         </section>
       </div>
     </main>

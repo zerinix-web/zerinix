@@ -24,6 +24,22 @@ export type DashboardReport = {
   }>;
 };
 
+export type MobileReportType =
+  | "Business Plan"
+  | "Market Analysis"
+  | "Strategic Report";
+
+export type MobileReportPreview = {
+  id: string;
+  workspaceId: string;
+  title: string;
+  summary: string;
+  createdAt: string;
+  type: MobileReportType;
+  status: string;
+  confidence?: number;
+};
+
 export type DashboardWorkspace = {
   id: string;
   name: string;
@@ -163,6 +179,68 @@ function inferReportType(row: ReportRow) {
   }
 
   return "Business Plan";
+}
+
+function inferMobileReportType(row: ReportRow): MobileReportType {
+  const rawType = readString(
+    row,
+    ["type", "report_type", "kind"],
+    ""
+  ).toLowerCase();
+
+  if (rawType.includes("market") || rawType.includes("pazar")) {
+    return "Market Analysis";
+  }
+
+  if (
+    rawType.includes("business") ||
+    rawType.includes("plan") ||
+    rawType.includes("iş plan")
+  ) {
+    return "Business Plan";
+  }
+
+  return "Strategic Report";
+}
+
+function normalizeReportConfidence(value: unknown) {
+  const numeric = Number(value);
+
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return undefined;
+  }
+
+  const percentage = numeric <= 1 ? numeric * 100 : numeric;
+  return Math.min(100, Math.round(percentage));
+}
+
+function normalizeMobileReportPreview(row: ReportRow): MobileReportPreview {
+  const type = inferMobileReportType(row);
+  const metadata =
+    row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? (row.metadata as ReportMetadata)
+      : undefined;
+  const investmentScore = readReportInvestmentScore(metadata);
+  const summary = readString(
+    row,
+    ["prompt", "business_idea", "idea", "input", "user_input", "original_prompt"],
+    ""
+  );
+
+  return {
+    id: readString(row, ["id", "report_id"], crypto.randomUUID()),
+    workspaceId: readString(row, ["workspace_id", "workspaceId"], ""),
+    title: readString(row, ["title", "name"], `${type} Report`),
+    summary,
+    createdAt: readString(
+      row,
+      ["created_at", "createdAt", "inserted_at"],
+      ""
+    ),
+    type,
+    status: readString(row, ["status", "state"], "completed"),
+    confidence: normalizeReportConfidence(investmentScore?.confidence),
+  };
 }
 
 function normalizeSections(row: ReportRow) {
@@ -314,6 +392,33 @@ export async function loadUserReports(supabase: SupabaseClient, user: User) {
 
   return {
     reports: (data || []).map((row) => normalizeReport(row as ReportRow)),
+    error: "",
+  };
+}
+
+export async function loadUserReportPreviews(
+  supabase: SupabaseClient,
+  user: User
+) {
+  const { data, error } = await supabase
+    .from("reports")
+    .select(
+      "id,user_id,workspace_id,title,prompt,report_type,status,created_at,metadata"
+    )
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return {
+      reports: [] as MobileReportPreview[],
+      error: error.message,
+    };
+  }
+
+  return {
+    reports: (data || []).map((row) =>
+      normalizeMobileReportPreview(row as ReportRow)
+    ),
     error: "",
   };
 }
