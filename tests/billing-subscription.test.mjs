@@ -33,7 +33,7 @@ test("subscription changes validate server-owned plan configuration", () => {
   assert.match(billingActions, /normalizeBillingPlan/);
   assert.match(billingActions, /billingPlans\.find/);
   assert.match(billingActions, /!planConfig\?\.databaseTier/);
-  assert.match(billingActions, /getStripeConfiguration\(\)/);
+  assert.match(billingActions, /getStripeCheckoutConfiguration\(plan\)/);
   assert.match(billingActions, /getPlanPriceState\(plan\)/);
   assert.match(billingActions, /createStripeCheckoutSession/);
   assert.match(billingActions, /redirect\(checkout\.data\.url\)/);
@@ -59,7 +59,7 @@ test("stripe foundation validates configuration and webhook signatures without e
 
 test("billing page shows missing Stripe configuration safely", () => {
   assert.match(billingPage, /Billing not configured/);
-  assert.match(billingPage, /stripeMissing\.map/);
+  assert.match(billingPage, /checkoutMissing\.map/);
   assert.match(billingPage, /No payment, upgrade, downgrade or\s+cancellation will be executed/);
   assert.match(billingActions, /Billing is not configured yet/);
 });
@@ -91,7 +91,7 @@ test("downgrade and cancellation flows require explicit confirmation surfaces", 
   assert.match(billingPage, /Confirm downgrade/);
   assert.match(billingPage, /Cancel subscription/);
   assert.match(billingPage, /Request cancellation/);
-  assert.match(billingPage, /Open customer portal/);
+  assert.match(billingPage, /BillingPortalButton/);
   assert.match(billingActions, /confirmDowngrade/);
   assert.match(billingActions, /requestCancellation/);
   assert.match(billingActions, /openCustomerPortal/);

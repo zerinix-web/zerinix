@@ -82,7 +82,7 @@ export default function BillingCheckoutButton({
         ) : current ? (
           "Current plan"
         ) : selectable ? (
-          "Select plan"
+          "Subscribe"
         ) : (
           "Unavailable"
         )}

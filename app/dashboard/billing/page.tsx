@@ -19,10 +19,10 @@ import DashboardSidebar from "../DashboardSidebar";
 import { getAuthenticatedUser } from "../report-utils";
 import {
   confirmDowngrade,
-  openCustomerPortal,
   requestCancellation,
 } from "./actions";
 import BillingCheckoutButton from "./BillingCheckoutButton";
+import BillingPortalButton from "./BillingPortalButton";
 import { loadBillingOverview } from "./billing-data";
 
 export const dynamic = "force-dynamic";
@@ -116,6 +116,12 @@ export default async function BillingPage({
   const checkoutMissing = Array.from(
     new Set(paidCheckoutPlans.flatMap((plan) => plan.checkout.missing))
   );
+  const activePaidSubscriptionStatuses = new Set(["active", "trialing"]);
+  const hasActivePaidSubscription =
+    billing.planTier !== "free" &&
+    activePaidSubscriptionStatuses.has(
+      String(billing.subscriptionStatus || "").trim().toLowerCase()
+    );
   const portalActionsAvailable = billing.stripe.portal.configured;
   const billingUnavailableMessage =
     "Customer portal actions are disabled until Stripe customer management is configured for this environment.";
@@ -260,7 +266,11 @@ export default async function BillingPage({
             })}
           </div>
 
-          <div className="mt-6 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+          <div
+            className={`mt-6 grid gap-5 ${
+              hasActivePaidSubscription ? "xl:grid-cols-[1.1fr_0.9fr]" : ""
+            }`}
+          >
             <section className="rounded-[1.85rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -304,7 +314,8 @@ export default async function BillingPage({
               </div>
             </section>
 
-            <section className="rounded-[1.85rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl">
+            {hasActivePaidSubscription ? (
+              <section className="rounded-[1.85rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200/70">
                 Secure actions
               </p>
@@ -320,16 +331,7 @@ export default async function BillingPage({
                   {billingUnavailableMessage}
                 </div>
               ) : null}
-              <form action={openCustomerPortal} className="mt-5">
-                <button
-                  type="submit"
-                  disabled={!portalActionsAvailable}
-                  aria-disabled={!portalActionsAvailable}
-                  className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl bg-white px-4 text-sm font-semibold text-black transition hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-teal-200/30 disabled:cursor-not-allowed disabled:border disabled:border-white/10 disabled:bg-white/10 disabled:text-zinc-500"
-                >
-                  {portalActionsAvailable ? "Open customer portal" : "Customer portal unavailable"}
-                </button>
-              </form>
+              <BillingPortalButton available={portalActionsAvailable} />
 
               <details className="mt-5 rounded-2xl border border-white/10 bg-black/25 p-4">
                 <summary className="cursor-pointer list-none text-sm font-semibold text-white">
@@ -378,10 +380,12 @@ export default async function BillingPage({
                   </button>
                 </form>
               </details>
-            </section>
+              </section>
+            ) : null}
           </div>
 
-          <section className="mt-6 rounded-[1.85rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl">
+          {!hasActivePaidSubscription ? (
+            <section className="mt-6 rounded-[1.85rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200/70">
@@ -400,31 +404,31 @@ export default async function BillingPage({
               </Link>
             </div>
 
-            <div className="mt-5 grid gap-4 md:grid-cols-3">
-              {billing.plans.filter((plan) => plan.id !== "team").map((plan) => {
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              {billing.plans
+                .filter((plan) => plan.id === "pro" || plan.id === "business")
+                .map((plan) => {
                 const planSelectable =
                   plan.supportedBySchema &&
                   plan.priceState.configured &&
-                  plan.checkout.configured &&
-                  !plan.current;
+                  plan.checkout.configured;
 
                 return (
                 <article
                   key={plan.id}
-                  className={`rounded-[1.5rem] border p-5 transition ${
-                    plan.current
-                      ? "border-teal-300/30 bg-teal-300/10"
-                      : "border-white/10 bg-black/25"
-                  } ${planSelectable ? "hover:border-teal-300/20 hover:bg-white/[0.04]" : ""}`}
+                  className={`rounded-[1.5rem] border border-white/10 bg-black/25 p-5 transition ${
+                    planSelectable ? "hover:border-teal-300/20 hover:bg-white/[0.04]" : ""
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-xl font-semibold text-white">{plan.name}</h3>
+                      <h3 className="text-xl font-semibold text-white">
+                        ZERINIX {plan.name}
+                      </h3>
                       <p className="mt-2 text-sm leading-6 text-zinc-500">
                         {plan.description}
                       </p>
                     </div>
-                    {plan.current ? <CheckCircle2 className="h-5 w-5 text-teal-200" /> : null}
                   </div>
                   <p className="mt-5 text-2xl font-semibold text-white">
                     {plan.priceState.label}
@@ -445,13 +449,14 @@ export default async function BillingPage({
                   <BillingCheckoutButton
                     planId={plan.id}
                     selectable={planSelectable}
-                    current={plan.current}
+                    current={false}
                   />
                 </article>
                 );
               })}
             </div>
-          </section>
+            </section>
+          ) : null}
 
           <div className="mt-6 grid gap-5 xl:grid-cols-2">
             <section className="rounded-[1.85rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl">

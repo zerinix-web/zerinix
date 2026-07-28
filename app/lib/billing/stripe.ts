@@ -397,7 +397,7 @@ export async function createStripeCustomerPortalSession(input: {
     "billing_portal/sessions",
     {
       customer: input.customerId,
-      return_url: `${config.appUrl}/dashboard/billing`,
+      return_url: `${config.appUrl}/billing`,
     },
     input.idempotencyKey,
     portalConfig.missing
