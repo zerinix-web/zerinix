@@ -10,20 +10,21 @@ test("authenticated users are redirected away from /register", () => {
   );
 });
 
-test("unauthenticated users only see the private beta registration state", () => {
-  assert.equal(getRegisterRouteState(null), "private_beta");
-  assert.equal(getRegisterRouteState(undefined), "private_beta");
+test("unauthenticated users see the production registration state", () => {
+  assert.equal(getRegisterRouteState(null), "show_registration");
+  assert.equal(getRegisterRouteState(undefined), "show_registration");
 });
 
-test("/register does not expose public signup form wiring", () => {
+test("/register exposes the production signup form", () => {
   const source = readFileSync("app/register/page.tsx", "utf8");
+  const form = readFileSync("components/RegisterForm.tsx", "utf8");
 
-  assert.equal(source.includes("signUpWithPassword"), false);
-  assert.equal(source.includes("<form"), false);
-  assert.equal(source.includes("auth_error"), false);
-  assert.match(source, /ZERINIX Private Beta/);
-  assert.match(
-    source,
-    /mailto:admin@zerinix\.com\?subject=ZERINIX%20Private%20Beta/
-  );
+  assert.match(source, /RegisterForm/);
+  assert.match(form, /signUpWithPassword/);
+  assert.match(form, /name="fullName"/);
+  assert.match(form, /name="email"/);
+  assert.match(form, /name="password"/);
+  assert.match(form, /name="confirmPassword"/);
+  assert.doesNotMatch(source, /ZERINIX Private Beta/);
+  assert.doesNotMatch(source, /mailto:admin@zerinix\.com/);
 });

@@ -227,14 +227,19 @@ test("authentication diagnostics and signup errors do not expose sensitive inter
   const proxy = read("app/lib/supabase/proxy.ts");
   const serverGuard = read("app/auth/server-guard.ts");
   const actions = read("app/auth/actions.ts");
+  const callback = read("app/auth/callback/route.ts");
 
   assert.doesNotMatch(proxy, /\[auth-guard:/);
   assert.doesNotMatch(serverGuard, /\[auth-guard:/);
   assert.doesNotMatch(actions, /stack:/);
   assert.doesNotMatch(actions, /raw:/);
   assert.doesNotMatch(actions, /cause=\$\{/);
-  assert.match(actions, /registration_disabled/);
-  assert.doesNotMatch(actions, /\.signUp\(/);
+  assert.match(actions, /\.signUp\(/);
+  assert.match(actions, /registrationFailed/);
+  assert.doesNotMatch(actions, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(callback, /exchangeCodeForSession\(code\)/);
+  assert.match(callback, /value\.startsWith\("\/"\)/);
+  assert.match(callback, /value\.startsWith\("\/\/"\)/);
 });
 
 test("Supabase migrations enforce RLS ownership for core user data", () => {

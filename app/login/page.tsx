@@ -22,9 +22,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       subtitle={dictionary.auth.loginSubtitle}
       locale={locale}
       dictionary={dictionary}
-      footerText={dictionary.auth.privateBetaAccess}
+      footerText={dictionary.auth.noAccount}
       footerHref="/register"
-      footerLinkText={dictionary.auth.requestAccess}
+      footerLinkText={dictionary.auth.createAccount}
     >
       <div>
         <p className="text-sm font-medium text-gray-500">{dictionary.auth.signIn}</p>

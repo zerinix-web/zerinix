@@ -8,6 +8,7 @@ import {
   persistSupabaseSession,
   restoreSupabaseSession,
 } from "@/app/lib/supabase/client";
+import OAuthButtons from "@/components/OAuthButtons";
 
 export default function LoginForm({
   labels,
@@ -30,7 +31,7 @@ export default function LoginForm({
     const password = String(formData.get("password") ?? "");
 
     if (!email || !password) {
-      setError("Enter your email and password.");
+      setError(labels.missingCredentials);
       return;
     }
 
@@ -45,7 +46,7 @@ export default function LoginForm({
       });
 
       if (signInError) {
-        setError("Check your email and password, then try again.");
+        setError(labels.authError);
         return;
       }
 
@@ -58,67 +59,83 @@ export default function LoginForm({
       } = await supabase.auth.getSession();
 
       if (sessionError || !session?.access_token) {
-        setError("Your session could not be saved. Please sign in again.");
+        setError(labels.sessionError);
         return;
       }
 
       router.replace("/plan");
       router.refresh();
     } catch {
-      setError("Sign in failed. Please try again.");
+      setError(labels.authError);
     } finally {
       setPending(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mt-8 space-y-4">
-      {error && (
-        <p className="rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">
-          {error}
-        </p>
-      )}
+    <>
+      <OAuthButtons labels={labels} />
 
-      <label className="block">
-        <span className="text-sm font-medium text-gray-300">{labels.email}</span>
-        <input
-          type="email"
-          name="email"
-          autoComplete="email"
-          placeholder="you@company.com"
-          className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-black/50 px-4 text-white outline-none transition placeholder:text-gray-600 focus:border-teal-300/70"
-        />
-      </label>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <p
+            aria-live="polite"
+            className="rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100"
+          >
+            {error}
+          </p>
+        )}
 
-      <label className="block">
-        <span className="text-sm font-medium text-gray-300">{labels.password}</span>
-        <input
-          type="password"
-          name="password"
-          autoComplete="current-password"
-          placeholder="••••••••"
-          className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-black/50 px-4 text-white outline-none transition placeholder:text-gray-600 focus:border-teal-300/70"
-        />
-      </label>
-
-      <div className="flex items-center text-sm">
-        <label className="flex items-center gap-2 text-gray-400">
+        <label className="block">
+          <span className="text-sm font-medium text-gray-300">
+            {labels.email}
+          </span>
           <input
-            type="checkbox"
-            name="remember"
-            className="h-4 w-4 rounded border-white/10 bg-black accent-white"
+            type="email"
+            name="email"
+            autoComplete="email"
+            placeholder="you@company.com"
+            required
+            disabled={pending}
+            className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-black/50 px-4 text-white outline-none transition placeholder:text-gray-600 focus:border-teal-300/70 disabled:cursor-not-allowed disabled:opacity-60"
           />
-          {labels.rememberMe}
         </label>
-      </div>
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="h-12 w-full rounded-2xl bg-white font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {pending ? labels.signingIn : labels.signInButton}
-      </button>
-    </form>
+        <label className="block">
+          <span className="text-sm font-medium text-gray-300">
+            {labels.password}
+          </span>
+          <input
+            type="password"
+            name="password"
+            autoComplete="current-password"
+            placeholder="••••••••"
+            required
+            disabled={pending}
+            className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-black/50 px-4 text-white outline-none transition placeholder:text-gray-600 focus:border-teal-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+          />
+        </label>
+
+        <div className="flex items-center text-sm">
+          <label className="flex items-center gap-2 text-gray-400">
+            <input
+              type="checkbox"
+              name="remember"
+              disabled={pending}
+              className="h-4 w-4 rounded border-white/10 bg-black accent-white disabled:cursor-not-allowed disabled:opacity-60"
+            />
+            {labels.rememberMe}
+          </label>
+        </div>
+
+        <button
+          type="submit"
+          disabled={pending}
+          className="h-12 w-full rounded-2xl bg-white font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {pending ? labels.signingIn : labels.signInButton}
+        </button>
+      </form>
+    </>
   );
 }
