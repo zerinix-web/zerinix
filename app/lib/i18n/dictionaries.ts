@@ -31,6 +31,8 @@ export const dictionaries = {
       missingCredentials: "Enter your email and password.",
       sessionError: "Your session could not be saved. Please sign in again.",
       oauthError: "Social sign-in could not be started. Please try again.",
+      betaAccessRequired:
+        "This account is not approved for private beta access.",
       continueWithGoogle: "Continue with Google",
       continueWithApple: "Continue with Apple",
       connecting: "Connecting...",
@@ -271,6 +273,8 @@ export const dictionaries = {
       missingCredentials: "E-posta ve şifrenizi girin.",
       sessionError: "Oturumunuz kaydedilemedi. Lütfen tekrar giriş yapın.",
       oauthError: "Sosyal giriş başlatılamadı. Lütfen tekrar deneyin.",
+      betaAccessRequired:
+        "Bu hesap private beta erişimi için onaylanmadı.",
       continueWithGoogle: "Google ile devam et",
       continueWithApple: "Apple ile devam et",
       connecting: "Bağlanıyor...",
@@ -502,6 +506,8 @@ export const dictionaries = {
         "Ihre Sitzung konnte nicht gespeichert werden. Melden Sie sich erneut an.",
       oauthError:
         "Die soziale Anmeldung konnte nicht gestartet werden. Versuchen Sie es erneut.",
+      betaAccessRequired:
+        "Dieses Konto ist nicht für den Private-Beta-Zugang freigegeben.",
       continueWithGoogle: "Mit Google fortfahren",
       continueWithApple: "Mit Apple fortfahren",
       connecting: "Verbindung wird hergestellt...",

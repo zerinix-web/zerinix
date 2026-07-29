@@ -228,18 +228,23 @@ test("authentication diagnostics and signup errors do not expose sensitive inter
   const serverGuard = read("app/auth/server-guard.ts");
   const actions = read("app/auth/actions.ts");
   const callback = read("app/auth/callback/route.ts");
+  const betaAccess = read("app/lib/beta-access.ts");
 
   assert.doesNotMatch(proxy, /\[auth-guard:/);
   assert.doesNotMatch(serverGuard, /\[auth-guard:/);
   assert.doesNotMatch(actions, /stack:/);
   assert.doesNotMatch(actions, /raw:/);
   assert.doesNotMatch(actions, /cause=\$\{/);
-  assert.match(actions, /\.signUp\(/);
-  assert.match(actions, /registrationFailed/);
+  assert.match(actions, /registration_disabled/);
+  assert.doesNotMatch(actions, /\.signUp\(/);
   assert.doesNotMatch(actions, /SUPABASE_SERVICE_ROLE_KEY/);
   assert.match(callback, /exchangeCodeForSession\(code\)/);
-  assert.match(callback, /value\.startsWith\("\/"\)/);
-  assert.match(callback, /value\.startsWith\("\/\/"\)/);
+  assert.match(callback, /isPrivateBetaAllowed\(user\)/);
+  assert.match(callback, /error=beta_access_required/);
+  assert.match(callback, /supabase\.auth\.signOut\(\)/);
+  assert.match(betaAccess, /PRIVATE_BETA_ALLOWED_EMAILS/);
+  assert.doesNotMatch(betaAccess, /PRIVATE_BETA_ALLOWED_EMAILS[\s\S]*FOUNDER_EMAILS/);
+  assert.doesNotMatch(betaAccess, /return Boolean\(account\)/);
 });
 
 test("Supabase migrations enforce RLS ownership for core user data", () => {

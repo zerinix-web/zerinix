@@ -6,14 +6,23 @@ import { getRequestDictionary } from "@/app/lib/i18n/server";
 type LoginPageProps = {
   searchParams: Promise<{
     auth_error?: string;
+    error?: string;
   }>;
 };
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   await redirectAuthenticatedUserFromAuthPage();
 
-  const { auth_error: authError } = await searchParams;
+  const { auth_error: authError, error } = await searchParams;
   const { locale, dictionary } = await getRequestDictionary();
+  const pageError =
+    error === "beta_access_required"
+      ? dictionary.auth.betaAccessRequired
+      : error === "oauth_callback_failed"
+        ? dictionary.auth.oauthError
+        : authError
+          ? dictionary.auth.authError
+          : "";
 
   return (
     <AuthShell
@@ -22,9 +31,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       subtitle={dictionary.auth.loginSubtitle}
       locale={locale}
       dictionary={dictionary}
-      footerText={dictionary.auth.noAccount}
+      footerText={dictionary.auth.privateBetaAccess}
       footerHref="/register"
-      footerLinkText={dictionary.auth.createAccount}
+      footerLinkText={dictionary.auth.requestAccess}
     >
       <div>
         <p className="text-sm font-medium text-gray-500">{dictionary.auth.signIn}</p>
@@ -33,9 +42,12 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         </h2>
       </div>
 
-      {authError && (
-        <p className="mt-6 rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">
-          {dictionary.auth.authError}
+      {pageError && (
+        <p
+          role="alert"
+          className="mt-6 rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100"
+        >
+          {pageError}
         </p>
       )}
 

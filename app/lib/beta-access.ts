@@ -1,4 +1,5 @@
 import { isFounderEmail } from "@/app/lib/founder-access.mjs";
+import { isPrivateBetaEmailAllowed } from "@/app/lib/private-beta-access.mjs";
 
 type BetaAccessIdentity = {
   identity_data?: Record<string, unknown> | null;
@@ -6,8 +7,6 @@ type BetaAccessIdentity = {
 
 type BetaAccessAccount = {
   email?: string | null;
-  user_metadata?: Record<string, unknown> | null;
-  app_metadata?: Record<string, unknown> | null;
   identities?: BetaAccessIdentity[] | null;
 };
 
@@ -19,17 +18,6 @@ function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
 }
 
-function normalizeGmailAddress(value: string) {
-  const email = normalizeEmail(value);
-  const [localPart, domain] = email.split("@");
-
-  if (!localPart || (domain !== "gmail.com" && domain !== "googlemail.com")) {
-    return email;
-  }
-
-  return `${localPart.split("+")[0].replace(/\./g, "")}@gmail.com`;
-}
-
 function collectAccountEmails(account: BetaAccessAccount) {
   const emails = new Set<string>();
   const addEmail = (value: unknown) => {
@@ -37,13 +25,10 @@ function collectAccountEmails(account: BetaAccessAccount) {
 
     if (email) {
       emails.add(normalizeEmail(email));
-      emails.add(normalizeGmailAddress(email));
     }
   };
 
   addEmail(account.email);
-  addEmail(account.user_metadata?.email);
-  addEmail(account.app_metadata?.email);
 
   account.identities?.forEach((identity) => {
     addEmail(identity.identity_data?.email);
@@ -52,8 +37,17 @@ function collectAccountEmails(account: BetaAccessAccount) {
   return emails;
 }
 
-export function isPrivateBetaAllowed(account?: BetaAccessAccount | string | null) {
-  return Boolean(account);
+export function isPrivateBetaAllowed(
+  account?: BetaAccessAccount | string | null,
+  allowedEmails = process.env.PRIVATE_BETA_ALLOWED_EMAILS || ""
+) {
+  if (!account || !allowedEmails.trim()) {
+    return false;
+  }
+
+  const betaAccount = typeof account === "string" ? { email: account } : account;
+
+  return isPrivateBetaEmailAllowed(betaAccount.email, allowedEmails);
 }
 
 export function isFounderAccount(account?: BetaAccessAccount | string | null) {
