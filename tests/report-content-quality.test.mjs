@@ -126,7 +126,8 @@ test("report generation instructions enforce a business-specific decision spine 
   assert.match(directives, /Executive Summary states the verdict and evidence gap/);
   assert.match(directives, /Never reuse a complete narrative paragraph/);
   assert.match(planPrompts, /responsible actor, target customer or operating object/);
-  assert.match(marketPrompts, /responsible actor, beachhead customer or channel/);
+  assert.match(marketPrompts, /requested geography and forecast period/);
+  assert.match(marketPrompts, /Produce a market intelligence report, never a business plan/);
   assert.match(planRoute, /dedupeReportParagraphsAcrossSections\(normalized\)/);
   assert.match(marketRoute, /dedupeReportParagraphsAcrossSections\(normalized\)/);
 });

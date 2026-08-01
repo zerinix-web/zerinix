@@ -14,10 +14,6 @@ const recommendationSource = await readFile(
   new URL("../components/planner/RecommendationCard.tsx", import.meta.url),
   "utf8"
 );
-const recommendationActionsSource = await readFile(
-  new URL("../components/planner/RecommendationActions.tsx", import.meta.url),
-  "utf8"
-);
 const understandingSource = await readFile(
   new URL("../components/planner/UnderstandingCard.tsx", import.meta.url),
   "utf8"
@@ -76,7 +72,7 @@ const reportUtilsSource = await readFile(
 );
 
 test("planner uses one universal input and gates execution behind understanding", () => {
-  assert.match(plannerSource, /Turn complex inputs into clear decisions\./);
+  assert.match(plannerSource, /Tell ZERINIX what you want to accomplish\./);
   assert.match(plannerSource, /Select an analysis type to continue\./);
   assert.match(plannerSource, /Business Idea Validation/);
   assert.match(plannerSource, /Market Intelligence/);
@@ -84,12 +80,12 @@ test("planner uses one universal input and gates execution behind understanding"
   assert.match(plannerSource, /submitForUnderstanding/);
   assert.match(plannerSource, /requestUniversalUnderstanding/);
   assert.match(plannerSource, /universalUnderstandingSchema\.safeParse/);
-  assert.match(plannerSource, /pendingRecommendation/);
+  assert.doesNotMatch(plannerSource, /pendingRecommendation/);
   assert.match(plannerSource, /!hasSelectedAnalysisMode/);
 });
 
 test("polished composer uses contextual suggestions and a calm understanding transition", () => {
-  assert.match(plannerSource, /"Analyze"/);
+  assert.match(plannerSource, /"Send"/);
   assert.doesNotMatch(plannerSource, /"Understand"/);
   assert.match(plannerSource, /getComposerSuggestions\(draft\)/);
   assert.doesNotMatch(plannerSource, /const firstInteractionSuggestions/);
@@ -100,7 +96,7 @@ test("polished composer uses contextual suggestions and a calm understanding tra
   );
   assert.match(
     plannerSource,
-    /Ask a question, describe your objective, paste a URL, or add files for context\./
+    /Describe a business decision, opportunity or challenge/
   );
 });
 
@@ -112,7 +108,7 @@ test("typing state is isolated and full detection runs only after Analyze", () =
     "async function submitForUnderstanding"
   );
   const understandingEnd = plannerSource.indexOf(
-    "async function continueRecommendationAsChat"
+    "async function getGeneralWorkspaceId"
   );
   const analyzeSource = plannerSource.slice(understandingStart, understandingEnd);
 
@@ -124,39 +120,28 @@ test("typing state is isolated and full detection runs only after Analyze", () =
     /detectPlannerIntent|new URL|attachments/
   );
   assert.match(analyzeSource, /requestUniversalUnderstanding/);
-  assert.match(analyzeSource, /recommendationFromUnderstanding/);
+  assert.match(analyzeSource, /createDirectReportReadiness/);
+  assert.doesNotMatch(analyzeSource, /recommendedAction === "clarify"/);
 });
 
-test("recommendation actions use chat or the single Decision Intelligence report pipeline", () => {
-  assert.match(plannerSource, /continueRecommendationAsChat/);
+test("selected mode directly controls chat or the single Decision Intelligence report pipeline", () => {
   assert.match(
     plannerSource,
-    /await sendChatMessage\(chatPrompt,\s*true,\s*"",\s*queuedAttachments\)/
+    /selectedMode === "chat"[\s\S]*await sendChatMessage\([\s\S]*queuedAttachments/
   );
   assert.match(
     plannerSource,
-    /createUniversalReportReadiness\([\s\S]*void generatePlan\(\s*reportPrompt,\s*true,\s*queuedAttachments,\s*reportReadiness,\s*recommendation\.reportMode\s*\)/
+    /createDirectReportReadiness\(understanding\)[\s\S]*void generatePlan\([\s\S]*queuedAttachments,[\s\S]*reportReadiness,[\s\S]*selectedMode/
   );
   assert.match(plannerSource, /"X-Zerinix-Universal-Input": "true"/);
   assert.match(plannerSource, /reportReadiness/);
   assert.doesNotMatch(plannerSource, /fetch\("\/api\/market-analysis"/);
   assert.doesNotMatch(plannerSource, /function analyzeMarket\(/);
   assert.match(plannerSource, /"X-Zerinix-Pipeline": "decision_intelligence_v1"/);
-  assert.match(recommendationSource, /RecommendationActions/);
-  assert.match(recommendationActionsSource, /Generate Strategic Report/);
-  assert.match(recommendationActionsSource, /Continue as Chat/);
-  assert.match(
-    recommendationActionsSource,
-    /onAction\("continue_as_chat"\)/
-  );
-  assert.match(
-    recommendationActionsSource,
-    /onAction\("generate_strategic_report"\)/
-  );
-  assert.match(
-    plannerSource,
-    /if \(action === "continue_as_chat"\)[\s\S]*continueRecommendationAsChat\(clarificationAnswers\)[\s\S]*return;/
-  );
+  assert.doesNotMatch(recommendationSource, /RecommendationActions/);
+  assert.doesNotMatch(recommendationSource, /Recommended Analyses|Why this recommendation/);
+  assert.doesNotMatch(plannerSource, /<RecommendationCard/);
+  assert.doesNotMatch(plannerSource, /recommendation\.reportMode\s*\)/);
 });
 
 test("completed report payloads render even when research contains advisory warnings", () => {
@@ -230,7 +215,7 @@ test("detector covers business, file, image, spreadsheet, and URL understanding 
 });
 
 test("mobile keeps the same universal understanding and attachment flow", () => {
-  assert.match(mobileSource, /What do you want to accomplish today\?/);
+  assert.match(mobileSource, /Tell ZERINIX what you want to accomplish\./);
   assert.match(mobileSource, /recommendationContent/);
   assert.match(mobileSource, /type="file"/);
   assert.match(mobileSource, /attachments\.length/);
@@ -267,7 +252,7 @@ test("file upload queues attachments and waits for explicit mode selection and A
     uploadSource,
     /requestUniversalUnderstanding|generatePlan|analyzeMarket|sendChatMessage/
   );
-  assert.match(plannerSource, /selectedMode === "chat"/);
+  assert.match(plannerSource, /const selectedMode = activeMode/);
   assert.match(plannerSource, /analysisMode: requestedMode/);
   assert.match(plannerSource, /analysisMode: "chat" as const/);
 });
@@ -361,17 +346,17 @@ test("PDF Excel Word and image detections preserve the existing chat file pipeli
   }
 
   const continueStart = plannerSource.indexOf(
-    "async function continueRecommendationAsChat"
+    "async function submitForUnderstanding"
   );
   const continueEnd = plannerSource.indexOf(
-    "function generateRecommendedReport"
+    "async function getGeneralWorkspaceId"
   );
   const continueSource = plannerSource.slice(continueStart, continueEnd);
 
-  assert.match(continueSource, /attachments: queuedAttachments/);
+  assert.match(continueSource, /const queuedAttachments = \[\.\.\.attachments\]/);
   assert.match(
     continueSource,
-    /sendChatMessage\(chatPrompt,\s*true,\s*"",\s*queuedAttachments\)/
+    /sendChatMessage\([\s\S]*true,[\s\S]*"",[\s\S]*queuedAttachments/
   );
   assert.match(
     plannerSource,

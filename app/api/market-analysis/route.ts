@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import type { User } from "@supabase/supabase-js";
 import { authorizeStrategicReportAccess } from "@/app/lib/strategic-report-access";
-import { isAmbiguousBusinessRequest } from "@/app/lib/business-idea-detection";
 import { createClient } from "@/app/lib/supabase/server";
 import {
   checkRateLimit,
@@ -38,11 +38,7 @@ import { createAiJobDescriptor } from "@/app/lib/ai/queue";
 import {
   createCanonicalFinancialAssumptions,
   formatDecisionConfidenceReport,
-  formatCanonicalFinancialAssumptions,
-  formatFinancialConsistencyReport,
   formatReportIntelligenceSummary,
-  formatSourceIntelligenceSummary,
-  formatValidationIntelligenceSummary,
   type AiFinancialModelContext,
 } from "@/app/lib/ai/financial-assumptions";
 import { createAiCostOptimizationMetrics } from "@/app/lib/ai/token-optimization";
@@ -60,9 +56,6 @@ import {
   extractExplicitMemoryOperations,
   loadUserMemoriesForUser,
 } from "@/app/lib/ai/user-memory";
-import {
-  buildFullReportStructureDirectives,
-} from "@/app/lib/ai/report-quality-directives";
 import { dedupeReportParagraphsAcrossSections } from "@/app/lib/report-content-quality.mjs";
 import { normalizeReportSourceSection } from "@/app/lib/report-source-normalization.mjs";
 import {
@@ -71,6 +64,13 @@ import {
   normalizePdfText,
 } from "@/app/lib/pdf-normalization.mjs";
 import { serializeReportStreamChunk } from "@/app/lib/report-engine/generation-service";
+import {
+  createOpenAiRequestId,
+  finalizeOpenAiCostResponse,
+  runWithOpenAiCostContext,
+  setOpenAiCostIdentity,
+  withOpenAiCostOperation,
+} from "@/app/lib/ai/cost-instrumentation";
 import {
   createReportMetadataContext,
   flattenReportMetadataForUsage,
@@ -101,15 +101,6 @@ const FULL_REPORT_OPENAI_TIMEOUT_MS = 180_000;
 const FULL_REPORT_POST_PROCESS_TIMEOUT_MS = 12_000;
 
 type MarketReportChunk = Partial<Record<MarketReportField, string>>;
-type MarketReportMetadataChunk = {
-  reportMetadata: {
-    investmentScore: AiFinancialModelContext["investmentScore"];
-    benchmarkFit: AiFinancialModelContext["benchmarkFit"];
-    benchmarkScore: AiFinancialModelContext["benchmarkScore"];
-    reportQuality: AiFinancialModelContext["reportIntelligence"];
-    validationIntelligence: AiFinancialModelContext["validationIntelligenceV2"];
-  };
-};
 type MarketReportWarningChunk = {
   warning: string;
   missingFields?: MarketReportField[];
@@ -211,47 +202,6 @@ function sanitizeMarketReportContent(value: string) {
     .trim();
 }
 
-function removePlaceholderKpiValues(content: string) {
-  return content
-    .replace(/\|\s*1\s*\|\s*Target\s*:\s*1\s*\|/gi, "| Validation Required | Target: validation test required |")
-    .replace(/\b1\s*\|\s*Target\s*:\s*1\b/gi, "Validation Required | Target: validation test required")
-    .replace(/\b1\s*(?:[-–—]\s*)?\/\s*(?:target\s*[:\-–—]?\s*)?1\b/gi, "Validation Required")
-    .replace(/\b1\s*\/\s*Target\s*:\s*1\b/gi, "Validation Required")
-    .replace(/\b1\s*\/\s*Target\s*1\b/gi, "Validation Required")
-    .replace(/\b1\s*\/\s*Target\b/gi, "Validation Required")
-    .replace(
-      /\bValue\s*:\s*1\s*(?:\||,|;|\s+-\s+)\s*Target\s*:\s*1\b/gi,
-      "Value: Validation Required | Target: validation test required"
-    )
-    .replace(/\bMetric\s*:\s*1\b/gi, "Metric: Validation Required")
-    .replace(/\b(Current|Baseline|Threshold)\s*:\s*1\b/gi, "$1: Validation Required")
-    .replace(/\bTarget\s*:\s*1\b/gi, "Target: validation test required")
-    .replace(/\bTarget\s+1\b/gi, "Target: validation test required")
-    .replace(/\bValue\s*:\s*1\b/gi, "Value: Validation Required")
-    .trim();
-}
-
-function removeTamSamSomOwnershipText(content: string) {
-  return sanitizeMarketReportContent(content)
-    .split("\n")
-    .filter((line) => {
-      const normalized = line.replace(/^[-*•]\s*/, "").trim();
-
-      if (!normalized) {
-        return true;
-      }
-
-      return !(
-        /^(?:tam|sam|som)\s*[:\-–—]/i.test(normalized) ||
-        /\btam\s*\/\s*sam\s*\/\s*som\b/i.test(normalized) ||
-        /\bmarket sizing\s*[:\-–—]/i.test(normalized)
-      );
-    })
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
 function detectLanguage(value: string): ResponseLanguage {
   const normalized = value.toLowerCase();
   const hasTurkishCharacters = /[çğıöşü]/i.test(normalized);
@@ -311,22 +261,6 @@ function serializeMarketReportChunks(report: Record<MarketReportField, string>) 
     .join("");
 }
 
-function serializeMarketReportMetadataChunk(
-  context: AiFinancialModelContext
-) {
-  const chunk: MarketReportMetadataChunk = {
-    reportMetadata: {
-      investmentScore: context.investmentScore,
-      benchmarkFit: context.benchmarkFit,
-      benchmarkScore: context.benchmarkScore,
-      reportQuality: context.reportIntelligence,
-      validationIntelligence: context.validationIntelligenceV2,
-    },
-  };
-
-  return serializeReportStreamChunk(chunk);
-}
-
 function createFallbackMarketReport() {
   return Object.fromEntries(
     reportFields.map((field) => [field, ""])
@@ -346,132 +280,6 @@ function createMockMarketReport(prompt: string, language: ResponseLanguage) {
       ].join(" "),
     ])
   ) as Record<MarketReportField, string>;
-}
-
-function hasMeaningfulSwotGroup(content: string, label: string) {
-  const groupMatch = content.match(
-    new RegExp(
-      `${label}\\s*[:\\-–—]?\\s*([\\s\\S]*?)(?=\\n\\s*(?:Strengths|Weaknesses|Opportunities|Threats)\\s*[:\\-–—]?|$)`,
-      "i"
-    )
-  );
-  const groupContent = sanitizeMarketReportContent(groupMatch?.[1] || "");
-
-  return groupContent
-    .split(/\n|•|-/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 18).length > 0;
-}
-
-function formatBulletGroup(label: string, items: string[]) {
-  const bullets = items
-    .map((item) => sanitizeMarketReportContent(item).replace(/^[-*•]\s*/, ""))
-    .filter((item) => item.length > 8)
-    .slice(0, 3);
-
-  return `${label}:\n${bullets.map((item) => `- ${item}`).join("\n")}`;
-}
-
-function formatLocalizedBulletGroup(
-  language: ResponseLanguage,
-  englishLabel: string,
-  turkishLabel: string,
-  items: string[]
-) {
-  return formatBulletGroup(marketLabel(language, englishLabel, turkishLabel), items);
-}
-
-function extractFallbackBullets(content: string, fallback: string) {
-  const bullets = sanitizeMarketReportContent(content)
-    .split(/\n|•|-/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 24 && !/^(opportunities|threats|strengths|weaknesses)$/i.test(item))
-    .slice(0, 3);
-
-  return bullets.length ? bullets : [fallback];
-}
-
-function buildCanonicalSwotSection(
-  report: Record<MarketReportField, string>,
-  context: AiFinancialModelContext,
-  language: ResponseLanguage
-) {
-  const strengths = context.investmentScore.strengths.length
-    ? context.investmentScore.strengths
-    : [
-        marketText(
-          language,
-          `${context.inputs.industry} model has a focused market-entry thesis and ${context.metrics.grossMargin.displayValue} gross-margin planning input.`,
-          `${context.inputs.industry} modeli odaklı bir pazara giriş tezi ve ${context.metrics.grossMargin.displayValue} brüt marj planlama girdisi taşır.`
-        ),
-      ];
-  const weaknesses = context.investmentScore.weaknesses.length
-    ? context.investmentScore.weaknesses
-    : [
-        marketText(
-          language,
-          `Primary validation is still required for ${context.inputs.targetCustomer}, pricing, and repeatable acquisition.`,
-          `${context.inputs.targetCustomer}, fiyatlandırma ve tekrarlanabilir edinim için birincil doğrulama hâlâ gereklidir.`
-        ),
-      ];
-  const opportunities = extractFallbackBullets(
-    report.opportunities,
-    marketText(
-      language,
-      "A focused beachhead gives the founder a practical segment to validate before expanding.",
-      "Odaklı başlangıç pazarı, kurucuya genişlemeden önce doğrulanabilir pratik bir segment sağlar."
-    )
-  );
-  const threats = context.investmentScore.topRisks.length
-    ? context.investmentScore.topRisks
-    : extractFallbackBullets(
-        report.threats,
-        marketText(
-          language,
-          "Competitive response, acquisition cost inflation, and weak retention could reduce investability.",
-          "Rekabet tepkisi, edinim maliyeti enflasyonu ve zayıf elde tutma yatırım yapılabilirliği azaltabilir."
-        )
-      );
-
-  return [
-    formatLocalizedBulletGroup(language, "Strengths", "Güçlü Yönler", strengths),
-    formatLocalizedBulletGroup(language, "Weaknesses", "Zayıf Yönler", weaknesses),
-    formatLocalizedBulletGroup(language, "Opportunities", "Fırsatlar", opportunities),
-    formatLocalizedBulletGroup(language, "Threats", "Tehditler", threats),
-  ].join("\n\n");
-}
-
-function scorePercent(score: number, maximumScore: number) {
-  return maximumScore > 0 ? Math.round((score / maximumScore) * 100) : 0;
-}
-
-function appendIntelligenceBlock(content: string, title: string, lines: string[]) {
-  const cleanLines = lines.map((line) => sanitizeMarketReportContent(line).trim()).filter(Boolean);
-
-  if (!cleanLines.length || new RegExp(`\\b${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(content)) {
-    return content;
-  }
-
-  return sanitizeMarketReportContent(`${content.trim()}\n\n${title}:\n${cleanLines.join("\n")}`);
-}
-
-function removeLegacyValidationIntelligenceBlock(content: string) {
-  return sanitizeMarketReportContent(content)
-    .split(/\n{2,}/)
-    .filter((block) => {
-      const normalizedBlock = block.trim();
-      const hasLegacyHeading =
-        /\b(?:Validation Roadmap|Doğrulama Yol Haritası)\s*:/i.test(normalizedBlock);
-      const hasOldValidationScore =
-        /\b(?:Validation Score|Doğrulama Skoru)\s*[:\-–—]\s*(?:Not Started|Başlamadı|In Progress|Devam Ediyor|Validated|Doğrulandı)\b/i.test(normalizedBlock);
-      const hasOldPriorityFormat =
-        /\b(?:Priority|Öncelik)\s+\d+\s*[:\-–—]\s*/i.test(normalizedBlock) &&
-        !/\b(?:Success Metric|Başarı Metriği|Timeline|Zamanlama|Evidence|Kanıt)\s*[:\-–—]/i.test(normalizedBlock);
-
-      return !hasLegacyHeading && !hasOldValidationScore && !hasOldPriorityFormat;
-    })
-    .join("\n\n")
-    .trim();
 }
 
 function marketText(language: ResponseLanguage, english: string, turkish: string) {
@@ -619,6 +427,11 @@ function enforceMarketReportLanguage(
     .replace(/\bDOĞRULA\b/g, "VALIDATE")
     .replace(/\bREDDET\b/g, "REJECT")
     .trim();
+}
+
+if (false) {
+function scorePercent(score: number, maximumScore: number) {
+  return maximumScore > 0 ? Math.round((score / maximumScore) * 100) : 0;
 }
 
 function buildMarketExecutiveInsight(
@@ -909,123 +722,32 @@ function buildCanonicalMarketKeyMetrics(context: AiFinancialModelContext, langua
     .join("\n");
 }
 
+void [
+  buildCanonicalMarketTamSamSomSection,
+  buildMarketOpportunityScore,
+  buildMarketConfidenceBreakdown,
+  buildMarketRiskMatrix,
+  buildMarketFounderDecisionEngine,
+  buildCanonicalMarketKpiDashboard,
+  buildCanonicalMarketExecutiveRecommendation,
+  buildMarketCeoBrief,
+  ensureMetricLine,
+  buildCanonicalMarketKeyMetrics,
+];
+}
+
 function ensureMarketReportQuality(
   report: Record<MarketReportField, string>,
-  context?: AiFinancialModelContext,
+  _context?: AiFinancialModelContext,
   language: ResponseLanguage = "English"
 ) {
   const normalized = { ...report };
 
   for (const field of reportFields) {
-    normalized[field] = sanitizeMarketReportContent(normalized[field] || "");
-  }
-  normalized.kpiDashboard = removePlaceholderKpiValues(normalized.kpiDashboard);
-  normalized.keyMetrics = removePlaceholderKpiValues(normalized.keyMetrics);
-
-  if (!context) {
-    for (const field of reportFields) {
-      normalized[field] = enforceMarketReportLanguage(normalized[field], language);
-    }
-
-    return dedupeReportParagraphsAcrossSections(normalized) as Record<
-      MarketReportField,
-      string
-    >;
-  }
-
-  const model = context.metrics;
-
-  normalized.kpiDashboard = removePlaceholderKpiValues(buildCanonicalMarketKpiDashboard(context, language));
-  normalized.keyMetrics = buildCanonicalMarketKeyMetrics(context, language);
-  normalized.tamSamSom = buildCanonicalMarketTamSamSomSection(context, normalized.tamSamSom, language);
-  normalized.opportunities = removeTamSamSomOwnershipText(normalized.opportunities);
-  normalized.executiveRecommendation = buildCanonicalMarketExecutiveRecommendation(context, language);
-  normalized.opportunities = appendIntelligenceBlock(
-    normalized.opportunities,
-    marketLabel(language, "Market Opportunity Score", "Pazar Fırsatı Skoru"),
-    buildMarketOpportunityScore(context, language)
-  );
-  normalized.competitorAnalysis = appendIntelligenceBlock(
-    normalized.competitorAnalysis,
-    marketLabel(language, "AI Executive Insight", "AI Yönetici İçgörüsü"),
-    [buildMarketExecutiveInsight(context, marketText(language, "Competitive position", "Rekabet konumu"), language)]
-  );
-
-  for (const field of ["unitEconomics", "financialDashboard", "kpiDashboard"] as const) {
-    normalized[field] = sanitizeMarketReportContent(
-      ensureMetricLine(
-        normalized[field],
-        marketLabel(language, "Gross Margin", "Brüt Marj"),
-        model.grossMargin.displayValue,
-        `${model.grossMargin.formula}; ${model.grossMargin.benchmarkComparison.toLowerCase()}.`
-      )
-    );
-  }
-  normalized.financialDashboard = sanitizeMarketReportContent(
-    `${normalized.financialDashboard}\n${formatFinancialConsistencyReport(context, language)}`
-  );
-
-  normalized.executiveRecommendation = sanitizeMarketReportContent(normalized.executiveRecommendation);
-  normalized.executiveRecommendation = appendIntelligenceBlock(
-    normalized.executiveRecommendation,
-    marketLabel(language, "AI Confidence Breakdown", "AI Güven Dağılımı"),
-    buildMarketConfidenceBreakdown(context, language)
-  );
-  normalized.executiveRecommendation = appendIntelligenceBlock(
-    normalized.executiveRecommendation,
-    marketLabel(language, "Founder Decision Engine", "Kurucu Karar Motoru"),
-    buildMarketFounderDecisionEngine(context, language)
-  );
-  normalized.threats = appendIntelligenceBlock(
-    normalized.threats,
-    marketLabel(language, "Risk Matrix", "Risk Matrisi"),
-    buildMarketRiskMatrix(context, language)
-  );
-  normalized.founderRoadmap = appendIntelligenceBlock(
-    normalized.founderRoadmap,
-    marketLabel(language, "AI Action Plan", "AI Aksiyon Planı"),
-    [
-      marketText(language, `- Immediate Actions: ${context.investmentScore.nextCriticalAction}. Expected impact: resolves the highest-risk market-entry decision.`, `- Acil Aksiyonlar: ${context.investmentScore.nextCriticalAction}. Beklenen etki: en riskli pazara giriş kararını çözer.`),
-      marketText(language, `- Next 30 Days: test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer} at the ${context.metrics.arpa.displayValue} planning input. Expected impact: separates paid demand from broad category interest.`, `- Sonraki 30 Gün: ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile ${context.metrics.arpa.displayValue} planlama girdisinde test et. Beklenen etki: ücretli talebi geniş kategori ilgisinden ayırır.`),
-      marketText(language, `- Next 90 Days: repeat one ${context.inputs.industry} acquisition path and document competitor displacement. Expected impact: proves an entry wedge rather than a one-off win.`, `- Sonraki 90 Gün: tek bir ${context.inputs.industry} edinim yolunu tekrarla ve rakipten geçişi belgele. Beklenen etki: tek seferlik başarı yerine giriş kamasını kanıtlar.`),
-      marketText(language, `- Next 6 Months: hold ${context.metrics.grossMargin.displayValue} gross margin while demonstrating ${context.metrics.cacPayback.displayValue} payback and repeat behavior. Expected impact: protects entry capital.`, `- Sonraki 6 Ay: ${context.metrics.cacPayback.displayValue} geri ödeme ve tekrar davranışını gösterirken ${context.metrics.grossMargin.displayValue} brüt marjı koru. Beklenen etki: giriş sermayesini korur.`),
-      marketText(language, `- Next 12 Months: expand beyond the ${context.inputs.geography} beachhead only after those proof gates repeat. Expected impact: scales from market evidence, not narrative.`, `- Sonraki 12 Ay: yalnızca bu kanıt kapıları tekrarlandığında ${context.inputs.geography} başlangıç pazarının ötesine genişle. Beklenen etki: anlatıdan değil pazar kanıtından ölçeklenir.`),
-    ]
-  );
-  normalized.validationPlan = removeLegacyValidationIntelligenceBlock(normalized.validationPlan);
-  normalized.validationPlan = appendIntelligenceBlock(
-    normalized.validationPlan,
-    marketLabel(language, "Validation Intelligence", "Doğrulama Zekası"),
-    [formatValidationIntelligenceSummary(context, language)]
-  );
-  normalized.sources = appendIntelligenceBlock(
-    cleanInternalMarketSourceFallbacks(normalized.sources, language),
-    marketLabel(language, "Source Intelligence", "Source Intelligence"),
-    [formatSourceIntelligenceSummary(context, language)]
-  );
-  normalized.sources = appendIntelligenceBlock(
-    normalized.sources,
-    marketLabel(language, "CEO Brief", "CEO Özeti"),
-    buildMarketCeoBrief(context, language)
-  );
-  normalized.sourcesAssumptions = cleanInternalMarketSourceFallbacks(
-    normalized.sourcesAssumptions,
-    language
-  );
-
-  if (
-    !hasMeaningfulSwotGroup(normalized.swotAnalysis, "Strengths") ||
-    !hasMeaningfulSwotGroup(normalized.swotAnalysis, "Weaknesses") ||
-    !hasMeaningfulSwotGroup(normalized.swotAnalysis, "Opportunities") ||
-    !hasMeaningfulSwotGroup(normalized.swotAnalysis, "Threats")
-  ) {
-    normalized.swotAnalysis = sanitizeMarketReportContent(
-      buildCanonicalSwotSection(normalized, context, language)
-    );
-  }
-
-  for (const field of reportFields) {
-    normalized[field] = enforceMarketReportLanguage(normalized[field], language, context);
+    const sanitized = sanitizeMarketReportContent(normalized[field] || "");
+    normalized[field] = field === "sources"
+      ? cleanInternalMarketSourceFallbacks(sanitized, language)
+      : enforceMarketReportLanguage(sanitized, language);
   }
 
   return dedupeReportParagraphsAcrossSections(normalized) as Record<
@@ -1203,60 +925,71 @@ function extractResponseText(response: unknown) {
   return outputText.trim() ? outputText : "";
 }
 
-function isWeakMarketPrompt(value: string) {
-  return isAmbiguousBusinessRequest(value);
-}
+export type MarketAnalysisExecutionContext = {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  user: User;
+  ip: string;
+};
 
-function clarificationMessage() {
-  return "Please add a little more detail for a useful market analysis: the business idea or industry, target customer, and target country or market.";
-}
-
-export async function POST(req: Request) {
+export async function executeMarketAnalysisRequest(
+  req: Request,
+  executionContext?: MarketAnalysisExecutionContext
+) {
   try {
-    const requestValidation = validateApiRequest(req, {
-      maxBodyBytes: 17_000_000,
-    });
+    if (!executionContext) {
+      const requestValidation = validateApiRequest(req, {
+        maxBodyBytes: 17_000_000,
+      });
 
-    if (!requestValidation.ok) {
-      return NextResponse.json(
-        { error: requestValidation.message },
-        { status: requestValidation.status }
-      );
+      if (!requestValidation.ok) {
+        return NextResponse.json(
+          { error: requestValidation.message },
+          { status: requestValidation.status }
+        );
+      }
     }
 
-    const ip = getClientIpFromRequest(req);
-    const ipRateLimit = checkRateLimit(`api:market:ip:${ip}`, {
-      limit: 20,
-      windowMs: 60_000,
-    });
+    const ip = executionContext?.ip || getClientIpFromRequest(req);
+    if (!executionContext) {
+      const ipRateLimit = checkRateLimit(`api:market:ip:${ip}`, {
+        limit: 20,
+        windowMs: 60_000,
+      });
 
-    if (!ipRateLimit.allowed) {
-      return NextResponse.json(
-        {
-          error:
-            "Daily AI usage limit reached. Please try again tomorrow or upgrade your plan.",
-        },
-        {
-          status: 429,
-          headers: getRateLimitHeaders(ipRateLimit),
-        }
-      );
+      if (!ipRateLimit.allowed) {
+        return NextResponse.json(
+          {
+            error:
+              "Daily AI usage limit reached. Please try again tomorrow or upgrade your plan.",
+          },
+          {
+            status: 429,
+            headers: getRateLimitHeaders(ipRateLimit),
+          }
+        );
+      }
     }
 
-    const supabase = await createClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    const supabase = executionContext?.supabase || await createClient();
+    const authResult = executionContext
+      ? { user: executionContext.user, error: null }
+      : await supabase.auth.getUser().then(({ data, error }) => ({
+          user: data.user,
+          error,
+        }));
+    const { user, error: userError } = authResult;
 
     if (userError || !user) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
+    setOpenAiCostIdentity({ userId: user.id, reportType: "market_intelligence" });
 
-    const reportAccess = await authorizeStrategicReportAccess({
-      request: req,
-      account: user,
-    });
+    const reportAccess = executionContext
+      ? { allowed: true }
+      : await authorizeStrategicReportAccess({
+          request: req,
+          account: user,
+        });
 
     if (!reportAccess.allowed) {
       return NextResponse.json(
@@ -1265,22 +998,24 @@ export async function POST(req: Request) {
       );
     }
 
-    const rateLimit = checkRateLimit(`api:market:${user.id}:${ip}`, {
-      limit: 24,
-      windowMs: 60_000,
-    });
+    if (!executionContext) {
+      const rateLimit = checkRateLimit(`api:market:${user.id}:${ip}`, {
+        limit: 24,
+        windowMs: 60_000,
+      });
 
-    if (!rateLimit.allowed) {
-      return NextResponse.json(
-        {
-          error:
-            "Daily AI usage limit reached. Please try again tomorrow or upgrade your plan.",
-        },
-        {
-          status: 429,
-          headers: getRateLimitHeaders(rateLimit),
-        }
-      );
+      if (!rateLimit.allowed) {
+        return NextResponse.json(
+          {
+            error:
+              "Daily AI usage limit reached. Please try again tomorrow or upgrade your plan.",
+          },
+          {
+            status: 429,
+            headers: getRateLimitHeaders(rateLimit),
+          }
+        );
+      }
     }
 
     const body = await req.json();
@@ -1311,13 +1046,6 @@ export async function POST(req: Request) {
     const responseLanguage = normalizeLanguage(language, promptText);
     const reportRequestId =
       typeof rawReportRequestId === "string" ? rawReportRequestId.trim().slice(0, 128) : "";
-
-    if (isWeakMarketPrompt(promptText) && analysisAssets.length === 0) {
-      return NextResponse.json(
-        { error: clarificationMessage() },
-        { status: 422 }
-      );
-    }
 
     const requestedField =
       typeof field === "string"
@@ -1367,9 +1095,6 @@ export async function POST(req: Request) {
       prompt: analysisPrompt,
       reportKind: "market_analysis",
     });
-    const financialAssumptionsContext = formatCanonicalFinancialAssumptions(
-      canonicalFinancialAssumptions
-    );
     const memoryOperations = extractExplicitMemoryOperations(promptText);
     const memoryApplyResult = memoryOperations.length > 0
       ? await applyUserMemoryOperations(supabase, user.id, memoryOperations, user)
@@ -1394,43 +1119,21 @@ export async function POST(req: Request) {
     const input = `Latest user request language: ${responseLanguage}
 Output language hard requirement: ${responseLanguage}. Ignore saved profile language, persistent memory language, browser locale, and previous conversation language.
 
-Business idea: ${promptText}
+Market intelligence request: ${promptText}
 ${assetContext ? `\nUploaded asset evidence:\n${assetContext}\n` : ""}
 ${assetEvidenceInstructions ? `\nAsset evidence rules:\n${assetEvidenceInstructions}\n` : ""}
 
-${financialAssumptionsContext}
 ${userMemoryInstruction ? `\n${userMemoryInstruction}\n` : ""}
 
 Report section to generate: ${fieldLabelsByLanguage[responseLanguage][reportField]}
 Analysis task: ${fieldConfig.prompt}
-First perform current web research. Use reliable sources for market size, competitor companies, industry trends, target customers, recent news, pricing models, SWOT inputs, Porter's Five Forces inputs, and entry strategy signals.
-Before writing visible output, silently construct the full Integrated Market Strategy Model. Do not output the model.
-Derive this section only from that model so market size, ICP, competitors, pricing, GTM, financial implications, risks, and recommendation stay consistent.
-Write the section as an investor-grade market diligence note with practical market-entry recommendations for the founder.
-Do not lead every section with the same decision-implication formula. Use it only where the section's job requires it.
-Classify every important numeric claim as Verified, Estimated, Assumption, or AI Analysis. User-provided values are Verified; benchmark-derived values are Estimated; inferred values are Assumptions; interpretation is AI Analysis.
-Avoid generic filler. Use planning inputs explicitly when evidence is limited and state what would change the verdict.
-Write in concise executive-consulting style: specific observations, short analytical paragraphs, numbered insights when useful, and no boilerplate conclusions.
-Do not repeat the user's prompt verbatim; anchor the analysis in the market, buyer, competitor, and economic context.
-Include at least one concrete business insight in this section that affects sizing, positioning, pricing, channel choice, risk, or validation priority.
-Use Claim -> Reason / supporting context -> Business implication whenever the section makes an analytical judgment.
-Answer what is happening, why it is happening, and why it matters for the founder without adding generic advice.
-Follow the section ownership contract exactly; do not borrow content assigned to another section.
-Do not repeat ideas, metrics, examples, or conclusions that belong to other sections; this section must add unique value.
-Remove filler phrases such as "It is important to", "Businesses should", "This strategy can help", "In today's market", and "By leveraging".
-Maintain exact financial consistency with the same planning-input set across Unit Economics, Financial Dashboard, Scenario Analysis, and Executive Recommendation.
-Use the Data-Driven Financial Analysis Engine block as the calculated base-case model for TAM, SAM, SOM, ARPA, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, Break-even Month, Investment Needed, ROI, and Revenue Forecast.
-Use the Investment Decision Inputs block as the calculated source for Investment Score, visible decision, Decision Confidence, estimated valuation, funding stage, decision factors, strengths, weaknesses, top risks, and next critical action.
-Reuse that single calculated model everywhere. Do not create conflicting financial values in separate sections. If a value is directional, say it needs validation and explain why.
-Align Decision Confidence with evidence quality and the calculated decision inputs; avoid extreme confidence unless the evidence clearly supports it.
-Do not expose internal grading labels, source-model labels, or internal recommendation codes anywhere in the final report.
-Make examples, KPIs, risks, roadmap actions, and financial interpretation specific to the detected industry instead of using generic startup templates.
-Use honest planning-input language instead of vague source claims such as "industry reports".
-Keep user inputs separate from benchmark sources. Deduplicate sources, merge repeated domains, and prioritize primary government, regulatory, academic, and official company sources. Include a URL only when it is present verbatim in source context. If a source cannot be verified, write exactly "AI-derived analysis (not externally verified)".
-Finish with a complete sentence or complete bullet. Do not end mid-sentence.
-Use structured markdown inside the section when useful: short paragraphs, bullets, or compact tables.
-Write only the content for this section. Do not write a JSON object, field name, braces, markdown code block, heading, or any other report section.
-Do not generate business-plan sections here. Do not suggest website URLs, domain names, brand names, or site ideas for the product.`;
+Perform current market research using authoritative public, regulatory, academic, industry, and company sources.
+Use only evidence relevant to this section, the requested regions, and the requested forecast period.
+Every material factual or numeric claim must cite the exact source supplied by research.
+Reconcile conflicting definitions, dates, geographies, and currencies before comparing values.
+Do not invent market values, growth rates, companies, citations, or URLs.
+Do not generate business-plan content, startup metrics, founder guidance, pricing strategy, sales strategy, or unit economics.
+Write only this section's content. Do not write a JSON object, field name, heading, code fence, or another report section.`;
     const productionLimit = await checkAiProductionRateLimit({
       supabase,
       userId: user.id,
@@ -1615,8 +1318,7 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
               : "";
 
           return new Response(encoder.encode(
-            serializeMarketReportMetadataChunk(canonicalFinancialAssumptions) +
-              cachedWarning +
+            cachedWarning +
               serializeMarketReportChunks(parsedCachedReport)
           ), {
             headers: {
@@ -1662,11 +1364,10 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
       const fullReportInput = `Latest user request language: ${responseLanguage}
 Output language hard requirement: ${responseLanguage}. Ignore saved profile language, persistent memory language, browser locale, and previous conversation language.
 
-Business idea: ${promptText}
+Market intelligence request: ${promptText}
 ${assetContext ? `\nUploaded asset evidence:\n${assetContext}\n` : ""}
 ${assetEvidenceInstructions ? `\nAsset evidence rules:\n${assetEvidenceInstructions}\n` : ""}
 
-${financialAssumptionsContext}
 ${userMemoryInstruction ? `\n${userMemoryInstruction}\n` : ""}
 
 Completed domain-aware research (this is the closed evidence registry for the report):
@@ -1677,31 +1378,19 @@ Return exactly these JSON keys and no others:
 ${reportFields.map((fieldName) => `- ${fieldName}: ${fieldLabelsByLanguage[responseLanguage][fieldName]} — ${fieldPrompts[fieldName].prompt}`).join("\n")}
 
 Deterministic report contract:
-${buildFullReportStructureDirectives("market_analysis").map((directive) => `- ${directive}`).join("\n")}
+- Return the JSON keys in the exact order listed above.
+- Every section must add distinct market intelligence and may not inherit business-plan content.
+- Remove repeated claims while retaining the section-specific implication.
 
 Research is already complete. Synthesize the uploaded evidence and the evidence registry above; do not perform a second research pass.
 Every material factual claim must include its evidence label and an inline [R#], [Asset: filename], [User], or [Method: description] reference.
 Separate observed evidence, estimates, assumptions, unknowns, and recommendations. Never present an estimate as verified.
-If the research output is preliminary, keep the recommendation conditional and identify the remaining verification step.
-Before writing visible output, silently construct the full Integrated Market Strategy Model. Do not output the model.
-Derive every section only from that model so market size, ICP, competitors, pricing, GTM, financial implications, risks, and recommendation stay consistent.
-Follow the section ownership contract exactly; do not borrow content assigned to another section.
-Do not repeat ideas, metrics, examples, or conclusions across sections.
-Use the Data-Driven Financial Analysis Engine block as the calculated base-case model for TAM, SAM, SOM, ARPA, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, Break-even Month, Investment Needed, ROI, and Revenue Forecast.
-Reuse that single calculated model everywhere. Do not create conflicting financial values in separate sections. If a value is directional, state that it needs validation and explain why.
-Use exactly one visible decision: PASS, HOLD, VALIDATE, or REJECT.
-Do not expose internal grading labels, source-model labels, or internal recommendation codes anywhere in the final report.
-Align Decision Confidence with evidence quality; avoid extreme confidence values unless the evidence clearly supports them.
-Use honest planning-input language instead of vague source claims such as "industry reports".
-Classify important numeric claims as Verified, Estimated, Assumption, or AI Analysis. Keep user inputs separate from benchmark sources. Deduplicate sources, merge repeated domains, and prioritize primary government, regulatory, academic, and official company sources. Include a URL only when it is present verbatim in source context. If a source cannot be verified, write exactly "AI-derived analysis (not externally verified)".
-Write concise executive memo prose with specific observations, numbered insights where useful, and no generic conclusions.
-Do not repeat the user's prompt verbatim; translate it into market context, buyer economics, competitor dynamics, and founder decisions.
-Every section must include at least one concrete business insight that changes sizing, timing, positioning, pricing, distribution, risk, or validation priority.
-Use Claim -> Reason / supporting context -> Business implication for major analytical statements.
-Every major section must make clear what is happening, why it is happening, and why it matters for the founder.
-Prefer causal reasoning over descriptive text and avoid unsupported assertions.
-Finish every section with a complete sentence or complete bullet. Never end mid-sentence.
-Do not generate business-plan sections here. Do not suggest website URLs, domain names, brand names, or site ideas for the product.
+If evidence is preliminary, state the specific limitation in the affected section without replacing supported findings elsewhere.
+Keep every section inside its named Market Intelligence scope and do not repeat evidence across sections.
+Market Size, CAGR, and TAM/SAM/SOM must preserve their source definitions, dates, geography, currency, and calculation method.
+Sources must include only citations actually used and must retain their exact URLs.
+Never generate Problem, Solution, ICP, Business Model, Pricing Strategy, Sales Strategy, Unit Economics, CAC, LTV, ARR, GTM, Founder Score, Founder Roadmap, or Validation Intelligence content.
+Write concise executive market research and do not expose internal labels or diagnostics.
 Do not include markdown code fences, braces inside string values, or commentary outside JSON.`;
       const fullReportInputCostMetrics = createAiCostOptimizationMetrics({
         beforeText: `${instructions}\n${fullReportInput}`,
@@ -1722,8 +1411,6 @@ Do not include markdown code fences, braces inside string values, or commentary 
           const enqueue = (chunk: string) => {
             controller.enqueue(encoder.encode(chunk));
           };
-
-          enqueue(serializeMarketReportMetadataChunk(canonicalFinancialAssumptions));
 
           try {
             logOperationalInfo("[api:market-analysis] provider call started", {
@@ -1749,7 +1436,12 @@ Do not include markdown code fences, braces inside string values, or commentary 
 
             try {
               response = await withReportTimeout(
-                client.responses.create(
+                withOpenAiCostOperation(
+                  {
+                    operationName: "market_intelligence_report",
+                    reportType: "market_intelligence",
+                  },
+                  () => client.responses.create(
                   {
                     model,
                     instructions,
@@ -1769,7 +1461,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
                       ),
                     },
                   },
-                  { signal: reportAbort.signal }
+                  { signal: reportAbort.signal })
                 ),
                 FULL_REPORT_OPENAI_TIMEOUT_MS,
                 "OpenAI report generation"
@@ -2093,8 +1785,12 @@ Do not include markdown code fences, braces inside string values, or commentary 
       model,
     });
 
-    const stream = await client.responses
-      .create(
+    const stream = await withOpenAiCostOperation(
+      {
+        operationName: `market_intelligence:${reportField}`,
+        reportType: "market_intelligence",
+      },
+      () => client.responses.create(
         {
           model,
           instructions,
@@ -2115,9 +1811,8 @@ Do not include markdown code fences, braces inside string values, or commentary 
             verbosity: "medium",
           },
         },
-        { signal: req.signal }
-      )
-      .catch(async (error) => {
+        { signal: req.signal })
+      ).catch(async (error) => {
         logOperationalInfo("[api:market-analysis] provider request failed", {
           reportField,
           reportRequestId: reportRequestId || null,
@@ -2287,4 +1982,12 @@ Do not include markdown code fences, braces inside string values, or commentary 
       { status: 500 }
     );
   }
+}
+
+export async function POST(req: Request) {
+  const requestId = createOpenAiRequestId(req);
+  return runWithOpenAiCostContext(
+    { requestId, route: "/api/market-analysis", reportType: "market_intelligence" },
+    async () => finalizeOpenAiCostResponse(await executeMarketAnalysisRequest(req))
+  );
 }

@@ -66,7 +66,7 @@ const employmentSignals =
 const wageRetaliationSignals =
   /\b(?:overtime|unpaid|wages?|salary|retaliat|reporting|whistleblow|exempt|misclassif|fazla mesai|ödenmeyen|ödenmemiş|ücret|maaş|misilleme|ihbar)\b/i;
 const realEstateSignals =
-  /\b(?:real[\s-]?estate|property|land|parcel|title deed|deed|cadastr|zoning|investment property|tapu|arsa|arazi|parsel|imar|kadastro|gayrimenkul|taşınmaz)\b/i;
+  /(?:\b(?:real[\s-]?estate|property|land|parcel|title deed|deed|cadastr|zoning|investment property|office building|commercial building)\b|tapu|arsa|arazi|parsel|imar|kadastro|gayrimenkul|taşınmaz|ofis binası|ticari bina|iş merkezi|plaza)/i;
 const retailSignals =
   /\b(?:retail|store|branch|sku|product sales|inventory|stock turnover|sell-through|perakende|mağaza|şube|ürün satış|stok|devir hızı)\b/i;
 const financeSignals =
@@ -114,6 +114,7 @@ function normalizedDetectedDomain(value: unknown) {
   const normalized = value.trim().toLowerCase();
   const aliases: Record<string, ExpertiseProfile["domain"]> = {
     startup: "business",
+    real_estate: "real_estate",
     realestate: "real_estate",
     logistics: "logistics",
     manufacturing: "manufacturing",
@@ -177,6 +178,21 @@ export function normalizeSelectedAnalysisMode(
     : "chat";
 }
 
+export function getSelectedModeMismatchMessage({
+  selectedMode,
+  detectedDomain,
+  prompt = "",
+}: {
+  selectedMode: unknown;
+  detectedDomain: unknown;
+  prompt?: string;
+}) {
+  normalizeSelectedAnalysisMode(selectedMode);
+  void detectedDomain;
+  void prompt;
+  return "";
+}
+
 function modeGoal(mode: SelectedAnalysisMode, goal: string) {
   const modeLabel =
     mode === "plan"
@@ -196,7 +212,23 @@ export function createExpertiseProfileFallback({
 }: ExpertiseProfileInput): ExpertiseProfile {
   const combined = `${prompt}\n${assetContext(assets)}`;
   const mode = normalizeSelectedAnalysisMode(selectedMode);
-  const domain = detectDomain(combined, assets, detectedDomain);
+  const hasExplicitMode = selectedAnalysisModeValues.includes(
+    selectedMode as SelectedAnalysisMode
+  );
+  const requestedDomain = normalizedDetectedDomain(detectedDomain);
+  const inferredDomain = hasExplicitMode && requestedDomain
+    ? requestedDomain
+    : detectDomain(combined, assets, detectedDomain);
+  const domain =
+    !hasExplicitMode
+      ? inferredDomain
+      : inferredDomain === "legal"
+        ? mode === "plan"
+          ? "business"
+          : mode === "market"
+            ? "marketing"
+            : "general"
+        : inferredDomain;
   const jurisdiction = detectJurisdiction(combined, domain);
 
   if (domain === "legal") {
@@ -438,7 +470,8 @@ export function createExpertiseProfileFallback({
 
 export function resolveExpertiseProfile(
   value: unknown,
-  fallback: ExpertiseProfile
+  fallback: ExpertiseProfile,
+  selectedMode?: unknown
 ): ExpertiseProfile {
   const parsed = expertiseProfileSchema.safeParse(value);
 
@@ -448,6 +481,27 @@ export function resolveExpertiseProfile(
   if (fallback.domain !== "general" && candidate.domain !== fallback.domain) {
     return fallback;
   }
+  const mode = selectedMode === undefined
+    ? null
+    : normalizeSelectedAnalysisMode(selectedMode);
+  const candidateScope = [
+    candidate.subdomain,
+    candidate.taskType,
+    candidate.professionalPerspective,
+    ...candidate.requiredAnalyses,
+    ...candidate.decisionCriteria,
+    ...candidate.requiredEvidence,
+    ...candidate.criticalClarifications,
+  ].join(" ");
+  const incompatibleModeProfile =
+    (mode === "plan" &&
+      /\b(?:contract[ _-]?review|legal[ _-]?(?:review|analysis)|market[ _-]?intelligence|strategic[ _-]?advisory|employment[ _-]?law)\b/i.test(candidateScope)) ||
+    (mode === "market" &&
+      /\b(?:contract[ _-]?review|legal[ _-]?(?:review|analysis)|business[ _-]?idea[ _-]?validation|strategic[ _-]?advisory|founder[ _-]?roadmap)\b/i.test(candidateScope)) ||
+    (mode === "chat" &&
+      /\b(?:contract[ _-]?review|legal[ _-]?review|document[ _-]?review|clause[ _-]?review|employment[ _-]?law)\b/i.test(candidateScope));
+
+  if (incompatibleModeProfile) return fallback;
 
   return {
     ...candidate,

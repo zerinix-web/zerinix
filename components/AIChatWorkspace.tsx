@@ -1693,7 +1693,10 @@ export default function AIChatWorkspace({
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Zerinix-AI-Request-Id": crypto.randomUUID(),
+        },
         signal: abortController.signal,
         body: JSON.stringify({
           prompt: submittedPrompt,

@@ -7,6 +7,7 @@ import {
   createExpertiseProfileFallback,
   createExpertiseProfileObjectJsonSchema,
   expertiseProfileSchema,
+  normalizeSelectedAnalysisMode,
   resolveExpertiseProfile,
   type ExpertiseProfile,
   type SelectedAnalysisMode,
@@ -152,6 +153,22 @@ export function createUniversalReportReadiness(
   };
 }
 
+export function createDirectReportReadiness(
+  understanding: UniversalUnderstanding
+): UniversalReportReadiness {
+  return {
+    version: 1,
+    detectedIndustry: understanding.detectedIndustry,
+    requiredQuestionIds: [],
+    answers: {},
+    expertiseProfile: understanding.expertiseProfile,
+    reportPlan: understanding.reportPlan,
+    researchPlan: understanding.researchPlan,
+    extractedAssetFacts: understanding.extractedAssetFacts,
+    confirmed: true,
+  };
+}
+
 export function getUniversalReportReadinessError(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return "Complete the content summary and required questions before starting research.";
@@ -214,7 +231,7 @@ const LEGAL_WORKFLOW_PATTERN =
 const CONTRACT_WORKFLOW_PATTERN =
   /(?:\b(?:contract|agreement|nda|lease|terms)\b|sözleşme|anlaşma|kira sözleşmesi)/i;
 const REAL_ESTATE_WORKFLOW_PATTERN =
-  /(?:\b(?:property|real estate|land|parcel|title deed|zoning|property listing|office building|commercial building)\b|tapu(?:su|da|dan|nun)?|arsa(?:ya|yı|nın|da|dan)?|arazi(?:ye|yi|nin|de|den)?|parsel(?:e|i|in|de|den)?|imar|gayrimenkul|emlak|ofis binası|ticari bina|iş merkezi|plaza)/i;
+  /(?:\b(?:property|real estate|land|parcel|title deed|zoning|property listing|office building|commercial building)\b|tapu(?:su|da|dan|nun)?|arsa(?:ya|yı|nın|da|dan)?|arazi(?:ye|yi|nin|de|den)?|parsel(?:e|i|in|de|den)?|pafta|\bada\b|imar|taşınmaz|gayrimenkul|emlak|kira|bina|konut|ofis binası|ticari bina|iş merkezi|plaza)/i;
 const EXPLICIT_REAL_ESTATE_LEGAL_REVIEW_PATTERN =
   /(?:\b(?:legal review|legal analysis|contract review|contract analysis|review (?:the )?(?:contract|agreement|lease))\b|hukuki(?: açıdan)? (?:incele|inceleme|değerlendir|değerlendirme|analiz|görüş)|(?:sözleşme|kontrat|kira sözleşmesi)(?:yi|ni|nin|nın|nu|nü)?\s+(?:incele|değerlendir|analiz et))/i;
 const FINANCE_WORKFLOW_PATTERN =
@@ -983,17 +1000,26 @@ export function createUnderstandingFallback({
   assets?: UnderstandingAsset[];
   selectedMode?: SelectedAnalysisMode;
 }): UniversalUnderstanding {
-  const understanding = createUnderstandingFallbackBase({ prompt, assets });
+  const selectedAnalysisMode = normalizeSelectedAnalysisMode(selectedMode);
+  const baseUnderstanding = createUnderstandingFallbackBase({ prompt, assets });
+  const understanding =
+    selectedMode === undefined
+      ? baseUnderstanding
+      : selectedAnalysisMode === "plan"
+      ? createBusinessValidationUnderstanding(prompt, assets, baseUnderstanding)
+      : selectedAnalysisMode === "market"
+        ? createMarketIntelligenceUnderstanding(prompt, baseUnderstanding)
+        : createStrategicAdvisoryUnderstanding(prompt, assets, baseUnderstanding);
   const expertiseProfile = createExpertiseProfileFallback({
     prompt,
     assets,
-    selectedMode,
+    selectedMode: selectedAnalysisMode,
     detectedDomain: understanding.detectedIndustry,
   });
 
   const reportPlan = createDynamicReportPlanFallback({
     expertiseProfile,
-    selectedMode,
+    selectedMode: selectedAnalysisMode,
     prompt,
     extractedFacts: understanding.extractedAssetFacts,
   });
@@ -1005,10 +1031,149 @@ export function createUnderstandingFallback({
     researchPlan: createDynamicResearchPlanFallback({
       expertiseProfile,
       reportPlan,
-      selectedMode,
+      selectedMode: selectedAnalysisMode,
       prompt,
       extractedFacts: understanding.extractedAssetFacts,
     }),
+  };
+}
+
+function createBusinessValidationUnderstanding(
+  prompt: string,
+  assets: UnderstandingAsset[],
+  fallback: UniversalUnderstandingBase
+): UniversalUnderstandingBase {
+  if (fallback.detectedIndustry === "real_estate") {
+    return fallback;
+  }
+
+  const combined = `${prompt}\n${normalizedAssetContext(assets)}`;
+  const Turkish = isTurkish(combined);
+  const questions = createDomainReadinessQuestions({
+    industry: "startup",
+    prompt,
+    combined,
+    Turkish,
+  });
+
+  return {
+    detectedIndustry: "startup",
+    detectedContentType: "business_idea",
+    detectedIntent: Turkish
+      ? "Sunulan bilgileri iş fikri doğrulama kararı olarak değerlendirmek"
+      : "Evaluate the supplied information as a business-idea validation decision",
+    confidence: 0.95,
+    missingCriticalInformation: questions
+      .filter((item) => item.required)
+      .map((item) => item.id),
+    suggestedReportTypes: Turkish
+      ? ["İş Fikri Doğrulama", "Müşteri Kanıtı", "Pazar Uygunluğu", "İş Modeli", "Doğrulama Planı"]
+      : ["Business Idea Validation", "Customer Evidence", "Market Fit", "Business Model", "Validation Plan"],
+    extractedAssetFacts: [],
+    clarificationQuestions: questions,
+    canGenerateReport: questions.every((item) => !item.required),
+    recommendedAction: questions.some((item) => item.required)
+      ? "clarify"
+      : "report",
+  };
+}
+
+function createStrategicAdvisoryUnderstanding(
+  prompt: string,
+  assets: UnderstandingAsset[],
+  fallback: UniversalUnderstandingBase
+): UniversalUnderstandingBase {
+  if (fallback.detectedIndustry === "real_estate") {
+    return fallback;
+  }
+
+  const combined = `${prompt}\n${normalizedAssetContext(assets)}`;
+  const Turkish = isTurkish(combined);
+  const hasGoal = prompt.trim().length > 0;
+  const questions = hasGoal
+    ? []
+    : [
+        question(
+          "analysis_objective",
+          Turkish
+            ? "Bu danışmanlık hangi kararı desteklemeli?"
+            : "What decision should this advisory support?",
+          Turkish
+            ? "Vermek istediğiniz kararı kısaca yazın"
+            : "Briefly describe the decision"
+        ),
+      ];
+
+  return {
+    detectedIndustry: "general",
+    detectedContentType: URL_PATTERN.test(prompt) ? "url" : "general_document",
+    detectedIntent: prompt.trim().slice(0, 240) ||
+      (Turkish ? "Stratejik danışmanlık amacını netleştirmek" : "Clarify the strategic advisory objective"),
+    confidence: hasGoal ? 0.88 : 0.72,
+    missingCriticalInformation: questions.map((item) => item.id),
+    suggestedReportTypes: Turkish
+      ? ["Stratejik Değerlendirme", "Seçenekler", "Riskler", "Sonraki Adımlar"]
+      : ["Strategic Assessment", "Options", "Risks", "Next Steps"],
+    extractedAssetFacts: fallback.extractedAssetFacts,
+    clarificationQuestions: questions,
+    canGenerateReport: false,
+    recommendedAction: questions.length ? "clarify" : "chat",
+  };
+}
+
+function createMarketIntelligenceUnderstanding(
+  prompt: string,
+  fallback: UniversalUnderstandingBase
+): UniversalUnderstandingBase {
+  const Turkish = isTurkish(prompt);
+  const hasMarketSubject =
+    /(?:\b(?:market|industry|sector|platform|category|segment)\b|pazar|sektör|platform|kategori|segment)/i.test(
+      prompt
+    ) && prompt.trim().split(/\s+/).length >= 5;
+  const hasMarketGeography =
+    /(?:\b(?:Europe|European Union|EU|United States|USA|US|UK|Germany|France|Spain|Turkey|Türkiye|global|worldwide|Asia|MENA)\b|Avrupa|ABD|Amerika Birleşik Devletleri|Almanya|Fransa|İspanya|küresel|dünya)/i.test(
+      prompt
+    );
+  const questions: ClarificationQuestion[] = [];
+
+  if (!hasMarketSubject) {
+    questions.push(
+      question(
+        "industry_scope",
+        Turkish
+          ? "Hangi sektör, ürün kategorisi veya pazar incelenmeli?"
+          : "Which industry, product category, or market should be analyzed?",
+        Turkish ? "Sektör veya pazar kapsamı" : "Industry or market scope"
+      )
+    );
+  }
+  if (!hasMarketGeography) {
+    questions.push(
+      question(
+        "market_geography",
+        Turkish
+          ? "Hangi ülke veya bölgeler karşılaştırılmalı?"
+          : "Which countries or regions should be compared?",
+        Turkish ? "Ülke veya bölgeler" : "Countries or regions"
+      )
+    );
+  }
+
+  return {
+    ...fallback,
+    detectedIndustry: "marketing",
+    detectedContentType:
+      fallback.detectedContentType === "url" ? "url" : "general_document",
+    detectedIntent: Turkish
+      ? "Pazar büyüklüğü, büyüme, rekabet, talep ve giriş koşullarını değerlendirmek"
+      : "Assess market size, growth, competition, demand, and entry conditions",
+    missingCriticalInformation: questions.map((item) => item.id),
+    suggestedReportTypes: Turkish
+      ? ["Pazar Büyüklüğü", "Büyüme ve Trendler", "Rekabet", "Talep", "Giriş Engelleri"]
+      : ["Market Size", "Growth and Trends", "Competition", "Demand", "Entry Barriers"],
+    clarificationQuestions: questions,
+    canGenerateReport: questions.length === 0,
+    recommendedAction: questions.length ? "clarify" : "report",
   };
 }
 
@@ -1045,29 +1210,17 @@ export function enforceUnderstandingPolicy(
         values.findIndex((candidateItem) => candidateItem.id === item.id) === index
     )
     .slice(0, 4);
-  const fallbackIsRealEstate = fallback.detectedIndustry === "real_estate";
-  const fallbackRequiresClarification =
-    fallback.recommendedAction === "clarify";
-  const preserveFallbackClassification =
-    fallbackIsRealEstate || fallbackRequiresClarification;
-  const effectiveCandidate = preserveFallbackClassification
-    ? {
-        ...candidate,
-        detectedIndustry:
-          fallback.detectedIndustry === "general"
-            ? candidate.detectedIndustry
-            : fallback.detectedIndustry,
-        detectedContentType:
-          fallback.detectedIndustry === "general"
-            ? candidate.detectedContentType
-            : fallback.detectedContentType,
-        detectedIntent: fallback.detectedIntent,
-        suggestedReportTypes: fallback.suggestedReportTypes,
-      }
-    : candidate;
+  const effectiveCandidate = {
+    ...candidate,
+    detectedIndustry: fallback.detectedIndustry,
+    detectedContentType: fallback.detectedContentType,
+    detectedIntent: fallback.detectedIntent,
+    suggestedReportTypes: fallback.suggestedReportTypes,
+  };
   const expertiseProfile = resolveExpertiseProfile(
     effectiveCandidate.expertiseProfile,
-    fallback.expertiseProfile
+    fallback.expertiseProfile,
+    fallback.reportPlan.selectedMode
   );
   const reportPlan = resolveDynamicReportPlan({
     value: effectiveCandidate.reportPlan,

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient as createSupabaseClient, type User } from "@supabase/supabase-js";
 import { authorizeStrategicReportAccess } from "@/app/lib/strategic-report-access";
-import { isAmbiguousBusinessRequest } from "@/app/lib/business-idea-detection";
 import { createClient } from "@/app/lib/supabase/server";
 import { getSupabasePublishableKey, getSupabaseUrl } from "@/app/lib/supabase/env";
 import {
@@ -57,6 +56,7 @@ import { createAiCostOptimizationMetrics } from "@/app/lib/ai/token-optimization
 import {
   createExpertiseProfileFallback,
   formatExpertiseProfileForReportContext,
+  getSelectedModeMismatchMessage,
   normalizeSelectedAnalysisMode,
   resolveExpertiseProfile,
 } from "@/app/lib/ai/expertise-profile";
@@ -98,12 +98,20 @@ import {
   buildFullReportStructureDirectives,
 } from "@/app/lib/ai/report-quality-directives";
 import { dedupeReportParagraphsAcrossSections } from "@/app/lib/report-content-quality.mjs";
+import { labelModelDerivedFinancialClaims } from "@/app/lib/report-engine/financial-claim-labeling";
 import { normalizeReportSourceSection } from "@/app/lib/report-source-normalization.mjs";
 import {
   localizePdfPresentationLabel,
   localizePdfPresentationText,
 } from "@/app/lib/pdf-normalization.mjs";
 import { serializeReportStreamChunk } from "@/app/lib/report-engine/generation-service";
+import {
+  createOpenAiRequestId,
+  finalizeOpenAiCostResponse,
+  runWithOpenAiCostContext,
+  setOpenAiCostIdentity,
+  withOpenAiCostOperation,
+} from "@/app/lib/ai/cost-instrumentation";
 import {
   createReportMetadataContext,
   flattenReportMetadataForUsage,
@@ -116,7 +124,10 @@ import {
   planPrompts,
   type PlanReportField,
 } from "@/app/lib/report-engine/prompts/plan";
-import { classifyReportDomain } from "@/app/lib/report-engine/domain";
+import {
+  classifyReportDomain,
+  resolveReportDomainForSelectedMode,
+} from "@/app/lib/report-engine/domain";
 import {
   buildDomainAnalysisInstructions,
   domainAnalysisFieldLabels,
@@ -1474,12 +1485,16 @@ function metricLine(
   const labels =
     language === "Turkish"
       ? {
+          evidence: "kanıt",
+          assumption: "Planlama varsayımı",
           formula: "formül",
           assumptions: "varsayımlar",
           benchmark: "referans",
           confidence: "güven",
         }
       : {
+          evidence: "evidence",
+          assumption: "Planning assumption",
           formula: "formula",
           assumptions: "assumptions",
           benchmark: "benchmark",
@@ -1488,6 +1503,7 @@ function metricLine(
 
   return [
     `${localizeMetricLabel(metric.label, language)}: ${metric.displayValue}`,
+    `${labels.evidence}=${labels.assumption}`,
     `${labels.formula}=${metric.formula}`,
     `${labels.assumptions}=${metric.assumptions.join("; ")}`,
     `${labels.benchmark}=${metric.benchmarkComparison}`,
@@ -1497,9 +1513,14 @@ function metricLine(
 
 function marketSizeLine(
   label: string,
-  metric: AiFinancialModelContext["metrics"][keyof AiFinancialModelContext["metrics"]]
+  metric: AiFinancialModelContext["metrics"][keyof AiFinancialModelContext["metrics"]],
+  language: ResponseLanguage = "English"
 ) {
-  return `${label}: ${metric.displayValue}`;
+  return `${label}: ${metric.displayValue} | ${
+    language === "Turkish"
+      ? "kanıt=Planlama varsayımı"
+      : "evidence=Planning assumption"
+  }`;
 }
 
 function formatPlanUsd(value: number) {
@@ -1513,11 +1534,14 @@ function formatPlanUsd(value: number) {
   return `${sign}$${Math.round(abs).toLocaleString("en-US")}`;
 }
 
-function buildCanonicalTamSamSom(context: AiFinancialModelContext) {
+function buildCanonicalTamSamSom(
+  context: AiFinancialModelContext,
+  language: ResponseLanguage = "English"
+) {
   return [
-    marketSizeLine("TAM", context.metrics.tam),
-    marketSizeLine("SAM", context.metrics.sam),
-    marketSizeLine("SOM", context.metrics.som),
+    marketSizeLine("TAM", context.metrics.tam, language),
+    marketSizeLine("SAM", context.metrics.sam, language),
+    marketSizeLine("SOM", context.metrics.som, language),
   ].join("\n");
 }
 
@@ -1557,9 +1581,9 @@ function buildCanonicalTamSamSomSection(
     );
 
   return [
-    marketSizeLine("TAM", context.metrics.tam),
-    marketSizeLine("SAM", context.metrics.sam),
-    marketSizeLine("SOM", context.metrics.som),
+    marketSizeLine("TAM", context.metrics.tam, language),
+    marketSizeLine("SAM", context.metrics.sam, language),
+    marketSizeLine("SOM", context.metrics.som, language),
     `${reportLabel(language, "Commentary", "Yorum")}: ${commentary}`,
     buildExecutiveInsight(context, reportText(language, "Market sizing", "Pazar büyüklüğü"), language),
   ].join("\n");
@@ -1601,18 +1625,18 @@ function buildCanonicalScenarioAnalysis(context: AiFinancialModelContext, langua
   return [
     reportText(
       language,
-      `Worst Case: Revenue ${metrics.arr.displayValue} base falls to approximately $${Math.round(worstRevenue / 1_000).toLocaleString("en-US")}k if acquisition is slower and CAC rises. Burn ${metrics.monthlyBurn.displayValue}; runway compresses to ${Math.max(1, Math.round(baseRunway * 0.7))} months. Risk: ${investmentScore.topRisks[0] || "execution risk"}. Decision: hold spend until proof points improve.`,
-      `Kötü Senaryo: Gelir ${metrics.arr.displayValue} bazından yaklaşık $${Math.round(worstRevenue / 1_000).toLocaleString("en-US")}k seviyesine düşer; edinim yavaşlar ve CAC yükselirse risk artar. Nakit yakımı ${metrics.monthlyBurn.displayValue}; finansal pist ${Math.max(1, Math.round(baseRunway * 0.7))} aya sıkışır. Risk: ${investmentScore.topRisks[0] || "yürütme riski"}. Karar: kanıt noktaları iyileşene kadar harcamayı sınırlayın.`
+      `Planning assumption — Worst Case: Revenue ${metrics.arr.displayValue} base falls to approximately $${Math.round(worstRevenue / 1_000).toLocaleString("en-US")}k if acquisition is slower and CAC rises. Burn ${metrics.monthlyBurn.displayValue}; runway compresses to ${Math.max(1, Math.round(baseRunway * 0.7))} months. Risk: ${investmentScore.topRisks[0] || "execution risk"}. Decision: hold spend until proof points improve.`,
+      `Planlama varsayımı — Kötü Senaryo: Gelir ${metrics.arr.displayValue} bazından yaklaşık $${Math.round(worstRevenue / 1_000).toLocaleString("en-US")}k seviyesine düşer; edinim yavaşlar ve CAC yükselirse risk artar. Nakit yakımı ${metrics.monthlyBurn.displayValue}; finansal pist ${Math.max(1, Math.round(baseRunway * 0.7))} aya sıkışır. Risk: ${investmentScore.topRisks[0] || "yürütme riski"}. Karar: kanıt noktaları iyileşene kadar harcamayı sınırlayın.`
     ),
     reportText(
       language,
-      `Base Case: Revenue ${metrics.arr.displayValue}; ${metrics.mrr.label} ${metrics.mrr.displayValue}; burn ${metrics.monthlyBurn.displayValue}; runway ${metrics.runway.displayValue}. Risk: ${investmentScore.topRisks[1] || "validation risk"}. Decision: ${investmentScore.recommendation}.`,
-      `Baz Senaryo: Gelir ${metrics.arr.displayValue}; ${metrics.mrr.label} ${metrics.mrr.displayValue}; nakit yakımı ${metrics.monthlyBurn.displayValue}; finansal pist ${metrics.runway.displayValue}. Risk: ${investmentScore.topRisks[1] || "doğrulama riski"}. Karar: ${localizeDecision(investmentScore.recommendation, language)}.`
+      `Planning assumption — Base Case: Revenue ${metrics.arr.displayValue}; ${metrics.mrr.label} ${metrics.mrr.displayValue}; burn ${metrics.monthlyBurn.displayValue}; runway ${metrics.runway.displayValue}. Risk: ${investmentScore.topRisks[1] || "validation risk"}. Decision: ${investmentScore.recommendation}.`,
+      `Planlama varsayımı — Baz Senaryo: Gelir ${metrics.arr.displayValue}; ${metrics.mrr.label} ${metrics.mrr.displayValue}; nakit yakımı ${metrics.monthlyBurn.displayValue}; finansal pist ${metrics.runway.displayValue}. Risk: ${investmentScore.topRisks[1] || "doğrulama riski"}. Karar: ${localizeDecision(investmentScore.recommendation, language)}.`
     ),
     reportText(
       language,
-      `Best Case: Revenue expands toward ${formatPlanUsd(bestRevenue)} with stronger conversion and retention. Year 3 revenue reaches ${revenueForecast[2] ? formatPlanUsd(revenueForecast[2].revenue) : metrics.arr.displayValue}. Burn remains tied to the model; runway extends to ${Math.round(baseRunway * 1.2)} months. Decision: accelerate the validated channel.`,
-      `En İyi Senaryo: Gelir ${formatPlanUsd(bestRevenue)} seviyesine çıkar; daha güçlü dönüşüm ve elde tutma ile desteklenir. 3. yıl geliri ${revenueForecast[2] ? formatPlanUsd(revenueForecast[2].revenue) : metrics.arr.displayValue} seviyesine ulaşır. Nakit yakımı modele bağlı kalır; finansal pist ${Math.round(baseRunway * 1.2)} aya uzar. Karar: doğrulanmış kanalı hızlandırın.`
+      `Planning assumption — Best Case: Revenue expands toward ${formatPlanUsd(bestRevenue)} with stronger conversion and retention. Year 3 revenue reaches ${revenueForecast[2] ? formatPlanUsd(revenueForecast[2].revenue) : metrics.arr.displayValue}. Burn remains tied to the model; runway extends to ${Math.round(baseRunway * 1.2)} months. Decision: accelerate only after validating the channel.`,
+      `Planlama varsayımı — En İyi Senaryo: Gelir ${formatPlanUsd(bestRevenue)} seviyesine çıkar; daha güçlü dönüşüm ve elde tutma varsayımına dayanır. 3. yıl geliri ${revenueForecast[2] ? formatPlanUsd(revenueForecast[2].revenue) : metrics.arr.displayValue} seviyesine ulaşır. Nakit yakımı modele bağlı kalır; finansal pist ${Math.round(baseRunway * 1.2)} aya uzar. Karar: kanalı yalnızca doğrulandıktan sonra hızlandırın.`
     ),
   ].join("\n");
 }
@@ -2056,7 +2080,7 @@ function normalizeFullPlanReport(
     >;
   }
 
-  const canonicalTamSamSom = buildCanonicalTamSamSom(context);
+  const canonicalTamSamSom = buildCanonicalTamSamSom(context, language);
   normalized.tamSamSom = buildCanonicalTamSamSomSection(
     context,
     typeof parsed.tamSamSom === "string"
@@ -2149,7 +2173,18 @@ function normalizeFullPlanReport(
   );
 
   for (const field of planFields) {
-    normalized[field] = enforcePlanReportLanguage(normalized[field], language, context);
+    normalized[field] = enforcePlanReportLanguage(
+      labelModelDerivedFinancialClaims({
+        content: normalized[field],
+        metricValues: Object.values(context.metrics).map(
+          (metric) => metric.displayValue
+        ),
+        language,
+        sourceContext: context.normalizedBusinessIdea,
+      }),
+      language,
+      context
+    );
   }
 
   return dedupeReportParagraphsAcrossSections(normalized) as Record<
@@ -2306,14 +2341,6 @@ async function countAiCallsForReport({
   }
 
   return count ?? 0;
-}
-
-function isWeakBusinessPrompt(value: string) {
-  return isAmbiguousBusinessRequest(value);
-}
-
-function clarificationMessage() {
-  return "Please add a little more detail so I can generate a useful business report: what is the product or service, who is the target customer, and which market do you want to start in?";
 }
 
 function createMockRealEstateReport(
@@ -3332,7 +3359,8 @@ Do not include commentary outside the JSON object.`;
         });
         const requestRealEstateReportSection = async (
           section: RealEstateGenerationSection,
-          requestInput: string
+          requestInput: string,
+          retryCount = 0
         ) => {
           const remainingPipelineBudgetMs = REAL_ESTATE_REPORT_TIMEOUT_MS;
           const reportAbort = createReportAbortSignal(
@@ -3341,8 +3369,13 @@ Do not include commentary outside the JSON object.`;
           );
           try {
             return await withReportTimeout(
-              client.responses.create(
+              withOpenAiCostOperation(
                 {
+                  operationName: `report_generation:real_estate:${section.id}`,
+                  reportType: "real_estate",
+                  retryCount,
+                },
+                () => client.responses.create({
                   model,
                   instructions,
                   input: requestInput,
@@ -3355,8 +3388,7 @@ Do not include commentary outside the JSON object.`;
                       section.fields
                     ),
                   },
-                },
-                { signal: reportAbort.signal }
+                }, { signal: reportAbort.signal })
               ),
               remainingPipelineBudgetMs,
               `OpenAI real-estate ${section.id} generation`
@@ -3415,7 +3447,8 @@ Do not include commentary outside the JSON object.`;
                     try {
                       const response = await requestRealEstateReportSection(
                         fieldSection,
-                        buildSectionInput(fieldSection, sectionEvidence)
+                        buildSectionInput(fieldSection, sectionEvidence),
+                        1
                       );
                       assertCompletedOpenAiResponse(response);
                       return {
@@ -4175,8 +4208,12 @@ Do not include commentary outside the JSON object.`;
           providerTimeoutMs
         );
         const response = await withReportTimeout(
-          client.responses.create(
+          withOpenAiCostOperation(
             {
+              operationName: `report_generation:${domain}`,
+              reportType: domain,
+            },
+            () => client.responses.create({
               model,
               instructions: buildDomainAnalysisInstructions(
                 domain,
@@ -4192,8 +4229,7 @@ Do not include commentary outside the JSON object.`;
                   domainAnalysisFields
                 ),
               },
-            },
-            { signal: reportAbort.signal }
+            }, { signal: reportAbort.signal })
           ),
           providerTimeoutMs,
           `OpenAI ${domain} report generation`
@@ -4358,7 +4394,7 @@ export type PlanExecutionContext = {
   ip: string;
 };
 
-export async function executePlanRequest(
+async function executePlanRequestInner(
   req: Request,
   executionContext?: PlanExecutionContext
 ) {
@@ -4413,6 +4449,7 @@ export async function executePlanRequest(
     if (!user) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
+    setOpenAiCostIdentity({ userId: user.id });
 
     const reportAccess = executionContext
       ? { allowed: true }
@@ -4542,25 +4579,46 @@ export async function executePlanRequest(
       attachmentCount: analysisAssets.length,
       attachmentMimeTypes: analysisAssets.map((asset) => asset.type),
     });
-    if (isWeakBusinessPrompt(promptText) && analysisAssets.length === 0) {
-      return NextResponse.json(
-        { error: clarificationMessage() },
-        { status: 422 }
-      );
-    }
-
-    const reportDomain = classifyReportDomain(promptText, analysisAssets);
+    const inferredReportDomain = classifyReportDomain(promptText, analysisAssets);
     const selectedAnalysisMode = normalizeSelectedAnalysisMode(body?.analysisMode);
     const expertiseFallback = createExpertiseProfileFallback({
       prompt: promptText,
       assets: analysisAssets,
       selectedMode: selectedAnalysisMode,
-      detectedDomain: reportDomain,
+      detectedDomain:
+        body?.reportReadiness?.detectedIndustry ??
+        body?.expertiseProfile?.domain ??
+        inferredReportDomain,
     });
     const expertiseProfile = resolveExpertiseProfile(
       body?.expertiseProfile ?? body?.reportReadiness?.expertiseProfile,
-      expertiseFallback
+      expertiseFallback,
+      selectedAnalysisMode
     );
+    const reportDomain = resolveReportDomainForSelectedMode({
+      selectedMode: selectedAnalysisMode,
+      inferredDomain: inferredReportDomain,
+      expertiseDomain: expertiseProfile.domain,
+    });
+    setOpenAiCostIdentity({
+      reportType:
+        selectedAnalysisMode === "market"
+          ? "market_intelligence"
+          : reportDomain === "business"
+            ? "business_validation"
+            : reportDomain,
+    });
+    const modeMismatchMessage = getSelectedModeMismatchMessage({
+      selectedMode: selectedAnalysisMode,
+      detectedDomain: expertiseProfile.domain,
+      prompt: promptText,
+    });
+    if (modeMismatchMessage) {
+      return NextResponse.json(
+        { error: modeMismatchMessage, code: "ANALYSIS_MODE_MISMATCH" },
+        { status: 422 }
+      );
+    }
     const readiness =
       body?.reportReadiness &&
       typeof body.reportReadiness === "object" &&
@@ -4631,12 +4689,37 @@ export async function executePlanRequest(
     logDecisionPipelineMarker("PIPELINE", "finished", correlatedRequestId, {
       selectedDomain: reportDomain,
       selectedGenerator:
-        reportDomain === "real_estate"
+        selectedAnalysisMode === "market"
+          ? "market_intelligence_pipeline"
+          : reportDomain === "real_estate"
           ? "generateRealEstateInvestmentReport"
           : reportDomain === "business"
             ? "business_report_pipeline"
             : "generateSpecializedDomainReport",
     });
+
+    if (selectedAnalysisMode === "market") {
+      const { executeMarketAnalysisRequest } = await import(
+        "@/app/api/market-analysis/route"
+      );
+      const marketHeaders = new Headers(req.headers);
+      marketHeaders.set("content-type", "application/json");
+      const marketRequest = new Request(
+        "http://report-worker.local/api/market-analysis",
+        {
+          method: "POST",
+          headers: marketHeaders,
+          body: JSON.stringify(body),
+          signal: req.signal,
+        }
+      );
+
+      return executeMarketAnalysisRequest(marketRequest, {
+        supabase,
+        user,
+        ip,
+      });
+    }
 
     if (reportDomain === "real_estate") {
       return generateRealEstateInvestmentReport({
@@ -5084,8 +5167,12 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
 
             try {
               response = await withReportTimeout(
-                client.responses.create(
+                withOpenAiCostOperation(
                   {
+                    operationName: "business_validation_report",
+                    reportType: "business_validation",
+                  },
+                  () => client.responses.create({
                     model,
                     instructions,
                     input: buildAnalysisProviderInput(
@@ -5103,8 +5190,7 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
                         planFields
                       ),
                     },
-                  },
-                  { signal: reportAbort.signal }
+                  }, { signal: reportAbort.signal })
                 ),
                 providerTimeoutMs,
                 "OpenAI report generation"
@@ -5662,4 +5748,25 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
       { status: 500 }
     );
   }
+}
+
+export async function executePlanRequest(
+  req: Request,
+  executionContext?: PlanExecutionContext
+) {
+  const requestId = createOpenAiRequestId(req);
+  return runWithOpenAiCostContext(
+    {
+      requestId,
+      parentRequestId:
+        req.headers.get("x-zerinix-report-request-id")?.trim().slice(0, 128) || null,
+      userId: executionContext?.user.id || null,
+      route: "/api/plan",
+      reportType: "report",
+    },
+    async () =>
+      finalizeOpenAiCostResponse(
+        await executePlanRequestInner(req, executionContext)
+      )
+  );
 }

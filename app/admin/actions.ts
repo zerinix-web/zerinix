@@ -8,6 +8,11 @@ import {
   getServerActionClientIp,
 } from "@/app/lib/security/rate-limit";
 import { loadAiCeoContext, requireAdminPage, writeAdminAuditLog } from "./admin-data";
+import {
+  enterOpenAiCostContext,
+  finalizeOpenAiCostRequest,
+  withOpenAiCostOperation,
+} from "@/app/lib/ai/cost-instrumentation";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -40,6 +45,11 @@ async function enforceAdminMutationRateLimit(adminUserId: string) {
 
 export async function updateUserAccountStatus(formData: FormData) {
   const admin = await requireAdminPage();
+  enterOpenAiCostContext({
+    userId: admin.user.id,
+    route: "admin:ai-ceo",
+    reportType: "admin_advisor",
+  });
   const allowed = await enforceAdminMutationRateLimit(admin.user.id);
 
   if (!allowed) {
@@ -264,7 +274,9 @@ export async function askAiCeo(
 
   try {
     const client = createOpenAiClient();
-    const response = await client.responses.create({
+    const response = await withOpenAiCostOperation(
+      { operationName: "admin_advisor", reportType: "admin_advisor" },
+      () => client.responses.create({
       model: "gpt-5-mini",
       reasoning: { effort: "minimal" },
       text: { verbosity: "low" },
@@ -289,7 +301,8 @@ export async function askAiCeo(
           }),
         },
       ],
-    });
+    }));
+    await finalizeOpenAiCostRequest();
     const answer = extractAiCeoText(response);
 
     if (!answer) {
@@ -298,6 +311,7 @@ export async function askAiCeo(
 
     return { answer };
   } catch (error) {
+    await finalizeOpenAiCostRequest();
     const configMessage = getAiConfigurationErrorMessage(error);
 
     return {

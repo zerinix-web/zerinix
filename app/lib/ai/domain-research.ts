@@ -28,6 +28,7 @@ import {
 } from "../decision-intelligence";
 import { logOperationalInfo } from "../security/logging";
 import { extractResearchAssetEntities } from "./research-entity-extraction";
+import { withOpenAiCostOperation } from "./cost-instrumentation";
 import {
   assertRealEstateResearchComposition,
   assertRealEstateUsesAvailableExternalEvidence,
@@ -2035,8 +2036,10 @@ async function runDomainAwareResearchInternal({
       prompt,
       assets,
       selectedMode,
-      detectedDomain: legacyResearchPlan.domain,
-    })
+      detectedDomain:
+        requestedExpertiseProfile?.domain ?? legacyResearchPlan.domain,
+    }),
+    selectedMode
   );
   const effectiveReportPlanFallback = createDynamicReportPlanFallback({
     expertiseProfile: effectiveExpertiseProfile,
@@ -2367,8 +2370,12 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
               model: researchModel,
               taskCount: request.tasks.length,
             });
-            responsePromise = client.responses.create(
+            responsePromise = withOpenAiCostOperation(
               {
+                operationName: `research:${stage.id}`,
+                reportType: researchPlan.domain,
+              },
+              () => client.responses.create({
                 model: researchModel,
                 stream: false,
                 instructions:
@@ -2391,8 +2398,7 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
                   verbosity: "low",
                   format: createResearchJsonSchema(request.tasks),
                 },
-              },
-              { signal: stageSignal.signal }
+              }, { signal: stageSignal.signal })
             );
             researchRequestCache.set(requestCacheKey, responsePromise);
           }

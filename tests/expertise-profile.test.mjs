@@ -28,7 +28,6 @@ test("California employment dispute resolves the focused legal expertise", () =>
   const profile = createExpertiseProfileFallback({
     prompt:
       "I worked for a software company in California for four years. I was terminated after reporting unpaid overtime. I was classified as exempt and regularly worked 55–65 hours per week.",
-    selectedMode: "chat",
   });
 
   assert.equal(profile.domain, "legal");
@@ -52,7 +51,6 @@ test("property evidence resolves real-estate acquisition due diligence", () => {
           "Hatay Defne Dursunlu 1517 Ada 1 Parsel Ağaçlı Tarla 6.364,62 m²",
       },
     ],
-    selectedMode: "plan",
   });
 
   assert.equal(profile.domain, "real_estate");
@@ -74,7 +72,6 @@ test("financial statement resolves financial-health analysis", () => {
         textContent: "Balance Sheet Income Statement Cash Flow",
       },
     ],
-    selectedMode: "market",
   });
 
   assert.equal(profile.domain, "finance");
@@ -95,7 +92,6 @@ test("retail spreadsheet resolves branch and product performance", () => {
         textContent: "Branch,SKU,Sales,Cost,Inventory",
       },
     ],
-    selectedMode: "market",
   });
 
   assert.equal(profile.domain, "retail");
@@ -157,7 +153,7 @@ test("existing report readiness remains valid and internal profile JSON is not v
         textContent: "Hatay Defne Dursunlu 1517 Ada 1 Parsel",
       },
     ],
-    selectedMode: "plan",
+    selectedMode: "chat",
   });
   const readiness = createUniversalReportReadiness(understanding, {});
   const visibleUnderstandingText = [
@@ -167,7 +163,7 @@ test("existing report readiness remains valid and internal profile JSON is not v
   ].join("\n");
   const privateContext = formatExpertiseProfileForReportContext(
     understanding.expertiseProfile,
-    "plan"
+    "chat"
   );
 
   assert.equal(universalUnderstandingSchema.safeParse(understanding).success, true);

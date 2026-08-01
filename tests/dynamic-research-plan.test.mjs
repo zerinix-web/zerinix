@@ -44,7 +44,7 @@ function makeContext(prompt, selectedMode, assets = []) {
 test("California employment case creates focused legal research tasks", () => {
   const context = makeContext(
     "I worked in California and was terminated after reporting unpaid overtime while classified as exempt.",
-    "chat"
+    undefined
   );
   const fields = context.researchPlan.tasks.map((task) => task.evidenceField);
 

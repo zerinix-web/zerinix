@@ -16,6 +16,7 @@ import {
 } from "@/app/lib/report-language";
 import {
   createExpertiseProfileFallback,
+  getSelectedModeMismatchMessage,
   normalizeSelectedAnalysisMode,
   resolveExpertiseProfile,
 } from "@/app/lib/ai/expertise-profile";
@@ -105,7 +106,11 @@ function readRequestExpertiseProfile(body: ReportJobRequestPayload) {
     detectedDomain: readiness.detectedIndustry,
   });
 
-  return resolveExpertiseProfile(readiness.expertiseProfile, fallback);
+  return resolveExpertiseProfile(
+    readiness.expertiseProfile,
+    fallback,
+    selectedMode
+  );
 }
 
 function readRequestReportPlan(
@@ -319,6 +324,17 @@ export async function POST(req: Request) {
   });
   const reportLanguage = getResponseLanguage(reportLanguageCode);
   const expertiseProfile = readRequestExpertiseProfile(body);
+  const modeMismatchMessage = getSelectedModeMismatchMessage({
+    selectedMode: body.analysisMode,
+    detectedDomain: expertiseProfile.domain,
+    prompt: typeof body.prompt === "string" ? body.prompt : "",
+  });
+  if (modeMismatchMessage) {
+    return NextResponse.json(
+      { error: modeMismatchMessage, code: "ANALYSIS_MODE_MISMATCH" },
+      { status: 422 }
+    );
+  }
   const reportPlan = readRequestReportPlan(
     body,
     expertiseProfile,
@@ -331,6 +347,9 @@ export async function POST(req: Request) {
   );
   const requestPayload = {
     ...body,
+    aiCostRequestId:
+      req.headers.get("x-zerinix-ai-request-id")?.trim().slice(0, 128) ||
+      idempotencyKey,
     expertiseProfile,
     reportPlan,
     researchPlan,

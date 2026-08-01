@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
+  createDirectReportReadiness,
   createUnderstandingFallback,
   createUniversalReportReadiness,
   getUniversalReportReadinessError,
@@ -127,23 +128,36 @@ test("report readiness is created only after every required answer exists", () =
   );
 });
 
-test("Planner always shows summary, missing information, and questions before research", () => {
-  assert.match(recommendationCardSource, /"İçerik Özeti"/);
-  assert.match(recommendationCardSource, /"Eksik Bilgiler"/);
-  assert.match(recommendationCardSource, /"Sorular"/);
-  assert.match(recommendationCardSource, /primaryDisabled=\{!requiredQuestionsAnswered\}/);
+test("Planner bypasses secondary clarification UI and starts the selected flow directly", () => {
 
   const submitStart = plannerSource.indexOf(
     "async function submitForUnderstanding"
   );
   const submitEnd = plannerSource.indexOf(
-    "async function continueRecommendationAsChat",
+    "async function getGeneralWorkspaceId",
     submitStart
   );
   const submitFlow = plannerSource.slice(submitStart, submitEnd);
 
-  assert.match(submitFlow, /setPendingRecommendation/);
-  assert.doesNotMatch(submitFlow, /generatePlan\(/);
+  assert.doesNotMatch(plannerSource, /<RecommendationCard/);
+  assert.doesNotMatch(plannerSource, /pendingRecommendation/);
+  assert.doesNotMatch(submitFlow, /recommendedAction === "clarify"/);
+  assert.match(submitFlow, /selectedMode === "chat"[\s\S]*sendChatMessage/);
+  assert.match(submitFlow, /createDirectReportReadiness\(understanding\)/);
+  assert.match(submitFlow, /void generatePlan\(/);
+});
+
+test("direct readiness preserves analysis context while making questions non-blocking", () => {
+  const understanding = createUnderstandingFallback({
+    prompt: "Lojistik operasyonlarımızı analiz et",
+  });
+  const readiness = createDirectReportReadiness(understanding);
+
+  assert.deepEqual(readiness.requiredQuestionIds, []);
+  assert.deepEqual(readiness.answers, {});
+  assert.equal(readiness.expertiseProfile, understanding.expertiseProfile);
+  assert.equal(readiness.reportPlan, understanding.reportPlan);
+  assert.equal(readiness.researchPlan, understanding.researchPlan);
 });
 
 test("OCR property facts render in a read-only detected information card above questions", () => {
@@ -163,7 +177,7 @@ test("OCR property facts render in a read-only detected information card above q
     '"Algılanan Bilgiler"'
   );
   const questionFormStart = recommendationCardSource.indexOf(
-    "{questions.length > 0 ?",
+    "{!modeMismatchMessage && questions.length > 0 ?",
     detectedCardStart
   );
   const detectedCardSource = recommendationCardSource.slice(

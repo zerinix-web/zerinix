@@ -1,5 +1,9 @@
 import OpenAI from "openai";
 import { logOperationalInfo } from "@/app/lib/security/logging";
+import {
+  instrumentOpenAiClient,
+  instrumentOpenAiTransportFetch,
+} from "@/app/lib/ai/cost-instrumentation";
 
 export type AiRuntimeEnvironment = "development" | "production" | "test";
 export type AiExecutionSource = "mock" | "cache" | "real_ai";
@@ -115,7 +119,9 @@ export function getOpenAiApiKey() {
 export function createOpenAiClient() {
   const { apiKey } = getOpenAiApiKey();
 
-  return new OpenAI({ apiKey });
+  return instrumentOpenAiClient(
+    new OpenAI({ apiKey, fetch: instrumentOpenAiTransportFetch })
+  );
 }
 
 export function getAiConfigurationErrorMessage(error: unknown) {

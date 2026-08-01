@@ -38,7 +38,7 @@ function makePlan(prompt, selectedMode, assets = []) {
 test("California employment report plan is legal-specific and excludes startup artifacts", () => {
   const plan = makePlan(
     "I worked in California and was terminated after reporting unpaid overtime while classified as exempt.",
-    "chat"
+    undefined
   );
   const sectionTitles = plan.sections.map((item) => item.title);
 
@@ -136,7 +136,6 @@ test("authoritative selected mode is retained and mismatched model plan falls ba
 test("invalid report-plan JSON uses a schema-valid conservative fallback", () => {
   const expertiseProfile = createExpertiseProfileFallback({
     prompt: "Review this California employment dispute.",
-    selectedMode: "chat",
   });
   const fallback = createDynamicReportPlanFallback({
     expertiseProfile,
@@ -156,7 +155,6 @@ test("invalid report-plan JSON uses a schema-valid conservative fallback", () =>
 test("compatibility validation removes cross-domain sections and arbitrary metrics", () => {
   const expertiseProfile = createExpertiseProfileFallback({
     prompt: "Review this California employment dispute.",
-    selectedMode: "chat",
   });
   const fallback = createDynamicReportPlanFallback({
     expertiseProfile,
@@ -231,7 +229,7 @@ test("plan remains private while existing report readiness and generation flow s
       mimeType: "image/png",
       textContent: "Hatay Defne Dursunlu Ada 1517 Parsel 1",
     }],
-    selectedMode: "plan",
+    selectedMode: "chat",
   });
   const readiness = createUniversalReportReadiness(understanding, {});
   const privateContext = formatDynamicReportPlanForContext(understanding.reportPlan);

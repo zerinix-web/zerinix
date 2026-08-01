@@ -57,6 +57,13 @@ import {
   expertInstructions,
   type AiExpert,
 } from "@/app/lib/report-engine/prompts/chat";
+import {
+  createOpenAiRequestId,
+  finalizeOpenAiCostResponse,
+  runWithOpenAiCostContext,
+  setOpenAiCostIdentity,
+  withOpenAiCostOperation,
+} from "@/app/lib/ai/cost-instrumentation";
 
 type ChatInputMessage = {
   role: "user" | "assistant";
@@ -1078,7 +1085,7 @@ function logChatAuthorizationDecision(
   console.info(`[api:chat:authorization] ${branchId}`, diagnostic);
 }
 
-export async function POST(req: Request) {
+async function handleChatPost(req: Request) {
   const requestValidation = validateApiRequest(req, {
     maxBodyBytes: 17_000_000,
   });
@@ -1152,6 +1159,7 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
+    setOpenAiCostIdentity({ userId: user.id, reportType: "strategic_advisory" });
 
     const userRateLimit = checkRateLimit(`api:chat:${user.id}:${ip}`, {
       limit: 45,
@@ -1188,6 +1196,7 @@ export async function POST(req: Request) {
     const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
     const messages = normalizeMessages(body?.messages);
     const attachments = normalizeAttachments(body?.attachments);
+    const isDirectStrategicAdvisory = body?.analysisMode === "chat";
     const promptUrls = extractAnalysisUrls(prompt);
     const webResearch = shouldUseAnalysisWebResearch(prompt, attachments);
     const requestedMode =
@@ -1397,6 +1406,7 @@ export async function POST(req: Request) {
       : [];
     const essentialAdvisorQuestions =
       advisorRequest &&
+      !isDirectStrategicAdvisory &&
       !reportMemory &&
       attachments.length === 0 &&
       promptUrls.length === 0
@@ -1656,6 +1666,9 @@ export async function POST(req: Request) {
         : "No URL was supplied as primary external context.",
       "If the user asks for a structured investor report, suggest AI Plan or Market Analysis mode instead of generating the full report in Chat mode.",
       "Advisor quality rules: ask follow-up questions only if the missing information is absolutely necessary. Never ask for information already present in the persistent profile or conversation. If useful but non-critical information is missing, proceed with clearly labeled assumptions.",
+      isDirectStrategicAdvisory
+        ? "This is a direct Strategic Advisory submission. Lead with one concise recommendation paragraph. Then provide 3–5 key reasons, followed by Key risks and Immediate next actions. Write like an executive consultant, keep the response conversation-oriented, and avoid a long essay unless the user explicitly requests a detailed report. Do not end with follow-up questions. Treat missing information as assumptions, confidence limitations, evidence gaps, or next actions inside the answer."
+        : "Use follow-up questions sparingly and only when an immediate useful answer is impossible.",
       "When giving recommendations, go deeper than generic advice. Rank options from best to worst, show step-by-step reasoning, explain why each option was chosen, and include estimated investment, expected ROI or outcome range, timeline, risks, advantages, disadvantages, and next actions whenever applicable.",
       "For investment, finance, crypto, real estate, legal, tax, or career-sensitive topics, use educational decision-support language, state uncertainty, and avoid guarantees.",
       "Keep Business Plan and Market Analysis separate: do not generate a PDF-style report in Chat mode. If the user explicitly wants a full structured report, suggest AI Plan or Market Analysis.",
@@ -1754,8 +1767,12 @@ export async function POST(req: Request) {
       quotaConsumed: false,
     });
 
-    const stream = await client.responses
-      .create(
+    const stream = await withOpenAiCostOperation(
+      {
+        operationName: requestKind === "file_analysis" ? "file_analysis" : "advisor",
+        reportType: "strategic_advisory",
+      },
+      () => client.responses.create(
         {
           model,
           reasoning: { effort: "minimal" },
@@ -1777,8 +1794,7 @@ export async function POST(req: Request) {
             : {}),
         },
         { signal: req.signal }
-      )
-      .catch(async (error) => {
+      )).catch(async (error) => {
         const errorMessage = getChatErrorMessage(error);
 
         logOperationalInfo("[api:chat] provider request failed", {
@@ -2082,4 +2098,12 @@ export async function POST(req: Request) {
       { status: 500 }
     );
   }
+}
+
+export async function POST(req: Request) {
+  const requestId = createOpenAiRequestId(req);
+  return runWithOpenAiCostContext(
+    { requestId, route: "/api/chat", reportType: "strategic_advisory" },
+    async () => finalizeOpenAiCostResponse(await handleChatPost(req))
+  );
 }

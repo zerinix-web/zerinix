@@ -139,15 +139,13 @@ test("generic model output cannot override stronger property classification", ()
   );
 });
 
-test("understanding sends binary assets to semantic analysis and Planner respects the gate", () => {
+test("understanding sends binary assets to semantic analysis and Planner starts directly", () => {
   assert.match(plannerSource, /dataUrl: attachment\.dataUrl \|\| ""/);
   assert.match(understandingRouteSource, /buildAnalysisProviderInput/);
   assert.match(understandingRouteSource, /property_document rather than the generic image type/);
-  assert.match(
-    plannerSource,
-    /setPendingRecommendation\(\{\s*prompt: submittedPrompt,\s*attachments: queuedAttachments,\s*recommendation/
-  );
-  assert.match(plannerSource, /createUniversalReportReadiness/);
+  assert.doesNotMatch(plannerSource, /setPendingRecommendation|<RecommendationCard/);
+  assert.match(plannerSource, /createDirectReportReadiness\(understanding\)/);
+  assert.match(plannerSource, /generatePlan\([\s\S]*queuedAttachments/);
 });
 
 test("technical research failures are removed centrally from user-facing report content", () => {

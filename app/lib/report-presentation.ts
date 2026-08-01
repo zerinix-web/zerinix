@@ -1,4 +1,8 @@
 import type { ReportInvestmentScore, ReportQualityScore } from "@/app/lib/report-investment-score";
+import {
+  polishTurkishUserFacingOutput,
+  sanitizeInternalRoutingMetadata,
+} from "@/app/lib/report-output-sanitization";
 
 export type ExecutiveSnapshot = {
   decision: string;
@@ -164,7 +168,9 @@ function removeDuplicateLines(content: string) {
 
 export function normalizeReportPresentationText(content: string) {
   let normalized = removeDuplicateLines(
-    removeAdjacentDuplicateWords(normalizeExecutiveInsightLabels(content))
+    removeAdjacentDuplicateWords(
+      normalizeExecutiveInsightLabels(sanitizeInternalRoutingMetadata(content))
+    )
   )
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -173,6 +179,7 @@ export function normalizeReportPresentationText(content: string) {
     for (const [pattern, replacement] of TURKISH_REPLACEMENTS) {
       normalized = normalized.replace(pattern, replacement);
     }
+    normalized = polishTurkishUserFacingOutput(normalized);
   }
 
   return normalized;
@@ -213,7 +220,7 @@ function extractLabelValue(content: string, labels: string[]) {
   return "";
 }
 
-function extractDecision(content: string) {
+function extractDecision(content: string, isTurkish = false) {
   const labeled = extractLabelValue(content, [
     "Decision",
     "Karar",
@@ -225,12 +232,12 @@ function extractDecision(content: string) {
   const decisionMatch = (labeled || content).match(/\b(GO|WAIT|NO-GO|NO GO|HOLD|VALIDATE|PASS|REJECT)\b/i);
 
   if (!decisionMatch) {
-    return labeled || "WAIT";
+    return labeled || (isTurkish ? "BEKLE" : "WAIT");
   }
 
   const value = decisionMatch[1].toUpperCase().replace("NO GO", "NO-GO");
   if (value === "HOLD" || value === "VALIDATE") {
-    return "WAIT";
+    return isTurkish ? "BEKLE" : "WAIT";
   }
   if (value === "PASS") {
     return "GO";
@@ -242,7 +249,7 @@ function extractDecision(content: string) {
   return value;
 }
 
-function extractConfidenceValue(content: string) {
+function extractConfidenceValue(content: string, isTurkish = false) {
   const labeled = extractLabelValue(content, [
     "Decision Confidence",
     "Confidence",
@@ -251,7 +258,9 @@ function extractConfidenceValue(content: string) {
   ]);
   const match = (labeled || content).match(/\b(\d{1,3})\s*%/);
 
-  return match ? `${Math.min(100, Number(match[1]))}%` : labeled || "Validation Required";
+  return match
+    ? `${Math.min(100, Number(match[1]))}%`
+    : labeled || (isTurkish ? "Kanıt düzeyi açıklanmalı" : "Needs evidence review");
 }
 
 function extractPercentScore(content: string, labels: string[]) {
@@ -265,8 +274,12 @@ function extractPercentScore(content: string, labels: string[]) {
   return Math.max(0, Math.min(100, Number(match[1])));
 }
 
-function formatScore(score: number | null, suffix = "%") {
-  return score === null ? "Validation Required" : `${score}${suffix}`;
+function formatScore(score: number | null, suffix = "%", isTurkish = false) {
+  return score === null
+    ? isTurkish
+      ? "Hesaplama için yeterli veri yok"
+      : "Insufficient data to calculate"
+    : `${score}${suffix}`;
 }
 
 function readFounderScoreValue(investmentScore?: ReportInvestmentScore) {
@@ -492,26 +505,26 @@ function inferRiskLevel(content: string, keywords: string[]): "Low" | "Medium" |
   return "Medium";
 }
 
-function buildRiskHeatmap(content: string) {
+function buildRiskHeatmap(content: string, isTurkish: boolean) {
   return [
-    { label: "Customer validation", keywords: ["customer validation", "müşteri doğrulama", "demand validation", "purchase intent"] },
-    { label: "CAC", keywords: ["cac", "customer acquisition", "edinim maliyeti"] },
-    { label: "Capital efficiency", keywords: ["capital efficiency", "sermaye verimliliği", "funding", "yatırım ihtiyacı"] },
-    { label: "Competition", keywords: ["competition", "competitor", "rekabet", "rakip"] },
-    { label: "Execution", keywords: ["execution", "yürütme", "operational", "operasyon"] },
+    { label: isTurkish ? "Müşteri doğrulaması" : "Customer validation", keywords: ["customer validation", "müşteri doğrulama", "demand validation", "purchase intent"] },
+    { label: isTurkish ? "Müşteri edinim maliyeti" : "CAC", keywords: ["cac", "customer acquisition", "edinim maliyeti"] },
+    { label: isTurkish ? "Sermaye verimliliği" : "Capital efficiency", keywords: ["capital efficiency", "sermaye verimliliği", "funding", "yatırım ihtiyacı"] },
+    { label: isTurkish ? "Rekabet" : "Competition", keywords: ["competition", "competitor", "rekabet", "rakip"] },
+    { label: isTurkish ? "Uygulama" : "Execution", keywords: ["execution", "yürütme", "operational", "operasyon"] },
   ].map((item) => ({
     label: item.label,
     level: inferRiskLevel(content, item.keywords),
   }));
 }
 
-function buildConfidenceRadar(content: string, fallbackScore: number | null) {
+function buildConfidenceRadar(content: string, fallbackScore: number | null, isTurkish: boolean) {
   const dimensions = [
-    { label: "Market", aliases: ["Market Confidence", "Market Readiness", "Pazar Güveni", "Pazar Hazırlığı"] },
-    { label: "Financial", aliases: ["Financial Confidence", "Financial Quality", "Finansal Güven", "Finansal Kalite"] },
-    { label: "Execution", aliases: ["Execution Confidence", "Execution Readiness", "Yürütme Güveni", "Yürütme Hazırlığı"] },
-    { label: "Product", aliases: ["Product Confidence", "Product Readiness", "Ürün Güveni", "Ürün Hazırlığı"] },
-    { label: "Evidence", aliases: ["Evidence Confidence", "Evidence Strength", "Kanıt Güveni", "Kanıt Gücü"] },
+    { label: isTurkish ? "Pazar" : "Market", aliases: ["Market Confidence", "Market Readiness", "Pazar Güveni", "Pazar Hazırlığı"] },
+    { label: isTurkish ? "Finansal" : "Financial", aliases: ["Financial Confidence", "Financial Quality", "Finansal Güven", "Finansal Kalite"] },
+    { label: isTurkish ? "Uygulama" : "Execution", aliases: ["Execution Confidence", "Execution Readiness", "Yürütme Güveni", "Yürütme Hazırlığı"] },
+    { label: isTurkish ? "Ürün" : "Product", aliases: ["Product Confidence", "Product Readiness", "Ürün Güveni", "Ürün Hazırlığı"] },
+    { label: isTurkish ? "Kanıt" : "Evidence", aliases: ["Evidence Confidence", "Evidence Strength", "Kanıt Güveni", "Kanıt Gücü"] },
   ];
 
   return dimensions.map((dimension) => ({
@@ -596,13 +609,15 @@ export function buildExecutiveSnapshot(
   );
 
   return {
-    decision: investmentScore?.recommendation || extractDecision(normalized),
+    decision: polishTurkishUserFacingOutput(
+      investmentScore?.recommendation || extractDecision(normalized, isTurkish)
+    ),
     confidence:
       typeof investmentScore?.confidence === "number"
         ? `${investmentScore.confidence}%`
-        : extractConfidenceValue(normalized),
+        : extractConfidenceValue(normalized, isTurkish),
     confidenceScore,
-    founderScore: formatScore(founderScoreValue, "/100"),
+    founderScore: formatScore(founderScoreValue, "/100", isTurkish),
     founderScoreValue,
     financialQuality: normalizeFinancialQualityPresentation(
       extractQuality(
@@ -625,8 +640,8 @@ export function buildExecutiveSnapshot(
     ),
     nextAction: investmentScore?.nextCriticalAction || actionBullets[0],
     riskLevel: inferRiskLevel(normalized, ["risk", "validation", "cac", "funding", "execution", "rekabet", "sermaye"]),
-    riskHeatmap: buildRiskHeatmap(normalized),
-    confidenceRadar: buildConfidenceRadar(normalized, confidenceScore),
+    riskHeatmap: buildRiskHeatmap(normalized, isTurkish),
+    confidenceRadar: buildConfidenceRadar(normalized, confidenceScore, isTurkish),
     why: collectBullets(
       normalized,
       ["market", "pazar", "opportunity", "fırsat", "model", "margin", "marj", "revenue", "gelir"],

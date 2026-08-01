@@ -4,6 +4,7 @@ import { logServerError } from "@/app/lib/security/errors";
 import { QUOTA_COUNTING_USAGE_KIND_EXCLUSION } from "@/app/lib/ai/quota-rules.mjs";
 import { estimateModelCostUsd } from "@/app/lib/ai/pricing";
 import { resolveAiModelForRequestKind } from "@/app/lib/ai/model-router";
+import { recordOpenAiApplicationCache } from "@/app/lib/ai/cost-instrumentation";
 
 export type PlanTier = "free" | "pro" | "business";
 export type AIUsageOperationType =
@@ -741,6 +742,15 @@ export async function getCachedAiResponse(
       logServerError("ai-governance:cache-hit-update", updateError);
     }
 
+    recordOpenAiApplicationCache({
+      operationName: "application_cache",
+      model: typeof data.model === "string" ? data.model : "unknown",
+      hit: true,
+      inputTokens: safeNumber(data.prompt_tokens),
+      outputTokens: safeNumber(data.completion_tokens),
+      estimatedCostUsd: safeNumber(data.estimated_cost_usd),
+    });
+
     return {
       responseText: String(data.response_text),
       responseData: data.response_data,
@@ -764,6 +774,14 @@ export async function getCachedAiResponse(
       const row = Array.isArray(globalData) ? globalData[0] : globalData;
 
       if (row?.response_text) {
+        recordOpenAiApplicationCache({
+          operationName: "application_cache",
+          model: typeof row.model === "string" ? row.model : "unknown",
+          hit: true,
+          inputTokens: safeNumber(row.prompt_tokens),
+          outputTokens: safeNumber(row.completion_tokens),
+          estimatedCostUsd: safeNumber(row.estimated_cost_usd),
+        });
         return {
           responseText: String(row.response_text),
           promptTokens: safeNumber(row.prompt_tokens),

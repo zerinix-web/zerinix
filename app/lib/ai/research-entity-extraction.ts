@@ -1,6 +1,7 @@
 import type OpenAI from "openai";
 import type { ResponseInput } from "openai/resources/responses/responses";
 import type { ExtractedFact } from "@/app/lib/decision-intelligence";
+import { withOpenAiCostOperation } from "./cost-instrumentation";
 import {
   buildAnalysisProviderInput,
   type AnalysisAsset,
@@ -125,8 +126,9 @@ export async function extractResearchAssetEntities({
   }
 
   try {
-    const response = await client.responses.create(
-      {
+    const response = await withOpenAiCostOperation(
+      { operationName: "entity_extraction" },
+      () => client.responses.create({
         model,
         instructions: `Extract every useful named entity and identifier visibly present in every uploaded asset, while returning only facts actually present.
 Never infer, geocode, correct, translate, or complete missing values.
@@ -146,8 +148,7 @@ Use the uploaded filename as source.`,
           verbosity: "low",
           format: createEntityExtractionSchema(),
         },
-      },
-      signal ? { signal } : undefined
+      }, signal ? { signal } : undefined)
     );
 
     if (response.status !== "completed" || !response.output_text.trim()) {

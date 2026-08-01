@@ -123,7 +123,7 @@ export function buildStrictReportLanguageInstruction(language: ResponseLanguage 
 
 const forbiddenUiPhrases: Record<ReportLanguageCode, RegExp> = {
   en: /\b(?:Yönetici Özeti|Güven Skoru|Ana Risk|Sonraki Adım|Hukuki Değerlendirme|Doğrulama Gerekiyor|Doğrulanmadı|Zusammenfassung|Risque principal|Resumen ejecutivo)\b/i,
-  tr: /\b(?:Executive Summary|Confidence Score|Main Risk|Next Action|Legal Assessment|Validation Required|Not verified|Verified from uploaded asset|Zusammenfassung|Synthèse exécutive|Resumen ejecutivo)\b/i,
+  tr: /\b(?:Executive Summary|Recommendation|Why|Immediate Actions?|Next Actions?|Confidence Score|Main Risk|Legal Assessment|Validation Required|Estimated|AI Analysis|Should proceed|Hold|Wait|Not verified|Verified from uploaded asset|Zusammenfassung|Synthèse exécutive|Resumen ejecutivo)\b/i,
   de: /\b(?:Executive Summary|Yönetici Özeti|Confidence Score|Main Risk|Legal Assessment|Synthèse exécutive|Resumen ejecutivo)\b/i,
   fr: /\b(?:Executive Summary|Yönetici Özeti|Confidence Score|Main Risk|Legal Assessment|Zusammenfassung|Resumen ejecutivo)\b/i,
   es: /\b(?:Executive Summary|Yönetici Özeti|Confidence Score|Main Risk|Legal Assessment|Zusammenfassung|Synthèse exécutive)\b/i,
@@ -158,6 +158,28 @@ function replaceKnownReportCopy(value: string, code: ReportLanguageCode) {
       repaired = repaired.replaceAll(source, copy[code][key]);
     }
   }
+
+  if (code === "tr") {
+    const replacements: Array<[RegExp, string]> = [
+      [/\bExecutive Recommendation\b/gi, "Yönetici Tavsiyesi"],
+      [/\bRecommendation\b/gi, "Tavsiye"],
+      [/\bWhy\b(?=\s*[:：\-–—])/gi, "Gerekçe"],
+      [/\bImmediate Actions?\b/gi, "Acil Adımlar"],
+      [/\bNext Actions?\b/gi, "Sonraki Adımlar"],
+      [/\bValidation Required\b/gi, "Doğrulama Gerekli"],
+      [/\bAI Analysis\b/gi, "Analitik Değerlendirme"],
+      [/\bEstimated\b/gi, "Tahmini"],
+      [/\bShould proceed\b/gi, "İlerleme Kararı"],
+      [/\bHold for validation\b/gi, "Doğrulama Tamamlanana Kadar Bekle"],
+      [/\b(?:Hold|Wait)\b/gi, "Bekle"],
+    ];
+
+    repaired = replacements.reduce(
+      (content, [pattern, replacement]) => content.replace(pattern, replacement),
+      repaired
+    );
+  }
+
   return repaired;
 }
 

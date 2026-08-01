@@ -146,6 +146,7 @@ import {
 } from "@/components/planner/report-utils";
 import {
   classifyReportDomain,
+  resolveReportDomainForSelectedMode,
   type ReportDomain,
 } from "@/app/lib/report-engine/domain";
 import {
@@ -165,23 +166,18 @@ import {
   type SpecializedReportDomain,
 } from "@/app/lib/report-engine/prompts/domain-analysis";
 import { planFieldLabels } from "@/app/lib/report-engine/prompts/plan";
+import { marketFieldLabels } from "@/app/lib/report-engine/prompts/market";
 import {
   useAttachments,
   type PlannerAttachment,
 } from "@/components/planner/useAttachments";
 import { useReportExport } from "@/components/planner/useReportExport";
 import {
-  recommendationFromUnderstanding,
-  type IntentRecommendation,
-} from "@/components/planner/IntentDetector";
-import {
-  createUniversalReportReadiness,
+  createDirectReportReadiness,
   createUnderstandingFallback,
   universalUnderstandingSchema,
   type UniversalReportReadiness,
-  type UniversalUnderstanding,
 } from "@/app/lib/ai/understanding";
-import { RecommendationCard } from "@/components/planner/RecommendationCard";
 import { UnderstandingLoadingState } from "@/components/planner/UnderstandingCard";
 import { getComposerSuggestions } from "@/components/planner/composer-suggestions";
 
@@ -195,25 +191,21 @@ type ReportSection = {
 type MarketReport = {
   executiveSummary: string;
   marketOverview: string;
-  tamSamSom: string;
+  marketSize: string;
+  cagr: string;
+  marketSegmentation: string;
+  regionalAnalysis: string;
   industryTrends: string;
-  targetCustomer: string;
-  competitorAnalysis: string;
-  customerPainPoints: string;
+  competitiveLandscape: string;
+  majorPlayers: string;
+  customerSegments: string;
+  marketDrivers: string;
+  barriers: string;
   opportunities: string;
   threats: string;
-  swotAnalysis: string;
+  tamSamSom: string;
   portersFiveForces: string;
-  unitEconomics: string;
-  financialDashboard: string;
-  scenarioAnalysis: string;
-  kpiDashboard: string;
-  executiveRecommendation: string;
-  founderRoadmap: string;
-  sourcesAssumptions: string;
-  entryStrategy: string;
-  validationPlan: string;
-  keyMetrics: string;
+  strategicRecommendations: string;
   sources: string;
 };
 
@@ -243,7 +235,7 @@ type PlanReport = {
   financialAssumptions: string;
   founderScore: string;
   sourcesAssumptions: string;
-} & Record<RealEstateReportField | DomainAnalysisField, string>;
+} & Record<RealEstateReportField | DomainAnalysisField, string> & Partial<MarketReport>;
 
 type MarketReportField = keyof MarketReport;
 type PlanReportField = keyof PlanReport;
@@ -375,15 +367,6 @@ type PlannerProps = {
   initialReport?: InitialReport | null;
   regenerationContext?: RegenerationContext | null;
 };
-
-const workflowSteps = [
-  "Analyzing business model...",
-  "Researching market...",
-  "Analyzing competitors...",
-  "Calculating financial estimates...",
-  "Building strategy...",
-  "Writing final report...",
-];
 
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 60_000;
 const CHAT_REQUEST_TIMEOUT_MS = 75_000;
@@ -572,25 +555,21 @@ const reportFields: Array<{
 }> = [
   { field: "executiveSummary", title: "Executive Summary", icon: Sparkles },
   { field: "marketOverview", title: "Market Overview", icon: BarChart3 },
-  { field: "tamSamSom", title: "TAM / SAM / SOM", icon: PieChart },
+  { field: "marketSize", title: "Market Size", icon: PieChart },
+  { field: "cagr", title: "CAGR", icon: TrendingUp },
+  { field: "marketSegmentation", title: "Market Segmentation", icon: ListChecks },
+  { field: "regionalAnalysis", title: "Regional Analysis", icon: Landmark },
   { field: "industryTrends", title: "Industry Trends", icon: Gauge },
-  { field: "targetCustomer", title: "Target Customer", icon: Users },
-  { field: "competitorAnalysis", title: "Competitor Analysis", icon: Search },
-  { field: "customerPainPoints", title: "Customer Pain Points", icon: ShieldAlert },
+  { field: "competitiveLandscape", title: "Competitive Landscape", icon: Search },
+  { field: "majorPlayers", title: "Major Players", icon: BriefcaseBusiness },
+  { field: "customerSegments", title: "Customer Segments", icon: Users },
+  { field: "marketDrivers", title: "Market Drivers", icon: TrendingUp },
+  { field: "barriers", title: "Barriers", icon: ShieldAlert },
   { field: "opportunities", title: "Opportunities", icon: Goal },
   { field: "threats", title: "Threats", icon: ShieldAlert },
-  { field: "swotAnalysis", title: "SWOT Analysis", icon: ListChecks },
+  { field: "tamSamSom", title: "TAM / SAM / SOM", icon: PieChart },
   { field: "portersFiveForces", title: "Porter's Five Forces", icon: Landmark },
-  { field: "unitEconomics", title: "Unit Economics", icon: TrendingUp },
-  { field: "financialDashboard", title: "Financial Dashboard", icon: PieChart },
-  { field: "scenarioAnalysis", title: "Scenario Analysis: Worst / Base / Best Case", icon: BarChart3 },
-  { field: "kpiDashboard", title: "KPI Dashboard", icon: Gauge },
-  { field: "executiveRecommendation", title: "Executive Recommendation", icon: Sparkles },
-  { field: "entryStrategy", title: "Entry Strategy", icon: BriefcaseBusiness },
-  { field: "validationPlan", title: "Validation Plan", icon: CalendarDays },
-  { field: "founderRoadmap", title: "Founder Roadmap", icon: CalendarDays },
-  { field: "keyMetrics", title: "Key Metrics", icon: Gauge },
-  { field: "sourcesAssumptions", title: "Sources / Assumptions", icon: FileText },
+  { field: "strategicRecommendations", title: "Strategic Recommendations", icon: Sparkles },
   { field: "sources", title: "Sources", icon: FileText },
 ];
 
@@ -768,6 +747,7 @@ function localizeReportFields<T extends ReportFieldDefinition>(
         ? field.title
         : realEstateFieldLabels[language]?.[field.field as RealEstateReportField]
           || domainAnalysisFieldLabels[language]?.[field.field as DomainAnalysisField]
+          || (marketFieldLabels[language] as Partial<Record<string, string>>)?.[field.field]
           || (planFieldLabels[language] as Partial<Record<string, string>>)?.[field.field]
           || field.title,
     };
@@ -826,25 +806,21 @@ function getInitialSelectedWorkspaceId(
 const emptyMarketReport: MarketReport = {
   executiveSummary: "",
   marketOverview: "",
-  tamSamSom: "",
+  marketSize: "",
+  cagr: "",
+  marketSegmentation: "",
+  regionalAnalysis: "",
   industryTrends: "",
-  targetCustomer: "",
-  competitorAnalysis: "",
-  customerPainPoints: "",
+  competitiveLandscape: "",
+  majorPlayers: "",
+  customerSegments: "",
+  marketDrivers: "",
+  barriers: "",
   opportunities: "",
   threats: "",
-  swotAnalysis: "",
+  tamSamSom: "",
   portersFiveForces: "",
-  unitEconomics: "",
-  financialDashboard: "",
-  scenarioAnalysis: "",
-  kpiDashboard: "",
-  executiveRecommendation: "",
-  entryStrategy: "",
-  validationPlan: "",
-  founderRoadmap: "",
-  keyMetrics: "",
-  sourcesAssumptions: "",
+  strategicRecommendations: "",
   sources: "",
 };
 
@@ -908,10 +884,10 @@ function getLanguageCopy(language: ResponseLanguage) {
   if (language === "Turkish") {
     return {
       planTitle: "İş Planı Raporu",
-      marketTitle: "İş Zekası Raporu",
+      marketTitle: "Pazar İstihbaratı Raporu",
       realEstateTitle: "Gayrimenkul Yatırım Analizi",
       preparingPlan: "## İş Planı Raporu\n\nİlk bölümler hazırlanıyor...",
-      preparingMarket: "## İş Zekası Raporu\n\nCanlı pazar araştırması hazırlanıyor...",
+      preparingMarket: "## Pazar İstihbaratı Raporu\n\nCanlı pazar araştırması hazırlanıyor...",
       preparingRealEstate:
         "## Gayrimenkul Yatırım Analizi\n\nBelge kanıtları ve durum tespiti hazırlanıyor...",
       waitingSection: "Bu bölüm AI çıktısını bekliyor.",
@@ -939,10 +915,10 @@ function getLanguageCopy(language: ResponseLanguage) {
 
   return {
     planTitle: "Business Plan Report",
-    marketTitle: "Business Intelligence Report",
+    marketTitle: "Market Intelligence Report",
     realEstateTitle: "Real Estate Investment Analysis",
     preparingPlan: "## Business Plan Report\n\nPreparing the first sections...",
-    preparingMarket: "## Business Intelligence Report\n\nPreparing live market research...",
+    preparingMarket: "## Market Intelligence Report\n\nPreparing live market research...",
     preparingRealEstate:
       "## Real Estate Investment Analysis\n\nPreparing document evidence and due diligence...",
     waitingSection: "This section is waiting for AI output.",
@@ -4954,71 +4930,6 @@ function SectionTakeaway({ content }: { content: string }) {
   );
 }
 
-function WorkflowPanel({
-  active,
-  completedSteps,
-}: {
-  active: boolean;
-  completedSteps: number;
-}) {
-  if (!active && completedSteps === 0) {
-    return null;
-  }
-
-  return (
-    <div className="rounded-[2rem] border border-teal-200/15 bg-[linear-gradient(135deg,rgba(94,234,212,0.08),rgba(255,255,255,0.035))] p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold tracking-[0.28em] text-teal-300/70">
-            LIVE AI WORKFLOW
-          </p>
-          <p className="mt-2 text-sm text-zinc-500">
-            ZERINIX is preparing a stable output before rendering the final result.
-          </p>
-        </div>
-        <div className="rounded-full border border-teal-300/20 bg-teal-300/10 px-3 py-1 text-xs font-medium text-teal-100">
-          {completedSteps >= workflowSteps.length ? "Complete" : "Working"}
-        </div>
-      </div>
-
-      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {workflowSteps.map((step, index) => {
-          const done = index < completedSteps;
-          const current = active && index === completedSteps;
-
-          return (
-            <div
-              key={step}
-              className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm shadow-lg shadow-black/10 transition ${
-                done
-                  ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
-                  : current
-                    ? "border-teal-300/30 bg-teal-300/10 text-teal-100"
-                    : "border-white/10 bg-white/[0.03] text-zinc-500"
-              }`}
-            >
-              <span
-                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
-                  done
-                    ? "border-emerald-300/30 bg-emerald-300/20"
-                    : "border-white/10 bg-black/40"
-                }`}
-              >
-                {done ? (
-                  <Check className="h-3.5 w-3.5 text-emerald-200" />
-                ) : (
-                  <span className={current ? "h-2 w-2 animate-pulse rounded-full bg-teal-200" : "h-2 w-2 rounded-full bg-zinc-600"} />
-                )}
-              </span>
-              {step}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function ConversationSidebar({
   conversations,
   activeConversationId,
@@ -7142,89 +7053,15 @@ const ReportPanel = memo(function ReportPanel({
 
 function ReportGenerationShell({
   title,
-  currentSection,
-  progress,
 }: {
   title: string;
-  currentSection: string;
-  progress: number;
 }) {
-  const safeProgress = Math.max(0, Math.min(100, progress));
-
   return (
-    <section className="min-h-[640px] overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-950/75 shadow-2xl shadow-black/50 backdrop-blur-2xl">
-      <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.18),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02))] p-5 sm:p-7">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
-              ZERINIX EXECUTIVE REPORT
-            </p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-              {title}
-            </h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
-              ZERINIX is generating the complete report in the background so the
-              final document appears without layout shift or partial sections.
-            </p>
-          </div>
-          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-teal-300/20 bg-teal-300/10 px-4 py-2 text-sm text-teal-100">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Generating
-          </div>
-        </div>
-      </div>
-
-      <div className="p-4 sm:p-5">
-        <div className="rounded-[1.75rem] border border-teal-200/15 bg-[linear-gradient(135deg,rgba(94,234,212,0.12),rgba(255,255,255,0.025))] p-5 shadow-2xl shadow-teal-950/10">
-          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
-                Overall Progress
-              </p>
-              <p className="mt-2 text-xl font-semibold tracking-tight text-white">
-                {currentSection || "Preparing report engine"}
-              </p>
-            </div>
-            <p className="text-4xl font-semibold tracking-tight text-white">
-              {Math.round(safeProgress)}%
-            </p>
-          </div>
-          <div className="mt-5 h-3 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/5">
-            <div
-              className="h-full rounded-full bg-teal-200 transition-[width] duration-500 ease-out"
-              style={{ width: `${safeProgress}%` }}
-            />
-          </div>
-        </div>
-
-        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {[
-            "Executive thesis",
-            "Market intelligence",
-            "Financial model",
-            "Scenario analysis",
-            "Founder roadmap",
-            "Final recommendation",
-          ].map((label, index) => (
-            <div
-              key={label}
-              className="min-h-40 rounded-[1.75rem] border border-white/10 bg-black/35 p-5 shadow-xl shadow-black/20"
-            >
-              <div className="flex items-center justify-between">
-                <span className="h-9 w-9 animate-pulse rounded-2xl border border-teal-200/20 bg-teal-200/10" />
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-              </div>
-              <p className="mt-5 text-sm font-semibold text-white">{label}</p>
-              <div className="mt-4 space-y-2.5">
-                <div className="h-2.5 animate-pulse rounded-full bg-white/10" />
-                <div className="h-2.5 w-10/12 animate-pulse rounded-full bg-white/10" />
-                <div className="h-2.5 w-7/12 animate-pulse rounded-full bg-white/10" />
-              </div>
-            </div>
-          ))}
-        </div>
+    <section className="flex min-h-64 items-center justify-center rounded-[2rem] border border-white/10 bg-zinc-950/75 p-8 shadow-2xl shadow-black/50 backdrop-blur-2xl">
+      <div className="text-center">
+        <Loader2 className="mx-auto h-6 w-6 animate-spin text-teal-200" />
+        <h2 className="mt-4 text-xl font-semibold text-white">{title}</h2>
+        <p className="mt-2 text-sm text-zinc-400">Preparing your report…</p>
       </div>
     </section>
   );
@@ -7302,37 +7139,6 @@ function createUnderstandingAssets(attachments: PlannerAttachment[]) {
     }));
 }
 
-function buildUnderstoodPrompt(
-  originalPrompt: string,
-  understanding: UniversalUnderstanding,
-  clarificationAnswers: Record<string, string> = {}
-) {
-  const answeredQuestions = understanding.clarificationQuestions
-    .map((question) => {
-      const answer = clarificationAnswers[question.id]?.trim();
-      return answer ? `- ${question.question}: ${answer}` : "";
-    })
-    .filter(Boolean);
-  const extractedFacts = understanding.extractedAssetFacts.map(
-    (fact) => `- ${fact.label}: ${fact.value} [Asset: ${fact.source}]`
-  );
-
-  return [
-    originalPrompt,
-    "",
-    "ZERINIX validated request context (classification is an inference, not a verified fact):",
-    `- Likely domain: ${understanding.detectedIndustry}`,
-    `- Likely content type: ${understanding.detectedContentType}`,
-    `- Inferred decision goal: ${understanding.detectedIntent}`,
-    ...(extractedFacts.length > 0
-      ? ["- Facts extracted from uploaded assets:", ...extractedFacts]
-      : []),
-    ...(answeredQuestions.length > 0
-      ? ["- User clarification answers:", ...answeredQuestions]
-      : []),
-  ].join("\n");
-}
-
 function usePlannerChat() {
   const [chatLoading, setChatLoading] = useState(false);
   const {
@@ -7408,8 +7214,7 @@ function useReportGeneration({
     useState<ReportInvestmentScore | undefined>(initialReport?.investmentScore);
   const [currentReportMetadata, setCurrentReportMetadata] =
     useState<ReportMetadata | undefined>(initialReport?.metadata);
-  const [regeneratingReportMode, setRegeneratingReportMode] =
-    useState<ChatMode | null>(null);
+  const [, setRegeneratingReportMode] = useState<ChatMode | null>(null);
 
   return {
     result,
@@ -7438,7 +7243,6 @@ function useReportGeneration({
     setCurrentReportInvestmentScore,
     currentReportMetadata,
     setCurrentReportMetadata,
-    regeneratingReportMode,
     setRegeneratingReportMode,
   };
 }
@@ -7886,7 +7690,6 @@ export default function Planner({
     setCurrentReportInvestmentScore,
     currentReportMetadata,
     setCurrentReportMetadata,
-    regeneratingReportMode,
     setRegeneratingReportMode,
   } = useReportGeneration({
     initialConversations,
@@ -7927,11 +7730,6 @@ export default function Planner({
   const [hasSelectedAnalysisMode, setHasSelectedAnalysisMode] = useState(
     Boolean(regenerationContext || restoredReportMode)
   );
-  const [pendingRecommendation, setPendingRecommendation] = useState<{
-    prompt: string;
-    recommendation: IntentRecommendation;
-    attachments: PlannerAttachment[];
-  } | null>(null);
   const [isUnderstanding, setIsUnderstanding] = useState(false);
   const [composerResetKey, setComposerResetKey] = useState(0);
   const [chatModelPreference] = useState<ChatModelPreference>("fast");
@@ -7967,7 +7765,6 @@ export default function Planner({
     );
     understandingRequestRef.current += 1;
     setIsUnderstanding(false);
-    setPendingRecommendation(null);
   }
 
   function selectAnalysisMode(mode: ChatMode) {
@@ -7975,6 +7772,7 @@ export default function Planner({
       return;
     }
 
+    cancelPendingUnderstanding();
     setActiveMode(mode);
     setHasSelectedAnalysisMode(true);
   }
@@ -7988,7 +7786,8 @@ export default function Planner({
   async function requestUniversalUnderstanding(
     submittedPrompt: string,
     queuedAttachments: PlannerAttachment[],
-    selectedMode: ChatMode
+    selectedMode: ChatMode,
+    aiCostRequestId: string
   ) {
     const assets = createUnderstandingAssets(queuedAttachments);
     const fallback = createUnderstandingFallback({
@@ -8005,6 +7804,7 @@ export default function Planner({
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
+          "X-Zerinix-AI-Request-Id": aiCostRequestId,
         },
         body: JSON.stringify({
           prompt: submittedPrompt,
@@ -8800,7 +8600,15 @@ export default function Planner({
 
     setComposerPrompt(request.prompt);
 
-    if (request.mode === "plan") {
+    if (request.reportReadiness) {
+      void generatePlan(
+        request.prompt,
+        false,
+        request.attachments,
+        request.reportReadiness,
+        request.mode
+      );
+    } else if (request.mode === "plan") {
       void generatePlan(
         request.prompt,
         false,
@@ -8862,35 +8670,22 @@ export default function Planner({
       return;
     }
 
+    const aiCostRequestId = crypto.randomUUID();
     const requestId = understandingRequestRef.current + 1;
     understandingRequestRef.current = requestId;
-    setPendingRecommendation(null);
     setIsUnderstanding(true);
     const queuedAttachments = [...attachments];
     const understanding = await requestUniversalUnderstanding(
       submittedPrompt,
       queuedAttachments,
-      selectedMode
+      selectedMode,
+      aiCostRequestId
     );
 
     if (understandingRequestRef.current !== requestId) {
       return;
     }
 
-    const recommendation = {
-      ...recommendationFromUnderstanding({
-        understanding,
-        prompt: submittedPrompt,
-        attachments: queuedAttachments,
-      }),
-      reportMode:
-        selectedMode === "market" ? ("market" as const) : ("plan" as const),
-    };
-    logPlannerAttachmentTrace(
-      "POINT_3_UNDERSTANDING_CARD_CREATED",
-      queuedAttachments,
-      { source: "analyze" }
-    );
     setIsUnderstanding(false);
     void persistAnalysisContext({
       originalRequest: submittedPrompt,
@@ -8911,148 +8706,35 @@ export default function Planner({
       reportPlan: understanding.reportPlan,
       researchPlan: understanding.researchPlan,
       clarificationAnswers: {},
-      reportStatus:
-        understanding.recommendedAction === "clarify"
-          ? "awaiting_clarification"
-          : "awaiting_user_action",
+      reportStatus: selectedMode === "chat" ? "ready_to_start" : "generating",
       createdAt: new Date().toISOString(),
     });
 
-    if (
-      selectedMode === "chat" &&
-      understanding.recommendedAction !== "clarify"
-    ) {
+    if (selectedMode === "chat") {
       composerDraftRef.current = "";
       setComposerResetKey((current) => current + 1);
       await sendChatMessage(
-        buildUnderstoodPrompt(submittedPrompt, understanding),
+        submittedPrompt,
         true,
         "",
-        queuedAttachments
+        queuedAttachments,
+        aiCostRequestId
       );
       return;
     }
 
-    setPendingRecommendation({
-      prompt: submittedPrompt,
-      attachments: queuedAttachments,
-      recommendation,
-    });
-  }
-
-  async function continueRecommendationAsChat(
-    clarificationAnswers: Record<string, string> = {}
-  ) {
-    if (!pendingRecommendation || isWorking) {
-      return;
-    }
-
-    const {
-      prompt: submittedPrompt,
-      recommendation,
-      attachments: queuedAttachments,
-    } = pendingRecommendation;
-    logPlannerAttachmentTrace(
-      "POINT_4_CONTINUE_AS_CHAT_CLICKED",
-      queuedAttachments,
-      { source: "recommendation_card" }
-    );
-    if (process.env.NODE_ENV !== "production") {
-      console.info("[planner:file-routing]", {
-        selectedAction: "continue_as_chat",
-        attachmentCount: queuedAttachments.length,
-        attachmentMimeTypes: queuedAttachments.map(
-          (attachment) => attachment.mimeType || "application/octet-stream"
-        ),
-        resolvedRequestMode:
-          queuedAttachments.length > 0 ? "file_analysis" : "chat",
-        fileAnalysis: queuedAttachments.length > 0,
-      });
-    }
-    const chatPrompt = recommendation.understanding
-      ? buildUnderstoodPrompt(
-          submittedPrompt,
-          recommendation.understanding,
-          clarificationAnswers
-        )
-      : submittedPrompt;
-    void persistAnalysisContext({
-      clarificationAnswers,
-      reportStatus: "chat_started",
-    });
+    const reportReadiness = createDirectReportReadiness(understanding);
     cancelPendingUnderstanding();
     composerDraftRef.current = "";
     setComposerResetKey((current) => current + 1);
-    await sendChatMessage(chatPrompt, true, "", queuedAttachments);
-  }
-
-  function generateRecommendedReport(
-    clarificationAnswers: Record<string, string> = {}
-  ) {
-    if (!pendingRecommendation || isWorking) {
-      return;
-    }
-
-    const {
-      prompt: submittedPrompt,
-      recommendation,
-      attachments: queuedAttachments,
-    } = pendingRecommendation;
-    const reportReadiness = recommendation.understanding
-      ? createUniversalReportReadiness(
-          recommendation.understanding,
-          clarificationAnswers
-        )
-      : null;
-
-    if (!reportReadiness) {
-      return;
-    }
-    if (process.env.NODE_ENV !== "production") {
-      console.info("[planner:file-routing]", {
-        selectedAction: "generate_strategic_report",
-        attachmentCount: queuedAttachments.length,
-        attachmentMimeTypes: queuedAttachments.map(
-          (attachment) => attachment.mimeType || "application/octet-stream"
-        ),
-        resolvedRequestMode: recommendation.reportMode,
-        fileAnalysis: false,
-      });
-    }
-    const reportPrompt = recommendation.understanding
-      ? buildUnderstoodPrompt(
-          submittedPrompt,
-          recommendation.understanding,
-          clarificationAnswers
-        )
-      : submittedPrompt;
-    void persistAnalysisContext({
-      clarificationAnswers,
-      reportStatus: "generating",
-    });
-    cancelPendingUnderstanding();
-    composerDraftRef.current = "";
-    setComposerResetKey((current) => current + 1);
-
     void generatePlan(
-      reportPrompt,
+      submittedPrompt,
       true,
       queuedAttachments,
       reportReadiness,
-      recommendation.reportMode
+      selectedMode,
+      aiCostRequestId
     );
-  }
-
-  function dispatchRecommendationAction(
-    action: "generate_strategic_report" | "continue_as_chat",
-    clarificationAnswers: Record<string, string>
-  ) {
-    if (action === "continue_as_chat") {
-      void continueRecommendationAsChat(clarificationAnswers);
-      return;
-    }
-
-    generateRecommendedReport(clarificationAnswers);
   }
 
   async function getGeneralWorkspaceId(
@@ -9273,7 +8955,8 @@ export default function Planner({
     promptOverride = prompt,
     addToHistory = true,
     supersededAssistantMessageId = "",
-    attachmentOverride?: PlannerAttachment[]
+    attachmentOverride?: PlannerAttachment[],
+    aiCostRequestId = crypto.randomUUID()
   ) {
     const currentAttachments =
       attachmentOverride?.length ? attachmentOverride : attachments;
@@ -9402,6 +9085,7 @@ export default function Planner({
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
+          "X-Zerinix-AI-Request-Id": aiCostRequestId,
         },
         signal: abortController.signal,
         body: JSON.stringify(chatRequestPayload),
@@ -9441,7 +9125,8 @@ export default function Planner({
     addToHistory = true,
     attachmentOverride?: PlannerAttachment[],
     reportReadiness?: UniversalReportReadiness,
-    requestedMode: Exclude<ChatMode, "chat"> = "plan"
+    requestedMode: ChatMode = "plan",
+    aiCostRequestId = crypto.randomUUID()
   ) {
     const submittedPrompt = promptOverride.trim();
 
@@ -9479,9 +9164,9 @@ export default function Planner({
       language: reportLanguage,
     });
     setReportProgress(0);
-    setCurrentReportSectionName("Preparing report engine");
+    setCurrentReportSectionName("Preparing your report");
     const copy = getLanguageCopy(reportLanguage);
-    const reportDomain = classifyReportDomain(
+    const inferredReportDomain = classifyReportDomain(
       submittedPrompt,
       reportAttachments.map((attachment) => ({
         name: attachment.name,
@@ -9489,21 +9174,32 @@ export default function Planner({
         textContent: attachment.textContent,
       }))
     );
+    const reportDomain = resolveReportDomainForSelectedMode({
+      selectedMode: requestedMode,
+      inferredDomain: inferredReportDomain,
+      expertiseDomain: reportReadiness?.expertiseProfile.domain,
+    });
     const baseDomainFields = getPlanFieldsForDomain(reportDomain);
     const outputFields = localizeReportFields(
-      reportDomain === "operations"
-        ? getPlanFieldsForDomain(reportDomain, submittedPrompt)
-        : baseDomainFields,
+      requestedMode === "market"
+        ? reportFields
+        : reportDomain === "operations"
+          ? getPlanFieldsForDomain(reportDomain, submittedPrompt)
+          : baseDomainFields,
       reportLanguage
     );
     const reportTitle =
-      reportDomain === "real_estate"
+      requestedMode === "market"
+        ? copy.marketTitle
+        : reportDomain === "real_estate"
         ? copy.realEstateTitle
         : isSpecializedReportDomain(reportDomain)
           ? getSpecializedReportTitle(reportDomain, reportLanguage)
           : copy.planTitle;
     const preparingReport =
-      reportDomain === "real_estate"
+      requestedMode === "market"
+        ? copy.preparingMarket
+        : reportDomain === "real_estate"
         ? copy.preparingRealEstate
         : isSpecializedReportDomain(reportDomain)
           ? `## ${reportTitle}\n\n${
@@ -9612,6 +9308,7 @@ export default function Planner({
           Authorization: `Bearer ${accessToken}`,
           "X-Zerinix-Pipeline": "decision_intelligence_v1",
           "X-Zerinix-Report-Request-Id": reportRequestId,
+          "X-Zerinix-AI-Request-Id": aiCostRequestId,
           ...(reportReadiness
             ? { "X-Zerinix-Universal-Input": "true" }
             : {}),
@@ -9890,12 +9587,20 @@ export default function Planner({
         language: reportLanguage,
       });
 
-      setPlanReport({ ...reportOutput });
+      if (requestedMode === "market") {
+        setMarketReport(Object.fromEntries(
+          reportFields.map(({ field }) => [field, reportOutput[field] || ""])
+        ) as MarketReport);
+        setPlanReport(null);
+      } else {
+        setPlanReport({ ...reportOutput });
+        setMarketReport(null);
+      }
       setReportGenerationError("");
       setReportGenerationWarning(warningMessage);
       setReportProgress(100);
       setCurrentReportSectionName("Report ready");
-      setWorkflowCompletedSteps(workflowSteps.length);
+      setWorkflowCompletedSteps(6);
       updateAssistantMessage(
         assistantMessageId,
         getReportMarkdown(reportTitle, reportOutput, outputFields),
@@ -9935,6 +9640,7 @@ export default function Planner({
       setReportGenerationError(errorMessage);
       setResult(errorMessage);
       setPlanReport(null);
+      setMarketReport(null);
       setReportProgress(0);
       setCurrentReportSectionName("Report failed");
       setWorkflowCompletedSteps(0);
@@ -9942,7 +9648,9 @@ export default function Planner({
         title: reportTitle,
         promptText: submittedPrompt,
         reportType:
-          reportDomain === "real_estate"
+          requestedMode === "market"
+            ? "market_analysis"
+            : reportDomain === "real_estate"
             ? "real_estate_investment_analysis"
             : isSpecializedReportDomain(reportDomain)
               ? `${reportDomain}_analysis`
@@ -9998,14 +9706,19 @@ export default function Planner({
     initialReport?.type === "Real Estate Investment Analysis" &&
     !lastRequest?.prompt
       ? "real_estate"
-      : classifyReportDomain(
-          lastRequest?.prompt || prompt,
-          (lastRequest?.attachments || []).map((attachment) => ({
-            name: attachment.name,
-            type: attachment.mimeType,
-            textContent: attachment.textContent,
-          }))
-        );
+      : resolveReportDomainForSelectedMode({
+          selectedMode: lastRequest?.mode || activeMode,
+          inferredDomain: classifyReportDomain(
+            lastRequest?.prompt || prompt,
+            (lastRequest?.attachments || []).map((attachment) => ({
+              name: attachment.name,
+              type: attachment.mimeType,
+              textContent: attachment.textContent,
+            }))
+          ),
+          expertiseDomain:
+            lastRequest?.reportReadiness?.expertiseProfile.domain,
+        });
   const activeReportFields = useMemo(
     () =>
       (activeReportMode === "plan"
@@ -10040,43 +9753,6 @@ export default function Planner({
     ? getSpecializedReportTitle("legal", activeReportLanguage)
     : decisionGoalLabels[activeMode];
   const shouldShowToolbarRegenerate = true;
-  const hasConversationMessages = messages.length > 0;
-  const hasWorkspaceActivity =
-    hasConversationMessages ||
-    isReportWorking ||
-    Boolean(planReport || marketReport || result || reportGenerationError);
-  const initialReportConversationIsActive = Boolean(
-    restoredReportMode && initialReport?.id && activeReportId === initialReport.id
-  );
-  const activeConversationHasReportOutput = Boolean(
-    activeConversation?.messages?.some(
-      (message) => message.mode === "plan" || message.mode === "market"
-    )
-  );
-  const isReportModeActive =
-    activeConversationHasReportOutput ||
-    Boolean(regeneratingReportMode) ||
-    (isReportWorking && (activeMode === "plan" || activeMode === "market"));
-  const showDesktopAdvisorPanels =
-    hasWorkspaceActivity &&
-    !initialReportConversationIsActive &&
-    !isReportModeActive;
-  const recentAssistantOutputs = useMemo(
-    () =>
-      (activeConversation?.messages || [])
-        .filter((message) => message.role === "assistant" && message.content.trim())
-        .map((message) => ({
-          id: message.id,
-          title: activeConversation
-            ? getAnalysisSessionTitle(activeConversation.title)
-            : "Current analysis",
-          content: message.content,
-          createdAt: message.createdAt,
-        }))
-        .sort((a, b) => b.createdAt - a.createdAt)
-        .slice(0, 3),
-    [activeConversation]
-  );
   const mobileConversationSummaries = useMemo(
     () =>
       [...conversations]
@@ -10164,13 +9840,8 @@ export default function Planner({
   const mobileReportContent =
     isReportWorking || planReport || marketReport || result ? (
       <>
-        <WorkflowPanel active={isReportWorking} completedSteps={workflowCompletedSteps} />
         {isReportWorking ? (
-          <ReportGenerationShell
-            title={currentReportTitle}
-            currentSection={currentReportSectionName}
-            progress={reportProgress}
-          />
+          <ReportGenerationShell title={currentReportTitle} />
         ) : (
           <ReportPanel
             reportData={planReport || marketReport}
@@ -10328,24 +9999,13 @@ export default function Planner({
           draftSnapshotRef={composerDraftRef}
           activeAnalysisMode={activeMode}
           analysisModeSelected={hasSelectedAnalysisMode}
-          analysisActive={isUnderstanding || Boolean(pendingRecommendation)}
+          analysisActive={isUnderstanding}
           chatLoading={chatLoading || isUnderstanding}
           isWorking={isWorking || isUnderstanding}
           canGenerateReport={Boolean(mobileReportPrompt)}
           reportContent={mobileReportContent}
           recommendationContent={
-            isUnderstanding ? (
-              <UnderstandingLoadingState />
-            ) : pendingRecommendation ? (
-              <RecommendationCard
-                key={`${pendingRecommendation.prompt}:${pendingRecommendation.attachments
-                  .map((attachment) => attachment.id)
-                  .join(",")}`}
-                recommendation={pendingRecommendation.recommendation}
-                isWorking={isWorking}
-                onAction={dispatchRecommendationAction}
-              />
-            ) : null
+            isUnderstanding ? <UnderstandingLoadingState /> : null
           }
           reportUpdateKey={`${reportProgress}:${currentReportSectionName}:${activeReportId}:${result.length}`}
           conversationError={conversationError}
@@ -10401,7 +10061,7 @@ export default function Planner({
                 modeSelectionDisabled={isWorking || isUnderstanding}
                 isWorking={isWorking}
                 isUnderstanding={isUnderstanding}
-                analysisActive={isUnderstanding || Boolean(pendingRecommendation)}
+                analysisActive={isUnderstanding}
                 attachments={attachments}
                 attachmentError={attachmentError}
                 draftSnapshotRef={composerDraftRef}
@@ -10420,18 +10080,7 @@ export default function Planner({
                 }}
               />
 
-              {isUnderstanding ? (
-                <UnderstandingLoadingState />
-              ) : pendingRecommendation ? (
-                <RecommendationCard
-                  key={`${pendingRecommendation.prompt}:${pendingRecommendation.attachments
-                    .map((attachment) => attachment.id)
-                    .join(",")}`}
-                  recommendation={pendingRecommendation.recommendation}
-                  isWorking={isWorking}
-                  onAction={dispatchRecommendationAction}
-                />
-              ) : null}
+              {isUnderstanding ? <UnderstandingLoadingState /> : null}
 
               <ChatMessages
                 messages={messages}
@@ -10440,86 +10089,8 @@ export default function Planner({
                 onRegenerate={regenerateResponse}
               />
 
-		              {showDesktopAdvisorPanels ? (
-                <>
-                  <section className="rounded-[1.55rem] border border-white/10 bg-white/[0.045] p-3.5 shadow-xl shadow-black/20 ring-1 ring-white/[0.025] backdrop-blur-2xl">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-teal-200/70">
-                      Context
-                    </p>
-                    <h3 className="mt-1.5 text-base font-semibold text-white">
-                      Conversation Context
-                    </h3>
-                    <div className="mt-3 grid gap-2 md:grid-cols-4">
-                      <div className="rounded-2xl border border-white/10 bg-black/25 p-2.5 md:col-span-2">
-                        <p className="text-[11px] font-medium text-zinc-500">Current session</p>
-                        <p className="mt-1 line-clamp-2 text-sm font-semibold text-zinc-100">
-                          {activeConversation
-                            ? getAnalysisSessionTitle(activeConversation.title)
-                            : "Strategic Analysis Builder"}
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-white/10 bg-black/25 p-2.5">
-                        <p className="text-base font-semibold text-white">{messages.length}</p>
-                        <p className="text-[11px] text-zinc-500">Messages</p>
-                      </div>
-                      <div className="rounded-2xl border border-white/10 bg-black/25 p-2.5">
-                        <p className="text-base font-semibold text-white">{attachments.length}</p>
-                        <p className="text-[11px] text-zinc-500">Files</p>
-                      </div>
-                      <div className="rounded-2xl border border-white/10 bg-black/25 p-2.5 md:col-span-4">
-                        <p className="text-[11px] font-medium text-zinc-500">Analysis type</p>
-                        <p className="mt-1 text-sm font-semibold text-zinc-100">
-                          {hasSelectedAnalysisMode
-                            ? activeAnalysisLabel
-                            : "Not selected"}
-                        </p>
-                      </div>
-                    </div>
-                  </section>
-
-                  {recentAssistantOutputs.length > 0 ? (
-                    <section className="rounded-[1.55rem] border border-white/10 bg-white/[0.045] p-3.5 shadow-xl shadow-black/20 ring-1 ring-white/[0.025] backdrop-blur-2xl">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-teal-200/70">
-                            Outputs
-                          </p>
-                          <h3 className="mt-1.5 text-base font-semibold text-white">
-                            Recent Outputs
-                          </h3>
-                        </div>
-                        <span className="rounded-full border border-white/10 bg-black/25 px-2 py-1 text-[11px] text-zinc-500">
-                          {recentAssistantOutputs.length}
-                        </span>
-                      </div>
-                      <div className="mt-3 grid gap-2 md:grid-cols-3">
-                        {recentAssistantOutputs.map((output) => (
-                          <div
-                            key={output.id}
-                            className="rounded-2xl border border-white/10 bg-black/25 p-2.5"
-                          >
-                            <p className="line-clamp-1 text-sm font-semibold text-zinc-100">
-                              {output.title}
-                            </p>
-                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500">
-                              {output.content}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  ) : null}
-                </>
-              ) : null}
-
-              <WorkflowPanel active={isReportWorking} completedSteps={workflowCompletedSteps} />
-
               {isReportWorking ? (
-                <ReportGenerationShell
-                  title={currentReportTitle}
-                  currentSection={currentReportSectionName}
-                  progress={reportProgress}
-                />
+                <ReportGenerationShell title={currentReportTitle} />
               ) : (planReport || marketReport || result) ? (
                 <ReportPanel
                   reportData={planReport || marketReport}

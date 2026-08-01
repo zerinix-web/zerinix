@@ -56,12 +56,12 @@ function plan(domain, sections, gates = [], selectedMode = "chat") {
   };
 }
 
-function validation({ findings = [], sectionSupport = [], gates = [], quality = "moderate" } = {}) {
+function validation({ findings = [], sectionSupport = [], gates = [], quality = "moderate", sources } = {}) {
   return {
     version: "evidence_validation_v1",
     selectedMode: "chat",
     findings,
-    sources: [
+    sources: sources || [
       {
         id: "source_1",
         title: "Official record",
@@ -233,7 +233,7 @@ test("one validated finding is owned by only one report section", () => {
   assert.equal(output.sections.reduce((count, item) => count + item.evidence.length, 0), 1);
 });
 
-test("recommendations reference validated findings and insufficient evidence uses the required fallback", () => {
+test("recommendations reference validated findings and insufficient evidence receives bounded decision guidance", () => {
   const supported = writer({
     domain: "legal",
     sections: [section("recommended_next_steps", "Recommended Next Steps", "Provide next steps")],
@@ -248,7 +248,95 @@ test("recommendations reference validated findings and insufficient evidence use
     evidence: validation({ quality: "insufficient" }),
     outputFields: ["recommendedActions"],
   });
-  assert.match(formatAdaptiveReportWriterContext(insufficient), /Additional verification is recommended\./);
+  const context = formatAdaptiveReportWriterContext(insufficient);
+  assert.match(context, /why the information may be unavailable/i);
+  assert.match(context, /bounded decision/i);
+  assert.doesNotMatch(context, /Additional verification is recommended\./);
+});
+
+test("writer preserves the exact decision question and requires consultant-grade interpretation", () => {
+  const output = createAdaptiveReportWriterPlan({
+    expertiseProfile: profile("business", {
+      userGoal: "Should we enter the European decision-intelligence market?",
+    }),
+    reportPlan: plan("business", [
+      section("executive_recommendation", "Executive Recommendation", "Decide whether to enter"),
+    ], [], "plan"),
+    validatedEvidence: validation(),
+    outputContract: { fields: ["executiveRecommendation"] },
+  });
+  const context = formatAdaptiveReportWriterContext(output);
+  assert.equal(output.decisionQuestion, "Should we enter the European decision-intelligence market?");
+  assert.match(context, /Every sentence must help answer the stated decision question/i);
+  assert.match(context, /causal driver.*decision implication.*execution risk.*recommended response/i);
+});
+
+test("numeric evidence is preserved and multiple sources require like-for-like comparison", () => {
+  const marketFinding = finding({
+    field: "market_growth",
+    claim: "The market increases from USD 10 billion in 2026 to USD 20 billion in 2031.",
+    sourceIds: ["source_1", "source_2"],
+    reason: "Two independent forecasts report 14.9% CAGR for 2026-2031.",
+  });
+  const output = writer({
+    domain: "business",
+    sections: [section("market_analysis", "Market Analysis", "Assess market growth")],
+    evidence: validation({
+      findings: [marketFinding],
+      sources: [
+        {
+          id: "source_1", title: "Forecast A", publisher: "Authority A",
+          url: "https://authority-a.test/forecast", sourceType: "industry report",
+          authority: 0.9, reliability: 0.9, publishedDate: "2026-01-01", accessedAt: "2026-08-01",
+        },
+        {
+          id: "source_2", title: "Forecast B", publisher: "Authority B",
+          url: "https://authority-b.test/forecast", sourceType: "industry report",
+          authority: 0.88, reliability: 0.9, publishedDate: "2026-02-01", accessedAt: "2026-08-01",
+        },
+      ],
+      sectionSupport: [
+        { sectionId: "market_analysis", supportedFindingIds: ["finding_1"], unresolvedFindings: [], risks: [], opportunities: [], conflictIds: [], decisionImpact: "critical" },
+      ],
+    }),
+    outputFields: ["marketOpportunity"],
+  });
+  assert.deepEqual(output.sections[0].evidence[0].numericSignals, [
+    "USD 10 billion", "2026", "USD 20 billion", "2031", "14.9%",
+  ]);
+  assert.equal(output.sections[0].evidence[0].requiresSourceComparison, true);
+  assert.match(formatAdaptiveReportWriterContext(output), /do not average incompatible figures/i);
+});
+
+test("executive recommendation contract requires one verdict and a three-action 30-day plan", () => {
+  const output = writer({
+    domain: "business",
+    sections: [section("executive_recommendation", "Executive Recommendation", "Make the investment decision")],
+    evidence: validation(),
+    outputFields: ["executiveRecommendation"],
+    selectedMode: "plan",
+  });
+  const rules = output.sections[0].writingInstructions.join(" ");
+  assert.match(rules, /Should proceed, Why, Biggest opportunity, Biggest risk/);
+  assert.match(rules, /three-action Next 30-day plan/);
+});
+
+test("only the final recommendation owner receives the executive recommendation contract", () => {
+  const output = writer({
+    domain: "business",
+    sections: [
+      section("executive_summary", "Executive Summary", "Summarize the decision"),
+      section("market_analysis", "Market Analysis", "Assess the market"),
+      section("executive_recommendation", "Executive Recommendation", "Conclude the decision"),
+    ],
+    evidence: validation(),
+    outputFields: ["executiveSummary", "marketOpportunity", "executiveRecommendation"],
+    selectedMode: "plan",
+  });
+  const owners = output.sections.filter((item) =>
+    item.writingInstructions.some((rule) => /three-action Next 30-day plan/.test(rule))
+  );
+  assert.deepEqual(owners.map((item) => item.id), ["executive_recommendation"]);
 });
 
 test("writer preserves the selected analysis mode and existing output contract", () => {

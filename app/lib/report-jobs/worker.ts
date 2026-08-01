@@ -23,6 +23,11 @@ import {
   realEstateFields,
   type RealEstateReportField,
 } from "@/app/lib/report-engine/prompts/real-estate";
+import {
+  marketFieldLabels,
+  marketReportFields,
+  type MarketReportField,
+} from "@/app/lib/report-engine/prompts/market";
 import type { ReportDomain } from "@/app/lib/report-engine/domain";
 import type { ReportMetadata } from "@/app/lib/report-investment-score";
 import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
@@ -62,8 +67,10 @@ type ReportJobRow = {
   started_at: string | null;
 };
 
+type ReportExecutionDomain = ReportDomain | "market";
+
 type ParsedReport = {
-  domain: ReportDomain;
+  domain: ReportExecutionDomain;
   language: ResponseLanguage;
   sections: Array<{ field: string; title: string; content: string }>;
   metadata?: ReportMetadata;
@@ -237,7 +244,11 @@ function isSpecializedDomain(value: string): value is SpecializedReportDomain {
   );
 }
 
-function getExpectedFields(domain: ReportDomain) {
+function getExpectedFields(domain: ReportExecutionDomain) {
+  if (domain === "market") {
+    return marketReportFields as readonly string[];
+  }
+
   if (domain === "real_estate") {
     return realEstateFields as readonly string[];
   }
@@ -250,10 +261,14 @@ function getExpectedFields(domain: ReportDomain) {
 }
 
 function getFieldTitle(
-  domain: ReportDomain,
+  domain: ReportExecutionDomain,
   language: ResponseLanguage,
   field: string
 ) {
+  if (domain === "market") {
+    return marketFieldLabels[language][field as MarketReportField] || field;
+  }
+
   if (domain === "real_estate") {
     return realEstateFieldLabels[language][field as RealEstateReportField] || field;
   }
@@ -268,7 +283,11 @@ function getFieldTitle(
 function inferDomain(
   payload: Record<string, unknown>,
   events: Array<Record<string, unknown>>
-): ReportDomain {
+): ReportExecutionDomain {
+  if (readString(payload.analysisMode) === "market") {
+    return "market";
+  }
+
   const eventDomain = events.map((event) => readString(event.reportDomain)).find(Boolean);
   const payloadDomain = readString(payload.reportDomain);
   const candidate = eventDomain || payloadDomain;
@@ -389,7 +408,11 @@ async function readExecutionResponse(
   };
 }
 
-function getReportType(domain: ReportDomain) {
+function getReportType(domain: ReportExecutionDomain) {
+  if (domain === "market") {
+    return "market_analysis";
+  }
+
   if (domain === "real_estate") {
     return "real_estate_investment_analysis";
   }
@@ -403,12 +426,16 @@ function getReportType(domain: ReportDomain) {
 
 function getReportTitle(
   payload: Record<string, unknown>,
-  domain: ReportDomain,
+  domain: ReportExecutionDomain,
   language: ResponseLanguage
 ) {
   const supplied = readString(payload.reportTitle);
   if (supplied) {
     return supplied.slice(0, 240);
+  }
+
+  if (domain === "market") {
+    return ({ English: "Market Intelligence Report", Turkish: "Pazar İstihbaratı Raporu", German: "Marktintelligenzbericht", French: "Rapport d'intelligence de marché", Spanish: "Informe de inteligencia de mercado" } as const)[language];
   }
 
   if (domain === "real_estate") {
@@ -730,6 +757,8 @@ export async function processNextReportJob(options: ReportWorkerOptions = {}) {
         "X-Zerinix-Pipeline":
           readString(queueMetadata.requestedPipeline) || "decision_intelligence_v1",
         "X-Zerinix-Report-Request-Id": requestId,
+        "X-Zerinix-AI-Request-Id":
+          readString(job.request_payload.aiCostRequestId) || job.id,
         ...(queueMetadata.universalInput === true
           ? { "X-Zerinix-Universal-Input": "true" }
           : {}),

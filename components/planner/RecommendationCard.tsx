@@ -1,14 +1,9 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { FileText, Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { FileDetectionBadge, UrlDetectionBadge } from "./FileDetectionBadge";
 import type { IntentRecommendation } from "./IntentDetector";
-import {
-  RecommendationActions,
-  type RecommendationAction,
-} from "./RecommendationActions";
-import { RecommendationReason } from "./RecommendationReason";
 import { UnderstandingCard } from "./UnderstandingCard";
 
 const detectedPropertyFactDefinitions = [
@@ -52,14 +47,13 @@ const detectedPropertyFactDefinitions = [
 export function RecommendationCard({
   recommendation,
   isWorking,
-  onAction,
+  modeMismatchMessage = "",
+  onContinue,
 }: {
   recommendation: IntentRecommendation;
   isWorking: boolean;
-  onAction: (
-    action: RecommendationAction,
-    clarificationAnswers: Record<string, string>
-  ) => void;
+  modeMismatchMessage?: string;
+  onContinue: (clarificationAnswers: Record<string, string>) => void;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const questions = useMemo(
@@ -128,25 +122,6 @@ export function RecommendationCard({
         </p>
       </div>
 
-      <div className="mt-7">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-teal-100/75">
-          {isTurkish ? "Önerilen Analizler" : "Recommended Analyses"}
-        </p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          {recommendation.analyses.map((analysis) => (
-            <div
-              key={analysis}
-              className="flex min-h-12 items-center gap-3 rounded-2xl bg-white/[0.055] px-4 py-3 text-[15px] font-medium text-zinc-100"
-            >
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-teal-200/12">
-                <Check className="h-3.5 w-3.5 text-teal-200" />
-              </span>
-              {analysis}
-            </div>
-          ))}
-        </div>
-      </div>
-
       {recommendation.detectedFiles.length > 0 || recommendation.detectedUrl ? (
         <div className="mt-5 flex flex-wrap gap-2">
           {recommendation.detectedFiles.map((file) => (
@@ -158,7 +133,7 @@ export function RecommendationCard({
         </div>
       ) : null}
 
-      {missingInformationLabels.length > 0 ? (
+      {!modeMismatchMessage && missingInformationLabels.length > 0 ? (
         <div className="mt-6 rounded-2xl bg-white/[0.04] p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-teal-100/75">
             {isTurkish ? "Eksik Bilgiler" : "Missing Information"}
@@ -192,7 +167,13 @@ export function RecommendationCard({
         </div>
       ) : null}
 
-      {questions.length > 0 ? (
+      {modeMismatchMessage ? (
+        <div className="mt-6 rounded-2xl border border-amber-200/15 bg-amber-200/[0.06] p-4 text-sm leading-6 text-amber-50">
+          {modeMismatchMessage}
+        </div>
+      ) : null}
+
+      {!modeMismatchMessage && questions.length > 0 ? (
         <fieldset className="mt-6 space-y-4">
           <legend className="text-xs font-semibold uppercase tracking-[0.2em] text-teal-100/75">
             {isTurkish ? "Sorular" : "Questions"}
@@ -250,26 +231,29 @@ export function RecommendationCard({
         </fieldset>
       ) : null}
 
-      <div className="mt-6">
-        <RecommendationReason reason={recommendation.reason} />
-      </div>
-      <div className="mt-6">
-        <RecommendationActions
-          isWorking={isWorking}
-          primaryDisabled={!requiredQuestionsAnswered}
-          primaryLabel={
-            questions.length > 0
+      {!modeMismatchMessage ? (
+        <div className="mt-6">
+          <button
+            type="button"
+            onClick={() => onContinue(answers)}
+            disabled={isWorking || !requiredQuestionsAnswered}
+            className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-teal-200 px-5 text-sm font-semibold text-black shadow-xl shadow-teal-950/35 transition hover:-translate-y-0.5 hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+          >
+            {isWorking ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <FileText className="h-4 w-4" />
+            )}
+            {questions.length > 0
               ? isTurkish
-                ? "Yanıtlarla Araştırmayı Başlat"
-                : "Start Research with Answers"
+                ? "Yanıtlarla Devam Et"
+                : "Continue with Answers"
               : isTurkish
-                ? "Araştırmayı Başlat"
-                : "Start Research"
-          }
-          secondaryLabel={isTurkish ? "Sohbet Olarak Devam Et" : "Continue as Chat"}
-          onAction={(action) => onAction(action, answers)}
-        />
-      </div>
+                ? "Devam Et"
+                : "Continue"}
+          </button>
+        </div>
+      ) : null}
     </UnderstandingCard>
   );
 }

@@ -1078,6 +1078,7 @@ export default function MobileChatHome({
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
+          "X-Zerinix-AI-Request-Id": crypto.randomUUID(),
         },
         body: JSON.stringify({
           prompt: submittedPrompt,

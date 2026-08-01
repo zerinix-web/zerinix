@@ -130,6 +130,18 @@ const pdfPresentationLabelPairs = [
     ["Risk Matrix", "Risk Matrisi"],
     ["AI Action Plan", "AI Aksiyon Planı"],
     ["Immediate Actions", "Acil Aksiyonlar"],
+    ["Immediate Action", "Acil Adım"],
+    ["Next Actions", "Sonraki Adımlar"],
+    ["Next Action", "Sonraki Adım"],
+    ["Key Reasons", "Temel Gerekçeler"],
+    ["Key Risks", "Temel Riskler"],
+    ["Evidence Gaps", "Kanıt Boşlukları"],
+    ["Why", "Gerekçe"],
+    ["Should proceed", "İlerleme Kararı"],
+    ["Wait", "Bekle"],
+    ["Hold", "Bekle"],
+    ["Estimated", "Tahmini"],
+    ["AI Analysis", "Analitik Değerlendirme"],
     ["Expected impact", "Beklenen etki"],
     ["Validation Intelligence", "Doğrulama Zekası"],
     ["Validation Roadmap", "Doğrulama Yol Haritası"],
@@ -288,6 +300,8 @@ const pdfPresentationLabelPairs = [
     ["Threat of Substitutes", "İkame Tehdidi"],
     ["NO DATA", "VERİ YOK"],
     ["Not available", "Mevcut değil"],
+    ["Not provided", "Veri bulunamadı"],
+    ["Unavailable", "Kullanılamıyor"],
 ];
 
 const turkishPdfPresentationLabels = new Map(
@@ -518,6 +532,29 @@ export function extractPdfValidationIntelligenceSection(sections = [], locale = 
 
 function cleanupTurkishPdfLanguageLeakage(value = "") {
   return String(value)
+    .replace(/\bExecutive Recommendation\b/gi, "Yönetici Tavsiyesi")
+    .replace(/\bRecommendation\b/gi, "Tavsiye")
+    .replace(/\bImmediate Actions?\b/gi, "Acil Adımlar")
+    .replace(/\bNext Actions?\b/gi, "Sonraki Adımlar")
+    .replace(/\bWhy\b(?=\s*[:：\-–—])/gi, "Gerekçe")
+    .replace(/\bShould proceed\b/gi, "İlerleme Kararı")
+    .replace(/\bValidation Required\b/gi, "Doğrulama Gerekli")
+    .replace(/\bAI Analysis\b/gi, "Analitik Değerlendirme")
+    .replace(/\bEstimated\b/gi, "Tahmini")
+    .replace(/\bHold for validation\b/gi, "Doğrulama Tamamlanana Kadar Bekle")
+    .replace(/\b(?:Hold|Wait)\b/gi, "Bekle")
+    .replace(
+      /(^|\n)(\s*(?:[-*•]\s*)?)(TAM|SAM|SOM)\s*[:=]\s*(?:[0-3](?:[.,]0+)?|[-–—]|N\/?A)(?=\s*(?:$|\n|[.;,]))/gi,
+      "$1$2$3: Hesaplanamadı"
+    )
+    .replace(
+      /sağlanmadı\s*[;,.]?\s*mevcut\s+kanıtlardan\s+hesaplanamaz/gi,
+      "Veri bulunamadı"
+    )
+    .replace(
+      /^(\s*(?:değerleme|fiyat|emsal değer|tam|sam|som|gelir|maliyet|metrik))\s+(Veri bulunamadı|Hesaplanamadı)/gim,
+      "$1: $2"
+    )
     .replace(/\bfinansal[._-]benchmarklar(?:[._-][\p{L}\p{N}_-]+)*\b/giu, "Finansal benchmarklar")
     .replace(/\bpazar[._-]büyüklüğü(?:[._-][\p{L}\p{N}_-]+)*\b/giu, "Pazar büyüklüğü")
     .replace(/(^|[\n:•-]\s*)tam(?=$|[\n.;,)]|\s{2,})/giu, "$1TAM / SAM / SOM")

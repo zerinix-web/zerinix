@@ -14,10 +14,10 @@ type ReportDomainAsset = {
 };
 
 const realEstateSignals =
-  /\b(real[\s-]?estate|property|properties|land|parcel|plot|title deed|deed|land registry|registry document|cadastral|cadastre|zoning|land use|planning permission|development potential|comparable sale|comparable listing|mortgage|easement|right of way|freehold|leasehold|tapu(?:ya|yu|nun|da|dan)?|tapu senedi|arsa(?:ya|yı|nın|da|dan)?|arazi(?:ye|yi|nin|de|den)?|parsel(?:e|i|in|de|den)?|gayrimenkul(?:e|ü|ün|de|den)?|taşınmaz(?:a|ı|ın|da|dan)?|imar(?:ı|ın|da|dan)?|kadastro|emlak|konut|daire|bina|mülkiyet|irtifak|şerh|ipotek)\b/i;
+  /(?:\b(?:real[\s-]?estate|property|properties|land|parcel|plot|title deed|deed|land registry|registry document|cadastral|cadastre|zoning|land use|planning permission|development potential|comparable sale|comparable listing|mortgage|easement|right of way|freehold|leasehold)\b|tapu(?:ya|yu|nun|da|dan)?|tapu senedi|arsa(?:ya|yı|nın|da|dan)?|arazi(?:ye|yi|nin|de|den)?|parsel(?:e|i|in|de|den)?|pafta|\bada\b|gayrimenkul(?:e|ü|ün|de|den)?|taşınmaz(?:a|ı|ın|da|dan)?|imar(?:ı|ın|da|dan)?|kadastro|emlak|kira|konut|daire|bina(?:sı|yı|nın|da|dan)?|ofis(?:i|in|te|ten)?|ofis binası|ticari bina|iş merkezi|plaza|mülkiyet|irtifak|şerh|ipotek)/i;
 
 const directAssetInvestmentSignals =
-  /\b(invest|investment|buy|purchase|acquire|sell|valuation|value|worth|due diligence|risk|return|yield|develop|yatırım|satın al|almak|değer|değerleme|eder|risk|getiri|geliştir|incele|analiz)\b/i;
+  /(?:\b(?:invest|investment|buy|purchase|acquire|sell|valuation|value|worth|due diligence|risk|return|yield|develop)\b|yatırım|satın al(?:mak|mayı|ma|ım|mayı düşünüyorum)?|almak|değer|değerleme|eder|risk|getiri|kira geliri|kapitalizasyon oranı|geliştir|incele|analiz)/i;
 
 const operatingBusinessSignals =
   /\b(startup|saas|software|platform|marketplace|subscription|customers?|customer acquisition|pricing model|revenue model|business plan|company|venture|founder|girişim|yazılım|platform|abonelik|müşteri edinimi|fiyatlandırma modeli|gelir modeli|iş planı|şirket|kurucu)\b/i;
@@ -77,4 +77,53 @@ export function classifyReportDomain(
   }
 
   return "real_estate";
+}
+
+const supportedStrategicDomains = new Set<ReportDomain>([
+  "real_estate",
+  "legal",
+  "finance",
+  "accounting",
+  "operations",
+  "procurement",
+]);
+
+/**
+ * The selected card owns the top-level workflow. Strategic Advisory may use a
+ * specialized internal domain, but that domain must come from the resolved
+ * expertise profile rather than a second classifier overriding the selection.
+ */
+export function resolveReportDomainForSelectedMode({
+  selectedMode,
+  inferredDomain,
+  expertiseDomain,
+}: {
+  selectedMode: unknown;
+  inferredDomain: ReportDomain;
+  expertiseDomain?: unknown;
+}): ReportDomain {
+  const normalizedExpertiseDomain =
+    typeof expertiseDomain === "string"
+      ? expertiseDomain.trim().toLowerCase()
+      : "";
+  const hasRealEstateDomain =
+    inferredDomain === "real_estate" || normalizedExpertiseDomain === "real_estate";
+
+  if (selectedMode === "plan") {
+    return hasRealEstateDomain ? "real_estate" : "business";
+  }
+
+  if (selectedMode === "market") {
+    return "business";
+  }
+
+  if (selectedMode !== "chat" || typeof expertiseDomain !== "string") {
+    return inferredDomain;
+  }
+
+  if (supportedStrategicDomains.has(normalizedExpertiseDomain as ReportDomain)) {
+    return normalizedExpertiseDomain as ReportDomain;
+  }
+
+  return "business";
 }

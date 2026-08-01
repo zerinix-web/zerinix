@@ -42,6 +42,10 @@ const domainUserInputFields = {
     "target_customer",
     "target_market",
     "venture_stage",
+    "industry_scope",
+    "market_geography",
+    "market_time_horizon",
+    "competitor_set",
   ]),
   manufacturing: new Set([
     "analysis_objective",
