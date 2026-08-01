@@ -73,6 +73,10 @@ import {
   resolveDynamicResearchPlan,
   type DynamicResearchPlan,
 } from "@/app/lib/ai/dynamic-research-plan";
+import {
+  createAdaptiveReportWriterPlan,
+  formatAdaptiveReportWriterContext,
+} from "@/app/lib/ai/adaptive-report-writer";
 import type {
   ExpertiseProfile,
   SelectedAnalysisMode,
@@ -3162,6 +3166,18 @@ async function generateRealEstateInvestmentReport({
     decision: compressedDecisionContext,
     extractedFacts: compressedAssetFacts,
   });
+  const adaptiveWriterContext = formatAdaptiveReportWriterContext(
+    createAdaptiveReportWriterPlan({
+      expertiseProfile: dynamicResearchPlanningInput.expertiseProfile,
+      reportPlan: dynamicResearchPlanningInput.reportPlan,
+      validatedEvidence: domainResearch.validatedEvidence,
+      uploadedMaterialTypes: analysisAssets.map((asset) => asset.type),
+      outputContract: {
+        fields: realEstateFields,
+        labels: realEstateFieldLabels[responseLanguage],
+      },
+    })
+  );
   console.info("[EVIDENCE_COMPRESSION] metrics", {
     requestId: reportRequestId || "unassigned",
     ...compressedResearch.metrics,
@@ -3169,7 +3185,7 @@ async function generateRealEstateInvestmentReport({
 
   const cacheKey = createAiCacheKey({
     endpoint: "/api/plan",
-    normalizedPrompt: `${productionLimit.normalizedPrompt}\nassets:${assetFingerprint}\nresearch:${domainResearchContext}`,
+    normalizedPrompt: `${productionLimit.normalizedPrompt}\nassets:${assetFingerprint}\nresearch:${domainResearchContext}\nwriter:${adaptiveWriterContext}`,
     mode: "real_estate_investment_analysis:sectioned:v3",
     language: responseLanguage,
     model,
@@ -3264,6 +3280,9 @@ ${JSON.stringify(compressedAssetFacts)}
 
 Decision Intelligence context:
 ${JSON.stringify(compressedDecisionContext)}
+
+Adaptive report-writing contract:
+${adaptiveWriterContext}
 
 Compressed evidence relevant to this section only:
 ${JSON.stringify(sectionEvidence)}
@@ -4046,10 +4065,22 @@ async function generateSpecializedDomainReport({
     });
   }
   const researchContext = formatDomainResearchBundle(domainResearch);
+  const adaptiveWriterContext = formatAdaptiveReportWriterContext(
+    createAdaptiveReportWriterPlan({
+      expertiseProfile: dynamicResearchPlanningInput.expertiseProfile,
+      reportPlan: dynamicResearchPlanningInput.reportPlan,
+      validatedEvidence: domainResearch.validatedEvidence,
+      uploadedMaterialTypes: analysisAssets.map((asset) => asset.type),
+      outputContract: {
+        fields: domainAnalysisFields,
+        labels: domainAnalysisFieldLabels[responseLanguage],
+      },
+    })
+  );
 
   const cacheKey = createAiCacheKey({
     endpoint: "/api/plan",
-    normalizedPrompt: `${productionLimit.normalizedPrompt}\nassets:${assetFingerprint}\nresearch:${researchContext}`,
+    normalizedPrompt: `${productionLimit.normalizedPrompt}\nassets:${assetFingerprint}\nresearch:${researchContext}\nwriter:${adaptiveWriterContext}`,
     mode: `${domain}_decision_analysis:fullReport:v1`,
     language: responseLanguage,
     model,
@@ -4110,6 +4141,9 @@ ${assetEvidenceInstructions || "Do not claim that an uploaded asset verified any
 
 Completed domain-aware research:
 ${researchContext}
+
+Adaptive report-writing contract:
+${adaptiveWriterContext}
 
 Generate a ${domain} decision analysis as one structured JSON object.
 Return exactly these keys and no others:
@@ -4809,12 +4843,29 @@ Write only the content for this section. Do not write a JSON object, field name,
       });
       const businessResearchContext =
         formatDomainResearchBundle(businessResearch);
+      const adaptiveWriterContext = formatAdaptiveReportWriterContext(
+        createAdaptiveReportWriterPlan({
+          expertiseProfile: dynamicResearchPlanningInput.expertiseProfile,
+          reportPlan: dynamicResearchPlanningInput.reportPlan,
+          validatedEvidence: businessResearch.validatedEvidence,
+          uploadedMaterialTypes: analysisAssets.map((asset) => asset.type),
+          outputContract: {
+            fields: planFields,
+            labels: Object.fromEntries(
+              planFields.map((fieldName) => [
+                fieldName,
+                planFieldLabels[responseLanguage][fieldName],
+              ])
+            ),
+          },
+        })
+      );
 
       const fullReportCacheKey = createAiCacheKey({
         endpoint: "/api/plan",
         normalizedPrompt: userMemoryContext
-          ? `${productionLimit.normalizedPrompt}\nmemories:${userMemoryContext}\nassets:${assetFingerprint}\nresearch:${businessResearchContext}`
-          : `${productionLimit.normalizedPrompt}\nassets:${assetFingerprint}\nresearch:${businessResearchContext}`,
+          ? `${productionLimit.normalizedPrompt}\nmemories:${userMemoryContext}\nassets:${assetFingerprint}\nresearch:${businessResearchContext}\nwriter:${adaptiveWriterContext}`
+          : `${productionLimit.normalizedPrompt}\nassets:${assetFingerprint}\nresearch:${businessResearchContext}\nwriter:${adaptiveWriterContext}`,
         mode: `business_plan:${FULL_REPORT_FIELD}:research_v1:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
         language: responseLanguage,
         model,
@@ -4943,6 +4994,9 @@ ${assetEvidenceInstructions ? `\nAsset evidence rules:\n${assetEvidenceInstructi
 
 Completed domain-aware research:
 ${businessResearchContext}
+
+Adaptive report-writing contract:
+${adaptiveWriterContext}
 
 ${financialAssumptionsContext}
 ${userMemoryInstruction ? `\n${userMemoryInstruction}\n` : ""}
