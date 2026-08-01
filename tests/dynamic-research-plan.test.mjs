@@ -236,7 +236,11 @@ test("research plan maps into the existing provider task contract", () => {
   assert.ok(tasks.every((task) => task.provider === "auto"));
   assert.ok(tasks.every((task) => task.status === "skipped_with_reason"));
   assert.ok(tasks.every((task) => task.queryVariants?.length));
-  assert.match(researchSource, /providers: \[webResearchProvider\]/);
+  assert.match(
+    researchSource,
+    /createDecisionResearchProviderAdapter\(webResearchProvider/
+  );
+  assert.match(researchSource, /executeResearchPlan\(\{/);
   assert.match(executorSource, /\.\.\.dynamicResearchPlanningInput/);
 });
 
