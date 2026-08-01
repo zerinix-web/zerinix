@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import type { ResponseInput } from "openai/resources/responses/responses";
-import {
-  isLocalDevelopmentOwnerOrAdmin,
-  isPrivateBetaAllowed,
-} from "@/app/lib/beta-access";
+import { authorizeStrategicReportAccess } from "@/app/lib/strategic-report-access";
 import { createClient } from "@/app/lib/supabase/server";
 import {
   checkRateLimit,
@@ -1213,18 +1210,16 @@ export async function POST(req: Request) {
       rawReportMode === "market" ||
       selectedAction === "generate_strategic_report";
     const isContinueAsChat = selectedAction === "continue_as_chat";
-    const privateBetaAllowed = isPrivateBetaAllowed(user);
-    const localDevelopmentOwnerOrAdmin =
-      isLocalDevelopmentOwnerOrAdmin(req, user);
-    const betaAccessAllowed =
-      privateBetaAllowed || localDevelopmentOwnerOrAdmin;
-    const betaAuthorizationBranch = privateBetaAllowed
-      ? "private_beta_allowed"
-      : localDevelopmentOwnerOrAdmin
-        ? "local_development_owner_admin"
-        : isFileAnalysis
-          ? "authenticated_file_analysis"
-          : "private_beta_denied";
+    const reportAccess = await authorizeStrategicReportAccess({
+      request: req,
+      account: user,
+    });
+    const betaAccessAllowed = reportAccess.allowed;
+    const betaAuthorizationBranch = reportAccess.allowed
+      ? reportAccess.branch
+      : isFileAnalysis
+        ? "authenticated_file_analysis"
+        : reportAccess.branch;
 
     if (process.env.NODE_ENV !== "production") {
       console.info("[api:chat:file-routing]", {
@@ -1284,10 +1279,8 @@ export async function POST(req: Request) {
       isStrategicReport,
       isContinueAsChat,
       authorizationBranch: betaAuthorizationBranch,
-      reason: privateBetaAllowed
-        ? "Authorization continued because the authenticated user is private-beta allowed."
-        : localDevelopmentOwnerOrAdmin
-          ? "Authorization continued because an authenticated owner or admin is using localhost in development."
+      reason: reportAccess.allowed
+        ? `Authorization continued through ${reportAccess.branch}.`
         : "Authorization continued because the request resolved to authenticated file_analysis.",
     });
 

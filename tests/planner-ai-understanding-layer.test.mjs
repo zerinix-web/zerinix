@@ -58,6 +58,10 @@ const betaAccessSource = await readFile(
   new URL("../app/lib/beta-access.ts", import.meta.url),
   "utf8"
 );
+const strategicReportAccessSource = await readFile(
+  new URL("../app/lib/strategic-report-access.ts", import.meta.url),
+  "utf8"
+);
 const reportErrorsSource = await readFile(
   new URL("../app/lib/report-errors.ts", import.meta.url),
   "utf8"
@@ -431,28 +435,25 @@ test("localhost development bypass is limited to authenticated owners and admins
   );
   assert.match(
     betaAccessSource,
-    /isFounderAccount\(account\) \|\| hasAdminClaim\(account\)/
+    /isFounderAccount\(account\) \|\| hasVerifiedAdminOrOwnerClaim\(account\)/
   );
   assert.match(
-    chatRouteSource,
-    /privateBetaAllowed \|\| localDevelopmentOwnerOrAdmin/
+    strategicReportAccessSource,
+    /isLocalDevelopmentOwnerOrAdmin\(request, account\)/
   );
-  assert.match(chatRouteSource, /"local_development_owner_admin"/);
+  assert.match(strategicReportAccessSource, /"local_development_owner_admin"/);
   for (const routeSource of [
     chatRouteSource,
     planRouteSource,
     marketRouteSource,
   ]) {
-    assert.match(routeSource, /isLocalDevelopmentOwnerOrAdmin\(req, user\)/);
+    assert.match(routeSource, /authorizeStrategicReportAccess/);
   }
 });
 
 test("private beta report denial stays authorized and renders as neutral information", () => {
   for (const routeSource of [planRouteSource, marketRouteSource]) {
-    assert.match(
-      routeSource,
-      /!isPrivateBetaAllowed\(user\)[\s\S]*!isLocalDevelopmentOwnerOrAdmin\(req, user\)/
-    );
+    assert.match(routeSource, /if \(!reportAccess\.allowed\)/);
     assert.match(routeSource, /Private beta access only\./);
     assert.match(routeSource, /status: 403/);
   }

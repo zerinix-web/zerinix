@@ -1,5 +1,5 @@
-import { isFounderEmail } from "@/app/lib/founder-access.mjs";
-import { isPrivateBetaEmailAllowed } from "@/app/lib/private-beta-access.mjs";
+import { isFounderEmail } from "./founder-access.mjs";
+import { isPrivateBetaEmailAllowed } from "./private-beta-access.mjs";
 
 type BetaAccessIdentity = {
   identity_data?: Record<string, unknown> | null;
@@ -62,7 +62,11 @@ export function isFounderAccount(account?: BetaAccessAccount | string | null) {
   return [...accountEmails].some((email) => isFounderEmail(email));
 }
 
-function hasAdminClaim(account: BetaAccessAccount) {
+export function isAdminOrOwnerRole(value: unknown) {
+  return new Set(["admin", "owner"]).has(readString(value).toLowerCase());
+}
+
+export function hasVerifiedAdminOrOwnerClaim(account: BetaAccessAccount) {
   const adminRoles = new Set(["admin", "owner"]);
   const role = readString(account.app_metadata?.role).toLowerCase();
   const roles = Array.isArray(account.app_metadata?.roles)
@@ -98,7 +102,7 @@ export function isLocalDevelopmentOwnerOrAdmin(
 
     return (
       isLocalhost &&
-      (isFounderAccount(account) || hasAdminClaim(account))
+      (isFounderAccount(account) || hasVerifiedAdminOrOwnerClaim(account))
     );
   } catch {
     return false;

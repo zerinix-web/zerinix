@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  isLocalDevelopmentOwnerOrAdmin,
-  isPrivateBetaAllowed,
-} from "@/app/lib/beta-access";
+import { authorizeStrategicReportAccess } from "@/app/lib/strategic-report-access";
 import { isAmbiguousBusinessRequest } from "@/app/lib/business-idea-detection";
 import { createClient } from "@/app/lib/supabase/server";
 import {
@@ -1256,10 +1253,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
 
-    if (
-      !isPrivateBetaAllowed(user) &&
-      !isLocalDevelopmentOwnerOrAdmin(req, user)
-    ) {
+    const reportAccess = await authorizeStrategicReportAccess({
+      request: req,
+      account: user,
+    });
+
+    if (!reportAccess.allowed) {
       return NextResponse.json(
         { error: "Private beta access only." },
         { status: 403 }
