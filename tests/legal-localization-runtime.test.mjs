@@ -4,6 +4,7 @@ import test from "node:test";
 import { jsPDF } from "jspdf";
 
 import {
+  repairReportLanguageSections,
   resolveReportLanguage,
   validateReportLanguageConsistency,
 } from "../app/lib/report-language.ts";
@@ -32,7 +33,10 @@ const turkishSections = [
 
 function renderFixturePdf(request, sections, uiLanguage, browserLanguage) {
   const locale = resolveReportLanguage({ requestText: request, uiLanguage, browserLanguage });
-  const rendered = buildLegalReportSections(sections, locale, request);
+  const rendered = repairReportLanguageSections(
+    buildLegalReportSections(sections, locale, request),
+    locale
+  ).sections;
   const visibleText = rendered.map((section) => `${section.title}\n${section.content}`).join("\n\n");
   validateReportLanguageConsistency(visibleText, locale);
   const pdf = new jsPDF();
@@ -66,12 +70,12 @@ test("legal report rendering excludes business controls and methodology", () => 
   assert.doesNotMatch(result.visibleText, /Competitor Analysis|Financial Plan|Brand Strategy|Market sizing|Financial projections|KPI estimates|Business Idea Validation/i);
 });
 
-test("mixed-language legal content cannot be exported", () => {
+test("mixed-language legal content is repaired without blocking export", () => {
   const mixedSections = englishSections.map((section) => section.field === "finalRecommendation"
     ? { ...section, content: `${section.content}\nBu bölüm yatırım ve hukuki karar için Türkçe açıklamalar içeriyor ve sonraki adımları öneriyor.` }
     : section);
-  assert.throws(
-    () => renderFixturePdf(englishRequest, mixedSections, "tr", "tr-TR"),
-    /language validation failed/i
-  );
+  const result = renderFixturePdf(englishRequest, mixedSections, "tr", "tr-TR");
+  assert.ok(result.byteLength > 1_000);
+  assert.doesNotMatch(result.visibleText, /Bu bölüm yatırım/);
+  assert.match(result.visibleText, /could not be translated reliably/i);
 });

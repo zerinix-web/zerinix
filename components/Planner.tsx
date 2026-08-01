@@ -98,6 +98,7 @@ import {
   detectReportLanguage,
   getReportLanguageCode,
   getResponseLanguage,
+  repairReportLanguageSections,
   resolveReportLanguage,
   validateReportLanguageConsistency,
 } from "@/app/lib/report-language";
@@ -5731,16 +5732,20 @@ const ReportPanel = memo(function ReportPanel({
         reportLanguage,
         pdfLanguageSource
       );
+      const languageSafeBasePdfSections = repairReportLanguageSections(
+        basePdfSections,
+        pdfLocale
+      ).sections;
       validateReportLanguageConsistency(
-        [reportTitle, ...basePdfSections.map((section) => `${section.title}\n${section.content}`)].join("\n"),
+        [reportTitle, ...languageSafeBasePdfSections.map((section) => `${section.title}\n${section.content}`)].join("\n"),
         pdfLocale
       );
       const pdfBaseSectionsWithBenchmark = (
         isDomainDecisionReport
-          ? basePdfSections
+          ? languageSafeBasePdfSections
           : extractPdfValidationIntelligenceSection(
               insertPdfBenchmarkIntelligenceSection(
-                basePdfSections,
+                languageSafeBasePdfSections,
                 benchmarkFit,
                 pdfLocale,
                 benchmarkScore

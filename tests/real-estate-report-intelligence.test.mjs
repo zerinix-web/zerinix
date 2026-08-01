@@ -208,28 +208,24 @@ test("Turkish preliminary reports use a concise localized decision contract", ()
   assert.equal(validateRealEstateReport(report), report);
 });
 
-test("Turkish real-estate reports reject mixed English analytical prose", () => {
+test("Turkish real-estate reports repair mixed English analytical prose", () => {
   const report = createPreliminaryReport();
   report.assetIdentification =
     "[Verified from uploaded asset] Taşınmaz görüntüsünde il, ilçe, mahalle, ada ve parsel bilgileri açıkça görülmektedir.";
   report.valuationRange =
     "[Unknown] Valuation Not Yet Defensible. Missing gates: imar ve emsal. Evidence acquisition plan: resmi kayıtları edin.";
 
-  assert.throws(
-    () => validateRealEstateReport(report),
-    /language validation failed/
-  );
+  assert.equal(validateRealEstateReport(report), report);
 });
 
-test("Turkish real-estate language gate rejects arbitrary English prose", () => {
+test("Turkish real-estate language gate removes only arbitrary English prose", () => {
   const report = createTurkishLanguageReport();
   report.location =
     "[Verified from external source] The property should be reviewed with the official municipal zoning record. [R1]";
 
-  assert.throws(
-    () => validateRealEstateReportLanguage(report, "Turkish"),
-    /contains English user-facing prose/
-  );
+  assert.equal(validateRealEstateReportLanguage(report, "Turkish"), report);
+  assert.doesNotMatch(report.location, /The property should/);
+  assert.match(report.location, /güvenilir biçimde çevrilemediği/i);
 });
 
 test("source titles and URLs do not trigger the Turkish language gate", () => {

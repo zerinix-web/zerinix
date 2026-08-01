@@ -29,6 +29,7 @@ import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
 import {
   getResponseLanguage,
   getReportLanguageCode,
+  repairReportLanguageSections,
   resolveReportLanguage,
   validateReportLanguageConsistency,
 } from "@/app/lib/report-language";
@@ -360,10 +361,20 @@ async function readExecutionResponse(
     );
   }
 
+  const languageRepair = repairReportLanguageSections(
+    expectedFields.map((field) => ({
+      field,
+      title: getFieldTitle(domain, language, field),
+      content: contentByField.get(field) || "",
+    })),
+    language
+  );
+  warnings.push(...languageRepair.warnings);
   validateReportLanguageConsistency(
     [
-      ...expectedFields.map((field) => getFieldTitle(domain, language, field)),
-      ...contentByField.values(),
+      ...languageRepair.sections.map(
+        (section) => `${section.title}\n${section.content}`
+      ),
       ...warnings,
     ].join("\n"),
     language
@@ -372,11 +383,7 @@ async function readExecutionResponse(
   return {
     domain,
     language,
-    sections: expectedFields.map((field) => ({
-      field,
-      title: getFieldTitle(domain, language, field),
-      content: contentByField.get(field) || "",
-    })),
+    sections: languageRepair.sections,
     metadata,
     warnings: [...new Set(warnings)],
   };

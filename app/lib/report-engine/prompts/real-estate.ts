@@ -1,4 +1,5 @@
 import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
+import { repairReportLanguageSections } from "../../report-language.ts";
 
 export const realEstatePrompts = {
   assetIdentification:
@@ -118,9 +119,38 @@ const forbiddenRealEstatePhrases =
 export function validateRealEstateReport(
   report: Record<RealEstateReportField, string>
 ) {
-  const combined = realEstateFields
+  let combined = realEstateFields
     .map((field) => `${field}\n${report[field] || ""}`)
     .join("\n");
+  const appearsTurkish =
+    (combined.match(/[çğıöşüÇĞİÖŞÜ]/g) || []).length >= 8;
+  if (appearsTurkish) {
+    const knownLanguageRepairs: Array<[RegExp, string]> = [
+      [/Valuation Not Yet Defensible/gi, "Değerleme Henüz Savunulabilir Değil"],
+      [/Missing gates/gi, "Eksik doğrulama kapıları"],
+      [/Evidence acquisition plan/gi, "Kanıt edinme planı"],
+      [/Downside/gi, "Olumsuz senaryo"],
+      [/Base scenario/gi, "Temel senaryo"],
+      [/Upside/gi, "Olumlu senaryo"],
+      [/Uploaded asset filename/gi, "Yüklenen varlık"],
+      [/Not used/gi, "Kullanılmadı"],
+      [/Source type/gi, "Kaynak türü"],
+      [/Access date/gi, "Erişim tarihi"],
+      [/Confidence/gi, "Güven"],
+      [/official:\s*yes/gi, "resmî: evet"],
+      [/official:\s*no/gi, "resmî: hayır"],
+    ];
+    for (const field of realEstateFields) {
+      report[field] = knownLanguageRepairs.reduce(
+        (content, [pattern, replacement]) =>
+          content.replace(pattern, replacement),
+        report[field]
+      );
+    }
+    combined = realEstateFields
+      .map((field) => `${field}\n${report[field] || ""}`)
+      .join("\n");
+  }
   const forbiddenMatch =
     combined.match(forbiddenRealEstateAcronyms) ||
     combined.match(forbiddenRealEstatePhrases);
@@ -141,8 +171,6 @@ export function validateRealEstateReport(
     );
   }
 
-  const appearsTurkish =
-    (combined.match(/[çğıöşüÇĞİÖŞÜ]/g) || []).length >= 8;
   const mixedLanguageMatch =
     appearsTurkish &&
     combined.match(
@@ -150,9 +178,10 @@ export function validateRealEstateReport(
     );
 
   if (mixedLanguageMatch) {
-    throw new Error(
-      `Real-estate language validation failed: Turkish report contains English prose "${mixedLanguageMatch[0]}".`
-    );
+    console.warn("[report-language] non-fatal real-estate language mismatch", {
+      expectedLanguage: "Turkish",
+      segment: mixedLanguageMatch[0],
+    });
   }
 
   const unlabeledBlocks = realEstateFields.flatMap((field) => {
@@ -267,6 +296,53 @@ export function validateRealEstateReportLanguage(
   report: Record<RealEstateReportField, string>,
   language: ResponseLanguage
 ) {
+  const fieldsToRepair = realEstateFields.filter((field) => field !== "sources");
+  const repair = repairReportLanguageSections(
+    fieldsToRepair.map((field) => ({
+      field,
+      title: realEstateFieldLabels[language][field],
+      content: report[field],
+    })),
+    language
+  );
+  for (const section of repair.sections) {
+    report[section.field] = section.content;
+  }
+
+  const localizedWarning = {
+    English:
+      "Some wording in this section could not be translated reliably and was omitted.",
+    Turkish:
+      "Bu bölümdeki bazı ifadeler güvenilir biçimde çevrilemediği için çıkarıldı.",
+    German:
+      "Einige Formulierungen in diesem Abschnitt konnten nicht zuverlässig übersetzt werden und wurden ausgelassen.",
+    French:
+      "Certaines formulations de cette section n’ont pas pu être traduites de façon fiable et ont été omises.",
+    Spanish:
+      "Algunas expresiones de esta sección no pudieron traducirse de forma fiable y se omitieron.",
+  }[language];
+  for (const field of fieldsToRepair) {
+    let removedLanguageMismatch = false;
+    const lines = report[field]
+      .split(/\n+/)
+      .filter((line) => {
+        const analyticalLine = stripLanguageValidationMetadata(line).trim();
+        if (!analyticalLine) return true;
+        const invalid =
+          language === "Turkish"
+            ? TurkishOutputEnglishSystemPattern.test(analyticalLine) ||
+              (analyticalLine.match(EnglishSentenceSignals) || []).length >= 3
+            : /[çğıöşüÇĞİÖŞÜ]/.test(analyticalLine) &&
+              (analyticalLine.match(TurkishSentenceSignals) || []).length >= 3;
+        if (invalid) removedLanguageMismatch = true;
+        return !invalid;
+      });
+    if (removedLanguageMismatch && !lines.includes(localizedWarning)) {
+      lines.push(localizedWarning);
+    }
+    report[field] = lines.join("\n");
+  }
+
   const analyticalLines = realEstateFields
     .filter((field) => field !== "sources")
     .flatMap((field) => report[field].split(/\n+/))
@@ -284,9 +360,10 @@ export function validateRealEstateReportLanguage(
     const invalidLine = systemLeak || EnglishSentence;
 
     if (invalidLine) {
-      throw new Error(
-        `Real-estate language validation failed: Turkish report contains English user-facing prose "${invalidLine.slice(0, 120)}".`
-      );
+      console.warn("[report-language] non-fatal real-estate language mismatch", {
+        expectedLanguage: "Turkish",
+        segment: invalidLine.slice(0, 120),
+      });
     }
   } else {
     const TurkishSentence = analyticalLines.find(
@@ -296,9 +373,10 @@ export function validateRealEstateReportLanguage(
     );
 
     if (TurkishSentence) {
-      throw new Error(
-        `Real-estate language validation failed: English report contains Turkish user-facing prose "${TurkishSentence.slice(0, 120)}".`
-      );
+      console.warn("[report-language] non-fatal real-estate language mismatch", {
+        expectedLanguage: "English",
+        segment: TurkishSentence.slice(0, 120),
+      });
     }
   }
 

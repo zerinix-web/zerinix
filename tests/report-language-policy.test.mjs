@@ -6,6 +6,7 @@ import {
   buildStrictReportLanguageInstruction,
   detectReportLanguage,
   getResponseLanguage,
+  repairReportLanguageSections,
   reportCopy,
   resolveReportLanguage,
   validateReportLanguageConsistency,
@@ -45,21 +46,43 @@ for (const item of cases) {
   });
 }
 
-test("mixed-language report labels are rejected", () => {
-  assert.throws(
-    () => validateReportLanguageConsistency("Yönetici Özeti\nConfidence Score", "tr"),
-    /language validation failed/i
+test("mixed-language validation is non-fatal and repairs only the offending section", () => {
+  assert.equal(
+    validateReportLanguageConsistency("Yönetici Özeti\nConfidence Score", "tr"),
+    false
   );
-  assert.throws(
-    () => validateReportLanguageConsistency("Zusammenfassung\nMain Risk", "de"),
-    /language validation failed/i
+  const repaired = repairReportLanguageSections(
+    [
+      {
+        field: "summary",
+        title: "Executive Summary",
+        content:
+          "Yatırım kararı için mevcut kanıtlar dikkatle değerlendirilmiştir. The report explains the market risk and the decision with clear recommendations and next actions.",
+      },
+      {
+        field: "risk",
+        title: "Riskler",
+        content: "İmar belirsizliği yatırım kararını sınırlandırmaktadır.",
+      },
+    ],
+    "tr"
   );
-  assert.throws(
-    () => validateReportLanguageConsistency(
-      "Yönetici Özeti\nThe report explains the market risk and the decision for the company with clear recommendations and next actions.",
+
+  assert.equal(repaired.sections[0].title, "Yönetici Özeti");
+  assert.match(repaired.sections[0].content, /mevcut kanıtlar dikkatle değerlendirilmiştir/i);
+  assert.doesNotMatch(repaired.sections[0].content, /The report explains/);
+  assert.match(repaired.sections[0].content, /güvenilir biçimde çevrilemediği/i);
+  assert.equal(
+    repaired.sections[1].content,
+    "İmar belirsizliği yatırım kararını sınırlandırmaktadır."
+  );
+  assert.equal(repaired.warnings.length, 1);
+  assert.equal(
+    validateReportLanguageConsistency(
+      repaired.sections.map((section) => `${section.title}\n${section.content}`).join("\n"),
       "tr"
     ),
-    /en prose/i
+    true
   );
 });
 

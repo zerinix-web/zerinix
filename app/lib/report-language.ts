@@ -122,21 +122,60 @@ export function buildStrictReportLanguageInstruction(language: ResponseLanguage 
 }
 
 const forbiddenUiPhrases: Record<ReportLanguageCode, RegExp> = {
-  en: /\b(?:Yönetici Özeti|Güven Skoru|Ana Risk|Sonraki Adım|Hukuki Değerlendirme|Zusammenfassung|Risque principal|Resumen ejecutivo)\b/i,
-  tr: /\b(?:Executive Summary|Confidence Score|Main Risk|Next Action|Legal Assessment|Zusammenfassung|Synthèse exécutive|Resumen ejecutivo)\b/i,
+  en: /\b(?:Yönetici Özeti|Güven Skoru|Ana Risk|Sonraki Adım|Hukuki Değerlendirme|Doğrulama Gerekiyor|Doğrulanmadı|Zusammenfassung|Risque principal|Resumen ejecutivo)\b/i,
+  tr: /\b(?:Executive Summary|Confidence Score|Main Risk|Next Action|Legal Assessment|Validation Required|Not verified|Verified from uploaded asset|Zusammenfassung|Synthèse exécutive|Resumen ejecutivo)\b/i,
   de: /\b(?:Executive Summary|Yönetici Özeti|Confidence Score|Main Risk|Legal Assessment|Synthèse exécutive|Resumen ejecutivo)\b/i,
   fr: /\b(?:Executive Summary|Yönetici Özeti|Confidence Score|Main Risk|Legal Assessment|Zusammenfassung|Resumen ejecutivo)\b/i,
   es: /\b(?:Executive Summary|Yönetici Özeti|Confidence Score|Main Risk|Legal Assessment|Zusammenfassung|Synthèse exécutive)\b/i,
 };
 
-export function validateReportLanguageConsistency(
+export type ReportLanguageIssue = {
+  kind: "foreign_ui_text" | "foreign_prose" | "dominant_foreign_prose";
+  segment: string;
+  detectedLanguage: ReportLanguageCode;
+};
+
+type ReportLanguageSection = {
+  title: string;
+  content: string;
+};
+
+const languageRepairWarnings: Record<ReportLanguageCode, string> = {
+  en: "A section could not be translated reliably and was omitted. Review the original report content if needed.",
+  tr: "Bir bölüm güvenilir biçimde çevrilemediği için çıkarıldı. Gerekirse özgün rapor içeriğini inceleyin.",
+  de: "Ein Abschnitt konnte nicht zuverlässig übersetzt werden und wurde ausgelassen. Prüfen Sie bei Bedarf den ursprünglichen Bericht.",
+  fr: "Une section n’a pas pu être traduite de façon fiable et a été omise. Consultez le rapport d’origine si nécessaire.",
+  es: "Una sección no pudo traducirse de forma fiable y se omitió. Revise el informe original si es necesario.",
+};
+
+function replaceKnownReportCopy(value: string, code: ReportLanguageCode) {
+  let repaired = value;
+  for (const sourceCode of reportLanguageCodes) {
+    if (sourceCode === code) continue;
+    for (const key of Object.keys(copy[code]) as ReportCopyKey[]) {
+      const source = copy[sourceCode][key];
+      if (!source || source === copy[code][key]) continue;
+      repaired = repaired.replaceAll(source, copy[code][key]);
+    }
+  }
+  return repaired;
+}
+
+export function findReportLanguageIssues(
   visibleText: string,
   language: ResponseLanguage | ReportLanguageCode
-) {
+): ReportLanguageIssue[] {
   const code = getReportLanguageCode(language);
   const normalizedText = String(visibleText || "");
+  const issues: ReportLanguageIssue[] = [];
   const mixed = normalizedText.match(forbiddenUiPhrases[code]);
-  if (mixed) throw new Error(`Report language validation failed: ${code} report contains foreign UI text "${mixed[0]}".`);
+  if (mixed) {
+    issues.push({
+      kind: "foreign_ui_text",
+      segment: mixed[0],
+      detectedLanguage: detectReportLanguage(mixed[0]),
+    });
+  }
   const prose = normalizedText
     .split("\n")
     .filter((line) => !/https?:\/\/|^\s*(?:URL|R\d+|\[[^\]]+\])\s*:/i.test(line))
@@ -148,9 +187,11 @@ export function validateReportLanguageConsistency(
       .filter((candidate) => candidate !== code)
       .sort((left, right) => segmentScores[right] - segmentScores[left])[0];
     if (segmentScores[foreign] >= 3 && segmentScores[foreign] > segmentScores[code]) {
-      throw new Error(
-        `Report language validation failed: ${code} report contains a ${foreign} prose segment.`
-      );
+      issues.push({
+        kind: "foreign_prose",
+        segment,
+        detectedLanguage: foreign,
+      });
     }
   }
   const scores = scoreReportLanguages(prose);
@@ -158,9 +199,78 @@ export function validateReportLanguageConsistency(
     .filter((candidate) => candidate !== code)
     .sort((left, right) => scores[right] - scores[left])[0];
   if (scores[strongestForeign] >= 5 && scores[strongestForeign] > scores[code]) {
-    throw new Error(
-      `Report language validation failed: ${code} report contains dominant ${strongestForeign} prose.`
-    );
+    issues.push({
+      kind: "dominant_foreign_prose",
+      segment: prose.slice(0, 240),
+      detectedLanguage: strongestForeign,
+    });
   }
-  return true;
+  return issues.filter(
+    (issue, index, values) =>
+      values.findIndex(
+        (candidate) =>
+          candidate.kind === issue.kind && candidate.segment === issue.segment
+      ) === index
+  );
+}
+
+export function repairReportLanguageSections<T extends ReportLanguageSection>(
+  sections: T[],
+  language: ResponseLanguage | ReportLanguageCode
+) {
+  const code = getReportLanguageCode(language);
+  const warnings: string[] = [];
+  const issues: Array<ReportLanguageIssue & { sectionTitle: string }> = [];
+  const repairedSections = sections.map((section) => {
+    const title = replaceKnownReportCopy(section.title, code);
+    const knownCopyRepaired = replaceKnownReportCopy(section.content, code);
+    const fragments = knownCopyRepaired
+      .split(/(?<=[.!?])\s+|\n+/)
+      .map((fragment) => fragment.trim())
+      .filter(Boolean);
+    let sectionHadUnrepairableProse = false;
+    const content = fragments
+      .filter((fragment) => {
+        const fragmentIssues = findReportLanguageIssues(fragment, code);
+        if (fragmentIssues.length === 0) return true;
+        sectionHadUnrepairableProse = true;
+        issues.push(
+          ...fragmentIssues.map((issue) => ({ ...issue, sectionTitle: title }))
+        );
+        return false;
+      })
+      .join("\n");
+    if (sectionHadUnrepairableProse) warnings.push(languageRepairWarnings[code]);
+    return {
+      ...section,
+      title,
+      content: [content, sectionHadUnrepairableProse ? languageRepairWarnings[code] : ""]
+        .filter(Boolean)
+        .join("\n"),
+    } as T;
+  });
+  return {
+    sections: repairedSections,
+    issues,
+    warnings: [...new Set(warnings)],
+  };
+}
+
+export function validateReportLanguageConsistency(
+  visibleText: string,
+  language: ResponseLanguage | ReportLanguageCode
+) {
+  const code = getReportLanguageCode(language);
+  const issues = findReportLanguageIssues(visibleText, code);
+  if (issues.length > 0) {
+    console.warn("[report-language] non-fatal language mismatch", {
+      expectedLanguage: code,
+      issueCount: issues.length,
+      issues: issues.map(({ kind, detectedLanguage }) => ({
+        kind,
+        detectedLanguage,
+      })),
+    });
+  }
+  return issues.length === 0;
 }

@@ -57,6 +57,7 @@ import {
   isLegalRenderableReport,
 } from "@/app/lib/report-engine/legal-report-rendering";
 import {
+  repairReportLanguageSections,
   resolveReportLanguage,
   validateReportLanguageConsistency,
 } from "@/app/lib/report-language";
@@ -1948,12 +1949,12 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       const bodyLineHeight = 5.25;
       const cardHeaderHeight = 24;
       const cardBottomPadding = 9;
-      const normalizedSections = dedupeReportSections(
+      const normalizedSectionsBeforeLanguageRepair = dedupeReportSections(
         normalizeSavedPdfSectionsBeforeRender(report.sections)
       );
       const pdfLanguageSource =
         report.prompt?.trim() ||
-        [report.title, report.type, ...normalizedSections.map((section) => `${section.title}\n${section.content}`)]
+        [report.title, report.type, ...normalizedSectionsBeforeLanguageRepair.map((section) => `${section.title}\n${section.content}`)]
           .filter(Boolean)
           .join("\n\n");
       const pdfLocale = resolvePdfPresentationLocale(
@@ -1964,6 +1965,11 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         }),
         pdfLanguageSource
       );
+      const languageRepair = repairReportLanguageSections(
+        normalizedSectionsBeforeLanguageRepair,
+        pdfLocale
+      );
+      const normalizedSections = languageRepair.sections;
       validateReportLanguageConsistency(
         [report.title, ...normalizedSections.map((section) => `${section.title}\n${section.content}`)].join("\n"),
         pdfLocale

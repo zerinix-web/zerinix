@@ -7,6 +7,7 @@ import {
 } from "./core";
 import { collectRealEstateResearchSourceContent } from "../report-engine/real-estate-presentation";
 import {
+  repairReportLanguageSections,
   resolveReportLanguage,
   validateReportLanguageConsistency,
 } from "../report-language";
@@ -1599,13 +1600,23 @@ export function createRealEstateReportPdf({
     requestText: inputReport.prompt,
     uiLanguage: metadataLanguage || (isTurkishReport(inputReport) ? "tr" : "en"),
   });
+  const languageRepair = repairReportLanguageSections(
+    inputReport.sections,
+    locale
+  );
+  const languageSafeReport = {
+    ...inputReport,
+    sections: languageRepair.sections,
+  };
   validateReportLanguageConsistency(
-    [inputReport.title, ...inputReport.sections.map((section) => `${section.title}\n${section.content}`)].join("\n"),
+    [languageSafeReport.title, ...languageSafeReport.sections.map((section) => `${section.title}\n${section.content}`)].join("\n"),
     locale
   );
   const copy = getPdfCopy(locale);
   const report =
-    locale === "tr" ? prepareTurkishPdfPresentation(inputReport) : inputReport;
+    locale === "tr"
+      ? prepareTurkishPdfPresentation(languageSafeReport)
+      : languageSafeReport;
 
   applyPdfFont(pdf, fontBase64);
   drawCover(pdf, report, locale, copy);
