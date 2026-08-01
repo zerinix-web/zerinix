@@ -214,7 +214,9 @@ const LEGAL_WORKFLOW_PATTERN =
 const CONTRACT_WORKFLOW_PATTERN =
   /(?:\b(?:contract|agreement|nda|lease|terms)\b|sözleşme|anlaşma|kira sözleşmesi)/i;
 const REAL_ESTATE_WORKFLOW_PATTERN =
-  /\b(?:property|real estate|land|parcel|title deed|zoning|listing|tapu(?:su|da|dan|nun)?|arsa(?:ya|yı|nın|da|dan)?|arazi(?:ye|yi|nin|de|den)?|parsel(?:e|i|in|de|den)?|imar|gayrimenkul|emlak)\b/i;
+  /(?:\b(?:property|real estate|land|parcel|title deed|zoning|property listing|office building|commercial building)\b|tapu(?:su|da|dan|nun)?|arsa(?:ya|yı|nın|da|dan)?|arazi(?:ye|yi|nin|de|den)?|parsel(?:e|i|in|de|den)?|imar|gayrimenkul|emlak|ofis binası|ticari bina|iş merkezi|plaza)/i;
+const EXPLICIT_REAL_ESTATE_LEGAL_REVIEW_PATTERN =
+  /(?:\b(?:legal review|legal analysis|contract review|contract analysis|review (?:the )?(?:contract|agreement|lease))\b|hukuki(?: açıdan)? (?:incele|inceleme|değerlendir|değerlendirme|analiz|görüş)|(?:sözleşme|kontrat|kira sözleşmesi)(?:yi|ni|nin|nın|nu|nü)?\s+(?:incele|değerlendir|analiz et))/i;
 const FINANCE_WORKFLOW_PATTERN =
   /(?:\b(?:finance|financial|accounting|balance sheet|income statement|cash flow|trial balance|ledger|invoice|profitability|budget|forecast|audit|tax)\b|finans|finansal|muhasebe|bilanço|gelir tablosu|nakit akış|mizan|defter|fatura|kârlılık|karlılık|bütçe|tahmin|denetim|vergi)/i;
 const MARKETING_WORKFLOW_PATTERN =
@@ -244,8 +246,15 @@ export function selectAnalysisWorkflow({
   assets?: UnderstandingAsset[];
 }): AnalysisWorkflow {
   const combined = `${prompt}\n${normalizedAssetContext(assets)}`;
+  const isRealEstate = REAL_ESTATE_WORKFLOW_PATTERN.test(combined);
 
-  if (REAL_ESTATE_WORKFLOW_PATTERN.test(combined)) return "real_estate";
+  if (
+    isRealEstate &&
+    EXPLICIT_REAL_ESTATE_LEGAL_REVIEW_PATTERN.test(combined)
+  ) {
+    return "legal";
+  }
+  if (isRealEstate) return "real_estate";
   if (LEGAL_WORKFLOW_PATTERN.test(combined)) return "legal";
   if (BUSINESS_WORKFLOW_PATTERN.test(prompt)) return "business";
   if (FINANCE_WORKFLOW_PATTERN.test(combined)) return "finance";

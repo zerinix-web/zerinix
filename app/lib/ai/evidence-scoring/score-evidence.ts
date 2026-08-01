@@ -1,4 +1,5 @@
 import type { ExpertiseProfile } from "../expertise-profile.ts";
+import { buildEvidenceIntelligence } from "../evidence-intelligence/index.ts";
 import type { ValidatedEvidenceCollection } from "../research-execution/evidence-decision-support.ts";
 import {
   evidenceScoringResultSchema,
@@ -246,6 +247,7 @@ export function scoreValidatedEvidence({
       })
     )
     .sort((left, right) => right.finalEvidenceScore - left.finalEvidenceScore);
+  const conflicts = compareConflicts(validation, findings);
 
   return evidenceScoringResultSchema.parse({
     version: "evidence_scoring_v1",
@@ -255,6 +257,12 @@ export function scoreValidatedEvidence({
       medium: findings.filter((finding) => finding.scoreBand === "medium").map((finding) => finding.id),
       low: findings.filter((finding) => finding.scoreBand === "low").map((finding) => finding.id),
     },
-    conflicts: compareConflicts(validation, findings),
+    conflicts,
+    intelligence: buildEvidenceIntelligence({
+      validation,
+      scoredFindings: findings,
+      scoringConflicts: conflicts,
+      domain,
+    }),
   });
 }

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { evidenceIntelligenceResultSchema } from "../evidence-intelligence/contracts.ts";
 import { evidenceStateSchema } from "../research-execution/evidence-decision-support.ts";
 
 export const evidenceScoreBandSchema = z.enum(["high", "medium", "low"]);
@@ -48,6 +49,7 @@ export const evidenceScoringResultSchema = z.object({
     low: z.array(z.string()),
   }),
   conflicts: z.array(scoredConflictAssessmentSchema),
+  intelligence: evidenceIntelligenceResultSchema,
 });
 
 export type ScoredEvidenceFinding = z.infer<typeof scoredEvidenceFindingSchema>;

@@ -22,6 +22,29 @@ test("real-estate requests select the real-estate workflow", () => {
   assert.equal(createUnderstandingFallback({ prompt }).detectedIndustry, "real_estate");
 });
 
+test("commercial-property investment requests never fall through to legal clarification", () => {
+  const prompt =
+    "İstanbul Kağıthane'de yaklaşık 120 milyon TL bütçeyle A sınıfı bir ofis binası satın almayı değerlendiriyorum...";
+  const result = createUnderstandingFallback({ prompt });
+
+  assert.equal(selectAnalysisWorkflow({ prompt }), "real_estate");
+  assert.equal(result.detectedIndustry, "real_estate");
+  assert.equal(result.detectedContentType, "property_document");
+  assert.doesNotMatch(
+    result.clarificationQuestions.map((question) => question.id).join(" "),
+    /governing_jurisdiction|review_perspective|decision_deadline|available_evidence/
+  );
+  assert.ok(result.suggestedReportTypes.includes("Yatırım Analizi"));
+});
+
+test("property requests use legal workflow only for explicit legal or contract review", () => {
+  const prompt =
+    "Kağıthane'deki ofis binasının satış sözleşmesini hukuki açıdan incele.";
+
+  assert.equal(selectAnalysisWorkflow({ prompt }), "legal");
+  assert.equal(createUnderstandingFallback({ prompt }).detectedIndustry, "legal");
+});
+
 test("startup requests select the business workflow", () => {
   const prompt = "I want to launch a startup for independent accountants.";
 

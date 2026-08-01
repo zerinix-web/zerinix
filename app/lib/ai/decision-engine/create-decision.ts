@@ -159,15 +159,15 @@ function chooseOutcome({
 }
 
 function confidenceAssessment({
-  expertiseProfile,
   material,
   missing,
   conflicts,
+  scoring,
 }: {
-  expertiseProfile: ExpertiseProfile;
   material: ReturnType<typeof materialFindings>;
   missing: ReturnType<typeof criticalMissing>;
   conflicts: ReturnType<typeof decisionConflicts>;
+  scoring: EvidenceScoringResult;
 }) {
   const weightedEvidence = material.length
     ? material.reduce(
@@ -182,19 +182,46 @@ function confidenceAssessment({
         0
       )
     : 0.15;
-  const profileContribution = expertiseProfile.confidence * 0.15;
-  const evidenceContribution = weightedEvidence * 0.85;
-  const missingPenalty = Math.min(0.36, missing.length * 0.09);
-  const unresolvedConflictCount = conflicts.filter((conflict) => !conflict.preferredClaim).length;
-  const conflictPenalty = Math.min(0.24, unresolvedConflictCount * 0.08);
-  const score = clamp(evidenceContribution + profileContribution - missingPenalty - conflictPenalty);
+  const intelligence = scoring.intelligence.summary;
+  const qualityContribution = intelligence.averageEvidenceQuality * 0.35;
+  const coverageContribution = (intelligence.evidenceCoverage / 100) * 0.2;
+  const authorityContribution = intelligence.averageAuthority * 0.2;
+  const freshnessContribution = intelligence.averageFreshness * 0.15;
+  const materialContribution = weightedEvidence * 0.1;
+  const missingPenalty = Math.min(0.3, missing.length * 0.075);
+  const unresolvedConflictCount = scoring.intelligence.conflicts.filter(
+    (conflict) => conflict.status === "unresolved"
+  ).length;
+  const resolvedConflictCount = Math.max(
+    0,
+    scoring.intelligence.conflicts.length - unresolvedConflictCount
+  );
+  const conflictPenalty = Math.min(
+    0.25,
+    unresolvedConflictCount * 0.1 + resolvedConflictCount * 0.025
+  );
+  const score = clamp(
+    qualityContribution +
+      coverageContribution +
+      authorityContribution +
+      freshnessContribution +
+      materialContribution -
+      missingPenalty -
+      conflictPenalty
+  );
   const positiveDrivers = unique([
     ...material
       .filter(({ scored }) => scored.scoreBand === "high")
       .slice(0, 3)
       .map(({ validated }) => validated.claim),
-    ...(expertiseProfile.confidence >= 0.75
-      ? [`The professional domain profile is well matched to ${expertiseProfile.taskType}.`]
+    ...(intelligence.averageAuthority >= 0.75
+      ? ["The evidence set has strong source authority."]
+      : []),
+    ...(intelligence.evidenceCoverage >= 75
+      ? [`Evidence coverage is ${intelligence.evidenceCoverage}%.`]
+      : []),
+    ...(intelligence.averageFreshness >= 0.75
+      ? ["The material evidence is sufficiently current."]
       : []),
   ]);
   const limitingFactors = unique([
@@ -205,13 +232,22 @@ function confidenceAssessment({
     ...(material.every(({ scored }) => scored.scoreBand !== "high")
       ? ["No high-confidence evidence supports the decision."]
       : []),
+    ...(intelligence.evidenceCoverage < 60
+      ? [`Evidence coverage is limited to ${intelligence.evidenceCoverage}%.`]
+      : []),
+    ...(intelligence.averageAuthority < 0.5
+      ? ["The available evidence has limited source authority."]
+      : []),
+    ...(intelligence.averageFreshness < 0.5
+      ? ["The available evidence is stale or undated."]
+      : []),
   ]);
   const level = score >= 0.75 ? "high" as const : score >= 0.5 ? "moderate" as const : "low" as const;
 
   return {
     score,
     level,
-    explanation: `Confidence is ${level} (${score}) because weighted material evidence contributes ${clamp(evidenceContribution)}, professional-profile fit contributes ${clamp(profileContribution)}, missing critical information reduces confidence by ${missingPenalty}, and unresolved contradictions reduce it by ${conflictPenalty}.`,
+    explanation: `Confidence is ${level} (${score}). Evidence quality contributes ${clamp(qualityContribution)}, coverage contributes ${clamp(coverageContribution)}, authority contributes ${clamp(authorityContribution)}, freshness contributes ${clamp(freshnessContribution)}, and material decision support contributes ${clamp(materialContribution)}. Missing critical information reduces confidence by ${missingPenalty}; evidence conflicts reduce it by ${conflictPenalty}.`,
     positiveDrivers,
     limitingFactors,
   };
@@ -375,10 +411,10 @@ export function createProfessionalDecision(input: DecisionInput): ProfessionalDe
       expertiseProfile: input.expertiseProfile,
     }),
     confidence: confidenceAssessment({
-      expertiseProfile: input.expertiseProfile,
       material,
       missing,
       conflicts,
+      scoring: input.scoring,
     }),
     missingCriticalInformation: missing,
     conflicts,
