@@ -6,6 +6,10 @@ import { sanitizeUntrustedResearchText } from "./research-execution/evidence-val
 import {
   scoreValidatedEvidence,
 } from "./evidence-scoring/index.ts";
+import {
+  createProfessionalDecision,
+  professionalDecisionSchema,
+} from "./decision-engine/index.ts";
 
 const adaptiveEvidenceSchema = z.object({
   claim: z.string().min(1),
@@ -62,6 +66,7 @@ export const adaptiveReportWriterPlanSchema = z.object({
   prohibitedTopics: z.array(z.string()),
   globalWritingRules: z.array(z.string().min(1)),
   evidenceQuality: z.enum(["strong", "moderate", "preliminary", "insufficient"]),
+  decision: professionalDecisionSchema,
   evidenceBands: z.object({
     high: z.array(z.object({ claim: z.string().min(1), score: z.number().min(0).max(1) })),
     medium: z.array(z.object({ claim: z.string().min(1), score: z.number().min(0).max(1) })),
@@ -288,6 +293,12 @@ export function createAdaptiveReportWriterPlan({
     validation,
     domain: expertiseProfile.domain,
   });
+  const decision = createProfessionalDecision({
+    expertiseProfile,
+    reportPlan,
+    validation,
+    scoring,
+  });
   const sourceById = new Map(validation.sources.map((source) => [source.id, source]));
   const findingById = new Map(validation.findings.map((finding) => [finding.id, finding]));
   const scoreById = new Map(scoring.findings.map((finding) => [finding.id, finding]));
@@ -299,19 +310,14 @@ export function createAdaptiveReportWriterPlan({
     })
   );
   const selectedSections = planSections.length ? planSections : [reportPlan.sections[0]];
-  const recommendationBasis = scoring.findings
-    .filter(
-      (finding) =>
-        finding.evidenceState !== "unresolved" && finding.scoreBand !== "low"
-    )
-    .sort((left, right) => {
-      const impact = { critical: 4, high: 3, medium: 2, low: 1, unknown: 0 };
-      return (
-        impact[right.decisionImpact] - impact[left.decisionImpact] ||
-        right.finalEvidenceScore - left.finalEvidenceScore
-      );
+  const recommendationBasis = unique(
+    decision.decisionRationale.flatMap((basis) => basis.evidenceIds),
+    3
+  )
+    .flatMap((findingId) => {
+      const finding = scoreById.get(findingId);
+      return finding && finding.scoreBand !== "low" ? [finding] : [];
     })
-    .slice(0, 3)
     .map((finding) => ({
       claim: finding.claim,
       sources: finding.sourceIds
@@ -425,6 +431,7 @@ export function createAdaptiveReportWriterPlan({
     globalWritingRules: [
       "Write as a senior domain consultant: concise, professional, executive, and decision-oriented.",
       "The dynamic section plan is authoritative; do not add generic template sections.",
+      "The Professional Decision is authoritative for the executive decision, risks, opportunities, rationale, next action, confidence, and critical missing information.",
       "Every section must contribute new information and each finding may be stated only once.",
       "Reference an earlier finding instead of restating its facts in a later section.",
       "Separate verified evidence, strong indications, preliminary findings, and matters requiring verification.",
@@ -437,6 +444,7 @@ export function createAdaptiveReportWriterPlan({
       "If evidence is insufficient, state once: Additional verification is recommended.",
     ],
     evidenceQuality: validation.overallEvidenceQuality,
+    decision,
     evidenceBands: {
       high: scoring.bands.high.flatMap((id) => {
         const finding = scoreById.get(id);
@@ -514,6 +522,7 @@ export function createAdaptiveReportWriterPlan({
       "Never expose technical failures or invent missing facts.",
     ],
     evidenceQuality: "preliminary",
+    decision,
     evidenceBands: { high: [], medium: [], low: [] },
     conflictAssessments: [],
     recommendationEvidence: [],
@@ -562,6 +571,19 @@ Report purpose: ${plan.reportPurpose}
 Uploaded material types: ${plan.uploadedMaterialTypes.join(", ") || "none"}
 Overall evidence quality: ${plan.evidenceQuality}
 Additional verification required: ${plan.additionalVerificationRequired ? "yes" : "no"}
+
+Professional Decision:
+- Executive Decision: ${plan.decision.executiveDecision}
+- Outcome: ${plan.decision.outcome}
+- Confidence: ${plan.decision.confidence.level} (${plan.decision.confidence.score})
+- Confidence basis: ${plan.decision.confidence.explanation}
+- Top risks: ${plan.decision.topRisks.map((item) => `${item.statement} — ${item.whyItMatters}`).join(" | ") || "none supported by scored evidence"}
+- Top opportunities: ${plan.decision.topOpportunities.map((item) => `${item.statement} — ${item.whyItMatters}`).join(" | ") || "none supported by scored evidence"}
+- Decision rationale: ${plan.decision.decisionRationale.map((item) => `${item.statement} — ${item.whyItMatters}`).join(" | ")}
+- Recommended next action: ${plan.decision.recommendedNextAction.action}
+- Why now: ${plan.decision.recommendedNextAction.reason}
+- Missing critical information: ${plan.decision.missingCriticalInformation.map((item) => `${item.information} — ${item.requiredAction}`).join(" | ") || "none"}
+- Conflicts: ${plan.decision.conflicts.map((item) => `${item.field}: ${item.explanation}`).join(" | ") || "none"}
 
 Evidence priority bands:
 - High confidence findings: ${plan.evidenceBands.high.map((item) => `${item.claim} (${item.score})`).join(" | ") || "none"}
