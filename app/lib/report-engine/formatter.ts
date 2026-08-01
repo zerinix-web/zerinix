@@ -1,13 +1,15 @@
-import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
-import {
-  containsReportGenerationFailure,
-  isReportGenerationFailureText,
-} from "@/app/lib/report-errors";
 import { dedupeReportSections } from "@/app/lib/report-section-normalization";
 import type { ReportFieldDefinition, ReportSectionPayload } from "./schema";
+import {
+  isTurkishReportText,
+  sanitizeInternalResearchDiagnostics,
+} from "../report-output-sanitization";
 
 export function sanitizeReportContent(content: string) {
-  return sanitizeAiResponseText(content)
+  const sanitized = sanitizeInternalResearchDiagnostics(content);
+  const Turkish = isTurkishReportText(sanitized);
+
+  return sanitized
     .replace(/\n\s*(?:sources|kaynaklar)\s*:[\s\S]*$/im, "")
     .replace(/\[([^\]]+)\]\((?:https?:\/\/|www\.)[^\s)]+\)/gi, "$1")
     .replace(/(?:https?:\/\/|www\.)[^\s),]+/gi, "")
@@ -19,7 +21,9 @@ export function sanitizeReportContent(content: string) {
     .replace(/\bMedium[\s-]+Confidence\b/gi, "Developing")
     .replace(/\bHigh[\s-]+Confidence\b/gi, "Verified")
     .replace(/\bIndustry[\s-]+Estimate\b/gi, "Market view")
-    .replace(/\bWAIT\b/g, "Hold for validation")
+    .replace(/\bWAIT\b/g, Turkish ? "Bekle" : "Hold for validation")
+    .replace(/\bValidation Required\b/gi, Turkish ? "Doğrulama Gerekli" : "Validation Required")
+    .replace(/\bNot verified\b/gi, Turkish ? "Doğrulanmadı" : "Not verified")
     .replace(/\(\s*\)/g, "")
     .replace(/[ \t]+\n/g, "\n")
     .trim();
@@ -30,7 +34,7 @@ export function sanitizeReportFieldContent<TReport extends object>(
   content: string
 ) {
   if (field === "sources" || field === "sourcesAssumptions") {
-    return sanitizeAiResponseText(content)
+    return sanitizeInternalResearchDiagnostics(content, false)
       .normalize("NFC")
       .replace(/\r\n/g, "\n")
       .replace(/\r/g, "\n")
@@ -38,7 +42,6 @@ export function sanitizeReportFieldContent<TReport extends object>(
       .replace(/\bConfidence\s+unavailable\b/gi, "")
       .replace(/\bT\s*B\s*D\b/gi, "")
       .replace(/\bPlace\s*holder\b/gi, "")
-      .replace(/\bUn\s*known\b/gi, "")
       .replace(/\bUn\s*available\b/gi, "")
       .replace(/[ \t]+\n/g, "\n")
       .replace(/\n{3,}/g, "\n\n")
@@ -63,17 +66,11 @@ export function serializeReportSections<TReport extends object>(
     }))
   );
 
-  const invalidSection = sections.find(
-    (section) =>
-      !section.content ||
-      isReportGenerationFailureText(section.content)
-  );
+  const invalidSection = sections.find((section) => !section.content);
 
   if (invalidSection) {
     throw new Error(
-      invalidSection.content && isReportGenerationFailureText(invalidSection.content)
-        ? invalidSection.content
-        : `Report section "${invalidSection.title}" was empty after sanitization.`
+      `Report section "${invalidSection.title}" was empty after sanitization.`
     );
   }
 
@@ -86,7 +83,6 @@ export function isCompleteReportSectionPayload(
 ) {
   return (
     sections.length === expectedSectionCount &&
-    sections.every((section) => section.title.trim() && section.content.trim()) &&
-    !containsReportGenerationFailure(sections)
+    sections.every((section) => section.title.trim() && section.content.trim())
   );
 }

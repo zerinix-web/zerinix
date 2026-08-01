@@ -1,6 +1,12 @@
 export type ReportPipelineStage =
   | "request_validation"
   | "authentication"
+  | "asset_extraction"
+  | "entity_extraction"
+  | "research"
+  | "decision_engine"
+  | "report_builder"
+  | "pdf_preparation"
   | "memory"
   | "quota"
   | "cache_read"

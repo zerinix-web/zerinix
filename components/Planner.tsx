@@ -7,6 +7,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type DragEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import type { LucideIcon } from "lucide-react";
@@ -26,6 +28,7 @@ import {
   FolderKanban,
   Gauge,
   Goal,
+  Info,
   LayoutDashboard,
   Landmark,
   ListChecks,
@@ -74,8 +77,7 @@ import type {
   ReportQualityScore,
 } from "@/app/lib/report-investment-score";
 import {
-  containsReportGenerationFailure,
-  isReportGenerationFailureText,
+  isReportAdvisoryWarningText,
 } from "@/app/lib/report-errors";
 import { dedupeReportSections } from "@/app/lib/report-section-normalization";
 import {
@@ -87,15 +89,22 @@ import {
   isCompleteReportSectionPayload,
   sanitizeReportContent,
   sanitizeReportFieldContent,
-  serializeReportSections,
 } from "@/app/lib/report-engine/formatter";
 import type {
   ReportFieldDefinition as EngineReportFieldDefinition,
-  ReportStreamEvent as EngineReportStreamEvent,
+  ResponseLanguage,
 } from "@/app/lib/report-engine/schema";
+import {
+  detectReportLanguage,
+  getReportLanguageCode,
+  getResponseLanguage,
+  resolveReportLanguage,
+  validateReportLanguageConsistency,
+} from "@/app/lib/report-language";
 import {
   cleanPdfLegacyValidationIntelligenceContent,
   detectPdfPresentationLocale,
+  resolvePdfPresentationLocale,
   extractPdfValidationIntelligenceSection,
   insertPdfBenchmarkIntelligenceSection,
   localizePdfPresentationLabel,
@@ -117,6 +126,7 @@ import {
   drawPdfLogoMark,
   getPdfPageMetrics,
   paintPdfPageBackground,
+  type PdfLocale,
 } from "@/app/lib/pdf-engine/core";
 import { drawPdfSectionCardFrame } from "@/app/lib/pdf-engine/section-renderer";
 import {
@@ -133,8 +143,46 @@ import {
   cleanEvidenceMetadataForDisplay,
   formatMetricCardValue,
 } from "@/components/planner/report-utils";
-import { useAttachments } from "@/components/planner/useAttachments";
+import {
+  classifyReportDomain,
+  type ReportDomain,
+} from "@/app/lib/report-engine/domain";
+import {
+  buildLegalReportSections,
+  formatLegalSourceContent,
+  isLegalRenderableReport,
+} from "@/app/lib/report-engine/legal-report-rendering";
+import {
+  realEstateFieldLabels,
+  realEstateFields,
+  type RealEstateReportField,
+} from "@/app/lib/report-engine/prompts/real-estate";
+import {
+  domainAnalysisFieldLabels,
+  domainAnalysisFields,
+  type DomainAnalysisField,
+  type SpecializedReportDomain,
+} from "@/app/lib/report-engine/prompts/domain-analysis";
+import { planFieldLabels } from "@/app/lib/report-engine/prompts/plan";
+import {
+  useAttachments,
+  type PlannerAttachment,
+} from "@/components/planner/useAttachments";
 import { useReportExport } from "@/components/planner/useReportExport";
+import {
+  recommendationFromUnderstanding,
+  type IntentRecommendation,
+} from "@/components/planner/IntentDetector";
+import {
+  createUniversalReportReadiness,
+  createUnderstandingFallback,
+  universalUnderstandingSchema,
+  type UniversalReportReadiness,
+  type UniversalUnderstanding,
+} from "@/app/lib/ai/understanding";
+import { RecommendationCard } from "@/components/planner/RecommendationCard";
+import { UnderstandingLoadingState } from "@/components/planner/UnderstandingCard";
+import { getComposerSuggestions } from "@/components/planner/composer-suggestions";
 
 type ReportSection = {
   field?: keyof (MarketReport & PlanReport) | string;
@@ -194,15 +242,10 @@ type PlanReport = {
   financialAssumptions: string;
   founderScore: string;
   sourcesAssumptions: string;
-};
+} & Record<RealEstateReportField | DomainAnalysisField, string>;
 
 type MarketReportField = keyof MarketReport;
 type PlanReportField = keyof PlanReport;
-
-type ReportStreamEvent = EngineReportStreamEvent<
-  MarketReport & PlanReport,
-  MarketReportField | PlanReportField
->;
 
 function getReportGenerationErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
@@ -210,6 +253,14 @@ function getReportGenerationErrorMessage(error: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function sanitizeVisiblePlannerReportContent(content: string) {
+  return sanitizeAiResponseText(content);
+}
+
+function isPrivateBetaReportRestriction(value: string) {
+  return value.trim().toLowerCase() === "private beta access only.";
 }
 
 type ReportFieldDefinition = EngineReportFieldDefinition<
@@ -228,13 +279,16 @@ type ExecutiveBriefField =
   | "additionalContext";
 type ExecutiveBriefFields = Record<ExecutiveBriefField, string>;
 
-type ResponseLanguage = "English" | "Turkish";
-
 type ChatAttachment = {
   id: string;
   name: string;
   size: number;
+  mimeType?: string;
   textContent?: string;
+  dataUrl?: string;
+  status?: "processing" | "ready" | "error";
+  progress?: number;
+  error?: string;
 };
 
 type ChatMessage = {
@@ -276,7 +330,11 @@ type InitialReport = {
   workspaceId: string;
   title: string;
   prompt: string;
-  type: "Business Plan" | "Market Analysis";
+  type:
+    | "Business Plan"
+    | "Market Analysis"
+    | "Real Estate Investment Analysis"
+    | "Strategic Report";
   status: string;
   metadata?: ReportMetadata;
   investmentScore?: ReportInvestmentScore;
@@ -290,7 +348,11 @@ type InitialReport = {
 type RegenerationContext = {
   reportId: string;
   reportTitle: string;
-  reportType: "Business Plan" | "Market Analysis";
+  reportType:
+    | "Business Plan"
+    | "Market Analysis"
+    | "Real Estate Investment Analysis"
+    | "Strategic Report";
   workspaceId: string;
   prompt: string;
 };
@@ -298,6 +360,9 @@ type RegenerationContext = {
 type LastRequest = {
   mode: ChatMode;
   prompt: string;
+  attachments?: PlannerAttachment[];
+  reportReadiness?: UniversalReportReadiness;
+  language?: ResponseLanguage;
 };
 
 type PlannerProps = {
@@ -382,54 +447,6 @@ async function getSupabaseAccessToken() {
   return accessToken;
 }
 
-const modeCards: Array<{
-  mode: ChatMode;
-  label: string;
-  description: string;
-  output: string;
-  opens: string;
-  icon: LucideIcon;
-}> = [
-  {
-    mode: "plan",
-    label: "Business Idea Validation",
-    description: "Pressure-test a venture thesis, customer fit, risks and execution path.",
-    output: "Validation report",
-    opens: "Creates a structured business validation report",
-    icon: BriefcaseBusiness,
-  },
-  {
-    mode: "market",
-    label: "Market Intelligence",
-    description: "Map market size, competitors, timing, entry strategy and opportunity quality.",
-    output: "Market memo",
-    opens: "Creates a market intelligence report",
-    icon: BarChart3,
-  },
-  {
-    mode: "chat",
-    label: "Strategic Advisory",
-    description: "Use ZERINIX as an executive advisor for a specific strategic decision.",
-    output: "Advisor session",
-    opens: "Advisor session",
-    icon: Bot,
-  },
-];
-
-function inferRecommendedAnalysisMode(promptText: string): ChatMode {
-  const prompt = promptText.toLowerCase();
-
-  if (/\b(market|pazar|sector|sektör|industry|competitor|competition|rakip|rakipler|opportunity|fırsat|expansion|genişleme|country|ülke|region|bölge)\b/i.test(prompt)) {
-    return "market";
-  }
-
-  if (/\b(strategy|strateji|decision|karar|pricing|fiyat|growth|büyüme|positioning|konumlandırma|go-to-market|gtm)\b/i.test(prompt)) {
-    return "chat";
-  }
-
-  return "plan";
-}
-
 const emptyExecutiveBrief: ExecutiveBriefFields = {
   decisionGoal: "",
   company: "",
@@ -458,6 +475,59 @@ const decisionGoalLabels: Record<ChatMode, string> = {
   market: "Market Intelligence",
   chat: "Strategic Advisory",
 };
+
+const analysisWorkspaceModes: Array<{
+  mode: ChatMode;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+}> = [
+  {
+    mode: "plan",
+    title: "Business Idea Validation",
+    description: "Test demand, positioning, viability, and the path to execution.",
+    icon: BriefcaseBusiness,
+  },
+  {
+    mode: "market",
+    title: "Market Intelligence",
+    description: "Understand markets, competitors, customers, and growth signals.",
+    icon: BarChart3,
+  },
+  {
+    mode: "chat",
+    title: "Strategic Advisory",
+    description: "Work through complex decisions with a focused AI advisor.",
+    icon: MessageSquare,
+  },
+];
+
+const analysisQuickActions: Array<{
+  label: string;
+  mode: ChatMode;
+  starter: string;
+}> = [
+  {
+    label: "Validate Business Idea",
+    mode: "plan",
+    starter: "Validate my business idea",
+  },
+  {
+    label: "Analyze Market",
+    mode: "market",
+    starter: "Analyze my market",
+  },
+  {
+    label: "Find Competitors",
+    mode: "market",
+    starter: "Find competitors for this opportunity",
+  },
+  {
+    label: "Improve Pricing",
+    mode: "chat",
+    starter: "Help me improve my pricing",
+  },
+];
 
 let pdfFontPromise: Promise<string> | null = null;
 
@@ -555,56 +625,152 @@ const planReportFields: Array<{
   { field: "sourcesAssumptions", title: "Sources / Assumptions", icon: FileText },
 ];
 
-const turkishReportFieldTitles: Partial<Record<MarketReportField | PlanReportField, string>> = {
-  executiveSummary: "Yönetici Özeti",
-  problem: "Problem",
-  solution: "Çözüm",
-  targetCustomer: "Hedef Müşteri / ICP",
-  marketOpportunity: "Pazar Fırsatı",
-  competitorLandscape: "Rakip Görünümü",
-  businessModel: "İş Modeli",
-  tamSamSom: "TAM / SAM / SOM",
-  swotAnalysis: "SWOT Analizi",
-  portersFiveForces: "Porter'ın Beş Gücü",
-  pricingStrategy: "Fiyatlandırma Stratejisi",
-  goToMarketPlan: "Pazara Giriş Planı",
-  salesStrategy: "Satış Stratejisi",
-  unitEconomics: "Birim Ekonomisi",
-  financialDashboard: "Finansal Panel",
-  scenarioAnalysis: "Senaryo Analizi: Kötü / Baz / En İyi",
-  kpiDashboard: "KPI Paneli",
-  executiveRecommendation: "Yönetici Tavsiyesi",
-  risks: "Riskler",
-  kpis: "KPI'lar",
-  founderRoadmap: "Kurucu Yol Haritası",
-  roadmap306090: "30-60-90 Günlük Yol Haritası",
-  financialAssumptions: "Finansal Varsayımlar",
-  founderScore: "Kurucu Hazırlık Skoru",
-  sourcesAssumptions: "Kaynaklar / Varsayımlar",
-  marketOverview: "Pazar Genel Bakışı",
-  industryTrends: "Sektör Trendleri",
-  competitorAnalysis: "Rakip Analizi",
-  customerPainPoints: "Müşteri Problemleri",
-  opportunities: "Fırsatlar",
-  threats: "Tehditler",
-  entryStrategy: "Pazara Giriş Stratejisi",
-  validationPlan: "Doğrulama Planı",
-  keyMetrics: "Temel Metrikler",
-  sources: "Kaynaklar",
-};
+const realEstateReportFields: Array<{
+  field: RealEstateReportField;
+  title: string;
+  icon: LucideIcon;
+}> = realEstateFields.map((field) => {
+  const icons: Partial<Record<RealEstateReportField, LucideIcon>> = {
+    assetIdentification: Landmark,
+    extractedDocumentFacts: FileText,
+    ownershipTitleFindings: ClipboardCheck,
+    location: Landmark,
+    zoningLandUseStatus: LayoutDashboard,
+    accessInfrastructure: Goal,
+    comparableMarketEvidence: Search,
+    valuationRange: PieChart,
+    legalRisks: ShieldAlert,
+    environmentalGeotechnicalRisks: ShieldAlert,
+    liquidity: TrendingUp,
+    developmentPotential: BarChart3,
+    scenarioAnalysis: BarChart3,
+    investmentScore: Gauge,
+    missingInformation: Info,
+    recommendedDueDiligence: ListChecks,
+    finalRecommendation: Sparkles,
+    sources: FileText,
+  };
+
+  return {
+    field,
+    title: realEstateFieldLabels.English[field],
+    icon: icons[field] || FileText,
+  };
+});
+
+const specializedReportFields: Array<{
+  field: DomainAnalysisField;
+  title: string;
+  icon: LucideIcon;
+}> = domainAnalysisFields.map((field) => {
+  const icons: Partial<Record<DomainAnalysisField, LucideIcon>> = {
+    subjectIdentification: ClipboardCheck,
+    extractedFacts: FileText,
+    externalEvidence: Search,
+    domainFindings: ListChecks,
+    regulatoryCompliance: Landmark,
+    financialImplications: PieChart,
+    operationalImplications: FolderKanban,
+    riskAnalysis: ShieldAlert,
+    scenarioAnalysis: BarChart3,
+    decisionAssessment: Gauge,
+    missingInformation: Info,
+    recommendedActions: Goal,
+    finalRecommendation: Sparkles,
+    sources: FileText,
+  };
+
+  return {
+    field,
+    title: domainAnalysisFieldLabels.English[field],
+    icon: icons[field] || FileText,
+  };
+});
+
+function isSpecializedReportDomain(
+  domain: ReportDomain
+): domain is SpecializedReportDomain {
+  return (
+    domain === "legal" ||
+    domain === "finance" ||
+    domain === "accounting" ||
+    domain === "operations" ||
+    domain === "procurement"
+  );
+}
+
+function getPlanFieldsForDomain(domain: ReportDomain, prompt = "") {
+  if (domain === "real_estate") return realEstateReportFields;
+  if (
+    domain === "operations" &&
+    /\b(retail|store|branch|sku|product sales|inventory turnover|perakende|market zinciri|mağaza|şube|ürün satış|stok devir)\b/i.test(
+      prompt
+    )
+  ) {
+    const Turkish = /[çğıöşüÇĞİÖŞÜ]/.test(prompt);
+    const titles: Record<DomainAnalysisField, string> = Turkish
+      ? {
+          subjectIdentification: "Veri Seti ve Dönem",
+          extractedFacts: "Yüklenen Satış Verilerinin Özeti",
+          externalEvidence: "Pazar ve Referans Kanıtları",
+          domainFindings: "Şube ve Ürün Performansı",
+          regulatoryCompliance: "Veri Kalitesi ve Kontroller",
+          financialImplications: "Kârlılık Analizi",
+          operationalImplications: "Stok Devir Hızı",
+          riskAnalysis: "Düşük Performanslı Ürünler ve Riskler",
+          scenarioAnalysis: "Büyüme Senaryoları",
+          decisionAssessment: "Performans Değerlendirmesi",
+          missingInformation: "Kritik Veri Eksikleri",
+          recommendedActions: "Önceliklendirilmiş Aksiyon Planı",
+          finalRecommendation: "Yönetici Tavsiyesi",
+          sources: "Kaynaklar",
+        }
+      : {
+          subjectIdentification: "Dataset and Period",
+          extractedFacts: "Uploaded Sales Data Summary",
+          externalEvidence: "Market and Benchmark Evidence",
+          domainFindings: "Branch and Product Performance",
+          regulatoryCompliance: "Data Quality and Controls",
+          financialImplications: "Profitability Analysis",
+          operationalImplications: "Inventory Turnover",
+          riskAnalysis: "Low-performing Products and Risks",
+          scenarioAnalysis: "Growth Scenarios",
+          decisionAssessment: "Performance Assessment",
+          missingInformation: "Critical Data Gaps",
+          recommendedActions: "Prioritized Action Plan",
+          finalRecommendation: "Executive Recommendation",
+          sources: "Sources",
+        };
+    return specializedReportFields.map((field) => ({
+      ...field,
+      title: titles[field.field as DomainAnalysisField],
+    }));
+  }
+  if (isSpecializedReportDomain(domain)) return specializedReportFields;
+  return planReportFields;
+}
 
 function localizeReportFields<T extends ReportFieldDefinition>(
   fields: T[],
   language: ResponseLanguage = "English"
 ) {
-  if (language !== "Turkish") {
-    return fields;
-  }
+  return fields.map((field) => {
+    const defaultSpecializedTitle =
+      domainAnalysisFieldLabels.English[field.field as DomainAnalysisField];
+    const hasCustomSpecializedTitle =
+      Boolean(defaultSpecializedTitle) &&
+      field.title !== defaultSpecializedTitle;
 
-  return fields.map((field) => ({
-    ...field,
-    title: turkishReportFieldTitles[field.field] || field.title,
-  }));
+    return {
+      ...field,
+      title: hasCustomSpecializedTitle
+        ? field.title
+        : realEstateFieldLabels[language]?.[field.field as RealEstateReportField]
+          || domainAnalysisFieldLabels[language]?.[field.field as DomainAnalysisField]
+          || (planFieldLabels[language] as Partial<Record<string, string>>)?.[field.field]
+          || field.title,
+    };
+  });
 }
 
 function buildInitialReportData(
@@ -621,7 +787,7 @@ function buildInitialReportData(
   const normalizedSections = new Map(
     initialReport.sections.map((section) => [
       (section.field || section.title).trim().toLowerCase(),
-      section.content,
+      sanitizeVisiblePlannerReportContent(section.content),
     ])
   );
 
@@ -681,7 +847,7 @@ const emptyMarketReport: MarketReport = {
   sources: "",
 };
 
-const emptyPlanReport: PlanReport = {
+const emptyPlanReport = Object.assign({
   executiveSummary: "",
   problem: "",
   solution: "",
@@ -707,16 +873,34 @@ const emptyPlanReport: PlanReport = {
   financialAssumptions: "",
   founderScore: "",
   sourcesAssumptions: "",
-};
+}, Object.fromEntries(
+  [...realEstateFields, ...domainAnalysisFields].map((field) => [field, ""])
+)) as PlanReport;
 
 function detectResponseLanguage(value: string): ResponseLanguage {
-  const normalized = value.toLowerCase();
-  const turkishSignals = [
-    /[çğıöşü]/i,
-    /\b(ve|bir|için|ile|ama|fakat|iş|hedef|müşteri|pazar|gelir|strateji|istiyorum|yap|kurmak|deneme|merhaba|selam|evet|hayır|lutfen|lütfen)\b/i,
-  ];
+  return getResponseLanguage(detectReportLanguage(value));
+}
 
-  return turkishSignals.some((signal) => signal.test(normalized)) ? "Turkish" : "English";
+function getExplicitReportLanguageSelection() {
+  return typeof window === "undefined"
+    ? ""
+    : window.localStorage.getItem("zerinix_report_language") || "";
+}
+
+function getPlannerUiLanguage() {
+  return typeof document === "undefined"
+    ? ""
+    : document.cookie.match(/(?:^|;\s*)zerinix_locale_manual=([^;]+)/)?.[1] || "";
+}
+
+function resolvePlannerReportLanguage(value: string): ResponseLanguage {
+  const browserLanguage = typeof navigator === "undefined" ? "" : navigator.language;
+  return getResponseLanguage(resolveReportLanguage({
+    explicitLanguage: getExplicitReportLanguageSelection(),
+    uiLanguage: getPlannerUiLanguage(),
+    browserLanguage,
+    requestText: value,
+  }));
 }
 
 function getLanguageCopy(language: ResponseLanguage) {
@@ -724,8 +908,11 @@ function getLanguageCopy(language: ResponseLanguage) {
     return {
       planTitle: "İş Planı Raporu",
       marketTitle: "İş Zekası Raporu",
+      realEstateTitle: "Gayrimenkul Yatırım Analizi",
       preparingPlan: "## İş Planı Raporu\n\nİlk bölümler hazırlanıyor...",
       preparingMarket: "## İş Zekası Raporu\n\nCanlı pazar araştırması hazırlanıyor...",
+      preparingRealEstate:
+        "## Gayrimenkul Yatırım Analizi\n\nBelge kanıtları ve durum tespiti hazırlanıyor...",
       waitingSection: "Bu bölüm AI çıktısını bekliyor.",
       sectionFallback: "Rapor servisi bu bölüm için içerik döndürmedi.",
       genericError: "Bir şeyler ters gitti.",
@@ -739,11 +926,24 @@ function getLanguageCopy(language: ResponseLanguage) {
     };
   }
 
+  if (language === "German") {
+    return { planTitle: "Geschäftsplan", marketTitle: "Marktintelligenzbericht", realEstateTitle: "Immobilien-Investitionsanalyse", preparingPlan: "## Geschäftsplan\n\nDie ersten Abschnitte werden erstellt...", preparingMarket: "## Marktintelligenzbericht\n\nDie Marktrecherche wird erstellt...", preparingRealEstate: "## Immobilien-Investitionsanalyse\n\nNachweise und Due Diligence werden erstellt...", waitingSection: "Dieser Abschnitt wartet auf die Analyse.", sectionFallback: "Für diesen Abschnitt liegt kein Inhalt vor.", genericError: "Ein Fehler ist aufgetreten.", retryError: "Die Berichtsanfrage wurde ohne verwertbare Antwort beendet.", marketError: "Bei der Marktanalyse ist ein Fehler aufgetreten.", marketRetryError: "Bei der Marktanalyse ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.", planClarification: "Bitte beschreiben Sie die zu analysierende Geschäftsidee.", marketClarification: "Bitte beschreiben Sie die zu analysierende Geschäftsidee oder Branche." };
+  }
+  if (language === "French") {
+    return { planTitle: "Plan d'affaires", marketTitle: "Rapport d'intelligence de marché", realEstateTitle: "Analyse d'investissement immobilier", preparingPlan: "## Plan d'affaires\n\nPréparation des premières sections...", preparingMarket: "## Rapport d'intelligence de marché\n\nPréparation de la recherche de marché...", preparingRealEstate: "## Analyse d'investissement immobilier\n\nPréparation des preuves et des diligences...", waitingSection: "Cette section attend l'analyse.", sectionFallback: "Aucun contenu n'a été produit pour cette section.", genericError: "Une erreur s'est produite.", retryError: "La demande de rapport a échoué sans réponse exploitable.", marketError: "Une erreur s'est produite pendant l'analyse de marché.", marketRetryError: "Une erreur s'est produite pendant l'analyse de marché. Veuillez réessayer.", planClarification: "Veuillez décrire l'idée d'entreprise à analyser.", marketClarification: "Veuillez décrire l'idée d'entreprise ou le secteur à analyser." };
+  }
+  if (language === "Spanish") {
+    return { planTitle: "Plan de negocio", marketTitle: "Informe de inteligencia de mercado", realEstateTitle: "Análisis de inversión inmobiliaria", preparingPlan: "## Plan de negocio\n\nPreparando las primeras secciones...", preparingMarket: "## Informe de inteligencia de mercado\n\nPreparando la investigación de mercado...", preparingRealEstate: "## Análisis de inversión inmobiliaria\n\nPreparando evidencia y diligencia debida...", waitingSection: "Esta sección está esperando el análisis.", sectionFallback: "No se generó contenido para esta sección.", genericError: "Se produjo un error.", retryError: "La solicitud del informe finalizó sin una respuesta utilizable.", marketError: "Se produjo un error durante el análisis de mercado.", marketRetryError: "Se produjo un error durante el análisis de mercado. Inténtelo de nuevo.", planClarification: "Describa la idea de negocio que desea analizar.", marketClarification: "Describa la idea de negocio o el sector que desea analizar." };
+  }
+
   return {
     planTitle: "Business Plan Report",
     marketTitle: "Business Intelligence Report",
+    realEstateTitle: "Real Estate Investment Analysis",
     preparingPlan: "## Business Plan Report\n\nPreparing the first sections...",
     preparingMarket: "## Business Intelligence Report\n\nPreparing live market research...",
+    preparingRealEstate:
+      "## Real Estate Investment Analysis\n\nPreparing document evidence and due diligence...",
     waitingSection: "This section is waiting for AI output.",
     sectionFallback: "The report service returned no content for this section.",
     genericError: "Something went wrong.",
@@ -755,6 +955,24 @@ function getLanguageCopy(language: ResponseLanguage) {
     marketClarification:
       "Please enter the business idea or industry you want analyzed. For example: luxury hotel brand, electric yacht company, or EV battery manufacturer.",
   };
+}
+
+function getSpecializedReportTitle(
+  domain: SpecializedReportDomain,
+  language: ResponseLanguage
+) {
+  const titles: Record<
+    SpecializedReportDomain,
+    Record<ResponseLanguage, string>
+  > = {
+    legal: { English: "Legal Decision Analysis", Turkish: "Hukuki Karar Analizi", German: "Rechtliche Entscheidungsanalyse", French: "Analyse de décision juridique", Spanish: "Análisis de decisión jurídica" },
+    finance: { English: "Financial Decision Analysis", Turkish: "Finansal Karar Analizi", German: "Finanzielle Entscheidungsanalyse", French: "Analyse de décision financière", Spanish: "Análisis de decisión financiera" },
+    accounting: { English: "Accounting Review", Turkish: "Muhasebe İncelemesi", German: "Rechnungslegungsprüfung", French: "Examen comptable", Spanish: "Revisión contable" },
+    operations: { English: "Operations Analysis", Turkish: "Operasyon Analizi", German: "Betriebsanalyse", French: "Analyse opérationnelle", Spanish: "Análisis operativo" },
+    procurement: { English: "Procurement Analysis", Turkish: "Tedarik Analizi", German: "Beschaffungsanalyse", French: "Analyse des achats", Spanish: "Análisis de compras" },
+  };
+
+  return titles[domain][language];
 }
 
 function generateConversationTitle(content: string) {
@@ -907,6 +1125,66 @@ function getReportMarkdown(
     .join("\n\n");
 
   return `## ${title}\n\n${sections || "Preparing the first sections..."}`;
+}
+
+function moveReportAdvisoriesIntoWarningsSection({
+  reportData,
+  fields,
+  warnings,
+  language,
+}: {
+  reportData: PlanReport;
+  fields: ReportFieldDefinition[];
+  warnings: string[];
+  language: ResponseLanguage;
+}) {
+  const reportContainsAdvisories = Object.values(reportData).some(
+    (content) =>
+      typeof content === "string" &&
+      isReportAdvisoryWarningText(content)
+  );
+  const uniqueWarnings = [...new Set(warnings.map((warning) => warning.trim()))]
+    .filter(Boolean)
+    .slice(0, 12);
+
+  if (!reportContainsAdvisories && uniqueWarnings.length === 0) {
+    return "";
+  }
+
+  const availableFields = new Set(fields.map(({ field }) => field));
+  const warningField: PlanReportField = availableFields.has(
+    "missingInformation"
+  )
+    ? "missingInformation"
+    : availableFields.has("sourcesAssumptions")
+      ? "sourcesAssumptions"
+      : (fields[fields.length - 1]?.field as PlanReportField | undefined) ||
+        "executiveSummary";
+  const heading =
+    language === "Turkish"
+      ? "Uyarılar / Eksik Kanıtlar"
+      : "Warnings / Missing Evidence";
+  const existingContent = reportData[warningField]?.trim() || "";
+  const warningDetails = uniqueWarnings
+    .filter((warning) => !existingContent.includes(warning))
+    .map((warning) => `- ${warning}`)
+    .join("\n");
+
+  if (!new RegExp(`^${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "im").test(existingContent)) {
+    reportData[warningField] = [
+      heading,
+      warningDetails,
+      existingContent,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  } else if (warningDetails) {
+    reportData[warningField] = `${existingContent}\n\n${warningDetails}`;
+  }
+
+  return language === "Turkish"
+    ? "Sağlayıcı ve doğrulama uyarıları raporun “Uyarılar / Eksik Kanıtlar” bölümüne eklendi."
+    : "Provider and verification warnings were included in the report’s “Warnings / Missing Evidence” section.";
 }
 
 function normalizeConversationPreview(content: string) {
@@ -1381,13 +1659,16 @@ function dedupePdfCitations(citations: CitationData[]) {
   const unique = new Map<string, CitationData>();
 
   citations.forEach((citation) => {
-    const domain = getCitationDomain(citation.url, citation.organization);
+    const normalizedUrl = normalizeCitationUrl(citation.url);
+    const domain = getCitationDomain(normalizedUrl, citation.organization);
+    const urlKey = `url:${normalizedUrl}`;
     const publisherKey = normalizePdfText(citation.organization).toLowerCase().replace(/\W+/g, " ").trim();
     const sourceNameKey = normalizePdfText(getCitationSourceName(citation))
       .toLowerCase()
       .replace(/\W+/g, " ")
       .trim();
     const key = [
+      normalizedUrl ? urlKey : "",
       domain || "no-domain",
       publisherKey || "unknown-publisher",
       sourceNameKey || "unknown-source",
@@ -1397,6 +1678,7 @@ function dedupePdfCitations(citations: CitationData[]) {
     unique.set(key, {
       ...existing,
       ...citation,
+      url: normalizedUrl || existing?.url || "",
       ...(existing?.url && !citation.url ? { url: existing.url } : {}),
       ...(existing?.sourceType && !citation.sourceType ? { sourceType: existing.sourceType } : {}),
       ...(existing?.confidence && !citation.confidence ? { confidence: existing.confidence } : {}),
@@ -1413,6 +1695,9 @@ function getFinalDedupePdfSources(citations: CitationData[]) {
       sourceName: string;
       sourceType: string;
       trustLabel: string;
+      publisher: string;
+      publicationYear: string;
+      url: string;
     }
   >();
 
@@ -1447,6 +1732,9 @@ function getFinalDedupePdfSources(citations: CitationData[]) {
         sourceName,
         sourceType: getPdfCitationSourceTypeLabel(citation),
         trustLabel: getPdfCitationTrustLabel(citation),
+        publisher: citation.organization || "Publisher not specified",
+        publicationYear: citation.publicationYear || "",
+        url: normalizeCitationUrl(citation.url),
       });
       unique.set(fallbackDisplayKey, unique.get(key)!);
     }
@@ -1629,7 +1917,7 @@ function Citation({ citation }: { citation?: CitationData }) {
   );
 }
 
-function SourcesCard({ sections }: { sections: ReportSection[] }) {
+function SourcesCard({ sections, legal = false }: { sections: ReportSection[]; legal?: boolean }) {
   const mergedContent = sections
     .map((section) => section.content.trim())
     .filter(Boolean)
@@ -1664,12 +1952,14 @@ function SourcesCard({ sections }: { sections: ReportSection[] }) {
                 ))}
               </div>
             ) : null}
-            <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-              <p className="text-sm font-semibold text-white">Methodology &amp; Assumptions</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-400">
-                Market sizing, financial projections and KPI estimates are based on available market signals, benchmark data and planning assumptions.
-              </p>
-            </div>
+            {!legal ? (
+              <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                <p className="text-sm font-semibold text-white">Methodology &amp; Assumptions</p>
+                <p className="mt-2 text-sm leading-6 text-zinc-400">
+                  Market sizing, financial projections and KPI estimates are based on available market signals, benchmark data and planning assumptions.
+                </p>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -1888,8 +2178,8 @@ function extractStrictMetricValueFromAliases(
   return "";
 }
 
-function normalizePdfFinancialMetrics(content: string) {
-  const metricContent = normalizePdfText(content);
+function normalizePdfFinancialMetrics(content: string, fullReportContent = "") {
+  const metricContent = `${content}\n${fullReportContent}`;
 
   return getFinancialDashboardMetrics(metricContent)
     .map((metric) => {
@@ -2244,6 +2534,57 @@ function extractMarketSizeValue(content: string, label: string) {
   return compactPdfMetricValue(direct || extractMetricValue(content, label));
 }
 
+function looksLikePromptOrInstruction(value: string) {
+  return /\b(based on the entire report|would you invest|should i invest|what do you think|section to generate|report quality rules|write only|business idea\s*\/\s*goal|system prompt|internal instruction|validation prompt)\b/i.test(
+    value
+  );
+}
+
+function getBusinessIdeaFromPrompt(value: string) {
+  const cleaned = normalizePdfText(value)
+    .replace(/^[-*•]\s*/, "")
+    .replace(/\?+$/g, "")
+    .trim();
+
+  if (
+    !cleaned ||
+    looksLikePromptOrInstruction(cleaned) ||
+    /\b(who is|what is|why|how|would|should|can you|tell me|analyze|compare)\b/i.test(
+      cleaned
+    )
+  ) {
+    return "";
+  }
+
+  return cleaned.slice(0, 180);
+}
+
+function deriveBusinessDescriptionFromSections(
+  sourcePrompt: string,
+  sections: ReportSection[]
+) {
+  const promptDescription = getBusinessIdeaFromPrompt(sourcePrompt);
+
+  if (promptDescription) {
+    return promptDescription;
+  }
+
+  for (const field of ["businessModel", "solution", "targetCustomer"]) {
+    const content = sections.find((section) => section.field === field)?.content || "";
+    const sentence = normalizePdfText(content)
+      .replace(/[#*_`>-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .match(/^(.{32,220}?[.!?])(?:\s|$)/)?.[1];
+
+    if (sentence) {
+      return sentence;
+    }
+  }
+
+  return "";
+}
+
 function isMobilityReportContent(content: string) {
   return /\b(scooter|micromobility|micro mobility|shared mobility|bike sharing|bikeshare|per-ride|urban riders|commuters|fleet utilization|rental|rider cac|rider ltv|active riders|yearly revenue|monthly revenue)\b/i.test(
     content
@@ -2591,7 +2932,7 @@ function extractScenarioSnippet(content: string, scenario: string) {
   return "";
 }
 
-function isPlaceholderKpiText(value: string) {
+function isMissingKpiText(value: string) {
   return /^1$/.test(value.trim()) ||
     /\b1\s*(?:[-–—]\s*)?\/\s*(?:target\s*[:\-–—]?\s*)?1\b/i.test(value) ||
     /\b(?:value|metric|current|baseline|threshold|target)\s*[:\-–—]?\s*1\b/i.test(value.trim());
@@ -2674,7 +3015,7 @@ function extractKpiObjectField(snippet: string, fieldLabels: string[]) {
   );
   const value = match?.[1]?.trim().replace(/\*\*/g, "") || "";
 
-  return isPlaceholderKpiText(value) ? "Validation Required" : value;
+  return isMissingKpiText(value) ? "Validation Required" : value;
 }
 
 function extractKpiQuantityValue(snippet: string) {
@@ -2696,7 +3037,7 @@ function extractKpiValueFromSnippet(snippet: string, aliases: string[] | readonl
     (score === null ? "" : `${score}%`) ||
     "";
 
-  return isPlaceholderKpiText(value) ? "Validation Required" : value;
+  return isMissingKpiText(value) ? "Validation Required" : value;
 }
 
 function extractKpiValueFromAliases(content: string, aliases: string[] | readonly string[]) {
@@ -2707,7 +3048,7 @@ function extractKpiTargetFromSnippet(snippet: string) {
   const target = extractKpiObjectField(snippet, ["target", "hedef"]);
   const cleanTarget = target ? compactPdfMetricValue(target) || target : "";
 
-  return isPlaceholderKpiText(cleanTarget) ? "Validation Required" : cleanTarget;
+  return isMissingKpiText(cleanTarget) ? "Validation Required" : cleanTarget;
 }
 
 function extractKpiTargetFromAliases(content: string, aliases: string[] | readonly string[]) {
@@ -2789,7 +3130,7 @@ function normalizePdfFounderScoreMetrics(content: string, investmentScore?: Repo
 function buildPdfFounderScoreCards(
   content: string,
   investmentScore: ReportInvestmentScore | undefined,
-  locale: "en" | "tr"
+  locale: PdfLocale
 ) {
   return normalizePdfFounderScoreMetrics(content, investmentScore).map((metric) => ({
     label: localizePdfPresentationLabel(metric.label, locale),
@@ -2797,7 +3138,7 @@ function buildPdfFounderScoreCards(
   }));
 }
 
-function getPdfSectionCardTitle(section: ReportSection, locale: "en" | "tr") {
+function getPdfSectionCardTitle(section: ReportSection, locale: PdfLocale) {
   if (section.field === "founderScore") {
     return locale === "tr" ? "Kurucu Hazırlık Boyutları" : "Founder Readiness Dimensions";
   }
@@ -2805,7 +3146,7 @@ function getPdfSectionCardTitle(section: ReportSection, locale: "en" | "tr") {
   return section.title;
 }
 
-function getPdfTocEntryTitle(section: ReportSection, locale: "en" | "tr") {
+function getPdfTocEntryTitle(section: ReportSection, locale: PdfLocale) {
   if (/\b(?:Validation Intelligence|Doğrulama Zekası)\b/i.test(section.content)) {
     return localizePdfPresentationLabel("Validation Intelligence", locale);
   }
@@ -2899,7 +3240,7 @@ function isSourceLikeSection(section: { field?: string; title: string }) {
   );
 }
 
-function formatPdfCitationContent(content: string) {
+function formatPdfCitationContent(content: string, realEstate = false) {
   const sourceContent = normalizePdfSourceContent(
     normalizePdfFinancialSectionContent(content, {
       field: "sourcesAssumptions",
@@ -2907,12 +3248,31 @@ function formatPdfCitationContent(content: string) {
     })
   );
   const citations = parseCitations(sourceContent);
-  const methodologyBlock = [
-    "Methodology & Assumptions",
-    "Market sizing, financial projections and KPI estimates are based on available market signals, benchmark data and planning assumptions.",
-  ].join("\n");
+  const methodologyBlock = realEstate
+    ? [
+        "Real Estate Evidence & Due-Diligence Methodology",
+        "Uploaded asset facts are extracted first and kept separate from external evidence. External research coverage records completed, not-found, unavailable, failed, and timed-out tasks. Valuation is gated by confirmed location, parcel size and unit, zoning or land use, sufficient comparables, currency, and an explicit calculation method. Confidence falls with missing or conflicting evidence. Unresolved unknowns remain visible, and this report does not replace title, planning, survey, legal, environmental, geotechnical, or licensed valuation due diligence.",
+      ].join("\n")
+    : [
+        "Methodology & Assumptions",
+        "Market sizing, financial projections and KPI estimates are based on available market signals, benchmark data and planning assumptions.",
+      ].join("\n");
 
   if (citations.length === 0) {
+    if (realEstate) {
+      return [
+        "• Uploaded Asset Evidence",
+        "  Type: Primary document or image evidence",
+        "• Official Planning and Cadastral Research",
+        "  Type: Authoritative verification required",
+        "• Comparable Market Research",
+        "  Type: Dated external market evidence required",
+        "• Unresolved Due-Diligence Items",
+        "  Type: Missing evidence acquisition plan",
+        "",
+        methodologyBlock,
+      ].join("\n");
+    }
     return [
       "• Market Comparisons",
       "  Type: Industry benchmark",
@@ -2934,6 +3294,9 @@ function formatPdfCitationContent(content: string) {
       [
         `• ${source.sourceName}`,
         `  Source type: ${source.sourceType}`,
+        `  Publisher: ${source.publisher}`,
+        `  Year: ${source.publicationYear || "Not specified"}`,
+        `  URL: ${source.url || "Not provided"}`,
         `  Confidence: ${source.trustLabel}`,
       ].join("\n")
     )
@@ -2942,9 +3305,13 @@ function formatPdfCitationContent(content: string) {
   return `${sourceLines}\n\n${methodologyBlock}`;
 }
 
-function formatPdfReadableContent(section: ReportSection, founderReadinessScore?: number | null) {
+function formatPdfReadableContent(
+  section: ReportSection,
+  founderReadinessScore?: number | null,
+  realEstate = false
+) {
   if (isSourceLikeSection(section)) {
-    return formatPdfCitationContent(section.content);
+    return formatPdfCitationContent(section.content, realEstate);
   }
 
   if (section.field === "tamSamSom" || isTamSamSomTitle(section.title)) {
@@ -3458,7 +3825,10 @@ function PremiumSectionVisual({
         </div>
         <div className="grid gap-3 lg:grid-cols-3">
           {rows.map((row, index) => (
-            <div key={row.label} className="min-h-44 rounded-3xl border border-white/10 bg-black/35 p-4">
+            <div
+              key={row.label}
+              className="grid min-h-44 gap-3 rounded-3xl border border-white/10 bg-black/35 p-4 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(7rem,auto)] lg:block"
+            >
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
@@ -4383,7 +4753,7 @@ function getBenchmarkFitLocale(source = "") {
     : "en";
 }
 
-function localizeBenchmarkFitValue(value = "", locale: "en" | "tr") {
+function localizeBenchmarkFitValue(value = "", locale: PdfLocale) {
   if (locale !== "tr") {
     return value;
   }
@@ -4652,6 +5022,7 @@ function ConversationSidebar({
   conversations,
   activeConversationId,
   activeMode,
+  modeSelected,
   onSelectConversation,
   onCreateConversation,
   onRenameConversation,
@@ -4660,6 +5031,7 @@ function ConversationSidebar({
   conversations: Conversation[];
   activeConversationId: string;
   activeMode: ChatMode;
+  modeSelected: boolean;
   onSelectConversation: (id: string) => void;
   onCreateConversation: () => void | Promise<void>;
   onRenameConversation: (id: string, title: string) => void;
@@ -4882,7 +5254,13 @@ function ConversationSidebar({
             Analysis Workspace
           </span>
           <span className="rounded-full border border-teal-200/20 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-teal-100">
-            {activeMode === "plan" ? "Plan" : activeMode === "market" ? "Market" : "Advisor"}
+            {modeSelected
+              ? activeMode === "plan"
+                ? "Plan"
+                : activeMode === "market"
+                  ? "Market"
+                  : "Advisor"
+              : "Select"}
           </span>
         </Link>
         <Link
@@ -5192,7 +5570,9 @@ const ReportPanel = memo(function ReportPanel({
   reportFields,
   reportId,
   reportTitle,
+  reportDomain,
   sourcePrompt,
+  reportLanguage,
   waitingMessage,
   result,
   failureMessage,
@@ -5201,6 +5581,8 @@ const ReportPanel = memo(function ReportPanel({
   benchmarkFit,
   benchmarkScore,
   reportQuality,
+  onContinueAsChat,
+  onBackToWorkspace,
 }: {
   reportData: Partial<MarketReport & PlanReport> | null;
   reportFields: Array<{
@@ -5210,7 +5592,9 @@ const ReportPanel = memo(function ReportPanel({
   }>;
   reportId?: string;
   reportTitle: string;
+  reportDomain?: ReportDomain;
   sourcePrompt?: string;
+  reportLanguage: ResponseLanguage;
   waitingMessage: string;
   result: string;
   failureMessage?: string;
@@ -5219,6 +5603,8 @@ const ReportPanel = memo(function ReportPanel({
   benchmarkFit?: ReportBenchmarkFit;
   benchmarkScore?: ReportBenchmarkScore;
   reportQuality?: ReportQualityScore;
+  onContinueAsChat: () => void;
+  onBackToWorkspace: () => void;
 }) {
   const sections = useMemo<ReportSection[]>(() => {
     if (reportData) {
@@ -5247,13 +5633,7 @@ const ReportPanel = memo(function ReportPanel({
         : []
     );
   }, [reportData, reportFields, result, waitingMessage]);
-  const failedSection = sections.find((section) =>
-    isReportGenerationFailureText(section.content)
-  );
-  const effectiveFailureMessage =
-    failureMessage ||
-    failedSection?.content ||
-    (!reportData && result && isReportGenerationFailureText(result) ? result : "");
+  const effectiveFailureMessage = failureMessage || "";
 
   const hasReportContent = !effectiveFailureMessage && sections.some(
     (section) =>
@@ -5270,13 +5650,39 @@ const ReportPanel = memo(function ReportPanel({
       section.content &&
       section.content !== waitingMessage
   );
+  const isRealEstateReport = reportFields.some(
+    ({ field }) => field === "assetIdentification"
+  );
+  const isLegalReport =
+    reportDomain === "legal" ||
+    isLegalRenderableReport({
+      type: "Strategic Report",
+      title: reportTitle,
+      prompt: sourcePrompt || "",
+      sections,
+    });
+  const isDomainDecisionReport =
+    isRealEstateReport ||
+    isLegalReport ||
+    reportFields.some(({ field }) => field === "subjectIdentification");
   const { exportingPdf, pdfError, setPdfError, runPdfExport } = useReportExport({
     canExport: hasReportContent,
     failureMessage: effectiveFailureMessage,
     loadFont: loadPdfFont,
   });
+  const pdfExportIntentRef = useRef(0);
 
-  async function downloadPdf() {
+  async function downloadPdf(event: ReactMouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const intentAge = Date.now() - pdfExportIntentRef.current;
+    pdfExportIntentRef.current = 0;
+
+    if (!event.isTrusted || intentAge < 0 || intentAge > 2_000) {
+      return;
+    }
+
     await runPdfExport(async (pdfFontBase64) => {
     const isSafari =
       /^((?!chrome|android).)*safari/i.test(navigator.userAgent) ||
@@ -5308,32 +5714,55 @@ const ReportPanel = memo(function ReportPanel({
       const bodyLineHeight = 5.85;
       const cardHeaderHeight = 25;
       const cardBottomPadding = 11;
-      const basePdfSections = compactExecutiveDecisionMemoSections(
-        dedupePdfSections(mergePdfSourceSections(sections))
-      );
+      const normalizedPdfSections = dedupePdfSections(mergePdfSourceSections(sections));
+      const basePdfSections = isLegalReport
+        ? buildLegalReportSections(
+            normalizedPdfSections,
+            getReportLanguageCode(reportLanguage),
+            sourcePrompt
+          ).map((section) => ({ ...section, icon: FileText }))
+        : compactExecutiveDecisionMemoSections(normalizedPdfSections);
       const pdfLanguageSource =
         sourcePrompt?.trim() ||
         [reportTitle, ...basePdfSections.map((section) => `${section.title}\n${section.content}`)]
           .filter(Boolean)
           .join("\n\n");
-      const pdfLocale = detectPdfPresentationLocale(pdfLanguageSource);
-      const pdfBaseSectionsWithBenchmark = extractPdfValidationIntelligenceSection(
-        insertPdfBenchmarkIntelligenceSection(
-          basePdfSections,
-          benchmarkFit,
-          pdfLocale,
-          benchmarkScore
-        ),
+      const pdfLocale = resolvePdfPresentationLocale(
+        reportLanguage,
+        pdfLanguageSource
+      );
+      validateReportLanguageConsistency(
+        [reportTitle, ...basePdfSections.map((section) => `${section.title}\n${section.content}`)].join("\n"),
         pdfLocale
+      );
+      const pdfBaseSectionsWithBenchmark = (
+        isDomainDecisionReport
+          ? basePdfSections
+          : extractPdfValidationIntelligenceSection(
+              insertPdfBenchmarkIntelligenceSection(
+                basePdfSections,
+                benchmarkFit,
+                pdfLocale,
+                benchmarkScore
+              ),
+              pdfLocale
+            )
       ).map((section) => ({
         ...section,
         icon: "icon" in section ? section.icon : FileText,
       })) as ReportSection[];
       const pdfSections = localizePdfReportSections(pdfBaseSectionsWithBenchmark, pdfLocale);
-      const localizedReportTitle = localizePdfPresentationLabel(reportTitle, pdfLocale);
+      const localizedReportTitle = isLegalReport
+        ? pdfLocale === "tr"
+          ? "Hukuki Değerlendirme Raporu"
+          : "Legal Assessment Report"
+        : localizePdfPresentationLabel(reportTitle, pdfLocale);
       const fullReportContent = basePdfSections
         .map((section) => `${section.title}\n${section.content}`)
         .join("\n\n");
+      const businessIdea = isLegalReport
+        ? normalizePdfText(sourcePrompt || "").slice(0, 260)
+        : deriveBusinessDescriptionFromSections(sourcePrompt || "", pdfSections);
       const tocEntries: Array<{ title: string; page: number }> = [];
       let y = margin;
 
@@ -5368,18 +5797,34 @@ const ReportPanel = memo(function ReportPanel({
         drawPdfLogoMark(pdf, x, logoY, size);
       };
 
-      const splitPdfReadableLines = (content: string, width: number) =>
-        splitPdfReadableLinesWithEngine({
+      const splitPdfReadableLines = (content: string, width: number) => {
+        const repairedContent = repairPdfLineFragments(
+          content.split("\n"),
+          isOrphanBulletText
+        ).join("\n");
+        return splitPdfReadableLinesWithEngine({
           pdf,
-          content,
+          content: repairedContent,
           width,
           normalizeText: normalizePdfText,
           repairLineFragments: repairPdfLineFragments,
           isOrphanBulletText,
         });
+      };
 
       const executiveSnapshot = buildExecutiveSnapshot(fullReportContent, investmentScore, reportQuality);
       const reportQualityBreakdown = getReportQualityBreakdown(reportQuality, pdfLocale === "tr");
+      const realEstateDecisionFactors = [
+        "Zoning Risk",
+        "Title / Ownership Risk",
+        "Market Evidence",
+        "Access and Infrastructure",
+        "Environmental and Geotechnical Risk",
+        "Development Potential",
+      ].map((label) => ({
+        label,
+        score: extractScore(fullReportContent, label),
+      }));
 
       const drawDecisionGauge = (
         label: string,
@@ -5425,19 +5870,50 @@ const ReportPanel = memo(function ReportPanel({
 
         pdf.setFontSize(8.5);
         pdf.setTextColor("#a1a1aa");
-        pdf.text(localizePdfPresentationText("Investor-grade decision snapshot generated from the current ZERINIX intelligence layers.", pdfLocale), margin + 12, 75, {
+        pdf.text(localizePdfPresentationText(
+          businessIdea || (isLegalReport
+            ? "Legal decision support based on the supplied facts and usable evidence."
+            : "Investor-grade decision snapshot generated from the current ZERINIX intelligence layers."),
+          pdfLocale
+        ), margin + 12, 75, {
           maxWidth: contentWidth - 24,
         });
 
-        const metricCards = [
-          [localizePdfPresentationLabel("Decision", pdfLocale), executiveSnapshot.decision],
-          [localizePdfPresentationLabel("Confidence Score", pdfLocale), executiveSnapshot.confidence],
-          [localizePdfPresentationLabel("Founder Readiness Score", pdfLocale), executiveSnapshot.founderScore],
-          [localizePdfPresentationLabel("Financial Quality", pdfLocale), executiveSnapshot.financialQuality],
-          [localizePdfPresentationLabel("Report Quality", pdfLocale), executiveSnapshot.reportQuality],
-          [localizePdfPresentationLabel("Main Risk", pdfLocale), executiveSnapshot.mainRisk],
-          [localizePdfPresentationLabel("Next Action", pdfLocale), executiveSnapshot.nextAction],
-        ];
+        const metricCards = isRealEstateReport
+          ? [
+              ["Decision", executiveSnapshot.decision],
+              ["Confidence", executiveSnapshot.confidence],
+              [
+                "Evidence Quality",
+                extractScore(fullReportContent, "Evidence Quality") === null
+                  ? "Not verified"
+                  : `${extractScore(fullReportContent, "Evidence Quality")}/100`,
+              ],
+              ["Main Risk", executiveSnapshot.mainRisk],
+              [
+                "Main Opportunity",
+                extractMetricValue(fullReportContent, "Main Opportunity") ||
+                  "See Development Potential",
+              ],
+              ["Required Next Action", executiveSnapshot.nextAction],
+            ]
+          : isDomainDecisionReport
+          ? [
+              [localizePdfPresentationLabel("Decision", pdfLocale), executiveSnapshot.decision],
+              [localizePdfPresentationLabel("Confidence Score", pdfLocale), executiveSnapshot.confidence],
+              [localizePdfPresentationLabel("Report Quality", pdfLocale), executiveSnapshot.reportQuality],
+              [localizePdfPresentationLabel("Main Risk", pdfLocale), executiveSnapshot.mainRisk],
+              [localizePdfPresentationLabel("Next Action", pdfLocale), executiveSnapshot.nextAction],
+            ]
+          : [
+              [localizePdfPresentationLabel("Decision", pdfLocale), executiveSnapshot.decision],
+              [localizePdfPresentationLabel("Confidence Score", pdfLocale), executiveSnapshot.confidence],
+              [localizePdfPresentationLabel("Founder Readiness Score", pdfLocale), executiveSnapshot.founderScore],
+              [localizePdfPresentationLabel("Financial Quality", pdfLocale), executiveSnapshot.financialQuality],
+              [localizePdfPresentationLabel("Report Quality", pdfLocale), executiveSnapshot.reportQuality],
+              [localizePdfPresentationLabel("Main Risk", pdfLocale), executiveSnapshot.mainRisk],
+              [localizePdfPresentationLabel("Next Action", pdfLocale), executiveSnapshot.nextAction],
+            ];
 
         const metricColumns = 3;
         const metricGap = 5;
@@ -5462,7 +5938,9 @@ const ReportPanel = memo(function ReportPanel({
 
         const gaugeWidth = (contentWidth - 33) / 2;
         drawDecisionGauge("Confidence Gauge", executiveSnapshot.confidenceScore, executiveSnapshot.confidence, margin + 12, 156, gaugeWidth);
-        drawDecisionGauge("Founder Readiness Gauge", executiveSnapshot.founderScoreValue, executiveSnapshot.founderScore, margin + 21 + gaugeWidth, 156, gaugeWidth);
+        if (!isDomainDecisionReport) {
+          drawDecisionGauge("Founder Readiness Gauge", executiveSnapshot.founderScoreValue, executiveSnapshot.founderScore, margin + 21 + gaugeWidth, 156, gaugeWidth);
+        }
 
         const heatmapY = reportQualityBreakdown.length ? 211 : 195;
         const panelWidth = (contentWidth - 33) / 2;
@@ -5490,12 +5968,39 @@ const ReportPanel = memo(function ReportPanel({
         pdf.setFontSize(7.2);
         pdf.setTextColor("#5eead4");
         pdf.text(localizePdfPresentationLabel("Risk Heatmap", pdfLocale).toUpperCase(), margin + 17, heatmapY + 7);
-        executiveSnapshot.riskHeatmap.forEach((risk, index) => {
+        (isRealEstateReport
+          ? realEstateDecisionFactors.map((item) => ({
+              label:
+                item.label === "Title / Ownership Risk"
+                  ? "Legal Risk"
+                  : item.label === "Access and Infrastructure"
+                    ? "Infrastructure"
+                    : item.label === "Environmental and Geotechnical Risk"
+                      ? "Environmental Risk"
+                      : item.label,
+              level:
+                item.score === null
+                  ? "Not verified"
+                  : item.score >= 70
+                    ? "Strong"
+                    : item.score >= 40
+                      ? "Partial"
+                      : "Weak",
+            }))
+          : executiveSnapshot.riskHeatmap).forEach((risk, index) => {
           const rowY = heatmapY + 14 + index * 5;
           pdf.setFontSize(6.4);
           pdf.setTextColor("#d4d4d8");
           pdf.text(localizePdfPresentationLabel(risk.label, pdfLocale), margin + 17, rowY, { maxWidth: panelWidth - 33 });
-          pdf.setFillColor(risk.level === "High" ? "#7f1d1d" : risk.level === "Medium" ? "#713f12" : "#064e3b");
+          pdf.setFillColor(
+            risk.level === "High" || risk.level === "Weak"
+              ? "#7f1d1d"
+              : risk.level === "Medium" || risk.level === "Partial"
+                ? "#713f12"
+                : risk.level.toLowerCase() === "unknown"
+                  ? "#3f3f46"
+                  : "#064e3b"
+          );
           pdf.roundedRect(margin + panelWidth - 9, rowY - 3.2, 16, 4.2, 2, 2, "F");
           pdf.setFontSize(5.4);
           pdf.setTextColor("#ffffff");
@@ -5508,7 +6013,16 @@ const ReportPanel = memo(function ReportPanel({
         pdf.setFontSize(7.2);
         pdf.setTextColor("#5eead4");
         pdf.text(localizePdfPresentationLabel("Confidence Radar", pdfLocale).toUpperCase(), margin + 26 + panelWidth, heatmapY + 7);
-        executiveSnapshot.confidenceRadar.forEach((dimension, index) => {
+        (isRealEstateReport
+          ? [
+              { label: "Evidence Quality", score: extractScore(fullReportContent, "Evidence Quality") },
+              { label: "Zoning Risk", score: extractScore(fullReportContent, "Zoning Risk") },
+              { label: "Market Evidence", score: extractScore(fullReportContent, "Market Evidence") },
+              { label: "Infrastructure", score: extractScore(fullReportContent, "Access and Infrastructure") },
+              { label: "Environmental Risk", score: extractScore(fullReportContent, "Environmental and Geotechnical Risk") },
+              { label: "Development Potential", score: extractScore(fullReportContent, "Development Potential") },
+            ]
+          : executiveSnapshot.confidenceRadar).forEach((dimension, index) => {
           const rowY = heatmapY + 14 + index * 5;
           const score = Math.max(0, Math.min(100, dimension.score ?? 0));
           pdf.setFontSize(6.4);
@@ -5557,8 +6071,16 @@ const ReportPanel = memo(function ReportPanel({
 
       const summaryCards = [
         `${pdfSections.filter((section) => !isSourceSection(section)).length} Sections`,
-        "Investor Ready",
-        "Strategy Model",
+        isRealEstateReport
+          ? "Due-Diligence Report"
+          : isLegalReport
+            ? pdfLocale === "tr" ? "Hukuki Analiz" : "Legal Analysis"
+            : "Investor Ready",
+        isRealEstateReport
+          ? "Real Estate Decision Model"
+          : isLegalReport
+            ? pdfLocale === "tr" ? "Hukuki Karar Desteği" : "Legal Decision Support"
+            : "Strategy Model",
       ];
 
       summaryCards.forEach((label, index) => {
@@ -5591,13 +6113,17 @@ const ReportPanel = memo(function ReportPanel({
         "kpis",
       ]);
 
+      if (isDomainDecisionReport) {
+        visualFields.clear();
+      }
+
       const getTamRows = (content: string, width: number) =>
         ([
           ["TAM", "#134e4a"],
           ["SAM", "#115e59"],
           ["SOM", "#5eead4"],
         ] as const).map(([label, color]) => {
-          const value = extractMarketSizeValue(content, label);
+          const value = extractMarketSizeValue(`${content}\n${fullReportContent}`, label);
           const snippet = extractSectionSnippet(content, label);
           const description = normalizePdfText(snippet.replace(value, ""))
             .replace(new RegExp(`^${label}\\s*[:\\-–—]?`, "i"), "")
@@ -5645,7 +6171,7 @@ const ReportPanel = memo(function ReportPanel({
 
       const getFinancialLayout = (content: string, width: number) => {
         const metricContent = content;
-        const labels = normalizePdfFinancialMetrics(metricContent);
+        const labels = normalizePdfFinancialMetrics(content, fullReportContent);
         const columns = 3;
         const itemWidth = (width - (columns - 1) * 3) / columns;
         const itemHeight = 18;
@@ -6213,8 +6739,14 @@ const ReportPanel = memo(function ReportPanel({
           section.field === "financialDashboard" ||
           section.field === "unitEconomics"
             ? ""
-            : localizePdfPresentationText(
-                formatPdfReadableContent(section, executiveSnapshot.founderScoreValue),
+            : isLegalReport && section.field === "legalSources"
+              ? formatLegalSourceContent(section.content, pdfLocale)
+              : localizePdfPresentationText(
+                formatPdfReadableContent(
+                  section,
+                  executiveSnapshot.founderScoreValue,
+                  isRealEstateReport
+                ),
                 pdfLocale
               );
 
@@ -6348,6 +6880,41 @@ const ReportPanel = memo(function ReportPanel({
     });
   }
 
+  if (isPrivateBetaReportRestriction(effectiveFailureMessage)) {
+    return (
+      <div className="flex min-h-[420px] items-center justify-center rounded-[2rem] bg-white/[0.04] p-8 text-center shadow-2xl shadow-black/35 backdrop-blur-2xl">
+        <div className="max-w-xl">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.06]">
+            <Info className="h-5 w-5 text-teal-200" />
+          </div>
+          <p className="mt-5 text-lg font-semibold text-white">
+            Strategic Reports are currently limited to approved beta users.
+          </p>
+          <p className="mt-2 text-sm leading-6 text-zinc-400">
+            Your request was understood successfully, but full report generation is not
+            enabled for this account yet.
+          </p>
+          <div className="mt-6 flex flex-col justify-center gap-2.5 sm:flex-row">
+            <button
+              type="button"
+              onClick={onContinueAsChat}
+              className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-teal-200 px-5 text-sm font-semibold text-black transition hover:bg-teal-100"
+            >
+              Continue as Chat
+            </button>
+            <button
+              type="button"
+              onClick={onBackToWorkspace}
+              className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-white/[0.06] px-5 text-sm font-medium text-zinc-200 transition hover:bg-white/[0.1]"
+            >
+              Back to Workspace
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (effectiveFailureMessage) {
     return (
       <div className="flex min-h-[420px] items-center justify-center rounded-[2rem] border border-red-300/20 bg-red-950/20 p-8 text-center shadow-2xl shadow-black/40 backdrop-blur-2xl">
@@ -6393,13 +6960,15 @@ const ReportPanel = memo(function ReportPanel({
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
-              ZERINIX EXECUTIVE REPORT
+              {isLegalReport ? "ZERINIX LEGAL REPORT" : "ZERINIX EXECUTIVE REPORT"}
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
               {reportTitle}
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
-              Structured analysis prepared for founder-level decision making.
+              {isLegalReport
+                ? "Legal analysis prepared for evidence-based decision making."
+                : "Structured analysis prepared for founder-level decision making."}
             </p>
           </div>
           <div className="w-fit rounded-full border border-teal-300/20 bg-teal-300/10 px-4 py-2 text-sm text-teal-100">
@@ -6414,13 +6983,15 @@ const ReportPanel = memo(function ReportPanel({
       </div>
 
       <div className="space-y-5 p-4 sm:p-5">
-        <BenchmarkIntelligencePanel
-          benchmarkFit={benchmarkFit}
-          benchmarkScore={benchmarkScore}
-          sourceText={`${reportTitle}\n${sourcePrompt || ""}\n${sections
-            .map((section) => `${section.title}\n${section.content}`)
-            .join("\n\n")}`}
-        />
+        {!isDomainDecisionReport ? (
+          <BenchmarkIntelligencePanel
+            benchmarkFit={benchmarkFit}
+            benchmarkScore={benchmarkScore}
+            sourceText={`${reportTitle}\n${sourcePrompt || ""}\n${sections
+              .map((section) => `${section.title}\n${section.content}`)
+              .join("\n\n")}`}
+          />
+        ) : null}
 
         {visibleSections.map((section, index) => {
           const Icon = section.icon;
@@ -6468,21 +7039,26 @@ const ReportPanel = memo(function ReportPanel({
                         investmentScore={investmentScore}
                       />
                     ) : null}
-                    <ExecutiveSnapshotPanel
-                      section={section}
-                      investmentScore={investmentScore}
-                      reportQuality={reportQuality}
-                    />
-                    {hasPremiumSectionVisual(section) &&
+                    {!isDomainDecisionReport ? (
+                      <ExecutiveSnapshotPanel
+                        section={section}
+                        investmentScore={investmentScore}
+                        reportQuality={reportQuality}
+                      />
+                    ) : null}
+                    {!isDomainDecisionReport &&
+                    hasPremiumSectionVisual(section) &&
                     section.field !== "executiveSummary" &&
                     section.field !== "financialDashboard" &&
                     section.field !== "tamSamSom" ? (
                       <ExecutiveInsightBanner section={section} />
                     ) : null}
-                    <PremiumSectionVisual
-                      section={section}
-                      investmentScore={investmentScore}
-                    />
+                    {!isDomainDecisionReport ? (
+                      <PremiumSectionVisual
+                        section={section}
+                        investmentScore={investmentScore}
+                      />
+                    ) : null}
                     {hasVisibleDetailsContent && section.field !== "tamSamSom" ? (
                       <>
                         <SectionTakeaway content={detailsContent} />
@@ -6503,7 +7079,7 @@ const ReportPanel = memo(function ReportPanel({
       </div>
 
       <div className="grid gap-3 border-t border-white/10 p-4 sm:grid-cols-2 sm:p-5">
-        {reportActions.map((action) => {
+        {!isLegalReport ? reportActions.map((action) => {
           const Icon = action.icon;
 
           return (
@@ -6518,13 +7094,23 @@ const ReportPanel = memo(function ReportPanel({
               {action.label}
             </button>
           );
-        })}
+        }) : null}
 
         {hasReportContent ? (
           <>
             <button
               type="button"
-              onClick={downloadPdf}
+              onPointerDown={() => {
+                pdfExportIntentRef.current = Date.now();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  pdfExportIntentRef.current = Date.now();
+                }
+              }}
+              onClick={(event) => {
+                void downloadPdf(event);
+              }}
               disabled={exportingPdf}
               className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-zinc-900 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:border-white/20 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -6542,7 +7128,7 @@ const ReportPanel = memo(function ReportPanel({
 
       {sourceSections.length > 0 ? (
         <div className="border-t border-white/10 p-4 sm:p-5">
-          <SourcesCard sections={sourceSections} />
+          <SourcesCard sections={sourceSections} legal={isLegalReport} />
         </div>
       ) : null}
     </section>
@@ -6643,26 +7229,128 @@ function createPlannerMessageId() {
   return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function logPlannerAttachmentTrace(
+  point: string,
+  attachments: PlannerAttachment[],
+  extra: Record<string, unknown> = {}
+) {
+  if (process.env.NODE_ENV === "production") {
+    return;
+  }
+
+  console.info(`[planner:attachment-trace] ${point}`, {
+    attachmentCount: attachments.length,
+    attachments: attachments.map((attachment) => {
+      const record = attachment as PlannerAttachment &
+        Record<string, unknown>;
+      const fileValue = record.file;
+      const blobValue = record.blob;
+      const uploadedReferenceKeys = [
+        "fileId",
+        "uploadId",
+        "uploadUrl",
+        "storagePath",
+        "signedUrl",
+        "url",
+      ].filter((key) => Boolean(record[key]));
+
+      return {
+        filename: attachment.name,
+        mimeType: attachment.mimeType || "",
+        objectKeys: Object.keys(attachment),
+        hasFile:
+          typeof File !== "undefined" && fileValue instanceof File,
+        hasBlob:
+          typeof Blob !== "undefined" && blobValue instanceof Blob,
+        hasUploadedReference:
+          uploadedReferenceKeys.length > 0 || Boolean(attachment.dataUrl),
+        uploadedReferenceKeys,
+        hasBinaryDataUrl: Boolean(attachment.dataUrl),
+        hasTextContent: Boolean(attachment.textContent),
+      };
+    }),
+    ...extra,
+  });
+}
+
+function serializePlannerAttachments(attachments: PlannerAttachment[]) {
+  return attachments
+    .filter((attachment) => attachment.status !== "error")
+    .map((attachment) => ({
+    name: attachment.name,
+    type: attachment.mimeType || "",
+    size: attachment.size,
+    textContent: attachment.textContent || "",
+    dataUrl: attachment.dataUrl || "",
+    }));
+}
+
+function createUnderstandingAssets(attachments: PlannerAttachment[]) {
+  return attachments
+    .filter((attachment) => attachment.status !== "error")
+    .map((attachment) => ({
+      name: attachment.name,
+      size: attachment.size,
+      mimeType: attachment.mimeType || "",
+      textContent: (attachment.textContent || "").slice(0, 4_000),
+      dataUrl: attachment.dataUrl || "",
+    }));
+}
+
+function buildUnderstoodPrompt(
+  originalPrompt: string,
+  understanding: UniversalUnderstanding,
+  clarificationAnswers: Record<string, string> = {}
+) {
+  const answeredQuestions = understanding.clarificationQuestions
+    .map((question) => {
+      const answer = clarificationAnswers[question.id]?.trim();
+      return answer ? `- ${question.question}: ${answer}` : "";
+    })
+    .filter(Boolean);
+  const extractedFacts = understanding.extractedAssetFacts.map(
+    (fact) => `- ${fact.label}: ${fact.value} [Asset: ${fact.source}]`
+  );
+
+  return [
+    originalPrompt,
+    "",
+    "ZERINIX validated request context (classification is an inference, not a verified fact):",
+    `- Likely domain: ${understanding.detectedIndustry}`,
+    `- Likely content type: ${understanding.detectedContentType}`,
+    `- Inferred decision goal: ${understanding.detectedIntent}`,
+    ...(extractedFacts.length > 0
+      ? ["- Facts extracted from uploaded assets:", ...extractedFacts]
+      : []),
+    ...(answeredQuestions.length > 0
+      ? ["- User clarification answers:", ...answeredQuestions]
+      : []),
+  ].join("\n");
+}
+
 function usePlannerChat() {
-  const [chatPrompt, setChatPrompt] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const {
     attachments,
     setAttachments,
+    attachmentError,
+    setAttachmentError,
     isDraggingFiles,
     setIsDraggingFiles,
+    handleFiles,
     handleDropFiles,
   } = useAttachments({ createId: createPlannerMessageId });
 
   return {
-    chatPrompt,
-    setChatPrompt,
     chatLoading,
     setChatLoading,
     attachments,
     setAttachments,
+    attachmentError,
+    setAttachmentError,
     isDraggingFiles,
     setIsDraggingFiles,
+    handleFiles,
     handleDropFiles,
   };
 }
@@ -6699,7 +7387,6 @@ function useReportGeneration({
     () => regenerationContext?.reportId || initialReport?.id || getStoredActiveReportId()
   );
   const [loading, setLoading] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
   const [workflowCompletedSteps, setWorkflowCompletedSteps] = useState(0);
   const [reportProgress, setReportProgress] = useState(0);
   const [currentReportSectionName, setCurrentReportSectionName] = useState("");
@@ -6734,8 +7421,6 @@ function useReportGeneration({
     setActiveReportId,
     loading,
     setLoading,
-    analyzing,
-    setAnalyzing,
     workflowCompletedSteps,
     setWorkflowCompletedSteps,
     reportProgress,
@@ -6818,65 +7503,265 @@ function useConversations({
   };
 }
 
-function ChatComposer({
-  chatPrompt,
-  chatLoading,
+const ChatComposer = memo(function ChatComposer({
+  activeMode,
+  modeSelected,
+  modeSelectionDisabled,
   isWorking,
-  suggestions,
-  onChange,
-  onSuggestionClick,
-  onSubmit,
+  isUnderstanding,
+  analysisActive,
+  attachments,
+  attachmentError,
+  draftSnapshotRef,
+  onAnalyze,
+  onModeSelect,
+  onInvalidateAnalysis,
+  onFiles,
+  onRemoveAttachment,
 }: {
-  chatPrompt: string;
-  chatLoading: boolean;
+  activeMode: ChatMode;
+  modeSelected: boolean;
+  modeSelectionDisabled: boolean;
   isWorking: boolean;
-  suggestions: string[];
-  onChange: (value: string) => void;
-  onSuggestionClick: (value: string) => void;
-  onSubmit: () => void;
+  isUnderstanding: boolean;
+  analysisActive: boolean;
+  attachments: ChatAttachment[];
+  attachmentError: string;
+  draftSnapshotRef: { current: string };
+  onAnalyze: (prompt: string) => void;
+  onModeSelect: (mode: ChatMode) => void;
+  onInvalidateAnalysis: () => void;
+  onFiles: (files: FileList | null, draft: string) => void;
+  onRemoveAttachment: (id: string) => void;
 }) {
+  const [draft, setDraft] = useState("");
+  const suggestions = useMemo(() => getComposerSuggestions(draft), [draft]);
+
+  function updateDraft(value: string) {
+    setDraft(value);
+    draftSnapshotRef.current = value;
+
+    if (analysisActive) {
+      onInvalidateAnalysis();
+    }
+  }
+
+  function applySuggestion(suggestion: string) {
+    updateDraft(`${draft.trim()}\n\nFocus on: ${suggestion}`);
+  }
+
+  function applyQuickAction(action: (typeof analysisQuickActions)[number]) {
+    const currentDraft = draft.trim();
+    const nextDraft = currentDraft
+      ? `${currentDraft}\n\n${action.starter}`
+      : action.starter;
+
+    updateDraft(nextDraft);
+    onModeSelect(action.mode);
+  }
+
   return (
-    <section className="rounded-[1.75rem] border border-teal-200/15 bg-white/[0.055] p-3.5 shadow-2xl shadow-black/35 ring-1 ring-teal-200/[0.035] backdrop-blur-2xl sm:p-4">
-      <div className="mb-2">
-        <p className="text-base font-semibold text-white">ZERINIX AI</p>
-        <p className="mt-0.5 text-xs text-zinc-400">
-          Tell ZERINIX what you want to accomplish.
-        </p>
+    <section className="py-4 sm:py-7">
+      <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="max-w-3xl">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-teal-200/65">
+            ZERINIX AI
+          </p>
+          <h2 className="mt-2.5 text-[1.75rem] font-semibold leading-tight tracking-[-0.045em] text-white sm:text-[2.05rem]">
+            New analysis session
+          </h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400/80">
+            Tell ZERINIX what you want to accomplish.
+          </p>
+        </div>
+        <span className="inline-flex w-fit items-center gap-2 rounded-full border border-teal-300/15 bg-teal-300/[0.06] px-3.5 py-2 text-[11px] font-medium text-teal-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+          <span className="h-1.5 w-1.5 rounded-full bg-teal-300 shadow-[0_0_12px_rgba(94,234,212,0.85)]" />
+          {modeSelected ? decisionGoalLabels[activeMode] : "Select analysis type"}
+        </span>
       </div>
-      <div className="rounded-[1.35rem] border border-white/10 bg-black/35 p-2.5 shadow-inner shadow-black/25 transition duration-200 ease-out focus-within:border-teal-300/50 focus-within:shadow-teal-950/25 focus-within:ring-2 focus-within:ring-teal-200/15">
-        <textarea
-          value={chatPrompt}
-          onChange={(event) => onChange(event.target.value)}
-          className="min-h-12 w-full resize-none border-0 bg-transparent p-1 text-sm leading-5 text-white outline-none transition placeholder:text-zinc-500/80 sm:min-h-14"
-          placeholder="Describe a business decision, opportunity or challenge..."
-        />
-        <div className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap gap-1.5">
-            {suggestions.map((suggestion) => (
+      <div className="rounded-[1.75rem] border border-white/[0.085] bg-[linear-gradient(145deg,rgba(24,24,27,0.94),rgba(8,8,10,0.99))] p-2 shadow-[0_28px_80px_rgba(0,0,0,0.46)] ring-1 ring-white/[0.025] sm:p-2.5">
+        <div className="rounded-[1.35rem] border border-white/[0.07] bg-black/35 p-3.5 transition duration-200 focus-within:border-teal-300/25 focus-within:bg-black/50 focus-within:shadow-[0_0_0_1px_rgba(94,234,212,0.055)] sm:p-4">
+          <textarea
+            value={draft}
+            onChange={(event) => updateDraft(event.target.value)}
+            className="min-h-[7.5rem] w-full resize-none border-0 bg-transparent p-1 text-[15px] leading-7 text-white outline-none transition placeholder:text-zinc-600 sm:min-h-[9rem] sm:text-base"
+            placeholder="Describe a business decision, opportunity or challenge…"
+          />
+          {attachments.length > 0 ? (
+            <div className="mb-3 mt-2 flex flex-wrap gap-2">
+              {attachments.map((attachment) => (
+                <span
+                  key={attachment.id}
+                  className="inline-flex max-w-full items-center gap-2 rounded-full bg-white/[0.065] py-1.5 pl-3 pr-1.5 text-xs text-zinc-300"
+                >
+                  <Paperclip className="h-3.5 w-3.5 shrink-0 text-teal-200" />
+                  <span className="min-w-0">
+                    <span className="block max-w-52 truncate">{attachment.name}</span>
+                    <span className="mt-0.5 block text-[10px] text-zinc-500">
+                      {attachment.mimeType || "Unspecified type"} ·{" "}
+                      {attachment.size >= 1_000_000
+                        ? `${(attachment.size / 1_000_000).toFixed(1)} MB`
+                        : `${Math.max(1, Math.round(attachment.size / 1_000))} KB`}
+                    </span>
+                    {attachment.status === "processing" ? (
+                      <span className="mt-1 block h-1 overflow-hidden rounded-full bg-white/10">
+                        <span
+                          className="block h-full rounded-full bg-teal-300 transition-all"
+                          style={{ width: `${attachment.progress || 15}%` }}
+                        />
+                      </span>
+                    ) : null}
+                    {attachment.status === "error" ? (
+                      <span className="mt-1 block text-[10px] text-red-300">
+                        {attachment.error || "File could not be read."}
+                      </span>
+                    ) : null}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveAttachment(attachment.id)}
+                    aria-label={`Remove ${attachment.name}`}
+                    className="flex h-6 w-6 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/10 hover:text-white"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {attachmentError ? (
+            <p
+              role="alert"
+              className="mb-2 rounded-xl bg-red-300/10 px-3 py-2 text-xs leading-5 text-red-200"
+            >
+              {attachmentError}
+            </p>
+          ) : null}
+          <div className="mt-2.5 flex flex-col gap-2.5 border-t border-white/[0.065] pt-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <label className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.045] px-3.5 text-xs font-medium text-zinc-300 transition hover:border-white/[0.13] hover:bg-white/[0.075] hover:text-white">
+                <Paperclip className="h-3.5 w-3.5 text-teal-200" />
+                Attach
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.tsv,.txt,.md,.json,.zip,.png,.jpg,.jpeg,.webp,.gif,.heic,.avif"
+                  className="sr-only"
+                  onChange={(event) => {
+                    onFiles(event.target.files, draft);
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+              <span className="hidden px-1 text-[10px] text-zinc-600 lg:inline">
+                PDF, Word, Excel, CSV, images, text or ZIP · 5 MB each
+              </span>
+              {suggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => applySuggestion(suggestion)}
+                  className="rounded-full bg-white/[0.045] px-2.5 py-1 text-[11px] font-medium text-zinc-400 transition hover:bg-teal-300/10 hover:text-teal-100"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => onAnalyze(draft)}
+              disabled={
+                !modeSelected ||
+                (!draft.trim() && attachments.length === 0) ||
+                isWorking ||
+                isUnderstanding ||
+                attachments.some((attachment) => attachment.status !== "ready")
+              }
+              className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-teal-300 px-5 py-2 text-sm font-semibold text-black shadow-[0_12px_28px_rgba(13,148,136,0.18)] transition duration-200 ease-out hover:-translate-y-0.5 hover:bg-teal-200 hover:shadow-[0_16px_34px_rgba(13,148,136,0.24)] active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+            >
+              {isUnderstanding ? "Sending..." : "Send"}
+              <Send className={`h-4 w-4 ${isUnderstanding ? "animate-pulse" : ""}`} />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2.5 px-2 pb-1.5 pt-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-600">
+            Quick actions
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {analysisQuickActions.map((action) => (
               <button
-                key={suggestion}
+                key={action.label}
                 type="button"
-                onClick={() => onSuggestionClick(suggestion)}
-                className="rounded-full border border-white/10 bg-white/[0.035] px-2.5 py-1 text-[11px] font-medium text-zinc-400 transition hover:border-teal-300/25 hover:bg-teal-300/10 hover:text-teal-100"
+                onClick={() => applyQuickAction(action)}
+                disabled={modeSelectionDisabled}
+                aria-pressed={modeSelected && activeMode === action.mode}
+                className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/40 ${
+                  modeSelected && activeMode === action.mode
+                    ? "border-teal-300/20 bg-teal-300/[0.1] text-teal-100"
+                    : "border-white/[0.065] bg-white/[0.035] text-zinc-400 hover:border-white/[0.12] hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                }`}
               >
-                {suggestion}
+                {action.label}
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={!chatPrompt.trim() || isWorking}
-            className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-2xl bg-teal-300 px-4 py-2 text-sm font-semibold text-black shadow-lg shadow-teal-950/30 transition duration-200 ease-out hover:-translate-y-0.5 hover:bg-teal-200 hover:shadow-xl hover:shadow-teal-950/45 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-lg"
-          >
-            {chatLoading ? "ZERINIX is thinking..." : "Send"}
-            <Send className="h-4 w-4" />
-          </button>
         </div>
       </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        {analysisWorkspaceModes.map((option) => {
+          const Icon = option.icon;
+          const selected = modeSelected && activeMode === option.mode;
+
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              onClick={() => onModeSelect(option.mode)}
+              disabled={modeSelectionDisabled}
+              aria-pressed={selected}
+              className={`group relative flex min-h-[8.75rem] flex-col items-start rounded-[1.4rem] border p-4.5 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/40 ${
+                selected
+                  ? "border-teal-300/30 bg-[linear-gradient(145deg,rgba(20,184,166,0.12),rgba(9,9,11,0.82))] shadow-[0_18px_44px_rgba(4,47,46,0.2)] ring-1 ring-teal-300/[0.08]"
+                  : "border-white/[0.075] bg-[linear-gradient(145deg,rgba(255,255,255,0.045),rgba(255,255,255,0.018))] hover:-translate-y-0.5 hover:border-white/[0.14] hover:bg-white/[0.055] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0"
+              }`}
+            >
+              {selected ? (
+                <span className="absolute right-4 top-4 flex h-6 w-6 items-center justify-center rounded-full bg-teal-300 text-black shadow-lg shadow-teal-950/30">
+                  <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
+                </span>
+              ) : null}
+              <span
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.9rem] ${
+                  selected
+                    ? "bg-teal-300 text-black"
+                    : "border border-white/[0.065] bg-white/[0.045] text-zinc-400 transition group-hover:border-teal-300/15 group-hover:text-teal-100"
+                }`}
+              >
+                <Icon className="h-[19px] w-[19px]" />
+              </span>
+              <span className="mt-4 min-w-0 pr-5">
+                <span className="block text-[15px] font-semibold tracking-[-0.015em] text-white">
+                  {option.title}
+                </span>
+                <span className="mt-2 block text-xs leading-5 text-zinc-500">
+                  {option.description}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {!modeSelected ? (
+        <p className="mt-4 text-center text-xs font-medium text-amber-200/80">
+          Select an analysis type to continue.
+        </p>
+      ) : null}
     </section>
   );
-}
+});
 
 function ChatMessages({
   messages,
@@ -6910,103 +7795,6 @@ function ChatMessages({
   );
 }
 
-function AnalysisModeCards({
-  visible,
-  cards,
-  selectedMode,
-  recommendedMode,
-  chatPrompt,
-  latestUserIntentPrompt,
-  isWorking,
-  onSelectMode,
-}: {
-  visible: boolean;
-  cards: typeof modeCards;
-  selectedMode: ChatMode | null;
-  recommendedMode: ChatMode;
-  chatPrompt: string;
-  latestUserIntentPrompt: string;
-  isWorking: boolean;
-  onSelectMode: (mode: ChatMode, prompt: string) => void;
-}) {
-  if (!visible) {
-    return null;
-  }
-
-  return (
-    <section className="transition-all duration-200 ease-out">
-      <div className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.045] p-3.5 shadow-2xl shadow-black/35 ring-1 ring-white/[0.035] backdrop-blur-2xl">
-        <div className="grid gap-3 md:grid-cols-3">
-          {cards.map((modeCard) => {
-            const Icon = modeCard.icon;
-            const selected = selectedMode === modeCard.mode;
-            const recommended = !selectedMode && recommendedMode === modeCard.mode;
-
-            return (
-              <button
-                key={modeCard.mode}
-                type="button"
-                onClick={() => {
-                  const sharedPrompt = chatPrompt.trim() || latestUserIntentPrompt.trim();
-
-                  if (!sharedPrompt) {
-                    return;
-                  }
-
-                  if (isWorking) {
-                    return;
-                  }
-
-                  onSelectMode(modeCard.mode, sharedPrompt);
-                }}
-                className={`flex min-h-36 flex-col rounded-[1.25rem] border p-3.5 text-left shadow-lg shadow-black/10 transition duration-200 ease-out hover:-translate-y-0.5 hover:shadow-xl md:shadow-sm ${
-                  selected
-                    ? "border-teal-200/35 bg-teal-200/[0.12] shadow-xl shadow-teal-950/30 ring-1 ring-teal-200/20"
-                    : "border-white/10 bg-black/25 hover:border-white/20 hover:bg-white/[0.055] hover:shadow-black/25"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span
-                    className={`flex h-9 w-9 items-center justify-center rounded-xl border ${
-                      selected
-                        ? "border-teal-200/30 bg-teal-200/10"
-                        : "border-white/10 bg-white/[0.04]"
-                    }`}
-                  >
-                    <Icon className={`h-4 w-4 ${selected ? "text-teal-100" : "text-teal-200"}`} />
-                  </span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] ${
-                      selected
-                        ? "bg-teal-200 text-black"
-                        : recommended
-                          ? "border border-teal-200/25 bg-teal-200/10 text-teal-100"
-                          : "border border-white/10 text-zinc-500"
-                    }`}
-                  >
-                    {selected ? "Selected" : recommended ? "Recommended" : "Option"}
-                  </span>
-                </div>
-                <p className="mt-3 text-sm font-semibold text-white">
-                  {modeCard.label}
-                </p>
-                <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-zinc-500">
-                  {modeCard.description}
-                </p>
-                <p className="mt-auto pt-2 text-[11px] font-medium text-teal-100/80">
-                  {modeCard.mode === "chat"
-                    ? modeCard.output
-                    : `${modeCard.output} · ${modeCard.opens}`}
-                </p>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 export default function Planner({
   initialConversations = [],
   conversationLoadError = "",
@@ -7026,7 +7814,14 @@ export default function Planner({
     restoredReportMode === "plan"
       ? buildInitialReportData(
           initialReport,
-          planReportFields,
+          initialReport?.type === "Real Estate Investment Analysis"
+            ? realEstateReportFields
+            : initialReport?.type === "Strategic Report"
+              ? getPlanFieldsForDomain(
+                  classifyReportDomain(initialReport.prompt),
+                  initialReport.prompt
+                )
+              : planReportFields,
           emptyPlanReport as Record<PlanReportField, string>
         )
       : null;
@@ -7048,14 +7843,15 @@ export default function Planner({
 
   const [prompt, setPrompt] = useState(() => buildExecutiveBriefPrompt(initialExecutiveBrief));
   const {
-    chatPrompt,
-    setChatPrompt,
     chatLoading,
     setChatLoading,
     attachments,
     setAttachments,
+    attachmentError,
+    setAttachmentError,
     isDraggingFiles,
     setIsDraggingFiles,
+    handleFiles,
     handleDropFiles,
   } = usePlannerChat();
   const {
@@ -7073,8 +7869,6 @@ export default function Planner({
     setActiveReportId,
     loading,
     setLoading,
-    analyzing,
-    setAnalyzing,
     workflowCompletedSteps,
     setWorkflowCompletedSteps,
     reportProgress,
@@ -7125,8 +7919,16 @@ export default function Planner({
       initialMode ||
       "chat"
   );
-  const [selectedDesktopAnalysisMode, setSelectedDesktopAnalysisMode] =
-    useState<ChatMode | null>(null);
+  const [hasSelectedAnalysisMode, setHasSelectedAnalysisMode] = useState(
+    Boolean(regenerationContext || restoredReportMode)
+  );
+  const [pendingRecommendation, setPendingRecommendation] = useState<{
+    prompt: string;
+    recommendation: IntentRecommendation;
+    attachments: PlannerAttachment[];
+  } | null>(null);
+  const [isUnderstanding, setIsUnderstanding] = useState(false);
+  const [composerResetKey, setComposerResetKey] = useState(0);
   const [chatModelPreference] = useState<ChatModelPreference>("fast");
   const [selectedWorkspaceId] = useState(
     getInitialSelectedWorkspaceId(
@@ -7137,11 +7939,146 @@ export default function Planner({
   );
   const chatScrollerRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLInputElement | null>(null);
+  const composerDraftRef = useRef("");
+  const understandingRequestRef = useRef(0);
+  const activeAnalysisContextRef = useRef<Record<string, unknown> | null>(null);
+  const chatRequestInFlightRef = useRef(false);
+  const conversationNavigationGenerationRef = useRef(0);
+  const activeReportRequestRef = useRef<{
+    requestId: string;
+    conversationId: string;
+  } | null>(null);
   const isNearBottomRef = useRef(true);
   const scrollFrameRef = useRef<number | null>(null);
 
-  const isReportWorking = loading || analyzing;
+  const isReportWorking = loading;
   const isWorking = isReportWorking || chatLoading;
+
+  function cancelPendingUnderstanding() {
+    logPlannerAttachmentTrace(
+      "CLEANUP_CANCEL_PENDING_UNDERSTANDING",
+      attachments,
+      { clearsAttachments: false }
+    );
+    understandingRequestRef.current += 1;
+    setIsUnderstanding(false);
+    setPendingRecommendation(null);
+  }
+
+  function selectAnalysisMode(mode: ChatMode) {
+    if (isWorking || isUnderstanding) {
+      return;
+    }
+
+    setActiveMode(mode);
+    setHasSelectedAnalysisMode(true);
+  }
+
+  function buildAttachmentPrompt(files: PlannerAttachment[]) {
+    return `Analyze the attached ${files.length === 1 ? "file" : "files"}: ${files
+      .map((attachment) => attachment.name)
+      .join(", ")}`;
+  }
+
+  async function requestUniversalUnderstanding(
+    submittedPrompt: string,
+    queuedAttachments: PlannerAttachment[],
+    selectedMode: ChatMode
+  ) {
+    const assets = createUnderstandingAssets(queuedAttachments);
+    const fallback = createUnderstandingFallback({
+      prompt: submittedPrompt,
+      assets,
+      selectedMode,
+    });
+
+    try {
+      const accessToken = await getSupabaseAccessToken();
+      const response = await fetch("/api/understanding", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          prompt: submittedPrompt,
+          selectedMode,
+          attachments: assets,
+        }),
+      });
+
+      if (!response.ok) {
+        return fallback;
+      }
+
+      const payload = (await response.json()) as { understanding?: unknown };
+      const parsed = universalUnderstandingSchema.safeParse(
+        payload.understanding
+      );
+      return parsed.success ? parsed.data : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  async function persistAnalysisContext(
+    context: Record<string, unknown>
+  ) {
+    const conversationId = activeConversationId;
+    const nextContext: Record<string, unknown> = {
+      ...(activeAnalysisContextRef.current || {}),
+      ...context,
+      updatedAt: new Date().toISOString(),
+    };
+    activeAnalysisContextRef.current = nextContext;
+
+    try {
+      const originalRequest =
+        typeof nextContext.originalRequest === "string"
+          ? nextContext.originalRequest
+          : "";
+      const contextTitle =
+        activeConversation?.title ||
+        (originalRequest
+          ? generateConversationTitle(originalRequest)
+          : "New analysis session");
+      if (!(await ensurePersistedConversation(conversationId, contextTitle))) {
+        return;
+      }
+
+      const supabase = createClient();
+      const session = await restoreSupabaseSession(supabase);
+      if (!session?.user?.id) {
+        return;
+      }
+
+      const { error } = await supabase
+        .from("ai_conversations")
+        .update({ analysis_context: nextContext })
+        .eq("id", conversationId)
+        .eq("user_id", session.user.id);
+
+      if (error && process.env.NODE_ENV !== "production") {
+        console.warn("[planner] analysis context persistence skipped", {
+          code: error.code,
+        });
+      }
+    } catch {
+      // Analysis metadata persistence is best-effort and must not block reports.
+    }
+  }
+
+  async function handlePlannerFiles(files: FileList | null, draft = "") {
+    cancelPendingUnderstanding();
+    composerDraftRef.current = draft;
+    await handleFiles(files);
+  }
+
+  async function handlePlannerDrop(event: DragEvent<HTMLElement>) {
+    cancelPendingUnderstanding();
+    await handleDropFiles(event);
+  }
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -7243,6 +8180,14 @@ export default function Planner({
   }
 
   async function createNewConversation() {
+    if (activeReportRequestRef.current) {
+      console.info("[SESSION] navigation blocked", {
+        reason: "report_generation_active",
+        ...activeReportRequestRef.current,
+      });
+      return;
+    }
+    conversationNavigationGenerationRef.current += 1;
     const id = createMessageId();
     const conversation = createConversation(id);
 
@@ -7257,9 +8202,15 @@ export default function Planner({
     setCurrentReportInvestmentScore(undefined);
     setCurrentReportMetadata(undefined);
     setActiveReportId("");
+    setHasSelectedAnalysisMode(false);
     setWorkflowCompletedSteps(0);
     setReportProgress(0);
     setCurrentReportSectionName("");
+    cancelPendingUnderstanding();
+    activeAnalysisContextRef.current = null;
+    composerDraftRef.current = "";
+    setComposerResetKey((current) => current + 1);
+    setAttachments([]);
     await ensurePersistedConversation(id, conversation.title);
   }
 
@@ -7278,6 +8229,15 @@ export default function Planner({
   }
 
   function deleteConversation(id: string) {
+    if (activeReportRequestRef.current) {
+      console.info("[SESSION] navigation blocked", {
+        reason: "report_generation_active",
+        requestedConversationId: id,
+        ...activeReportRequestRef.current,
+      });
+      return;
+    }
+    conversationNavigationGenerationRef.current += 1;
     void deletePersistedConversation(id).then((deleted) => {
       if (!deleted) {
         return;
@@ -7423,7 +8383,15 @@ export default function Planner({
       content: message.content,
       mode: message.mode === "chat" ? null : message.mode || null,
       status: message.status || "complete",
-      attachments: message.attachments || [],
+      attachments: (message.attachments || []).map(
+        ({ id, name, size, mimeType, textContent }) => ({
+          id,
+          name,
+          size,
+          mimeType,
+          textContent,
+        })
+      ),
     });
 
     if (error) {
@@ -7449,8 +8417,10 @@ export default function Planner({
     if (error) {
       console.error("[ai_messages update failed]", error);
       setConversationError(error.message);
+      return false;
     } else {
       setConversationError("");
+      return true;
     }
   }
 
@@ -7465,6 +8435,7 @@ export default function Planner({
   }
 
   async function loadPersistedConversations() {
+    const hydrationGeneration = conversationNavigationGenerationRef.current;
     const supabase = createClient();
     await restoreSupabaseSession(supabase);
     const {
@@ -7538,12 +8509,31 @@ export default function Planner({
       messages: messagesByConversation.get(conversation.id as string) || [],
     }));
 
-    persistedConversationIdsRef.current = new Set(
-      nextConversations.map((conversation) => conversation.id)
-    );
+    const hydrationIsStale =
+      hydrationGeneration !== conversationNavigationGenerationRef.current;
+    persistedConversationIdsRef.current = new Set([
+      ...persistedConversationIdsRef.current,
+      ...nextConversations.map((conversation) => conversation.id),
+    ]);
     setConversationError("");
 
     if (nextConversations.length === 0) {
+      return;
+    }
+
+    if (hydrationIsStale) {
+      setConversations((current) => {
+        const currentIds = new Set(
+          current.map((conversation) => conversation.id)
+        );
+
+        return [
+          ...current,
+          ...nextConversations.filter(
+            (conversation) => !currentIds.has(conversation.id)
+          ),
+        ];
+      });
       return;
     }
 
@@ -7587,6 +8577,15 @@ export default function Planner({
   }
 
   function selectConversation(conversationId: string) {
+    if (activeReportRequestRef.current) {
+      console.info("[SESSION] navigation blocked", {
+        reason: "report_generation_active",
+        requestedConversationId: conversationId,
+        ...activeReportRequestRef.current,
+      });
+      return;
+    }
+    conversationNavigationGenerationRef.current += 1;
     const selectedConversation = conversations.find(
       (conversation) => conversation.id === conversationId
     );
@@ -7597,6 +8596,9 @@ export default function Planner({
     setActiveConversationId(conversationId);
     if (latestMode) {
       setActiveMode(latestMode);
+      setHasSelectedAnalysisMode(true);
+    } else {
+      setHasSelectedAnalysisMode(false);
     }
     clearComposerPrompt();
     setResult("");
@@ -7605,6 +8607,11 @@ export default function Planner({
     setMarketReport(null);
     setPlanReport(null);
     setWorkflowCompletedSteps(0);
+    cancelPendingUnderstanding();
+    activeAnalysisContextRef.current = null;
+    composerDraftRef.current = "";
+    setComposerResetKey((current) => current + 1);
+    setAttachments([]);
     void loadPersistedMessages(conversationId);
   }
 
@@ -7616,8 +8623,20 @@ export default function Planner({
     setPrompt("");
   }
 
-  function addUserMessage(mode: ChatMode, content: string, conversationId = activeConversationId) {
-    const attachedFiles = attachments;
+  function addUserMessage(
+    mode: ChatMode,
+    content: string,
+    conversationId = activeConversationId,
+    attachedFiles = attachments
+  ) {
+    logPlannerAttachmentTrace(
+      "CLEANUP_ADD_USER_MESSAGE_BEFORE_RESET",
+      attachedFiles,
+      {
+        mode,
+        clearsAttachments: false,
+      }
+    );
     const message: ChatMessage = {
       id: createMessageId(),
       role: "user",
@@ -7636,8 +8655,6 @@ export default function Planner({
       messages: [...conversation.messages, message],
       updatedAt: Date.now(),
     }));
-    setAttachments([]);
-
     return message;
   }
 
@@ -7684,6 +8701,7 @@ export default function Planner({
   function editMessage(message: ChatMessage) {
     setComposerPrompt(message.content);
     setActiveMode(message.mode || "plan");
+    setHasSelectedAnalysisMode(true);
     composerRef.current?.focus();
   }
 
@@ -7738,7 +8756,12 @@ export default function Planner({
         : "";
     const request =
       reportMode && reportPrompt
-        ? { mode: reportMode, prompt: reportPrompt }
+        ? {
+            mode: reportMode,
+            prompt: reportPrompt,
+            attachments: lastRequest?.attachments || [],
+            reportReadiness: lastRequest?.reportReadiness,
+          }
         : lastRequest?.prompt.trim()
           ? lastRequest
           : null;
@@ -7773,24 +8796,258 @@ export default function Planner({
     setComposerPrompt(request.prompt);
 
     if (request.mode === "plan") {
-      void generatePlan(request.prompt, false);
+      void generatePlan(
+        request.prompt,
+        false,
+        request.attachments,
+        request.reportReadiness,
+        "plan"
+      );
     } else if (request.mode === "market") {
-      void analyzeMarket(request.prompt, false);
+      void generatePlan(
+        request.prompt,
+        false,
+        request.attachments,
+        request.reportReadiness,
+        "market"
+      );
     } else {
       setRegeneratingReportMode(null);
-      void sendChatMessage(request.prompt, false, previousAssistantMessage?.id);
+      void sendChatMessage(
+        request.prompt,
+        false,
+        previousAssistantMessage?.id,
+        request.attachments
+      );
     }
   }
 
-  async function submitChatPrompt() {
-    const submittedPrompt = chatPrompt.trim();
+  function getUniversalPrompt(draft: string) {
+    const submittedPrompt = draft.trim();
 
-    if (!submittedPrompt || isWorking) {
+    if (submittedPrompt) {
+      return submittedPrompt;
+    }
+
+    if (attachments.length > 0) {
+      return buildAttachmentPrompt(attachments);
+    }
+
+    return "";
+  }
+
+  async function submitForUnderstanding(draft: string) {
+    const submittedPrompt = getUniversalPrompt(draft);
+
+    if (
+      !submittedPrompt ||
+      !hasSelectedAnalysisMode ||
+      isWorking ||
+      isUnderstanding
+    ) {
+      return;
+    }
+    const selectedMode = activeMode;
+    if (attachments.some((attachment) => attachment.status === "processing")) {
+      setAttachmentError("Please wait until every file has finished processing.");
+      return;
+    }
+    if (attachments.some((attachment) => attachment.status === "error")) {
+      setAttachmentError("Remove unreadable files before starting the analysis.");
       return;
     }
 
-    await sendChatMessage(submittedPrompt);
-    setChatPrompt("");
+    const requestId = understandingRequestRef.current + 1;
+    understandingRequestRef.current = requestId;
+    setPendingRecommendation(null);
+    setIsUnderstanding(true);
+    const queuedAttachments = [...attachments];
+    const understanding = await requestUniversalUnderstanding(
+      submittedPrompt,
+      queuedAttachments,
+      selectedMode
+    );
+
+    if (understandingRequestRef.current !== requestId) {
+      return;
+    }
+
+    const recommendation = {
+      ...recommendationFromUnderstanding({
+        understanding,
+        prompt: submittedPrompt,
+        attachments: queuedAttachments,
+      }),
+      reportMode:
+        selectedMode === "market" ? ("market" as const) : ("plan" as const),
+    };
+    logPlannerAttachmentTrace(
+      "POINT_3_UNDERSTANDING_CARD_CREATED",
+      queuedAttachments,
+      { source: "analyze" }
+    );
+    setIsUnderstanding(false);
+    void persistAnalysisContext({
+      originalRequest: submittedPrompt,
+      selectedMode,
+      detectedIndustry: understanding.detectedIndustry,
+      detectedIntent: understanding.detectedIntent,
+      detectedContentType: understanding.detectedContentType,
+      uploadedFiles: createUnderstandingAssets(queuedAttachments).map(
+        (asset) => ({
+          name: asset.name,
+          size: asset.size,
+          mimeType: asset.mimeType,
+        })
+      ),
+      clarificationQuestions: understanding.clarificationQuestions,
+      extractedAssetFacts: understanding.extractedAssetFacts,
+      expertiseProfile: understanding.expertiseProfile,
+      reportPlan: understanding.reportPlan,
+      researchPlan: understanding.researchPlan,
+      clarificationAnswers: {},
+      reportStatus:
+        understanding.recommendedAction === "clarify"
+          ? "awaiting_clarification"
+          : "awaiting_user_action",
+      createdAt: new Date().toISOString(),
+    });
+
+    if (
+      selectedMode === "chat" &&
+      understanding.recommendedAction !== "clarify"
+    ) {
+      composerDraftRef.current = "";
+      setComposerResetKey((current) => current + 1);
+      await sendChatMessage(
+        buildUnderstoodPrompt(submittedPrompt, understanding),
+        true,
+        "",
+        queuedAttachments
+      );
+      return;
+    }
+
+    setPendingRecommendation({
+      prompt: submittedPrompt,
+      attachments: queuedAttachments,
+      recommendation,
+    });
+  }
+
+  async function continueRecommendationAsChat(
+    clarificationAnswers: Record<string, string> = {}
+  ) {
+    if (!pendingRecommendation || isWorking) {
+      return;
+    }
+
+    const {
+      prompt: submittedPrompt,
+      recommendation,
+      attachments: queuedAttachments,
+    } = pendingRecommendation;
+    logPlannerAttachmentTrace(
+      "POINT_4_CONTINUE_AS_CHAT_CLICKED",
+      queuedAttachments,
+      { source: "recommendation_card" }
+    );
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[planner:file-routing]", {
+        selectedAction: "continue_as_chat",
+        attachmentCount: queuedAttachments.length,
+        attachmentMimeTypes: queuedAttachments.map(
+          (attachment) => attachment.mimeType || "application/octet-stream"
+        ),
+        resolvedRequestMode:
+          queuedAttachments.length > 0 ? "file_analysis" : "chat",
+        fileAnalysis: queuedAttachments.length > 0,
+      });
+    }
+    const chatPrompt = recommendation.understanding
+      ? buildUnderstoodPrompt(
+          submittedPrompt,
+          recommendation.understanding,
+          clarificationAnswers
+        )
+      : submittedPrompt;
+    void persistAnalysisContext({
+      clarificationAnswers,
+      reportStatus: "chat_started",
+    });
+    cancelPendingUnderstanding();
+    composerDraftRef.current = "";
+    setComposerResetKey((current) => current + 1);
+    await sendChatMessage(chatPrompt, true, "", queuedAttachments);
+  }
+
+  function generateRecommendedReport(
+    clarificationAnswers: Record<string, string> = {}
+  ) {
+    if (!pendingRecommendation || isWorking) {
+      return;
+    }
+
+    const {
+      prompt: submittedPrompt,
+      recommendation,
+      attachments: queuedAttachments,
+    } = pendingRecommendation;
+    const reportReadiness = recommendation.understanding
+      ? createUniversalReportReadiness(
+          recommendation.understanding,
+          clarificationAnswers
+        )
+      : null;
+
+    if (!reportReadiness) {
+      return;
+    }
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[planner:file-routing]", {
+        selectedAction: "generate_strategic_report",
+        attachmentCount: queuedAttachments.length,
+        attachmentMimeTypes: queuedAttachments.map(
+          (attachment) => attachment.mimeType || "application/octet-stream"
+        ),
+        resolvedRequestMode: recommendation.reportMode,
+        fileAnalysis: false,
+      });
+    }
+    const reportPrompt = recommendation.understanding
+      ? buildUnderstoodPrompt(
+          submittedPrompt,
+          recommendation.understanding,
+          clarificationAnswers
+        )
+      : submittedPrompt;
+    void persistAnalysisContext({
+      clarificationAnswers,
+      reportStatus: "generating",
+    });
+    cancelPendingUnderstanding();
+    composerDraftRef.current = "";
+    setComposerResetKey((current) => current + 1);
+
+    void generatePlan(
+      reportPrompt,
+      true,
+      queuedAttachments,
+      reportReadiness,
+      recommendation.reportMode
+    );
+  }
+
+  function dispatchRecommendationAction(
+    action: "generate_strategic_report" | "continue_as_chat",
+    clarificationAnswers: Record<string, string>
+  ) {
+    if (action === "continue_as_chat") {
+      void continueRecommendationAsChat(clarificationAnswers);
+      return;
+    }
+
+    generateRecommendedReport(clarificationAnswers);
   }
 
   async function getGeneralWorkspaceId(
@@ -7862,7 +9119,9 @@ export default function Planner({
           reportType,
           expectedSectionCount,
           receivedSectionCount: sections.length,
-          containsFailureText: containsReportGenerationFailure(sections),
+          containsEmptySection: sections.some(
+            (section) => !section.title.trim() || !section.content.trim()
+          ),
         });
       }
 
@@ -7944,107 +9203,6 @@ export default function Planner({
     }
   }
 
-  async function readStreamingSectionJson(
-    response: Response,
-    onEvent: (event: ReportStreamEvent) => void,
-    fallbackMessage: string,
-    onFirstChunk?: () => void
-  ) {
-    if (!response.ok || !response.body) {
-      let errorMessage = fallbackMessage;
-
-      try {
-        const data = await response.json();
-        errorMessage =
-          typeof data?.error === "string" && data.error.trim()
-            ? data.error
-            : fallbackMessage;
-      } catch {
-        errorMessage = fallbackMessage;
-      }
-
-      throw new Error(errorMessage);
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let hasChunk = false;
-    let buffer = "";
-
-    const parseReportStreamEvent = (value: string) => {
-      const event = JSON.parse(value) as ReportStreamEvent;
-      const failedEntry = Object.entries(event).find(
-        ([key, entry]) =>
-          key !== "warning" &&
-          key !== "missingFields" &&
-          key !== "invalidFields" &&
-          key !== "partial" &&
-          typeof entry === "string" &&
-          isReportGenerationFailureText(entry)
-      );
-      const failedValue =
-        typeof failedEntry?.[1] === "string" ? failedEntry[1] : undefined;
-
-      if (failedValue) {
-        throw new Error(failedValue);
-      }
-
-      return event;
-    };
-
-    const emitBufferedEvents = () => {
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-
-        if (!trimmed) {
-          continue;
-        }
-
-        try {
-          const event = parseReportStreamEvent(trimmed);
-
-          if (!hasChunk && Object.values(event).some(Boolean)) {
-            hasChunk = true;
-            onFirstChunk?.();
-          }
-
-          onEvent(event);
-        } catch (error) {
-          throw error instanceof Error
-            ? error
-            : new Error("Report stream contained malformed section JSON.");
-        }
-      }
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      emitBufferedEvents();
-    }
-
-    buffer += decoder.decode();
-    emitBufferedEvents();
-
-    if (buffer.trim()) {
-      try {
-        onEvent(parseReportStreamEvent(buffer.trim()));
-      } catch (error) {
-        throw error instanceof Error
-          ? error
-          : new Error("Report stream ended with malformed section JSON.");
-      }
-    }
-  }
-
   async function readStreamingText(
     response: Response,
     onChunk: (content: string) => void,
@@ -8109,17 +9267,35 @@ export default function Planner({
   async function sendChatMessage(
     promptOverride = prompt,
     addToHistory = true,
-    supersededAssistantMessageId = ""
+    supersededAssistantMessageId = "",
+    attachmentOverride?: PlannerAttachment[]
   ) {
+    const currentAttachments =
+      attachmentOverride?.length ? attachmentOverride : attachments;
+    logPlannerAttachmentTrace(
+      "POINT_5_SEND_CHAT_MESSAGE_ENTRY",
+      currentAttachments,
+      {
+        hasAttachmentOverride: attachmentOverride !== undefined,
+        composerAttachmentCount: attachments.length,
+        cleanupRanBeforeEntry:
+          Boolean(attachmentOverride?.length) && attachments.length === 0,
+      }
+    );
     const submittedPrompt = promptOverride.trim();
 
-    if (!submittedPrompt || chatLoading) {
+    if (!submittedPrompt || chatLoading || chatRequestInFlightRef.current) {
       return;
     }
 
+    chatRequestInFlightRef.current = true;
     setChatLoading(true);
     setActiveMode("chat");
-    setLastRequest({ mode: "chat", prompt: submittedPrompt });
+    setLastRequest({
+      mode: "chat",
+      prompt: submittedPrompt,
+      attachments: currentAttachments,
+    });
     setReportGenerationError("");
     setReportGenerationWarning("");
     setResult("");
@@ -8137,7 +9313,8 @@ export default function Planner({
       ? generateConversationTitle(submittedPrompt)
       : activeConversation?.title || generateConversationTitle(submittedPrompt);
     const currentMessages = activeConversation?.messages || [];
-    const currentAttachments = attachments;
+    const requestMode =
+      currentAttachments.length > 0 ? "file_analysis" : "chat";
     const memoryMessages = currentMessages
       .filter(
         (message) =>
@@ -8155,7 +9332,12 @@ export default function Planner({
     await ensurePersistedConversation(conversationId, title);
 
     if (addToHistory) {
-      const userMessage = addUserMessage("chat", submittedPrompt, conversationId);
+      const userMessage = addUserMessage(
+        "chat",
+        submittedPrompt,
+        conversationId,
+        currentAttachments
+      );
       await persistMessage(conversationId, userMessage);
       if (shouldUpdateTitle) {
         await persistConversationTitle(conversationId, title);
@@ -8186,6 +9368,29 @@ export default function Planner({
 
     try {
       const accessToken = await getSupabaseAccessToken();
+      const chatRequestPayload = {
+        prompt: submittedPrompt,
+        analysisMode: "chat" as const,
+        conversationId,
+        requestMode,
+        modelPreference: chatModelPreference,
+        attachments: serializePlannerAttachments(currentAttachments),
+        messages: memoryMessages,
+        reportId: activeReportId,
+      };
+      logPlannerAttachmentTrace(
+        "POINT_6_BEFORE_CHAT_PAYLOAD_SERIALIZATION",
+        currentAttachments,
+        {
+          requestMode,
+          composerAttachmentCount: attachments.length,
+          stateResetOccurredBeforeSerialization:
+            currentAttachments.length > 0 && attachments.length === 0,
+          serializedAttachmentCount: chatRequestPayload.attachments.length,
+          clearsAttachmentsAfterSerialization: true,
+        }
+      );
+      setAttachments([]);
       const res = await fetch("/api/chat", {
         method: "POST",
         credentials: "include",
@@ -8194,18 +9399,7 @@ export default function Planner({
           Authorization: `Bearer ${accessToken}`,
         },
         signal: abortController.signal,
-        body: JSON.stringify({
-          prompt: submittedPrompt,
-          conversationId,
-          modelPreference: chatModelPreference,
-          attachments: currentAttachments.map((attachment) => ({
-            name: attachment.name,
-            size: attachment.size,
-            textContent: attachment.textContent || "",
-          })),
-          messages: memoryMessages,
-          reportId: activeReportId,
-        }),
+        body: JSON.stringify(chatRequestPayload),
       });
       const responseText = await readStreamingText(
         res,
@@ -8232,32 +9426,87 @@ export default function Planner({
       void updatePersistedMessage(assistantMessageId, errorMessage, "failed");
     } finally {
       clearTimeout(requestTimeoutId);
+      chatRequestInFlightRef.current = false;
       setChatLoading(false);
     }
   }
 
-  async function generatePlan(promptOverride = prompt, addToHistory = true) {
+  async function generatePlan(
+    promptOverride = prompt,
+    addToHistory = true,
+    attachmentOverride?: PlannerAttachment[],
+    reportReadiness?: UniversalReportReadiness,
+    requestedMode: Exclude<ChatMode, "chat"> = "plan"
+  ) {
     const submittedPrompt = promptOverride.trim();
 
     if (!submittedPrompt) {
       return;
     }
 
-    if (loading) {
+    if (loading || activeReportRequestRef.current) {
       return;
     }
 
-    setLoading(true);
-    setActiveMode("plan");
-    setWorkflowCompletedSteps(0);
-    setLastRequest({ mode: "plan", prompt: submittedPrompt });
-    setReportProgress(0);
-    setCurrentReportSectionName("Preparing report engine");
-    const reportLanguage = detectResponseLanguage(submittedPrompt);
-    const copy = getLanguageCopy(reportLanguage);
-    const outputFields = localizeReportFields(planReportFields, reportLanguage);
     const conversationId = activeConversationId;
     const reportRequestId = createMessageId();
+    const clientExecutionStartedAt = performance.now();
+    activeReportRequestRef.current = {
+      requestId: reportRequestId,
+      conversationId,
+    };
+    conversationNavigationGenerationRef.current += 1;
+    console.info("[SESSION] generation locked", {
+      requestId: reportRequestId,
+      conversationId,
+    });
+    setLoading(true);
+    setActiveMode(requestedMode);
+    setWorkflowCompletedSteps(0);
+    const reportAttachments =
+      attachmentOverride?.length ? attachmentOverride : attachments;
+    const reportLanguage = resolvePlannerReportLanguage(submittedPrompt);
+    setLastRequest({
+      mode: requestedMode,
+      prompt: submittedPrompt,
+      attachments: reportAttachments,
+      reportReadiness,
+      language: reportLanguage,
+    });
+    setReportProgress(0);
+    setCurrentReportSectionName("Preparing report engine");
+    const copy = getLanguageCopy(reportLanguage);
+    const reportDomain = classifyReportDomain(
+      submittedPrompt,
+      reportAttachments.map((attachment) => ({
+        name: attachment.name,
+        type: attachment.mimeType,
+        textContent: attachment.textContent,
+      }))
+    );
+    const baseDomainFields = getPlanFieldsForDomain(reportDomain);
+    const outputFields = localizeReportFields(
+      reportDomain === "operations"
+        ? getPlanFieldsForDomain(reportDomain, submittedPrompt)
+        : baseDomainFields,
+      reportLanguage
+    );
+    const reportTitle =
+      reportDomain === "real_estate"
+        ? copy.realEstateTitle
+        : isSpecializedReportDomain(reportDomain)
+          ? getSpecializedReportTitle(reportDomain, reportLanguage)
+          : copy.planTitle;
+    const preparingReport =
+      reportDomain === "real_estate"
+        ? copy.preparingRealEstate
+        : isSpecializedReportDomain(reportDomain)
+          ? `## ${reportTitle}\n\n${
+              reportLanguage === "Turkish"
+                ? "Kanıtlar ve dış kaynak araştırması hazırlanıyor..."
+                : "Preparing evidence and external research..."
+            }`
+          : copy.preparingPlan;
     const shouldUpdateTitle = shouldAutoTitleConversation(
       activeConversation?.title || "New analysis session"
     );
@@ -8268,26 +9517,47 @@ export default function Planner({
       conversationId,
       title
     );
+    const initialPersistenceTasks: Promise<unknown>[] = [];
     if (addToHistory) {
-      const userMessage = addUserMessage("plan", submittedPrompt, conversationId);
-      await persistMessage(conversationId, userMessage);
+      const userMessage = addUserMessage(
+        requestedMode,
+        submittedPrompt,
+        conversationId,
+        reportAttachments
+      );
+      initialPersistenceTasks.push(persistMessage(conversationId, userMessage));
       if (shouldUpdateTitle) {
-        await persistConversationTitle(conversationId, title);
+        initialPersistenceTasks.push(
+          persistConversationTitle(conversationId, title)
+        );
       }
     }
     const assistantMessageId = addAssistantMessage(
-      "plan",
-      copy.preparingPlan,
+      requestedMode,
+      preparingReport,
       "streaming",
       conversationId
     );
-    await persistMessage(conversationId, {
-      id: assistantMessageId,
-      role: "assistant",
-      mode: "plan",
-      content: copy.preparingPlan,
-      status: "streaming",
-      createdAt: Date.now(),
+    initialPersistenceTasks.push(
+      persistMessage(conversationId, {
+        id: assistantMessageId,
+        role: "assistant",
+        mode: requestedMode,
+        content: preparingReport,
+        status: "streaming",
+        createdAt: Date.now(),
+      })
+    );
+    void Promise.allSettled(initialPersistenceTasks).then((results) => {
+      const rejectedCount = results.filter(
+        (result) => result.status === "rejected"
+      ).length;
+      if (rejectedCount > 0) {
+        console.warn("[report-jobs] non-blocking conversation persistence failed", {
+          reportRequestId,
+          rejectedCount,
+        });
+      }
     });
     setResult("");
     setReportGenerationError("");
@@ -8308,16 +9578,18 @@ export default function Planner({
 
       completedFields.add(field);
       setCurrentReportSectionName(
-        outputFields.find((item) => item.field === field)?.title || copy.planTitle
+        outputFields.find((item) => item.field === field)?.title || reportTitle
       );
-      setReportProgress(calculateReportProgress(completedFields.size, planReportFields.length));
+      setReportProgress(
+        calculateReportProgress(completedFields.size, outputFields.length)
+      );
     };
 
     const streamFullReport = async () => {
       reportApiCalls += 1;
 
       assertReportApiCallBudget({
-        logLabel: "[planner] Business Plan AI call count",
+        logLabel: `[planner] ${reportDomain} report AI call count`,
         reportRequestId,
         aiCallsForReport: reportApiCalls,
         maxAiCallsPerReport: REPORT_GENERATION_MAX_API_CALLS,
@@ -8333,82 +9605,328 @@ export default function Planner({
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
+          "X-Zerinix-Pipeline": "decision_intelligence_v1",
+          "X-Zerinix-Report-Request-Id": reportRequestId,
+          ...(reportReadiness
+            ? { "X-Zerinix-Universal-Input": "true" }
+            : {}),
         },
         referrerPolicy: "no-referrer",
         body: JSON.stringify({
           prompt: submittedPrompt,
+          analysisMode: requestedMode,
           field: "fullReport",
           reportRequestId,
+          language: reportLanguage,
+          explicitReportLanguage: getExplicitReportLanguageSelection() || undefined,
+          uiLanguage: getPlannerUiLanguage() || undefined,
+          browserLanguage: typeof navigator === "undefined" ? undefined : navigator.language,
+          reportDomain,
+          reportTitle,
+          workspaceId: selectedWorkspaceId,
+          conversationId,
+          assistantMessageId,
+          attachments: serializePlannerAttachments(reportAttachments),
+          ...(reportReadiness ? { reportReadiness } : {}),
         }),
       });
 
-      setCurrentReportSectionName("Generating complete report");
+      if (process.env.NODE_ENV !== "production") {
+        console.info("[PLANNER] report response", {
+          reportRequestId,
+          requestedPipeline: "decision_intelligence_v1",
+          responsePipeline: res.headers.get("x-zerinix-pipeline"),
+          responseRequestId: res.headers.get(
+            "x-zerinix-report-request-id"
+          ),
+          endpoint: planRequestUrl,
+          reportDomain,
+          attachmentCount: reportAttachments.length,
+        });
+      }
+
+      const enqueuePayload = (await res.json().catch(() => null)) as
+        | { success?: boolean; jobId?: string; status?: string; error?: string }
+        | null;
+
+      if (!res.ok || !enqueuePayload?.success || !enqueuePayload.jobId) {
+        throw new Error(
+          enqueuePayload?.error || copy.retryError
+        );
+      }
+
+      const jobId = enqueuePayload.jobId;
+      setCurrentReportSectionName("Report queued");
       setWorkflowCompletedSteps((current) => Math.max(current, 1));
+      let completedReportId = "";
+      let completedReportPayload: {
+        sections?: unknown;
+        metadata?: unknown;
+      } | null = null;
+      let pollDelayMs = 0;
+      let consecutivePollFailures = 0;
+      let totalPollFailures = 0;
+      let lastProgress = -1;
+      let lastProgressStage = "";
 
-      await readStreamingSectionJson(
-        res,
-        (event) => {
-          if (event.reportMetadata) {
-            reportMetadata = event.reportMetadata;
-            setCurrentReportMetadata(event.reportMetadata);
-            if (event.reportMetadata.investmentScore) {
-              setCurrentReportInvestmentScore(event.reportMetadata.investmentScore);
+      while (!completedReportId) {
+        if (pollDelayMs > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, pollDelayMs));
+        }
+
+        let statusResponse: Response;
+        try {
+          statusResponse = await fetch(
+            `/api/report-jobs/${encodeURIComponent(jobId)}`,
+            {
+              credentials: "include",
+              headers: { Authorization: `Bearer ${accessToken}` },
+              cache: "no-store",
             }
+          );
+        } catch (error) {
+          consecutivePollFailures += 1;
+          totalPollFailures += 1;
+          if (consecutivePollFailures > 5) {
+            throw error;
+          }
+          pollDelayMs = Math.min(4_000, 500 * 2 ** (consecutivePollFailures - 1));
+          continue;
+        }
+
+        const jobStatus = (await statusResponse.json().catch(() => null)) as
+          | {
+              status?: string;
+              progress?: number;
+              progressStage?: string;
+              reportId?: string | null;
+              report?: {
+                sections?: unknown;
+                metadata?: unknown;
+              } | null;
+              updatedAt?: string | null;
+              error?: string | null;
+            }
+          | null;
+
+        if (
+          (!statusResponse.ok || !jobStatus?.status) &&
+          (statusResponse.status === 429 || statusResponse.status >= 500)
+        ) {
+          consecutivePollFailures += 1;
+          totalPollFailures += 1;
+          if (consecutivePollFailures <= 5) {
+            pollDelayMs = Math.min(
+              4_000,
+              500 * 2 ** (consecutivePollFailures - 1)
+            );
+            continue;
+          }
+        }
+
+        if (!statusResponse.ok || !jobStatus?.status) {
+          throw new Error(jobStatus?.error || "Report status could not be loaded.");
+        }
+
+        consecutivePollFailures = 0;
+
+        if (
+          typeof jobStatus.progress === "number" &&
+          jobStatus.progress !== lastProgress
+        ) {
+          lastProgress = jobStatus.progress;
+          setReportProgress(Math.max(0, Math.min(100, jobStatus.progress)));
+        }
+
+        if (
+          jobStatus.progressStage &&
+          jobStatus.progressStage !== lastProgressStage
+        ) {
+          lastProgressStage = jobStatus.progressStage;
+          setCurrentReportSectionName(
+            jobStatus.progressStage.replace(/_/g, " ")
+          );
+        }
+
+        if (jobStatus.status === "failed" || jobStatus.status === "cancelled") {
+          throw new Error(
+            jobStatus.error ||
+              (jobStatus.status === "cancelled"
+                ? "Report generation was cancelled."
+                : copy.retryError)
+          );
+        }
+
+        if (jobStatus.status === "completed") {
+          if (!jobStatus.reportId) {
+            throw new Error("Completed report job did not include a report id.");
           }
 
-          for (const { field } of planReportFields) {
-            const chunk = event[field];
+          completedReportId = jobStatus.reportId;
+          completedReportPayload = jobStatus.report || null;
+          console.info("[report-jobs] client delivery timing", {
+            reportRequestId,
+            totalMs: Math.round(performance.now() - clientExecutionStartedAt),
+            completionToClientMs: jobStatus.updatedAt
+              ? Math.max(0, Date.now() - Date.parse(jobStatus.updatedAt))
+              : null,
+            transientPollFailures: totalPollFailures,
+          });
+          break;
+        }
 
-            if (!chunk) {
-              continue;
-            }
+        pollDelayMs =
+          jobStatus.status === "retry_wait"
+            ? 4_000
+            : jobStatus.status === "extracting" || jobStatus.status === "researching"
+              ? 2_000
+              : jobStatus.status === "queued" || jobStatus.status === "claimed"
+                ? 1_000
+                : 750;
+      }
 
-            if (isReportGenerationFailureText(chunk)) {
-              throw new Error(chunk);
-            }
+      let persistedReport = completedReportPayload;
+      if (!persistedReport) {
+        const reportClient = createClient();
+        await restoreSupabaseSession(reportClient);
+        const { data, error: persistedReportError } = await reportClient
+          .from("reports")
+          .select("sections,metadata")
+          .eq("id", completedReportId)
+          .maybeSingle();
 
-            reportOutput[field] = chunk;
-            markSectionComplete(field);
-          }
-        },
-        copy.sectionFallback,
-        undefined
-      );
+        if (persistedReportError || !data) {
+          throw new Error(
+            persistedReportError?.message || "Completed report could not be loaded."
+          );
+        }
+        persistedReport = data;
+      }
+
+      const persistedSections = Array.isArray(persistedReport.sections)
+        ? (persistedReport.sections as Array<{
+            field?: string;
+            title?: string;
+            content?: string;
+          }>)
+        : [];
+
+      for (const { field, title } of outputFields) {
+        const persistedSection = persistedSections.find(
+          (section) => section.field === field || section.title === title
+        );
+        const content =
+          typeof persistedSection?.content === "string"
+            ? persistedSection.content.trim()
+            : "";
+
+        if (!content) {
+          continue;
+        }
+
+        reportOutput[field] = content;
+        markSectionComplete(field);
+      }
+
+      if (
+        persistedReport.metadata &&
+        typeof persistedReport.metadata === "object" &&
+        !Array.isArray(persistedReport.metadata)
+      ) {
+        reportMetadata = persistedReport.metadata as ReportMetadata;
+        setCurrentReportMetadata(reportMetadata);
+        if (reportMetadata.investmentScore) {
+          setCurrentReportInvestmentScore(reportMetadata.investmentScore);
+        }
+      }
+
+      const hasCompletePayload =
+        completedFields.size === outputFields.length &&
+        outputFields.every(({ field }) => reportOutput[field]?.trim());
+      const reportCompleted = hasCompletePayload;
+
+      if (!reportCompleted) {
+        throw new Error(
+          "Report job completed without a complete report payload."
+        );
+      }
+
+      if (!hasCompletePayload) {
+        const missingPayloadFields = outputFields
+          .filter(({ field }) => !reportOutput[field]?.trim())
+          .map(({ title }) => title);
+        throw new Error(
+          `Report payload is missing required sections: ${missingPayloadFields.join(", ")}.`
+        );
+      }
+
+      console.info("[STREAM] closed", {
+        requestId: reportRequestId,
+        conversationId,
+        pipeline:
+          "decision_intelligence_v1",
+        completedFieldCount: completedFields.size,
+        reportCompleted,
+      });
+
+      return {
+        reportCompleted: true,
+        warnings: [] as string[],
+        reportId: completedReportId,
+      };
     };
 
     try {
-      await streamFullReport();
-      const serializedSections = serializeReportSections(reportOutput, outputFields);
+      const streamOutcome = await streamFullReport();
+      const warningMessage = moveReportAdvisoriesIntoWarningsSection({
+        reportData: reportOutput,
+        fields: outputFields,
+        warnings: streamOutcome.warnings,
+        language: reportLanguage,
+      });
 
       setPlanReport({ ...reportOutput });
+      setReportGenerationError("");
+      setReportGenerationWarning(warningMessage);
       setReportProgress(100);
       setCurrentReportSectionName("Report ready");
       setWorkflowCompletedSteps(workflowSteps.length);
       updateAssistantMessage(
         assistantMessageId,
-        getReportMarkdown(copy.planTitle, reportOutput, outputFields),
+        getReportMarkdown(reportTitle, reportOutput, outputFields),
         "complete",
         conversationId
       );
-      await updatePersistedMessage(
-        assistantMessageId,
-        getReportMarkdown(copy.planTitle, reportOutput, outputFields),
-        "complete"
-      );
-      const savedReportId = await saveGeneratedReport({
-        title: copy.planTitle,
-        promptText: submittedPrompt,
-        reportType: "business_plan",
-        workspaceId: selectedWorkspaceId,
-        sections: serializedSections,
-        expectedSectionCount: serializedSections.length,
-        metadata: reportMetadata,
+      const savedReportId = streamOutcome.reportId;
+      void persistAnalysisContext({
+        reportStatus: "completed",
+        ...(savedReportId ? { finalReportId: savedReportId } : {}),
+        completedAt: new Date().toISOString(),
       });
-      setActiveReportId(savedReportId);
-      await attributeReportUsage(savedReportId, reportRequestId);
-      void notifyReportReady(savedReportId);
+      if (!savedReportId) {
+        setReportGenerationWarning(
+          warningMessage ||
+            (reportLanguage === "Turkish"
+              ? "Rapor tamamlandı ancak rapor kitaplığına kaydedilemedi."
+              : "The report completed but could not be saved to the report library.")
+        );
+      } else {
+        setActiveReportId(savedReportId);
+        void attributeReportUsage(savedReportId, reportRequestId);
+        console.info("[SESSION] persisted", {
+          requestId: reportRequestId,
+          conversationId,
+          reportId: savedReportId,
+          status: "completed",
+        });
+        void notifyReportReady(savedReportId);
+      }
     } catch (error) {
       const errorMessage = getReportGenerationErrorMessage(error, copy.retryError);
+      void persistAnalysisContext({
+        reportStatus: "failed",
+        failedAt: new Date().toISOString(),
+      });
       setReportGenerationError(errorMessage);
       setResult(errorMessage);
       setPlanReport(null);
@@ -8416,9 +9934,14 @@ export default function Planner({
       setCurrentReportSectionName("Report failed");
       setWorkflowCompletedSteps(0);
       const failedReportId = await saveGeneratedReport({
-        title: copy.planTitle,
+        title: reportTitle,
         promptText: submittedPrompt,
-        reportType: "business_plan",
+        reportType:
+          reportDomain === "real_estate"
+            ? "real_estate_investment_analysis"
+            : isSpecializedReportDomain(reportDomain)
+              ? `${reportDomain}_analysis`
+              : "business_plan",
         workspaceId: selectedWorkspaceId,
         status: "failed",
         sections: [],
@@ -8432,271 +9955,87 @@ export default function Planner({
         "failed",
         conversationId
       );
-      await updatePersistedMessage(
+      const failureMessagePersisted = await updatePersistedMessage(
         assistantMessageId,
         errorMessage,
         "failed"
       );
+      console.info(
+        failureMessagePersisted
+          ? "[SESSION] persisted"
+          : "[SESSION] persistence failed",
+        {
+          requestId: reportRequestId,
+          conversationId,
+          reportId: failedReportId,
+          status: "failed",
+        }
+      );
     } finally {
+      if (
+        activeReportRequestRef.current?.requestId === reportRequestId
+      ) {
+        activeReportRequestRef.current = null;
+      }
       setLoading(false);
       setRegeneratingReportMode(null);
     }
   }
 
-  async function analyzeMarket(promptOverride = prompt, addToHistory = true) {
-    const submittedPrompt = promptOverride.trim();
-
-    if (!submittedPrompt || analyzing) {
-      return;
-    }
-
-    setAnalyzing(true);
-    setActiveMode("market");
-    setWorkflowCompletedSteps(0);
-    setLastRequest({ mode: "market", prompt: submittedPrompt });
-    setReportProgress(0);
-    setCurrentReportSectionName("Preparing report engine");
-    const reportLanguage = detectResponseLanguage(submittedPrompt);
-    const copy = getLanguageCopy(reportLanguage);
-    const outputFields = localizeReportFields(reportFields, reportLanguage);
-    const conversationId = activeConversationId;
-    const reportRequestId = createMessageId();
-    const shouldUpdateTitle = shouldAutoTitleConversation(
-      activeConversation?.title || "New analysis session"
-    );
-    const title = shouldUpdateTitle
-      ? generateConversationTitle(submittedPrompt)
-      : activeConversation?.title || generateConversationTitle(submittedPrompt);
-    await ensurePersistedConversation(
-      conversationId,
-      title
-    );
-    if (addToHistory) {
-      const userMessage = addUserMessage("market", submittedPrompt, conversationId);
-      await persistMessage(conversationId, userMessage);
-      if (shouldUpdateTitle) {
-        await persistConversationTitle(conversationId, title);
-      }
-    }
-    const assistantMessageId = addAssistantMessage(
-      "market",
-      copy.preparingMarket,
-      "streaming",
-      conversationId
-    );
-    await persistMessage(conversationId, {
-      id: assistantMessageId,
-      role: "assistant",
-      mode: "market",
-      content: copy.preparingMarket,
-      status: "streaming",
-      createdAt: Date.now(),
-    });
-    setResult("");
-    setReportGenerationError("");
-    setReportGenerationWarning("");
-    setPlanReport(null);
-    setMarketReport(null);
-    setCurrentReportInvestmentScore(undefined);
-    setCurrentReportMetadata(undefined);
-
-    const reportOutput: MarketReport = { ...emptyMarketReport };
-    let reportMetadata: ReportMetadata | undefined;
-    const completedFields = new Set<MarketReportField>();
-    let reportApiCalls = 0;
-
-    const markSectionComplete = (field: MarketReportField) => {
-      if (completedFields.has(field)) {
-        return;
-      }
-
-      completedFields.add(field);
-      setCurrentReportSectionName(
-        outputFields.find((item) => item.field === field)?.title || copy.marketTitle
-      );
-      setReportProgress(calculateReportProgress(completedFields.size, reportFields.length));
-    };
-
-    const streamFullReport = async () => {
-      reportApiCalls += 1;
-
-      assertReportApiCallBudget({
-        logLabel: "[planner] Market Analysis AI call count",
-        reportRequestId,
-        aiCallsForReport: reportApiCalls,
-        maxAiCallsPerReport: REPORT_GENERATION_MAX_API_CALLS,
-      });
-
-      removeLargePlannerQueryPayloads();
-      const accessToken = await getSupabaseAccessToken();
-
-      const res = await fetch("/api/market-analysis", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        referrerPolicy: "no-referrer",
-        body: JSON.stringify({
-          prompt: submittedPrompt,
-          field: "fullReport",
-          reportRequestId,
-        }),
-      });
-
-      setCurrentReportSectionName("Generating complete report");
-      setWorkflowCompletedSteps((current) => Math.max(current, 1));
-
-      await readStreamingSectionJson(
-        res,
-        (event) => {
-          if (event.reportMetadata) {
-            reportMetadata = event.reportMetadata;
-            setCurrentReportMetadata(event.reportMetadata);
-            if (event.reportMetadata.investmentScore) {
-              setCurrentReportInvestmentScore(event.reportMetadata.investmentScore);
-            }
-          }
-
-          if (event.warning) {
-            const affectedFields = [
-              ...(event.missingFields || []),
-              ...(event.invalidFields || []),
-            ];
-            const affectedTitles = affectedFields
-              .map((field) => outputFields.find((item) => item.field === field)?.title)
-              .filter(Boolean)
-              .join(", ");
-            const warningMessage = affectedTitles
-              ? `${event.warning} Affected sections: ${affectedTitles}.`
-              : event.warning;
-
-            setReportGenerationWarning(warningMessage);
-            setResult(warningMessage);
-          }
-
-          for (const { field } of reportFields) {
-            const chunk = event[field];
-
-            if (!chunk) {
-              continue;
-            }
-
-            if (isReportGenerationFailureText(chunk)) {
-              throw new Error(chunk);
-            }
-
-            reportOutput[field] = chunk;
-            markSectionComplete(field);
-          }
-        },
-        copy.sectionFallback,
-        undefined
-      );
-    };
-
-    try {
-      await streamFullReport();
-      const serializedSections = serializeReportSections(reportOutput, outputFields);
-
-      setMarketReport({ ...reportOutput });
-      setReportProgress(100);
-      setCurrentReportSectionName("Report ready");
-      setWorkflowCompletedSteps(workflowSteps.length);
-      updateAssistantMessage(
-        assistantMessageId,
-        getReportMarkdown(copy.marketTitle, reportOutput, outputFields),
-        "complete",
-        conversationId
-      );
-      await updatePersistedMessage(
-        assistantMessageId,
-        getReportMarkdown(copy.marketTitle, reportOutput, outputFields),
-        "complete"
-      );
-      const savedReportId = await saveGeneratedReport({
-        title: copy.marketTitle,
-        promptText: submittedPrompt,
-        reportType: "market_analysis",
-        workspaceId: selectedWorkspaceId,
-        sections: serializedSections,
-        expectedSectionCount: serializedSections.length,
-        metadata: reportMetadata,
-      });
-      setActiveReportId(savedReportId);
-      await attributeReportUsage(savedReportId, reportRequestId);
-      void notifyReportReady(savedReportId);
-    } catch (error) {
-      const errorMessage = getReportGenerationErrorMessage(
-        error,
-        copy.marketRetryError
-      );
-      setReportGenerationError(errorMessage);
-      setResult(errorMessage);
-      setMarketReport(null);
-      setReportProgress(0);
-      setCurrentReportSectionName("Report failed");
-      setWorkflowCompletedSteps(0);
-      const failedReportId = await saveGeneratedReport({
-        title: copy.marketTitle,
-        promptText: submittedPrompt,
-        reportType: "market_analysis",
-        workspaceId: selectedWorkspaceId,
-        status: "failed",
-        sections: [],
-        expectedSectionCount: outputFields.length,
-        metadata: reportMetadata,
-      });
-      await attributeReportUsage(failedReportId, reportRequestId);
-      updateAssistantMessage(
-        assistantMessageId,
-        errorMessage,
-        "failed",
-        conversationId
-      );
-      await updatePersistedMessage(
-        assistantMessageId,
-        errorMessage,
-        "failed"
-      );
-    } finally {
-      setAnalyzing(false);
-      setRegeneratingReportMode(null);
-    }
-  }
-
-  const activeReportLanguage = detectResponseLanguage(lastRequest?.prompt || prompt);
+  const activeReportLanguage = lastRequest?.language || detectResponseLanguage(lastRequest?.prompt || prompt);
   const currentLanguageCopy = getLanguageCopy(activeReportLanguage);
   const activeReportMode = planReport
     ? "plan"
     : marketReport || activeMode === "market"
       ? "market"
       : "plan";
+  const activePlanReportDomain =
+    initialReport?.type === "Real Estate Investment Analysis" &&
+    !lastRequest?.prompt
+      ? "real_estate"
+      : classifyReportDomain(
+          lastRequest?.prompt || prompt,
+          (lastRequest?.attachments || []).map((attachment) => ({
+            name: attachment.name,
+            type: attachment.mimeType,
+            textContent: attachment.textContent,
+          }))
+        );
   const activeReportFields = useMemo(
     () =>
       (activeReportMode === "plan"
-        ? localizeReportFields(planReportFields, activeReportLanguage)
+        ? localizeReportFields(
+            getPlanFieldsForDomain(
+              activePlanReportDomain,
+              lastRequest?.prompt || prompt
+            ),
+            activeReportLanguage
+          )
         : localizeReportFields(reportFields, activeReportLanguage)) as Array<{
         field: keyof (MarketReport & PlanReport);
         title: string;
         icon: LucideIcon;
       }>,
-    [activeReportLanguage, activeReportMode]
+    [
+      activePlanReportDomain,
+      activeReportLanguage,
+      activeReportMode,
+      lastRequest?.prompt,
+      prompt,
+    ]
   );
   const currentReportTitle = activeReportMode === "plan"
-    ? currentLanguageCopy.planTitle
+    ? activePlanReportDomain === "real_estate"
+      ? currentLanguageCopy.realEstateTitle
+      : isSpecializedReportDomain(activePlanReportDomain)
+        ? getSpecializedReportTitle(activePlanReportDomain, activeReportLanguage)
+        : currentLanguageCopy.planTitle
     : currentLanguageCopy.marketTitle;
+  const activeAnalysisLabel = activePlanReportDomain === "legal"
+    ? getSpecializedReportTitle("legal", activeReportLanguage)
+    : decisionGoalLabels[activeMode];
   const shouldShowToolbarRegenerate = true;
   const hasConversationMessages = messages.length > 0;
-  const latestUserIntentPrompt =
-    [...(activeConversation?.messages || [])]
-      .reverse()
-      .find((message) => message.role === "user")
-      ?.content ||
-    lastRequest?.prompt ||
-    "";
-  const recommendedAnalysisMode = inferRecommendedAnalysisMode(latestUserIntentPrompt);
   const hasWorkspaceActivity =
     hasConversationMessages ||
     isReportWorking ||
@@ -8713,24 +10052,10 @@ export default function Planner({
     activeConversationHasReportOutput ||
     Boolean(regeneratingReportMode) ||
     (isReportWorking && (activeMode === "plan" || activeMode === "market"));
-  const showDesktopAnalysisCards =
-    !initialReportConversationIsActive && !isReportModeActive;
   const showDesktopAdvisorPanels =
     hasWorkspaceActivity &&
     !initialReportConversationIsActive &&
     !isReportModeActive;
-  const advisorSuggestions = [
-    "Validate my business idea",
-    "Find my strongest competitors",
-    "Build a pricing strategy",
-    "Plan expansion into a new market",
-  ];
-  const firstInteractionSuggestions = [
-    "Validate my business idea",
-    "Analyze my market",
-    "Find competitors",
-    "Improve my pricing",
-  ];
   const recentAssistantOutputs = useMemo(
     () =>
       (activeConversation?.messages || [])
@@ -8797,23 +10122,38 @@ export default function Planner({
     ].join("\n\n");
   }, [activeConversation, initialReport?.prompt]);
 
-  function submitMobileChatPrompt() {
-    const submittedPrompt = chatPrompt.trim();
-
-    if (!submittedPrompt || isWorking) {
-      return;
-    }
-
-    setChatPrompt("");
-    void sendChatMessage(submittedPrompt);
-  }
-
   function generateMobileStrategicReport() {
     if (!mobileReportPrompt || isWorking) {
       return;
     }
 
-    void generatePlan(mobileReportPrompt, false);
+    void submitForUnderstanding(mobileReportPrompt);
+  }
+
+  function backToWorkspaceFromReportRestriction() {
+    setReportGenerationError("");
+    setResult("");
+    setWorkflowCompletedSteps(0);
+    setReportProgress(0);
+    setCurrentReportSectionName("");
+    setActiveMode("chat");
+  }
+
+  function continueRestrictedReportAsChat() {
+    const submittedPrompt = lastRequest?.prompt.trim() || "";
+    const queuedAttachments = lastRequest?.attachments || [];
+
+    if (!submittedPrompt || isWorking) {
+      return;
+    }
+
+    logPlannerAttachmentTrace(
+      "POINT_4_CONTINUE_AS_CHAT_CLICKED",
+      queuedAttachments,
+      { source: "report_restriction_card" }
+    );
+    backToWorkspaceFromReportRestriction();
+    void sendChatMessage(submittedPrompt, false, "", queuedAttachments);
   }
 
   const mobileReportContent =
@@ -8832,7 +10172,9 @@ export default function Planner({
             reportFields={activeReportFields}
             reportId={activeReportId}
             reportTitle={currentReportTitle}
+            reportDomain={activePlanReportDomain}
             sourcePrompt={lastRequest?.prompt}
+            reportLanguage={activeReportLanguage}
             waitingMessage={currentLanguageCopy.waitingSection}
             result={result}
             failureMessage={reportGenerationError}
@@ -8847,6 +10189,8 @@ export default function Planner({
             reportQuality={
               currentReportMetadata?.reportQuality || initialReport?.metadata?.reportQuality
             }
+            onContinueAsChat={continueRestrictedReportAsChat}
+            onBackToWorkspace={backToWorkspaceFromReportRestriction}
           />
         )}
       </>
@@ -8868,13 +10212,16 @@ export default function Planner({
           setIsDraggingFiles(false);
         }
       }}
-      onDrop={handleDropFiles}
+      onDrop={(event) => {
+        void handlePlannerDrop(event);
+      }}
     >
       <MobileBottomNavigation />
       <ConversationSidebar
         conversations={conversations}
         activeConversationId={activeConversationId}
         activeMode={activeMode}
+        modeSelected={hasSelectedAnalysisMode}
         onSelectConversation={selectConversation}
         onCreateConversation={createNewConversation}
         onRenameConversation={renameConversation}
@@ -8900,27 +10247,34 @@ export default function Planner({
           </div>
         ) : null}
 
-        <header className="relative z-10 hidden items-center justify-between gap-4 border-b border-white/10 bg-black/65 px-5 py-4 shadow-xl shadow-black/20 backdrop-blur-2xl md:flex lg:px-8">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
-                ZERINIX AI
-              </p>
-              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-300">
-                {decisionGoalLabels[activeMode]}
-              </span>
+        <header className="relative z-10 hidden min-h-[76px] items-center justify-between gap-5 border-b border-white/[0.075] bg-black/70 px-5 py-3.5 shadow-[0_16px_45px_rgba(0,0,0,0.28)] backdrop-blur-2xl md:flex lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[0.9rem] border border-teal-200/20 bg-[linear-gradient(145deg,rgba(94,234,212,0.16),rgba(13,148,136,0.06))] shadow-[0_10px_30px_rgba(4,47,46,0.25)]">
+              <Sparkles className="h-[17px] w-[17px] text-teal-200" />
+            </span>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-[11px] font-semibold tracking-[0.32em] text-teal-300/70">
+                  ZERINIX AI
+                </p>
+                <span className="rounded-full border border-white/[0.08] bg-white/[0.035] px-2.5 py-1 text-[10px] font-medium text-zinc-400">
+                  {hasSelectedAnalysisMode
+                    ? activeAnalysisLabel
+                    : "Select analysis type"}
+                </span>
+              </div>
+              <h1 className="mt-1 truncate text-lg font-semibold tracking-[-0.025em] text-white md:text-xl">
+                {activeConversation
+                  ? getAnalysisSessionTitle(activeConversation.title)
+                  : "Business Decision Advisor"}
+              </h1>
             </div>
-            <h1 className="mt-1 truncate text-xl font-semibold text-white md:text-2xl">
-              {activeConversation
-                ? getAnalysisSessionTitle(activeConversation.title)
-                : "Business Decision Advisor"}
-            </h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
               onClick={() => void createNewConversation()}
-              className="hidden items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-zinc-200 transition hover:bg-white/10 md:inline-flex"
+              className="hidden min-h-10 items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.035] px-4 py-2 text-sm font-medium text-zinc-200 transition hover:border-white/[0.14] hover:bg-white/[0.075] md:inline-flex"
             >
               <Plus className="h-4 w-4 text-teal-200" />
               New analysis
@@ -8930,16 +10284,16 @@ export default function Planner({
                 type="button"
                 onClick={regenerateResponse}
                 disabled={isWorking}
-              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.035] px-4 py-2 text-sm font-medium text-zinc-200 transition hover:border-white/[0.14] hover:bg-white/[0.075] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <RefreshCcw className="h-4 w-4 text-teal-200" />
-                <span className="inline">Regenerate response</span>
+                <span className="inline">Regenerate</span>
               </button>
             ) : null}
             <Link
               href="/dashboard/settings"
               aria-label="Open account settings"
-              className="hidden items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30 lg:flex"
+              className="hidden min-h-10 items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.035] px-2.5 py-1.5 transition hover:border-white/[0.14] hover:bg-white/[0.075] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30 lg:flex"
             >
               <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white text-sm font-semibold text-black">
                 {(userEmail || "Z").slice(0, 1).toUpperCase()}
@@ -8955,6 +10309,7 @@ export default function Planner({
         </header>
 
         <MobileConversationExperience
+          key={`mobile-composer-${composerResetKey}`}
           activeConversationId={activeConversationId}
           conversationTitle={
             activeConversation
@@ -8963,17 +10318,45 @@ export default function Planner({
           }
           conversations={mobileConversationSummaries}
           messages={messages}
-          prompt={chatPrompt}
-          suggestions={firstInteractionSuggestions}
-          chatLoading={chatLoading}
-          isWorking={isWorking}
+          attachments={attachments}
+          attachmentError={attachmentError}
+          draftSnapshotRef={composerDraftRef}
+          activeAnalysisMode={activeMode}
+          analysisModeSelected={hasSelectedAnalysisMode}
+          analysisActive={isUnderstanding || Boolean(pendingRecommendation)}
+          chatLoading={chatLoading || isUnderstanding}
+          isWorking={isWorking || isUnderstanding}
           canGenerateReport={Boolean(mobileReportPrompt)}
           reportContent={mobileReportContent}
+          recommendationContent={
+            isUnderstanding ? (
+              <UnderstandingLoadingState />
+            ) : pendingRecommendation ? (
+              <RecommendationCard
+                key={`${pendingRecommendation.prompt}:${pendingRecommendation.attachments
+                  .map((attachment) => attachment.id)
+                  .join(",")}`}
+                recommendation={pendingRecommendation.recommendation}
+                isWorking={isWorking}
+                onAction={dispatchRecommendationAction}
+              />
+            ) : null
+          }
           reportUpdateKey={`${reportProgress}:${currentReportSectionName}:${activeReportId}:${result.length}`}
           conversationError={conversationError}
-          onPromptChange={setChatPrompt}
-          onSuggestionClick={setChatPrompt}
-          onSubmit={submitMobileChatPrompt}
+          onFiles={(files, draft) => {
+            void handlePlannerFiles(files, draft);
+          }}
+          onRemoveAttachment={(id) => {
+            cancelPendingUnderstanding();
+            setAttachmentError("");
+            setAttachments((current) =>
+              current.filter((attachment) => attachment.id !== id)
+            );
+          }}
+          onInvalidateAnalysis={cancelPendingUnderstanding}
+          onAnalyze={(draft) => void submitForUnderstanding(draft)}
+          onSelectAnalysisMode={selectAnalysisMode}
           onGenerateReport={generateMobileStrategicReport}
           onCreateConversation={() => void createNewConversation()}
           onSelectConversation={selectConversation}
@@ -8988,9 +10371,9 @@ export default function Planner({
         <div
           ref={chatScrollerRef}
           onScroll={updateNearBottomState}
-          className="relative z-10 hidden min-h-0 flex-1 overflow-y-auto scroll-smooth px-4 py-5 sm:px-5 md:block lg:px-8"
+          className="relative z-10 hidden min-h-0 flex-1 overflow-y-auto scroll-smooth px-4 py-5 sm:px-5 md:block lg:px-8 lg:py-7"
         >
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 pb-48">
+          <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-48">
             <div
               className="mx-auto flex w-full flex-col gap-6 pb-14"
             >
@@ -9007,14 +10390,43 @@ export default function Planner({
               ) : null}
 
               <ChatComposer
-                chatPrompt={chatPrompt}
-                chatLoading={chatLoading}
+                key={`desktop-composer-${composerResetKey}`}
+                activeMode={activeMode}
+                modeSelected={hasSelectedAnalysisMode}
+                modeSelectionDisabled={isWorking || isUnderstanding}
                 isWorking={isWorking}
-                suggestions={firstInteractionSuggestions}
-                onChange={setChatPrompt}
-                onSuggestionClick={setChatPrompt}
-                onSubmit={() => void submitChatPrompt()}
+                isUnderstanding={isUnderstanding}
+                analysisActive={isUnderstanding || Boolean(pendingRecommendation)}
+                attachments={attachments}
+                attachmentError={attachmentError}
+                draftSnapshotRef={composerDraftRef}
+                onAnalyze={(draft) => void submitForUnderstanding(draft)}
+                onModeSelect={selectAnalysisMode}
+                onInvalidateAnalysis={cancelPendingUnderstanding}
+                onFiles={(files, draft) => {
+                  void handlePlannerFiles(files, draft);
+                }}
+                onRemoveAttachment={(id) => {
+                  cancelPendingUnderstanding();
+                  setAttachmentError("");
+                  setAttachments((current) =>
+                    current.filter((attachment) => attachment.id !== id)
+                  );
+                }}
               />
+
+              {isUnderstanding ? (
+                <UnderstandingLoadingState />
+              ) : pendingRecommendation ? (
+                <RecommendationCard
+                  key={`${pendingRecommendation.prompt}:${pendingRecommendation.attachments
+                    .map((attachment) => attachment.id)
+                    .join(",")}`}
+                  recommendation={pendingRecommendation.recommendation}
+                  isWorking={isWorking}
+                  onAction={dispatchRecommendationAction}
+                />
+              ) : null}
 
               <ChatMessages
                 messages={messages}
@@ -9023,46 +10435,8 @@ export default function Planner({
                 onRegenerate={regenerateResponse}
               />
 
-              <AnalysisModeCards
-                visible={showDesktopAnalysisCards}
-                cards={modeCards}
-                selectedMode={selectedDesktopAnalysisMode}
-                recommendedMode={recommendedAnalysisMode}
-                chatPrompt={chatPrompt}
-                latestUserIntentPrompt={latestUserIntentPrompt}
-                isWorking={isWorking}
-                onSelectMode={(mode, sharedPrompt) => {
-                  setSelectedDesktopAnalysisMode(mode);
-                  void (mode === "market"
-                    ? analyzeMarket(sharedPrompt)
-                    : generatePlan(sharedPrompt));
-                }}
-              />
-
 		              {showDesktopAdvisorPanels ? (
                 <>
-                  <section className="rounded-[1.55rem] border border-white/10 bg-white/[0.045] p-3.5 shadow-xl shadow-black/20 ring-1 ring-white/[0.025] backdrop-blur-2xl">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-teal-200/70">
-                      Advisor
-                    </p>
-                    <h3 className="mt-1.5 text-base font-semibold text-white">
-                      AI Suggestions
-                    </h3>
-                    <div className="mt-3 grid gap-2 md:grid-cols-2">
-                      {advisorSuggestions.map((suggestion) => (
-                        <button
-                          key={suggestion}
-                          type="button"
-                          onClick={() => setChatPrompt(suggestion)}
-                          className="flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-left text-xs font-medium text-zinc-300 transition duration-200 ease-out hover:-translate-y-0.5 hover:border-teal-300/25 hover:bg-white/[0.06] hover:text-white"
-                        >
-                          <Sparkles className="h-3.5 w-3.5 shrink-0 text-teal-200/80" />
-                          {suggestion}
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-
                   <section className="rounded-[1.55rem] border border-white/10 bg-white/[0.045] p-3.5 shadow-xl shadow-black/20 ring-1 ring-white/[0.025] backdrop-blur-2xl">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-teal-200/70">
                       Context
@@ -9090,7 +10464,9 @@ export default function Planner({
                       <div className="rounded-2xl border border-white/10 bg-black/25 p-2.5 md:col-span-4">
                         <p className="text-[11px] font-medium text-zinc-500">Analysis type</p>
                         <p className="mt-1 text-sm font-semibold text-zinc-100">
-                          {decisionGoalLabels[activeMode]}
+                          {hasSelectedAnalysisMode
+                            ? activeAnalysisLabel
+                            : "Not selected"}
                         </p>
                       </div>
                     </div>
@@ -9145,7 +10521,9 @@ export default function Planner({
                   reportFields={activeReportFields}
                   reportId={activeReportId}
                   reportTitle={currentReportTitle}
+                  reportDomain={activePlanReportDomain}
                   sourcePrompt={lastRequest?.prompt}
+                  reportLanguage={activeReportLanguage}
                   waitingMessage={currentLanguageCopy.waitingSection}
                   result={result}
                   failureMessage={reportGenerationError}
@@ -9154,6 +10532,8 @@ export default function Planner({
                   benchmarkFit={currentReportMetadata?.benchmarkFit || initialReport?.metadata?.benchmarkFit}
                   benchmarkScore={currentReportMetadata?.benchmarkScore || initialReport?.metadata?.benchmarkScore}
                   reportQuality={currentReportMetadata?.reportQuality || initialReport?.metadata?.reportQuality}
+                  onContinueAsChat={continueRestrictedReportAsChat}
+                  onBackToWorkspace={backToWorkspaceFromReportRestriction}
                 />
 	              ) : null}
               </div>

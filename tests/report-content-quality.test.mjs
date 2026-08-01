@@ -118,7 +118,7 @@ test("report generation instructions enforce a business-specific decision spine 
   const directives = readFileSync("app/lib/ai/report-quality-directives.ts", "utf8");
   const planPrompts = readFileSync("app/lib/report-engine/prompts/plan.ts", "utf8");
   const marketPrompts = readFileSync("app/lib/report-engine/prompts/market.ts", "utf8");
-  const planRoute = readFileSync("app/api/plan/route.ts", "utf8");
+  const planRoute = readFileSync("app/lib/report-jobs/plan-executor.ts", "utf8");
   const marketRoute = readFileSync("app/api/market-analysis/route.ts", "utf8");
 
   assert.match(directives, /Decision Spine/);

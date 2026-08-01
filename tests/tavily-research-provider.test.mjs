@@ -234,7 +234,7 @@ test("Tavily coordinator uses the existing cache, normalization, and ranking flo
   assert.ok(first.evidence[0].rankingScore > 0);
 });
 
-test("configuration is always production-disabled even when the feature flag is set", () => {
+test("server-side Tavily configuration remains enabled in production when explicitly configured", () => {
   const configuration = resolveTavilyConfiguration({
     NODE_ENV: "production",
     ENABLE_TAVILY_RESEARCH: "true",
@@ -242,7 +242,112 @@ test("configuration is always production-disabled even when the feature flag is 
   });
 
   assert.equal(configuration.configured, true);
-  assert.equal(configuration.enabled, false);
-  assert.equal(configuration.productionBlocked, true);
+  assert.equal(configuration.enabled, true);
+  assert.equal(configuration.productionBlocked, false);
 });
 
+test("configuration remains disabled when the explicit server flag is absent", () => {
+  const configuration = resolveTavilyConfiguration({
+    NODE_ENV: "production",
+    TAVILY_API_KEY: apiKey,
+  });
+
+  assert.equal(configuration.configured, true);
+  assert.equal(configuration.enabled, false);
+});
+
+test("a timeout is retried once and a successful response is normalized", async () => {
+  let transportCalls = 0;
+  const provider = new TavilyResearchProvider({
+    apiKey,
+    timeoutMs: 5,
+    maxAttempts: 2,
+    clock: () => now,
+    fetchImpl: async (_url, init) => {
+      transportCalls += 1;
+      if (transportCalls === 1) {
+        return new Promise((_resolve, reject) => {
+          init.signal.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true }
+          );
+        });
+      }
+
+      return jsonResponse({
+        results: [
+          {
+            title: "Defne Municipality planning document",
+            url: "https://www.defne.bel.tr/plan/dursunlu",
+            content: "Dursunlu plan information is published on this page.",
+            score: 0.92,
+          },
+        ],
+        usage: { credits: 1 },
+      });
+    },
+  });
+
+  const result = await provider.research(
+    request({
+      query: "Hatay Defne Dursunlu 1517 ada 1 parsel imar",
+      language: "tr",
+      region: "TR",
+    })
+  );
+
+  assert.equal(transportCalls, 2);
+  assert.equal(result.rawEvidenceItems.length, 1);
+  assert.equal(result.rawEvidenceItems[0].source, "defne.bel.tr");
+  assert.equal(
+    result.rawEvidenceItems[0].provenance[0].provider,
+    "tavily-search"
+  );
+});
+
+test("coordinator removes duplicate source URLs and preserves normalized metadata", async () => {
+  const provider = new TavilyResearchProvider({
+    apiKey,
+    maxAttempts: 1,
+    clock: () => now,
+    fetchImpl: async () =>
+      jsonResponse({
+        results: [
+          {
+            title: "AFAD Hatay risk map",
+            url: "https://www.afad.gov.tr/hatay-risk?utm_source=search",
+            content: "Hatay regional hazard information was published by AFAD.",
+            score: 0.94,
+            published_date: "2026-06-01",
+          },
+          {
+            title: "AFAD Hatay risk map",
+            url: "https://www.afad.gov.tr/hatay-risk",
+            content: "Hatay regional hazard information was published by AFAD.",
+            score: 0.9,
+            published_date: "2026-06-01",
+          },
+        ],
+        usage: { credits: 1 },
+      }),
+  });
+  const coordinator = new ResearchCoordinator({ providers: [provider] });
+  const result = await coordinator.research(
+    {
+      query: "AFAD Hatay Defne risk",
+      language: "tr",
+      region: "TR",
+      maxResults: 5,
+    },
+    { now: now.toISOString() }
+  );
+
+  assert.equal(result.evidence.length, 1);
+  assert.equal(result.evidence[0].url, "https://www.afad.gov.tr/hatay-risk");
+  assert.equal(result.evidence[0].source, "afad.gov.tr");
+  assert.equal(result.evidence[0].evidenceType, "Government");
+  assert.equal(result.evidence[0].publishedAt, "2026-06-01T00:00:00.000Z");
+  assert.equal(result.evidence[0].provenance[0].provider, "tavily-search");
+  assert.equal(result.evidence[0].provenance[0].collectedAt, now.toISOString());
+});

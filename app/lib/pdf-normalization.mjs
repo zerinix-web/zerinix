@@ -322,22 +322,46 @@ export function detectPdfPresentationLocale(value = "") {
     return "tr";
   }
 
+  if (/[äöüßÄÖÜ]/.test(normalized) || /\b(?:Zusammenfassung|Entscheidung|Risiken|Quellen|Empfehlungen)\b/i.test(normalized)) return "de";
+  if (/[àâçéèêëîïôûùüÿœÀÂÇÉÈÊËÎÏÔÛÙÜŸŒ]/.test(normalized) || /\b(?:Synthèse|Décision|Risques|Sources|Recommandations)\b/i.test(normalized)) return "fr";
+  if (/[áéíóúñ¿¡ÁÉÍÓÚÑ]/.test(normalized) || /\b(?:Resumen|Decisión|Riesgos|Fuentes|Recomendaciones)\b/i.test(normalized)) return "es";
+
   return "en";
 }
+
+export function resolvePdfPresentationLocale(explicitLanguage, value = "") {
+  const normalized = String(explicitLanguage || "").trim().toLowerCase().split(/[-_]/)[0];
+  const aliases = { english: "en", turkish: "tr", german: "de", french: "fr", spanish: "es" };
+  const resolved = aliases[normalized] || normalized;
+  return ["en", "tr", "de", "fr", "es"].includes(resolved)
+    ? resolved
+    : detectPdfPresentationLocale(value);
+}
+
+const additionalPdfLabels = {
+  de: new Map([["executive summary", "Zusammenfassung"], ["decision", "Entscheidung"], ["confidence score", "Konfidenzwert"], ["main risk", "Hauptrisiko"], ["next action", "Nächster Schritt"], ["legal assessment", "Rechtliche Bewertung"], ["risks", "Risiken"], ["recommendations", "Empfehlungen"], ["evidence", "Nachweise"], ["sources", "Quellen"], ["warnings", "Warnhinweise"], ["missing information", "Fehlende Informationen"], ["access date", "Zugriffsdatum"], ["reliability", "Verlässlichkeit"], ["page", "Seite"]]),
+  fr: new Map([["executive summary", "Synthèse exécutive"], ["decision", "Décision"], ["confidence score", "Indice de confiance"], ["main risk", "Risque principal"], ["next action", "Prochaine action"], ["legal assessment", "Évaluation juridique"], ["risks", "Risques"], ["recommendations", "Recommandations"], ["evidence", "Éléments probants"], ["sources", "Sources"], ["warnings", "Avertissements"], ["missing information", "Informations manquantes"], ["access date", "Date de consultation"], ["reliability", "Fiabilité"], ["page", "Page"]]),
+  es: new Map([["executive summary", "Resumen ejecutivo"], ["decision", "Decisión"], ["confidence score", "Índice de confianza"], ["main risk", "Riesgo principal"], ["next action", "Siguiente acción"], ["legal assessment", "Evaluación jurídica"], ["risks", "Riesgos"], ["recommendations", "Recomendaciones"], ["evidence", "Evidencia"], ["sources", "Fuentes"], ["warnings", "Advertencias"], ["missing information", "Información faltante"], ["access date", "Fecha de acceso"], ["reliability", "Fiabilidad"], ["page", "Página"]]),
+};
 
 export function localizePdfPresentationLabel(value = "", locale = "en") {
   const normalized = normalizePdfText(String(value));
   const continued = /\s+continued$/i.test(normalized);
   const devam = /\s+devamı$/i.test(normalized);
   const key = normalizePdfLocalizationKey(normalized.replace(/\s+devamı$/i, ""));
-  const translated =
-    locale === "tr"
-      ? turkishPdfPresentationLabels.get(key) || normalized.replace(/\s+continued$/i, "")
-      : englishPdfPresentationLabels.get(key) || normalized.replace(/\s+devamı$/i, "");
+  const translated = locale === "tr"
+    ? turkishPdfPresentationLabels.get(key) || normalized.replace(/\s+continued$/i, "")
+    : locale === "en"
+      ? englishPdfPresentationLabels.get(key) || normalized.replace(/\s+devamı$/i, "")
+      : additionalPdfLabels[locale]?.get(key) || normalized.replace(/\s+continued$/i, "");
 
   if (locale === "tr") {
     return continued || devam ? `${translated} devamı` : translated;
   }
+
+  if (locale === "de") return continued || devam ? `${translated} (Fortsetzung)` : translated;
+  if (locale === "fr") return continued || devam ? `${translated} (suite)` : translated;
+  if (locale === "es") return continued || devam ? `${translated} (continuación)` : translated;
 
   return continued || devam ? `${translated} continued` : translated;
 }

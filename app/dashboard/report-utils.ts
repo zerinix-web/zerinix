@@ -1,5 +1,4 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import { containsReportGenerationFailure } from "@/app/lib/report-errors";
 import {
   readReportInvestmentScore,
   type ReportInvestmentScore,
@@ -13,7 +12,11 @@ export type DashboardReport = {
   title: string;
   prompt: string;
   createdAt: string;
-  type: "Business Plan" | "Market Analysis";
+  type:
+    | "Business Plan"
+    | "Market Analysis"
+    | "Real Estate Investment Analysis"
+    | "Strategic Report";
   status: string;
   metadata?: ReportMetadata;
   investmentScore?: ReportInvestmentScore;
@@ -27,6 +30,7 @@ export type DashboardReport = {
 export type MobileReportType =
   | "Business Plan"
   | "Market Analysis"
+  | "Real Estate Investment Analysis"
   | "Strategic Report";
 
 export type MobileReportPreview = {
@@ -94,6 +98,32 @@ const sectionLabels: Record<string, string> = {
   firstCustomerStrategy: "First Customer Strategy",
   kpiMetrics: "KPI Metrics",
   successScore: "AI Success Score",
+  assetIdentification: "Asset Identification",
+  extractedDocumentFacts: "Extracted Document Facts",
+  ownershipTitleFindings: "Ownership and Title Findings",
+  location: "Location",
+  zoningLandUseStatus: "Zoning and Land-Use Status",
+  accessInfrastructure: "Access and Infrastructure",
+  comparableMarketEvidence: "Comparable Market Evidence",
+  valuationRange: "Valuation Range",
+  legalRisks: "Legal Risks",
+  environmentalGeotechnicalRisks: "Environmental and Geotechnical Risks",
+  liquidity: "Liquidity",
+  developmentPotential: "Development Potential",
+  investmentScore: "Investment Score",
+  missingInformation: "Missing Information",
+  recommendedDueDiligence: "Recommended Due Diligence",
+  finalRecommendation: "Final Recommendation",
+  subjectIdentification: "Subject Identification",
+  extractedFacts: "Extracted Facts",
+  externalEvidence: "External Evidence",
+  domainFindings: "Domain Findings",
+  regulatoryCompliance: "Regulatory and Compliance Findings",
+  financialImplications: "Financial Implications",
+  operationalImplications: "Operational Implications",
+  riskAnalysis: "Risk Analysis",
+  decisionAssessment: "Decision Assessment",
+  recommendedActions: "Recommended Actions",
 };
 
 const sectionOrder = Object.keys(sectionLabels);
@@ -174,8 +204,26 @@ function normalizeJsonSections(value: unknown) {
 function inferReportType(row: ReportRow) {
   const rawType = readString(row, ["type", "report_type", "kind"], "").toLowerCase();
 
+  if (
+    rawType.includes("real_estate") ||
+    rawType.includes("real estate") ||
+    rawType.includes("gayrimenkul")
+  ) {
+    return "Real Estate Investment Analysis";
+  }
+
   if (rawType.includes("market") || rawType.includes("pazar")) {
     return "Market Analysis";
+  }
+
+  if (
+    rawType.includes("legal") ||
+    rawType.includes("finance") ||
+    rawType.includes("accounting") ||
+    rawType.includes("operations") ||
+    rawType.includes("procurement")
+  ) {
+    return "Strategic Report";
   }
 
   return "Business Plan";
@@ -187,6 +235,14 @@ function inferMobileReportType(row: ReportRow): MobileReportType {
     ["type", "report_type", "kind"],
     ""
   ).toLowerCase();
+
+  if (
+    rawType.includes("real_estate") ||
+    rawType.includes("real estate") ||
+    rawType.includes("gayrimenkul")
+  ) {
+    return "Real Estate Investment Analysis";
+  }
 
   if (rawType.includes("market") || rawType.includes("pazar")) {
     return "Market Analysis";
@@ -282,13 +338,17 @@ export function normalizeReport(row: ReportRow): DashboardReport {
   const createdAt = readString(row, ["created_at", "createdAt", "inserted_at"], "");
   const reportType = inferReportType(row);
   const titleFallback =
-    reportType === "Market Analysis" ? "Market Analysis Report" : "Business Plan Report";
+    reportType === "Market Analysis"
+      ? "Market Analysis Report"
+      : reportType === "Real Estate Investment Analysis"
+        ? "Real Estate Investment Analysis"
+        : reportType === "Strategic Report"
+          ? "Strategic Decision Report"
+          : "Business Plan Report";
   const sections = normalizeSections(row);
   const investmentScore = readReportInvestmentScore(row.metadata);
   const rowStatus = readString(row, ["status", "state"], "completed");
-  const failedReport =
-    rowStatus.toLowerCase() !== "completed" ||
-    containsReportGenerationFailure(sections);
+  const failedReport = rowStatus.toLowerCase() !== "completed";
 
   return {
     id: readString(row, ["id", "report_id"], crypto.randomUUID()),

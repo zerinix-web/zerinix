@@ -1,13 +1,23 @@
 import { NextRequest } from "next/server";
-import { createServiceRoleClient } from "@/app/lib/supabase/admin";
 import { createClient } from "@/app/lib/supabase/server";
 import { noStoreJson } from "@/app/lib/security/api-response";
 import { logServerError } from "@/app/lib/security/errors";
 import { checkRateLimit, getClientIpFromRequest } from "@/app/lib/security/rate-limit";
 import { validateApiRequest } from "@/app/lib/security/request-validation";
+import { attributeReportUsageWithServerStorage } from "@/app/admin/report-attribution-storage";
 
 function readBodyString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function analyticsSkipped(reason: string) {
+  console.info("[reports:attribute-usage] analytics skipped", { reason });
+  return noStoreJson({
+    ok: true,
+    attributed: false,
+    skipped: true,
+    reason,
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -54,40 +64,56 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const serviceClient = createServiceRoleClient();
-  const { data: report, error: reportError } = await serviceClient
-    .from("reports")
-    .select("id,user_id")
-    .eq("id", reportId)
-    .eq("user_id", user.id)
-    .maybeSingle();
+  try {
+    const { data: report, error: reportError } = await supabase
+      .from("reports")
+      .select("id,user_id")
+      .eq("id", reportId)
+      .eq("user_id", user.id)
+      .maybeSingle();
 
-  if (reportError) {
-    logServerError("reports:attribute-usage:ownership", reportError);
+    if (reportError) {
+      logServerError("reports:attribute-usage:ownership", reportError);
+      return analyticsSkipped("ownership_check_unavailable");
+    }
 
-    return noStoreJson({ error: "Report could not be verified." }, { status: 500 });
+    if (!report) {
+      return noStoreJson({ error: "Report not found." }, { status: 404 });
+    }
+
+    const updatePayload = {
+      report_id: reportId,
+      report_request_id: reportRequestId,
+    };
+
+    const { error: attributionError } = await supabase
+      .from("ai_usage_events")
+      .update(updatePayload)
+      .eq("user_id", user.id)
+      .eq("report_request_id", reportRequestId);
+
+    if (attributionError) {
+      logServerError("reports:attribute-usage:update", attributionError);
+      const fallback = await attributeReportUsageWithServerStorage({
+        userId: user.id,
+        reportId,
+        reportRequestId,
+      });
+
+      if (fallback.ok) {
+        return noStoreJson({ ok: true, attributed: true, skipped: false });
+      }
+
+      if (fallback.reason === "service_role_unavailable") {
+        return analyticsSkipped("service_role_unavailable");
+      }
+
+      return analyticsSkipped("attribution_write_unavailable");
+    }
+
+    return noStoreJson({ ok: true, attributed: true, skipped: false });
+  } catch (error) {
+    logServerError("reports:attribute-usage:unexpected", error);
+    return analyticsSkipped("analytics_unavailable");
   }
-
-  if (!report) {
-    return noStoreJson({ error: "Report not found." }, { status: 404 });
-  }
-
-  const updatePayload = {
-    report_id: reportId,
-    report_request_id: reportRequestId,
-  };
-
-  const { error: attributionError } = await serviceClient
-    .from("ai_usage_events")
-    .update(updatePayload)
-    .eq("user_id", user.id)
-    .eq("report_request_id", reportRequestId);
-
-  if (attributionError) {
-    logServerError("reports:attribute-usage:update", attributionError);
-
-    return noStoreJson({ error: "Report usage could not be attributed." }, { status: 500 });
-  }
-
-  return noStoreJson({ ok: true });
 }

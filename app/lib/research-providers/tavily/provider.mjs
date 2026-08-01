@@ -121,6 +121,9 @@ export class TavilyResearchProvider {
     this.timeoutMs = Number.isFinite(options.timeoutMs)
       ? Math.max(1, Math.min(60_000, Math.round(options.timeoutMs)))
       : DEFAULT_TAVILY_TIMEOUT_MS;
+    this.maxAttempts = Number.isFinite(options.maxAttempts)
+      ? Math.max(1, Math.min(2, Math.round(options.maxAttempts)))
+      : 2;
     this.estimatedCostPerCreditUsd = Number.isFinite(
       options.estimatedCostPerCreditUsd
     )
@@ -195,114 +198,124 @@ export class TavilyResearchProvider {
     await this.onCostEstimate(queryMetadata);
     this.logger.info("[research:tavily] request started", queryMetadata);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
     const startedAt = Date.now();
+    let lastError;
 
-    try {
-      const response = await this.fetchImpl(TAVILY_SEARCH_ENDPOINT, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(this.buildRequestBody(request)),
-        signal: controller.signal,
-      });
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
-      if (response.status === 429) {
-        throw new TavilyRateLimitError(
-          parseRetryAfter(response.headers?.get?.("retry-after"))
+      try {
+        const response = await this.fetchImpl(TAVILY_SEARCH_ENDPOINT, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(this.buildRequestBody(request)),
+          signal: controller.signal,
+        });
+
+        if (response.status === 429) {
+          throw new TavilyRateLimitError(
+            parseRetryAfter(response.headers?.get?.("retry-after"))
+          );
+        }
+
+        if (!response.ok) {
+          throw new TavilyProviderError(
+            `Tavily research failed with HTTP ${response.status}.`,
+            { status: response.status, code: "http_error" }
+          );
+        }
+
+        const payload = await response.json().catch(() => {
+          throw new TavilyProviderError(
+            "Tavily returned an invalid JSON response.",
+            { status: response.status, code: "invalid_response" }
+          );
+        });
+        const executedAt = this.clock().toISOString();
+        const results = Array.isArray(payload?.results)
+          ? payload.results.slice(
+              0,
+              Math.min(MAX_TAVILY_RESULTS, request.maxResults)
+            )
+          : [];
+        const rawEvidenceItems = results.map((item) =>
+          mapTavilyResult(item, executedAt, this.id)
         );
-      }
+        const credits = Number(payload?.usage?.credits);
+        const billableUnits = Number.isFinite(credits)
+          ? Math.max(0, credits)
+          : 1;
+        const estimatedCost = {
+          ...estimate,
+          billableUnits,
+          estimatedCostUsd: billableUnits * this.estimatedCostPerCreditUsd,
+        };
+        const durationMs = Date.now() - startedAt;
 
-      if (!response.ok) {
-        throw new TavilyProviderError(
-          `Tavily research failed with HTTP ${response.status}.`,
-          { status: response.status, code: "http_error" }
-        );
-      }
-
-      const payload = await response.json().catch(() => {
-        throw new TavilyProviderError(
-          "Tavily returned an invalid JSON response.",
-          { status: response.status, code: "invalid_response" }
-        );
-      });
-      const executedAt = this.clock().toISOString();
-      const results = Array.isArray(payload?.results)
-        ? payload.results.slice(0, Math.min(MAX_TAVILY_RESULTS, request.maxResults))
-        : [];
-      const rawEvidenceItems = results.map((item) =>
-        mapTavilyResult(item, executedAt, this.id)
-      );
-      const credits = Number(payload?.usage?.credits);
-      const billableUnits = Number.isFinite(credits) ? Math.max(0, credits) : 1;
-      const estimatedCost = {
-        ...estimate,
-        billableUnits,
-        estimatedCostUsd: billableUnits * this.estimatedCostPerCreditUsd,
-      };
-      const durationMs = Date.now() - startedAt;
-
-      this.logger.info("[research:tavily] request completed", {
-        providerId: this.id,
-        requestId: normalizeEvidenceText(payload?.request_id).slice(0, 100),
-        resultCount: rawEvidenceItems.length,
-        durationMs,
-        estimatedCostUsd: estimatedCost.estimatedCostUsd,
-      });
-
-      return {
-        rawEvidenceItems,
-        metadata: {
+        this.logger.info("[research:tavily] request completed", {
           providerId: this.id,
-          providerKind: this.kind,
-          requestId:
-            normalizeEvidenceText(payload?.request_id).slice(0, 100) ||
-            undefined,
-          executedAt,
+          requestId: normalizeEvidenceText(payload?.request_id).slice(0, 100),
           resultCount: rawEvidenceItems.length,
           durationMs,
-          notes: rawEvidenceItems.length
-            ? [
-                `Tavily basic search; language=${request.language}; region=${request.region}.`,
-              ]
-            : ["Tavily returned no research results."],
-        },
-        estimatedCost,
-      };
-    } catch (error) {
-      if (error instanceof TavilyProviderError) {
+          attempt,
+          estimatedCostUsd: estimatedCost.estimatedCostUsd,
+        });
+
+        return {
+          rawEvidenceItems,
+          metadata: {
+            providerId: this.id,
+            providerKind: this.kind,
+            requestId:
+              normalizeEvidenceText(payload?.request_id).slice(0, 100) ||
+              undefined,
+            executedAt,
+            resultCount: rawEvidenceItems.length,
+            durationMs,
+            notes: rawEvidenceItems.length
+              ? [
+                  `Tavily basic search; language=${request.language}; region=${request.region}.`,
+                ]
+              : ["Tavily returned no research results."],
+          },
+          estimatedCost,
+        };
+      } catch (error) {
+        const normalizedError =
+          controller.signal.aborted &&
+          !(error instanceof TavilyProviderError)
+            ? new TavilyTimeoutError(this.timeoutMs)
+            : error instanceof TavilyProviderError
+              ? error
+              : new TavilyProviderError("Tavily research request failed.", {
+                  code: "network_error",
+                });
+        lastError = normalizedError;
+        const retryable =
+          normalizedError instanceof TavilyTimeoutError ||
+          normalizedError instanceof TavilyRateLimitError ||
+          normalizedError.code === "network_error";
+
         this.logger.error("[research:tavily] request failed", {
           providerId: this.id,
-          code: error.code,
-          status: error.status,
+          code: normalizedError.code,
+          status: normalizedError.status,
+          attempt,
+          willRetry: retryable && attempt < this.maxAttempts,
         });
-        throw error;
-      }
 
-      if (controller.signal.aborted) {
-        const timeoutError = new TavilyTimeoutError(this.timeoutMs);
-        this.logger.error("[research:tavily] request failed", {
-          providerId: this.id,
-          code: timeoutError.code,
-          timeoutMs: this.timeoutMs,
-        });
-        throw timeoutError;
+        if (!retryable || attempt >= this.maxAttempts) {
+          throw normalizedError;
+        }
+      } finally {
+        clearTimeout(timeoutId);
       }
-
-      const providerError = new TavilyProviderError(
-        "Tavily research request failed.",
-        { code: "network_error" }
-      );
-      this.logger.error("[research:tavily] request failed", {
-        providerId: this.id,
-        code: providerError.code,
-      });
-      throw providerError;
-    } finally {
-      clearTimeout(timeoutId);
     }
+
+    throw lastError;
   }
 }

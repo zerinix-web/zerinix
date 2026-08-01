@@ -28,6 +28,7 @@ export type TavilyResearchProviderOptions = {
   apiKey?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  maxAttempts?: number;
   estimatedCostPerCreditUsd?: number;
   onCostEstimate?: (
     metadata: TavilyCostMetadata

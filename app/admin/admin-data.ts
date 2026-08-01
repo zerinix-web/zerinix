@@ -9,6 +9,12 @@ import { getStripeConfiguration } from "@/app/lib/billing/stripe";
 import { getResendConfiguration } from "@/app/lib/integrations/resend";
 import { estimateModelCostUsd, getModelPricing } from "@/app/lib/ai/pricing";
 import {
+  fetchAdminHealth,
+  fetchOpenAiOrganizationData,
+  statusFromAdminHealth,
+} from "@/app/lib/admin-provider-data";
+import { noStoreJson } from "@/app/lib/security/api-response";
+import {
   createPredictiveCostIntelligence,
   type PredictiveCostIntelligence,
 } from "@/app/lib/predictive-cost-intelligence";
@@ -394,7 +400,6 @@ let cachedHealth:
   | { expiresAt: number; data: AdminSystemStatus[] }
   | null = null;
 
-const HEALTH_CHECK_TIMEOUT_MS = 2500;
 const HEALTH_DEGRADED_LATENCY_MS = 2000;
 const OPENAI_COST_CENTER_START = new Date(Date.UTC(2020, 0, 1));
 const OPENAI_ORGANIZATION_USAGE_URL = "https://api.openai.com/v1/organization/usage/completions";
@@ -672,70 +677,6 @@ function emptyPredictiveCost(): PredictiveCostIntelligence {
 
 function isFailedAiUsageStatus(value: unknown) {
   return readString(value).toLowerCase() === "failed";
-}
-
-async function fetchHealth(
-  url: string,
-  init: RequestInit,
-  timeoutMs = HEALTH_CHECK_TIMEOUT_MS
-) {
-  const controller = new AbortController();
-  const startedAt = Date.now();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(url, {
-      ...init,
-      signal: controller.signal,
-      cache: "no-store",
-    });
-
-    return {
-      ok: response.ok,
-      status: response.status,
-      responseTimeMs: Date.now() - startedAt,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      status: 0,
-      responseTimeMs: Date.now() - startedAt,
-      error: error instanceof Error ? error.message : "Provider request failed.",
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function statusFromHealth(
-  check: Awaited<ReturnType<typeof fetchHealth>>,
-  options?: {
-    allowStatuses?: number[];
-    degradedStatuses?: number[];
-    downStatuses?: number[];
-  }
-): AdminSystemStatus["status"] {
-  if (check.ok || options?.allowStatuses?.includes(check.status)) {
-    return check.responseTimeMs > HEALTH_DEGRADED_LATENCY_MS ? "Degraded" : "Healthy";
-  }
-
-  if (options?.degradedStatuses?.includes(check.status) || check.status === 429) {
-    return "Degraded";
-  }
-
-  if (options?.downStatuses?.includes(check.status) || check.status === 401 || check.status === 403) {
-    return "Down";
-  }
-
-  if (check.status === 0) {
-    return "Degraded";
-  }
-
-  if (check.status >= 500) {
-    return "Down";
-  }
-
-  return "Degraded";
 }
 
 function successfulCheckTime(status: AdminSystemStatus["status"], lastChecked: string) {
@@ -1019,9 +960,9 @@ function buildMockAdminDashboardData(dateRange: AdminDateRange): AdminDashboardD
     },
     alerts: [
       {
-        id: "local:service-role-missing",
+        id: "local:database-access-missing",
         label: "Admin data source not configured",
-        detail: "SUPABASE_SERVICE_ROLE_KEY is required for live admin metrics.",
+        detail: "Server database access is required for live admin metrics.",
         severity: "warning",
         createdAt: new Date().toISOString(),
       },
@@ -1148,7 +1089,7 @@ export async function requireAdminApi() {
   if (!context) {
     return {
       ok: false as const,
-      response: Response.json({ error: "Admin access required." }, { status: 403 }),
+      response: noStoreJson({ error: "Admin access required." }, { status: 403 }),
     };
   }
 
@@ -2067,56 +2008,6 @@ function buildTimeSeries<T extends object>(
   });
 
   return buckets.map(({ label, value }) => ({ label, value }));
-}
-
-async function fetchOpenAiOrganizationData(
-  endpoint: string,
-  key: string,
-  params: Record<string, string | number>
-) {
-  const allBuckets: Array<Record<string, unknown>> = [];
-  let page: string | null = null;
-
-  for (let index = 0; index < 20; index += 1) {
-    const url = new URL(endpoint);
-
-    Object.entries(params).forEach(([paramKey, value]) => {
-      url.searchParams.set(paramKey, String(value));
-    });
-
-    if (page) {
-      url.searchParams.set("page", page);
-    }
-
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${key}`,
-        Accept: "application/json",
-      },
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new Error(`OpenAI organization API returned ${response.status}: ${body.slice(0, 240)}`);
-    }
-
-    const payload = (await response.json()) as Record<string, unknown>;
-    const buckets = Array.isArray(payload.data) ? payload.data : [];
-
-    allBuckets.push(...(buckets as Array<Record<string, unknown>>));
-
-    const nextPage = readString(payload.next_page);
-    const hasMore = Boolean(payload.has_more);
-
-    if (!hasMore || !nextPage) {
-      break;
-    }
-
-    page = nextPage;
-  }
-
-  return allBuckets;
 }
 
 function extractOpenAiCostFromResult(result: Record<string, unknown>) {
@@ -4128,7 +4019,7 @@ export async function loadSystemStatus() {
   let supabaseStatus: AdminSystemStatus = {
     label: "Supabase",
     status: "Not Connected",
-    detail: "Supabase URL or service-role key is missing.",
+    detail: "Supabase server database access is not configured.",
     lastChecked,
     lastSuccessfulCheck: null,
     responseTimeMs: null,
@@ -4173,7 +4064,7 @@ export async function loadSystemStatus() {
       supabaseStatus = {
         label: "Supabase",
         status: "Down",
-        detail: "Supabase service-role client could not complete a database health query.",
+        detail: "Supabase could not complete a database health query.",
         lastChecked,
         lastSuccessfulCheck: null,
         responseTimeMs: Date.now() - startedAt,
@@ -4184,46 +4075,46 @@ export async function loadSystemStatus() {
   const recentAiFailures = recentUsage.filter((row) => isFailedAiUsageStatus(row.status)).length;
   const openAiKey = getOpenAiCostCenterKey();
   const openAiCheck = openAiKey
-    ? await fetchHealth("https://api.openai.com/v1/models", {
+    ? await fetchAdminHealth("https://api.openai.com/v1/models", {
         headers: {
           Authorization: `Bearer ${openAiKey}`,
         },
       })
     : null;
   const openAiStatus: AdminSystemStatus["status"] = openAiCheck
-    ? statusFromHealth(openAiCheck)
+    ? statusFromAdminHealth(openAiCheck)
     : "Not Connected";
   const stripeCheck =
     stripe.configured && stripe.enabled
-      ? await fetchHealth("https://api.stripe.com/v1/balance", {
+      ? await fetchAdminHealth("https://api.stripe.com/v1/balance", {
           headers: {
             Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
           },
         })
       : null;
   const stripeStatus: AdminSystemStatus["status"] = stripeCheck
-    ? statusFromHealth(stripeCheck)
+    ? statusFromAdminHealth(stripeCheck)
     : "Not Connected";
   const resendCheck =
     resend.configured && resend.enabled
-      ? await fetchHealth("https://api.resend.com/domains", {
+      ? await fetchAdminHealth("https://api.resend.com/domains", {
           headers: {
             Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
           },
         })
       : null;
   const resendStatus: AdminSystemStatus["status"] = resendCheck
-    ? statusFromHealth(resendCheck)
+    ? statusFromAdminHealth(resendCheck)
     : "Not Connected";
   const vercelCheck = normalizedAppUrl
-    ? await fetchHealth(normalizedAppUrl, {
+    ? await fetchAdminHealth(normalizedAppUrl, {
         headers: {
           Accept: "text/html",
         },
       })
     : null;
   const vercelStatus: AdminSystemStatus["status"] = vercelCheck
-    ? statusFromHealth(vercelCheck)
+    ? statusFromAdminHealth(vercelCheck)
     : "Unknown";
   const domainUrl = productionDomain
     ? productionDomain.startsWith("http")
@@ -4231,24 +4122,24 @@ export async function loadSystemStatus() {
       : `https://${productionDomain}`
     : "";
   const domainCheck = domainUrl
-    ? await fetchHealth(domainUrl, {
+    ? await fetchAdminHealth(domainUrl, {
         headers: {
           Accept: "text/html",
         },
       })
     : null;
   const domainStatus: AdminSystemStatus["status"] = domainCheck
-    ? statusFromHealth(domainCheck)
+    ? statusFromAdminHealth(domainCheck)
     : "Not Connected";
   const apiCheck = normalizedAppUrl
-    ? await fetchHealth(`${normalizedAppUrl.replace(/\/$/, "")}/api/admin/health`, {
+    ? await fetchAdminHealth(`${normalizedAppUrl.replace(/\/$/, "")}/api/admin/health`, {
         headers: {
           Accept: "application/json",
         },
       })
     : null;
   const apiStatus: AdminSystemStatus["status"] = apiCheck
-    ? statusFromHealth(apiCheck, { allowStatuses: [401, 403] })
+    ? statusFromAdminHealth(apiCheck, { allowStatuses: [401, 403] })
     : "Unknown";
 
   const data: AdminSystemStatus[] = [

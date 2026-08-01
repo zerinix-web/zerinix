@@ -88,11 +88,15 @@ export type ReportValidationIntelligence = {
 };
 
 export type ReportMetadata = {
+  reportLanguage?: "en" | "tr" | "de" | "fr" | "es";
   investmentScore?: ReportInvestmentScore;
   benchmarkFit?: ReportBenchmarkFit;
   benchmarkScore?: ReportBenchmarkScore;
   reportQuality?: ReportQualityScore;
   validationIntelligence?: ReportValidationIntelligence;
+  expertiseProfile?: import("@/app/lib/ai/expertise-profile").ExpertiseProfile;
+  reportPlan?: import("@/app/lib/ai/dynamic-report-plan").DynamicReportPlan;
+  researchPlan?: import("@/app/lib/ai/dynamic-research-plan").DynamicResearchPlan;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -193,6 +193,15 @@ export const marketFieldLabels: Record<
     sourcesAssumptions: "Kaynaklar / Varsayımlar",
     sources: "Kaynaklar",
   },
+  German: {
+    executiveSummary: "Zusammenfassung", marketOverview: "Marktüberblick", tamSamSom: "TAM / SAM / SOM", industryTrends: "Branchentrends", targetCustomer: "Zielkunde", competitorAnalysis: "Wettbewerbsanalyse", customerPainPoints: "Kundenprobleme", opportunities: "Chancen", threats: "Bedrohungen", swotAnalysis: "SWOT-Analyse", portersFiveForces: "Porters Fünf Kräfte", unitEconomics: "Stückökonomie", financialDashboard: "Finanzübersicht", scenarioAnalysis: "Szenarioanalyse: Negativ / Basis / Positiv", kpiDashboard: "KPI-Übersicht", executiveRecommendation: "Managementempfehlung", entryStrategy: "Markteintrittsstrategie", validationPlan: "Validierungsplan", keyMetrics: "Schlüsselkennzahlen", founderRoadmap: "Gründerfahrplan", sourcesAssumptions: "Quellen / Annahmen", sources: "Quellen",
+  },
+  French: {
+    executiveSummary: "Synthèse exécutive", marketOverview: "Vue d'ensemble du marché", tamSamSom: "TAM / SAM / SOM", industryTrends: "Tendances sectorielles", targetCustomer: "Client cible", competitorAnalysis: "Analyse concurrentielle", customerPainPoints: "Problèmes clients", opportunities: "Opportunités", threats: "Menaces", swotAnalysis: "Analyse SWOT", portersFiveForces: "Cinq forces de Porter", unitEconomics: "Économie unitaire", financialDashboard: "Tableau financier", scenarioAnalysis: "Scénarios : défavorable / central / favorable", kpiDashboard: "Tableau des KPI", executiveRecommendation: "Recommandation exécutive", entryStrategy: "Stratégie d'entrée", validationPlan: "Plan de validation", keyMetrics: "Indicateurs clés", founderRoadmap: "Feuille de route du fondateur", sourcesAssumptions: "Sources / Hypothèses", sources: "Sources",
+  },
+  Spanish: {
+    executiveSummary: "Resumen ejecutivo", marketOverview: "Visión general del mercado", tamSamSom: "TAM / SAM / SOM", industryTrends: "Tendencias del sector", targetCustomer: "Cliente objetivo", competitorAnalysis: "Análisis competitivo", customerPainPoints: "Problemas del cliente", opportunities: "Oportunidades", threats: "Amenazas", swotAnalysis: "Análisis SWOT", portersFiveForces: "Cinco fuerzas de Porter", unitEconomics: "Economía unitaria", financialDashboard: "Panel financiero", scenarioAnalysis: "Escenarios: adverso / base / favorable", kpiDashboard: "Panel de KPI", executiveRecommendation: "Recomendación ejecutiva", entryStrategy: "Estrategia de entrada", validationPlan: "Plan de validación", keyMetrics: "Métricas clave", founderRoadmap: "Hoja de ruta del fundador", sourcesAssumptions: "Fuentes / Supuestos", sources: "Fuentes",
+  },
 };
 
 export const legacyMarketSectionToField: Record<string, MarketReportField> = {

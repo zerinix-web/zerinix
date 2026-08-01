@@ -85,7 +85,9 @@ export default async function AdminUsersPage({ searchParams }: UsersPageProps) {
                 <th className="px-5 py-4">Plan</th>
                 <th className="px-5 py-4">Status</th>
                 <th className="px-5 py-4">Reports</th>
-                <th className="px-5 py-4">Total tokens</th>
+                <th className="px-5 py-4">AI requests</th>
+                <th className="px-5 py-4">Tokens</th>
+                <th className="px-5 py-4">Errors</th>
                 <th className="px-5 py-4">Total AI cost</th>
                 <th className="px-5 py-4">Registration date</th>
                 <th className="px-5 py-4">Last activity</th>
@@ -105,7 +107,9 @@ export default async function AdminUsersPage({ searchParams }: UsersPageProps) {
                   <td className="px-5 py-4 capitalize">{user.plan}</td>
                   <td className="px-5 py-4 capitalize">{user.accountStatus}</td>
                   <td className="px-5 py-4">{user.reportCount}</td>
+                  <td className="px-5 py-4">{user.aiRequestCount.toLocaleString("en-US")}</td>
                   <td className="px-5 py-4">{user.totalTokens.toLocaleString("en-US")}</td>
+                  <td className="px-5 py-4">{user.failedRequestCount.toLocaleString("en-US")}</td>
                   <td className="px-5 py-4">{formatCurrency(user.estimatedAiCostUsd)}</td>
                   <td className="px-5 py-4">{formatDate(user.registeredAt)}</td>
                   <td className="px-5 py-4">{formatDate(user.lastSignInAt)}</td>

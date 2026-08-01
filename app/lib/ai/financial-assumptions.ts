@@ -25,6 +25,7 @@ import {
   type SourceIntelligenceModel,
   type SourceIntelligenceType,
 } from "@/app/lib/ai/source-intelligence";
+import type { ResponseLanguage } from "@/app/lib/report-language";
 import {
   createValidationIntelligence,
   createValidationIntelligenceModel,
@@ -61,7 +62,7 @@ export type AiFinancialModelContext = FinancialModel & {
   validationIntelligenceV2: ValidationIntelligence;
 };
 
-function localizeReportLabel(value: string, language: "English" | "Turkish") {
+function localizeReportLabel(value: string, language: ResponseLanguage) {
   return localizePdfPresentationLabel(value, language === "Turkish" ? "tr" : "en");
 }
 
@@ -218,14 +219,14 @@ Financial modeling rules:
 - Do not invent static investment scores or category scores; reuse the calculated score and category reasoning above.
 - Executive Summary and Executive Recommendation must use the calculated Recommendation, Estimated Valuation, Funding Stage, Top Risks, and Next Critical Action from the Investment Scoring Engine.
 - For recurring software models, ARR and MRR are appropriate. For mobility, retail, hospitality, manufacturing, and other non-subscription models, use business-model-specific revenue labels from the structured model instead of SaaS labels.
-- For revenue, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, show value, formula, assumptions, evidence label, and benchmark source when the section is responsible for financial explanation.
+- For revenue, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, show value, formula, assumptions, Evidence classification, and benchmark source when the section is responsible for financial explanation.
 	- Financial Assumptions must be written as a Key Assumptions section that lists every calculation assumption and classifies each as Verified, Estimated, Assumption, or AI Analysis.
 	- Tag every important numeric claim with one concise evidence label from this exact set: Verified, Estimated, Assumption, or AI Analysis. Do not create fake citations.`;
 }
 
 export function formatFinancialConsistencyReport(
   context: AiFinancialModelContext,
-  language: "English" | "Turkish" = "English"
+  language: ResponseLanguage = "English"
 ) {
   const qualityLabel =
     language === "Turkish"
@@ -304,7 +305,7 @@ export function formatFinancialConsistencyReport(
 
 export function formatDecisionConfidenceReport(
   context: AiFinancialModelContext,
-  language: "English" | "Turkish" = "English"
+  language: ResponseLanguage = "English"
 ) {
   const decision = context.decisionConfidence;
   const positiveTitle = language === "Turkish" ? "Pozitif sinyaller:" : "Positive signals:";
@@ -378,7 +379,7 @@ export function formatDecisionConfidenceReport(
 
 export function formatReportIntelligenceSummary(
   context: AiFinancialModelContext,
-  language: "English" | "Turkish" = "English"
+  language: ResponseLanguage = "English"
 ) {
   const intelligence = context.reportIntelligence;
   const qualityLabel =
@@ -482,7 +483,7 @@ export function formatReportIntelligenceSummary(
   ].join("\n");
 }
 
-function localizeSourceConfidence(level: SourceConfidenceLevel, language: "English" | "Turkish") {
+function localizeSourceConfidence(level: SourceConfidenceLevel, language: ResponseLanguage) {
   if (language !== "Turkish") {
     return level;
   }
@@ -493,7 +494,7 @@ function localizeSourceConfidence(level: SourceConfidenceLevel, language: "Engli
   return "Düşük Güven";
 }
 
-function localizeSourceType(type: SourceIntelligenceType, language: "English" | "Turkish") {
+function localizeSourceType(type: SourceIntelligenceType, language: ResponseLanguage) {
   if (language !== "Turkish") {
     return type;
   }
@@ -510,7 +511,7 @@ function localizeSourceType(type: SourceIntelligenceType, language: "English" | 
   return labels[type];
 }
 
-function localizeSourceText(value: string, language: "English" | "Turkish") {
+function localizeSourceText(value: string, language: ResponseLanguage) {
   if (language !== "Turkish") {
     return value;
   }
@@ -538,7 +539,7 @@ function localizeSourceText(value: string, language: "English" | "Turkish") {
   return dictionary[value] || value;
 }
 
-function formatSourceItem(item: SourceIntelligenceItem, language: "English" | "Turkish") {
+function formatSourceItem(item: SourceIntelligenceItem, language: ResponseLanguage) {
   const area = localizeReportLabel(item.area, language);
   const evidence = getEvidenceLabel(
     sourceTypeToEvidenceLevel(item.sourceType),
@@ -552,7 +553,7 @@ function formatSourceItem(item: SourceIntelligenceItem, language: "English" | "T
 
 export function formatSourceIntelligenceSummary(
   context: AiFinancialModelContext,
-  language: "English" | "Turkish" = "English"
+  language: ResponseLanguage = "English"
 ) {
   const source = context.sourceIntelligence;
   const sectionTitle = localizeReportLabel("Source Intelligence", language);
@@ -579,7 +580,7 @@ export function formatSourceIntelligenceSummary(
   ].join("\n");
 }
 
-function localizeValidationType(type: ValidationType, language: "English" | "Turkish") {
+function localizeValidationType(type: ValidationType, language: ResponseLanguage) {
   if (language !== "Turkish") {
     return type;
   }
@@ -597,7 +598,7 @@ function localizeValidationType(type: ValidationType, language: "English" | "Tur
   return labels[type];
 }
 
-function localizeValidationScore(score: ValidationScore, language: "English" | "Turkish") {
+function localizeValidationScore(score: ValidationScore, language: ResponseLanguage) {
   if (language !== "Turkish") {
     return score;
   }
@@ -608,7 +609,7 @@ function localizeValidationScore(score: ValidationScore, language: "English" | "
   return "Başlamadı";
 }
 
-function localizeValidationRiskLevel(level: ValidationRiskLevel, language: "English" | "Turkish") {
+function localizeValidationRiskLevel(level: ValidationRiskLevel, language: ResponseLanguage) {
   if (language !== "Turkish") {
     return level;
   }
@@ -619,7 +620,7 @@ function localizeValidationRiskLevel(level: ValidationRiskLevel, language: "Engl
   return "Orta";
 }
 
-function localizeValidationEvidenceStatus(status: ValidationEvidenceStatus, language: "English" | "Turkish") {
+function localizeValidationEvidenceStatus(status: ValidationEvidenceStatus, language: ResponseLanguage) {
   if (language !== "Turkish") {
     return status;
   }
@@ -630,7 +631,7 @@ function localizeValidationEvidenceStatus(status: ValidationEvidenceStatus, lang
   return "Eksik";
 }
 
-function localizeValidationConfidence(level: ValidationIntelligence["confidenceLevel"], language: "English" | "Turkish") {
+function localizeValidationConfidence(level: ValidationIntelligence["confidenceLevel"], language: ResponseLanguage) {
   if (language !== "Turkish") {
     return level;
   }
@@ -641,7 +642,7 @@ function localizeValidationConfidence(level: ValidationIntelligence["confidenceL
   return "Düşük";
 }
 
-function localizeValidationText(value: string, language: "English" | "Turkish") {
+function localizeValidationText(value: string, language: ResponseLanguage) {
   if (language !== "Turkish") {
     return value;
   }
@@ -706,7 +707,7 @@ function localizeValidationText(value: string, language: "English" | "Turkish") 
 
 function formatValidationAssumptionV2(
   assumption: ValidationAssumption,
-  language: "English" | "Turkish"
+  language: ResponseLanguage
 ) {
   return [
     `${language === "Turkish" ? "Öncelik" : "Priority"} ${assumption.priority}: ${localizeValidationText(assumption.assumption, language)}`,
@@ -718,7 +719,7 @@ function formatValidationAssumptionV2(
   ].join("\n");
 }
 
-function formatValidationExperiment(experiment: ValidationExperiment, language: "English" | "Turkish") {
+function formatValidationExperiment(experiment: ValidationExperiment, language: ResponseLanguage) {
   return [
     `${language === "Turkish" ? "Öncelik" : "Priority"} ${experiment.priority}: ${localizeValidationText(experiment.assumption, language)}`,
     `${language === "Turkish" ? "Risk" : "Risk"}: ${localizeValidationText(experiment.risk, language)}`,
@@ -730,7 +731,7 @@ function formatValidationExperiment(experiment: ValidationExperiment, language: 
 
 export function formatValidationIntelligenceSummary(
   context: AiFinancialModelContext,
-  language: "English" | "Turkish" = "English"
+  language: ResponseLanguage = "English"
 ) {
   if (context.validationIntelligenceV2) {
     const validation = context.validationIntelligenceV2;

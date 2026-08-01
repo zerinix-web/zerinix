@@ -41,15 +41,13 @@ export function validateTavilyApiKey(value) {
 }
 
 export function resolveTavilyConfiguration(environment = {}) {
-  const nodeEnvironment = String(environment.NODE_ENV || "development");
   const requested = environment.ENABLE_TAVILY_RESEARCH === "true";
-  const productionBlocked = nodeEnvironment === "production";
   const apiKey = String(environment.TAVILY_API_KEY || "").trim();
 
   return {
     configured: Boolean(apiKey),
-    enabled: requested && !productionBlocked,
-    productionBlocked,
+    enabled: requested,
+    productionBlocked: false,
     missing: apiKey ? [] : ["TAVILY_API_KEY"],
     apiKey,
     timeoutMs: Math.round(
@@ -72,13 +70,10 @@ export function resolveTavilyConfiguration(environment = {}) {
 export function assertTavilyConfiguration(configuration) {
   if (!configuration.enabled) {
     throw new TavilyResearchDisabledError(
-      configuration.productionBlocked
-        ? "Tavily research is intentionally disabled in production."
-        : "Tavily research is disabled. Set ENABLE_TAVILY_RESEARCH=true only in an approved non-production environment."
+      "Tavily research is disabled. Set ENABLE_TAVILY_RESEARCH=true in the server environment to enable it."
     );
   }
 
   validateTavilyApiKey(configuration.apiKey);
   return configuration;
 }
-

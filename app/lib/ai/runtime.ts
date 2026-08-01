@@ -62,7 +62,7 @@ function enforceDevelopmentBudget() {
     devUsage.monthlyRequests = 0;
   }
 
-  const dailyLimit = readPositiveInt(process.env.AI_DEV_DAILY_REQUEST_LIMIT, 20);
+  const dailyLimit = readPositiveInt(process.env.AI_DEV_DAILY_REQUEST_LIMIT, 100000);
   const monthlyLimit = readPositiveInt(process.env.AI_DEV_MONTHLY_REQUEST_LIMIT, 100);
 
   if (devUsage.dailyRequests >= dailyLimit) {

@@ -45,7 +45,20 @@ export type ResearchEvidenceInput = Partial<
 export const RESEARCH_EVIDENCE_TYPES: readonly ResearchEvidenceType[];
 export function clampEvidenceScore(value: unknown, fallback?: number): number;
 export function normalizeEvidenceText(value: unknown): string;
+export function buildEvidenceSearchText(input?: {
+  title?: unknown;
+  source?: unknown;
+  url?: unknown;
+  claim?: unknown;
+  value?: unknown;
+  supportingData?: unknown[];
+}): string;
+export function resolveResearchTaskReference<
+  T extends { id?: unknown; field?: unknown },
+>(
+  input: { taskId?: unknown; field?: unknown },
+  tasks: readonly T[]
+): T | null;
 export function normalizeEvidenceUrl(value: unknown): string;
 export function getEvidenceDomain(value: string): string;
 export function canonicalEvidenceKey(evidence: ResearchEvidence): string;
-

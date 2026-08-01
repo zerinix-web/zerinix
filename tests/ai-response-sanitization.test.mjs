@@ -6,7 +6,7 @@ const sanitizerSource = readFileSync("app/lib/ai/response-sanitization.ts", "utf
 const chatWorkspaceSource = readFileSync("components/AIChatWorkspace.tsx", "utf8");
 const plannerSource = readFileSync("components/Planner.tsx", "utf8");
 const chatRouteSource = readFileSync("app/api/chat/route.ts", "utf8");
-const planRouteSource = readFileSync("app/api/plan/route.ts", "utf8");
+const planRouteSource = readFileSync("app/lib/report-jobs/plan-executor.ts", "utf8");
 const marketRouteSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
 const reportDetailSource = readFileSync("app/dashboard/[id]/page.tsx", "utf8");
 

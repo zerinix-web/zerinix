@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const planRouteSource = readFileSync("app/api/plan/route.ts", "utf8");
+const planRouteSource = readFileSync("app/lib/report-jobs/plan-executor.ts", "utf8");
 const plannerSource = readFileSync("components/Planner.tsx", "utf8");
 const dashboardPdfSource = readFileSync("app/dashboard/[id]/ReportPdfButton.tsx", "utf8");
 const financialAssumptionsSource = readFileSync(

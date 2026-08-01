@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import type { DashboardReport } from "../report-utils";
-import { isReportGenerationFailureText } from "@/app/lib/report-errors";
 import { dedupeReportSections } from "@/app/lib/report-section-normalization";
 import {
   applyPdfFont,
@@ -12,7 +11,13 @@ import {
   drawPdfLogoMark,
   getPdfPageMetrics,
   paintPdfPageBackground,
+  type PdfDocument,
+  type PdfLocale,
 } from "@/app/lib/pdf-engine/core";
+import {
+  createRealEstateReportPdf,
+  isRealEstateDashboardReport,
+} from "@/app/lib/pdf-engine/real-estate-report";
 import { drawPdfSectionCardFrame } from "@/app/lib/pdf-engine/section-renderer";
 import {
   splitPdfReadableLines as splitPdfReadableLinesWithEngine,
@@ -28,7 +33,7 @@ import {
 } from "@/app/lib/report-presentation";
 import {
   cleanPdfLegacyValidationIntelligenceContent,
-  detectPdfPresentationLocale,
+  resolvePdfPresentationLocale,
   extractPdfValidationIntelligenceSection,
   insertPdfBenchmarkIntelligenceSection,
   localizePdfPresentationLabel,
@@ -46,6 +51,15 @@ import {
 import {
   sourceTypeToEvidenceLevel,
 } from "@/app/lib/report-evidence";
+import {
+  buildLegalReportSections,
+  formatLegalSourceContent,
+  isLegalRenderableReport,
+} from "@/app/lib/report-engine/legal-report-rendering";
+import {
+  resolveReportLanguage,
+  validateReportLanguageConsistency,
+} from "@/app/lib/report-language";
 
 type PdfReportSection = DashboardReport["sections"][number];
 
@@ -54,8 +68,7 @@ let pdfFontPromise: Promise<string> | null = null;
 function isFailedReport(report: DashboardReport) {
   return (
     report.status.toLowerCase() !== "completed" ||
-    report.sections.length === 0 ||
-    report.sections.some((section) => isReportGenerationFailureText(section.content))
+    report.sections.length === 0
   );
 }
 
@@ -175,10 +188,13 @@ function dedupePdfCitations(citations: CitationData[]) {
   const unique = new Map<string, CitationData>();
 
   citations.forEach((citation) => {
-    const domain = getCitationDomain(citation.url, citation.organization);
+    const normalizedUrl = normalizeCitationUrl(citation.url);
+    const domain = getCitationDomain(normalizedUrl, citation.organization);
+    const urlKey = `url:${normalizedUrl}`;
     const publisherKey = normalizeCitationKey(citation.organization);
     const sourceNameKey = normalizeCitationKey(getCitationSourceName(citation));
     const key = [
+      normalizedUrl ? urlKey : "",
       domain || "no-domain",
       publisherKey || "unknown-publisher",
       sourceNameKey || "unknown-source",
@@ -188,6 +204,7 @@ function dedupePdfCitations(citations: CitationData[]) {
     unique.set(key, {
       ...existing,
       ...citation,
+      url: normalizedUrl || existing?.url || "",
       ...(existing?.url && !citation.url ? { url: existing.url } : {}),
       ...(existing?.sourceType && !citation.sourceType ? { sourceType: existing.sourceType } : {}),
       ...(existing?.confidence && !citation.confidence ? { confidence: existing.confidence } : {}),
@@ -204,6 +221,9 @@ function getFinalDedupePdfSources(citations: CitationData[]) {
       sourceName: string;
       sourceType: string;
       trustLabel: string;
+      publisher: string;
+      publicationYear: string;
+      url: string;
     }
   >();
 
@@ -235,6 +255,9 @@ function getFinalDedupePdfSources(citations: CitationData[]) {
         sourceName,
         sourceType: getPdfCitationSourceTypeLabel(citation),
         trustLabel: getPdfCitationTrustLabel(citation),
+        publisher: citation.organization || "Publisher not specified",
+        publicationYear: citation.publicationYear || "",
+        url: normalizeCitationUrl(citation.url),
       });
       unique.set(fallbackDisplayKey, unique.get(key)!);
     }
@@ -466,12 +489,12 @@ function parseCitations(content: string): CitationData[] {
 }
 
 function isSourceSectionTitle(title: string) {
-  return /^(sources(?:\s+continued)?|references|kaynaklar|sources \/ assumptions|kaynaklar \/ varsayımlar)$/i.test(
+  return /^(sources(?:\s+continued)?|references|kaynaklar|verified sources|doğrulanmış kaynaklar|sources \/ assumptions|kaynaklar \/ varsayımlar)$/i.test(
     title.trim()
   );
 }
 
-function formatPdfCitationContent(content: string) {
+function formatPdfCitationContent(content: string, realEstate = false) {
   const sourceContent = normalizePdfSourceContent(
     normalizePdfFinancialSectionContent(content, {
       field: "sourcesAssumptions",
@@ -479,12 +502,31 @@ function formatPdfCitationContent(content: string) {
     })
   );
   const citations = parseCitations(sourceContent);
-  const methodologyBlock = [
-    "Methodology & Assumptions",
-    "Market sizing, financial projections and KPI estimates are based on available market signals, benchmark data and planning assumptions.",
-  ].join("\n");
+  const methodologyBlock = realEstate
+    ? [
+        "Real Estate Evidence & Due-Diligence Methodology",
+        "Uploaded asset facts are extracted first and kept separate from external evidence. Research coverage records successful, unavailable, timed-out, and not-found tasks. Valuation is gated by confirmed location, parcel size and unit, zoning or land use, sufficient comparables, currency, and an explicit calculation method. Evidence confidence falls when authoritative sources are missing or conflicting. Unresolved unknowns remain visible, and this report does not replace title, planning, survey, legal, environmental, geotechnical, or licensed valuation due diligence.",
+      ].join("\n")
+    : [
+        "Methodology & Assumptions",
+        "Market sizing, financial projections and KPI estimates are based on available market signals, benchmark data and planning assumptions.",
+      ].join("\n");
 
   if (citations.length === 0) {
+    if (realEstate) {
+      return [
+        "• Uploaded Asset Evidence",
+        "  Type: Primary document or image evidence",
+        "• Official Planning and Cadastral Research",
+        "  Type: Authoritative verification required",
+        "• Comparable Market Research",
+        "  Type: Dated external market evidence required",
+        "• Unresolved Due-Diligence Items",
+        "  Type: Missing evidence acquisition plan",
+        "",
+        methodologyBlock,
+      ].join("\n");
+    }
     return [
       "• Market Comparisons",
       "  Type: Industry benchmark",
@@ -506,6 +548,9 @@ function formatPdfCitationContent(content: string) {
       [
         `• ${source.sourceName}`,
         `  Source type: ${source.sourceType}`,
+        `  Publisher: ${source.publisher}`,
+        `  Year: ${source.publicationYear || "Not specified"}`,
+        `  URL: ${source.url || "Not provided"}`,
         `  Confidence: ${source.trustLabel}`,
       ].join("\n")
     )
@@ -700,8 +745,8 @@ function extractStrictMetricValueFromAliases(
   return "";
 }
 
-function normalizePdfFinancialMetrics(content: string) {
-  const metricContent = normalizePdfText(content);
+function normalizePdfFinancialMetrics(content: string, fullReportContent = "") {
+  const metricContent = `${content}\n${fullReportContent}`;
 
   return getFinancialDashboardMetrics(metricContent)
     .map((metric) => {
@@ -780,6 +825,13 @@ function extractMarketSizeVisualValue(content: string, label: string) {
   )?.[1];
 
   return value ? compactPdfMetricValue(value) : "";
+}
+
+function extractMarketSizeValue(content: string, label: string) {
+  return (
+    extractMarketSizeVisualValue(content, label) ||
+    compactPdfMetricValue(extractMetricValue(content, label))
+  );
 }
 
 function isMobilityReportContent(content: string) {
@@ -922,37 +974,6 @@ function extractConfidence(content: string) {
   }
 
   return null;
-}
-
-function extractFirstMetric(content: string, labels: string[]) {
-  for (const label of labels) {
-    const value = extractMetricValue(content, label);
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return "";
-}
-
-function extractDashboardList(content: string, labels: string[], limit: number) {
-  const lines = normalizePdfText(content)
-    .split("\n")
-    .map((line) => line.trim().replace(/^[-*]\s+/, "").replace(/\*\*/g, ""))
-    .filter(Boolean);
-  const labelIndex = lines.findIndex((line) =>
-    labels.some((label) => line.toLowerCase().startsWith(label.toLowerCase()))
-  );
-
-  if (labelIndex === -1) {
-    return [];
-  }
-
-  return lines
-    .slice(labelIndex + 1)
-    .filter((line) => !/^(weaknesses|top risks|risks|next critical action|category scores|decision engine|financial modeling rules)\b/i.test(line))
-    .slice(0, limit);
 }
 
 function extractSectionSnippet(content: string, title: string) {
@@ -1335,14 +1356,14 @@ function extractKpiValueFromSnippet(snippet: string, aliases: string[] | readonl
     (score === null ? "" : `${score}%`) ||
     "";
 
-  return isPlaceholderKpiText(value) ? "Validation Required" : value;
+  return isMissingKpiText(value) ? "Validation Required" : value;
 }
 
 function extractKpiValueFromAliases(content: string, aliases: string[] | readonly string[]) {
   return extractKpiValueFromSnippet(extractKpiSnippet(content, aliases), aliases);
 }
 
-function isPlaceholderKpiText(value: string) {
+function isMissingKpiText(value: string) {
   return /^1$/.test(value.trim()) ||
     /\b1\s*(?:[-–—]\s*)?\/\s*(?:target\s*[:\-–—]?\s*)?1\b/i.test(value) ||
     /\b(?:value|metric|current|baseline|threshold|target)\s*[:\-–—]?\s*1\b/i.test(value.trim());
@@ -1385,7 +1406,7 @@ function extractKpiObjectField(snippet: string, fieldLabels: string[]) {
   );
   const value = match?.[1]?.trim().replace(/\*\*/g, "") || "";
 
-  return isPlaceholderKpiText(value) ? "Validation Required" : value;
+  return isMissingKpiText(value) ? "Validation Required" : value;
 }
 
 function extractKpiQuantityValue(snippet: string) {
@@ -1400,7 +1421,7 @@ function extractKpiTargetFromSnippet(snippet: string) {
   const target = extractKpiObjectField(snippet, ["target", "hedef"]);
   const cleanTarget = target ? compactPdfMetricValue(target) || target : "";
 
-  return isPlaceholderKpiText(cleanTarget) ? "Validation Required" : cleanTarget;
+  return isMissingKpiText(cleanTarget) ? "Validation Required" : cleanTarget;
 }
 
 function extractKpiTargetFromAliases(content: string, aliases: string[] | readonly string[]) {
@@ -1482,7 +1503,7 @@ function normalizePdfFounderScoreMetrics(content: string, investmentScore?: Dash
 function buildPdfFounderScoreCards(
   content: string,
   investmentScore: DashboardReport["investmentScore"] | undefined,
-  locale: "en" | "tr"
+  locale: PdfLocale
 ) {
   return normalizePdfFounderScoreMetrics(content, investmentScore).map((metric) => ({
     label: localizePdfPresentationLabel(metric.label, locale),
@@ -1490,7 +1511,7 @@ function buildPdfFounderScoreCards(
   }));
 }
 
-function getPdfSectionCardTitle(section: PdfReportSection, locale: "en" | "tr") {
+function getPdfSectionCardTitle(section: PdfReportSection, locale: PdfLocale) {
   if (section.field === "founderScore") {
     return locale === "tr" ? "Kurucu Hazırlık Boyutları" : "Founder Readiness Dimensions";
   }
@@ -1498,7 +1519,7 @@ function getPdfSectionCardTitle(section: PdfReportSection, locale: "en" | "tr") 
   return section.title;
 }
 
-function getPdfTocEntryTitle(section: PdfReportSection, locale: "en" | "tr") {
+function getPdfTocEntryTitle(section: PdfReportSection, locale: PdfLocale) {
   if (/\b(?:Validation Intelligence|Doğrulama Zekası)\b/i.test(section.content)) {
     return localizePdfPresentationLabel("Validation Intelligence", locale);
   }
@@ -1810,6 +1831,56 @@ function usesMobilePdfFlow() {
   );
 }
 
+function deliverPdf(
+  pdf: PdfDocument,
+  report: Pick<DashboardReport, "title">,
+  setError: (message: string) => void
+) {
+  const blob = pdf.output("blob");
+  const url = URL.createObjectURL(blob);
+
+  if (usesMobilePdfFlow()) {
+    try {
+      window.location.assign(url);
+    } catch (openError) {
+      console.error(openError);
+      URL.revokeObjectURL(url);
+      setError("PDF could not be opened on this device. Please try again.");
+    }
+
+    return;
+  }
+
+  const isSafari =
+    /^((?!chrome|android).)*safari/i.test(navigator.userAgent) ||
+    navigator.vendor.includes("Apple");
+
+  if (isSafari) {
+    const openedWindow = window.open(url, "_blank");
+
+    if (!openedWindow) {
+      URL.revokeObjectURL(url);
+      setError("Safari blocked the PDF tab. Please allow pop-ups and try again.");
+      return;
+    }
+
+    window.setTimeout(() => URL.revokeObjectURL(url), 300000);
+    return;
+  }
+
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = createFileName(report.title);
+  link.rel = "noopener";
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.setTimeout(() => URL.revokeObjectURL(url), 120000);
+}
+
 export default function ReportPdfButton({ report }: { report: DashboardReport }) {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
@@ -1854,6 +1925,22 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
     setError("");
 
     try {
+      if (isRealEstateDashboardReport(report)) {
+        const resolvedExportLanguage = resolveReportLanguage({
+          explicitLanguage: window.localStorage.getItem("zerinix_report_language"),
+          requestText: report.prompt,
+          uiLanguage: report.metadata?.reportLanguage,
+          browserLanguage: navigator.language,
+        });
+        const realEstatePdf = createRealEstateReportPdf({
+          report,
+          fontBase64,
+          language: resolvedExportLanguage,
+        });
+        deliverPdf(realEstatePdf, report, setError);
+        return;
+      }
+
       const pdf = createPdfDocument();
       const { pageWidth, pageHeight, margin, contentWidth } = getPdfPageMetrics(pdf);
       const bodyX = margin + 20;
@@ -1864,29 +1951,54 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       const normalizedSections = dedupeReportSections(
         normalizeSavedPdfSectionsBeforeRender(report.sections)
       );
-      const basePdfSections = compactExecutiveDecisionMemoSections(
-        dedupeReportSections(
-          dedupePdfSections(mergePdfSourceSections(normalizedSections))
-        )
-      );
       const pdfLanguageSource =
         report.prompt?.trim() ||
-        [report.title, report.type, ...basePdfSections.map((section) => `${section.title}\n${section.content}`)]
+        [report.title, report.type, ...normalizedSections.map((section) => `${section.title}\n${section.content}`)]
           .filter(Boolean)
           .join("\n\n");
-      const pdfLocale = detectPdfPresentationLocale(pdfLanguageSource);
-      const pdfBaseSectionsWithBenchmark = extractPdfValidationIntelligenceSection(
-        insertPdfBenchmarkIntelligenceSection(
-          basePdfSections,
-          report.metadata?.benchmarkFit,
-          pdfLocale,
-          report.metadata?.benchmarkScore
-        ),
+      const pdfLocale = resolvePdfPresentationLocale(
+        resolveReportLanguage({
+          explicitLanguage: window.localStorage.getItem("zerinix_report_language"),
+          requestText: report.prompt,
+          uiLanguage: report.metadata?.reportLanguage,
+        }),
+        pdfLanguageSource
+      );
+      validateReportLanguageConsistency(
+        [report.title, ...normalizedSections.map((section) => `${section.title}\n${section.content}`)].join("\n"),
         pdfLocale
       );
+      const isLegalReport = isLegalRenderableReport(report);
+      const basePdfSections = isLegalReport
+        ? buildLegalReportSections(normalizedSections, pdfLocale, report.prompt)
+        : compactExecutiveDecisionMemoSections(
+            dedupeReportSections(
+              dedupePdfSections(mergePdfSourceSections(normalizedSections))
+            )
+          );
+      const pdfBaseSectionsWithBenchmark = isLegalReport
+        ? basePdfSections
+        : extractPdfValidationIntelligenceSection(
+            insertPdfBenchmarkIntelligenceSection(
+              basePdfSections,
+              report.metadata?.benchmarkFit,
+              pdfLocale,
+              report.metadata?.benchmarkScore
+            ),
+            pdfLocale
+          );
       const pdfSections = localizePdfReportSections(pdfBaseSectionsWithBenchmark, pdfLocale);
-      const localizedReportTitle = localizePdfPresentationLabel(report.title, pdfLocale);
-      const businessIdea = deriveBusinessDescriptionFromSections(report, pdfSections);
+      const localizedReportTitle = isLegalReport
+        ? pdfLocale === "tr"
+          ? "Hukuki Değerlendirme Raporu"
+          : "Legal Assessment Report"
+        : localizePdfPresentationLabel(report.title, pdfLocale);
+      const isRealEstateReport =
+        report.type === "Real Estate Investment Analysis" ||
+        /real[\s-]?estate|gayrimenkul|arsa|arazi|tapu/i.test(report.title);
+      const businessIdea = isLegalReport
+        ? normalizePdfText(report.prompt).slice(0, 220)
+        : deriveBusinessDescriptionFromSections(report, pdfSections);
       const fullReportContent = basePdfSections
         .map((section) => `${section.title}\n${section.content}`)
         .join("\n\n");
@@ -1933,15 +2045,20 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         pdf.text(label, x + 4, tagY + 6.4, { maxWidth: width - 8 });
       };
 
-      const splitPdfReadableLines = (content: string, width: number) =>
-        splitPdfReadableLinesWithEngine({
+      const splitPdfReadableLines = (content: string, width: number) => {
+        const repairedContent = repairPdfLineFragments(
+          content.split("\n"),
+          isOrphanBulletText
+        ).join("\n");
+        return splitPdfReadableLinesWithEngine({
           pdf,
-          content,
+          content: repairedContent,
           width,
           normalizeText: normalizePdfText,
           repairLineFragments: repairPdfLineFragments,
           isOrphanBulletText,
         });
+      };
 
       const wrapPdfText = (text: string, width: number) =>
         wrapPdfTextWithEngine({ pdf, text, width, normalizeText: normalizePdfText });
@@ -1965,50 +2082,6 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         const lastSpace = clipped.lastIndexOf(" ");
 
         return `${clipped.slice(0, Math.max(32, lastSpace)).trim()}…`;
-      };
-
-      const conciseFundingStage = (value: string) => {
-        const normalized = normalizePdfText(value).trim();
-        const stageMatch = normalized.match(
-          /\b(pre[-\s]?seed|seed|series\s+[a-c]|growth|expansion|bootstrap(?:ped)?|mvp|pilot|validation|scale[-\s]?up|pre[-\s]?revenue)\b/i
-        );
-
-        if (stageMatch?.[0]) {
-          return stageMatch[0].replace(/\s+/g, " ");
-        }
-
-        return conciseCoverText(normalized, 34)
-          .split(/\s+/)
-          .slice(0, 5)
-          .join(" ");
-      };
-
-      const getExecutiveSummaryPreview = (content: string, decision: string) => {
-        const cleaned = normalizePdfText(content)
-          .split("\n")
-          .map((line) =>
-            line
-              .replace(/^[-*•]\s+/, "")
-              .replace(/^#{1,6}\s+/, "")
-              .replace(/\*\*/g, "")
-              .trim()
-          )
-          .filter((line) => line && !/^executive summary\b/i.test(line))
-          .join(" ")
-          .replace(/\s+/g, " ")
-          .trim();
-        const sentences = cleaned
-          .split(/(?<=[.!?])\s+/)
-          .map((sentence) => sentence.trim())
-          .filter(Boolean);
-        const decisionSentence =
-          sentences.find((sentence) =>
-            /\b(invest|recommend|go|wait|pass|validate|hold|risk|opportunity|priority)\b/i.test(sentence)
-          ) ||
-          sentences[0] ||
-          `${formatDecisionLabel(decision)} pending the validation priorities detailed in the Executive Summary.`;
-
-        return conciseCoverText(decisionSentence, 150);
       };
 
       const drawCoverPage = () => {
@@ -2040,6 +2113,27 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           pdfLocale === "tr"
         );
         const founderScore = executiveSnapshot.founderScoreValue ?? investmentScore;
+        const legalConfidence =
+          extractScore(fullReportContent, pdfLocale === "tr" ? "Güven" : "Confidence") ??
+          extractConfidence(fullReportContent);
+        const legalDecision = isLegalReport
+          ? fullReportContent
+              .match(/(?:Nihai tavsiye|Final recommendation|Karar|Assessment)\s*:\s*([A-ZÇĞİÖŞÜ ]{2,32})/i)?.[1]
+              ?.trim()
+              .toLocaleUpperCase(pdfLocale === "tr" ? "tr-TR" : "en-US") ||
+            (pdfLocale === "tr" ? "KOŞULLU DEĞERLENDİRME" : "CONDITIONAL ASSESSMENT")
+          : executiveSnapshot.decision;
+        const legalSourceCount = new Set(
+          (pdfSections.find((section) => section.field === "legalSources")?.content.match(/https?:\/\/[^\s)]+/g) || [])
+        ).size;
+        const overallInvestmentScore =
+          extractScore(fullReportContent, "Overall Investment Score") ??
+          investmentScore;
+        const realEstateMainOpportunity =
+          extractMetricValue(fullReportContent, "Main Opportunity") ||
+          pdfSections.find((section) => section.field === "developmentPotential")
+            ?.content ||
+          "Not verified";
 
         paintPage();
         pdf.setFillColor("#020617");
@@ -2069,7 +2163,9 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
         const previewY = 88;
         const previewLines = wrapPdfText(
-          `${localizePdfPresentationLabel("Decision", pdfLocale)}: ${executiveSnapshot.decision}. ${localizePdfPresentationLabel("Main Risk", pdfLocale)}: ${executiveSnapshot.mainRisk}`,
+          isLegalReport
+            ? `${pdfLocale === "tr" ? "Hukuki değerlendirme" : "Legal assessment"}: ${legalDecision}. ${pdfLocale === "tr" ? "Temel risk" : "Primary risk"}: ${executiveSnapshot.mainRisk}`
+            : `${localizePdfPresentationLabel("Decision", pdfLocale)}: ${executiveSnapshot.decision}. ${localizePdfPresentationLabel("Main Risk", pdfLocale)}: ${executiveSnapshot.mainRisk}`,
           contentWidth - 38
         ).slice(0, 2);
         const previewHeight = Math.max(21, 13 + previewLines.length * 4.1);
@@ -2089,8 +2185,28 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         });
 
         const tagY = previewY + previewHeight + 5;
-        drawTag("Investor Ready", margin + 12, tagY, 36);
-        drawTag(localizePdfPresentationLabel(report.type, pdfLocale), margin + 52, tagY, 42);
+        drawTag(
+          isRealEstateReport
+            ? "Due-Diligence Report"
+            : isLegalReport
+              ? pdfLocale === "tr"
+                ? "Hukuki Analiz"
+                : "Legal Analysis"
+              : "Investor Ready",
+          margin + 12,
+          tagY,
+          isLegalReport ? 42 : 36
+        );
+        drawTag(
+          isLegalReport
+            ? pdfLocale === "tr"
+              ? "Karar Desteği"
+              : "Decision Support"
+            : localizePdfPresentationLabel(report.type, pdfLocale),
+          margin + (isLegalReport ? 58 : 52),
+          tagY,
+          42
+        );
 
         const scoreX = margin + 12;
         const scoreY = tagY + 16;
@@ -2106,10 +2222,21 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         pdf.setLineWidth(0.15);
         pdf.setFontSize(24);
         pdf.setTextColor("#ffffff");
-        pdf.text(String(founderScore ?? "--"), scoreX + 20, scoreY + 31);
+        pdf.text(String((isLegalReport ? legalConfidence : isRealEstateReport ? overallInvestmentScore : founderScore) ?? "--"), scoreX + 20, scoreY + 31);
         pdf.setFontSize(6.5);
         pdf.setTextColor("#99f6e4");
-        pdf.text(localizePdfPresentationLabel("Founder Readiness Score", pdfLocale).toUpperCase(), scoreX + 12, scoreY + 43);
+        pdf.text(
+          (isRealEstateReport
+            ? "Overall Investment Score"
+            : isLegalReport
+              ? pdfLocale === "tr"
+                ? "Kanıt Gücü"
+                : "Evidence Strength"
+            : localizePdfPresentationLabel("Founder Readiness Score", pdfLocale)
+          ).toUpperCase(),
+          scoreX + 12,
+          scoreY + 43
+        );
 
         pdf.setFillColor(recommendationFill);
         pdf.setDrawColor("#334155");
@@ -2118,17 +2245,45 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         pdf.setTextColor(recommendationText);
         pdf.text(localizePdfPresentationLabel("Decision", pdfLocale).toUpperCase(), scoreX + 72, scoreY + 8);
         pdf.setFontSize(18);
-        pdf.text(executiveSnapshot.decision, scoreX + 72, scoreY + 20);
+        pdf.text(legalDecision, scoreX + 72, scoreY + 20);
 
         const cardWidth = (contentWidth - 86) / 2;
-        const kpis = [
-          ["Confidence Score", executiveSnapshot.confidence],
-          ["Financial Quality", executiveSnapshot.financialQuality],
-          ["Report Quality", executiveSnapshot.reportQuality],
-          ["Main Risk", executiveSnapshot.mainRisk],
-          ["Next Action", executiveSnapshot.nextAction],
-          [localizePdfPresentationLabel("Report Type", pdfLocale), localizePdfPresentationLabel(report.type, pdfLocale)],
-        ].map(([label, value]) => {
+        const kpis = (isLegalReport
+          ? [
+              [pdfLocale === "tr" ? "Kanıt Gücü" : "Evidence Strength", legalConfidence === null ? "—" : `${legalConfidence}%`],
+              [pdfLocale === "tr" ? "Usul Aciliyeti" : "Procedural Urgency", pdfLocale === "tr" ? "Derhâl süre kontrolü" : "Immediate deadline review"],
+              [pdfLocale === "tr" ? "Zamanaşımı Riski" : "Limitation Risk", pdfLocale === "tr" ? "Tarih teyidi gerekli" : "Date verification required"],
+              [pdfLocale === "tr" ? "Talep Gücü" : "Claim Viability", legalDecision],
+              [pdfLocale === "tr" ? "Kaynak Kapsamı" : "Source Coverage", String(legalSourceCount)],
+              [pdfLocale === "tr" ? "Rapor Türü" : "Report Type", pdfLocale === "tr" ? "Hukuki analiz" : "Legal analysis"],
+            ]
+          : isRealEstateReport
+          ? [
+              ["Confidence", executiveSnapshot.confidence],
+              [
+                "Evidence Quality",
+                extractScore(fullReportContent, "Evidence Quality") === null
+                  ? "Not verified"
+                  : `${extractScore(fullReportContent, "Evidence Quality")}/100`,
+              ],
+              ["Main Risk", executiveSnapshot.mainRisk],
+              ["Main Opportunity", realEstateMainOpportunity],
+              ["Required Next Action", executiveSnapshot.nextAction],
+              [
+                "Zoning Risk",
+                extractScore(fullReportContent, "Zoning Risk") === null
+                  ? "Not verified"
+                  : `${extractScore(fullReportContent, "Zoning Risk")}/100`,
+              ],
+            ]
+          : [
+              ["Confidence Score", executiveSnapshot.confidence],
+              ["Financial Quality", executiveSnapshot.financialQuality],
+              ["Report Quality", executiveSnapshot.reportQuality],
+              ["Main Risk", executiveSnapshot.mainRisk],
+              ["Next Action", executiveSnapshot.nextAction],
+              [localizePdfPresentationLabel("Report Type", pdfLocale), localizePdfPresentationLabel(report.type, pdfLocale)],
+            ]).map(([label, value]) => {
           const labelLines = wrapPdfText(label.toUpperCase(), cardWidth - 8).slice(0, 2);
           const valueLines = wrapPdfText(
             conciseCoverText(value, 46),
@@ -2208,11 +2363,34 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         };
 
         const insightWidth = (contentWidth - 31) / 2;
+        const legalRiskItems = extractBullets(
+          pdfSections.find((section) => section.field === "legalProceduralRisks")?.content || "",
+          ""
+        );
+        const legalActionItems = extractBullets(
+          pdfSections.find((section) => section.field === "legalImmediateActions")?.content || "",
+          ""
+        );
         const strengthsLayout = getInsightPanelLayout(
-          executiveSnapshot.riskHeatmap.map((risk) => `${risk.label}: ${risk.level}`),
+          isLegalReport
+            ? legalRiskItems
+          : isRealEstateReport
+            ? [
+                ["Legal Risk", "Title / Ownership Risk"],
+                ["Market Evidence", "Market Evidence"],
+                ["Infrastructure", "Access and Infrastructure"],
+                ["Environmental Risk", "Environmental and Geotechnical Risk"],
+                ["Development Potential", "Development Potential"],
+              ].map(([label, metric]) => {
+                const value = extractScore(fullReportContent, metric);
+                return `${label}: ${value === null ? "Not verified" : `${value}/100`}`;
+              })
+            : executiveSnapshot.riskHeatmap.map((risk) => `${risk.label}: ${risk.level}`),
           insightWidth
         );
-        const confidenceOrQualityItems = reportQualityBreakdown.length
+        const confidenceOrQualityItems = isLegalReport
+          ? legalActionItems
+          : reportQualityBreakdown.length
           ? reportQualityBreakdown.map((item) => `${item.label}: ${item.value}`)
           : executiveSnapshot.confidenceRadar.map((dimension) =>
               `${dimension.label}: ${dimension.score === null ? "Validation Required" : `${dimension.score}%`}`
@@ -2226,7 +2404,13 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         const kpiGridHeight = rowHeights.reduce((sum, height) => sum + height, 0) + (rowHeights.length - 1) * 4;
         const insightY = scoreY + 32 + kpiGridHeight + 8;
         drawInsightPanel(
-          localizePdfPresentationLabel("Risk Heatmap", pdfLocale),
+          isLegalReport
+            ? pdfLocale === "tr"
+              ? "Temel Hukuki Riskler"
+              : "Key Legal Risks"
+          : isRealEstateReport
+            ? "Real Estate Decision Factors"
+            : localizePdfPresentationLabel("Risk Heatmap", pdfLocale),
           strengthsLayout.lineBlocks,
           margin + 12,
           insightY,
@@ -2235,7 +2419,11 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           "#14b8a6"
         );
         drawInsightPanel(
-          reportQualityBreakdown.length
+          isLegalReport
+            ? pdfLocale === "tr"
+              ? "Hemen Atılacak Adımlar"
+              : "Immediate Actions"
+          : reportQualityBreakdown.length
             ? localizePdfPresentationLabel("Report Quality", pdfLocale)
             : localizePdfPresentationLabel("Confidence Radar", pdfLocale),
           risksLayout.lineBlocks,
@@ -2294,8 +2482,18 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
       const summaryCards = [
         `${pdfSections.length} Sections`,
-        report.type,
-        "Investor Ready",
+        isLegalReport
+          ? pdfLocale === "tr"
+            ? "Hukuki Analiz"
+            : "Legal Analysis"
+          : report.type,
+        isRealEstateReport
+          ? "Due-Diligence Report"
+          : isLegalReport
+            ? pdfLocale === "tr"
+              ? "Karar Desteği"
+              : "Decision Support"
+            : "Investor Ready",
       ].map((label) => wrapPdfText(label, (contentWidth - 8) / 3 - 8).slice(0, 2));
       const summaryCardHeight = Math.max(
         12,
@@ -2325,7 +2523,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           ["SAM", "#115e59"],
           ["SOM", "#5eead4"],
         ] as const).map(([label, color]) => {
-          const value = extractMarketSizeVisualValue(content, label);
+          const value = extractMarketSizeValue(`${content}\n${fullReportContent}`, label);
           const rowHeight = 15;
 
           return { label, color, value, rowHeight };
@@ -2378,7 +2576,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
       const getFinancialLayout = (content: string, width: number) => {
         const metricContent = content;
-        const labels = normalizePdfFinancialMetrics(metricContent);
+        const labels = normalizePdfFinancialMetrics(content, fullReportContent);
         const columns = 3;
         const itemWidth = (width - (columns - 1) * 3) / columns;
         const items = labels
@@ -3015,7 +3213,9 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           isTamSamSomPdfSection
             ? localizePdfPresentationText(cleanPdfEvidenceMetadataText(normalizePdfTamSamSomBodyContent(section.content)), pdfLocale)
             : isSourceSectionTitle(section.title)
-              ? localizePdfPresentationText(formatPdfCitationContent(section.content), pdfLocale)
+              ? isLegalReport
+                ? formatLegalSourceContent(section.content, pdfLocale)
+                : localizePdfPresentationText(formatPdfCitationContent(section.content, isRealEstateReport), pdfLocale)
               : localizePdfPresentationText(
                   cleanPdfLegacyValidationIntelligenceContent(
                     cleanPdfEvidenceMetadataText(
@@ -3169,48 +3369,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
       pdf.setPage(finalPage);
 
-      const blob = pdf.output("blob");
-      const url = URL.createObjectURL(blob);
-
-      if (usesMobilePdfFlow()) {
-        try {
-          window.location.assign(url);
-        } catch (openError) {
-          console.error(openError);
-          URL.revokeObjectURL(url);
-          setError("PDF could not be opened on this device. Please try again.");
-        }
-
-        return;
-      }
-
-      const isSafari =
-        /^((?!chrome|android).)*safari/i.test(navigator.userAgent) ||
-        navigator.vendor.includes("Apple");
-
-      if (isSafari) {
-        const openedWindow = window.open(url, "_blank");
-
-        if (!openedWindow) {
-          URL.revokeObjectURL(url);
-          setError("Safari blocked the PDF tab. Please allow pop-ups and try again.");
-          return;
-        }
-
-        window.setTimeout(() => URL.revokeObjectURL(url), 300000);
-      } else {
-        const link = document.createElement("a");
-
-        link.href = url;
-        link.download = createFileName(report.title);
-        link.rel = "noopener";
-        link.style.display = "none";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-
-        window.setTimeout(() => URL.revokeObjectURL(url), 120000);
-      }
+      deliverPdf(pdf, report, setError);
     } catch (downloadError) {
       console.error(downloadError);
       setError("PDF could not be created. Please try again.");

@@ -191,6 +191,15 @@ export const planFieldLabels: Record<
     founderScore: "Kurucu Hazırlık Skoru",
     sourcesAssumptions: "Kaynaklar / Varsayımlar",
   },
+  German: {
+    executiveSummary: "Zusammenfassung", problem: "Problem", solution: "Lösung", targetCustomer: "Zielkunde / ICP", marketOpportunity: "Marktchance", competitorLandscape: "Wettbewerbsumfeld", businessModel: "Geschäftsmodell", tamSamSom: "TAM / SAM / SOM", swotAnalysis: "SWOT-Analyse", portersFiveForces: "Porters Fünf Kräfte", pricingStrategy: "Preisstrategie", goToMarketPlan: "Markteinführungsplan", salesStrategy: "Vertriebsstrategie", unitEconomics: "Stückökonomie", financialDashboard: "Finanzübersicht", scenarioAnalysis: "Szenarioanalyse: Negativ / Basis / Positiv", kpiDashboard: "KPI-Übersicht", executiveRecommendation: "Managementempfehlung", risks: "Risiken", kpis: "KPIs", founderRoadmap: "Gründerfahrplan", roadmap306090: "30-60-90-Tage-Plan", financialAssumptions: "Finanzielle Annahmen", founderScore: "Gründerbereitschaft", sourcesAssumptions: "Quellen / Annahmen",
+  },
+  French: {
+    executiveSummary: "Synthèse exécutive", problem: "Problème", solution: "Solution", targetCustomer: "Client cible / ICP", marketOpportunity: "Opportunité de marché", competitorLandscape: "Paysage concurrentiel", businessModel: "Modèle économique", tamSamSom: "TAM / SAM / SOM", swotAnalysis: "Analyse SWOT", portersFiveForces: "Cinq forces de Porter", pricingStrategy: "Stratégie tarifaire", goToMarketPlan: "Plan de mise sur le marché", salesStrategy: "Stratégie commerciale", unitEconomics: "Économie unitaire", financialDashboard: "Tableau financier", scenarioAnalysis: "Scénarios : défavorable / central / favorable", kpiDashboard: "Tableau des KPI", executiveRecommendation: "Recommandation exécutive", risks: "Risques", kpis: "KPI", founderRoadmap: "Feuille de route du fondateur", roadmap306090: "Plan à 30-60-90 jours", financialAssumptions: "Hypothèses financières", founderScore: "Préparation du fondateur", sourcesAssumptions: "Sources / Hypothèses",
+  },
+  Spanish: {
+    executiveSummary: "Resumen ejecutivo", problem: "Problema", solution: "Solución", targetCustomer: "Cliente objetivo / ICP", marketOpportunity: "Oportunidad de mercado", competitorLandscape: "Panorama competitivo", businessModel: "Modelo de negocio", tamSamSom: "TAM / SAM / SOM", swotAnalysis: "Análisis SWOT", portersFiveForces: "Cinco fuerzas de Porter", pricingStrategy: "Estrategia de precios", goToMarketPlan: "Plan de salida al mercado", salesStrategy: "Estrategia comercial", unitEconomics: "Economía unitaria", financialDashboard: "Panel financiero", scenarioAnalysis: "Escenarios: adverso / base / favorable", kpiDashboard: "Panel de KPI", executiveRecommendation: "Recomendación ejecutiva", risks: "Riesgos", kpis: "KPI", founderRoadmap: "Hoja de ruta del fundador", roadmap306090: "Plan de 30-60-90 días", financialAssumptions: "Supuestos financieros", founderScore: "Preparación del fundador", sourcesAssumptions: "Fuentes / Supuestos",
+  },
 };
 
 export function buildPlanLanguageInstructions(language: ResponseLanguage) {

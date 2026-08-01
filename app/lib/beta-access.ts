@@ -8,6 +8,7 @@ type BetaAccessIdentity = {
 type BetaAccessAccount = {
   email?: string | null;
   identities?: BetaAccessIdentity[] | null;
+  app_metadata?: Record<string, unknown> | null;
 };
 
 function readString(value: unknown) {
@@ -59,4 +60,47 @@ export function isFounderAccount(account?: BetaAccessAccount | string | null) {
   const accountEmails = collectAccountEmails(betaAccount);
 
   return [...accountEmails].some((email) => isFounderEmail(email));
+}
+
+function hasAdminClaim(account: BetaAccessAccount) {
+  const adminRoles = new Set(["admin", "owner"]);
+  const role = readString(account.app_metadata?.role).toLowerCase();
+  const roles = Array.isArray(account.app_metadata?.roles)
+    ? account.app_metadata.roles
+    : [];
+
+  return (
+    adminRoles.has(role) ||
+    roles.some((value) =>
+      adminRoles.has(readString(value).toLowerCase())
+    )
+  );
+}
+
+export function isLocalDevelopmentOwnerOrAdmin(
+  request: Request,
+  account?: BetaAccessAccount | null
+) {
+  if (
+    !account ||
+    process.env.NODE_ENV !== "development" ||
+    process.env.VERCEL
+  ) {
+    return false;
+  }
+
+  try {
+    const hostname = new URL(request.url).hostname.toLowerCase();
+    const isLocalhost =
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "[::1]";
+
+    return (
+      isLocalhost &&
+      (isFounderAccount(account) || hasAdminClaim(account))
+    );
+  } catch {
+    return false;
+  }
 }

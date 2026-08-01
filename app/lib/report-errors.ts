@@ -37,6 +37,33 @@ export const reportGenerationFailurePatterns = [
   /bu bölüm için ai çıktısı bekleniyor/i,
 ];
 
+export const reportAdvisoryWarningPatterns = [
+  /\bprovider_unavailable\b/i,
+  /\bcompleted_no_evidence\b/i,
+  /\bmissing (?:evidence|document|documents|information)\b/i,
+  /\brequired (?:document|documents|evidence|record|records)\b/i,
+  /\b(?:provider request|research provider)\b[^\n]{0,80}\b(?:aborted|timed out|unavailable)\b/i,
+  /\bverification (?:failed|unavailable|incomplete)\b/i,
+  /\bcould not be verified\b/i,
+  /\bnot externally verified\b/i,
+  /\bdoğrulanam(?:adı|ayan)\b/i,
+  /\beksik (?:kanıt|belge|bilgi)\b/i,
+  /\bgerekli (?:belge|kanıt|kayıt)\b/i,
+];
+
+export function isReportAdvisoryWarningText(value: string) {
+  const normalized = value
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return (
+    Boolean(normalized) &&
+    reportAdvisoryWarningPatterns.some((pattern) => pattern.test(normalized))
+  );
+}
+
 export function isReportGenerationFailureText(value: string) {
   const normalized = value
     .normalize("NFKC")
@@ -46,6 +73,10 @@ export function isReportGenerationFailureText(value: string) {
   const compact = normalized.toLowerCase().replace(/[^a-z0-9çğıöşü]+/gi, "");
 
   if (!normalized) {
+    return false;
+  }
+
+  if (isReportAdvisoryWarningText(normalized)) {
     return false;
   }
 

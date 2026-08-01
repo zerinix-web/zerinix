@@ -59,6 +59,11 @@ import {
   inferEvidenceLevel,
   type EvidenceLevel,
 } from "@/app/lib/report-evidence";
+import {
+  buildLegalReportSections,
+  formatLegalSourceContent,
+  isLegalRenderableReport,
+} from "@/app/lib/report-engine/legal-report-rendering";
 
 export const dynamic = "force-dynamic";
 
@@ -77,7 +82,7 @@ function formatDate(value: string) {
 }
 
 function isSourceSectionTitle(title: string) {
-  return /^(sources|kaynaklar|sources \/ assumptions|kaynaklar \/ varsayımlar)$/i.test(title.trim());
+  return /^(sources|kaynaklar|verified sources|doğrulanmış kaynaklar|sources \/ assumptions|kaynaklar \/ varsayımlar)$/i.test(title.trim());
 }
 
 function getSectionIcon(title: string): LucideIcon {
@@ -2576,9 +2581,25 @@ export default async function ReportDetailPage({
         .maybeSingle()
     : { data: null };
 
-  const uniqueReportSections = Array.from(
+  const storedReportSections = Array.from(
     new Map(report.sections.map((section) => [section.field || section.title, section])).values()
   );
+  const isLegalReport = isLegalRenderableReport(report);
+  const reportLocale = detectPdfPresentationLocale(
+    report.prompt || storedReportSections.map((section) => section.content).join("\n")
+  );
+  const uniqueReportSections = isLegalReport
+    ? buildLegalReportSections(storedReportSections, reportLocale, report.prompt)
+        .map((section) =>
+          section.field === "legalSources"
+            ? {
+                ...section,
+                content: formatLegalSourceContent(section.content, reportLocale),
+              }
+            : section
+        )
+        .filter((section) => section.content.trim())
+    : storedReportSections;
   const visibleSections = uniqueReportSections.filter(
     (section) => !isSourceSectionTitle(section.title)
   );
@@ -2794,11 +2815,13 @@ export default async function ReportDetailPage({
                       >
                         <div className="min-w-0 space-y-5">
                           <div className="min-w-0 [&>*]:max-w-full">
-                            <ReportSectionVisual
-                              title={section.title}
-                              content={section.content}
-                              investmentScore={report.investmentScore}
-                            />
+                            {!isLegalReport ? (
+                              <ReportSectionVisual
+                                title={section.title}
+                                content={section.content}
+                                investmentScore={report.investmentScore}
+                              />
+                            ) : null}
                           </div>
                           {detailsContent.trim() ? (
                             <div className="min-w-0 rounded-[1.25rem] border border-white/[0.12] bg-black/30 p-3.5 shadow-inner shadow-black/20">
@@ -2921,6 +2944,7 @@ export default async function ReportDetailPage({
             </Link>
           </div>
 
+          {!isLegalReport ? <>
           <section className="mt-6 overflow-hidden rounded-[2.15rem] border border-white/10 bg-white/[0.04] shadow-2xl shadow-black/30 ring-1 ring-white/[0.025] backdrop-blur-xl">
             <div className="flex flex-col gap-3 border-b border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.065),rgba(255,255,255,0.02))] p-5 sm:p-6">
               <p className="text-xs font-semibold tracking-[0.35em] text-teal-300/70">
@@ -3023,6 +3047,7 @@ export default async function ReportDetailPage({
               </article>
             </div>
           </section>
+          </> : null}
 
           <section className="mt-6 overflow-hidden rounded-[2.15rem] border border-teal-200/15 bg-teal-200/[0.045] shadow-2xl shadow-black/35 ring-1 ring-teal-200/5 backdrop-blur-xl">
             <div className="flex flex-col gap-5 border-b border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.14),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.065),rgba(255,255,255,0.02))] p-5 sm:p-6 lg:flex-row lg:items-end lg:justify-between">
@@ -3142,13 +3167,15 @@ export default async function ReportDetailPage({
                 </aside>
 
                 <div className="space-y-8 xl:max-w-5xl">
-                  <BenchmarkIntelligencePanel
-                    benchmarkFit={report.metadata?.benchmarkFit}
-                    benchmarkScore={report.metadata?.benchmarkScore}
-                    sourceText={`${report.title}\n${report.prompt}\n${uniqueReportSections
-                      .map((section) => `${section.title}\n${section.content}`)
-                      .join("\n\n")}`}
-                  />
+                  {!isLegalReport ? (
+                    <BenchmarkIntelligencePanel
+                      benchmarkFit={report.metadata?.benchmarkFit}
+                      benchmarkScore={report.metadata?.benchmarkScore}
+                      sourceText={`${report.title}\n${report.prompt}\n${uniqueReportSections
+                        .map((section) => `${section.title}\n${section.content}`)
+                        .join("\n\n")}`}
+                    />
+                  ) : null}
 
                   {visibleSections.map((section, index) => {
                     const Icon = getSectionIcon(section.title);
@@ -3185,9 +3212,11 @@ export default async function ReportDetailPage({
 	                                <span className="w-fit rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
 	                                  Section {String(index + 1).padStart(2, "0")}
 	                                </span>
-	                                <div className="mt-2">
-	                                  <EvidenceBadge level={getDashboardSectionEvidence(section)} />
-	                                </div>
+	                                {!isLegalReport ? (
+	                                  <div className="mt-2">
+	                                    <EvidenceBadge level={getDashboardSectionEvidence(section)} />
+	                                  </div>
+	                                ) : null}
 	                                <h2 className="mt-3 text-2xl font-semibold tracking-[-0.025em] text-white">
 	                                  {section.title}
 	                                </h2>
@@ -3203,6 +3232,9 @@ export default async function ReportDetailPage({
                           <div className="mb-5 flex justify-end">
                             <CopySectionButton content={section.content} />
                           </div>
+                              {isLegalReport ? (
+                                detailsContent.trim() ? <ReportText content={detailsContent} /> : null
+                              ) : <>
                               <ExecutiveSummaryVisual
                                 title={section.title}
                                 content={section.content}
@@ -3234,6 +3266,7 @@ export default async function ReportDetailPage({
                                   </AnalysisNotes>
                                 </>
                               ) : null}
+                              </>}
                         </div>
                       </details>
                     );
@@ -3256,7 +3289,7 @@ export default async function ReportDetailPage({
                                 Research Appendix
                               </p>
                               <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white">
-                                Sources
+                                {reportLocale === "tr" ? "Kaynaklar" : "Sources"}
                               </h2>
                             </div>
                             <span className="inline-flex min-h-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.045] px-3.5 py-2 text-xs font-semibold text-zinc-300 ring-1 ring-white/[0.02] transition duration-300 group-hover:border-teal-200/30 group-hover:text-teal-100">

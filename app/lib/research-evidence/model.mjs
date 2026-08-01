@@ -25,6 +25,41 @@ export function normalizeEvidenceText(value) {
     .trim();
 }
 
+export function buildEvidenceSearchText(input = {}) {
+  return normalizeEvidenceText(
+    [
+      input.title,
+      input.source,
+      input.url,
+      input.claim,
+      input.value,
+      ...(Array.isArray(input.supportingData) ? input.supportingData : []),
+    ].join(" ")
+  ).toLocaleLowerCase("tr");
+}
+
+export function resolveResearchTaskReference(input = {}, tasks = []) {
+  const taskId = normalizeEvidenceText(input.taskId);
+  const field = normalizeEvidenceText(input.field);
+  const normalizedField = field
+    .toLocaleLowerCase("tr")
+    .replace(/[^\p{L}\p{N}]+/gu, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return (
+    tasks.find((task) => normalizeEvidenceText(task?.id) === taskId) ||
+    tasks.find((task) => normalizeEvidenceText(task?.field) === field) ||
+    tasks.find(
+      (task) =>
+        normalizeEvidenceText(task?.field)
+          .toLocaleLowerCase("tr")
+          .replace(/[^\p{L}\p{N}]+/gu, "_")
+          .replace(/^_+|_+$/g, "") === normalizedField
+    ) ||
+    null
+  );
+}
+
 export function normalizeEvidenceUrl(value) {
   const raw = String(value || "").trim();
 
@@ -70,4 +105,3 @@ export function canonicalEvidenceKey(evidence) {
 
   return evidence.url || `${domain}|${title}|${evidence.publishedAt || ""}`;
 }
-

@@ -15,7 +15,7 @@ type PlanPageProps = {
   }>;
 };
 
-function getInitialMode(mode: string | undefined, shouldStartFresh: boolean) {
+function getInitialMode(mode: string | undefined) {
   if (mode === "market") {
     return "market";
   }
@@ -24,7 +24,7 @@ function getInitialMode(mode: string | undefined, shouldStartFresh: boolean) {
     return "plan";
   }
 
-  return shouldStartFresh ? "plan" : undefined;
+  return undefined;
 }
 
 export default async function PlanPage({ searchParams }: PlanPageProps) {
@@ -50,7 +50,7 @@ export default async function PlanPage({ searchParams }: PlanPageProps) {
       ? "market"
       : "plan"
     : undefined;
-  const initialMode = getInitialMode(regenerationMode || params.mode, shouldStartFresh);
+  const initialMode = getInitialMode(regenerationMode || params.mode);
   const regenerationContext =
     regenerationReport
       ? {

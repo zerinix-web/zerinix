@@ -209,7 +209,7 @@ function Sparkline({
   );
 }
 
-function ExecutiveKpiCard({
+function MetricCard({
   label,
   value,
   detail,
@@ -236,7 +236,7 @@ function ExecutiveKpiCard({
   const accentStyle = accentStyles[accent];
 
   return (
-    <article className={`group relative flex h-[14.25rem] min-w-0 flex-col overflow-hidden rounded-[1.5rem] p-[1.375rem] transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/20 hover:shadow-2xl hover:shadow-black/45 ${dashboardTheme.surface}`}>
+    <article className={`group relative flex h-[14.25rem] min-w-0 flex-col overflow-hidden rounded-[1.5rem] p-[1.375rem] shadow-[0_18px_70px_rgba(0,0,0,0.24)] transition duration-300 hover:-translate-y-1 hover:border-purple-300/20 hover:shadow-2xl hover:shadow-black/45 ${dashboardTheme.surface}`}>
       <div className={`pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b ${accentStyle.glow} to-transparent opacity-45 transition duration-300 group-hover:opacity-65`} />
       <div className="relative flex items-start justify-between gap-4">
         <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[1rem] border shadow-lg shadow-black/20 ${accentStyle.icon}`}>
@@ -273,7 +273,7 @@ function ExecutiveKpiCard({
   );
 }
 
-function ExecutiveLineChart({
+function LineChartCard({
   title,
   subtitle,
   series,
@@ -1060,11 +1060,50 @@ export default async function AdminDashboardPage({
       sparkline: [],
     },
   ];
+  const overviewCards = [
+    {
+      label: "Total users",
+      value: formatNumber(data.totalUsers),
+      detail: data.sourceDetails.users,
+      icon: BarChart3,
+      accent: "blue" as const,
+      status: data.sourceStatus.users,
+      trend: calculateTrend(data.charts.userGrowth, "Last 24h"),
+      sparkline: data.charts.userGrowth,
+      animatedValue: data.totalUsers,
+      valueFormat: "integer" as const,
+    },
+    {
+      label: "Generated Reports",
+      value: formatNumber(data.reportsGenerated),
+      detail: data.sourceDetails.reports,
+      icon: Gauge,
+      accent: "green" as const,
+      status: data.sourceStatus.reports,
+      trend: calculateTrend(data.charts.reportsGenerated, "Last 24h"),
+      sparkline: data.charts.reportsGenerated,
+      animatedValue: data.reportsGenerated,
+      valueFormat: "integer" as const,
+    },
+    {
+      label: "AI Conversations",
+      value: formatNumber(data.aiConversations),
+      detail: data.sourceDetails.aiUsage,
+      icon: BrainCircuit,
+      accent: "purple" as const,
+      status: data.sourceStatus.aiUsage,
+      trend: calculateTrend(data.charts.aiRequests, "Last 24h"),
+      sparkline: data.charts.aiRequests,
+      animatedValue: data.aiConversations,
+      valueFormat: "integer" as const,
+    },
+    financialCards[0],
+  ];
   return (
     <AdminShell
-      eyebrow="CEO Control Center"
-      title="CEO Dashboard"
-      subtitle="Executive operating metrics, financial signals and platform health."
+      eyebrow="Admin"
+      title="Dashboard"
+      subtitle="System overview and statistics"
       hidePageHeader
       headerActions={
         <>
@@ -1080,24 +1119,35 @@ export default async function AdminDashboardPage({
       }
     >
       <div className="space-y-8">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {overviewCards.map((card) => (
+            <MetricCard key={card.label} {...card} />
+          ))}
+        </section>
+
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           {financialCards.map((card) => (
-            <ExecutiveKpiCard key={card.label} {...card} />
+            <MetricCard key={card.label} {...card} />
           ))}
         </section>
 
         <section className="grid items-stretch gap-4 lg:grid-cols-12">
-          <ExecutiveLineChart
-            title="Revenue, AI Cost and Profit"
-            subtitle={`${data.dateRange.label} financial trajectory`}
+          <LineChartCard
+            title="User Growth"
+            subtitle={`${data.dateRange.label} account growth`}
             series={[
-              { label: "Revenue", data: data.charts.revenue, color: "#34d399" },
-              { label: "AI Cost", data: data.charts.estimatedAiCost, color: "#8b5cf6" },
-              { label: "Profit", data: profitSeries, color: "#60a5fa" },
+              { label: "Users", data: data.charts.userGrowth, color: "#34d399" },
             ]}
           />
           <DonutChartCard
-            title="User Distribution"
+            title="Report Distribution"
+            subtitle="Generated report type mix"
+            data={data.reportTypeDistribution}
+            status={data.sourceStatus.reports}
+            className="lg:col-span-4 min-[1440px]:col-span-3"
+          />
+          <DonutChartCard
+            title="Subscription Plans"
             subtitle="Plan profile mix"
             data={data.planDistribution}
             status={data.sourceStatus.subscriptions}
@@ -1111,6 +1161,34 @@ export default async function AdminDashboardPage({
           <MostExpensiveReportsCard data={data} />
           <ProductionReadinessCard data={data} />
           <AdminSystemHealth initialStatuses={data.systemStatus} />
+        </section>
+
+        <section className={`rounded-[1.5rem] p-5 ${dashboardTheme.surface}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-[17px] font-semibold tracking-tight text-white">Recent users</h2>
+              <p className="mt-1 text-xs text-zinc-500">Latest accounts from Supabase Auth</p>
+            </div>
+            <Link href="/admin/users" className="text-xs font-semibold text-teal-200">
+              View all
+            </Link>
+          </div>
+          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {data.recentUsers.length ? (
+              data.recentUsers.map((user) => (
+                <Link
+                  key={user.id}
+                  href={`/admin/users/${user.id}`}
+                  className="rounded-[1rem] border border-white/10 bg-black/25 p-4 transition duration-300 hover:border-[#343b49]"
+                >
+                  <p className="truncate text-sm font-semibold text-white">{user.email}</p>
+                  <p className="mt-1 text-xs capitalize text-zinc-500">{user.plan} · {user.accountStatus}</p>
+                </Link>
+              ))
+            ) : (
+              <p className="text-sm text-zinc-500">No users found yet.</p>
+            )}
+          </div>
         </section>
 
         <AlertCenter alerts={data.alerts} />

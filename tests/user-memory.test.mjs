@@ -8,7 +8,7 @@ const migrationSource = readFileSync(
 );
 const helperSource = readFileSync("app/lib/ai/user-memory.ts", "utf8");
 const chatRouteSource = readFileSync("app/api/chat/route.ts", "utf8");
-const planRouteSource = readFileSync("app/api/plan/route.ts", "utf8");
+const planRouteSource = readFileSync("app/lib/report-jobs/plan-executor.ts", "utf8");
 const marketRouteSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
 
 test("user memories table is owner-scoped with RLS", () => {

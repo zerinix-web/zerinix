@@ -125,6 +125,21 @@ test("report attribution API verifies ownership and rate limits writes", () => {
   assert.match(route, /\.from\("ai_usage_events"\)/);
 });
 
+test("report attribution analytics fail open when service-role storage is unavailable", () => {
+  const route = read("app/api/reports/attribute-usage/route.ts");
+
+  assert.match(route, /service_role_unavailable/);
+  assert.match(route, /ownership_check_unavailable/);
+  assert.match(route, /attribution_write_unavailable/);
+  assert.match(route, /analytics_unavailable/);
+  assert.match(route, /attributed:\s*false/);
+  assert.match(route, /skipped:\s*true/);
+  assert.doesNotMatch(
+    route,
+    /Report usage could not be attributed\." \}, \{ status: 500/
+  );
+});
+
 test("workspace server actions scope mutations and bound user-controlled names", () => {
   const actions = read("app/dashboard/actions.ts");
 
@@ -137,24 +152,28 @@ test("workspace server actions scope mutations and bound user-controlled names",
 });
 
 test("chat file attachments are bounded and sanitized on the server", () => {
-  const source = read("app/api/chat/route.ts");
+  const source = read("app/lib/ai/analysis-assets.ts");
+  const chatRoute = read("app/api/chat/route.ts");
 
-  assert.match(source, /MAX_CHAT_ATTACHMENTS\s*=\s*6/);
-  assert.match(source, /MAX_ATTACHMENT_SIZE_BYTES\s*=\s*5_000_000/);
-  assert.match(source, /MAX_TOTAL_ATTACHMENT_SIZE_BYTES\s*=\s*12_000_000/);
-  assert.match(source, /MAX_ATTACHMENT_TEXT_BYTES\s*=\s*20_000/);
-  assert.match(source, /allowedAttachmentExtensions/);
-  assert.match(source, /allowedAttachmentMimeTypes/);
-  assert.match(source, /sanitizeAttachmentName/);
-  assert.match(source, /hasSuspiciousAttachmentMetadata/);
-  assert.match(source, /getAttachmentValidationError/);
+  assert.match(source, /MAX_ANALYSIS_ASSETS\s*=\s*6/);
+  assert.match(source, /MAX_ASSET_SIZE_BYTES\s*=\s*5_000_000/);
+  assert.match(source, /MAX_TOTAL_ASSET_SIZE_BYTES\s*=\s*12_000_000/);
+  assert.match(source, /MAX_ASSET_TEXT_BYTES\s*=\s*20_000/);
+  assert.match(source, /MAX_ASSET_DATA_URL_CHARS\s*=\s*6_667_000/);
+  assert.match(source, /allowedAssetExtensions/);
+  assert.match(source, /allowedAssetMimeTypes/);
+  assert.match(source, /sanitizeAssetName/);
+  assert.match(source, /hasSuspiciousAssetMetadata/);
+  assert.match(source, /getAnalysisAssetValidationError/);
   assert.match(source, /Attachment is too large/);
   assert.match(source, /Total attachment size is too large/);
   assert.match(source, /Attachment text is too large/);
+  assert.match(source, /Attachment data is invalid/);
+  assert.match(source, /Attachment data does not match its declared size/);
   assert.match(source, /Attachment metadata is invalid/);
   assert.match(source, /Attachment type is not supported/);
-  assert.match(source, /recordAIAbuseEvent/);
-  assert.match(source, /oversized_input/);
+  assert.match(chatRoute, /recordAIAbuseEvent/);
+  assert.match(chatRoute, /oversized_input/);
 });
 
 test("admin API routes reject unauthorized callers through the shared guard", () => {

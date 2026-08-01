@@ -1,4 +1,5 @@
 declare module "@/app/lib/pdf-normalization.mjs" {
+  type PdfLocale = "en" | "tr" | "de" | "fr" | "es";
   export function normalizePdfText(value: string): string;
   export function preservePdfInlineTokens(value: string): string;
   export function cleanPdfContinuationFragment(value: string): string;
@@ -23,24 +24,25 @@ declare module "@/app/lib/pdf-normalization.mjs" {
   export function cleanPdfLegacyValidationIntelligenceContent(value?: string): string;
   export function extractPdfValidationIntelligenceSection<T extends { field?: string; title: string; content: string }>(
     sections?: T[],
-    locale?: "en" | "tr"
+    locale?: PdfLocale
   ): Array<T | { field: string; title: string; content: string }>;
-  export function detectPdfPresentationLocale(value?: string): "en" | "tr";
-  export function localizePdfPresentationLabel(value?: string, locale?: "en" | "tr"): string;
-  export function localizePdfPresentationText(value?: string, locale?: "en" | "tr"): string;
+  export function detectPdfPresentationLocale(value?: string): PdfLocale;
+  export function resolvePdfPresentationLocale(explicitLanguage?: unknown, value?: string): PdfLocale;
+  export function localizePdfPresentationLabel(value?: string, locale?: PdfLocale): string;
+  export function localizePdfPresentationText(value?: string, locale?: PdfLocale): string;
   export function createPdfBenchmarkIntelligenceSection(
     benchmarkFit?: unknown,
-    locale?: "en" | "tr",
+    locale?: PdfLocale,
     benchmarkScore?: unknown
   ): { field: string; title: string; content: string } | null;
   export function insertPdfBenchmarkIntelligenceSection<T extends { field?: string; title: string; content: string }>(
     sections?: T[],
     benchmarkFit?: unknown,
-    locale?: "en" | "tr",
+    locale?: PdfLocale,
     benchmarkScore?: unknown
   ): Array<T | { field: string; title: string; content: string }>;
   export function localizePdfReportSections<T extends { title: string; content: string }>(
     sections?: T[],
-    locale?: "en" | "tr"
+    locale?: PdfLocale
   ): T[];
 }

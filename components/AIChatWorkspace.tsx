@@ -328,16 +328,6 @@ function getStoredActiveReportId() {
   }
 }
 
-function shouldSendReportContext(prompt: string, messages: ChatMessage[]) {
-  const text = [...messages.slice(-4).map((message) => message.content), prompt]
-    .join("\n")
-    .toLowerCase();
-
-  return /\b(my report|the report|this report|attached report|report memory|tam|sam|som|competitors?|risks?|cagr|gross margin|market size|executive summary|swot|porter|financial dashboard|unit economics|sources?|recommendation|scenario|kpis?)\b/i.test(
-    text
-  );
-}
-
 function shouldAutoTitleConversation(title: string) {
   return (
     title === "New conversation" ||
@@ -1037,9 +1027,6 @@ export default function AIChatWorkspace({
   const [clearProfileConfirmOpen, setClearProfileConfirmOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
-  const [activeReportMemoryExplicit] = useState(() =>
-    Boolean(initialReportMemory?.id || getReportIdFromLocation())
-  );
   const [activeReportMemoryId] = useState(() =>
     initialReportMemory?.id || getReportIdFromLocation() || getStoredActiveReportId()
   );
@@ -1629,12 +1616,6 @@ export default function AIChatWorkspace({
       ? currentMessages.find((message) => message.id === replacementAssistantMessageId)
       : undefined;
     const replacementOriginalContent = replacementMessage?.content || "";
-    const reportContextId =
-      activeReportMemoryId &&
-      (shouldSendReportContext(submittedPrompt, currentMessages) ||
-        (activeReportMemoryExplicit && currentMessages.length === 0))
-        ? activeReportMemoryId
-        : "";
     const memoryMessages = currentMessages
       .filter(
         (message) =>
@@ -1724,7 +1705,7 @@ export default function AIChatWorkspace({
             textContent: attachment.textContent || "",
           })),
           messages: memoryMessages,
-          reportId: reportContextId,
+          reportId: activeReportMemoryId,
         }),
       });
 
@@ -1955,7 +1936,7 @@ export default function AIChatWorkspace({
               Clear AI profile
             </p>
             <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">
-              Remove saved advisor preferences?
+              Remove saved chat preferences?
             </h2>
             <p className="mt-2 text-sm leading-6 text-zinc-400">
               Future advisory sessions will stop using your saved country, industry,

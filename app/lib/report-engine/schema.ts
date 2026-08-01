@@ -1,6 +1,5 @@
 import type { ReportMetadata } from "@/app/lib/report-investment-score";
-
-export type ResponseLanguage = "English" | "Turkish";
+export type { ResponseLanguage } from "@/app/lib/report-language";
 
 export type ReportSectionPayload = {
   title: string;
@@ -20,12 +19,18 @@ export type ReportStreamEvent<
   TReport extends Record<string, string>,
   TField extends keyof TReport & string,
 > = Partial<TReport> & {
+  pipelineVersion?: string;
+  pipelineStage?: string;
+  pipelineRequestId?: string;
   done?: boolean;
   reportMetadata?: ReportMetadata;
   warning?: string;
   missingFields?: TField[];
   invalidFields?: TField[];
   partial?: boolean;
+  error?: string;
+  errorStage?: string;
+  fatal?: boolean;
 };
 
 export function createFullReportJsonSchema(name: string, fields: readonly string[]) {

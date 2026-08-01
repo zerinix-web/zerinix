@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { isPrivateBetaAllowed } from "@/app/lib/beta-access";
+import type { ResponseInput } from "openai/resources/responses/responses";
+import {
+  isLocalDevelopmentOwnerOrAdmin,
+  isPrivateBetaAllowed,
+} from "@/app/lib/beta-access";
 import { createClient } from "@/app/lib/supabase/server";
 import {
   checkRateLimit,
@@ -19,6 +23,15 @@ import {
   storeCachedAiResponse,
   type AiRequestKind,
 } from "@/app/lib/ai/governance";
+import {
+  buildAnalysisAssetContext as buildAttachmentContext,
+  buildAnalysisAssetModelContent as buildAttachmentModelContent,
+  extractAnalysisUrls,
+  getAnalysisAssetValidationError as getAttachmentValidationError,
+  normalizeAnalysisAssets as normalizeAttachments,
+  shouldUseAnalysisWebResearch,
+  type AnalysisAsset as ChatAttachmentInput,
+} from "@/app/lib/ai/analysis-assets";
 import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 import { recordAIAbuseEvent } from "@/app/lib/ai/abuse-protection";
 import { loadUserReport, type DashboardReport } from "@/app/dashboard/report-utils";
@@ -51,13 +64,6 @@ import {
 type ChatInputMessage = {
   role: "user" | "assistant";
   content: string;
-};
-
-type ChatAttachmentInput = {
-  name: string;
-  type: string;
-  size: number;
-  textContent: string;
 };
 
 type ReportMemoryContext = {
@@ -105,135 +111,7 @@ const intentExpertMap: Record<ChatIntent, AiExpert> = {
   General: "General AI Assistant",
 };
 
-const MAX_CHAT_ATTACHMENTS = 6;
-const MAX_ATTACHMENT_SIZE_BYTES = 5_000_000;
-const MAX_TOTAL_ATTACHMENT_SIZE_BYTES = 12_000_000;
-const MAX_ATTACHMENT_TEXT_BYTES = 20_000;
-const MAX_ATTACHMENT_NAME_LENGTH = 180;
 const MAX_REPORT_MEMORY_SECTION_CHARS = 2_800;
-const allowedAttachmentExtensions = new Set([
-  "txt",
-  "md",
-  "csv",
-  "json",
-  "ts",
-  "tsx",
-  "js",
-  "jsx",
-  "css",
-  "html",
-  "sql",
-  "pdf",
-  "doc",
-  "docx",
-]);
-const allowedAttachmentMimeTypes = new Set([
-  "text/plain",
-  "text/markdown",
-  "text/csv",
-  "application/csv",
-  "application/json",
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/octet-stream",
-]);
-
-function sanitizeAttachmentName(value: string) {
-  return value
-    .replace(/[\u0000-\u001f\u007f]/g, "")
-    .replace(/[\\/]+/g, "-")
-    .trim()
-    .slice(0, MAX_ATTACHMENT_NAME_LENGTH);
-}
-
-function getAttachmentExtension(name: string) {
-  const match = name.toLowerCase().match(/\.([a-z0-9]+)$/);
-
-  return match?.[1] || "";
-}
-
-function isAllowedAttachmentType(name: string, type: string) {
-  const extension = getAttachmentExtension(name);
-  const normalizedType = type.trim().toLowerCase();
-
-  if (!allowedAttachmentExtensions.has(extension)) {
-    return false;
-  }
-
-  return (
-    !normalizedType ||
-    normalizedType.startsWith("text/") ||
-    allowedAttachmentMimeTypes.has(normalizedType)
-  );
-}
-
-function hasSuspiciousAttachmentMetadata(record: Record<string, unknown>) {
-  return ["url", "signedUrl", "path", "bucket", "token", "authorization"].some(
-    (key) => key in record
-  );
-}
-
-function getAttachmentValidationError(value: unknown) {
-  if (value === undefined || value === null) {
-    return "";
-  }
-
-  if (!Array.isArray(value)) {
-    return "Attachments must be an array.";
-  }
-
-  if (value.length > MAX_CHAT_ATTACHMENTS) {
-    return `Attach up to ${MAX_CHAT_ATTACHMENTS} files per message.`;
-  }
-
-  let totalSize = 0;
-
-  for (const attachment of value) {
-    if (!attachment || typeof attachment !== "object") {
-      return "Invalid attachment payload.";
-    }
-
-    const record = attachment as Record<string, unknown>;
-    const rawName = typeof record.name === "string" ? record.name : "";
-    const name = sanitizeAttachmentName(rawName);
-    const type = typeof record.type === "string" ? record.type.trim() : "";
-    const size =
-      typeof record.size === "number" && Number.isFinite(record.size)
-        ? record.size
-        : 0;
-    const textContent = typeof record.textContent === "string" ? record.textContent : "";
-
-    if (!name || rawName !== name || name.includes("..") || hasSuspiciousAttachmentMetadata(record)) {
-      return "Attachment metadata is invalid.";
-    }
-
-    if (!isAllowedAttachmentType(name, type)) {
-      return "Attachment type is not supported.";
-    }
-
-    if (!name) {
-      return "Attachment name is required.";
-    }
-
-    if (size < 0 || size > MAX_ATTACHMENT_SIZE_BYTES) {
-      return "Attachment is too large.";
-    }
-
-    totalSize += size;
-
-    if (totalSize > MAX_TOTAL_ATTACHMENT_SIZE_BYTES) {
-      return "Total attachment size is too large.";
-    }
-
-    if (textContent.length > MAX_ATTACHMENT_TEXT_BYTES) {
-      return "Attachment text is too large.";
-    }
-  }
-
-  return "";
-}
-
 function normalizeMessages(value: unknown): ChatInputMessage[] {
   if (!Array.isArray(value)) {
     return [];
@@ -263,56 +141,6 @@ function normalizeMessages(value: unknown): ChatInputMessage[] {
     })
     .filter((message): message is ChatInputMessage => Boolean(message))
     .slice(-10);
-}
-
-function normalizeAttachments(value: unknown): ChatAttachmentInput[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((attachment) => {
-      if (!attachment || typeof attachment !== "object") {
-        return null;
-      }
-
-      const name = (attachment as { name?: unknown }).name;
-      const type = (attachment as { type?: unknown }).type;
-      const size = (attachment as { size?: unknown }).size;
-      const textContent = (attachment as { textContent?: unknown }).textContent;
-
-      if (typeof name !== "string" || !sanitizeAttachmentName(name)) {
-        return null;
-      }
-
-      return {
-        name: sanitizeAttachmentName(name),
-        type: typeof type === "string" ? type.trim().toLowerCase().slice(0, 120) : "",
-        size: typeof size === "number" && Number.isFinite(size) ? size : 0,
-        textContent:
-          typeof textContent === "string" ? textContent.trim().slice(0, 12_000) : "",
-      };
-    })
-    .filter((attachment): attachment is ChatAttachmentInput => Boolean(attachment))
-    .slice(-6);
-}
-
-function buildAttachmentContext(attachments: ChatAttachmentInput[]) {
-  if (attachments.length === 0) {
-    return "";
-  }
-
-  return attachments
-    .map((attachment, index) => {
-      const fileIntro = `File ${index + 1}: ${attachment.name} (${attachment.size} bytes)`;
-
-      if (!attachment.textContent) {
-        return `${fileIntro}\nReadable text was not available for this file.`;
-      }
-
-      return `${fileIntro}\n${attachment.textContent}`;
-    })
-    .join("\n\n---\n\n");
 }
 
 function normalizeReportId(value: unknown) {
@@ -715,9 +543,11 @@ function shouldUseChatCache(input: {
   reportMemory: ReportMemoryContext | null;
   profileContext: string;
   userMemoryContext: string;
+  webResearch: boolean;
 }) {
   return (
     input.attachments.length === 0 &&
+    !input.webResearch &&
     !input.reportMemory &&
     !input.profileContext &&
     !input.userMemoryContext &&
@@ -849,13 +679,13 @@ function formatMemoryRecallResponse(
     case "name":
       return `Hi ${content}. How can I help today?`;
     case "company":
-      return `How can I help with ${content}?`;
+      return `Your company is ${content}.`;
     case "language":
       return `Of course, I'll respond in ${content}.`;
     case "writing_style":
-      return `Of course, I'll use ${content}.`;
+      return `You prefer ${content}.`;
     case "long_term_goal":
-      return "How can I help with that goal?";
+      return `Your long-term goal is ${content}.`;
     default:
       return content;
   }
@@ -1218,12 +1048,64 @@ function sanitizeResponseShape(value: unknown, depth = 0): unknown {
   );
 }
 
+type ChatAuthorizationDiagnostic = {
+  authenticatedUserId: string | null;
+  authenticatedEmail: string | null;
+  selectedAction: string | null;
+  requestMode: string | null;
+  chatMode: string | null;
+  reportMode: string | null;
+  attachmentCount: number;
+  attachmentMimeTypes: string[];
+  hasAttachments: boolean;
+  fileAnalysis: boolean;
+  intent: string | null;
+  isStrategicReport: boolean;
+  isContinueAsChat: boolean;
+  authorizationBranch: string;
+  reason: string;
+};
+
+function logChatAuthorizationDecision(
+  branchId:
+    | "AUTH_BRANCH_01"
+    | "AUTH_BRANCH_02"
+    | "AUTH_BRANCH_03"
+    | "AUTH_BRANCH_04",
+  diagnostic: ChatAuthorizationDiagnostic
+) {
+  if (process.env.NODE_ENV === "production") {
+    return;
+  }
+
+  console.info(`[api:chat:authorization] ${branchId}`, diagnostic);
+}
+
 export async function POST(req: Request) {
   const requestValidation = validateApiRequest(req, {
-    maxBodyBytes: 1_000_000,
+    maxBodyBytes: 17_000_000,
   });
 
   if (!requestValidation.ok) {
+    if (requestValidation.status === 401 || requestValidation.status === 403) {
+      logChatAuthorizationDecision("AUTH_BRANCH_01", {
+        authenticatedUserId: null,
+        authenticatedEmail: null,
+        selectedAction: null,
+        requestMode: null,
+        chatMode: null,
+        reportMode: null,
+        attachmentCount: 0,
+        attachmentMimeTypes: [],
+        hasAttachments: false,
+        fileAnalysis: false,
+        intent: null,
+        isStrategicReport: false,
+        isContinueAsChat: false,
+        authorizationBranch: "request_validation_denied",
+        reason: requestValidation.message,
+      });
+    }
     return NextResponse.json(
       { error: requestValidation.message },
       { status: requestValidation.status }
@@ -1252,14 +1134,26 @@ export async function POST(req: Request) {
     } = await supabase.auth.getUser();
 
     if (userError || !user) {
+      logChatAuthorizationDecision("AUTH_BRANCH_02", {
+        authenticatedUserId: user?.id || null,
+        authenticatedEmail: user?.email || null,
+        selectedAction: null,
+        requestMode: null,
+        chatMode: null,
+        reportMode: null,
+        attachmentCount: 0,
+        attachmentMimeTypes: [],
+        hasAttachments: false,
+        fileAnalysis: false,
+        intent: null,
+        isStrategicReport: false,
+        isContinueAsChat: false,
+        authorizationBranch: userError
+          ? "supabase_get_user_error"
+          : "authenticated_user_missing",
+        reason: userError?.message || "No authenticated user was returned.",
+      });
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
-
-    if (!isPrivateBetaAllowed(user)) {
-      return NextResponse.json(
-        { error: "Private beta access only." },
-        { status: 403 }
-      );
     }
 
     const userRateLimit = checkRateLimit(`api:chat:${user.id}:${ip}`, {
@@ -1297,6 +1191,106 @@ export async function POST(req: Request) {
     const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
     const messages = normalizeMessages(body?.messages);
     const attachments = normalizeAttachments(body?.attachments);
+    const promptUrls = extractAnalysisUrls(prompt);
+    const webResearch = shouldUseAnalysisWebResearch(prompt, attachments);
+    const requestedMode =
+      body?.requestMode === "file_analysis" ? "file_analysis" : "chat";
+    const isFileAnalysis =
+      requestedMode === "file_analysis" && attachments.length > 0;
+    const rawChatMode =
+      typeof body?.chatMode === "string" ? body.chatMode.trim().slice(0, 80) : "";
+    const rawReportMode =
+      typeof body?.reportMode === "string" ? body.reportMode.trim().slice(0, 80) : "";
+    const selectedAction =
+      typeof body?.selectedAction === "string" && body.selectedAction.trim()
+        ? body.selectedAction.trim().slice(0, 80)
+        : requestedMode === "file_analysis"
+          ? "continue_as_chat"
+          : "chat";
+    const authorizationIntent = classifyIntent(messages, prompt, null);
+    const isStrategicReport =
+      rawReportMode === "plan" ||
+      rawReportMode === "market" ||
+      selectedAction === "generate_strategic_report";
+    const isContinueAsChat = selectedAction === "continue_as_chat";
+    const privateBetaAllowed = isPrivateBetaAllowed(user);
+    const localDevelopmentOwnerOrAdmin =
+      isLocalDevelopmentOwnerOrAdmin(req, user);
+    const betaAccessAllowed =
+      privateBetaAllowed || localDevelopmentOwnerOrAdmin;
+    const betaAuthorizationBranch = privateBetaAllowed
+      ? "private_beta_allowed"
+      : localDevelopmentOwnerOrAdmin
+        ? "local_development_owner_admin"
+        : isFileAnalysis
+          ? "authenticated_file_analysis"
+          : "private_beta_denied";
+
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[api:chat:file-routing]", {
+        selectedAction:
+          requestedMode === "file_analysis" ? "continue_as_chat" : "chat",
+        attachmentCount: attachments.length,
+        attachmentMimeTypes: attachments.map(
+          (attachment) => attachment.type || "application/octet-stream"
+        ),
+        resolvedRequestMode: isFileAnalysis ? "file_analysis" : "chat",
+        fileAnalysis: isFileAnalysis,
+        betaAuthorizationBranch,
+      });
+    }
+
+    if (!betaAccessAllowed && !isFileAnalysis) {
+      logChatAuthorizationDecision("AUTH_BRANCH_03", {
+        authenticatedUserId: user.id,
+        authenticatedEmail: user.email || null,
+        selectedAction,
+        requestMode: requestedMode,
+        chatMode: rawChatMode || "chat",
+        reportMode: rawReportMode || null,
+        attachmentCount: attachments.length,
+        attachmentMimeTypes: attachments.map(
+          (attachment) => attachment.type || "application/octet-stream"
+        ),
+        hasAttachments: attachments.length > 0,
+        fileAnalysis: isFileAnalysis,
+        intent: authorizationIntent,
+        isStrategicReport,
+        isContinueAsChat,
+        authorizationBranch: betaAuthorizationBranch,
+        reason:
+          "Private beta authorization failed because the authenticated user is not beta-allowed and the request did not resolve to file_analysis.",
+      });
+      return NextResponse.json(
+        { error: "Private beta access only." },
+        { status: 403 }
+      );
+    }
+
+    logChatAuthorizationDecision("AUTH_BRANCH_04", {
+      authenticatedUserId: user.id,
+      authenticatedEmail: user.email || null,
+      selectedAction,
+      requestMode: requestedMode,
+      chatMode: rawChatMode || "chat",
+      reportMode: rawReportMode || null,
+      attachmentCount: attachments.length,
+      attachmentMimeTypes: attachments.map(
+        (attachment) => attachment.type || "application/octet-stream"
+      ),
+      hasAttachments: attachments.length > 0,
+      fileAnalysis: isFileAnalysis,
+      intent: authorizationIntent,
+      isStrategicReport,
+      isContinueAsChat,
+      authorizationBranch: betaAuthorizationBranch,
+      reason: privateBetaAllowed
+        ? "Authorization continued because the authenticated user is private-beta allowed."
+        : localDevelopmentOwnerOrAdmin
+          ? "Authorization continued because an authenticated owner or admin is using localhost in development."
+        : "Authorization continued because the request resolved to authenticated file_analysis.",
+    });
+
     const reportId = normalizeReportId(body?.reportId);
     const modelPreference = body?.modelPreference === "balanced" ? "balanced" : "fast";
     const conversationId =
@@ -1408,14 +1402,16 @@ export async function POST(req: Request) {
     const missingAdvisorContext = advisorRequest
       ? getMissingAdvisorContext(messages, prompt, chatProfile)
       : [];
-    const essentialAdvisorQuestions = advisorRequest && !reportMemory
+    const essentialAdvisorQuestions =
+      advisorRequest &&
+      !reportMemory &&
+      attachments.length === 0 &&
+      promptUrls.length === 0
       ? getEssentialAdvisorQuestions(selectedIntent, prompt, missingAdvisorContext)
       : [];
-    const requestKind = classifyChatRequestKind(
-      selectedIntent,
-      attachments,
-      advisorRequest
-    );
+    const requestKind = isFileAnalysis
+      ? "file_analysis"
+      : classifyChatRequestKind(selectedIntent, attachments, advisorRequest);
     const profileContext = shouldAttachProfileContext({
       prompt,
       messages,
@@ -1533,6 +1529,7 @@ export async function POST(req: Request) {
       reportMemory,
       profileContext,
       userMemoryContext,
+      webResearch,
     });
     const chatCacheKey = createAiCacheKey({
       endpoint: "/api/chat",
@@ -1602,6 +1599,7 @@ export async function POST(req: Request) {
     }
 
     const attachmentContext = buildAttachmentContext(attachments);
+    const attachmentModelContent = buildAttachmentModelContent(attachments);
     let client: ReturnType<typeof createOpenAiClient>;
 
     try {
@@ -1646,7 +1644,7 @@ export async function POST(req: Request) {
         ? `Persistent user profile for non-sensitive personalization:\n${profileContext}\nUse this profile to avoid asking for details the user has already saved. If the user's latest message conflicts with the profile, prioritize the latest message.`
         : "No persistent chat profile is available yet. Do not invent profile preferences.",
       userMemoryContext
-        ? `Persistent user memories for stable personalization:\n${userMemoryContext}\nUse these memories as durable user facts and preferences. If the latest user message conflicts with memory, prioritize the latest message and only update memory when the user explicitly asks you to remember or forget something.`
+        ? `Persistent user memories for stable personalization:\nPersistent user memory context:\n${userMemoryContext}\nUse these memories as durable user facts and preferences. If the latest user message conflicts with memory, prioritize the latest message and only update memory when the user explicitly asks you to remember or forget something.`
         : "No persistent user memories are stored yet. Do not claim anything has been remembered unless the user explicitly asked and the request is handled.",
       reportMemory
         ? [
@@ -1659,7 +1657,10 @@ export async function POST(req: Request) {
         : "Answer from the current conversation and general reasoning. Do not mention missing report context unless the user explicitly asks about a saved report.",
       "Answer naturally and directly. You may help with business, strategy, operations, finance, product, marketing, technology, or general questions.",
       "Use the conversation history for context, but do not fabricate facts.",
-      "When attached file text is provided, treat it as user-supplied context. If a file has no readable text, say so briefly when relevant.",
+      "Treat attached file text and binary file inputs as primary user-supplied evidence. Analyze every attached asset directly, attribute material findings to its filename, and use those findings before general model knowledge. If neither readable text nor binary content is available, say so briefly when relevant.",
+      promptUrls.length > 0
+        ? `The user supplied these URLs as primary external context:\n${promptUrls.join("\n")}\nUse web research to inspect and corroborate them before answering.`
+        : "No URL was supplied as primary external context.",
       "If the user asks for a structured investor report, suggest AI Plan or Market Analysis mode instead of generating the full report in Chat mode.",
       "Advisor quality rules: ask follow-up questions only if the missing information is absolutely necessary. Never ask for information already present in the persistent profile or conversation. If useful but non-critical information is missing, proceed with clearly labeled assumptions.",
       "When giving recommendations, go deeper than generic advice. Rank options from best to worst, show step-by-step reasoning, explain why each option was chosen, and include estimated investment, expected ROI or outcome range, timeline, risks, advantages, disadvantages, and next actions whenever applicable.",
@@ -1716,6 +1717,19 @@ export async function POST(req: Request) {
         content: prompt,
       },
     ];
+    const providerInput: ResponseInput =
+      attachmentModelContent.length > 0
+        ? [
+            ...inputMessages.slice(0, -1),
+            {
+              role: "user",
+              content: [
+                { type: "input_text", text: prompt },
+                ...attachmentModelContent,
+              ],
+            },
+          ]
+        : inputMessages;
     const inputCostMetrics = createAiCostOptimizationMetrics({
       beforeText: `${instructionsText}\n${originalInputMessages
         .map((message) => `${message.role}: ${message.content}`)
@@ -1754,9 +1768,20 @@ export async function POST(req: Request) {
           reasoning: { effort: "minimal" },
           text: { verbosity: "low" },
           instructions: instructionsText,
-          input: inputMessages,
+          input: providerInput,
           max_output_tokens: maxOutputTokens,
           stream: true,
+          ...(webResearch
+            ? {
+                tools: [
+                  {
+                    type: "web_search_preview" as const,
+                    search_context_size: "low" as const,
+                  },
+                ],
+                include: ["web_search_call.action.sources" as const],
+              }
+            : {}),
         },
         { signal: req.signal }
       )

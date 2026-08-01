@@ -6,6 +6,7 @@ import {
   EvidenceNormalizer,
   EvidenceRanker,
   assessEvidenceReliability,
+  buildEvidenceSearchText,
   extractEvidenceFacts,
 } from "../app/lib/research-evidence/index.mjs";
 
@@ -37,6 +38,22 @@ test("EvidenceNormalizer canonicalizes metadata, URLs, dates, language, and fact
     "The market reached $12 million in 2024.",
   ]);
   assert.equal(evidence.provenance[0].collector, "EvidenceCollector");
+});
+
+test("entity relevance text retains facts found in provider snippets and claims", () => {
+  const searchText = buildEvidenceSearchText({
+    title: "Municipality planning notice",
+    source: "defne.bel.tr",
+    url: "https://www.defne.bel.tr/plan/notice",
+    claim:
+      "Hatay Defne Dursunlu Mahallesi 1517 ada 1 parsel için plan kaydı incelendi.",
+    value: "Dursunlu plan kaydı",
+    supportingData: ["Ada 1517", "Parsel 1"],
+  });
+
+  assert.match(searchText, /dursunlu/);
+  assert.match(searchText, /ada 1517/);
+  assert.match(searchText, /parsel 1/);
 });
 
 test("source reliability favors government and filings over news, company, and AI evidence", () => {

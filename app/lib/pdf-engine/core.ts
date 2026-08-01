@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
+import { reportCopy } from "@/app/lib/report-language";
 
-export type PdfLocale = "en" | "tr";
+export type PdfLocale = import("@/app/lib/report-language").ReportLanguageCode;
 export type PdfDocument = jsPDF;
 
 export function createPdfDocument() {
@@ -81,9 +82,7 @@ export function drawPdfFooter(
   pdf.setFontSize(7);
   pdf.setTextColor("#71717a");
   pdf.text(
-    locale === "tr"
-      ? `Sayfa ${currentPage} / ${pdf.getNumberOfPages()}`
-      : `Page ${currentPage} / ${pdf.getNumberOfPages()}`,
+    `${reportCopy(locale, "page")} ${currentPage} / ${pdf.getNumberOfPages()}`,
     pageWidth - margin - 22,
     pageHeight - 5
   );
@@ -102,4 +101,3 @@ export function drawPdfLogoMark(
   pdf.setTextColor("#ccfbf1");
   pdf.text("Z", x + size * 0.34, logoY + size * 0.68);
 }
-

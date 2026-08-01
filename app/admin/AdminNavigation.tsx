@@ -46,7 +46,7 @@ const navGroups = [
       { label: "Support", href: "/admin/support", icon: Headphones },
       { label: "Logs", href: "/admin/logs", icon: BarChart3 },
       { label: "Security", href: "/admin/security", icon: LockKeyhole },
-      { label: "API Keys", href: "/admin/api-management", icon: KeyRound },
+      { label: "API Management", href: "/admin/api-management", icon: KeyRound },
       { label: "Settings", href: "/admin/settings", icon: Settings },
     ],
   },

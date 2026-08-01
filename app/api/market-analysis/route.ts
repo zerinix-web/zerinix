@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { isPrivateBetaAllowed } from "@/app/lib/beta-access";
+import {
+  isLocalDevelopmentOwnerOrAdmin,
+  isPrivateBetaAllowed,
+} from "@/app/lib/beta-access";
 import { isAmbiguousBusinessRequest } from "@/app/lib/business-idea-detection";
 import { createClient } from "@/app/lib/supabase/server";
 import {
@@ -19,6 +22,20 @@ import {
   storeCachedAiResponse,
   type TokenUsage,
 } from "@/app/lib/ai/governance";
+import {
+  buildAnalysisAssetContext,
+  buildAnalysisAssetEvidenceInstructions,
+  buildAnalysisProviderInput,
+  createAnalysisAssetFingerprint,
+  getAnalysisAssetValidationError,
+  normalizeAnalysisAssets,
+} from "@/app/lib/ai/analysis-assets";
+import {
+  formatDomainResearchBundle,
+  runDomainAwareResearch,
+  validateDomainResearchQuality,
+  validateDomainResearchQualitySafely,
+} from "@/app/lib/ai/domain-research";
 import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 import { createAiJobDescriptor } from "@/app/lib/ai/queue";
 import {
@@ -75,6 +92,7 @@ import {
 } from "@/app/lib/report-engine/prompts/market";
 import { createFullReportJsonSchema } from "@/app/lib/report-engine/schema";
 import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
+import { getResponseLanguage, resolveReportLanguage } from "@/app/lib/report-language";
 
 const reportFields = marketReportFields;
 const fieldPrompts = marketPrompts;
@@ -264,8 +282,11 @@ function detectLanguage(value: string): ResponseLanguage {
   return hasTurkishWords ? "Turkish" : "English";
 }
 
-function normalizeLanguage(_value: unknown, prompt: string): ResponseLanguage {
-  return detectLanguage(prompt);
+function normalizeLanguage(value: unknown, prompt: string): ResponseLanguage {
+  return getResponseLanguage(resolveReportLanguage({
+    explicitLanguage: value,
+    requestText: prompt,
+  }));
 }
 
 function isMarketReportField(value: string | undefined): value is MarketReportField {
@@ -689,12 +710,14 @@ function buildMarketOpportunityScore(context: AiFinancialModelContext, language:
 
 function buildMarketConfidenceBreakdown(context: AiFinancialModelContext, language: ResponseLanguage) {
   const engine = context.investmentScore.decisionEngine;
+  const investmentConfidence = context.investmentScore.confidence;
   const market = scorePercent(engine.marketScore.score, engine.marketScore.maximumScore);
   const competition = scorePercent(engine.competitionScore.score, engine.competitionScore.maximumScore);
   const financial = scorePercent(engine.financialScore.score, engine.financialScore.maximumScore);
   const execution = scorePercent(engine.executionScore.score, engine.executionScore.maximumScore);
   const product = scorePercent(engine.technologyScore.score, engine.technologyScore.maximumScore);
   return [
+    marketText(language, `- Investment Confidence: ${investmentConfidence}%`, `- Yatırım Güveni: ${investmentConfidence}%`),
     marketText(language, `- Decision Confidence: ${context.reportIntelligence.totalScore}% — derived from evidence quality, source coverage, financial certainty, benchmark fit, and validation readiness.`, `- Karar Güveni: ${context.reportIntelligence.totalScore}% — kanıt kalitesi, kaynak kapsamı, finansal kesinlik, benchmark uyumu ve doğrulama hazırlığından türetilmiştir.`),
     marketText(language, `- Market Confidence: ${market}% — ${engine.marketScore.explanation}`, `- Pazar Güveni: ${market}% — ${engine.marketScore.explanation}`),
     marketText(language, `- Competition Confidence: ${competition}% — ${engine.competitionScore.explanation}`, `- Rekabet Güveni: ${competition}% — ${engine.competitionScore.explanation}`),
@@ -1194,7 +1217,7 @@ function clarificationMessage() {
 export async function POST(req: Request) {
   try {
     const requestValidation = validateApiRequest(req, {
-      maxBodyBytes: 250_000,
+      maxBodyBytes: 17_000_000,
     });
 
     if (!requestValidation.ok) {
@@ -1233,7 +1256,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
 
-    if (!isPrivateBetaAllowed(user)) {
+    if (
+      !isPrivateBetaAllowed(user) &&
+      !isLocalDevelopmentOwnerOrAdmin(req, user)
+    ) {
       return NextResponse.json(
         { error: "Private beta access only." },
         { status: 403 }
@@ -1258,19 +1284,36 @@ export async function POST(req: Request) {
       );
     }
 
+    const body = await req.json();
+    const attachmentValidationError = getAnalysisAssetValidationError(
+      body?.attachments
+    );
+
+    if (attachmentValidationError) {
+      return NextResponse.json(
+        { error: attachmentValidationError },
+        { status: 400 }
+      );
+    }
+
     const {
       prompt,
       field,
       section,
       language,
       reportRequestId: rawReportRequestId,
-    } = await req.json();
+    } = body;
+    const analysisAssets = normalizeAnalysisAssets(body?.attachments);
+    const assetContext = buildAnalysisAssetContext(analysisAssets);
+    const assetEvidenceInstructions =
+      buildAnalysisAssetEvidenceInstructions(analysisAssets);
+    const assetFingerprint = createAnalysisAssetFingerprint(analysisAssets);
     const promptText = typeof prompt === "string" ? prompt : "";
     const responseLanguage = normalizeLanguage(language, promptText);
     const reportRequestId =
       typeof rawReportRequestId === "string" ? rawReportRequestId.trim().slice(0, 128) : "";
 
-    if (isWeakMarketPrompt(promptText)) {
+    if (isWeakMarketPrompt(promptText) && analysisAssets.length === 0) {
       return NextResponse.json(
         { error: clarificationMessage() },
         { status: 422 }
@@ -1318,8 +1361,11 @@ export async function POST(req: Request) {
     }
 
     const instructions = buildMarketLanguageInstructions(responseLanguage);
+    const analysisPrompt = assetContext
+      ? `${promptText}\n\nUploaded asset evidence:\n${assetContext}`
+      : promptText;
     const canonicalFinancialAssumptions = createCanonicalFinancialAssumptions({
-      prompt: promptText,
+      prompt: analysisPrompt,
       reportKind: "market_analysis",
     });
     const financialAssumptionsContext = formatCanonicalFinancialAssumptions(
@@ -1350,6 +1396,8 @@ export async function POST(req: Request) {
 Output language hard requirement: ${responseLanguage}. Ignore saved profile language, persistent memory language, browser locale, and previous conversation language.
 
 Business idea: ${promptText}
+${assetContext ? `\nUploaded asset evidence:\n${assetContext}\n` : ""}
+${assetEvidenceInstructions ? `\nAsset evidence rules:\n${assetEvidenceInstructions}\n` : ""}
 
 ${financialAssumptionsContext}
 ${userMemoryInstruction ? `\n${userMemoryInstruction}\n` : ""}
@@ -1419,12 +1467,36 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
     }
 
     if (isFullReportRequest) {
+      const marketResearchClient = createOpenAiClient();
+      const domainResearch = await runDomainAwareResearch({
+        client: marketResearchClient,
+        model,
+        prompt: promptText,
+        assets: analysisAssets,
+        language: responseLanguage,
+        signal: req.signal,
+        researchUserId: user.id,
+      });
+      const domainResearchContext = formatDomainResearchBundle(domainResearch);
+
+      if (domainResearch.recommendedOutput === "clarification") {
+        return NextResponse.json(
+          {
+            error:
+              responseLanguage === "Turkish"
+                ? `Araştırma tamamlandı, ancak karar raporu için doğrulanabilir temel kanıt bulunamadı. Gerekli bilgi veya belge: ${domainResearch.unresolvedFields.join(", ") || "karar bağlamı"}.`
+                : `Research completed, but no verifiable core evidence was found for a decision report. Required information or document: ${domainResearch.unresolvedFields.join(", ") || "decision context"}.`,
+          },
+          { status: 422 }
+        );
+      }
+
       const fullReportCacheKey = createAiCacheKey({
         endpoint: "/api/market-analysis",
         normalizedPrompt: userMemoryContext
-          ? `${productionLimit.normalizedPrompt}\nmemories:${userMemoryContext}`
-          : productionLimit.normalizedPrompt,
-        mode: `market_analysis:${FULL_REPORT_FIELD}:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
+          ? `${productionLimit.normalizedPrompt}\nmemories:${userMemoryContext}\nassets:${assetFingerprint}\nresearch:${domainResearchContext}`
+          : `${productionLimit.normalizedPrompt}\nassets:${assetFingerprint}\nresearch:${domainResearchContext}`,
+        mode: `market_analysis:${FULL_REPORT_FIELD}:research_v1:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
         language: responseLanguage,
         model,
       });
@@ -1453,15 +1525,26 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
         let cachedInvalidFields: MarketReportField[] = [];
 
         try {
-          const parsedCachePayload = parseFullMarketReport(
-            cachedFullReport.responseText,
-            canonicalFinancialAssumptions,
-            responseLanguage
-          );
+          const parsedCachePayload =
+            responseLanguage === "English"
+              ? parseFullMarketReport(
+                  cachedFullReport.responseText,
+                  canonicalFinancialAssumptions
+                )
+              : parseFullMarketReport(
+                  cachedFullReport.responseText,
+                  canonicalFinancialAssumptions,
+                  responseLanguage
+                );
 
           parsedCachedReport = parsedCachePayload.report;
           cachedMissingFields = parsedCachePayload.missingFields;
           cachedInvalidFields = parsedCachePayload.invalidFields;
+          validateDomainResearchQuality({
+            report: parsedCachedReport,
+            bundle: domainResearch,
+            expectedDomain: "business",
+          });
         } catch (error) {
           console.error("[api:market-analysis] Ignoring malformed cached full report", {
             reportRequestId: reportRequestId || null,
@@ -1581,9 +1664,14 @@ Do not generate business-plan sections here. Do not suggest website URLs, domain
 Output language hard requirement: ${responseLanguage}. Ignore saved profile language, persistent memory language, browser locale, and previous conversation language.
 
 Business idea: ${promptText}
+${assetContext ? `\nUploaded asset evidence:\n${assetContext}\n` : ""}
+${assetEvidenceInstructions ? `\nAsset evidence rules:\n${assetEvidenceInstructions}\n` : ""}
 
 ${financialAssumptionsContext}
 ${userMemoryInstruction ? `\n${userMemoryInstruction}\n` : ""}
+
+Completed domain-aware research (this is the closed evidence registry for the report):
+${domainResearchContext}
 
 Generate the complete Market Analysis report as one structured JSON object.
 Return exactly these JSON keys and no others:
@@ -1592,7 +1680,10 @@ ${reportFields.map((fieldName) => `- ${fieldName}: ${fieldLabelsByLanguage[respo
 Deterministic report contract:
 ${buildFullReportStructureDirectives("market_analysis").map((directive) => `- ${directive}`).join("\n")}
 
-First perform current web research in this single request. Use reliable sources for market size, competitor companies, industry trends, target customers, recent news, pricing models, SWOT inputs, Porter's Five Forces inputs, and entry strategy signals.
+Research is already complete. Synthesize the uploaded evidence and the evidence registry above; do not perform a second research pass.
+Every material factual claim must include its evidence label and an inline [R#], [Asset: filename], [User], or [Method: description] reference.
+Separate observed evidence, estimates, assumptions, unknowns, and recommendations. Never present an estimate as verified.
+If the research output is preliminary, keep the recommendation conditional and identify the remaining verification step.
 Before writing visible output, silently construct the full Integrated Market Strategy Model. Do not output the model.
 Derive every section only from that model so market size, ICP, competitors, pricing, GTM, financial implications, risks, and recommendation stay consistent.
 Follow the section ownership contract exactly; do not borrow content assigned to another section.
@@ -1644,7 +1735,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
               quotaConsumed: false,
             });
 
-            const client = createOpenAiClient();
+            const client = marketResearchClient;
             const reportAbort = createReportAbortSignal(
               req.signal,
               FULL_REPORT_OPENAI_TIMEOUT_MS
@@ -1663,18 +1754,14 @@ Do not include markdown code fences, braces inside string values, or commentary 
                   {
                     model,
                     instructions,
-                    input: fullReportInput,
+                    input: buildAnalysisProviderInput(
+                      fullReportInput,
+                      analysisAssets
+                    ),
                     max_output_tokens: 6500,
                     reasoning: {
                       effort: "low",
                     },
-                    tools: [
-                      {
-                        type: "web_search_preview",
-                        search_context_size: "low",
-                      },
-                    ],
-                    include: ["web_search_call.action.sources"],
                     text: {
                       verbosity: "medium",
                       format: createFullReportJsonSchema(
@@ -1709,11 +1796,19 @@ Do not include markdown code fences, braces inside string values, or commentary 
               report: parsedReport,
               missingFields,
               invalidFields,
-            } = parseFullMarketReport(
-              responseText,
-              canonicalFinancialAssumptions,
-              responseLanguage
-            );
+            } =
+              responseLanguage === "English"
+                ? parseFullMarketReport(responseText, canonicalFinancialAssumptions)
+                : parseFullMarketReport(
+                    responseText,
+                    canonicalFinancialAssumptions,
+                    responseLanguage
+                  );
+            validateDomainResearchQualitySafely({
+              report: parsedReport,
+              bundle: domainResearch,
+              expectedDomain: "business",
+            });
             const reportMetadataContext = createReportMetadataContext({
               prompt: promptText,
               report: parsedReport,
@@ -1898,8 +1993,8 @@ Do not include markdown code fences, braces inside string values, or commentary 
     const cacheKey = createAiCacheKey({
       endpoint: "/api/market-analysis",
       normalizedPrompt: userMemoryContext
-        ? `${productionLimit.normalizedPrompt}\nmemories:${userMemoryContext}`
-        : productionLimit.normalizedPrompt,
+        ? `${productionLimit.normalizedPrompt}\nmemories:${userMemoryContext}\nassets:${assetFingerprint}`
+        : `${productionLimit.normalizedPrompt}\nassets:${assetFingerprint}`,
       mode: `market_analysis:${reportField}:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
       language: responseLanguage,
       model,
@@ -2004,7 +2099,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
         {
           model,
           instructions,
-          input,
+          input: buildAnalysisProviderInput(input, analysisAssets),
           max_output_tokens: fieldConfig.maxTokens,
           stream: true,
           reasoning: {

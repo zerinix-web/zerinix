@@ -69,8 +69,8 @@ export function getTavilyConfigurationStatus() {
 }
 
 /**
- * Dormant integration point. Nothing in the current application imports this
- * factory. Production remains hard-disabled even if its flag is set.
+ * Server-only integration point used by the report research fallback when the
+ * explicit feature flag and credential are both configured.
  */
 export function createTavilyResearchCoordinator(
   options: TavilyServerFactoryOptions = {}

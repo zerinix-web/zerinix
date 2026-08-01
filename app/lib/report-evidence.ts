@@ -4,7 +4,7 @@ export type EvidenceLevel =
   | "planningAssumption"
   | "validationRequired";
 
-export type EvidenceLocale = "English" | "Turkish";
+export type EvidenceLocale = import("@/app/lib/report-language").ResponseLanguage;
 
 export const evidenceLabels: Record<EvidenceLocale, Record<EvidenceLevel, string>> = {
   English: {
@@ -19,6 +19,9 @@ export const evidenceLabels: Record<EvidenceLocale, Record<EvidenceLevel, string
     planningAssumption: "Varsayım",
     validationRequired: "AI Analizi",
   },
+  German: { verified: "Verifiziert", benchmarkDerived: "Geschätzt", planningAssumption: "Annahme", validationRequired: "KI-Analyse" },
+  French: { verified: "Vérifié", benchmarkDerived: "Estimé", planningAssumption: "Hypothèse", validationRequired: "Analyse IA" },
+  Spanish: { verified: "Verificado", benchmarkDerived: "Estimado", planningAssumption: "Supuesto", validationRequired: "Análisis de IA" },
 };
 
 export function getEvidenceLabel(level: EvidenceLevel, locale: EvidenceLocale = "English") {
