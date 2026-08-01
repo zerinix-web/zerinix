@@ -72,9 +72,15 @@ const presentationFields = [
 ] as const satisfies readonly RealEstateReportField[];
 
 const internalResearchDiagnosticPattern =
-  /(?:\bprovider_unavailable\b|\bcompleted_no_evidence\b|\brequest (?:was )?aborted\b|\bprovider disabled\b|\bresult\s*=\s*failed\b|\breason\s*=\s*request was aborted\b|\bresearch attempts?\b|\battempt\s*\||\bnext provider\b|\bsearch query\b|\b(?:provider|query|result|reason|status)\s*[:=|]|\b(?:stack trace|request payload|api response|execution log)\b|\b(?:tavily|perplexity|firecrawl|serper|exa|openai|web_search)\b|\baraştırma sağlayıc(?:ı|ıları)\b|\brapor oluşturma doğrulama hatası\b|\bişlem hattı\b|\bZERINIX validated request context\b|\bvalidated request context\b|\bclassification (?:result|wording|context)\b|\bdahili (?:metodoloji|sınıflandırma)\b)/i;
+  /(?:\bprovider_unavailable\b|\bcompleted_no_evidence\b|\brequest (?:was )?aborted\b|\bprovider disabled\b|\bresult\s*=\s*failed\b|\breason\s*=\s*request was aborted\b|\bresearch (?:attempts?|failed|timed out)\b|\baraştırma (?:başarısız|zaman aşımına uğradı)\b|\battempt\s*\||\bnext provider\b|\bsearch query\b|\b(?:provider|query|result|reason|status)\s*[:=|]|\b(?:stack trace|request payload|api response|execution log)\b|\b(?:tavily|perplexity|firecrawl|serper|exa|openai|web_search)\b|\baraştırma sağlayıc(?:ı|ıları)\b|\brapor oluşturma doğrulama hatası\b|\bişlem hattı\b|\bZERINIX validated request context\b|\bvalidated request context\b|\bclassification (?:result|wording|context)\b|\bdahili (?:metodoloji|sınıflandırma)\b)/i;
 const technicalMethodologyPattern =
   /(?:\bsource parsing\b|\bevidence normaliz(?:er|ation)\b|\bclaim[- ]level mapping\b|\bresearch pipeline\b|\braw pipeline\b|\bschema validation\b|\bjson (?:payload|response)\b|\btechnical diagnostics?\b)/i;
+const userVisibleTechnicalValuePattern =
+  /^(?:analysis|undefined|null|unknown(?:_field)?|internal(?:[_ -](?:source|provider|task|schema))?(?:[_ -]?id)?|provider(?:[_ -]?id)?|research[_ -]?task(?:[_ -]?id)?|task[_ -]?id|source[_ -]?id|schema(?:[_ -]?field)?|stack(?:[_ -]?trace)?|error(?:[_ -]?(?:message|code))?|json(?:[_ -]?key)?)$/i;
+const embeddedTechnicalValuePattern =
+  /\b(?:undefined|null|unknown_field|provider[_ -]?id|research[_ -]?task[_ -]?id|task[_ -]?id|source[_ -]?id|schema[_ -]?field|stack[_ -]?trace)\b/i;
+const repeatedMissingDecisionPattern =
+  /(?:doğrulanmadan bu başlıkta kesin yatırım sonucu üretilemez|no definitive investment conclusion can be made for this section until)/i;
 const brokenSourceTextPattern =
   /(?:\bURL\s*:\s*(?:belge|yok|none|n\/?a|null|undefined)?\s*$|\b(?:[a-z0-9-]+\.\s+){2,}[a-z]{2,}\b|^\s*[-•*]?\s*(?:[a-z0-9-]+\.\s*){1,2}$)/i;
 const bareDomainPattern = /\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/i;
@@ -96,6 +102,40 @@ const invalidSourcePathPattern =
   /(?:^|\/)(?:yüklenen|yuklenen|uploaded|belge|missing|unknown|null|undefined)(?:\/|$)/i;
 const genericSourceHomepagePattern =
   /^\/(?:home|homepage|anasayfa|index(?:\.html?)?|haberler|news|duyurular)?\/?$/i;
+
+const evidenceFieldToSection: Record<string, RealEstateReportField> = {
+  administrative_location: "location",
+  location: "location",
+  geospatial_context: "location",
+  zoning_status: "zoningLandUseStatus",
+  zoning: "zoningLandUseStatus",
+  land_use: "zoningLandUseStatus",
+  title_status: "ownershipTitleFindings",
+  ownership: "ownershipTitleFindings",
+  encumbrances: "ownershipTitleFindings",
+  legal_access: "accessInfrastructure",
+  access: "accessInfrastructure",
+  infrastructure: "accessInfrastructure",
+  utilities: "accessInfrastructure",
+  environmental_risk: "environmentalGeotechnicalRisks",
+  geotechnical_risk: "environmentalGeotechnicalRisks",
+  natural_hazards: "environmentalGeotechnicalRisks",
+  hazards: "environmentalGeotechnicalRisks",
+  hazard: "environmentalGeotechnicalRisks",
+  comparable_sales: "comparableMarketEvidence",
+  comparable_listings: "comparableMarketEvidence",
+  comparables: "comparableMarketEvidence",
+  market_evidence: "comparableMarketEvidence",
+  valuation_method: "valuationRange",
+  valuation: "valuationRange",
+  liquidity: "liquidity",
+  local_demand: "liquidity",
+  regional_development: "developmentPotential",
+  public_projects: "developmentPotential",
+  amenities_projects: "developmentPotential",
+  transport_projects: "developmentPotential",
+  development_potential: "developmentPotential",
+};
 
 const sectionEvidencePatterns: Partial<Record<RealEstateReportField, RegExp>> = {
   ownershipTitleFindings:
@@ -190,7 +230,7 @@ function missingRequiredSectionContent(
       liquidity:
         "Likidite değerlendirmesi için yerel işlem sıklığı ve talep göstergeleri gereklidir.",
       developmentPotential:
-        "Geliştirme potansiyeli; imar, erişim, altyapı ve zemin koşulları birlikte olumluysa değerlendirilebilir.",
+        "Mevcut kanıtlarla geliştirme potansiyeli doğrulanmadı.",
       scenarioAnalysis:
         "Sayısal senaryo, satın alma koşulları ve kritik resmî kayıtlar tamamlandığında oluşturulabilir.",
       missingInformation:
@@ -384,6 +424,105 @@ function evidenceSupportsReportSection(
     context,
     hasValidatedComparables
   );
+}
+
+function normalizeEvidenceField(value: string) {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("tr")
+    .replace(/[^\p{L}\p{N}]+/gu, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function sectionForEvidence(item: RealEstateQualityEvidence) {
+  return evidenceFieldToSection[
+    normalizeEvidenceField(String(item.field || item.taskId || ""))
+  ];
+}
+
+function evidenceAccessDate(item: RealEstateQualityEvidence) {
+  const metadata = item as RealEstateQualityEvidence & {
+    accessedAt?: string;
+    lastChecked?: string;
+    retrievedAt?: string;
+  };
+  return String(
+    metadata.accessedAt || metadata.lastChecked || metadata.retrievedAt || ""
+  ).trim();
+}
+
+function evidencePresentationLine(
+  item: RealEstateQualityEvidence,
+  language: ResponseLanguage
+) {
+  const url = canonicalizeSourceUrl(String(item.url || ""));
+  const claim = String(item.claim || "").trim();
+  const value = String(item.value || "").trim();
+  const title = String(item.sourceTitle || "").trim();
+  const publisher = String(item.publisher || "").trim() || url?.hostname || "";
+  const accessedAt = evidenceAccessDate(item);
+  if (!url || !claim || !value || !title) return "";
+
+  const finding = value === claim ? claim : `${claim}: ${value}`;
+  const accessText = accessedAt
+    ? language === "Turkish"
+      ? `; Erişim tarihi: ${accessedAt}`
+      : `; Access date: ${accessedAt}`
+    : "";
+  return language === "Turkish"
+    ? `[${item.label}] ${finding}. Kaynak başlığı: ${title}; Kurum/site: ${publisher}; URL: ${url.toString()}${accessText}`
+    : `[${item.label}] ${finding}. Source title: ${title}; Institution/site: ${publisher}; URL: ${url.toString()}${accessText}`;
+}
+
+function appendUsableResearchEvidence({
+  report,
+  evidence,
+  context,
+  language,
+  hasValidatedComparables,
+  valuationOnly,
+}: {
+  report: RealEstateReport;
+  evidence: readonly RealEstateQualityEvidence[];
+  context: PropertyEvidenceContext;
+  language: ResponseLanguage;
+  hasValidatedComparables: boolean;
+  valuationOnly: boolean;
+}) {
+  const enriched = { ...report };
+  for (const item of evidence) {
+    const section = sectionForEvidence(item);
+    if (!section || (section === "valuationRange") !== valuationOnly) continue;
+    if (
+      !evidenceSupportsReportSection(
+        item,
+        section,
+        context,
+        hasValidatedComparables
+      )
+    ) {
+      continue;
+    }
+    const line = evidencePresentationLine(item, language);
+    if (!line) continue;
+    const url = canonicalizeSourceUrl(String(item.url || ""));
+    const existingLines = (enriched[section] || "").split("\n");
+    const existingIndex = url
+      ? existingLines.findIndex((existingLine) =>
+          sourceUrlsFromLine(existingLine).some(
+            (candidate) =>
+              candidate.toString().toLowerCase() === url.toString().toLowerCase()
+          )
+        )
+      : -1;
+    if (existingIndex >= 0) {
+      existingLines[existingIndex] = line;
+      enriched[section] = existingLines.filter(Boolean).join("\n");
+      continue;
+    }
+    enriched[section] = [enriched[section], line].filter(Boolean).join("\n");
+  }
+  return enriched;
 }
 
 function parseAreaSquareMetres(value: string) {
@@ -685,8 +824,18 @@ function localizePresentationText(
     .replace(/\bValidation Required\b/gi, "Resmî doğrulama gerekli")
     .replace(
       /\bSee Development Potential\b/gi,
-      "Geliştirme potansiyeli incelenebilir"
+      "Geliştirme potansiyeli doğrulanmadı"
     )
+    .replace(/\bReal Estate Decision Model\b/gi, "Gayrimenkul Karar Modeli")
+    .replace(/\bUploaded Asset Evidence\b/gi, "Yüklenen Belge Kanıtı")
+    .replace(/\bEvidence Quality\b/gi, "Kanıt Kalitesi")
+    .replace(/\bMain Risk\b/gi, "Ana Risk")
+    .replace(/\bMain Opportunity\b/gi, "Ana Fırsat")
+    .replace(/\bNo Verified Opportunity\b/gi, "Doğrulanmış Fırsat Yok")
+    .replace(/\bConditional Development Potential\b/gi, "Koşullu Geliştirme Potansiyeli")
+    .replace(/\bVerified Price Advantage\b/gi, "Doğrulanmış Fiyat Avantajı")
+    .replace(/\bVerified Infrastructure Access\b/gi, "Doğrulanmış Altyapı Erişimi")
+    .replace(/\bVerified Regional Investment Signal\b/gi, "Doğrulanmış Bölgesel Yatırım Sinyali")
     .replace(
       /\bUploaded facts, external evidence, estimates, and recommendations are treated as separate evidence classes\.?/gi,
       "Belgeden çıkarılan bilgiler, dış kaynak kanıtları, tahminler ve öneriler ayrı değerlendirilir."
@@ -725,6 +874,10 @@ function localizeTurkishExecutiveLanguage(value: string) {
     .replace(/\bReasoning\b/gi, "Gerekçe")
     .replace(/\bConfidence\b/gi, "Güven")
     .replace(/\bNot calculated\b/gi, "Hesaplanmadı")
+    .replace(/\bStrong\b/gi, "Güçlü")
+    .replace(/\bModerate\b/gi, "Orta")
+    .replace(/\bPreliminary Findings\b/gi, "Ön Bulgular")
+    .replace(/\bNo Data\b/gi, "Veri Yok")
     .replace(/\bNot quantifiable from current evidence\b/gi, "Mevcut kanıtla ölçülemedi")
     .replace(/\bOpen\b/gi, "Açık")
     .replace(/\bBUY\b/g, "AL")
@@ -756,6 +909,73 @@ function removeRepeatedMissingEvidenceLines(value: string) {
     .join("\n");
 }
 
+function humanizeCriticalGap(value: string, language: ResponseLanguage) {
+  const normalized = normalizeKey(value);
+  if (
+    !normalized ||
+    userVisibleTechnicalValuePattern.test(value.trim()) ||
+    embeddedTechnicalValuePattern.test(value) ||
+    internalResearchDiagnosticPattern.test(value) ||
+    technicalMethodologyPattern.test(value)
+  ) {
+    return "";
+  }
+  const labels: Array<[RegExp, string, string]> = [
+    [
+      /\b(?:tapu|takyidat|mülkiyet|malik|title|encumbrance|ownership)\b/i,
+      "Current title and encumbrance record",
+      "Güncel tapu ve takyidat kaydı",
+    ],
+    [
+      /\b(?:imar|plan notu|arazi kullanım|zoning|land use)\b/i,
+      "Parcel-specific official zoning status",
+      "Parsel bazlı resmî imar durumu",
+    ],
+    [
+      /\b(?:yasal erişim|fiilî erişim|fiili erişim|kadastro yolu|legal access|cadastral access|road access)\b/i,
+      "Legal and physical road access",
+      "Yasal ve fiilî yol erişimi",
+    ],
+    [
+      /\b(?:altyapı|elektrik|su|kanalizasyon|infrastructure|utilities)\b/i,
+      "Parcel-specific utility and infrastructure records",
+      "Parsel bazlı altyapı ve hizmet kayıtları",
+    ],
+    [
+      /\b(?:emsal|karşılaştırılabilir|comparable|listing|transaction)\b/i,
+      "Dated comparable listings or transactions",
+      "Tarihli karşılaştırılabilir emsaller",
+    ],
+    [
+      /\b(?:satın alma fiyatı|purchase price|asking price)\b/i,
+      "Purchase price and currency",
+      "Satın alma fiyatı ve para birimi",
+    ],
+    [
+      /\b(?:afet|deprem|sel|taşkın|heyelan|jeoloji|zemin|hazard|flood|seismic|geotechnical)\b/i,
+      "Location-specific hazard and geotechnical records",
+      "Konuma özgü afet ve jeoteknik kayıtları",
+    ],
+    [
+      /\b(?:koordinat|kesin konum|coordinate|exact location)\b/i,
+      "Exact parcel coordinates",
+      "Kesin parsel koordinatları",
+    ],
+  ];
+  const mapped = labels.find(([pattern]) => pattern.test(value));
+  if (mapped) return language === "Turkish" ? mapped[2] : mapped[1];
+
+  const cleaned = value
+    .replace(/\b(?:analysis|unknown|undefined|null)\b/gi, "")
+    .replace(/\b(?:field|task|provider|schema|source)\s*[:=]\s*\S+/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/[.;,:\s]+$/, "")
+    .trim();
+  return cleaned.length >= 8 && !userVisibleTechnicalValuePattern.test(cleaned)
+    ? cleaned
+    : "";
+}
+
 function consolidateCriticalGaps(
   value: string,
   language: ResponseLanguage
@@ -767,13 +987,14 @@ function consolidateCriticalGaps(
   const seen = new Set<string>();
   const items = value
     .replace(/^(?:Kritik Eksikler|Doğrulanamayan Kritik Bilgiler|Critical Gaps|Missing Information)\s*:\s*/i, "")
-    .split(/\n+|(?<=[.!?])\s+(?=[A-ZÇĞİÖŞÜ])/)
+    .split(/\n+|,\s*|(?<=[.!?])\s+(?=[A-ZÇĞİÖŞÜ])/)
     .map((item) =>
       item
         .replace(/^(?:[-•*]|\d+[.)])\s*/, "")
         .replace(/^(?:Eksik Kanıt|Missing Evidence|Doğrulanmadı|Not verified)\s*:\s*/i, "")
         .trim()
     )
+    .map((item) => humanizeCriticalGap(item, language))
     .filter(Boolean)
     .filter((item) => !isGenericMissingEvidenceLine(item))
     .filter((item) => {
@@ -867,18 +1088,75 @@ function decisionCandidateLines(
     );
 }
 
+function verifiedOpportunityCandidates(
+  evidence: readonly RealEstateQualityEvidence[],
+  language: ResponseLanguage
+) {
+  const eligibleFields = new Set([
+    "access",
+    "infrastructure",
+    "comparables",
+    "amenities_projects",
+    "regional_development",
+  ]);
+  const positiveFindingPattern =
+    /\b(?:piyasanın altında|fiyat avantajı|doğrulanmış erişim|bağlantı mevcut|tamamlandı|hizmete açıldı|resmî yatırım programı|below market|price advantage|confirmed access|connected|completed|opened|official investment programme)\b/i;
+  const conditionalPattern =
+    /\b(?:olabilir|doğrulanırsa|değerlendirilebilir|potansiyel olabilir|araştırılmalı|gerekiyor|belirsiz|could|may|if verified|potential|requires|uncertain)\b/i;
+  const seen = new Set<string>();
+
+  return evidence
+    .filter((item) =>
+      eligibleFields.has(
+        normalizeEvidenceField(String(item.field || item.taskId || ""))
+      )
+    )
+    .map((item) => {
+      const finding = `${String(item.claim || "").trim()}${
+        item.value && item.value !== item.claim ? `: ${item.value}` : ""
+      }`.trim();
+      if (
+        !finding ||
+        !positiveFindingPattern.test(finding) ||
+        conditionalPattern.test(finding)
+      ) {
+        return "";
+      }
+      const title = String(item.sourceTitle || "").trim();
+      return language === "Turkish"
+        ? `${finding}${title ? ` — Kaynak: ${title}` : ""}`
+        : `${finding}${title ? ` — Source: ${title}` : ""}`;
+    })
+    .filter(Boolean)
+    .filter((item) => {
+      const key = normalizeKey(item);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 3);
+}
+
 function buildDecisionOrientedRecommendation({
   report,
   language,
   evidenceIsInsufficient,
   previousRecommendation,
   usableSourceCount,
+  verifiedOpportunities,
+  criticalVerification,
 }: {
   report: RealEstateReport;
   language: ResponseLanguage;
   evidenceIsInsufficient: boolean;
   previousRecommendation: string;
   usableSourceCount: number;
+  verifiedOpportunities: readonly string[];
+  criticalVerification: {
+    title: boolean;
+    zoning: boolean;
+    access: boolean;
+  };
 }) {
   const negativeDecision = /\b(?:Avoid|Kaçın|Uygun Değil|AVOID)\b/i.test(
     previousRecommendation
@@ -886,11 +1164,18 @@ function buildDecisionOrientedRecommendation({
   const positiveDecision = /\b(?:Proceed|Uygun|BUY|AL)\b/i.test(
     previousRecommendation
   );
+  const hasUploadedIdentity = Boolean(
+    report.extractedDocumentFacts.trim() &&
+      !/çıkarılamadı|could not be extracted/i.test(report.extractedDocumentFacts)
+  );
+  const allCriticalVerified = Object.values(criticalVerification).every(Boolean);
   const decision = negativeDecision
     ? "AVOID"
-    : positiveDecision && !evidenceIsInsufficient
+    : positiveDecision && !evidenceIsInsufficient && allCriticalVerified
       ? "BUY"
-      : "WAIT";
+      : !hasUploadedIdentity && usableSourceCount === 0
+        ? "INSUFFICIENT"
+        : "WAIT";
   const risks = decisionCandidateLines(
     [
       report.legalRisks,
@@ -901,113 +1186,143 @@ function buildDecisionOrientedRecommendation({
     language,
     3
   );
-  const positiveSignals = decisionCandidateLines(
-    [
-      report.developmentPotential,
-      report.comparableMarketEvidence,
-      report.location,
-      report.accessInfrastructure,
-    ],
-    language,
-    3,
-    true
-  );
   const missing = decisionCandidateLines(
     [report.missingInformation],
     language,
-    4
+    5
   );
   const actions = decisionCandidateLines(
     [report.recommendedDueDiligence],
     language,
-    4
+    5
   );
-  const biggestReason = risks[0] || missing[0];
-  const biggestReasonText = (
-    biggestReason ||
+  const missingCritical = [
+    !criticalVerification.title
+      ? language === "Turkish"
+        ? "Güncel tapu ve takyidat kaydı doğrulanmadı"
+        : "Current title and encumbrance records are not verified"
+      : "",
+    !criticalVerification.zoning
+      ? language === "Turkish"
+        ? "Parsel bazlı resmî imar durumu doğrulanmadı"
+        : "Parcel-specific official zoning is not verified"
+      : "",
+    !criticalVerification.access
+      ? language === "Turkish"
+        ? "Yasal yol erişimi doğrulanmadı"
+        : "Legal road access is not verified"
+      : "",
+  ].filter(Boolean);
+  const reasons = [...missingCritical, ...risks, ...missing]
+    .filter((reason, index, values) => {
+      const key = normalizeKey(reason);
+      return values.findIndex((candidate) => normalizeKey(candidate) === key) === index;
+    })
+    .slice(0, 3);
+  const biggestRisk =
+    risks[0] ||
+    missingCritical[0] ||
     (language === "Turkish"
-      ? "Kritik karar kanıtlarının tamamlanmamış olması"
-      : "Critical decision evidence remains incomplete")
-  ).replace(/[.!?]+$/, "");
-  const legacyLocalizationNote =
-    language === "Turkish" &&
-    /Not verified|Doğrulanmadı/i.test(previousRecommendation)
-      ? ` Kanıt Durumu: Doğrulanmadı.${
-          /See Development Potential|Geliştirme potansiyeli incelenebilir/i.test(
-            previousRecommendation
-          )
-            ? " Geliştirme potansiyeli incelenebilir."
-            : ""
-        }`
-      : "";
+      ? "Kritik resmî kayıtların eksikliği"
+      : "Missing critical official records");
+  const opportunity =
+    verifiedOpportunities[0] ||
+    (language === "Turkish"
+      ? "Mevcut kanıtlarla bağımsız bir yatırım fırsatı doğrulanmadı."
+      : "No independent investment opportunity is verified by the available evidence.");
+  const actionForGap = (gap: string) => {
+    if (/tapu|takyidat|title|encumbrance/i.test(gap)) {
+      return language === "Turkish"
+        ? "Yetkili tapu müdürlüğünden güncel tapu ve takyidat kaydını alın."
+        : "Obtain current title and encumbrance records from the competent land registry.";
+    }
+    if (/imar|zoning|plan/i.test(gap)) {
+      return language === "Turkish"
+        ? "Belediyeden parsel bazlı imar durumu ve yürürlükteki plan notlarını doğrulayın."
+        : "Verify parcel-specific zoning and current plan notes with the municipality.";
+    }
+    if (/erişim|yol|access|road/i.test(gap)) {
+      return language === "Turkish"
+        ? "Kadastrodan yasal yol erişimini ve fiilî ulaşımı yerinde teyit edin."
+        : "Confirm legal cadastral access and inspect physical access on site.";
+    }
+    if (/emsal|comparable/i.test(gap)) {
+      return language === "Turkish"
+        ? "Aynı yakın çevreden tarihli ve benzer nitelikte en az üç emsal toplayın."
+        : "Collect at least three dated, genuinely comparable local records.";
+    }
+    return gap.replace(/[.;]+$/, "") + ".";
+  };
+  const defaultActions =
+    language === "Turkish"
+      ? [
+          "Yetkili tapu müdürlüğünden güncel tapu ve takyidat kaydını alın.",
+          "Belediyeden parsel bazlı imar durumu ve yürürlükteki plan notlarını doğrulayın.",
+          "Kadastrodan yasal yol erişimini ve fiilî ulaşımı yerinde teyit edin.",
+        ]
+      : [
+          "Obtain current title and encumbrance records from the competent land registry.",
+          "Verify parcel-specific zoning and current plan notes with the municipality.",
+          "Confirm legal cadastral access and inspect physical access on site.",
+        ];
+  const nextActions = [...missingCritical.map(actionForGap), ...actions, ...defaultActions]
+    .map((action) => action.replace(/^(?:[-•*]|\d+[.)])\s*/, "").trim())
+    .filter(Boolean)
+    .filter((action, index, values) => {
+      const key = normalizeKey(action);
+      return values.findIndex((candidate) => normalizeKey(candidate) === key) === index;
+    })
+    .slice(0, 3);
+  while (nextActions.length < 3) {
+    const fallback = defaultActions[nextActions.length];
+    if (!nextActions.some((action) => normalizeKey(action) === normalizeKey(fallback))) {
+      nextActions.push(fallback);
+    } else {
+      nextActions.push(defaultActions[(nextActions.length + 1) % defaultActions.length]);
+    }
+  }
+  const confidence = allCriticalVerified && usableSourceCount >= 4
+    ? language === "Turkish" ? "Güçlü" : "Strong"
+    : usableSourceCount >= 3
+      ? language === "Turkish" ? "Orta" : "Moderate"
+      : usableSourceCount > 0
+        ? language === "Turkish" ? "Ön Bulgular" : "Preliminary Findings"
+        : evidenceIsInsufficient
+          ? language === "Turkish" ? "Yetersiz Kanıt" : "Insufficient Evidence"
+          : language === "Turkish" ? "Doğrulama Gerekli" : "Verification Required";
+  const changeDecision = language === "Turkish"
+    ? "Temiz tapu/takyidat, geliştirmeye uyumlu resmî imar ve doğrulanmış yasal erişim AL değerlendirmesini; bunlardan birindeki maddi olumsuzluk KAÇIN kararını destekler."
+    : "Clean title, development-compatible official zoning, and verified legal access support BUY review; a material adverse result in any one supports AVOID.";
 
   if (language === "Turkish") {
     const TurkishDecision =
-      decision === "BUY" ? "Al" : decision === "AVOID" ? "Kaçın" : "Bekle";
-    const TurkishDecisionCode = TurkishDecision.toLocaleUpperCase("tr-TR");
-    const conclusion =
       decision === "BUY"
-        ? "Mevcut doğrulanmış kanıtlar varlığın koşullu olarak yatırım incelemesinde ilerletilebileceğini gösteriyor."
+        ? "AL"
         : decision === "AVOID"
-          ? "Mevcut olumsuz bulgular sermaye taahhüdünü desteklemiyor."
-          : "ZERINIX bugün sermaye taahhüdünü önermiyor; kritik resmî kayıtlar tamamlanmadan risk-getiri dengesi savunulabilir değil.";
-    const noPositiveSignal =
-      "Mevcut kanıtlarla doğrulanmış olumlu yatırım sinyali bulunmuyor.";
-    const nextVerification =
-      actions[0] ||
-      "Yetkili tapu müdürlüğü ve belediyeden güncel tapu/takyidat, imar ve kadastro erişim kayıtları alınmalıdır.";
-    const changeDecision =
-      decision === "AVOID"
-        ? "Olumsuz bulgunun yetkili kayıtla ortadan kalkması ve diğer kritik kontrollerin olumlu tamamlanması kararı yeniden incelemeye açar."
-        : "Temiz tapu/takyidat, geliştirmeye uyumlu resmî imar ve doğrulanmış yasal erişim kararı AL yönünde incelemeye taşır; bunlardan birindeki maddi olumsuzluk KAÇIN kararını destekler.";
-    const verifiedPattern = /Dış kaynaktan doğrulandı|resmî kaynaktan doğrulandı/i;
-    const unverifiedConditions = [
-      !verifiedPattern.test(report.ownershipTitleFindings) ? "tapu/takyidat" : "",
-      !verifiedPattern.test(report.zoningLandUseStatus) ? "imar" : "",
-      !verifiedPattern.test(report.accessInfrastructure) ? "yasal erişim" : "",
-    ].filter(Boolean);
-    const pageOneReason = unverifiedConditions.length
-      ? `${unverifiedConditions.join(", ")} doğrulanmadı`
-      : biggestReasonText;
-    const immediateActions =
-      "1) Güncel tapu/takyidat kaydını al; 2) imar durumu ve plan notlarını doğrula; 3) kadastrodan yasal erişimi teyit et.";
-
-    return `${TurkishDecision}. Yönetici Özeti — Öneri: ${TurkishDecisionCode}. ${decision === "WAIT" ? "ZERINIX bugün sermaye taahhüt etmez." : conclusion} Neden: ${pageOneReason}. AL koşulu: temiz tapu, geliştirmeye uyumlu imar ve doğrulanmış yasal erişim. KAÇIN koşulu: tapu riski, uygunsuz imar veya yasal erişimin bulunmaması. İlk 3 adım: ${immediateActions}
-Neden — Karar Gerekçesi / Yapay Zekâ İçgörüsü: ${biggestReasonText}. Destekleyici Kanıt: ${usableSourceCount} kullanılabilir dış kaynak. Öncelikli Riskler: ${risks.length ? risks.join(" | ") : "Kritik riskleri sıralamak için yeterli doğrulanmış veri yok."} Potansiyel Fırsatlar: ${positiveSignals.length ? positiveSignals.join(" | ") : noPositiveSignal}
-Kararı Değiştirecek Kanıt: ${changeDecision} Kritik Eksikler (Eksik Kanıt): ${missing.length ? missing.join(" | ") : evidenceIsInsufficient ? "Tapu, imar, erişim ve diğer kritik resmî kayıtlar tamamlanmalıdır." : "Kritik ek bilgi açığı kaydedilmedi."}
-Sonraki Adımlar: ${immediateActions} ${nextVerification}
-ZERINIX Görüşü: ZERINIX bugün ${decision === "BUY" ? "yalnızca belirtilen koşullarla sermaye taahhüdünü değerlendirebilir" : "sermaye taahhüt etmez"}. Varlık şu anda ${decision === "BUY" ? "koşullu olarak cazip" : decision === "AVOID" ? "cazip değil" : "kritik resmî kayıtlar nedeniyle kesin değerlendirilemiyor"}. Olumlu çözüm AL incelemesini, olumsuz çözüm KAÇIN kararını destekler. Karar ağacı: İmar uyumlu, erişim doğrulanmış ve tapu temizse AL için incele; aksi yöndeki maddi bulguda KAÇIN.${legacyLocalizationNote}`;
+          ? "KAÇIN"
+          : decision === "INSUFFICIENT"
+            ? "YETERSİZ KANIT"
+            : "BEKLE";
+    return `Karar: ${TurkishDecision}
+Neden:
+${(reasons.length ? reasons : ["Kritik karar kanıtları tamamlanmadı"]).map((reason) => `• ${reason.replace(/[.!?]+$/, "")}`).join("\n")}
+En Büyük Risk: ${biggestRisk.replace(/[.!?]+$/, "")}
+En Güçlü Doğrulanmış Fırsat: ${opportunity.replace(/[.!?]+$/, "")}
+Kararı Değiştirecek Kanıt: ${changeDecision}
+İlk 3 Sonraki Adım:
+${nextActions.map((action, index) => `${index + 1}. ${action}`).join("\n")}
+Güven Seviyesi: ${confidence}`;
   }
-
-  const conclusion =
-    decision === "BUY"
-      ? "Available verified evidence supports advancing the asset through a conditional investment review."
-      : decision === "AVOID"
-        ? "Available adverse findings do not support committing capital."
-        : "ZERINIX would not commit capital today because the risk-return case is not defensible until critical official records are complete.";
-  const nextVerification =
-    actions[0] ||
-    "Obtain current title, encumbrance, zoning, and cadastral-access records from the competent authorities.";
-  const changeDecision =
-    "Clean title and encumbrance records, development-compatible official zoning, and confirmed legal access move the case toward BUY; a material adverse result in any of these supports AVOID.";
-
-  const verifiedPattern = /Verified from external source|Verified from official source/i;
-  const unverifiedConditions = [
-    !verifiedPattern.test(report.ownershipTitleFindings) ? "title/encumbrances" : "",
-    !verifiedPattern.test(report.zoningLandUseStatus) ? "zoning" : "",
-    !verifiedPattern.test(report.accessInfrastructure) ? "legal access" : "",
-  ].filter(Boolean);
-  const pageOneReason = unverifiedConditions.length
-    ? `${unverifiedConditions.join(", ")} are not verified`
-    : biggestReasonText;
-  const immediateActions =
-    "1) Obtain current title and encumbrance records; 2) verify zoning and plan notes; 3) confirm legal cadastral access.";
-
-  return `${decision}. Executive Summary — Recommendation: ${decision}. ${decision === "WAIT" ? "ZERINIX would not commit capital today." : conclusion} Why: ${pageOneReason}. BUY condition: clean title, development-compatible zoning, and verified legal access. AVOID condition: title risk, unsuitable zoning, or no legal access. Immediate actions: ${immediateActions}
-Why — Decision Reasoning / ZERINIX Insight: ${biggestReasonText}. Supporting Evidence: ${usableSourceCount} usable external source(s). Priority Risks: ${risks.length ? risks.join(" | ") : "Insufficient verified evidence to rank material risks."} Positive Signals: ${positiveSignals.length ? positiveSignals.join(" | ") : "No positive investment signal is currently verified."}
-What Changes the Decision: ${changeDecision} Critical Missing Information: ${missing.length ? missing.join(" | ") : evidenceIsInsufficient ? "Title, zoning, access, and other critical official records must be completed." : "No critical information gap was recorded."}
-Next Actions: ${immediateActions} ${nextVerification}
-ZERINIX View: ZERINIX would ${decision === "BUY" ? "consider committing capital only under the stated conditions" : "not commit capital today"}. The asset is currently ${decision === "BUY" ? "conditionally attractive" : decision === "AVOID" ? "unattractive" : "impossible to judge defensibly"}. A positive resolution supports BUY review; a negative resolution supports AVOID. Decision tree: if zoning is compatible, legal access is confirmed, and title is clean, review for BUY; otherwise AVOID on a material adverse finding.`;
+  const EnglishDecision = decision === "INSUFFICIENT" ? "INSUFFICIENT EVIDENCE" : decision;
+  return `Decision: ${EnglishDecision}
+Why:
+${(reasons.length ? reasons : ["Critical decision evidence remains incomplete"]).map((reason) => `• ${reason.replace(/[.!?]+$/, "")}`).join("\n")}
+Biggest Risk: ${biggestRisk.replace(/[.!?]+$/, "")}
+Strongest Verified Opportunity: ${opportunity.replace(/[.!?]+$/, "")}
+Evidence That Would Change the Decision: ${changeDecision}
+First 3 Next Actions:
+${nextActions.map((action, index) => `${index + 1}. ${action}`).join("\n")}
+Confidence Level: ${confidence}`;
 }
 
 function removeAssetNames(value: string, assetNames: readonly string[]) {
@@ -1053,6 +1368,10 @@ function cleanPresentationText({
       (line) =>
         !internalResearchDiagnosticPattern.test(line) &&
         !technicalMethodologyPattern.test(line) &&
+        !userVisibleTechnicalValuePattern.test(line.trim()) &&
+        !embeddedTechnicalValuePattern.test(line) &&
+        !repeatedMissingDecisionPattern.test(line) &&
+        !/^\s*[{}]\s*$/.test(line) &&
         !containsBrokenSourceText(line) &&
         !brokenPresentationLinePattern.test(line) &&
         !/^\s*[-•*]\s*$/.test(line)
@@ -1260,6 +1579,25 @@ function sourceDecisionRelevance(
     : fallback;
 }
 
+function sourceSectionLabel(
+  field: RealEstateReportField | undefined,
+  language: ResponseLanguage
+) {
+  const labels: Partial<Record<RealEstateReportField, [string, string]>> = {
+    ownershipTitleFindings: ["Ownership and Title", "Mülkiyet ve Tapu"],
+    location: ["Location", "Konum"],
+    zoningLandUseStatus: ["Zoning and Land Use", "İmar ve Arazi Kullanımı"],
+    accessInfrastructure: ["Access and Infrastructure", "Erişim ve Altyapı"],
+    comparableMarketEvidence: ["Comparable Market Evidence", "Pazar ve Emsaller"],
+    valuationRange: ["Valuation", "Değerleme"],
+    environmentalGeotechnicalRisks: ["Hazard and Geotechnical Risk", "Afet ve Jeoteknik Risk"],
+    liquidity: ["Liquidity", "Likidite"],
+    developmentPotential: ["Regional Development", "Bölgesel Gelişim"],
+  };
+  const label = field ? labels[field] : undefined;
+  return label ? (language === "Turkish" ? label[1] : label[0]) : "";
+}
+
 function dedupeSources(
   value: string,
   mappings: readonly RealEstateClaimSourceMapping[],
@@ -1313,9 +1651,16 @@ function dedupeSources(
           language
         );
         const reason = sourceDecisionRelevance(mapping, language);
+        const accessDate = line.match(
+          /(?:Erişim tarihi|Access date|Accessed)\s*:\s*([^;\n]+)/i
+        )?.[1]?.trim();
+        const supportedSection = sourceSectionLabel(
+          mapping?.supportedSection,
+          language
+        );
         return language === "Turkish"
-          ? `- Kaynak: ${institution} — ${title} — ${url.toString()} — Neden önemli: ${reason}`
-          : `- Source: ${institution} — ${title} — ${url.toString()} — Why it matters: ${reason}`;
+          ? `- Kaynak: ${title} — Kurum: ${institution} — URL: ${url.toString()}${accessDate ? ` — Erişim tarihi: ${accessDate}` : ""}${supportedSection ? ` — Desteklediği bölüm: ${supportedSection}` : ""} — Neden önemli: ${reason}`
+          : `- Source: ${title} — Publisher: ${institution} — URL: ${url.toString()}${accessDate ? ` — Access date: ${accessDate}` : ""}${supportedSection ? ` — Supported section: ${supportedSection}` : ""} — Why it matters: ${reason}`;
       })
     )
     .filter(Boolean);
@@ -1397,8 +1742,19 @@ export function prepareRealEstateReportForPresentation({
   evidence?: readonly RealEstateQualityEvidence[];
 }): RealEstateReport {
   const evidenceContext = extractPropertyEvidenceContext(report);
+  const usableEvidenceRegistry = evidence
+    ? deduplicateUsableRealEstateExternalEvidence([...evidence])
+    : [];
+  const reportWithResearch = appendUsableResearchEvidence({
+    report,
+    evidence: usableEvidenceRegistry,
+    context: evidenceContext,
+    language,
+    hasValidatedComparables: false,
+    valuationOnly: false,
+  });
   const validatedComparableContent = removeUnusableVerifiedEvidence(
-    report.comparableMarketEvidence || "",
+    reportWithResearch.comparableMarketEvidence || "",
     "comparableMarketEvidence",
     evidenceContext,
     false
@@ -1406,11 +1762,19 @@ export function prepareRealEstateReportForPresentation({
   const hasValidatedComparables = validatedComparableContent
     .split("\n")
     .some((line) => externalVerifiedLabelPattern.test(line));
+  const workingReport = appendUsableResearchEvidence({
+    report: reportWithResearch,
+    evidence: usableEvidenceRegistry,
+    context: evidenceContext,
+    language,
+    hasValidatedComparables,
+    valuationOnly: true,
+  });
   const survivingClaimLines = presentationFields
     .filter((field) => field !== "sources")
     .flatMap((field) =>
       removeUnusableVerifiedEvidence(
-        report[field] || "",
+        workingReport[field] || "",
         field,
         evidenceContext,
         hasValidatedComparables
@@ -1419,9 +1783,6 @@ export function prepareRealEstateReportForPresentation({
       .filter((line) => externalVerifiedLabelPattern.test(line))
       .map((line) => ({ field, line }))
     );
-  const usableEvidenceRegistry = evidence
-    ? deduplicateUsableRealEstateExternalEvidence([...evidence])
-    : [];
   const evidenceByUrl = new Map<string, RealEstateQualityEvidence[]>();
   for (const item of usableEvidenceRegistry) {
     const url = canonicalizeSourceUrl(String(item.url || ""));
@@ -1458,7 +1819,7 @@ export function prepareRealEstateReportForPresentation({
             : ("rejected" as const),
       }));
     });
-  const declaredSourceLines = (report.sources || "").split("\n");
+  const declaredSourceLines = (workingReport.sources || "").split("\n");
   const verifiedSourceCandidates = claimSourceMappings
     .filter((mapping) => mapping.relevanceStatus === "usable")
     .map((mapping) => {
@@ -1488,7 +1849,7 @@ export function prepareRealEstateReportForPresentation({
     presentationFields.map((field) => [
       field,
       cleanPresentationText({
-        value: report[field] || "",
+        value: workingReport[field] || "",
         field,
         context: evidenceContext,
         hasValidatedComparables,
@@ -1520,13 +1881,139 @@ export function prepareRealEstateReportForPresentation({
       (value.trim() ? dedupeLines(value, new Set<string>()) : "");
   }
 
-  cleaned.sources = dedupeSources(
-    verifiedSourceCandidates.join("\n"),
-    claimSourceMappings.filter(
-      (mapping) => mapping.relevanceStatus === "usable"
+  const usableClaimMappings = claimSourceMappings.filter(
+    (mapping) => mapping.relevanceStatus === "usable"
+  );
+  const hasUsableSectionEvidence = (field: RealEstateReportField) =>
+    usableClaimMappings.some((mapping) => mapping.supportedSection === field);
+  const mappingHasCanonicalEvidence = (
+    mapping: RealEstateClaimSourceMapping,
+    canonicalFields: readonly string[],
+    legacyClaimPattern: RegExp
+  ) => {
+    const url = canonicalizeSourceUrl(mapping.sourceUrl);
+    const matchingEvidence = url
+      ? evidenceByUrl.get(url.toString().toLowerCase()) || []
+      : [];
+    return matchingEvidence.length
+      ? matchingEvidence.some((item) =>
+          canonicalFields.includes(
+            normalizeEvidenceField(String(item.field || item.taskId || ""))
+          )
+        )
+      : legacyClaimPattern.test(mapping.supportedClaim);
+  };
+  const criticalVerification = {
+    title: usableClaimMappings.some(
+      (mapping) =>
+        mapping.supportedSection === "ownershipTitleFindings" &&
+        mappingHasCanonicalEvidence(
+          mapping,
+          ["title_status"],
+          /\b(?:tapu|takyidat|title|encumbrance)\b/i
+        )
     ),
+    zoning: usableClaimMappings.some(
+      (mapping) =>
+        mapping.supportedSection === "zoningLandUseStatus" &&
+        mappingHasCanonicalEvidence(
+          mapping,
+          ["zoning"],
+          /\b(?:imar|zoning|plan notu|land use)\b/i
+        )
+    ),
+    access: usableClaimMappings.some(
+      (mapping) =>
+        mapping.supportedSection === "accessInfrastructure" &&
+        mappingHasCanonicalEvidence(
+          mapping,
+          ["access"],
+          /\b(?:yasal erişim|kadastro yolu|legal access|cadastral access)\b/i
+        )
+    ),
+  };
+  const opportunityEvidence = usableEvidenceRegistry.filter((item) => {
+    const url = canonicalizeSourceUrl(String(item.url || ""));
+    return Boolean(
+      url &&
+        usableClaimMappings.some(
+          (mapping) =>
+            canonicalizeSourceUrl(mapping.sourceUrl)?.toString().toLowerCase() ===
+            url.toString().toLowerCase()
+        )
+    );
+  });
+  const verifiedOpportunities = verifiedOpportunityCandidates(
+    opportunityEvidence,
     language
   );
+
+  if (!hasUsableSectionEvidence("ownershipTitleFindings")) {
+    cleaned.ownershipTitleFindings = language === "Turkish"
+      ? "Güncel malik, pay ve takyidat bilgileri resmî tapu kaydıyla doğrulanmadı."
+      : "Current ownership, share, and encumbrance details are not verified by an official title record.";
+  }
+  if (!hasUsableSectionEvidence("zoningLandUseStatus")) {
+    cleaned.zoningLandUseStatus = language === "Turkish"
+      ? "Parsel bazlı resmî imar durumu henüz doğrulanmadı; belgedeki taşınmaz niteliği yapılaşma hakkı olarak yorumlanmadı."
+      : "Parcel-specific official zoning is not yet verified; the property type in the uploaded record is not treated as a development right.";
+  }
+  if (!hasUsableSectionEvidence("accessInfrastructure")) {
+    cleaned.accessInfrastructure = language === "Turkish"
+      ? "Yasal yol erişimi ve parsel bazlı altyapı bağlantıları teyit edilmedi."
+      : "Legal road access and parcel-specific utility connections are not confirmed.";
+  }
+  if (!hasUsableSectionEvidence("comparableMarketEvidence")) {
+    cleaned.comparableMarketEvidence = language === "Turkish"
+      ? "Kullanılabilir, tarihli ve gerçekten karşılaştırılabilir emsal sayısı yetersiz."
+      : "There are insufficient usable, dated, genuinely comparable market records.";
+  }
+  if (
+    !hasUsableSectionEvidence("valuationRange") ||
+    !hasUsableSectionEvidence("comparableMarketEvidence")
+  ) {
+    cleaned.valuationRange = language === "Turkish"
+      ? "Doğrulanmış emsaller, satın alma fiyatı, para birimi ve açık hesaplama yöntemi birlikte bulunmadığı için değerleme aralığı oluşturulmadı."
+      : "No valuation range was produced because validated comparables, purchase price, currency, and an explicit calculation method are not all available.";
+  }
+  if (!verifiedOpportunities.length) {
+    cleaned.developmentPotential = language === "Turkish"
+      ? "Mevcut kanıtlarla bağımsız bir yatırım fırsatı doğrulanmadı."
+      : "No independent investment opportunity is verified by the available evidence.";
+  }
+  const hasDefensibleScoreBasis =
+    usableClaimMappings.length >= 3 &&
+    /\b(?:ağırlıklandır|hesaplama yöntemi|kanıt temeli|weighted|calculation method|evidence basis)\b/i.test(
+      cleaned.investmentScore
+    );
+  if (!hasDefensibleScoreBasis) {
+    cleaned.investmentScore = language === "Turkish"
+      ? "Skorlanmadı. Kritik karar girdileri için yeterli ve izlenebilir hesaplama temeli bulunmuyor."
+      : "Not scored. A sufficient and traceable calculation basis is unavailable for the critical decision inputs.";
+  }
+
+  const externalSources = dedupeSources(
+    verifiedSourceCandidates.join("\n"),
+    usableClaimMappings,
+    language
+  );
+  const uploadedPrimarySource = evidenceContext.documentTypeExtracted
+    ? language === "Turkish"
+      ? "- Birincil kaynak: Yüklenen taşınmaz belgesi — Taşınmaz kimlik bilgilerinin kaynağıdır; güncel resmî kayıt doğrulaması değildir."
+      : "- Primary source: Uploaded property document — Source of the extracted property identity; not a current official-record verification."
+    : "";
+  const requiredVerificationSources = !externalSources
+    ? language === "Turkish"
+      ? "- Gerekli doğrulama kaynakları: Yetkili tapu müdürlüğü, ilgili belediye, kadastro ve konuma özgü afet/altyapı kayıtları. Bu kayıtlar henüz kullanılmış kaynak değildir."
+      : "- Required verification sources: competent land registry, municipality, cadastre, and location-specific hazard/infrastructure records. These records have not yet been used as sources."
+    : "";
+  cleaned.sources = [
+    uploadedPrimarySource,
+    externalSources,
+    requiredVerificationSources,
+  ]
+    .filter(Boolean)
+    .join("\n");
   cleaned.missingInformation = removeResolvedMissingItems(
     cleaned.missingInformation,
     evidenceContext
@@ -1536,7 +2023,9 @@ export function prepareRealEstateReportForPresentation({
     language
   );
   const usableSourceCount = cleaned.sources
-    ? cleaned.sources.split("\n").filter(Boolean).length
+    ? cleaned.sources
+        .split("\n")
+        .filter((line) => sourceUrlsFromLine(line).length > 0).length
     : 0;
   const evidenceIsInsufficient =
     usableSourceCount === 0 ||
@@ -1574,6 +2063,8 @@ export function prepareRealEstateReportForPresentation({
     evidenceIsInsufficient,
     previousRecommendation,
     usableSourceCount,
+    verifiedOpportunities,
+    criticalVerification,
   });
 
   return cleaned;

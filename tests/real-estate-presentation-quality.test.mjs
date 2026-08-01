@@ -93,13 +93,13 @@ test("Turkish real-estate presentation localizes system decision prose", () => {
   });
   const combined = Object.values(presented).join("\n");
 
-  assert.match(presented.finalRecommendation, /^Bekle\b/);
+  assert.match(presented.finalRecommendation, /^Karar: BEKLE\b/);
   assert.doesNotMatch(
     combined,
     /\b(?:Wait|Preliminary due-diligence report|What is known|What was researched|Top risks|Top opportunities|Next actions|Unknown|Required)\b/i
   );
-  assert.match(combined, /Doğrulanmadı/);
-  assert.match(combined, /Geliştirme potansiyeli incelenebilir/);
+  assert.match(combined, /doğrulanmadı/i);
+  assert.match(combined, /Mevcut kanıtlarla bağımsız bir yatırım fırsatı doğrulanmadı/);
   assert.doesNotMatch(combined, /source parsing diagnostics/i);
   assert.doesNotMatch(combined, /URL:\s*belge|(?:^|\n)\s*-\s*(?:hatay|csb)\./i);
 });
@@ -133,10 +133,9 @@ test("claim-level source mapping requires successful evidence for the same secti
     evidence: [{ ...evidence, retrievalStatus: "success" }],
   });
 
-  assert.equal(
-    failed.sources,
-    "Bu veri açık kaynaklardan doğrulanamadı; resmî belge kontrolü gerekiyor."
-  );
+  assert.match(failed.sources, /Birincil kaynak: Yüklenen taşınmaz belgesi/);
+  assert.match(failed.sources, /Gerekli doğrulama kaynakları/);
+  assert.doesNotMatch(failed.sources, new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(successful.zoningLandUseStatus, /Dış kaynaktan doğrulandı/);
   assert.match(successful.sources, new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
@@ -262,8 +261,8 @@ test("presentation removes synthetic sources, ISO timestamps, repeated asset bas
   const combined = Object.values(presented).join("\n");
 
   assert.match(presented.assetIdentification, /Belgeden çıkarıldı/);
-  assert.equal(presented.sources.split("\n").length, 1);
-  assert.match(presented.finalRecommendation, /1 kullanılabilir dış kaynak/);
+  assert.equal(presented.sources.split("\n").length, 2);
+  assert.doesNotMatch(presented.finalRecommendation, /10 gerçek dış kaynak/);
   assert.doesNotMatch(combined, /99\/100|68\/100|T10:15:30|yüklenen\/belge/);
   assert.equal(combined.match(/Kaynak:\s*yüklenen belge/gi)?.length || 0, 0);
 });
@@ -281,11 +280,9 @@ test("an unverified recommendation link is not counted as a usable source", () =
     language: "Turkish",
   });
 
-  assert.equal(
-    presented.sources,
-    "Bu veri açık kaynaklardan doğrulanamadı; resmî belge kontrolü gerekiyor."
-  );
-  assert.match(presented.finalRecommendation, /0 kullanılabilir dış kaynak/);
+  assert.match(presented.sources, /Birincil kaynak/);
+  assert.match(presented.sources, /Gerekli doğrulama kaynakları/);
+  assert.doesNotMatch(presented.sources, /https?:\/\//);
 });
 
 test("city-only evidence and unrelated comparable listings do not survive exact-section filtering", () => {
@@ -310,13 +307,10 @@ test("city-only evidence and unrelated comparable listings do not survive exact-
     language: "Turkish",
   });
 
-  assert.equal(
-    presented.zoningLandUseStatus,
-    "Bu veri açık kaynaklardan doğrulanamadı; resmî belge kontrolü gerekiyor."
-  );
+  assert.match(presented.zoningLandUseStatus, /Parsel bazlı resmî imar durumu henüz doğrulanmadı/);
   assert.doesNotMatch(presented.comparableMarketEvidence, /Harbiye/);
   assert.match(presented.comparableMarketEvidence, /Dursunlu/);
-  assert.equal(presented.sources.split("\n").length, 1);
+  assert.equal(presented.sources.split("\n").length, 2);
   assert.match(presented.sources, /Dursunlu Karşılaştırılabilir Tarla İlanı/);
 });
 
@@ -341,8 +335,8 @@ test("resolved document facts are not repeated as missing and split currency val
   assert.doesNotMatch(presented.missingInformation, /\basset\b/i);
   assert.match(presented.missingInformation, /imar durumu/);
   assert.match(presented.missingInformation, /Resmî parsel alanı doğrulaması/);
-  assert.match(presented.valuationRange, /1\.000\.000 TL/);
-  assert.doesNotMatch(presented.valuationRange, /\n000\.000 TL/);
+  assert.doesNotMatch(presented.valuationRange, /1\.000\.000 TL|\n000\.000 TL/);
+  assert.match(presented.valuationRange, /değerleme aralığı oluşturulmadı/);
   assert.match(presented.extractedDocumentFacts, /Belgeden çıkarıldı|Ada:\s*1517/);
   assert.match(presented.extractedDocumentFacts, /Pafta:\s*42/);
   assert.doesNotMatch(presented.extractedDocumentFacts, /Ada:\s*Pafta/i);
@@ -433,10 +427,9 @@ test("a missing source is represented by one natural sentence", () => {
     assetNames: ["IMG_5412.PNG"],
   });
 
-  assert.equal(
-    presented.sources,
-    "Bu veri açık kaynaklardan doğrulanamadı; resmî belge kontrolü gerekiyor."
-  );
+  assert.match(presented.sources, /Birincil kaynak/);
+  assert.match(presented.sources, /Gerekli doğrulama kaynakları/);
+  assert.doesNotMatch(presented.sources, /provider_unavailable|Request was aborted/);
 });
 
 test("every presentation path preserves every required report section", () => {
@@ -458,7 +451,7 @@ test("every presentation path preserves every required report section", () => {
     []
   );
   assert.match(presented.recommendedDueDiligence, /Kanıt yetersiz/);
-  assert.match(presented.investmentScore, /yatırım skoru hesaplanmadı/i);
+  assert.match(presented.investmentScore, /Skorlanmadı/i);
 });
 
 test("PDF source mapping uses evidence outside the sources section before fallback", () => {
@@ -505,11 +498,11 @@ test("renderer removes repeated global failure copy and localizes decision evide
     combined,
     /Tüm kullanılabilir dış kaynak stratejileri sonuç vermedi/
   );
-  assert.match(presented.finalRecommendation, /Yönetici Özeti/);
-  assert.match(presented.finalRecommendation, /Yapay Zekâ İçgörüsü/);
-  assert.match(presented.finalRecommendation, /Destekleyici Kanıt/);
-  assert.match(presented.finalRecommendation, /Eksik Kanıt/);
-  assert.match(presented.finalRecommendation, /Karar Gerekçesi/);
+  assert.match(presented.finalRecommendation, /^Karar: BEKLE/);
+  assert.match(presented.finalRecommendation, /En Büyük Risk/);
+  assert.match(presented.finalRecommendation, /En Güçlü Doğrulanmış Fırsat/);
+  assert.match(presented.finalRecommendation, /İlk 3 Sonraki Adım/);
+  assert.doesNotMatch(presented.finalRecommendation, /Yapay Zekâ İçgörüsü|Destekleyici Kanıt|Eksik Kanıt|Karar Gerekçesi/);
 });
 
 test("grounded real-estate renderer includes real evidence metadata and evidence-based decision blocks", () => {
@@ -545,10 +538,128 @@ test("real-estate output always retains a decision summary", () => {
     assetNames: ["IMG_5412.PNG"],
   });
 
-  assert.match(presented.finalRecommendation, /^Bekle\b/);
-  assert.match(presented.finalRecommendation, /Öncelikli riskler/i);
-  assert.match(presented.finalRecommendation, /Potansiyel fırsatlar/i);
-  assert.match(presented.finalRecommendation, /Sonraki adımlar/i);
+  assert.match(presented.finalRecommendation, /^Karar: BEKLE\b/);
+  assert.match(presented.finalRecommendation, /En Büyük Risk/i);
+  assert.match(presented.finalRecommendation, /En Güçlü Doğrulanmış Fırsat/i);
+  assert.match(presented.finalRecommendation, /İlk 3 Sonraki Adım/i);
+});
+
+test("Phase 9 sanitizes technical gaps and consolidates human-readable missing evidence", () => {
+  const report = createInternalReport();
+  report.missingInformation = [
+    "analysis",
+    "undefined",
+    "null",
+    "unknown_field",
+    "provider_id: openai_web_search",
+    "Parsel bazlı imar durumu",
+    "Güncel tapu ve takyidat kaydı",
+    "Parsel bazlı imar durumu",
+  ].join("\n");
+  report.location =
+    "Konum kaydı doğrulanmadan bu başlıkta kesin yatırım sonucu üretilemez.";
+  report.legalRisks =
+    "Tapu kaydı doğrulanmadan bu başlıkta kesin yatırım sonucu üretilemez.";
+  report.liquidity =
+    "Pazar verisi doğrulanmadan bu başlıkta kesin yatırım sonucu üretilemez.";
+
+  const presented = prepareRealEstateReportForPresentation({
+    report,
+    language: "Turkish",
+    assetNames: ["IMG_5412.PNG"],
+  });
+
+  assert.doesNotMatch(
+    Object.values(presented).join("\n"),
+    /\b(?:analysis|undefined|null|unknown_field|provider_id|openai_web_search)\b/i
+  );
+  assert.equal(
+    presented.missingInformation.match(/Parsel bazlı resmî imar durumu/g)?.length,
+    1
+  );
+  assert.equal(
+    presented.missingInformation.match(/Güncel tapu ve takyidat kaydı/g)?.length,
+    1
+  );
+  assert.ok(
+    (Object.values(presented)
+      .join("\n")
+      .match(/kesin yatırım sonucu üretilemez/gi)?.length || 0) <= 1
+  );
+});
+
+test("Phase 9 maps usable research evidence into its section and cited source list", () => {
+  const report = createInternalReport();
+  report.zoningLandUseStatus = "";
+  report.sources = "";
+  const url = "https://www.defne.bel.tr/imar/dursunlu/1517-1";
+  const presented = prepareRealEstateReportForPresentation({
+    report,
+    language: "Turkish",
+    assetNames: ["IMG_5412.PNG"],
+    evidence: [
+      {
+        label: "Verified from official source",
+        field: "zoning",
+        claim:
+          "Hatay ili Defne ilçesi Dursunlu Mahallesi Ada 1517 Parsel 1 resmî imar kaydı",
+        value: "Ada 1517 Parsel 1 için yürürlükteki plan kaydı yayımlandı",
+        sourceTitle: "Dursunlu Ada 1517 Parsel 1 İmar Kaydı",
+        publisher: "Defne Belediyesi",
+        url,
+        retrievalStatus: "success",
+        lastChecked: "2026-07-31T10:15:30.000Z",
+      },
+    ],
+  });
+
+  assert.match(presented.zoningLandUseStatus, /Dış kaynaktan doğrulandı/);
+  assert.match(presented.zoningLandUseStatus, new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(presented.sources, /Dursunlu Ada 1517 Parsel 1 İmar Kaydı/);
+  assert.match(presented.sources, /Desteklediği bölüm: İmar ve Arazi Kullanımı/);
+  assert.match(presented.sources, /Erişim tarihi: 31\.07\.2026/);
+});
+
+test("Phase 9 does not turn failures, property type, or unsupported prose into facts or opportunities", () => {
+  const report = createInternalReport();
+  report.ownershipTitleFindings = "Malik Ahmet Yılmaz'dır.";
+  report.zoningLandUseStatus = "Ağaçlı Tarla niteliği yapılaşma hakkı sağlar.";
+  report.developmentPotential =
+    "Bölge gelişirse gelecekte olumlu bir fırsat olabilir.";
+  const failedUrl = "https://www.defne.bel.tr/imar/dursunlu/1517-1";
+  const presented = prepareRealEstateReportForPresentation({
+    report,
+    language: "Turkish",
+    evidence: [
+      {
+        label: "Verified from official source",
+        field: "zoning",
+        claim:
+          "Hatay ili Defne ilçesi Dursunlu Mahallesi Ada 1517 Parsel 1 imar araştırması",
+        value: "Request was aborted",
+        sourceTitle: "Defne Belediyesi",
+        url: failedUrl,
+        retrievalStatus: "failed",
+      },
+    ],
+  });
+  const combined = Object.values(presented).join("\n");
+
+  assert.doesNotMatch(combined, /Malik Ahmet|Request was aborted|openai|provider/i);
+  assert.match(presented.ownershipTitleFindings, /malik.*doğrulanmadı/i);
+  assert.match(presented.zoningLandUseStatus, /taşınmaz niteliği yapılaşma hakkı olarak yorumlanmadı/i);
+  assert.equal(
+    presented.developmentPotential,
+    "Mevcut kanıtlarla bağımsız bir yatırım fırsatı doğrulanmadı."
+  );
+  assert.match(
+    presented.finalRecommendation,
+    /En Güçlü Doğrulanmış Fırsat: Mevcut kanıtlarla bağımsız bir yatırım fırsatı doğrulanmadı/
+  );
+  assert.equal(
+    presented.finalRecommendation.match(/^\d+\. /gm)?.length,
+    3
+  );
 });
 
 test("quality gate rejects an OCR-only report when usable external evidence exists", () => {
