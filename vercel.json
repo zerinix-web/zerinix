@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/report-jobs/worker",
-      "schedule": "* * * * *"
+      "schedule": "0 3 * * *"
     }
   ]
 }
