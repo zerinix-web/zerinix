@@ -763,7 +763,10 @@ function ensureMarketReportQuality(
       : enforceMarketReportLanguage(sanitized, language);
   }
 
-  return dedupeReportParagraphsAcrossSections(normalized) as Record<
+  return dedupeReportParagraphsAcrossSections(normalized, {
+    language,
+    sectionLabels: fieldLabelsByLanguage[language],
+  }) as Record<
     MarketReportField,
     string
   >;
@@ -1420,6 +1423,8 @@ Deterministic report contract:
 - Return the JSON keys in the exact order listed above.
 - Every section must add distinct market intelligence and may not inherit business-plan content.
 - Remove repeated claims while retaining the section-specific implication.
+- Maintain an internal insight ledger. Explain each claim once; later sections may use a cross-reference of at most 12 words and must add only new section-owned analysis.
+- Target at least 20% fewer output tokens than a repetitive draft by removing restatement and filler only; preserve evidence, citations, definitions, calculations, and decisions.
 
 Research is already complete. Synthesize the uploaded evidence and the evidence registry above; do not perform a second research pass.
 Every material factual claim must include its evidence label and an inline [R#], [Asset: filename], [User], or [Method: description] reference.
@@ -1433,6 +1438,7 @@ Write concise executive market research and do not expose internal labels or dia
 Do not include markdown code fences, braces inside string values, or commentary outside JSON.`;
       const compactMarketContract = `Deterministic report contract:
 - Return exactly the schema keys in order with concise, distinct market-intelligence sections and no outside commentary/code fences.
+- Keep an internal insight ledger: explain each claim once, then use a <=12-word cross-reference plus only new section-owned analysis. Achieve at least 20% output-token compression by removing repetition/filler only.
 - Research is complete. Use only uploaded evidence and the closed registry; cite material claims with exact [R#], [Asset], [User], or [Method] references.
 - Separate observed evidence, estimates, assumptions, gaps, and recommendations. Preserve source geography, dates, currency, definitions, calculation methods, and exact URLs.
 - Never invent facts or citations. Keep every section in its named market scope; exclude all business-plan, founder, product, pricing, sales, unit-economics, and GTM content.

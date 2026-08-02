@@ -72,7 +72,7 @@ test("Market Analysis post-processing preserves the dedicated market schema", ()
 
   assert.match(routeSource, /function ensureMarketReportQuality/);
   assert.match(routeSource, /field === "sources"/);
-  assert.match(routeSource, /dedupeReportParagraphsAcrossSections\(normalized\)/);
+  assert.match(routeSource, /dedupeReportParagraphsAcrossSections\(normalized,/);
   assert.match(routeSource, /parseFullMarketReport\(responseText, canonicalFinancialAssumptions\)/);
   assert.match(routeSource, /parseFullMarketReport\([\s\S]*cachedFullReport\.responseText[\s\S]*canonicalFinancialAssumptions/);
   assert.match(normalizerSource, /fiyat\\s\+sıkıştırma\\s\+by\\s\+yerel\\s\+danışmanlar/);

@@ -440,10 +440,11 @@ function serializePlanReportMetadataChunk(
 }
 
 function serializeRealEstateReportChunks(report: RealEstateReport) {
+  const conciseReport = dedupeReportParagraphsAcrossSections(report);
   return [
     serializeReportStreamChunk({ reportDomain: "real_estate" }),
     ...realEstateFields.map((field) =>
-      serializeReportStreamChunk({ [field]: report[field] })
+      serializeReportStreamChunk({ [field]: conciseReport[field] })
     ),
   ].join("");
 }
@@ -452,10 +453,11 @@ function serializeDomainAnalysisReportChunks(
   domain: SpecializedReportDomain,
   report: DomainAnalysisReport
 ) {
+  const conciseReport = dedupeReportParagraphsAcrossSections(report);
   return [
     serializeReportStreamChunk({ reportDomain: domain }),
     ...domainAnalysisFields.map((field) =>
-      serializeReportStreamChunk({ [field]: report[field] })
+      serializeReportStreamChunk({ [field]: conciseReport[field] })
     ),
   ].join("");
 }
@@ -2089,7 +2091,10 @@ function normalizeFullPlanReport(
       normalized[field] = enforcePlanReportLanguage(normalized[field], language);
     }
 
-    return dedupeReportParagraphsAcrossSections(normalized) as Record<
+    return dedupeReportParagraphsAcrossSections(normalized, {
+      language,
+      sectionLabels: planFieldLabels[language],
+    }) as Record<
       PlanReportField,
       string
     >;
@@ -2202,7 +2207,10 @@ function normalizeFullPlanReport(
     );
   }
 
-  return dedupeReportParagraphsAcrossSections(normalized) as Record<
+  return dedupeReportParagraphsAcrossSections(normalized, {
+    language,
+    sectionLabels: planFieldLabels[language],
+  }) as Record<
     PlanReportField,
     string
   >;
@@ -5265,6 +5273,8 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
 - Follow the section ownership contract exactly; do not borrow content assigned to another section.
 - Keep each JSON value concise, dense, analytical, investor-ready, and complete.
 - Do not repeat ideas, metrics, examples, or conclusions across sections.
+- Maintain an internal insight ledger while drafting. Once an insight is explained, later sections may use a cross-reference of at most 12 words and must add only their section-owned implication.
+- Target at least 20% fewer output tokens than a version that restates shared context; remove repetition and filler, never evidence, citations, calculations, decisions, or section-owned analysis.
 - Use the Data-Driven Financial Analysis Engine block as the calculated base-case model for TAM, SAM, SOM, ARPA, CAC, LTV, Gross Margin, MRR, ARR, Payback, Burn Rate, Runway, EBITDA, Break-even Month, Investment Needed, ROI, and Revenue Forecast.
 - Reuse that single calculated model everywhere. Do not create conflicting financial values in separate sections. Classify every important numeric claim as Verified, Estimated, Assumption, or AI Analysis.
 - Executive Recommendation must reuse the deterministic Report Quality Confidence derived from evidence quality, source coverage, financial certainty, benchmark fit, and validation readiness.
@@ -5286,6 +5296,7 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
 - Return the schema's exact JSON keys in order, with concise, complete values and no outside commentary/code fences.
 - Build one integrated strategy model and one decision spine; keep every section specific, internally consistent, and non-repetitive.
 - Respect each field contract. Executive Summary=verdict; Recommendation=decision logic; Roadmaps=proof-gated execution; financial fields=numbers; Risks=failure mechanisms.
+- Keep an internal insight ledger: explain each insight once, then use a <=12-word cross-reference plus only the new section-owned implication. Achieve at least 20% output-token compression by removing repetition/filler only.
 - Use the supplied financial model unchanged across financial and decision sections. Classify material numbers as Verified, Estimated, Assumption, or AI Analysis and include source/formula/method.
 - Research is complete. Cite exact [R#]/URL references, preserve the ${businessResearch.recommendedOutput} sufficiency level, and never invent or reconstruct evidence.
 - Financial Assumptions lists all model assumptions by User-provided fact, AI assumption, or Market-derived estimate.
