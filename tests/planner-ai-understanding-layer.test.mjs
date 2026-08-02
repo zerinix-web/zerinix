@@ -26,6 +26,10 @@ const chatRouteSource = await readFile(
   new URL("../app/api/chat/route.ts", import.meta.url),
   "utf8"
 );
+const chatRequestConfigSource = await readFile(
+  new URL("../app/lib/ai/chat-request-config.ts", import.meta.url),
+  "utf8"
+);
 const composerSuggestionsSource = await readFile(
   new URL("../components/planner/composer-suggestions.ts", import.meta.url),
   "utf8"
@@ -389,7 +393,8 @@ test("PDF Excel Word and image detections preserve the existing chat file pipeli
 test("assets and URLs become first-class context in chat and strategic reports", () => {
   assert.match(chatRouteSource, /extractAnalysisUrls\(prompt\)/);
   assert.match(chatRouteSource, /shouldUseAnalysisWebResearch\(prompt, attachments\)/);
-  assert.match(chatRouteSource, /type: "web_search_preview"/);
+  assert.match(chatRouteSource, /createChatResponseCapabilities\(webResearch\)/);
+  assert.match(chatRequestConfigSource, /type: "web_search_preview"/);
   assert.match(chatRouteSource, /primary user-supplied evidence/);
 
   assert.match(

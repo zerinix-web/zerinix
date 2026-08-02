@@ -52,6 +52,7 @@ import {
   omitTrailingDuplicateUserPrompt,
   optimizeChatHistoryForCost,
 } from "@/app/lib/ai/token-optimization";
+import { createChatResponseCapabilities } from "@/app/lib/ai/chat-request-config";
 import {
   applyUserMemoryOperations,
   buildUserMemoryContext,
@@ -1806,23 +1807,12 @@ async function handleChatPost(req: Request) {
       () => client.responses.create(
         {
           model,
-          reasoning: { effort: "minimal" },
+          ...createChatResponseCapabilities(webResearch),
           text: { verbosity: "low" },
           instructions: instructionsText,
           input: providerInput,
           max_output_tokens: maxOutputTokens,
           stream: true,
-          ...(webResearch
-            ? {
-                tools: [
-                  {
-                    type: "web_search_preview" as const,
-                    search_context_size: "low" as const,
-                  },
-                ],
-                include: ["web_search_call.action.sources" as const],
-              }
-            : {}),
         },
         { signal: req.signal }
       )).catch(async (error) => {
