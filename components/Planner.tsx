@@ -9011,10 +9011,21 @@ export default function Planner({
           message.status !== "failed" &&
           !isReportPreparingPreview(message.content)
       )
-      .slice(-12)
       .map((message) => ({
         role: message.role,
-        content: message.content,
+        content: [
+          message.content,
+          message.attachments?.length
+            ? `Uploaded files referenced in this message: ${message.attachments
+                .map((attachment) => attachment.name)
+                .join(", ")}`
+            : "",
+          message.mode && message.mode !== "chat"
+            ? `Selected analysis type: ${message.mode}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
       }));
 
     await ensurePersistedConversation(conversationId, title);

@@ -1,9 +1,11 @@
 import { resolveOpenAiPricing } from "@/app/lib/ai/cost-metrics";
 export {
+  compactConversationHistory,
   compactReportFieldPrompt,
   dedupeExactPromptBlocks,
   omitTrailingDuplicateUserPrompt,
 } from "@/app/lib/ai/token-optimization-core";
+import { compactConversationHistory } from "@/app/lib/ai/token-optimization-core";
 
 type AiMessageLike = {
   role: string;
@@ -21,13 +23,13 @@ export type AiCostOptimizationMetrics = {
   input_chars_before: number;
   input_chars_after: number;
   trimmed_message_count: number;
+  summarized_message_count: number;
+  history_summary_chars: number;
+  recent_message_count: number;
   estimated_input_cost_savings_usd: number;
 };
 
 const tokenChars = 4;
-const chatContextImportancePattern =
-  /\b(business|startup|company|market|customer|pricing|revenue|model|competitor|risk|strategy|plan|report|analysis|investment|validation|mvp|idea|iş|girişim|şirket|pazar|müşteri|fiyat|gelir|rakip|risk|strateji|rapor|analiz|yatırım|doğrulama)\b/i;
-
 export function estimateAiInputTokens(value: string) {
   return Math.max(1, Math.ceil(value.length / tokenChars));
 }
@@ -47,14 +49,13 @@ function trimTextMiddle(value: string, maxChars: number) {
     .trim()}`;
 }
 
-function getMessageChars(messages: AiMessageLike[]) {
-  return messages.reduce((total, message) => total + message.content.length, 0);
-}
-
 export function createAiCostOptimizationMetrics(input: {
   beforeText: string;
   afterText?: string;
   trimmedMessageCount?: number;
+  summarizedMessageCount?: number;
+  historySummaryChars?: number;
+  recentMessageCount?: number;
   model?: string;
 }): AiCostOptimizationMetrics {
   const beforeChars = input.beforeText.length;
@@ -79,6 +80,9 @@ export function createAiCostOptimizationMetrics(input: {
     input_chars_before: beforeChars,
     input_chars_after: afterChars,
     trimmed_message_count: input.trimmedMessageCount ?? 0,
+    summarized_message_count: input.summarizedMessageCount ?? 0,
+    history_summary_chars: input.historySummaryChars ?? 0,
+    recent_message_count: input.recentMessageCount ?? 0,
     estimated_input_cost_savings_usd: Number(
       ((savings * inputPrice) / 1_000_000).toFixed(8)
     ),
@@ -95,34 +99,29 @@ export function optimizeChatHistoryForCost<TMessage extends AiMessageLike>(
   } = {}
 ) {
   const maxRecentMessages = options.maxRecentMessages ?? 10;
-  const maxImportantOlderMessages = options.maxImportantOlderMessages ?? 4;
   const maxMessageChars = options.maxMessageChars ?? 2_400;
   const maxTotalChars = options.maxTotalChars ?? 18_000;
   const beforeText = messages.map((message) => `${message.role}: ${message.content}`).join("\n");
-
-  if (messages.length <= maxRecentMessages && getMessageChars(messages) <= maxTotalChars) {
-    return {
-      messages,
-      metrics: createAiCostOptimizationMetrics({ beforeText }),
-    };
-  }
-
-  const indexed = messages.map((message, index) => ({ message, index }));
-  const recent = indexed.slice(-maxRecentMessages);
-  const older = indexed.slice(0, -maxRecentMessages);
-  const firstUserContext = older.find(({ message }) => message.role === "user");
-  const importantOlder = older
-    .filter(
-      (item) =>
-        item !== firstUserContext && chatContextImportancePattern.test(item.message.content)
-    )
-    .slice(-maxImportantOlderMessages);
-  const selected = [...(firstUserContext ? [firstUserContext] : []), ...importantOlder, ...recent]
-    .filter((item, index, array) => array.findIndex((candidate) => candidate.index === item.index) === index)
-    .sort((a, b) => a.index - b.index);
-  const optimizedMessages = selected.map(({ message }) => ({
+  const compacted = compactConversationHistory(messages, {
+    recentMessageCount: maxRecentMessages,
+    maxItemsPerCategory: options.maxImportantOlderMessages ?? 4,
+    maxSummaryChars: Math.min(2_400, Math.max(600, Math.floor(maxTotalChars * 0.2))),
+  });
+  const summaryMessageCount = compacted.summary ? 1 : 0;
+  const recentCharacterBudget = Math.max(
+    600 * Math.max(1, compacted.recentMessageCount),
+    maxTotalChars - compacted.summary.length
+  );
+  const recentMessageCharLimit = Math.min(
+    maxMessageChars,
+    Math.max(600, Math.floor(recentCharacterBudget / Math.max(1, compacted.recentMessageCount)))
+  );
+  const optimizedMessages = compacted.messages.map((message, index) => ({
     ...message,
-    content: trimTextMiddle(message.content, maxMessageChars),
+    content:
+      index < summaryMessageCount
+        ? message.content
+        : trimTextMiddle(message.content, recentMessageCharLimit),
   })) as TMessage[];
   const afterText = optimizedMessages
     .map((message) => `${message.role}: ${message.content}`)
@@ -133,7 +132,10 @@ export function optimizeChatHistoryForCost<TMessage extends AiMessageLike>(
     metrics: createAiCostOptimizationMetrics({
       beforeText,
       afterText,
-      trimmedMessageCount: Math.max(0, messages.length - optimizedMessages.length),
+      trimmedMessageCount: compacted.summarizedMessageCount,
+      summarizedMessageCount: compacted.summarizedMessageCount,
+      historySummaryChars: compacted.summary.length,
+      recentMessageCount: compacted.recentMessageCount,
     }),
   };
 }

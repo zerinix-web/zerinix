@@ -152,8 +152,7 @@ function normalizeMessages(value: unknown): ChatInputMessage[] {
         content: content.trim().slice(0, 6_000),
       };
     })
-    .filter((message): message is ChatInputMessage => Boolean(message))
-    .slice(-10);
+    .filter((message): message is ChatInputMessage => Boolean(message));
 }
 
 function normalizeReportId(value: unknown) {
@@ -1792,6 +1791,9 @@ async function handleChatPost(req: Request) {
       estimatedInputCostSavingsUsd:
         inputCostMetrics.estimated_input_cost_savings_usd,
       trimmedMessageCount: inputCostMetrics.trimmed_message_count,
+      summarizedMessageCount: inputCostMetrics.summarized_message_count,
+      historySummaryChars: inputCostMetrics.history_summary_chars,
+      recentMessageCount: inputCostMetrics.recent_message_count,
       providerCalled: true,
       quotaConsumed: false,
     });

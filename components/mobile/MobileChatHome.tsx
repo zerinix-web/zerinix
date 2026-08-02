@@ -1030,14 +1030,7 @@ export default function MobileChatHome({
           message.content.trim() &&
           message.status !== "failed"
       );
-    const contextualMemoryMessages =
-      availableMemoryMessages.length <= 10
-        ? availableMemoryMessages
-        : [
-            ...availableMemoryMessages.slice(0, 2),
-            ...availableMemoryMessages.slice(-8),
-          ];
-    const memoryMessages = contextualMemoryMessages
+    const memoryMessages = availableMemoryMessages
       .map((message) => ({
         role: message.role,
         content: message.content,

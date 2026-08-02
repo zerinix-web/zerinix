@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   analyzeOpenAiRequestInput,
+  compactConversationHistory,
   compactReportFieldPrompt,
   dedupeExactPromptBlocks,
   omitTrailingDuplicateUserPrompt,
@@ -20,6 +21,94 @@ const tokenOptimization = readFileSync(
   "utf8"
 );
 const domainResearch = readFileSync("app/lib/ai/domain-research.ts", "utf8");
+const mobileChatHome = readFileSync(
+  "components/mobile/MobileChatHome.tsx",
+  "utf8"
+);
+const aiChatWorkspace = readFileSync("components/AIChatWorkspace.tsx", "utf8");
+const planner = readFileSync("components/Planner.tsx", "utf8");
+
+test("older conversation turns become compact memory while the last ten remain intact", () => {
+  const older = [
+    { role: "user", content: "My goal is to validate an accounting SaaS for small businesses." },
+    { role: "assistant", content: "The uploaded finance-model.xlsx is the primary evidence file." },
+    { role: "user", content: "Use Market Intelligence as the selected analysis type." },
+    { role: "assistant", content: "Decision: prioritize Turkish accountants before expanding." },
+  ];
+  const recent = Array.from({ length: 10 }, (_, index) => ({
+    role: index % 2 === 0 ? "user" : "assistant",
+    content: `Recent message ${index + 1}`,
+  }));
+  const compacted = compactConversationHistory([...older, ...recent]);
+
+  assert.equal(compacted.summarizedMessageCount, 4);
+  assert.equal(compacted.recentMessageCount, 10);
+  assert.equal(compacted.messages.length, 11);
+  assert.deepEqual(compacted.messages.slice(1), recent);
+  assert.match(compacted.summary, /accounting SaaS/);
+  assert.match(compacted.summary, /finance-model\.xlsx/);
+  assert.match(compacted.summary, /Market Intelligence/);
+  assert.match(compacted.summary, /prioritize Turkish accountants/);
+});
+
+test("conversation memory is extractive, bounded, and materially smaller than old history", () => {
+  const messages = Array.from({ length: 40 }, (_, index) => ({
+    role: index % 2 === 0 ? "user" : "assistant",
+    content: `${index === 0 ? "My goal is to build a logistics marketplace. " : ""}${"Operational discussion without a new durable decision. ".repeat(30)}`,
+  }));
+  const beforeChars = messages.reduce((total, message) => total + message.content.length, 0);
+  const compacted = compactConversationHistory(messages, {
+    recentMessageCount: 10,
+    maxSummaryChars: 1_200,
+  });
+  const afterChars = compacted.messages.reduce(
+    (total, message) => total + message.content.length,
+    0
+  );
+
+  assert.ok(compacted.summary.length <= 1_200);
+  assert.ok(compacted.messages.length <= 11);
+  assert.ok(afterChars < beforeChars * 0.6);
+  assert.match(compacted.summary, /logistics marketplace/);
+});
+
+test("conversation memory retains boundary context when the language has no keyword matcher", () => {
+  const older = [
+    { role: "user", content: "Ich entwickle eine Lösung für lokale Hersteller." },
+    { role: "assistant", content: "Wir haben zunächst den regionalen Vertrieb besprochen." },
+    { role: "user", content: "Die zuletzt vereinbarte Richtung gilt weiterhin." },
+  ];
+  const recent = Array.from({ length: 10 }, (_, index) => ({
+    role: index % 2 === 0 ? "user" : "assistant",
+    content: `Aktuelle Nachricht ${index + 1}`,
+  }));
+  const compacted = compactConversationHistory([...older, ...recent]);
+
+  assert.match(compacted.summary, /lokale Hersteller/);
+  assert.match(compacted.summary, /zuletzt vereinbarte Richtung/);
+  assert.match(compacted.summary, /regionalen Vertrieb/);
+});
+
+test("all chat clients submit available history for centralized server compaction", () => {
+  assert.doesNotMatch(mobileChatHome, /contextualMemoryMessages/);
+  assert.doesNotMatch(
+    aiChatWorkspace,
+    /const memoryMessages = currentMessages[\s\S]{0,400}\.slice\(-8\)/
+  );
+  assert.doesNotMatch(
+    planner,
+    /const memoryMessages = currentMessages[\s\S]{0,500}\.slice\(-12\)/
+  );
+  assert.doesNotMatch(
+    chatRoute,
+    /function normalizeMessages[\s\S]{0,900}\.slice\(-10\)/
+  );
+  assert.match(tokenOptimization, /compactConversationHistory\(messages/);
+  assert.match(aiChatWorkspace, /Uploaded files referenced in this message/);
+  assert.match(aiChatWorkspace, /Selected analysis type/);
+  assert.match(planner, /Uploaded files referenced in this message/);
+  assert.match(planner, /Selected analysis type/);
+});
 
 test("exact duplicate prompt blocks are removed without changing unique report content", () => {
   const evidence = "Completed research:\n[R1] Market size — https://example.gov/data";

@@ -3,6 +3,171 @@ export type PromptMessage = {
   content: string;
 };
 
+export type CompactedConversationHistory<TMessage extends PromptMessage> = {
+  messages: TMessage[];
+  summary: string;
+  summarizedMessageCount: number;
+  recentMessageCount: number;
+};
+
+const conversationMemoryCategories = [
+  {
+    label: "Uploaded files and evidence",
+    preferRecent: true,
+    pattern:
+      /\b(attached|attachment|uploaded|file|document|pdf|csv|xlsx?|docx?|image|screenshot|dataset|dosya|belge|yükle(?:dim|ndi)?|ekli)\b|\b[^\s]+\.(?:pdf|csv|xlsx?|docx?|txt|md|json|png|jpe?g|webp)\b/i,
+  },
+  {
+    label: "User goals",
+    preferRecent: false,
+    pattern:
+      /\b(goal|objective|aim|want|need|trying|build|launch|validate|accomplish|hedef|amaç|istiyorum|ihtiyacım|kurmak|oluşturmak|başlatmak|doğrulamak)\b/i,
+  },
+  {
+    label: "Report mode and analysis type",
+    preferRecent: true,
+    pattern:
+      /\b(report mode|report|business plan|market analysis|market intelligence|strategic report|analysis type|decision intelligence|plan mode|rapor|iş planı|pazar analizi|pazar araştırması|stratejik rapor|analiz türü|karar zekâsı)\b/i,
+  },
+  {
+    label: "Important decisions and constraints",
+    preferRecent: true,
+    pattern:
+      /\b(decided|decision|selected|choose|chosen|agreed|must|must not|do not|constraint|budget|deadline|priority|karar|kararlaştır|seç|seçildi|anlaştık|zorunlu|yapma|bütçe|son tarih|öncelik)\b/i,
+  },
+] as const;
+
+const generalConversationFactPattern =
+  /\b(business|startup|company|product|service|market|customer|competitor|pricing|revenue|industry|risk|strategy|investment|validation|mvp|iş|girişim|şirket|ürün|hizmet|pazar|müşteri|rakip|fiyat|gelir|sektör|risk|strateji|yatırım|doğrulama)\b/i;
+
+function normalizeMemoryExcerpt(value: string, maxChars = 240) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars - 2).trim()} …`;
+}
+
+function conversationMemoryExcerpts(message: PromptMessage) {
+  return message.content
+    .split(/\n+|(?<=[.!?])\s+/)
+    .map((part) => normalizeMemoryExcerpt(part))
+    .filter((part) => part.length >= 4)
+    .map((part) => `${message.role === "assistant" ? "Assistant" : "User"}: ${part}`);
+}
+
+/**
+ * Converts older chat turns into a deterministic, extractive memory. It never
+ * asks a model to summarize, so compaction cannot add latency, cost, invented
+ * facts, or a second AI request.
+ */
+export function compactConversationHistory<TMessage extends PromptMessage>(
+  messages: TMessage[],
+  options: {
+    recentMessageCount?: number;
+    maxSummaryChars?: number;
+    maxItemsPerCategory?: number;
+  } = {}
+): CompactedConversationHistory<TMessage> {
+  const recentMessageCount = Math.min(
+    12,
+    Math.max(8, options.recentMessageCount ?? 10)
+  );
+  const maxSummaryChars = Math.max(600, options.maxSummaryChars ?? 2_400);
+  const maxItemsPerCategory = Math.min(
+    2,
+    Math.max(1, options.maxItemsPerCategory ?? 2)
+  );
+  const recent = messages.slice(-recentMessageCount);
+  const older = messages.slice(0, -recentMessageCount);
+
+  if (older.length === 0) {
+    return {
+      messages: recent,
+      summary: "",
+      summarizedMessageCount: 0,
+      recentMessageCount: recent.length,
+    };
+  }
+
+  const categorized = conversationMemoryCategories.map((category) => ({
+    ...category,
+    items: [] as string[],
+  }));
+  const generalItems: string[] = [];
+  const seen = new Set<string>();
+
+  for (const message of older) {
+    for (const excerpt of conversationMemoryExcerpts(message)) {
+      const identity = excerpt.toLocaleLowerCase();
+      if (seen.has(identity)) continue;
+
+      const category = categorized.find((item) => item.pattern.test(excerpt));
+      if (category) {
+        if (category.items.length < maxItemsPerCategory) {
+          category.items.push(excerpt);
+          seen.add(identity);
+          continue;
+        }
+        if (category.preferRecent) {
+          category.items.shift();
+          category.items.push(excerpt);
+          seen.add(identity);
+          continue;
+        }
+      }
+
+      if (
+        generalItems.length < maxItemsPerCategory &&
+        generalConversationFactPattern.test(excerpt)
+      ) {
+        generalItems.push(excerpt);
+        seen.add(identity);
+      }
+    }
+  }
+
+  if (categorized.every((category) => category.items.length === 0) && generalItems.length === 0) {
+    const fallbackMessages = [
+      older.find((message) => message.role === "user"),
+      [...older].reverse().find((message) => message.role === "user"),
+      [...older].reverse().find((message) => message.role === "assistant"),
+    ].filter((message): message is TMessage => Boolean(message));
+
+    for (const fallbackMessage of fallbackMessages) {
+      const item = `${fallbackMessage.role === "assistant" ? "Assistant" : "User"}: ${normalizeMemoryExcerpt(fallbackMessage.content, 320)}`;
+      if (!generalItems.includes(item)) generalItems.push(item);
+    }
+  }
+
+  const sections = [
+    ...categorized
+      .filter((category) => category.items.length > 0)
+      .map(
+        (category) =>
+          `${category.label}:\n${category.items.map((item) => `- ${item}`).join("\n")}`
+      ),
+    ...(generalItems.length > 0
+      ? [`Other durable business context:\n${generalItems.map((item) => `- ${item}`).join("\n")}`]
+      : []),
+  ];
+  const summaryBody = sections.join("\n\n");
+  const summary = normalizeMemoryExcerpt(
+    `Conversation memory from earlier messages (context only; the latest user message remains the active request):\n${summaryBody}`,
+    maxSummaryChars
+  );
+  const summaryMessage = {
+    role: "user",
+    content: summary,
+  } as TMessage;
+
+  return {
+    messages: [summaryMessage, ...recent],
+    summary,
+    summarizedMessageCount: older.length,
+    recentMessageCount: recent.length,
+  };
+}
+
 /** Removes only byte-for-byte equivalent blocks while retaining first-use order. */
 export function dedupeExactPromptBlocks(value: string) {
   const seen = new Set<string>();
