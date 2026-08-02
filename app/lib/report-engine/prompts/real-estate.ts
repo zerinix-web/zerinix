@@ -1,5 +1,6 @@
 import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
 import { repairReportLanguageSections } from "../../report-language.ts";
+import { buildExecutivePresentationDirectives } from "../../ai/report-quality-directives.ts";
 
 export const realEstatePrompts = {
   assetIdentification:
@@ -414,6 +415,7 @@ export function buildRealEstateInstructions(language: ResponseLanguage) {
     "A source homepage or generic provider page is not evidence. Use a source only when it supports a concrete normalized fact.",
     "Do not claim a source conflict unless two distinct usable sources assert incompatible facts about the same field.",
     "Sources must list only usable external evidence. For each source include its title, institution or site name, exact non-homepage URL, and access date. Never list an uploaded filename as a source.",
+    ...buildExecutivePresentationDirectives("real_estate"),
     language === "Turkish"
       ? "Evidence labels dışında bütün başlık, açıklama, bulgu, risk, fırsat ve tavsiye metnini doğal Türkçe yaz."
       : "Write all headings, explanations, findings, risks, opportunities, and recommendations in English.",

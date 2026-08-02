@@ -1196,7 +1196,7 @@ function enforcePlanReportLanguage(
       .replace(/\bAI Confidence Breakdown\b/g, "AI Güven Dağılımı")
       .replace(/\bFounder Decision Engine\b/g, "Kurucu Karar Motoru")
       .replace(/\bRisk Matrix\b/g, "Risk Matrisi")
-      .replace(/\bCEO Brief\b/g, "CEO Özeti")
+      .replace(/\bCEO (?:Brief|Summary)\b/g, "CEO Özeti")
       .replace(/\bCommentary\s*:/g, "Yorum:")
       .replace(/\bDecision\s*:/g, "Karar:")
       .replace(/\bInvestment Recommendation\s*:/g, "Yatırım Tavsiyesi:")
@@ -1229,7 +1229,7 @@ function enforcePlanReportLanguage(
     .replace(/\bAI Güven Dağılımı\b/g, "AI Confidence Breakdown")
     .replace(/\bKurucu Karar Motoru\b/g, "Founder Decision Engine")
     .replace(/\bRisk Matrisi\b/g, "Risk Matrix")
-    .replace(/\bCEO Özeti\b/g, "CEO Brief")
+    .replace(/\bCEO Özeti\b/g, "CEO Summary")
     .replace(/\bYorum\s*:/g, "Commentary:")
     .replace(/\bKarar\s*:/g, "Decision:")
     .replace(/\bKarar Güveni\b/g, "Decision Confidence")
@@ -1856,6 +1856,71 @@ function scorePercent(score: number, maximumScore: number) {
   return maximumScore > 0 ? Math.round((score / maximumScore) * 100) : 0;
 }
 
+function buildExecutiveScorecard(
+  context: AiFinancialModelContext,
+  language: ResponseLanguage
+) {
+  const confidence = context.reportIntelligence.totalScore;
+  const confidenceLevel =
+    confidence >= 75
+      ? reportText(language, "High", "Yüksek")
+      : confidence >= 55
+        ? reportText(language, "Medium", "Orta")
+        : reportText(language, "Low", "Düşük");
+  const opportunityScore = scorePercent(
+    context.investmentScore.decisionEngine.marketScore.score,
+    context.investmentScore.decisionEngine.marketScore.maximumScore
+  );
+  const opportunityLevel =
+    opportunityScore >= 70
+      ? reportText(language, "High", "Yüksek")
+      : opportunityScore >= 50
+        ? reportText(language, "Medium", "Orta")
+        : reportText(language, "Low", "Düşük");
+  const riskLevel =
+    context.investmentScore.totalScore < 45
+      ? reportText(language, "High", "Yüksek")
+      : context.investmentScore.totalScore < 70
+        ? reportText(language, "Medium", "Orta")
+        : reportText(language, "Low", "Düşük");
+  const executionScore = scorePercent(
+    context.investmentScore.decisionEngine.executionScore.score,
+    context.investmentScore.decisionEngine.executionScore.maximumScore
+  );
+  const timeToMarket =
+    executionScore >= 70
+      ? reportText(language, "3-6 months", "3-6 ay")
+      : executionScore >= 50
+        ? reportText(language, "6-12 months", "6-12 ay")
+        : reportText(language, "12-18 months", "12-18 ay");
+  const decision = localizeDecision(getVisibleDecision(context), language);
+  const readiness =
+    getVisibleDecision(context) === "VALIDATE"
+      ? reportText(language, "Conditionally ready", "Koşullu hazır")
+      : getVisibleDecision(context) === "PASS"
+        ? reportText(language, "Not ready", "Hazır değil")
+        : reportText(language, "Validation required", "Doğrulama gerekli");
+
+  return [
+    reportText(language, "Executive Scorecard", "Yönetici Skor Kartı"),
+    reportText(language, `[Estimated] Overall Recommendation: ${decision}`, `[Tahmini] Genel Tavsiye: ${decision}`),
+    reportText(
+      language,
+      `[Estimated] Confidence Score: ${confidence}/100 (${confidenceLevel}) — evidence coverage, financial certainty, and validation readiness determine this level.`,
+      `[Tahmini] Güven Skoru: ${confidence}/100 (${confidenceLevel}) — bu düzeyi kanıt kapsamı, finansal kesinlik ve doğrulama hazırlığı belirler.`
+    ),
+    reportText(language, `[Estimated] Opportunity Level: ${opportunityLevel} (${opportunityScore}/100)`, `[Tahmini] Fırsat Seviyesi: ${opportunityLevel} (${opportunityScore}/100)`),
+    reportText(language, `[Estimated] Risk Level: ${riskLevel}`, `[Tahmini] Risk Seviyesi: ${riskLevel}`),
+    reportText(language, `[Assumption] Estimated Time to Market: ${timeToMarket}, conditional on the stated validation gates.`, `[Varsayım] Tahmini Pazara Çıkış Süresi: belirtilen doğrulama kapılarına bağlı olarak ${timeToMarket}.`),
+    reportText(language, `[Estimated] Investment Readiness: ${readiness}`, `[Tahmini] Yatırım Hazırlığı: ${readiness}`),
+    reportText(
+      language,
+      `[Assumption] Decision Summary: ${context.investmentScore.nextCriticalAction}; release additional capital only after the highest-risk proof gate is met.`,
+      `[Varsayım] Karar Özeti: ${context.investmentScore.nextCriticalAction}; ek sermayeyi yalnızca en riskli kanıt kapısı karşılandıktan sonra serbest bırakın.`
+    ),
+  ].join("\n");
+}
+
 function appendIntelligenceBlock(content: string, title: string, lines: string[]) {
   const cleanLines = lines.map((line) => line.trim()).filter(Boolean);
 
@@ -2002,16 +2067,11 @@ function buildRiskMatrix(context: AiFinancialModelContext, language: ResponseLan
 function buildCeoBrief(context: AiFinancialModelContext, language: ResponseLanguage) {
   const decision = localizeDecision(getVisibleDecision(context), language);
   return [
-    reportText(language, `- Decision posture: ${decision}; Decision Confidence is ${context.reportIntelligence.totalScore}/100.`, `- Karar duruşu: ${decision}; Karar Güveni ${context.reportIntelligence.totalScore}/100.`),
-    reportText(language, `- Immediate board priority: ${context.investmentScore.nextCriticalAction}`, `- Acil yönetim önceliği: ${context.investmentScore.nextCriticalAction}`),
-    reportText(language, `- Demand proof must come from ${context.inputs.targetCustomer} willingness to pay, not market-size narrative alone.`, `- Talep kanıtı yalnızca pazar büyüklüğü anlatısından değil, ${context.inputs.targetCustomer} ödeme isteğinden gelmelidir.`),
-    reportText(language, `- Financial discipline depends on protecting ${context.metrics.grossMargin.displayValue} gross margin and ${context.metrics.cacPayback.displayValue} CAC payback.`, `- Finansal disiplin ${context.metrics.grossMargin.displayValue} brüt marjı ve ${context.metrics.cacPayback.displayValue} CAC geri ödemesini korumaya bağlıdır.`),
-    reportText(language, `- Capital allocation should stay constrained by ${context.metrics.runway.displayValue} runway until repeatable conversion evidence exists.`, `- Tekrarlanabilir dönüşüm kanıtı oluşana kadar sermaye dağıtımı ${context.metrics.runway.displayValue} finansal pist ile sınırlı kalmalıdır.`),
-    reportText(language, "- Avoid scaling paid acquisition before conversion, retention, and payback evidence are repeatable.", "- Dönüşüm, elde tutma ve geri ödeme kanıtı tekrarlanabilir olmadan ücretli edinimi ölçeklemekten kaçının."),
-    reportText(language, "- Avoid expanding product scope before the beachhead use case is validated.", "- Başlangıç kullanım senaryosu doğrulanmadan ürün kapsamını genişletmekten kaçının."),
-    reportText(language, "- Biggest opportunity: turn the focused beachhead into validated early revenue before broad expansion.", "- En büyük fırsat: geniş genişlemeden önce odaklı başlangıç pazarını doğrulanmış erken gelire çevirmek."),
-    reportText(language, `- Biggest hidden risk: ${context.investmentScore.topRisks[0] || "the model may appear investable before demand and payback evidence are proven."}`, `- En büyük gizli risk: ${context.investmentScore.topRisks[0] || "talep ve geri ödeme kanıtı oluşmadan model yatırım yapılabilir görünebilir."}`),
-    reportText(language, `- Executive conclusion: ${localizeDecision(context.investmentScore.recommendation, language)} is justified only if the highest-risk assumption is proven before scaling capital.`, `- Yönetici sonucu: ${localizeDecision(context.investmentScore.recommendation, language)} kararı yalnızca en riskli varsayım sermaye ölçeklenmeden önce kanıtlanırsa gerekçelidir.`),
+    reportText(language, `- [Estimated] Biggest Opportunity: convert ${context.inputs.targetCustomer} beachhead demand into repeatable paid revenue before broad expansion.`, `- [Tahmini] En Büyük Fırsat: genişlemeden önce ${context.inputs.targetCustomer} başlangıç talebini tekrarlanabilir ücretli gelire dönüştürmek.`),
+    reportText(language, `- [Estimated] Biggest Risk: ${context.investmentScore.topRisks[0] || "demand and payback may remain unproven when capital is scaled."}`, `- [Tahmini] En Büyük Risk: ${context.investmentScore.topRisks[0] || "sermaye ölçeklendiğinde talep ve geri ödeme kanıtlanmamış kalabilir."}`),
+    reportText(language, `- [Assumption] First 90 Days: ${context.investmentScore.nextCriticalAction}; test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer}, record paid conversion, and repeat the winning motion before expansion.`, `- [Varsayım] İlk 90 Gün: ${context.investmentScore.nextCriticalAction}; ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile test edin, ücretli dönüşümü kaydedin ve genişlemeden önce kazanan hareketi tekrarlayın.`),
+    reportText(language, `- [Assumption] Critical KPIs: paid conversion, retention, ${context.metrics.grossMargin.displayValue} gross margin, and ${context.metrics.cacPayback.displayValue} CAC payback.`, `- [Varsayım] Kritik KPI'lar: ücretli dönüşüm, elde tutma, ${context.metrics.grossMargin.displayValue} brüt marj ve ${context.metrics.cacPayback.displayValue} CAC geri ödeme.`),
+    reportText(language, `- [Estimated] Final Recommendation: ${decision} with ${context.reportIntelligence.totalScore}/100 confidence; commit additional capital only after the primary evidence gate is met.`, `- [Tahmini] Nihai Tavsiye: ${context.reportIntelligence.totalScore}/100 güven ile ${decision}; ek sermayeyi yalnızca birincil kanıt kapısı karşılandıktan sonra taahhüt edin.`),
   ];
 }
 
@@ -2131,6 +2191,7 @@ function normalizeFullPlanReport(
       ? buildCanonicalExecutiveRecommendation(context)
       : buildCanonicalExecutiveRecommendation(context, language);
   normalized.founderScore = buildCanonicalFounderScore(context, language);
+  normalized.executiveSummary = buildExecutiveScorecard(context, language);
   normalized.swotAnalysis =
     language === "English"
       ? buildCanonicalSwot(context, parsed)
@@ -2188,7 +2249,7 @@ function normalizeFullPlanReport(
   );
   normalized.sourcesAssumptions = appendIntelligenceBlock(
     normalized.sourcesAssumptions,
-    reportLabel(language, "CEO Brief", "CEO Özeti"),
+    reportLabel(language, "CEO Summary", "CEO Özeti"),
     buildCeoBrief(context, language)
   );
 

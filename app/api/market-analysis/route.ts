@@ -383,7 +383,7 @@ function enforceMarketReportLanguage(
       .replace(/\bAI Confidence Breakdown\b/g, "AI Güven Dağılımı")
       .replace(/\bFounder Decision Engine\b/g, "Kurucu Karar Motoru")
       .replace(/\bRisk Matrix\b/g, "Risk Matrisi")
-      .replace(/\bCEO Brief\b/g, "CEO Özeti")
+      .replace(/\bCEO (?:Brief|Summary)\b/g, "CEO Özeti")
       .replace(/\bCommentary\s*:/g, "Yorum:")
       .replace(/\bDecision\s*:/g, "Karar:")
       .replace(/\bInvestment Recommendation\s*:/g, "Yatırım Tavsiyesi:")
@@ -416,7 +416,7 @@ function enforceMarketReportLanguage(
     .replace(/\bAI Güven Dağılımı\b/g, "AI Confidence Breakdown")
     .replace(/\bKurucu Karar Motoru\b/g, "Founder Decision Engine")
     .replace(/\bRisk Matrisi\b/g, "Risk Matrix")
-    .replace(/\bCEO Özeti\b/g, "CEO Brief")
+    .replace(/\bCEO Özeti\b/g, "CEO Summary")
     .replace(/\bYorum\s*:/g, "Commentary:")
     .replace(/\bKarar\s*:/g, "Decision:")
     .replace(/\bKarar Güveni\b/g, "Decision Confidence")
@@ -749,9 +749,91 @@ void [
 ];
 }
 
+function marketScorePercent(score: number, maximumScore: number) {
+  return maximumScore > 0 ? Math.round((score / maximumScore) * 100) : 0;
+}
+
+function buildMarketExecutiveScorecard(
+  context: AiFinancialModelContext,
+  language: ResponseLanguage
+) {
+  const confidence = context.reportIntelligence.totalScore;
+  const confidenceLevel = confidence >= 75
+    ? marketText(language, "High", "Yüksek")
+    : confidence >= 55
+      ? marketText(language, "Medium", "Orta")
+      : marketText(language, "Low", "Düşük");
+  const opportunityScore = marketScorePercent(
+    context.investmentScore.decisionEngine.marketScore.score,
+    context.investmentScore.decisionEngine.marketScore.maximumScore
+  );
+  const opportunityLevel = opportunityScore >= 70
+    ? marketText(language, "High", "Yüksek")
+    : opportunityScore >= 50
+      ? marketText(language, "Medium", "Orta")
+      : marketText(language, "Low", "Düşük");
+  const riskLevel = context.investmentScore.totalScore < 45
+    ? marketText(language, "High", "Yüksek")
+    : context.investmentScore.totalScore < 70
+      ? marketText(language, "Medium", "Orta")
+      : marketText(language, "Low", "Düşük");
+  const executionScore = marketScorePercent(
+    context.investmentScore.decisionEngine.executionScore.score,
+    context.investmentScore.decisionEngine.executionScore.maximumScore
+  );
+  const timeToMarket = executionScore >= 70
+    ? marketText(language, "3-6 months", "3-6 ay")
+    : executionScore >= 50
+      ? marketText(language, "6-12 months", "6-12 ay")
+      : marketText(language, "12-18 months", "12-18 ay");
+  const rawDecision = context.investmentScore.recommendation === "GO"
+    ? "VALIDATE"
+    : context.investmentScore.recommendation === "PASS" && context.investmentScore.confidence < 35
+      ? "PASS"
+      : "HOLD";
+  const decision = localizeMarketDecision(rawDecision, language);
+  const readiness = rawDecision === "VALIDATE"
+    ? marketText(language, "Conditionally ready", "Koşullu hazır")
+    : rawDecision === "PASS"
+      ? marketText(language, "Not ready", "Hazır değil")
+      : marketText(language, "Validation required", "Doğrulama gerekli");
+
+  return [
+    marketText(language, "Executive Scorecard", "Yönetici Skor Kartı"),
+    marketText(language, `[Estimated] Overall Recommendation: ${decision}`, `[Tahmini] Genel Tavsiye: ${decision}`),
+    marketText(language, `[Estimated] Confidence Score: ${confidence}/100 (${confidenceLevel}) — source coverage, market evidence, and unresolved gaps determine this level.`, `[Tahmini] Güven Skoru: ${confidence}/100 (${confidenceLevel}) — bu düzeyi kaynak kapsamı, pazar kanıtı ve çözülmemiş boşluklar belirler.`),
+    marketText(language, `[Estimated] Opportunity Level: ${opportunityLevel} (${opportunityScore}/100)`, `[Tahmini] Fırsat Seviyesi: ${opportunityLevel} (${opportunityScore}/100)`),
+    marketText(language, `[Estimated] Risk Level: ${riskLevel}`, `[Tahmini] Risk Seviyesi: ${riskLevel}`),
+    marketText(language, `[Assumption] Estimated Time to Market: ${timeToMarket}, conditional on market-entry proof gates.`, `[Varsayım] Tahmini Pazara Çıkış Süresi: pazara giriş kanıt kapılarına bağlı olarak ${timeToMarket}.`),
+    marketText(language, `[Estimated] Investment Readiness: ${readiness}`, `[Tahmini] Yatırım Hazırlığı: ${readiness}`),
+    marketText(language, `[Assumption] Decision Summary: ${context.investmentScore.nextCriticalAction}; expand only after the entry thesis is supported by repeatable demand evidence.`, `[Varsayım] Karar Özeti: ${context.investmentScore.nextCriticalAction}; yalnızca giriş tezi tekrarlanabilir talep kanıtıyla desteklendikten sonra genişleyin.`),
+  ].join("\n");
+}
+
+function buildMarketCeoSummary(
+  context: AiFinancialModelContext,
+  language: ResponseLanguage
+) {
+  const rawDecision = context.investmentScore.recommendation === "GO"
+    ? "VALIDATE"
+    : context.investmentScore.recommendation === "PASS" && context.investmentScore.confidence < 35
+      ? "PASS"
+      : "HOLD";
+  const decision = localizeMarketDecision(rawDecision, language);
+
+  return [
+    marketText(language, "CEO Summary", "CEO Özeti"),
+    marketText(language, `- [Estimated] Biggest Opportunity: convert the ${context.inputs.targetCustomer} beachhead into defensible market-entry evidence.`, `- [Tahmini] En Büyük Fırsat: ${context.inputs.targetCustomer} başlangıç pazarını savunulabilir pazara giriş kanıtına dönüştürmek.`),
+    marketText(language, `- [Estimated] Biggest Risk: ${context.investmentScore.topRisks[0] || "reachable demand may be weaker than category growth suggests."}`, `- [Tahmini] En Büyük Risk: ${context.investmentScore.topRisks[0] || "erişilebilir talep kategori büyümesinin ima ettiğinden zayıf olabilir."}`),
+    marketText(language, `- [Assumption] First 90 Days: ${context.investmentScore.nextCriticalAction}; run three buyer tests, validate the ${context.inputs.pricingModel} offer, and document a repeatable entry signal.`, `- [Varsayım] İlk 90 Gün: ${context.investmentScore.nextCriticalAction}; üç alıcı testi yürütün, ${context.inputs.pricingModel} teklifini doğrulayın ve tekrarlanabilir giriş sinyalini belgeleyin.`),
+    marketText(language, `- [Assumption] Critical KPIs: qualified demand, paid conversion, sales-cycle length, and ${context.metrics.cacPayback.displayValue} payback.`, `- [Varsayım] Kritik KPI'lar: nitelikli talep, ücretli dönüşüm, satış döngüsü süresi ve ${context.metrics.cacPayback.displayValue} geri ödeme.`),
+    marketText(language, `- [Estimated] Final Recommendation: ${decision} with ${context.reportIntelligence.totalScore}/100 confidence; scale entry spend only after the primary evidence gate is met.`, `- [Tahmini] Nihai Tavsiye: ${context.reportIntelligence.totalScore}/100 güven ile ${decision}; giriş harcamasını yalnızca birincil kanıt kapısı karşılandıktan sonra ölçekleyin.`),
+  ].join("\n");
+}
+
 function ensureMarketReportQuality(
   report: Record<MarketReportField, string>,
-  _context?: AiFinancialModelContext,
+  context?: AiFinancialModelContext,
   language: ResponseLanguage = "English"
 ) {
   const normalized = { ...report };
@@ -761,6 +843,21 @@ function ensureMarketReportQuality(
     normalized[field] = field === "sources"
       ? cleanInternalMarketSourceFallbacks(sanitized, language)
       : enforceMarketReportLanguage(sanitized, language);
+  }
+
+  if (context) {
+    const scorecardHeading = language === "Turkish"
+      ? "Yönetici Skor Kartı"
+      : "Executive Scorecard";
+    const ceoSummaryHeading = language === "Turkish" ? "CEO Özeti" : "CEO Summary";
+
+    if (!normalized.executiveSummary.includes(scorecardHeading)) {
+      normalized.executiveSummary = `${buildMarketExecutiveScorecard(context, language)}\n\n${normalized.executiveSummary}`.trim();
+    }
+
+    if (!normalized.strategicRecommendations.includes(ceoSummaryHeading)) {
+      normalized.strategicRecommendations = `${normalized.strategicRecommendations}\n\n${buildMarketCeoSummary(context, language)}`.trim();
+    }
   }
 
   return dedupeReportParagraphsAcrossSections(normalized, {

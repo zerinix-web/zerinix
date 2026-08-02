@@ -1,4 +1,49 @@
 type ReportQualityKind = "business_plan" | "market_analysis";
+export type ExecutivePresentationKind =
+  | ReportQualityKind
+  | "real_estate"
+  | "specialized_analysis";
+
+const majorSectionsByKind: Record<ExecutivePresentationKind, string> = {
+  business_plan:
+    "Problem, Solution, Market Opportunity, Competitor Landscape, Business Model, Pricing Strategy, Go-to-Market, Financial Dashboard, Risks, and Executive Recommendation",
+  market_analysis:
+    "Market Overview, Market Size, Industry Trends, Competitive Landscape, Opportunities, Threats, Porter's Five Forces, and Strategic Recommendations",
+  real_estate:
+    "Ownership and Title, Zoning and Land Use, Comparable Market Evidence, Valuation, Legal and Environmental Risks, Development Potential, Scenarios, and Final Recommendation",
+  specialized_analysis:
+    "Domain Findings, Regulatory and Compliance Findings, Financial Implications, Operational Implications, Risk Analysis, Scenario Analysis, Decision Assessment, and Final Recommendation",
+};
+
+/**
+ * Presentation-only contract. All blocks are embedded inside existing string
+ * fields, so report schemas, stream events, API contracts, and PDF inputs stay
+ * unchanged.
+ */
+export function buildExecutivePresentationDirectives(
+  kind: ExecutivePresentationKind
+) {
+  const scorecardPlacement =
+    kind === "business_plan" || kind === "market_analysis"
+      ? "Begin Executive Summary"
+      : "Begin the existing executive/final-recommendation presentation";
+  const summaryPlacement =
+    kind === "business_plan"
+      ? "End Sources / Assumptions"
+      : kind === "market_analysis"
+        ? "End Strategic Recommendations, immediately before Sources"
+        : "End Final Recommendation";
+
+  return [
+    `${scorecardPlacement} with an Executive Scorecard containing exactly: Overall Recommendation, Confidence Score, Opportunity Level, Risk Level, Estimated Time to Market, Investment Readiness, and Decision Summary. Keep it scannable in under 30 seconds.`,
+    `Treat these as major sections: ${majorSectionsByKind[kind]}. End each with one compact AI Executive Insight block containing Key Insight, Why It Matters, Recommended Executive Action, and Expected Business Impact. The block must synthesize the section's new implication instead of repeating its prose.`,
+    "After each major-section insight, include Confidence: High, Medium, or Low plus one sentence tied to evidence coverage and unresolved gaps.",
+    "After each major section, include Next Actions with 3-5 concrete actions that name an owner or operating object, an action, and a measurable proof point or decision gate.",
+    "Classify material claims with [Verified], [Estimated], or [Assumption]. If a specialized domain requires stricter provenance labels, preserve those stricter labels and map their meaning rather than weakening them.",
+    `${summaryPlacement} with a one-page CEO Summary containing exactly: Biggest Opportunity, Biggest Risk, First 90 Days, Critical KPIs, and Final Recommendation. Reuse conclusions by concise reference; do not copy earlier paragraphs.`,
+    "Keep every insight, action, confidence line, scorecard, and CEO summary inside the existing field word budgets. Replace repetitive summaries and generic advice with these decision blocks; do not increase total report length.",
+  ];
+}
 
 const sharedDecisionSupportDirectives = [
   "Before drafting, silently create one Decision Spine with exactly five elements: business-specific thesis, decisive evidence gap, primary risk mechanism, next concrete action, and proof-gated milestone sequence. Keep wording internal; use the facts consistently without copying sentences between sections.",

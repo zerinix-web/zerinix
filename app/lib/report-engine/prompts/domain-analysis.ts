@@ -1,5 +1,6 @@
 import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
 import type { ReportDomain } from "@/app/lib/report-engine/domain";
+import { buildExecutivePresentationDirectives } from "../../ai/report-quality-directives.ts";
 
 export type SpecializedReportDomain = Exclude<
   ReportDomain,
@@ -154,6 +155,7 @@ export function buildDomainAnalysisInstructions(
     "Every material factual claim must include inline provenance: [Asset: filename], [R#], [User], [Method: ...], [Required: ...], or [Basis: ...].",
     "Never invent numeric values, sources, professional conclusions, legal status, accounting treatment, prices, or operational findings.",
     "If research could not verify a fact, write Unknown and name the exact source or document required.",
+    ...buildExecutivePresentationDirectives("specialized_analysis"),
   ].join("\n");
 }
 
