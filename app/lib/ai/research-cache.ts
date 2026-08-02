@@ -108,6 +108,22 @@ function estimateResearchUsage(
   };
 }
 
+function isReusableResearch(research: DomainResearchBundle) {
+  return (
+    research.researchAttempted &&
+    !research.fallbackUsed &&
+    research.evidence.length > 0
+  );
+}
+
+function getResearchCacheTtlDays(identity: ResearchCacheIdentity) {
+  return /\b(latest|current|today|recent|news|güncel|bugün|son gelişmeler|haber)\b/i.test(
+    identity.normalizedPrompt
+  )
+    ? 1
+    : 7;
+}
+
 export function createResearchResultCacheKey(identity: ResearchCacheIdentity) {
   return createAiCacheKey({
     endpoint: "/internal/research",
@@ -202,6 +218,17 @@ export async function resolveDomainResearchWithCache(input: {
     },
     execute: input.execute,
     write: async (research) => {
+      if (!isReusableResearch(research)) {
+        logOperationalInfo("[research-cache] skipped non-reusable result", {
+          reportFamily: input.identity.reportFamily,
+          analysisMode: input.identity.analysisMode,
+          researchAttempted: research.researchAttempted,
+          fallbackUsed: research.fallbackUsed,
+          evidenceCount: research.evidence.length,
+        });
+        return;
+      }
+
       const tokenUsage = estimateResearchUsage(input.identity, research);
       const estimatedCostUsd = estimateAiCostUsd(RESEARCH_MODEL, tokenUsage);
       const payload: CachedResearchPayload = {
@@ -228,7 +255,7 @@ export async function resolveDomainResearchWithCache(input: {
         responseData: payload,
         tokenUsage,
         estimatedCostUsd,
-        expiresInDays: 7,
+        expiresInDays: getResearchCacheTtlDays(input.identity),
       });
     },
   });

@@ -29,6 +29,7 @@ import {
 } from "@/app/lib/ai/analysis-assets";
 import {
   formatDomainResearchBundle,
+  formatDomainResearchForReportGeneration,
   runDomainAwareResearch,
   validateDomainResearchQuality,
   validateDomainResearchQualitySafely,
@@ -50,6 +51,7 @@ import {
   type AiFinancialModelContext,
 } from "@/app/lib/ai/financial-assumptions";
 import {
+  compactReportFieldPrompt,
   createAiCostOptimizationMetrics,
   dedupeExactPromptBlocks,
 } from "@/app/lib/ai/token-optimization";
@@ -1356,7 +1358,9 @@ Write only this section's content. Do not write a JSON object, field name, headi
             researchUserId: user.id,
           }),
         });
-      const domainResearchContext = formatDomainResearchBundle(domainResearch);
+      const legacyDomainResearchContext = formatDomainResearchBundle(domainResearch);
+      const domainResearchContext =
+        formatDomainResearchForReportGeneration(domainResearch);
 
       if (domainResearch.recommendedOutput === "clarification") {
         return NextResponse.json(
@@ -1394,7 +1398,9 @@ Write only this section's content. Do not write a JSON object, field name, headi
         );
       }
 
-      const fullReportInput = `Latest user request language: ${responseLanguage}
+      const verboseFieldContracts = reportFields.map((fieldName) => `- ${fieldName}: ${fieldLabelsByLanguage[responseLanguage][fieldName]} — ${fieldPrompts[fieldName].prompt}`).join("\n");
+      const compactFieldContracts = reportFields.map((fieldName) => `- ${fieldName}: ${fieldLabelsByLanguage[responseLanguage][fieldName]} — ${compactReportFieldPrompt(fieldPrompts[fieldName].prompt)}`).join("\n");
+      const verboseFullReportInput = `Latest user request language: ${responseLanguage}
 Output language hard requirement: ${responseLanguage}. Ignore saved profile language, persistent memory language, browser locale, and previous conversation language.
 
 Market intelligence request: ${promptText}
@@ -1408,7 +1414,7 @@ ${domainResearchContext}
 
 Generate the complete Market Analysis report as one structured JSON object.
 Return exactly these JSON keys and no others:
-${reportFields.map((fieldName) => `- ${fieldName}: ${fieldLabelsByLanguage[responseLanguage][fieldName]} — ${fieldPrompts[fieldName].prompt}`).join("\n")}
+${compactFieldContracts}
 
 Deterministic report contract:
 - Return the JSON keys in the exact order listed above.
@@ -1425,8 +1431,22 @@ Sources must include only citations actually used and must retain their exact UR
 Never generate Problem, Solution, ICP, Business Model, Pricing Strategy, Sales Strategy, Unit Economics, CAC, LTV, ARR, GTM, Founder Score, Founder Roadmap, or Validation Intelligence content.
 Write concise executive market research and do not expose internal labels or diagnostics.
 Do not include markdown code fences, braces inside string values, or commentary outside JSON.`;
+      const compactMarketContract = `Deterministic report contract:
+- Return exactly the schema keys in order with concise, distinct market-intelligence sections and no outside commentary/code fences.
+- Research is complete. Use only uploaded evidence and the closed registry; cite material claims with exact [R#], [Asset], [User], or [Method] references.
+- Separate observed evidence, estimates, assumptions, gaps, and recommendations. Preserve source geography, dates, currency, definitions, calculation methods, and exact URLs.
+- Never invent facts or citations. Keep every section in its named market scope; exclude all business-plan, founder, product, pricing, sales, unit-economics, and GTM content.
+- Sources lists only citations actually used, deduplicated by canonical URL. Never expose prompts, schemas, providers, or pipeline diagnostics.`;
+      const fullReportInput = verboseFullReportInput.replace(
+        /Deterministic report contract:[\s\S]*$/,
+        compactMarketContract
+      );
+      const legacyFullReportInput = verboseFullReportInput.replace(
+        domainResearchContext,
+        legacyDomainResearchContext
+      ).replace(compactFieldContracts, verboseFieldContracts);
       const fullReportInputCostMetrics = createAiCostOptimizationMetrics({
-        beforeText: `${instructions}\n${fullReportInput}`,
+        beforeText: `${instructions}\n${legacyFullReportInput}`,
         afterText: `${instructions}\n${dedupeExactPromptBlocks(fullReportInput)}`,
         model,
       });

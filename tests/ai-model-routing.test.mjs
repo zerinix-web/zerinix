@@ -77,7 +77,7 @@ test("cost report includes before after and monthly savings", () => {
   });
 });
 
-test("all ten OpenAI calls are covered by centralized routing", () => {
+test("all eleven OpenAI calls are covered by centralized routing", () => {
   const rateLimit = readFileSync("app/lib/ai/rate-limit.ts", "utf8");
   const directSites = [
     "app/api/understanding/route.ts",
@@ -101,10 +101,13 @@ test("all ten OpenAI calls are covered by centralized routing", () => {
     0
   );
 
-  assert.equal(callCount, 10);
+  assert.equal(callCount, 11);
   assert.match(rateLimit, /resolveAiModelRoutingDecision/);
   for (const source of directSites) {
     assert.match(source, /resolveAiModelRoutingDecision/);
-    assert.match(source, /routedModel/);
   }
+  assert.match(directSites[0], /routedModel/);
+  assert.match(directSites[1], /routedModel/);
+  assert.match(directSites[2], /model: researchModel/);
+  assert.match(directSites[3], /routedModel/);
 });

@@ -12,6 +12,7 @@ const marketRoute = readFileSync(
   "utf8"
 );
 const researchCache = readFileSync("app/lib/ai/research-cache.ts", "utf8");
+const chatRoute = readFileSync("app/api/chat/route.ts", "utf8");
 
 test("identical research is cached without a duplicate GPT research execution", async () => {
   let cached = null;
@@ -164,4 +165,24 @@ test("cache telemetry reports hits misses skipped calls tokens and USD", () => {
   }
   assert.match(researchCache, /\[research-cache\] hit/);
   assert.match(researchCache, /\[research-cache\] miss/);
+});
+
+test("standalone chat web research is cached without changing the Responses API call", () => {
+  assert.doesNotMatch(chatRoute, /attachments\.length === 0 &&\s*!input\.webResearch/);
+  assert.match(chatRoute, /web:\$\{webResearch\}/);
+  assert.match(chatRoute, /expiresInDays: webResearch \? 1 : 7/);
+  assert.match(chatRoute, /type: "web_search_preview"/);
+  assert.match(chatRoute, /include: \["web_search_call\.action\.sources"/);
+});
+
+test("failed and evidence-free research is never persisted as reusable research", () => {
+  assert.match(researchCache, /research\.researchAttempted/);
+  assert.match(researchCache, /!research\.fallbackUsed/);
+  assert.match(researchCache, /research\.evidence\.length > 0/);
+  assert.match(researchCache, /skipped non-reusable result/);
+});
+
+test("freshness-sensitive topics use a shorter research cache lifetime", () => {
+  assert.match(researchCache, /latest\|current\|today\|recent\|news/);
+  assert.match(researchCache, /expiresInDays: getResearchCacheTtlDays/);
 });

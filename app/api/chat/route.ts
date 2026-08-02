@@ -40,6 +40,14 @@ import {
 } from "@/app/lib/ai/runtime";
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 import {
+  addTokenUsage,
+  CHAT_RESPONSE_CONTINUATION_INPUT,
+  getContinuationMaxOutputTokens,
+  isOutputTokenLimitReason,
+  MAX_CHAT_RESPONSE_CONTINUATIONS,
+  shouldContinueResponse,
+} from "@/app/lib/ai/response-continuation";
+import {
   createAiCostOptimizationMetrics,
   omitTrailingDuplicateUserPrompt,
   optimizeChatHistoryForCost,
@@ -552,12 +560,12 @@ function shouldUseChatCache(input: {
 }) {
   return (
     input.attachments.length === 0 &&
-    !input.webResearch &&
     !input.reportMemory &&
     !input.profileContext &&
     !input.userMemoryContext &&
     input.requestKind !== "file_analysis" &&
-    input.messages.length <= 2
+    input.messages.length <= 2 &&
+    (!input.webResearch || input.messages.length === 0)
   );
 }
 
@@ -1008,8 +1016,18 @@ function getIncompleteReason(response: unknown) {
   return typeof reason === "string" ? reason : "";
 }
 
+function getResponseId(response: unknown) {
+  if (!response || typeof response !== "object") {
+    return "";
+  }
+
+  const id = (response as Record<string, unknown>).id;
+
+  return typeof id === "string" ? id : "";
+}
+
 function createIncompleteResponseFallback(reason: string) {
-  if (reason === "max_output_tokens") {
+  if (isOutputTokenLimitReason(reason)) {
     return "I reached the response length limit before I could display the answer. Please ask me to continue or narrow the question.";
   }
 
@@ -1526,9 +1544,13 @@ async function handleChatPost(req: Request) {
       );
     }
 
+    const cacheRelevantHistory = omitTrailingDuplicateUserPrompt(
+      messages,
+      prompt
+    );
     const chatCacheEnabled = shouldUseChatCache({
       attachments,
-      messages,
+      messages: cacheRelevantHistory,
       requestKind,
       reportMemory,
       profileContext,
@@ -1540,7 +1562,7 @@ async function handleChatPost(req: Request) {
       normalizedPrompt: normalizeAiPrompt(
         userMemoryContext ? `${prompt}\n\nUser memories:\n${userMemoryContext}` : prompt
       ),
-      mode: `chat:${requestKind}:${selectedIntent}:${selectedExpert}`,
+      mode: `chat:${requestKind}:${selectedIntent}:${selectedExpert}:web:${webResearch}`,
       language: responseLanguage,
       model,
     });
@@ -1626,10 +1648,7 @@ async function handleChatPost(req: Request) {
     });
 
     const maxOutputTokens = getChatMaxOutputTokens(requestKind);
-    const historyWithoutCurrentPrompt = omitTrailingDuplicateUserPrompt(
-      messages,
-      prompt
-    );
+    const historyWithoutCurrentPrompt = cacheRelevantHistory;
     const optimizedHistory = optimizeChatHistoryForCost(
       historyWithoutCurrentPrompt.map((message) => ({
         role: message.role,
@@ -1865,45 +1884,91 @@ async function handleChatPost(req: Request) {
           let completedText = "";
           let completedResponse: unknown = null;
           let incompleteReason = "";
+          let continuationCount = 0;
+          let continuationLimitReached = false;
           let usedDisplayFallback = false;
           let tokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
           try {
-            for await (const event of stream) {
-              if (event.type === "response.output_text.delta" && event.delta) {
-                const deltaText = extractTextFromValue(event.delta);
+            let activeStream = stream;
 
-                if (deltaText) {
-                  streamedText += deltaText;
-                  controller.enqueue(encoder.encode(deltaText));
+            while (true) {
+              let currentAttemptText = "";
+              completedText = "";
+              completedResponse = null;
+              incompleteReason = "";
+
+              for await (const event of activeStream) {
+                if (event.type === "response.output_text.delta" && event.delta) {
+                  const deltaText = extractTextFromValue(event.delta);
+
+                  if (deltaText) {
+                    currentAttemptText += deltaText;
+                    streamedText += deltaText;
+                    controller.enqueue(encoder.encode(deltaText));
+                  }
                 }
-              }
 
-              if (event.type === "response.output_text.done" && !streamedText) {
-                const doneText = extractTextFromValue(event.text);
+                if (event.type === "response.output_text.done" && !currentAttemptText) {
+                  const doneText = extractTextFromValue(event.text);
 
-                if (doneText) {
-                  streamedText = doneText;
-                  controller.enqueue(encoder.encode(doneText));
+                  if (doneText) {
+                    currentAttemptText = doneText;
+                    streamedText += doneText;
+                    controller.enqueue(encoder.encode(doneText));
+                  }
                 }
-              }
 
-              if (event.type === "response.output_item.done" && !streamedText) {
-                const itemText = extractOutputItemText(event.item);
+                if (event.type === "response.output_item.done" && !currentAttemptText) {
+                  const itemText = extractOutputItemText(event.item);
 
-                if (itemText) {
-                  streamedText = itemText;
-                  controller.enqueue(encoder.encode(itemText));
+                  if (itemText) {
+                    currentAttemptText = itemText;
+                    streamedText += itemText;
+                    controller.enqueue(encoder.encode(itemText));
+                  }
                 }
-              }
 
-              if (event.type === "response.completed") {
-                completedResponse = event.response;
-                incompleteReason = getIncompleteReason(event.response);
-                tokenUsage = extractTokenUsage(event.response);
-                completedText = extractResponseText(event.response);
+                if (event.type === "response.completed") {
+                  completedResponse = event.response;
+                  incompleteReason = getIncompleteReason(event.response);
+                  tokenUsage = addTokenUsage(
+                    tokenUsage,
+                    extractTokenUsage(event.response)
+                  );
+                  completedText = extractResponseText(event.response);
 
-                if (getResponseStatus(event.response) === "incomplete") {
+                  if (getResponseStatus(event.response) === "incomplete") {
+                    logOperationalError("[api:chat]", new Error("OpenAI response incomplete"), {
+                      model,
+                      selectedIntent,
+                      selectedExpert,
+                      requestKind,
+                      maxOutputTokens,
+                      incompleteReason,
+                      continuationCount,
+                      conversationId: conversationId || null,
+                      responseShape: sanitizeResponseShape(event.response),
+                    });
+                  }
+
+                  if (!currentAttemptText && completedText) {
+                    const sanitizedCompletedText = sanitizeAiResponseText(completedText);
+                    currentAttemptText = sanitizedCompletedText;
+                    streamedText += sanitizedCompletedText;
+                    controller.enqueue(encoder.encode(sanitizedCompletedText));
+                  }
+                }
+
+                if (event.type === "response.incomplete") {
+                  completedResponse = event.response;
+                  incompleteReason = getIncompleteReason(event.response);
+                  tokenUsage = addTokenUsage(
+                    tokenUsage,
+                    extractTokenUsage(event.response)
+                  );
+                  completedText = extractResponseText(event.response);
+
                   logOperationalError("[api:chat]", new Error("OpenAI response incomplete"), {
                     model,
                     selectedIntent,
@@ -1911,52 +1976,84 @@ async function handleChatPost(req: Request) {
                     requestKind,
                     maxOutputTokens,
                     incompleteReason,
+                    continuationCount,
                     conversationId: conversationId || null,
                     responseShape: sanitizeResponseShape(event.response),
                   });
+
+                  if (!currentAttemptText && completedText) {
+                    const sanitizedCompletedText = sanitizeAiResponseText(completedText);
+                    currentAttemptText = sanitizedCompletedText;
+                    streamedText += sanitizedCompletedText;
+                    controller.enqueue(encoder.encode(sanitizedCompletedText));
+                  }
                 }
 
-                if (!streamedText && completedText) {
-                  const sanitizedCompletedText = sanitizeAiResponseText(completedText);
-                  streamedText = sanitizedCompletedText;
-                  controller.enqueue(encoder.encode(sanitizedCompletedText));
+                if (event.type === "response.failed") {
+                  const errorMessage =
+                    event.response?.error?.message || "OpenAI chat response failed.";
+
+                  throw new Error(errorMessage);
+                }
+
+                if (event.type === "error") {
+                  throw new Error(event.message || "OpenAI chat stream failed.");
                 }
               }
 
-              if (event.type === "response.incomplete") {
-                completedResponse = event.response;
-                incompleteReason = getIncompleteReason(event.response);
-                tokenUsage = extractTokenUsage(event.response);
-                completedText = extractResponseText(event.response);
+              const previousResponseId = getResponseId(completedResponse);
 
-                logOperationalError("[api:chat]", new Error("OpenAI response incomplete"), {
-                  model,
-                  selectedIntent,
-                  selectedExpert,
-                  requestKind,
-                  maxOutputTokens,
+              if (
+                !shouldContinueResponse({
                   incompleteReason,
-                  conversationId: conversationId || null,
-                  responseShape: sanitizeResponseShape(event.response),
-                });
-
-                if (!streamedText && completedText) {
-                  const sanitizedCompletedText = sanitizeAiResponseText(completedText);
-                  streamedText = sanitizedCompletedText;
-                  controller.enqueue(encoder.encode(sanitizedCompletedText));
-                }
+                  responseId: previousResponseId,
+                  continuationCount,
+                })
+              ) {
+                continuationLimitReached =
+                  continuationCount >= MAX_CHAT_RESPONSE_CONTINUATIONS &&
+                  Boolean(previousResponseId) &&
+                  isOutputTokenLimitReason(incompleteReason);
+                break;
               }
 
-              if (event.type === "response.failed") {
-                const errorMessage =
-                  event.response?.error?.message || "OpenAI chat response failed.";
+              continuationCount += 1;
+              const continuationMaxOutputTokens = getContinuationMaxOutputTokens(
+                maxOutputTokens,
+                continuationCount
+              );
 
-                throw new Error(errorMessage);
-              }
+              logOperationalInfo("[api:chat] continuing incomplete response", {
+                model,
+                selectedIntent,
+                selectedExpert,
+                requestKind,
+                conversationId: conversationId || null,
+                previousResponseId,
+                continuationCount,
+                continuationMaxOutputTokens,
+                incompleteReason,
+              });
 
-              if (event.type === "error") {
-                throw new Error(event.message || "OpenAI chat stream failed.");
-              }
+              activeStream = await withOpenAiCostOperation(
+                {
+                  operationName: "advisor_continuation",
+                  reportType: "strategic_advisory",
+                },
+                () =>
+                  client.responses.create(
+                    {
+                      model,
+                      reasoning: { effort: "minimal" },
+                      text: { verbosity: "low" },
+                      input: CHAT_RESPONSE_CONTINUATION_INPUT,
+                      previous_response_id: previousResponseId,
+                      max_output_tokens: continuationMaxOutputTokens,
+                      stream: true,
+                    },
+                    { signal: req.signal }
+                  )
+              );
             }
 
             if (!streamedText.trim()) {
@@ -2013,6 +2110,8 @@ async function handleChatPost(req: Request) {
                 max_output_tokens: maxOutputTokens,
                 response_status: getResponseStatus(completedResponse) || null,
                 incomplete_reason: incompleteReason || null,
+                continuation_count: continuationCount,
+                continuation_limit_reached: continuationLimitReached,
                 display_fallback_used: usedDisplayFallback,
                 ...inputCostMetrics,
               },
@@ -2024,11 +2123,17 @@ async function handleChatPost(req: Request) {
               selectedExpert,
               requestKind,
               conversationId: conversationId || null,
+              continuationCount,
+              continuationLimitReached,
               providerCalled: true,
               quotaConsumed: !productionLimit.quotaAlreadyCharged,
             });
 
-            if (chatCacheEnabled && !usedDisplayFallback) {
+            if (
+              chatCacheEnabled &&
+              !usedDisplayFallback &&
+              getResponseStatus(completedResponse) === "completed"
+            ) {
               const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
 
               await storeCachedAiResponse(supabase, {
@@ -2042,7 +2147,7 @@ async function handleChatPost(req: Request) {
                 responseText: streamedText,
                 tokenUsage,
                 estimatedCostUsd,
-                expiresInDays: 7,
+                expiresInDays: webResearch ? 1 : 7,
               });
             }
           } catch (error) {

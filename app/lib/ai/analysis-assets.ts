@@ -5,7 +5,7 @@ import type {
   ResponseInput,
   ResponseInputContent,
 } from "openai/resources/responses/responses";
-import { dedupeExactPromptBlocks } from "@/app/lib/ai/token-optimization-core";
+import { dedupeExactPromptBlocks } from "./token-optimization-core.ts";
 
 export type AnalysisAsset = {
   name: string;

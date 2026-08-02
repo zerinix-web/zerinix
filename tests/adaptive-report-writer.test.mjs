@@ -5,6 +5,7 @@ import {
   adaptiveReportWriterPlanSchema,
   createAdaptiveReportWriterPlan,
   formatAdaptiveReportWriterContext,
+  formatAdaptiveReportWriterGenerationContext,
 } from "../app/lib/ai/adaptive-report-writer.ts";
 
 function profile(domain, overrides = {}) {
@@ -371,6 +372,34 @@ test("formatted writer context hides internal evidence and provider metadata", (
   const context = formatAdaptiveReportWriterContext(output);
   assert.match(context, /Official record — https:\/\/authority\.gov\.test\/records\/1/);
   assert.doesNotMatch(context, /finding_1|source_1|provider|research query|retry|schema/i);
+});
+
+test("generation context preserves decision and section ownership without duplicating evidence", () => {
+  const output = writer({
+    domain: "business",
+    sections: [
+      section("market_analysis", "Market Analysis", "Assess the market"),
+      section("risk_analysis", "Risk Analysis", "Assess execution risk"),
+      section("executive_recommendation", "Executive Recommendation", "Make the decision"),
+    ],
+    evidence: validation({
+      findings: [finding({
+        claim: "A long validated market finding that belongs in the closed evidence registry and must not be copied into each report section.",
+        reason: "Supported by the authoritative record and retained by its evidence identifier.",
+      })],
+    }),
+    outputFields: ["marketOpportunity", "risks", "executiveRecommendation"],
+    selectedMode: "plan",
+  });
+  const legacy = formatAdaptiveReportWriterContext(output);
+  const compact = formatAdaptiveReportWriterGenerationContext(output);
+
+  assert.match(compact, /Decision spine:/);
+  assert.match(compact, /Section routing/);
+  assert.match(compact, /marketOpportunity/);
+  assert.match(compact, /executiveRecommendation/);
+  assert.doesNotMatch(compact, /Final evidence score:/);
+  assert.ok(compact.length <= legacy.length * 0.6);
 });
 
 test("all three existing report-writing paths consume the adaptive writer", async () => {

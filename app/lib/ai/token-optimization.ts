@@ -1,5 +1,6 @@
 import { resolveOpenAiPricing } from "@/app/lib/ai/cost-metrics";
 export {
+  compactReportFieldPrompt,
   dedupeExactPromptBlocks,
   omitTrailingDuplicateUserPrompt,
 } from "@/app/lib/ai/token-optimization-core";
@@ -11,6 +12,8 @@ type AiMessageLike = {
 
 export type AiCostOptimizationMetrics = {
   cost_optimization_version: "v2";
+  input_reduction_target_pct: 40;
+  input_reduction_target_met: boolean;
   estimated_input_tokens_before: number;
   estimated_input_tokens_after: number;
   estimated_input_token_savings: number;
@@ -65,6 +68,8 @@ export function createAiCostOptimizationMetrics(input: {
 
   return {
     cost_optimization_version: "v2",
+    input_reduction_target_pct: 40,
+    input_reduction_target_met: beforeTokens > 0 && savings / beforeTokens >= 0.4,
     estimated_input_tokens_before: beforeTokens,
     estimated_input_tokens_after: afterTokens,
     estimated_input_token_savings: savings,

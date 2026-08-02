@@ -655,3 +655,56 @@ ${plan.prohibitedTopics.map((topic) => `- ${topic}`).join("\n") || "- none"}
 Global writing rules:
 ${plan.globalWritingRules.map((rule) => `- ${rule}`).join("\n")}`;
 }
+
+/**
+ * Generation-only contract. The complete evidence registry is supplied by the
+ * research context, so repeating every evidence item in every section adds
+ * tokens without adding information. This formatter preserves the decision,
+ * section ownership, gaps, gates, and writing constraints while referring to
+ * the single closed evidence registry.
+ */
+export function formatAdaptiveReportWriterGenerationContext(
+  plan: AdaptiveReportWriterPlan
+) {
+  const sections = plan.sections
+    .map((section, index) => {
+      const gates = section.decisionGates
+        .map((gate) => `${gate.condition}: ${gate.status}; next ${gate.nextAction}`)
+        .join(" | ");
+      const sectionSpecificRules = section.writingInstructions.slice(4);
+      return `${index + 1}. ${section.outputField} (${section.title})
+Purpose: ${section.purpose}
+Confidence: ${section.confidenceExpression}
+Evidence: use only relevant items from the closed evidence registry.
+Gaps: ${section.unresolved.join(" | ") || "none"}
+Section risks: ${section.risks.join(" | ") || "none"}
+Section opportunities: ${section.opportunities.join(" | ") || "none"}
+Gates: ${gates || "none"}
+Rules: ${sectionSpecificRules.join(" | ") || "apply the global rules"}`;
+    })
+    .join("\n\n");
+
+  return `Adaptive report contract
+Context: ${plan.profession}; ${plan.industry}/${plan.domain}; ${plan.selectedMode}; ${plan.language}
+Intent: ${plan.intent}
+Title: ${plan.reportTitle}
+Purpose: ${plan.reportPurpose}
+Decision question: ${plan.decisionQuestion}
+Evidence quality: ${plan.evidenceQuality}; further verification: ${plan.additionalVerificationRequired ? "yes" : "no"}
+Prohibited topics: ${plan.prohibitedTopics.join(" | ") || "none"}
+
+Decision spine:
+- Decision: ${plan.decision.executiveDecision} (${plan.decision.outcome})
+- Confidence: ${plan.decision.confidence.level} (${plan.decision.confidence.score}) — ${plan.decision.confidence.explanation}
+- Rationale: ${plan.decision.decisionRationale.map((item) => `${item.statement} — ${item.whyItMatters}`).join(" | ")}
+- Primary risks: ${plan.decision.topRisks.map((item) => item.statement).join(" | ") || "none supported"}
+- Primary opportunities: ${plan.decision.topOpportunities.map((item) => item.statement).join(" | ") || "none supported"}
+- Next action: ${plan.decision.recommendedNextAction.action} — ${plan.decision.recommendedNextAction.reason}
+- Missing critical information: ${plan.decision.missingCriticalInformation.map((item) => `${item.information} — ${item.requiredAction}`).join(" | ") || "none"}
+- Conflicts: ${plan.decision.conflicts.map((item) => `${item.field}: ${item.explanation}`).join(" | ") || "none"}
+
+Global rules: answer the decision question; explain causal driver, implication, execution risk, and response; state each finding once; preserve evidence class and provenance; compare only compatible numeric definitions/periods/geographies/currencies; show derived formulas; disclose each material limitation once; never invent or expose internal metadata.
+
+Section routing (do not copy prose across sections):
+${sections}`;
+}

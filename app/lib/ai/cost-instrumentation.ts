@@ -14,6 +14,7 @@ import {
   summarizeOpenAiCostEvents,
   type OpenAiCostEventLike,
 } from "@/app/lib/ai/cost-metrics";
+import { analyzeOpenAiRequestInput } from "@/app/lib/ai/token-optimization-core";
 
 type CacheStatus = "hit" | "miss" | "provider_cached";
 
@@ -227,6 +228,14 @@ function recordEvent(event: CostEvent) {
   const write = persistEvent(event);
   if (context) context.pendingWrites.push(write);
   logOpenAiCost("[openai-cost] call", event);
+  logOpenAiCost("[openai-input] actual", {
+    requestId: event.requestId,
+    route: event.route,
+    operationName: event.operationName,
+    model: event.model,
+    inputTokens: event.inputTokens,
+    cachedInputTokens: event.cachedInputTokens,
+  });
 }
 
 function createEvent(input: {
@@ -337,6 +346,15 @@ export function instrumentOpenAiClient(client: OpenAI): OpenAI {
     const startedAt = Date.now();
     const requestContext = requestStorage.getStore();
     const operationContext = operationStorage.getStore();
+    const inputAudit = analyzeOpenAiRequestInput(body);
+    logOpenAiCost("[openai-input] preflight", {
+      requestId: requestContext?.requestId || "unscoped",
+      route: requestContext?.route || "unscoped",
+      operationName:
+        operationContext?.operationName || "unscoped_openai_call",
+      model,
+      ...inputAudit,
+    });
     const transportContext = { attempts: 0 };
     try {
       const result = await transportStorage.run(transportContext, () =>
