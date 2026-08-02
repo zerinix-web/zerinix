@@ -42,7 +42,11 @@ test("simple no-search requests retain the low-cost minimal reasoning route", ()
 
 test("Strategic Advisory with web search passes the provider compatibility gate", () => {
   assert.equal(mockResponsesApiStatus(true), 200);
-  assert.match(chatRoute, /createChatResponseCapabilities\(webResearch\)/);
+  assert.match(
+    chatRoute,
+    /createChatResponseCapabilities\(webResearch && !chatResearchContext\)/
+  );
+  assert.match(chatRoute, /storeConversationResearchSnapshot/);
   assert.match(chatRoute, /reportType: "strategic_advisory"/);
 });
 

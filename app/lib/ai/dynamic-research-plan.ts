@@ -10,6 +10,7 @@ import {
   type DynamicReportPlan,
 } from "./dynamic-report-plan.ts";
 import type { ResearchTask } from "../decision-intelligence/contracts.ts";
+import { expandMarketTaxonomyTerms } from "./market-taxonomy.ts";
 
 const researchPriorityValues = ["critical", "high", "standard"] as const;
 const preferredSourceTypeValues = [
@@ -372,6 +373,157 @@ function createRetailSeeds(
   ];
 }
 
+function createMarketIntelligenceSeeds(
+  profile: ExpertiseProfile,
+  reportPlan: DynamicReportPlan,
+  facts: readonly ExtractedFact[],
+  prompt = ""
+): TaskSeed[] {
+  const context = q(
+    profile.jurisdiction,
+    entityContext(facts),
+    prompt.replace(/\s+/g, " ").trim().slice(0, 150)
+  );
+  const taxonomyTerms = expandMarketTaxonomyTerms(prompt);
+  const categoryQuery = taxonomyTerms.slice(0, 6).join(" OR ");
+  const adjacentQuery = taxonomyTerms.slice(6, 12).join(" OR ");
+
+  return [
+    task({
+      id: "market_vendor_discovery",
+      topic: "Multi-source vendor discovery",
+      purpose:
+        "Discover 10–30 evidence-supported vendors where available by reconciling independent directories, analyst coverage, industry publications, filings, and official company sources.",
+      reportSectionId: sectionId(reportPlan, ["major_players", "competitive_landscape", "competition"]),
+      evidenceField: "vendor_discovery",
+      priority: "critical",
+      preferredSourceTypes: ["credible_market_data", "professional_standard", "company_source", "official_filing"],
+      queries: [
+        q(context, categoryQuery, "vendors alternatives directory market map"),
+        q(context, adjacentQuery, "software companies vendor landscape comparison"),
+        q(context, "vendor list analyst report industry publication competitors"),
+      ],
+      required: true,
+      criterionHints: ["competition", "market", "evidence"],
+    }),
+    task({
+      id: "market_competitor_landscape",
+      topic: "Independent competitor landscape",
+      purpose:
+        "Identify multiple relevant competitors dynamically and compare their verified market role, positioning, products, and pricing without over-weighting one company.",
+      reportSectionId: sectionId(reportPlan, ["competitive_landscape", "major_players", "competition"]),
+      evidenceField: "competitors",
+      priority: "critical",
+      preferredSourceTypes: ["company_source", "official_filing", "credible_market_data"],
+      queries: [
+        q(context, categoryQuery, "leading competitors vendors independent sources"),
+        q(context, categoryQuery, "competitor products pricing official company pages"),
+        q(context, "competitor annual report investor filing market position"),
+      ],
+      required: true,
+      criterionHints: ["competition", "market", "evidence"],
+    }),
+    task({
+      id: "market_official_demand",
+      topic: "Official demand and adoption evidence",
+      purpose:
+        "Verify demand, adoption, customer, and business-population signals from government, statistical, regulatory, or industry-association sources.",
+      reportSectionId: sectionId(reportPlan, ["market_overview", "market_drivers", "customer_segments"]),
+      evidenceField: "market_demand",
+      priority: "critical",
+      preferredSourceTypes: ["official_statistics", "official_government", "regulator", "credible_market_data"],
+      queries: [
+        q(context, "demand adoption customers official statistics government"),
+        q(context, "industry association adoption survey market demand"),
+      ],
+      required: true,
+      criterionHints: ["market", "demand", "evidence"],
+    }),
+    task({
+      id: "market_size_endpoints",
+      topic: "Verifiable market-size endpoints",
+      purpose:
+        "Find compatible market-size or growth endpoints with geography, period, currency, definition, and methodology; preserve an explicit gap when no reliable endpoint exists.",
+      reportSectionId: sectionId(reportPlan, ["market_size", "tam_sam_som", "cagr"]),
+      evidenceField: "market_size",
+      priority: "high",
+      preferredSourceTypes: ["official_statistics", "credible_market_data", "official_filing"],
+      queries: [
+        q(context, categoryQuery, "market size CAGR methodology geography year analyst report"),
+        q(context, categoryQuery, "official statistics market revenue spending adoption"),
+        q(context, "industry association public filing annual report market size"),
+      ],
+      required: false,
+      criterionHints: ["market", "size", "evidence"],
+    }),
+    task({
+      id: "market_industry_structure",
+      topic: "Industry structure and independent analysis",
+      purpose:
+        "Verify market structure, trends, regulation, switching costs, and buyer behavior across independent research, associations, and credible publications.",
+      reportSectionId: sectionId(reportPlan, ["industry_trends", "porters_five_forces", "barriers"]),
+      evidenceField: "industry_structure",
+      priority: "high",
+      preferredSourceTypes: ["credible_market_data", "professional_standard", "regulator", "official_statistics"],
+      queries: [
+        q(context, "industry trends buyer behavior switching costs association research"),
+        q(context, "regulation technology financial publication market analysis"),
+      ],
+      required: false,
+      criterionHints: ["market", "risk", "evidence"],
+    }),
+    task({
+      id: "market_pricing_intelligence",
+      topic: "Vendor pricing intelligence",
+      purpose:
+        "Collect current public subscription, seat, usage, enterprise, transaction, success-fee, and hybrid pricing evidence from distinct vendor-owned sources without inferring missing prices.",
+      reportSectionId: sectionId(reportPlan, ["major_players", "competitive_landscape", "market_segmentation"]),
+      evidenceField: "pricing_models",
+      priority: "high",
+      preferredSourceTypes: ["company_source", "credible_market_data"],
+      queries: [
+        q(context, categoryQuery, "official pricing subscription per seat usage transaction"),
+        q(context, adjacentQuery, "vendor pricing plans enterprise quote official"),
+        q(context, "pricing page packages plans official vendors"),
+      ],
+      required: false,
+      criterionHints: ["product", "competition", "market"],
+    }),
+    task({
+      id: "market_product_evidence",
+      topic: "Product and pricing evidence",
+      purpose:
+        "Verify current product scope, deployment, integrations, and public pricing directly from multiple relevant company sources.",
+      reportSectionId: sectionId(reportPlan, ["market_segmentation", "major_players", "competitive_landscape"]),
+      evidenceField: "product_evidence",
+      priority: "high",
+      preferredSourceTypes: ["company_source", "credible_market_data"],
+      queries: [
+        q(context, "competitor product features integrations pricing official"),
+        q(context, "software product comparison customer segments deployment official"),
+      ],
+      required: false,
+      criterionHints: ["product", "competition", "market"],
+    }),
+    task({
+      id: "market_company_filings",
+      topic: "Company filings and investor evidence",
+      purpose:
+        "Collect primary company and filing evidence across relevant public competitors without treating one issuer as representative of the entire market.",
+      reportSectionId: sectionId(reportPlan, ["major_players", "competitive_landscape", "market_overview"]),
+      evidenceField: "company_evidence",
+      priority: "high",
+      preferredSourceTypes: ["official_filing", "audited_statement", "company_source", "regulator"],
+      queries: [
+        q(context, "competitors SEC filing annual report investor relations"),
+        q(context, "public company filing market competition revenue segment"),
+      ],
+      required: false,
+      criterionHints: ["competition", "company", "evidence"],
+    }),
+  ];
+}
+
 function createGenericSeeds(
   profile: ExpertiseProfile,
   reportPlan: DynamicReportPlan,
@@ -407,6 +559,25 @@ function seedTasks(input: ResearchPlanInput) {
   }
   if (expertiseProfile.domain === "real_estate") {
     return createRealEstateSeeds(expertiseProfile, reportPlan, extractedFacts);
+  }
+  const selectedMode = normalizeSelectedAnalysisMode(input.selectedMode);
+  const isMarketIntelligenceRequest =
+    selectedMode === "market" &&
+    (/(?:\bmarket\b|competitors?|competitive landscape|industry landscape|\bTAM\b|\bSAM\b|\bSOM\b|\bCAGR\b)/i.test(
+      input.prompt || ""
+    ) ||
+      reportPlan.sections.some((section) =>
+        /market|compet|industry|customer|segment|trend|tam|sam|som|cagr/i.test(
+          `${section.id} ${section.title}`
+        )
+      ));
+  if (isMarketIntelligenceRequest) {
+    return createMarketIntelligenceSeeds(
+      expertiseProfile,
+      reportPlan,
+      extractedFacts,
+      input.prompt
+    );
   }
   if (
     expertiseProfile.domain === "finance" ||

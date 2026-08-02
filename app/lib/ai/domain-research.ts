@@ -66,6 +66,10 @@ import {
   formatValidatedEvidenceForReportContext,
   validateEvidenceForDecisionSupport,
 } from "./research-execution/index.ts";
+import {
+  evaluateAggregateResearchEvidence,
+  researchEvidenceThresholds,
+} from "./research-evidence-evaluation.ts";
 
 type ProviderResearchEvidence = {
   title: string;
@@ -814,6 +818,45 @@ function normalizeResearchSourceUrl(value: string) {
   }
 }
 
+function sourcePublisherFromUrl(value: string) {
+  try {
+    return new URL(value).hostname.replace(/^www\./i, "");
+  } catch {
+    return "";
+  }
+}
+
+function normalizeResearchPublisher(value: unknown, url: string) {
+  const publisher = String(value || "").replace(/\s+/g, " ").trim();
+  if (
+    publisher &&
+    !/^(?:unknown|not provided|validation required|publisher|source)$/i.test(publisher)
+  ) {
+    return publisher.slice(0, 200);
+  }
+  return sourcePublisherFromUrl(url).slice(0, 200);
+}
+
+function normalizeResearchSourceTitleValue(
+  value: unknown,
+  claim: string,
+  publisher: string,
+  url: string
+) {
+  const title = String(value || "").replace(/\s+/g, " ").trim();
+  const hostname = sourcePublisherFromUrl(url);
+  if (
+    humanReadableSourceTitle(title) &&
+    title.toLowerCase() !== hostname.toLowerCase() &&
+    title.toLowerCase() !== publisher.toLowerCase()
+  ) {
+    return title.slice(0, 300);
+  }
+  const claimTitle = claim.replace(/\s+/g, " ").trim();
+  if (humanReadableSourceTitle(claimTitle)) return claimTitle.slice(0, 300);
+  return `${publisher || hostname || "External source"} — referenced source page`.slice(0, 300);
+}
+
 function isGenericSourceHomepage(value: string) {
   try {
     const url = new URL(value);
@@ -855,6 +898,39 @@ export type LegalResearchSourceClassification =
   | "authoritative secondary source"
   | "commercial commentary"
   | "unsupported/irrelevant";
+
+function classifyMarketResearchSourceType({
+  url,
+  title,
+  publisher,
+  sourceType,
+}: {
+  url: string;
+  title: string;
+  publisher: string;
+  sourceType: string;
+}) {
+  const identity = `${url} ${title} ${publisher} ${sourceType}`.toLowerCase();
+  if (isOfficialGovernmentSource(url) || /\bofficial statistics\b/.test(identity)) {
+    return "government/statistical source";
+  }
+  if (/\b(?:sec\.gov|10-k|10-q|annual report|financial[ _]filing|official[ _]filing|audited statement|investor relations)\b/.test(identity)) {
+    return "financial filing";
+  }
+  if (/\b(?:company[ _]source|official company|product page|pricing page)\b/.test(identity)) {
+    return "official company source";
+  }
+  if (/\b(?:association|institute|council|alliance|society|professional[ _]standard)\b/.test(identity)) {
+    return "industry association";
+  }
+  if (/\b(?:market research|industry report|market data|forecast)\b/.test(identity)) {
+    return "market research";
+  }
+  if (/\b(?:news|journal|review|reuters|bloomberg|technology|financial publication)\b/.test(identity)) {
+    return "credible publication";
+  }
+  return sourceType.trim() || "external source";
+}
 
 function humanReadableSourceTitle(value: string) {
   const normalized = value.trim();
@@ -1115,6 +1191,12 @@ export function buildTaskStageQueries({
     amenities_projects: "nearby transport public project school hospital industrial zone yakın ulaşım kamu projesi okul hastane sanayi bölgesi",
     regional_development: "regional investment projects development infrastructure bölgesel yatırım proje gelişim",
     geospatial_context: "map coordinates satellite cadastral geography harita koordinat uydu kadastro",
+    competitors: "multiple independent competitors vendors major players positioning market share",
+    market_demand: "market demand adoption customer usage official statistics industry association",
+    market_size: "market size TAM SAM SOM CAGR forecast methodology geography year currency",
+    industry_structure: "industry trends regulation switching costs entry barriers buyer behavior",
+    product_evidence: "competitor products pricing features integrations deployment official pages",
+    company_evidence: "company annual report SEC filing investor relations primary disclosure",
   };
   const synonyms = fieldSynonyms[task.field] || task.field.replaceAll("_", " ");
   const languageTerms =
@@ -1337,6 +1419,12 @@ function normalizeResearchEvidence(
       "çevresel risk",
       "jeoteknik risk",
     ],
+    competitors: ["competitors", "competition", "major players", "vendors", "market landscape"],
+    market_demand: ["market demand", "adoption", "customers", "demand signals"],
+    market_size: ["market size", "tam", "sam", "som", "cagr", "forecast"],
+    industry_structure: ["industry structure", "trends", "barriers", "regulation", "switching costs"],
+    product_evidence: ["products", "pricing", "features", "integrations", "deployment"],
+    company_evidence: ["company evidence", "filings", "annual reports", "investor relations"],
     comparables: [
       "comparable",
       "comparables",
@@ -1476,7 +1564,13 @@ function normalizeResearchEvidence(
       const field = String(task?.field || "").trim().slice(0, 120);
       const claim = String(record.claim || "").trim().slice(0, 1_000);
       const evidenceValue = String(record.value || "").trim().slice(0, 1_500);
-      const sourceTitle = String(record.sourceTitle || "").trim().slice(0, 300);
+      const publisher = normalizeResearchPublisher(record.publisher, normalizedExternalUrl);
+      const sourceTitle = normalizeResearchSourceTitleValue(
+        record.sourceTitle,
+        claim,
+        publisher,
+        normalizedExternalUrl
+      );
       const rawConfidence =
         typeof record.confidence === "number"
           ? record.confidence
@@ -1514,10 +1608,18 @@ function normalizeResearchEvidence(
         ? classifyLegalResearchSource({
             url: normalizedExternalUrl,
             title: sourceTitle,
-            publisher: String(record.publisher || "").trim(),
+            publisher,
             citation: claim,
           })
         : undefined;
+      const normalizedSourceType = external
+        ? classifyMarketResearchSourceType({
+            url: normalizedExternalUrl,
+            title: sourceTitle,
+            publisher,
+            sourceType: String(record.sourceType || ""),
+          })
+        : String(record.sourceType || "").trim();
       const sourceText = `${sourceTitle} ${record.publisher || ""} ${claim} ${evidenceValue} ${uniqueStrings(record.supportingData).join(" ")} ${normalizedExternalUrl}`;
       if (
         external &&
@@ -1545,9 +1647,9 @@ function normalizeResearchEvidence(
           publisher:
             label === "Verified from uploaded asset"
               ? uploadedAssetNames[0] || "Uploaded asset"
-              : String(record.publisher || "").trim().slice(0, 200),
+              : publisher,
           url: normalizedExternalUrl.slice(0, 2_000),
-          sourceType: String(record.sourceType || "").trim().slice(0, 120),
+          sourceType: normalizedSourceType.slice(0, 120),
           authorityLevel: (
             label === "Verified from official source"
               ? "primary"
@@ -2352,6 +2454,13 @@ Respond in ${language}, while preserving evidence labels exactly in English.`;
           })),
         });
         try {
+          const marketCoverageInstruction = request.tasks.some((task) =>
+            /competitors|market_demand|market_size|industry_structure|product_evidence|company_evidence/i.test(
+              task.field
+            )
+          )
+            ? "For established markets, seek several independently sourced competitors and diversify evidence across official statistics, filings, official company pages, research/associations, and credible publications. Do not let one issuer dominate when other public evidence exists."
+            : "";
           const strategyInput = `${input}
 
 Evidence acquisition stage: ${stage.id}
@@ -2360,6 +2469,8 @@ ${stage.guidance}
 
 Execute multiple query variants for every task:
 ${queryPlan}
+
+${marketCoverageInstruction}
 
 This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat the absence of results in an earlier stage as permission to skip this stage. Return only concrete facts supported by deep, citable source URLs. A provider homepage, contact page, search portal, or generic landing page is not evidence.`;
           const stageSignal = createResearchStageSignal({
@@ -2392,7 +2503,7 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
                 model: researchModel,
                 stream: false,
                 instructions:
-                  `You are a research provider for ZERINIX. Return normalized evidence only for the requested ${stage.id} source tier. Run the supplied query variants for every task, preserve provenance and geographic scope, expose uncertainty, and never write a report or recommendation.`,
+                  `You are a research provider for ZERINIX. Return normalized evidence only for the requested ${stage.id} source tier. Run the supplied query variants for every task, preserve complete title/publisher/URL/date metadata and geographic scope, expose uncertainty, and never write a report or recommendation. ${marketCoverageInstruction}`,
                 input: buildAnalysisProviderInput(
                   strategyInput,
                   assets
@@ -2531,6 +2642,18 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
                   /\b(regional development|bölgesel gelişim|nüfus|population|investment activity|yatırım faaliyeti)\b/i,
                 geospatial_context:
                   /\b(map|harita|geospatial|mekânsal|kadastro|cadastral|parsel|parcel|tkgm|satellite|uydu|topography|topografya)\b/i,
+                competitors:
+                  /\b(competitors?|competition|competitive landscape|major players?|vendors?|rivals?|market share)\b/i,
+                market_demand:
+                  /\b(market demand|adoption|customer demand|buyer demand|business population|spending|usage)\b/i,
+                market_size:
+                  /\b(market size|tam|sam|som|cagr|compound annual growth|forecast|market value)\b/i,
+                industry_structure:
+                  /\b(industry structure|industry trends?|switching costs?|entry barriers?|regulation|buyer behavior)\b/i,
+                product_evidence:
+                  /\b(products?|pricing|features?|integrations?|deployment|subscription plans?)\b/i,
+                company_evidence:
+                  /\b(annual report|10-k|10-q|sec filing|investor relations|financial filing|company disclosure)\b/i,
                 legal_overtime: legalIssueSignals.legal_overtime,
                 legal_exempt_status: legalIssueSignals.legal_exempt_status,
                 legal_retaliation: legalIssueSignals.legal_retaliation,
@@ -2640,7 +2763,6 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
               exactEntityMatch: entityMatch.exactEntityMatch,
               geographicMatch: entityMatch.geographicMatch,
             });
-            if (quality.qualityScore < 45) return [];
             return [
               {
                 ...normalizedItem,
@@ -3090,7 +3212,7 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
         );
       }
 
-      const deduplicatedEvidence = allEvidence
+      const deduplicatedEvidenceCandidates = allEvidence
         .filter(
           (item, index, evidence) =>
             evidence.findIndex(
@@ -3108,8 +3230,18 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
           (left, right) =>
             (right.qualityScore || right.confidence) -
             (left.qualityScore || left.confidence)
-        )
+        );
+      const aggregateEvidenceEvaluation = evaluateAggregateResearchEvidence(
+        deduplicatedEvidenceCandidates
+      );
+      const deduplicatedEvidence = aggregateEvidenceEvaluation.acceptedEvidence
         .map((item, index) => ({ ...item, id: `R${index + 1}` }));
+      logOperationalInfo("[research-evidence] aggregate evaluation", {
+        before: aggregateEvidenceEvaluation.before,
+        after: aggregateEvidenceEvaluation.after,
+        aggregateSupportIsSufficient:
+          aggregateEvidenceEvaluation.aggregateSupportIsSufficient,
+      });
       const deduplicatedFacts = allFacts.filter(
         (fact, index, facts) =>
           facts.findIndex(
@@ -3599,13 +3731,58 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
       item.sourceTitle.trim() &&
       /^https?:\/\//i.test(item.url)
   ).length;
-  const recommendedOutput =
-    usableEvidenceCount === 0
-      ? ("clarification" as const)
-      : usableExternalEvidenceCount === 0 ||
-          requiredResearchCompletion < 100
-        ? ("preliminary_report" as const)
-        : decisionIntelligence.outputMode;
+  const verifiedSources = new Set(
+    evidence
+      .filter(
+        (item) =>
+          (item.label === "Verified from official source" ||
+            item.label === "Verified from external source") &&
+          /^https?:\/\//i.test(item.url)
+      )
+      .map((item) => normalizeResearchSourceUrl(item.url))
+      .filter(Boolean)
+  ).size;
+  const qualityEligibleEvidence = evidence.filter(
+    (item) =>
+      item.label === "Verified from uploaded asset" ||
+      item.label === "Verified from official source" ||
+      item.label === "Verified from external source"
+  );
+  const averageQuality = qualityEligibleEvidence.length
+    ? Math.round(
+        qualityEligibleEvidence.reduce(
+          (total, item) => total + (item.qualityScore ?? item.confidence),
+          0
+        ) / qualityEligibleEvidence.length
+      )
+    : 0;
+  const confidenceScore =
+    decisionIntelligence.evidenceValidation.confidence;
+  // A report is blocked only when every aggregate evidence signal is absent or
+  // below the conservative confidence floor. Provenance and claim validation
+  // have already run, so this does not admit fabricated or uncited evidence.
+  const reportShouldBeBlocked =
+    usableEvidenceCount === 0 &&
+    verifiedSources === 0 &&
+    confidenceScore < researchEvidenceThresholds.minimumReportConfidence;
+  const evidenceSupportedOutput =
+    usableExternalEvidenceCount === 0 || requiredResearchCompletion < 100
+      ? ("preliminary_report" as const)
+      : decisionIntelligence.outputMode;
+  const recommendedOutput = reportShouldBeBlocked
+    ? ("clarification" as const)
+    : evidenceSupportedOutput === "clarification"
+      ? ("preliminary_report" as const)
+      : evidenceSupportedOutput;
+  logOperationalInfo("[research-evidence] report decision", {
+    usableEvidenceCount,
+    verifiedSources,
+    averageQuality,
+    confidenceScore,
+    reportDecision: reportShouldBeBlocked
+      ? "clarification"
+      : recommendedOutput,
+  });
   const researchAttempted =
     attemptedFields.length > 0 ||
     providerResult.taskResults.some((task) =>
@@ -3899,7 +4076,7 @@ Do not claim that external research was completed.`;
     : bundle.evidence
         .map(
           (item) =>
-            `Field: ${item.field}\nClaim: ${item.claim}\nValue: ${item.value}\nSource title: ${item.sourceTitle || "Unknown"}\nSource URL: ${item.url || "No external URL"}\nEvidence quality: ${item.qualityScore ?? item.confidence}/100`
+            `Evidence ID: ${item.id}\nField: ${item.field}\nClaim: ${item.claim}\nValue: ${item.value}\nSource title: ${item.sourceTitle || "Unverified source"}\nPublisher: ${item.publisher || sourcePublisherFromUrl(item.url) || "Not independently verified"}\nSource URL: ${item.url || "No external URL"}\nPublished: ${item.publishedDate || "not available"}\nAccess date: ${item.lastChecked || "not available"}\nOfficial: ${item.authorityLevel === "primary" ? "yes" : "no"}\nSource classification: ${item.sourceClassification || item.sourceType || "external source"}\nConfidence classification: ${item.confidence >= 75 ? "Verified" : item.confidence >= 55 ? "Estimated confidence" : item.url ? "Preliminary external evidence" : "Unverified"} (${item.confidence}/100)\nEvidence quality: ${item.qualityScore ?? item.confidence}/100`
         )
         .join("\n\n");
   const unresolvedSummary = bundle.unresolvedFields.length
@@ -3947,8 +4124,20 @@ export function formatDomainResearchForReportGeneration(
     return `Research evidence unavailable. Continue with user and asset evidence only; label every unsupported inference as an assumption and do not claim external verification.`;
   }
 
+  const validatedCitationIndex = bundle.evidence
+    .filter(
+      (item) =>
+        (item.label === "Verified from official source" ||
+          item.label === "Verified from external source") &&
+        Boolean(normalizeResearchSourceUrl(item.url))
+    )
+    .map(
+      (item) =>
+        `[${item.id}] ${item.sourceTitle} | ${item.publisher || sourcePublisherFromUrl(item.url)} | ${item.url}`
+    )
+    .join("\n");
   const evidence = bundle.validatedEvidence
-    ? formatValidatedEvidenceForReportContext(bundle.validatedEvidence)
+    ? `${formatValidatedEvidenceForReportContext(bundle.validatedEvidence)}\n\nReport citation ID index:\n${validatedCitationIndex || "No validated external citation IDs."}`
     : bundle.evidence
         .map(
           (item) =>

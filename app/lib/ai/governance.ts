@@ -133,6 +133,7 @@ type CacheInput = {
   tokenUsage: TokenUsage;
   estimatedCostUsd: number;
   expiresInDays?: number;
+  allowGlobalSharing?: boolean;
 };
 
 type AiCacheConfig = Record<AICacheOperationType, { ttlHours: number }>;
@@ -699,7 +700,8 @@ export async function checkUsageAllowance(
 export async function getCachedAiResponse(
   supabase: SupabaseClient,
   userId: string,
-  cacheKey: string
+  cacheKey: string,
+  options: { allowGlobalSharing?: boolean } = {}
 ): Promise<CachedAiResponse | null> {
   const primary = await supabase
     .from("ai_response_cache")
@@ -762,7 +764,7 @@ export async function getCachedAiResponse(
     };
   }
 
-  if (shouldAllowGlobalAiCacheSharing()) {
+  if (options.allowGlobalSharing !== false && shouldAllowGlobalAiCacheSharing()) {
     const { data: globalData, error: globalError } = await supabase.rpc(
       "get_global_ai_response_cache_entry",
       {
@@ -812,7 +814,7 @@ export async function storeCachedAiResponse(
     : getAiCacheTtlMs(operationType);
   const expiresAt = new Date(Date.now() + ttlMs).toISOString();
 
-  if (shouldAllowGlobalAiCacheSharing()) {
+  if (input.allowGlobalSharing !== false && shouldAllowGlobalAiCacheSharing()) {
     const { error: globalError } = await supabase.rpc(
       "upsert_global_ai_response_cache_entry",
       {

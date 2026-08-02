@@ -378,7 +378,11 @@ test("research exhausts ordered source stages and configured alternatives before
   );
   assert.match(
     research,
-    /usableEvidenceCount === 0[\s\S]*"clarification"/
+    /usableEvidenceCount === 0[\s\S]*verifiedSources === 0[\s\S]*confidenceScore <[\s\S]*"clarification"/
+  );
+  assert.match(
+    research,
+    /evidenceSupportedOutput === "clarification"[\s\S]*"preliminary_report"/
   );
 });
 
@@ -400,7 +404,7 @@ test("evidence quality rewards authority and exact entity specificity", () => {
   assert.match(research, /authorityScore/);
   assert.match(research, /specificityScore/);
   assert.match(research, /provenanceScore/);
-  assert.match(research, /qualityScore < 45/);
+  assert.match(research, /evaluateAggregateResearchEvidence/);
   assert.match(research, /right\.qualityScore/);
 });
 

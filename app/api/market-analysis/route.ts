@@ -36,7 +36,10 @@ import {
 } from "@/app/lib/ai/domain-research";
 import {
   createPreResearchReportCacheKey,
+  createResearchBundleFingerprint,
   createReportCacheData,
+  getConversationResearchSnapshot,
+  getCachedMarketIntelligenceGraphFromReportData,
   getCachedResearchFromReportData,
   logSkippedResearchForReportCache,
   resolveDomainResearchWithCache,
@@ -50,6 +53,17 @@ import {
   formatReportIntelligenceSummary,
   type AiFinancialModelContext,
 } from "@/app/lib/ai/financial-assumptions";
+import {
+  applyMarketResearchCoverageToContext,
+  formatMarketResearchCoverageForReport,
+  type MarketResearchCoverage,
+} from "@/app/lib/ai/market-research-coverage";
+import {
+  buildMarketIntelligenceGraph,
+  formatMarketIntelligenceGraphForModel,
+  projectMarketIntelligenceGraphToReport,
+  type MarketIntelligenceGraph,
+} from "@/app/lib/ai/market-intelligence-graph";
 import {
   compactReportFieldPrompt,
   createAiCostOptimizationMetrics,
@@ -109,6 +123,7 @@ const fieldPrompts = marketPrompts;
 const fieldLabelsByLanguage = marketFieldLabels;
 const legacySectionToField = legacyMarketSectionToField;
 const FULL_REPORT_FIELD = "fullReport";
+const MARKET_EVIDENCE_QUALITY_VERSION = "market_evidence_graph_v6";
 const MAX_AI_CALLS_PER_MARKET_REPORT = 1;
 const FULL_REPORT_OPENAI_TIMEOUT_MS = 180_000;
 const FULL_REPORT_POST_PROCESS_TIMEOUT_MS = 12_000;
@@ -263,6 +278,17 @@ function serializeReportChunk(field: MarketReportField, content: string) {
   );
 }
 
+function serializeNormalizedReportChunk(
+  field: MarketReportField,
+  content: string
+) {
+  const safeContent = normalizePdfText(sanitizeAiResponseText(content))
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return serializeReportStreamChunk(createReportChunk(field, safeContent));
+}
+
 function serializeWarningChunk(warning: MarketReportWarningChunk) {
   return serializeReportStreamChunk(warning);
 }
@@ -270,7 +296,7 @@ function serializeWarningChunk(warning: MarketReportWarningChunk) {
 function serializeMarketReportChunks(report: Record<MarketReportField, string>) {
   return reportFields
     .filter((field) => report[field]?.trim())
-    .map((field) => serializeReportChunk(field, report[field]))
+    .map((field) => serializeNormalizedReportChunk(field, report[field]))
     .join("");
 }
 
@@ -753,9 +779,24 @@ function marketScorePercent(score: number, maximumScore: number) {
   return maximumScore > 0 ? Math.round((score / maximumScore) * 100) : 0;
 }
 
+function buildMarketEvidenceScoreLines(
+  coverage: MarketResearchCoverage,
+  language: ResponseLanguage
+) {
+  return [
+    marketText(language, `[Estimated] Market Confidence: ${coverage.dimensions.marketConfidence}/100`, `[Tahmini] Pazar Güveni: ${coverage.dimensions.marketConfidence}/100`),
+    marketText(language, `[Estimated] Competitive Evidence: ${coverage.dimensions.competitiveEvidence}/100`, `[Tahmini] Rekabet Kanıtı: ${coverage.dimensions.competitiveEvidence}/100`),
+    marketText(language, `[Estimated] Financial Evidence: ${coverage.dimensions.financialEvidence}/100${coverage.verifiedMarketSizeAvailable ? "" : " — verified TAM / SAM / SOM endpoints are unavailable"}`, `[Tahmini] Finansal Kanıt: ${coverage.dimensions.financialEvidence}/100${coverage.verifiedMarketSizeAvailable ? "" : " — doğrulanmış TAM / SAM / SOM uç noktaları mevcut değil"}`),
+    marketText(language, `[Estimated] Product Evidence: ${coverage.dimensions.productEvidence}/100`, `[Tahmini] Ürün Kanıtı: ${coverage.dimensions.productEvidence}/100`),
+    marketText(language, `[Estimated] Execution Readiness: ${coverage.dimensions.executionReadiness}/100`, `[Tahmini] Yürütme Hazırlığı: ${coverage.dimensions.executionReadiness}/100`),
+    marketText(language, `[Estimated] Founder Readiness: ${coverage.dimensions.founderReadiness}/100 — based on founder, validation, team, capital, and execution inputs rather than missing external market data.`, `[Tahmini] Kurucu Hazırlığı: ${coverage.dimensions.founderReadiness}/100 — eksik dış pazar verisi yerine kurucu, doğrulama, ekip, sermaye ve yürütme girdilerine dayanır.`),
+  ];
+}
+
 function buildMarketExecutiveScorecard(
   context: AiFinancialModelContext,
-  language: ResponseLanguage
+  language: ResponseLanguage,
+  coverage?: MarketResearchCoverage
 ) {
   const confidence = context.reportIntelligence.totalScore;
   const confidenceLevel = confidence >= 75
@@ -806,6 +847,7 @@ function buildMarketExecutiveScorecard(
     marketText(language, `[Estimated] Risk Level: ${riskLevel}`, `[Tahmini] Risk Seviyesi: ${riskLevel}`),
     marketText(language, `[Assumption] Estimated Time to Market: ${timeToMarket}, conditional on market-entry proof gates.`, `[Varsayım] Tahmini Pazara Çıkış Süresi: pazara giriş kanıt kapılarına bağlı olarak ${timeToMarket}.`),
     marketText(language, `[Estimated] Investment Readiness: ${readiness}`, `[Tahmini] Yatırım Hazırlığı: ${readiness}`),
+    ...(coverage ? buildMarketEvidenceScoreLines(coverage, language) : []),
     marketText(language, `[Assumption] Decision Summary: ${context.investmentScore.nextCriticalAction}; expand only after the entry thesis is supported by repeatable demand evidence.`, `[Varsayım] Karar Özeti: ${context.investmentScore.nextCriticalAction}; yalnızca giriş tezi tekrarlanabilir talep kanıtıyla desteklendikten sonra genişleyin.`),
   ].join("\n");
 }
@@ -831,10 +873,28 @@ function buildMarketCeoSummary(
   ].join("\n");
 }
 
+function applySharedMarketGraph(
+  report: Record<MarketReportField, string>,
+  graph: MarketIntelligenceGraph,
+  language: ResponseLanguage
+) {
+  const projection = projectMarketIntelligenceGraphToReport(graph, language);
+  const { marketInfrastructure, ...reportFieldsFromGraph } = projection;
+  return {
+    ...report,
+    ...reportFieldsFromGraph,
+    marketOverview: marketInfrastructure
+      ? `${report.marketOverview}\n\n${marketInfrastructure}`.trim()
+      : report.marketOverview,
+  };
+}
+
 function ensureMarketReportQuality(
   report: Record<MarketReportField, string>,
   context?: AiFinancialModelContext,
-  language: ResponseLanguage = "English"
+  language: ResponseLanguage = "English",
+  coverage?: MarketResearchCoverage,
+  graph?: MarketIntelligenceGraph
 ) {
   const normalized = { ...report };
 
@@ -845,6 +905,12 @@ function ensureMarketReportQuality(
       : enforceMarketReportLanguage(sanitized, language);
   }
 
+  // Apply the server-owned graph after generic model-output cleanup so its
+  // provenance labels, URLs, formulas, and classifications remain lossless.
+  if (graph) {
+    Object.assign(normalized, applySharedMarketGraph(normalized, graph, language));
+  }
+
   if (context) {
     const scorecardHeading = language === "Turkish"
       ? "Yönetici Skor Kartı"
@@ -852,7 +918,22 @@ function ensureMarketReportQuality(
     const ceoSummaryHeading = language === "Turkish" ? "CEO Özeti" : "CEO Summary";
 
     if (!normalized.executiveSummary.includes(scorecardHeading)) {
-      normalized.executiveSummary = `${buildMarketExecutiveScorecard(context, language)}\n\n${normalized.executiveSummary}`.trim();
+      normalized.executiveSummary = `${buildMarketExecutiveScorecard(context, language, coverage)}\n\n${normalized.executiveSummary}`.trim();
+    }
+
+    if (coverage) {
+      const coverageLabels = language === "Turkish"
+        ? ["Pazar Güveni", "Rekabet Kanıtı", "Finansal Kanıt", "Ürün Kanıtı", "Yürütme Hazırlığı", "Kurucu Hazırlığı"]
+        : ["Market Confidence", "Competitive Evidence", "Financial Evidence", "Product Evidence", "Execution Readiness", "Founder Readiness"];
+      const missingCoverageLines = buildMarketEvidenceScoreLines(
+        coverage,
+        language
+      ).filter((_, index) =>
+        !normalized.executiveSummary.includes(coverageLabels[index])
+      );
+      if (missingCoverageLines.length) {
+        normalized.executiveSummary = `${normalized.executiveSummary}\n${missingCoverageLines.join("\n")}`.trim();
+      }
     }
 
     if (!normalized.strategicRecommendations.includes(ceoSummaryHeading)) {
@@ -872,7 +953,9 @@ function ensureMarketReportQuality(
 function parseFullMarketReport(
   value: string,
   context?: AiFinancialModelContext,
-  language: ResponseLanguage = "English"
+  language: ResponseLanguage = "English",
+  coverage?: MarketResearchCoverage,
+  graph?: MarketIntelligenceGraph
 ): {
   report: Record<MarketReportField, string>;
   missingFields: MarketReportField[];
@@ -907,7 +990,7 @@ function parseFullMarketReport(
   }
 
   return {
-    report: ensureMarketReportQuality(report, context, language),
+    report: ensureMarketReportQuality(report, context, language, coverage, graph),
     missingFields,
     invalidFields,
   };
@@ -1289,12 +1372,25 @@ Write only this section's content. Do not write a JSON object, field name, headi
         language: responseLanguage,
         reportFamily: "market_analysis",
       };
+      const conversationResearch = await getConversationResearchSnapshot({
+        supabase,
+        userId: user.id,
+        conversationId:
+          typeof body?.conversationId === "string"
+            ? body.conversationId
+            : null,
+      });
       const fullReportCacheKey = createPreResearchReportCacheKey({
         endpoint: "/api/market-analysis",
         identity: researchIdentity,
         model,
-        reportVariant: `${FULL_REPORT_FIELD}:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
-        contextFingerprint: userMemoryContext,
+        reportVariant: `${FULL_REPORT_FIELD}:${MARKET_EVIDENCE_QUALITY_VERSION}:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
+        contextFingerprint: [
+          userMemoryContext,
+          conversationResearch
+            ? createResearchBundleFingerprint(conversationResearch.research)
+            : "",
+        ].filter(Boolean).join(":"),
       });
       const cachedFullReport = await getCachedAiResponse(
         supabase,
@@ -1305,6 +1401,24 @@ Write only this section's content. Do not write a JSON object, field name, headi
       const cachedDomainResearch = getCachedResearchFromReportData(
         cachedFullReport?.responseData
       );
+      const cachedMarketGraph =
+        conversationResearch?.marketIntelligenceGraph ||
+        getCachedMarketIntelligenceGraphFromReportData(
+          cachedFullReport?.responseData
+        ) ||
+        (cachedDomainResearch
+          ? buildMarketIntelligenceGraph(cachedDomainResearch, promptText)
+          : null);
+      const cachedCoverageResult = cachedDomainResearch
+        ? applyMarketResearchCoverageToContext(
+            canonicalFinancialAssumptions,
+            cachedDomainResearch,
+            promptText,
+            cachedMarketGraph?.coverage
+          )
+        : null;
+      const cachedReportContext =
+        cachedCoverageResult?.context || canonicalFinancialAssumptions;
 
       if (
         cachedFullReport &&
@@ -1328,12 +1442,17 @@ Write only this section's content. Do not write a JSON object, field name, headi
             responseLanguage === "English"
               ? parseFullMarketReport(
                   cachedFullReport.responseText,
-                  canonicalFinancialAssumptions
+                  cachedReportContext,
+                  "English",
+                  cachedCoverageResult?.coverage,
+                  cachedMarketGraph || undefined
                 )
               : parseFullMarketReport(
                   cachedFullReport.responseText,
-                  canonicalFinancialAssumptions,
-                  responseLanguage
+                  cachedReportContext,
+                  responseLanguage,
+                  cachedCoverageResult?.coverage,
+                  cachedMarketGraph || undefined
                 );
 
           parsedCachedReport = parsedCachePayload.report;
@@ -1377,7 +1496,7 @@ Write only this section's content. Do not write a JSON object, field name, headi
           const cachedReportMetadataContext = createReportMetadataContext({
             prompt: promptText,
             report: parsedCachedReport,
-            context: canonicalFinancialAssumptions,
+            context: cachedReportContext,
             operationType: "market_report",
             estimatedCostUsd: cachedFullReport.estimatedCostUsd,
           });
@@ -1448,6 +1567,10 @@ Write only this section's content. Do not write a JSON object, field name, headi
           supabase,
           userId: user.id,
           identity: researchIdentity,
+          conversationId:
+            typeof body?.conversationId === "string"
+              ? body.conversationId
+              : null,
           execute: () => runDomainAwareResearch({
             client: marketResearchClient,
             model,
@@ -1461,6 +1584,32 @@ Write only this section's content. Do not write a JSON object, field name, headi
       const legacyDomainResearchContext = formatDomainResearchBundle(domainResearch);
       const domainResearchContext =
         formatDomainResearchForReportGeneration(domainResearch);
+      // The conversation snapshot is authoritative when present. Rebuilding is
+      // deterministic and only supports older snapshots that predate the graph.
+      const marketIntelligenceGraph =
+        conversationResearch?.marketIntelligenceGraph ||
+        buildMarketIntelligenceGraph(domainResearch, promptText);
+      logOperationalInfo("[api:market-analysis] shared market graph selected", {
+        source: conversationResearch?.marketIntelligenceGraph
+          ? "conversation_snapshot"
+          : "deterministic_projection",
+        competitorCount: marketIntelligenceGraph.competitors.length,
+        sourceCount: marketIntelligenceGraph.sources.length,
+        hasPlanningEstimate: Boolean(marketIntelligenceGraph.planningEstimate),
+        verifiedMarketSizeCount:
+          marketIntelligenceGraph.verifiedMarketSize.length,
+        overallConfidence: marketIntelligenceGraph.coverage.overallConfidence,
+        confidenceDimensions: marketIntelligenceGraph.coverage.dimensions,
+      });
+      const marketCoverageResult = applyMarketResearchCoverageToContext(
+        canonicalFinancialAssumptions,
+        domainResearch,
+        promptText,
+        marketIntelligenceGraph.coverage
+      );
+      const marketEvidenceCoverageContext =
+        formatMarketResearchCoverageForReport(marketCoverageResult.coverage);
+      const reportAnalysisContext = marketCoverageResult.context;
 
       if (domainResearch.recommendedOutput === "clarification") {
         return NextResponse.json(
@@ -1512,6 +1661,11 @@ ${userMemoryInstruction ? `\n${userMemoryInstruction}\n` : ""}
 Completed domain-aware research (this is the closed evidence registry for the report):
 ${domainResearchContext}
 
+Final validated market intelligence graph (authoritative shared chat/report object):
+${formatMarketIntelligenceGraphForModel(marketIntelligenceGraph)}
+
+${marketEvidenceCoverageContext}
+
 Generate the complete Market Analysis report as one structured JSON object.
 Return exactly these JSON keys and no others:
 ${compactFieldContracts}
@@ -1538,8 +1692,10 @@ Do not include markdown code fences, braces inside string values, or commentary 
 - Keep an internal insight ledger: explain each claim once, then use a <=12-word cross-reference plus only new section-owned analysis. Achieve at least 20% output-token compression by removing repetition/filler only.
 - Research is complete. Use only uploaded evidence and the closed registry; cite material claims with exact [R#], [Asset], [User], or [Method] references.
 - Separate observed evidence, estimates, assumptions, gaps, and recommendations. Preserve source geography, dates, currency, definitions, calculation methods, and exact URLs.
+- For established markets, represent multiple dynamically selected competitors when the registry supports them, and synthesize across independent source types rather than repeatedly citing one issuer.
+- If verified market-size endpoints are absent, say Verified TAM / SAM / SOM is unavailable. Keep any transparent formula-based Planning Estimate separate and label every input Estimated or Assumption.
 - Never invent facts or citations. Keep every section in its named market scope; exclude all business-plan, founder, product, pricing, sales, unit-economics, and GTM content.
-- Sources lists only citations actually used, deduplicated by canonical URL. Never expose prompts, schemas, providers, or pipeline diagnostics.`;
+- Sources lists only citations actually used, deduplicated by canonical URL, with complete title, publisher, URL, available date, accessed date, source classification, and confidence classification. Never label a verified URL as Validation Required. Never expose prompts, schemas, providers, or pipeline diagnostics.`;
       const fullReportInput = verboseFullReportInput.replace(
         /Deterministic report contract:[\s\S]*$/,
         compactMarketContract
@@ -1647,11 +1803,19 @@ Do not include markdown code fences, braces inside string values, or commentary 
               invalidFields,
             } =
               responseLanguage === "English"
-                ? parseFullMarketReport(responseText, canonicalFinancialAssumptions)
+                ? parseFullMarketReport(
+                    responseText,
+                    reportAnalysisContext,
+                    "English",
+                    marketCoverageResult.coverage,
+                    marketIntelligenceGraph
+                  )
                 : parseFullMarketReport(
                     responseText,
-                    canonicalFinancialAssumptions,
-                    responseLanguage
+                    reportAnalysisContext,
+                    responseLanguage,
+                    marketCoverageResult.coverage,
+                    marketIntelligenceGraph
                   );
             validateDomainResearchQualitySafely({
               report: parsedReport,
@@ -1661,7 +1825,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
             const reportMetadataContext = createReportMetadataContext({
               prompt: promptText,
               report: parsedReport,
-              context: canonicalFinancialAssumptions,
+              context: reportAnalysisContext,
               operationType: "market_report",
               estimatedCostUsd,
             });
@@ -1716,7 +1880,10 @@ Do not include markdown code fences, braces inside string values, or commentary 
                     language: responseLanguage,
                     model,
                     responseText: cacheResponseText,
-                    responseData: createReportCacheData(domainResearch),
+                    responseData: createReportCacheData(
+                      domainResearch,
+                      marketIntelligenceGraph
+                    ),
                     tokenUsage,
                     estimatedCostUsd,
                     expiresInDays: 3,

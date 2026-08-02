@@ -153,7 +153,7 @@ test("cached reports retain their exact output and research citation provenance"
   );
   assert.match(
     marketRoute,
-    /responseText: cacheResponseText,\s*responseData: createReportCacheData\(domainResearch\)/
+    /responseText: cacheResponseText,\s*responseData: createReportCacheData\(\s*domainResearch,\s*marketIntelligenceGraph\s*\)/
   );
   assert.match(researchCache, /return isDomainResearchBundle\(research\) \? research : null/);
 });
@@ -171,11 +171,15 @@ test("cache telemetry reports hits misses skipped calls tokens and USD", () => {
   assert.match(researchCache, /\[research-cache\] miss/);
 });
 
-test("standalone chat web research is cached without changing the Responses API call", () => {
+test("chat web research is validated once and reused without a duplicate Responses web search", () => {
   assert.doesNotMatch(chatRoute, /attachments\.length === 0 &&\s*!input\.webResearch/);
   assert.match(chatRoute, /web:\$\{webResearch\}/);
   assert.match(chatRoute, /expiresInDays: webResearch \? 1 : 7/);
-  assert.match(chatRoute, /createChatResponseCapabilities\(webResearch\)/);
+  assert.match(
+    chatRoute,
+    /createChatResponseCapabilities\(webResearch && !chatResearchContext\)/
+  );
+  assert.match(chatRoute, /storeConversationResearchSnapshot/);
   assert.match(chatRequestConfig, /type: "web_search_preview"/);
   assert.match(chatRequestConfig, /include: \["web_search_call\.action\.sources"/);
 });

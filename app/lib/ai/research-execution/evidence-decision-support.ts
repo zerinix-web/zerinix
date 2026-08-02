@@ -692,6 +692,10 @@ export function formatValidatedEvidenceForReportContext(
     unresolved: "Unresolved",
   };
   const sourceById = new Map(validated.sources.map((source) => [source.id, source]));
+  const sources = validated.sources.map(
+    (source) =>
+      `${source.title} | Publisher: ${source.publisher} | URL: ${source.url} | Published: ${source.publishedDate || "not available"} | Accessed: ${source.accessedAt || "not available"} | Type: ${source.sourceType || "external source"} | Reliability: ${Math.round(source.reliability * 100)}/100`
+  );
   const findings = validated.findings.map((finding) => {
     const sources = finding.sourceIds
       .map((id) => sourceById.get(id))
@@ -714,6 +718,9 @@ Unresolved decision questions:
 ${validated.unresolvedQuestions.map((item) => `- ${item}`).join("\n") || "- None."}
 Conflicts:
 ${conflicts.join("\n") || "- None."}
+
+Validated source registry:
+${sources.join("\n") || "No validated external sources."}
 
 Validated findings:
 ${findings.join("\n\n") || "No validated findings."}`;

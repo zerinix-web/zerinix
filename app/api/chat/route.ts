@@ -23,12 +23,28 @@ import {
 import {
   buildAnalysisAssetContext as buildAttachmentContext,
   buildAnalysisAssetModelContent as buildAttachmentModelContent,
+  createAnalysisAssetFingerprint,
   extractAnalysisUrls,
   getAnalysisAssetValidationError as getAttachmentValidationError,
   normalizeAnalysisAssets as normalizeAttachments,
   shouldUseAnalysisWebResearch,
   type AnalysisAsset as ChatAttachmentInput,
 } from "@/app/lib/ai/analysis-assets";
+import {
+  formatDomainResearchForReportGeneration,
+  runDomainAwareResearch,
+  type DomainResearchBundle,
+} from "@/app/lib/ai/domain-research";
+import {
+  resolveDomainResearchWithCache,
+  storeConversationResearchSnapshot,
+  type ResearchCacheIdentity,
+} from "@/app/lib/ai/research-cache";
+import {
+  buildMarketIntelligenceGraph,
+  formatMarketIntelligenceGraphForModel,
+  type MarketIntelligenceGraph,
+} from "@/app/lib/ai/market-intelligence-graph";
 import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 import { recordAIAbuseEvent } from "@/app/lib/ai/abuse-protection";
 import { loadUserReport, type DashboardReport } from "@/app/dashboard/report-utils";
@@ -1567,7 +1583,7 @@ async function handleChatPost(req: Request) {
       model,
     });
 
-    if (chatCacheEnabled) {
+    if (chatCacheEnabled && !webResearch) {
       const cachedChatResponse = await getCachedAiResponse(
         supabase,
         user.id,
@@ -1647,6 +1663,81 @@ async function handleChatPost(req: Request) {
       model,
     });
 
+    let chatResearch: DomainResearchBundle | null = null;
+    let chatMarketGraph: MarketIntelligenceGraph | null = null;
+    let chatResearchContext = "";
+    if (webResearch) {
+      const researchConversationContext = [
+        ...cacheRelevantHistory.slice(-10).map(
+          (message) => `${message.role}: ${message.content}`
+        ),
+        `user: ${prompt}`,
+      ].join("\n\n");
+      const researchIdentity: ResearchCacheIdentity = {
+        normalizedPrompt: normalizeAiPrompt(researchConversationContext),
+        uploadedAssetHash: createAnalysisAssetFingerprint(attachments),
+        analysisMode: rawReportMode === "market" ? "market" : "chat",
+        language: responseLanguage,
+        reportFamily:
+          rawReportMode === "market" || selectedIntent === "Marketing"
+            ? "market_analysis"
+            : "strategic_advisory",
+      };
+      const researchResolution = await resolveDomainResearchWithCache({
+        supabase,
+        userId: user.id,
+        identity: researchIdentity,
+        execute: () =>
+          runDomainAwareResearch({
+            client,
+            model,
+            prompt: researchConversationContext,
+            assets: attachments,
+            language: responseLanguage,
+            signal: req.signal,
+            researchUserId: user.id,
+            selectedMode:
+              rawReportMode === "market" ? "market" : "chat",
+          }),
+      });
+      const reusableResearch =
+        researchResolution.research.researchAttempted &&
+        !researchResolution.research.fallbackUsed &&
+        researchResolution.research.evidence.length > 0;
+      chatResearch = reusableResearch ? researchResolution.research : null;
+      chatResearchContext = chatResearch
+        ? formatDomainResearchForReportGeneration(chatResearch)
+        : "";
+      chatMarketGraph = chatResearch
+        ? buildMarketIntelligenceGraph(chatResearch, researchConversationContext)
+        : null;
+      if (chatMarketGraph) {
+        chatResearchContext = `${chatResearchContext}\n\nFinal validated market intelligence graph:\n${formatMarketIntelligenceGraphForModel(chatMarketGraph)}`;
+      }
+
+      if (conversationId && chatResearch) {
+        await storeConversationResearchSnapshot({
+          supabase,
+          userId: user.id,
+          conversationId,
+          identity: researchIdentity,
+          research: chatResearch,
+          marketIntelligenceGraph: chatMarketGraph || undefined,
+        });
+      }
+
+      logOperationalInfo("[api:chat] validated research attached", {
+        conversationId: conversationId || null,
+        evidenceCount: chatResearch?.evidence.length || 0,
+        validatedFindingCount:
+          chatResearch?.validatedEvidence?.findings.length || 0,
+        competitorCount: chatMarketGraph?.competitors.length || 0,
+        hasPlanningEstimate: Boolean(chatMarketGraph?.planningEstimate),
+        researchSource: researchResolution.source,
+        directChatWebSearchSkipped: Boolean(chatResearchContext),
+      });
+    }
+
     const maxOutputTokens = getChatMaxOutputTokens(requestKind);
     const historyWithoutCurrentPrompt = cacheRelevantHistory;
     const optimizedHistory = optimizeChatHistoryForCost(
@@ -1684,6 +1775,9 @@ async function handleChatPost(req: Request) {
         : "Answer from the current conversation and general reasoning. Do not mention missing report context unless the user explicitly asks about a saved report.",
       "Answer naturally and directly. You may help with business, strategy, operations, finance, product, marketing, technology, or general questions.",
       "Use the conversation history for context, but do not fabricate facts.",
+      chatResearchContext
+        ? "A validated ZERINIX research snapshot is attached. Base external factual claims, competitors, market sizing, confidence, and executive recommendations on this exact evidence only. Do not start another web search or replace its citations."
+        : "No validated external research snapshot is attached.",
       "Treat attached file text and binary file inputs as primary user-supplied evidence. Analyze every attached asset directly, attribute material findings to its filename, and use those findings before general model knowledge. If neither readable text nor binary content is available, say so briefly when relevant.",
       promptUrls.length > 0
         ? `The user supplied these URLs as primary external context:\n${promptUrls.join("\n")}\nUse web research to inspect and corroborate them before answering.`
@@ -1716,6 +1810,14 @@ async function handleChatPost(req: Request) {
             {
               role: "user" as const,
               content: `Saved ZERINIX report memory. Use this as the primary source for answering report-related questions:\n\n${reportMemory.content}`,
+            },
+          ]
+        : []),
+      ...(chatResearchContext
+        ? [
+            {
+              role: "user" as const,
+              content: `Validated research snapshot. Use this exact evidence object as the external research basis for this answer:\n\n${chatResearchContext}`,
             },
           ]
         : []),
@@ -1807,7 +1909,7 @@ async function handleChatPost(req: Request) {
       () => client.responses.create(
         {
           model,
-          ...createChatResponseCapabilities(webResearch),
+          ...createChatResponseCapabilities(webResearch && !chatResearchContext),
           text: { verbosity: "low" },
           instructions: instructionsText,
           input: providerInput,

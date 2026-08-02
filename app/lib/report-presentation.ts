@@ -524,7 +524,7 @@ function buildConfidenceRadar(content: string, fallbackScore: number | null, isT
     { label: isTurkish ? "Finansal" : "Financial", aliases: ["Financial Confidence", "Financial Quality", "Finansal Güven", "Finansal Kalite"] },
     { label: isTurkish ? "Uygulama" : "Execution", aliases: ["Execution Confidence", "Execution Readiness", "Yürütme Güveni", "Yürütme Hazırlığı"] },
     { label: isTurkish ? "Ürün" : "Product", aliases: ["Product Confidence", "Product Readiness", "Ürün Güveni", "Ürün Hazırlığı"] },
-    { label: isTurkish ? "Kanıt" : "Evidence", aliases: ["Evidence Confidence", "Evidence Strength", "Kanıt Güveni", "Kanıt Gücü"] },
+    { label: isTurkish ? "Kanıt" : "Evidence", aliases: ["Competitive Evidence", "Evidence Confidence", "Evidence Strength", "Rekabet Kanıtı", "Kanıt Güveni", "Kanıt Gücü"] },
   ];
 
   return dimensions.map((dimension) => ({

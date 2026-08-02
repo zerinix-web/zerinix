@@ -43,7 +43,9 @@ import {
 } from "@/app/lib/ai/evidence-compression";
 import {
   createPreResearchReportCacheKey,
+  createResearchBundleFingerprint,
   createReportCacheData,
+  getConversationResearchSnapshot,
   getCachedResearchFromReportData,
   logSkippedResearchForReportCache,
   resolveDomainResearchWithCache,
@@ -61,6 +63,7 @@ import {
   formatValidationIntelligenceSummary,
   type AiFinancialModelContext,
 } from "@/app/lib/ai/financial-assumptions";
+import { applyMarketResearchCoverageToContext } from "@/app/lib/ai/market-research-coverage";
 import {
   compactReportFieldPrompt,
   createAiCostOptimizationMetrics,
@@ -3056,6 +3059,7 @@ async function generateRealEstateInvestmentReport({
   pipelineStartedAt,
   assetExtractionMs,
   dynamicResearchPlanningInput,
+  conversationId,
 }: {
   req: Request;
   supabase: Awaited<ReturnType<typeof createClient>>;
@@ -3072,6 +3076,7 @@ async function generateRealEstateInvestmentReport({
   pipelineStartedAt: number;
   assetExtractionMs: number;
   dynamicResearchPlanningInput: DynamicResearchPlanningInput;
+  conversationId?: string;
 }) {
   const encoder = new TextEncoder();
   const prepareForPresentation = (
@@ -3128,11 +3133,19 @@ async function generateRealEstateInvestmentReport({
     language: responseLanguage,
     reportFamily: "real_estate",
   };
+  const conversationResearch = await getConversationResearchSnapshot({
+    supabase,
+    userId: user.id,
+    conversationId,
+  });
   const cacheKey = createPreResearchReportCacheKey({
     endpoint: "/api/plan",
     identity: researchIdentity,
     model,
     reportVariant: "real_estate_investment_analysis:sectioned:v3",
+    contextFingerprint: conversationResearch
+      ? createResearchBundleFingerprint(conversationResearch.research)
+      : undefined,
   });
   const cached = await getCachedAiResponse(supabase, user.id, cacheKey);
 
@@ -3220,6 +3233,7 @@ async function generateRealEstateInvestmentReport({
     supabase,
     userId: user.id,
     identity: researchIdentity,
+    conversationId,
     execute: () => runDomainAwareResearch({
       client,
       model,
@@ -4168,6 +4182,7 @@ async function generateSpecializedDomainReport({
   pipelineStartedAt,
   assetExtractionMs,
   dynamicResearchPlanningInput,
+  conversationId,
 }: {
   domain: SpecializedReportDomain;
   req: Request;
@@ -4185,6 +4200,7 @@ async function generateSpecializedDomainReport({
   pipelineStartedAt: number;
   assetExtractionMs: number;
   dynamicResearchPlanningInput: DynamicResearchPlanningInput;
+  conversationId?: string;
 }) {
   const encoder = new TextEncoder();
 
@@ -4232,11 +4248,19 @@ async function generateSpecializedDomainReport({
     language: responseLanguage,
     reportFamily: `${domain}_decision_analysis`,
   };
+  const conversationResearch = await getConversationResearchSnapshot({
+    supabase,
+    userId: user.id,
+    conversationId,
+  });
   const cacheKey = createPreResearchReportCacheKey({
     endpoint: "/api/plan",
     identity: researchIdentity,
     model,
     reportVariant: `${domain}_decision_analysis:fullReport:v1`,
+    contextFingerprint: conversationResearch
+      ? createResearchBundleFingerprint(conversationResearch.research)
+      : undefined,
   });
   const cached = await getCachedAiResponse(supabase, user.id, cacheKey);
 
@@ -4296,6 +4320,7 @@ async function generateSpecializedDomainReport({
     supabase,
     userId: user.id,
     identity: researchIdentity,
+    conversationId,
     execute: () => runDomainAwareResearch({
       client,
       model,
@@ -4949,6 +4974,10 @@ async function executePlanRequestInner(
         pipelineStartedAt,
         assetExtractionMs,
         dynamicResearchPlanningInput,
+        conversationId:
+          typeof body?.conversationId === "string"
+            ? body.conversationId
+            : undefined,
       });
     }
 
@@ -4976,6 +5005,10 @@ async function executePlanRequestInner(
         pipelineStartedAt,
         assetExtractionMs,
         dynamicResearchPlanningInput,
+        conversationId:
+          typeof body?.conversationId === "string"
+            ? body.conversationId
+            : undefined,
       });
     }
 
@@ -5128,12 +5161,25 @@ Write only the content for this section. Do not write a JSON object, field name,
         language: responseLanguage,
         reportFamily: "business_plan",
       };
+      const conversationResearch = await getConversationResearchSnapshot({
+        supabase,
+        userId: user.id,
+        conversationId:
+          typeof body?.conversationId === "string"
+            ? body.conversationId
+            : null,
+      });
       const fullReportCacheKey = createPreResearchReportCacheKey({
         endpoint: "/api/plan",
         identity: researchIdentity,
         model,
         reportVariant: `${FULL_REPORT_FIELD}:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
-        contextFingerprint: userMemoryContext,
+        contextFingerprint: [
+          userMemoryContext,
+          conversationResearch
+            ? createResearchBundleFingerprint(conversationResearch.research)
+            : "",
+        ].filter(Boolean).join(":"),
       });
       const cachedFullReport = await getCachedAiResponse(
         supabase,
@@ -5150,9 +5196,16 @@ Write only the content for this section. Do not write a JSON object, field name,
         const cachedBusinessResearch = getCachedResearchFromReportData(
           cachedFullReport.responseData
         );
+        const cachedUnifiedFinancialContext = cachedBusinessResearch
+          ? applyMarketResearchCoverageToContext(
+              canonicalFinancialAssumptions,
+              cachedBusinessResearch,
+              promptText
+            ).context
+          : canonicalFinancialAssumptions;
         const parsedCachedReport = parseFullPlanReport(
           cachedFullReport.responseText,
-          canonicalFinancialAssumptions,
+          cachedUnifiedFinancialContext,
           responseLanguage
         );
 
@@ -5183,7 +5236,7 @@ Write only the content for this section. Do not write a JSON object, field name,
         const cachedReportMetadataContext = createReportMetadataContext({
           prompt: promptText,
           report: parsedCachedReport,
-          context: canonicalFinancialAssumptions,
+          context: cachedUnifiedFinancialContext,
           operationType: "plan_report",
           estimatedCostUsd: cachedFullReport.estimatedCostUsd,
         });
@@ -5218,7 +5271,7 @@ Write only the content for this section. Do not write a JSON object, field name,
         });
 
         return new Response(encoder.encode(
-          serializePlanReportMetadataChunk(canonicalFinancialAssumptions) +
+          serializePlanReportMetadataChunk(cachedUnifiedFinancialContext) +
             serializePlanReportChunks(parsedCachedReport)
         ), {
           headers: {
@@ -5234,6 +5287,10 @@ Write only the content for this section. Do not write a JSON object, field name,
           supabase,
           userId: user.id,
           identity: researchIdentity,
+          conversationId:
+            typeof body?.conversationId === "string"
+              ? body.conversationId
+              : null,
           execute: () => runDomainAwareResearch({
             client: businessResearchClient,
             model,
@@ -5249,6 +5306,13 @@ Write only the content for this section. Do not write a JSON object, field name,
         formatDomainResearchBundle(businessResearch);
       const businessResearchContext =
         formatDomainResearchForReportGeneration(businessResearch);
+      const unifiedFinancialContext = applyMarketResearchCoverageToContext(
+        canonicalFinancialAssumptions,
+        businessResearch,
+        promptText
+      ).context;
+      const unifiedFinancialAssumptionsContext =
+        formatCanonicalFinancialAssumptions(unifiedFinancialContext);
       const adaptiveWriterPlan = createAdaptiveReportWriterPlan({
           expertiseProfile: dynamicResearchPlanningInput.expertiseProfile,
           reportPlan: dynamicResearchPlanningInput.reportPlan,
@@ -5318,7 +5382,7 @@ ${businessResearchContext}
 Adaptive report-writing contract:
 ${adaptiveWriterContext}
 
-${financialAssumptionsContext}
+${unifiedFinancialAssumptionsContext}
 ${userMemoryInstruction ? `\n${userMemoryInstruction}\n` : ""}
 
 Generate the complete Business Plan report as one structured JSON object.
@@ -5396,7 +5460,7 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
             controller.enqueue(encoder.encode(chunk));
           };
 
-          enqueue(serializePlanReportMetadataChunk(canonicalFinancialAssumptions));
+          enqueue(serializePlanReportMetadataChunk(unifiedFinancialContext));
 
           try {
             fullReportStage = "provider_call";
@@ -5493,7 +5557,7 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
             fullReportStage = "json_parse";
             const parsedReport = parseFullPlanReport(
               responseText,
-              canonicalFinancialAssumptions,
+              unifiedFinancialContext,
               responseLanguage
             );
             validateDomainResearchQualitySafely({
@@ -5504,7 +5568,7 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
             const reportMetadataContext = createReportMetadataContext({
               prompt: promptText,
               report: parsedReport,
-              context: canonicalFinancialAssumptions,
+              context: unifiedFinancialContext,
               operationType: "plan_report",
               estimatedCostUsd,
             });
@@ -5597,7 +5661,7 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
 
             if (providerTimedOut) {
               const fallbackReport = createGroundedBusinessTimeoutFallback({
-                context: canonicalFinancialAssumptions,
+                context: unifiedFinancialContext,
                 research: businessResearch,
                 language: responseLanguage,
               });

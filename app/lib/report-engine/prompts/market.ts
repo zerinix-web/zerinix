@@ -39,12 +39,12 @@ export const marketPrompts = {
   },
   competitiveLandscape: {
     prompt:
-      "Assess market structure, competitive intensity, positioning clusters, entry barriers, switching costs, and areas of convergence or differentiation. Do not substitute a business plan or go-to-market plan. Max 180 words.",
+      "Assess market structure, competitive intensity, positioning clusters, entry barriers, switching costs, and areas of convergence or differentiation. When the evidence registry supports them, compare multiple relevant competitors across independent domains and do not use one issuer as a proxy for the whole market. Do not substitute a business plan or go-to-market plan. Max 180 words.",
     maxTokens: 1300,
   },
   majorPlayers: {
     prompt:
-      "Identify only evidence-supported major players and relevant specialists. For each, explain its market role, positioning, geographic strength, and differentiator. Omit unsupported revenue, valuation, funding, or customer claims. Max 200 words.",
+      "Identify only evidence-supported major players and relevant specialists selected dynamically for the requested market. Represent multiple competitors when distinct public evidence exists; for each, explain its market role, positioning, geographic strength, and differentiator. Omit unsupported revenue, valuation, funding, or customer claims. Max 200 words.",
     maxTokens: 1400,
   },
   customerSegments: {
@@ -74,7 +74,7 @@ export const marketPrompts = {
   },
   tamSamSom: {
     prompt:
-      "Define TAM, SAM, and SOM using explicit market boundaries, geography, customer scope, forecast year, currency, sources, and calculation method. If SOM cannot be supported without company-specific inputs, state that limitation rather than inventing it. Max 170 words.",
+      "Define TAM, SAM, and SOM using explicit market boundaries, geography, customer scope, forecast year, currency, sources, and calculation method. If reliable endpoints are absent, explicitly state that Verified TAM / SAM / SOM is unavailable. A separate Planning Estimate is allowed only when every input is labeled Estimated or Assumption and the transparent formula and calculation basis are shown; never present it as verified. Max 170 words.",
     maxTokens: 1300,
   },
   portersFiveForces: {
@@ -89,7 +89,7 @@ export const marketPrompts = {
   },
   sources: {
     prompt:
-      "List only sources actually used in the report. For each include the human-readable title, publisher, valid URL, publication date when available, access date, and the market claim it supports. Deduplicate canonical URLs and omit unverifiable or placeholder citations. Max 240 words.",
+      "List only sources actually used in the report. For each include the human-readable title, publisher, valid URL, publication date or year when available, access date, source classification, confidence classification, and the market claim it supports. Preserve metadata from the validated registry exactly, deduplicate canonical URLs, and omit unverifiable or placeholder citations. Never write Validation Required for a verified source whose URL exists. Max 240 words.",
     maxTokens: 1600,
   },
 } as const;
