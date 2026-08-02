@@ -1,3 +1,9 @@
+import { resolveOpenAiPricing } from "@/app/lib/ai/cost-metrics";
+export {
+  dedupeExactPromptBlocks,
+  omitTrailingDuplicateUserPrompt,
+} from "@/app/lib/ai/token-optimization-core";
+
 type AiMessageLike = {
   role: string;
   content: string;
@@ -12,6 +18,7 @@ export type AiCostOptimizationMetrics = {
   input_chars_before: number;
   input_chars_after: number;
   trimmed_message_count: number;
+  estimated_input_cost_savings_usd: number;
 };
 
 const tokenChars = 4;
@@ -45,12 +52,16 @@ export function createAiCostOptimizationMetrics(input: {
   beforeText: string;
   afterText?: string;
   trimmedMessageCount?: number;
+  model?: string;
 }): AiCostOptimizationMetrics {
   const beforeChars = input.beforeText.length;
   const afterChars = (input.afterText ?? input.beforeText).length;
   const beforeTokens = estimateAiInputTokens(input.beforeText);
   const afterTokens = estimateAiInputTokens(input.afterText ?? input.beforeText);
   const savings = Math.max(0, beforeTokens - afterTokens);
+  const inputPrice = input.model
+    ? resolveOpenAiPricing(input.model)?.input ?? 0
+    : 0;
 
   return {
     cost_optimization_version: "v2",
@@ -63,6 +74,9 @@ export function createAiCostOptimizationMetrics(input: {
     input_chars_before: beforeChars,
     input_chars_after: afterChars,
     trimmed_message_count: input.trimmedMessageCount ?? 0,
+    estimated_input_cost_savings_usd: Number(
+      ((savings * inputPrice) / 1_000_000).toFixed(8)
+    ),
   };
 }
 

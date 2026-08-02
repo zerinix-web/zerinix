@@ -8,10 +8,13 @@ import {
   getUserPlanTier,
   normalizeAiPrompt,
   recordAiUsage,
-  selectAiModel,
   type AiRequestKind,
   type AIUsageOperationType,
 } from "@/app/lib/ai/governance";
+import {
+  logAiModelRoutingDecision,
+  resolveAiModelRoutingDecision,
+} from "@/app/lib/ai/model-router";
 import { checkAIAbuseProtection } from "@/app/lib/ai/abuse-protection";
 import { QUOTA_COUNTING_USAGE_KIND_EXCLUSION } from "@/app/lib/ai/quota-rules.mjs";
 
@@ -51,7 +54,15 @@ export async function checkAiProductionRateLimit({
   ip,
 }: AiProductionRateLimitInput) {
   const planTier = await getUserPlanTier(supabase, userId);
-  const model = selectAiModel(requestKind);
+  const routingDecision = resolveAiModelRoutingDecision({
+    requestKind,
+    prompt: promptText,
+  });
+  const model = routingDecision.routedModel;
+  logAiModelRoutingDecision(routingDecision, {
+    endpoint,
+    operation: reportField || requestKind,
+  });
   const normalizedPrompt = normalizeAiPrompt(promptText);
   const promptHash = createAiPromptHash(promptText);
   const operationType = operationTypeForRequestKind(requestKind);

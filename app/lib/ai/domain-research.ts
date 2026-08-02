@@ -30,6 +30,10 @@ import { logOperationalInfo } from "../security/logging";
 import { extractResearchAssetEntities } from "./research-entity-extraction";
 import { withOpenAiCostOperation } from "./cost-instrumentation";
 import {
+  logAiModelRoutingDecision,
+  resolveAiModelRoutingDecision,
+} from "./model-router";
+import {
   assertRealEstateResearchComposition,
   assertRealEstateUsesAvailableExternalEvidence,
 } from "../report-engine/real-estate-quality.mjs";
@@ -2289,6 +2293,15 @@ Respond in ${language}, while preserving evidence labels exactly in English.`;
       task.provider === "auto" || task.provider === "openai_web_search",
     async execute(request) {
       const researchModel = "gpt-5.5";
+      const researchRoutingDecision = resolveAiModelRoutingDecision({
+        requestKind: "report_generation",
+        category: "research",
+        previousModel: researchModel,
+      });
+      logAiModelRoutingDecision(researchRoutingDecision, {
+        endpoint: "domain-research",
+        operation: "openai_web_search",
+      });
       const allEvidence: DomainResearchEvidence[] = [];
       const allFacts: ExtractedFact[] = [];
       const allTaskResults: ResearchTaskResult[] = [];
@@ -2367,7 +2380,7 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
               provider: "openai_web_search",
               researchStage: stage.id,
               requestSent: true,
-              model: researchModel,
+              model: researchRoutingDecision.routedModel,
               taskCount: request.tasks.length,
             });
             responsePromise = withOpenAiCostOperation(
@@ -2376,7 +2389,7 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
                 reportType: researchPlan.domain,
               },
               () => client.responses.create({
-                model: researchModel,
+                model: researchRoutingDecision.routedModel,
                 stream: false,
                 instructions:
                   `You are a research provider for ZERINIX. Return normalized evidence only for the requested ${stage.id} source tier. Run the supplied query variants for every task, preserve provenance and geographic scope, expose uncertainty, and never write a report or recommendation.`,

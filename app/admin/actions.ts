@@ -13,6 +13,10 @@ import {
   finalizeOpenAiCostRequest,
   withOpenAiCostOperation,
 } from "@/app/lib/ai/cost-instrumentation";
+import {
+  logAiModelRoutingDecision,
+  resolveAiModelRoutingDecision,
+} from "@/app/lib/ai/model-router";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -274,10 +278,19 @@ export async function askAiCeo(
 
   try {
     const client = createOpenAiClient();
+    const routingDecision = resolveAiModelRoutingDecision({
+      requestKind: "simple_chat",
+      category: "admin_analysis",
+      previousModel: "gpt-5-mini",
+    });
+    logAiModelRoutingDecision(routingDecision, {
+      endpoint: "/admin/ai-ceo",
+      operation: "admin_analysis",
+    });
     const response = await withOpenAiCostOperation(
       { operationName: "admin_advisor", reportType: "admin_advisor" },
       () => client.responses.create({
-      model: "gpt-5-mini",
+      model: routingDecision.routedModel,
       reasoning: { effort: "minimal" },
       text: { verbosity: "low" },
       max_output_tokens: 1200,

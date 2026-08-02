@@ -34,6 +34,10 @@ import { logServerError } from "@/app/lib/security/errors";
 import { buildAnalysisProviderInput } from "@/app/lib/ai/analysis-assets";
 import { normalizeSelectedAnalysisMode } from "@/app/lib/ai/expertise-profile";
 import {
+  logAiModelRoutingDecision,
+  resolveAiModelRoutingDecision,
+} from "@/app/lib/ai/model-router";
+import {
   createOpenAiRequestId,
   finalizeOpenAiCostResponse,
   runWithOpenAiCostContext,
@@ -246,8 +250,18 @@ async function handleUnderstandingPost(request: Request) {
       });
     }
 
-    const model =
+    const previousModel =
       process.env.OPENAI_CLASSIFIER_MODEL || selectAiModel("simple_chat");
+    const routingDecision = resolveAiModelRoutingDecision({
+      requestKind: "simple_chat",
+      category: "extraction",
+      previousModel,
+    });
+    const model = routingDecision.routedModel;
+    logAiModelRoutingDecision(routingDecision, {
+      endpoint: "/api/understanding",
+      operation: "input_classification",
+    });
     const classifierInput = buildClassifierInput(
       prompt,
       assets,

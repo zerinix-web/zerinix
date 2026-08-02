@@ -1,6 +1,13 @@
 import "server-only";
 
 import type { AiRequestKind } from "@/app/lib/ai/governance";
+import {
+  classifyAiTask,
+  routeAiModel,
+  type AiModelRoutingDecision,
+  type AiTaskCategory,
+} from "@/app/lib/ai/model-router-core";
+import { logOperationalInfo } from "@/app/lib/security/logging";
 
 export type AiModelRoutingOperation =
   | "chat"
@@ -104,4 +111,51 @@ export function getModelRoutingOperationForRequestKind(
 
 export function resolveAiModelForRequestKind(requestKind: AiRequestKind) {
   return resolveAiModelForOperation(getModelRoutingOperationForRequestKind(requestKind));
+}
+
+export function getAiTaskCategoryForRequest(input: {
+  requestKind: AiRequestKind;
+  prompt?: string;
+}): AiTaskCategory {
+  if (input.requestKind === "report_generation") return "business_planning";
+  if (input.requestKind === "market_analysis") return "market_intelligence";
+  if (input.requestKind === "business_advice" || input.requestKind === "investment_advice") {
+    return "strategic_advisory";
+  }
+  if (input.requestKind === "file_analysis") return "extraction";
+  return classifyAiTask(input.prompt || "");
+}
+
+export function resolveAiModelRoutingDecision(input: {
+  requestKind: AiRequestKind;
+  prompt?: string;
+  category?: AiTaskCategory;
+  previousModel?: string;
+}): AiModelRoutingDecision {
+  const config = readRoutingConfig();
+  const models = {
+    FAST: config.tiers.FAST || fallbackTierModels.FAST,
+    BALANCED: config.tiers.BALANCED || fallbackTierModels.BALANCED,
+    HIGH_QUALITY: config.tiers.HIGH_QUALITY || fallbackTierModels.HIGH_QUALITY,
+  };
+  const category = input.category || getAiTaskCategoryForRequest(input);
+  const previousModel =
+    input.previousModel || resolveAiModelForRequestKind(input.requestKind);
+  return routeAiModel({ category, previousModel, models });
+}
+
+export function logAiModelRoutingDecision(
+  decision: AiModelRoutingDecision,
+  context: { endpoint: string; operation: string }
+) {
+  logOperationalInfo("[ai model routing]", {
+    ...context,
+    category: decision.category,
+    tier: decision.tier,
+    previousModel: decision.previousModel,
+    routedModel: decision.routedModel,
+    modelChanged: decision.modelChanged,
+    qualityProtected: decision.qualityProtected,
+    reason: decision.reason,
+  });
 }

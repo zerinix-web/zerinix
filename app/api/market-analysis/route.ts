@@ -33,6 +33,14 @@ import {
   validateDomainResearchQuality,
   validateDomainResearchQualitySafely,
 } from "@/app/lib/ai/domain-research";
+import {
+  createPreResearchReportCacheKey,
+  createReportCacheData,
+  getCachedResearchFromReportData,
+  logSkippedResearchForReportCache,
+  resolveDomainResearchWithCache,
+  type ResearchCacheIdentity,
+} from "@/app/lib/ai/research-cache";
 import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 import { createAiJobDescriptor } from "@/app/lib/ai/queue";
 import {
@@ -41,7 +49,10 @@ import {
   formatReportIntelligenceSummary,
   type AiFinancialModelContext,
 } from "@/app/lib/ai/financial-assumptions";
-import { createAiCostOptimizationMetrics } from "@/app/lib/ai/token-optimization";
+import {
+  createAiCostOptimizationMetrics,
+  dedupeExactPromptBlocks,
+} from "@/app/lib/ai/token-optimization";
 import { isReportGenerationFailureText } from "@/app/lib/report-errors";
 import {
   createOpenAiClient,
@@ -1169,38 +1180,19 @@ Write only this section's content. Do not write a JSON object, field name, headi
     }
 
     if (isFullReportRequest) {
-      const marketResearchClient = createOpenAiClient();
-      const domainResearch = await runDomainAwareResearch({
-        client: marketResearchClient,
-        model,
-        prompt: promptText,
-        assets: analysisAssets,
+      const researchIdentity: ResearchCacheIdentity = {
+        normalizedPrompt: productionLimit.normalizedPrompt,
+        uploadedAssetHash: assetFingerprint,
+        analysisMode: "market",
         language: responseLanguage,
-        signal: req.signal,
-        researchUserId: user.id,
-      });
-      const domainResearchContext = formatDomainResearchBundle(domainResearch);
-
-      if (domainResearch.recommendedOutput === "clarification") {
-        return NextResponse.json(
-          {
-            error:
-              responseLanguage === "Turkish"
-                ? `Araştırma tamamlandı, ancak karar raporu için doğrulanabilir temel kanıt bulunamadı. Gerekli bilgi veya belge: ${domainResearch.unresolvedFields.join(", ") || "karar bağlamı"}.`
-                : `Research completed, but no verifiable core evidence was found for a decision report. Required information or document: ${domainResearch.unresolvedFields.join(", ") || "decision context"}.`,
-          },
-          { status: 422 }
-        );
-      }
-
-      const fullReportCacheKey = createAiCacheKey({
+        reportFamily: "market_analysis",
+      };
+      const fullReportCacheKey = createPreResearchReportCacheKey({
         endpoint: "/api/market-analysis",
-        normalizedPrompt: userMemoryContext
-          ? `${productionLimit.normalizedPrompt}\nmemories:${userMemoryContext}\nassets:${assetFingerprint}\nresearch:${domainResearchContext}`
-          : `${productionLimit.normalizedPrompt}\nassets:${assetFingerprint}\nresearch:${domainResearchContext}`,
-        mode: `market_analysis:${FULL_REPORT_FIELD}:research_v1:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
-        language: responseLanguage,
+        identity: researchIdentity,
         model,
+        reportVariant: `${FULL_REPORT_FIELD}:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
+        contextFingerprint: userMemoryContext,
       });
       const cachedFullReport = await getCachedAiResponse(
         supabase,
@@ -1208,6 +1200,9 @@ Write only this section's content. Do not write a JSON object, field name, headi
         fullReportCacheKey
       );
       const encoder = new TextEncoder();
+      const cachedDomainResearch = getCachedResearchFromReportData(
+        cachedFullReport?.responseData
+      );
 
       if (
         cachedFullReport &&
@@ -1242,11 +1237,13 @@ Write only this section's content. Do not write a JSON object, field name, headi
           parsedCachedReport = parsedCachePayload.report;
           cachedMissingFields = parsedCachePayload.missingFields;
           cachedInvalidFields = parsedCachePayload.invalidFields;
-          validateDomainResearchQuality({
-            report: parsedCachedReport,
-            bundle: domainResearch,
-            expectedDomain: "business",
-          });
+          if (cachedDomainResearch) {
+            validateDomainResearchQuality({
+              report: parsedCachedReport,
+              bundle: cachedDomainResearch,
+              expectedDomain: "business",
+            });
+          }
         } catch (error) {
           console.error("[api:market-analysis] Ignoring malformed cached full report", {
             reportRequestId: reportRequestId || null,
@@ -1262,6 +1259,10 @@ Write only this section's content. Do not write a JSON object, field name, headi
             cacheKey: fullReportCacheKey,
           });
         } else {
+          logSkippedResearchForReportCache({
+            identity: researchIdentity,
+            research: cachedDomainResearch,
+          });
 
           if (cachedMissingFields.length || cachedInvalidFields.length) {
             logOperationalInfo("[api:market-analysis] cached full report partial sections", {
@@ -1301,6 +1302,8 @@ Write only this section's content. Do not write a JSON object, field name, headi
               report_request_id: reportRequestId || null,
               usage_kind: "full_report_cache_hit",
               actual_ai_call: false,
+              research_cache_hit: true,
+              skipped_gpt_research_calls: true,
               cachedEstimatedCostUsd: cachedFullReport.estimatedCostUsd,
               ...flattenReportMetadataForUsage(cachedReportMetadataContext),
             },
@@ -1335,6 +1338,36 @@ Write only this section's content. Do not write a JSON object, field name, headi
           reportField: FULL_REPORT_FIELD,
           cacheKey: fullReportCacheKey,
         });
+      }
+
+      const marketResearchClient = createOpenAiClient();
+      const { research: domainResearch } =
+        await resolveDomainResearchWithCache({
+          supabase,
+          userId: user.id,
+          identity: researchIdentity,
+          execute: () => runDomainAwareResearch({
+            client: marketResearchClient,
+            model,
+            prompt: promptText,
+            assets: analysisAssets,
+            language: responseLanguage,
+            signal: req.signal,
+            researchUserId: user.id,
+          }),
+        });
+      const domainResearchContext = formatDomainResearchBundle(domainResearch);
+
+      if (domainResearch.recommendedOutput === "clarification") {
+        return NextResponse.json(
+          {
+            error:
+              responseLanguage === "Turkish"
+                ? `Araştırma tamamlandı, ancak karar raporu için doğrulanabilir temel kanıt bulunamadı. Gerekli bilgi veya belge: ${domainResearch.unresolvedFields.join(", ") || "karar bağlamı"}.`
+                : `Research completed, but no verifiable core evidence was found for a decision report. Required information or document: ${domainResearch.unresolvedFields.join(", ") || "decision context"}.`,
+          },
+          { status: 422 }
+        );
       }
 
       const existingAiCallCount = await countAiCallsForReport({
@@ -1394,6 +1427,8 @@ Write concise executive market research and do not expose internal labels or dia
 Do not include markdown code fences, braces inside string values, or commentary outside JSON.`;
       const fullReportInputCostMetrics = createAiCostOptimizationMetrics({
         beforeText: `${instructions}\n${fullReportInput}`,
+        afterText: `${instructions}\n${dedupeExactPromptBlocks(fullReportInput)}`,
+        model,
       });
       const queuedJob = createAiJobDescriptor({
         kind: "market_analysis",
@@ -1558,6 +1593,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
                     language: responseLanguage,
                     model,
                     responseText: cacheResponseText,
+                    responseData: createReportCacheData(domainResearch),
                     tokenUsage,
                     estimatedCostUsd,
                     expiresInDays: 3,

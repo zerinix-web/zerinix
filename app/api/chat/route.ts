@@ -41,6 +41,7 @@ import {
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 import {
   createAiCostOptimizationMetrics,
+  omitTrailingDuplicateUserPrompt,
   optimizeChatHistoryForCost,
 } from "@/app/lib/ai/token-optimization";
 import {
@@ -1625,8 +1626,12 @@ async function handleChatPost(req: Request) {
     });
 
     const maxOutputTokens = getChatMaxOutputTokens(requestKind);
+    const historyWithoutCurrentPrompt = omitTrailingDuplicateUserPrompt(
+      messages,
+      prompt
+    );
     const optimizedHistory = optimizeChatHistoryForCost(
-      messages.map((message) => ({
+      historyWithoutCurrentPrompt.map((message) => ({
         role: message.role,
         content: message.content,
       })),
@@ -1647,7 +1652,7 @@ async function handleChatPost(req: Request) {
         ? `Persistent user profile for non-sensitive personalization:\n${profileContext}\nUse this profile to avoid asking for details the user has already saved. If the user's latest message conflicts with the profile, prioritize the latest message.`
         : "No persistent chat profile is available yet. Do not invent profile preferences.",
       userMemoryContext
-        ? `Persistent user memories for stable personalization:\nPersistent user memory context:\n${userMemoryContext}\nUse these memories as durable user facts and preferences. If the latest user message conflicts with memory, prioritize the latest message and only update memory when the user explicitly asks you to remember or forget something.`
+        ? `Persistent user memories for stable personalization:\n${userMemoryContext}\nUse these memories as durable user facts and preferences. If the latest user message conflicts with memory, prioritize the latest message and only update memory when the user explicitly asks you to remember or forget something.`
         : "No persistent user memories are stored yet. Do not claim anything has been remembered unless the user explicitly asked and the request is handled.",
       reportMemory
         ? [
@@ -1743,7 +1748,10 @@ async function handleChatPost(req: Request) {
       afterText: `${instructionsText}\n${inputMessages
         .map((message) => `${message.role}: ${message.content}`)
         .join("\n")}`,
-      trimmedMessageCount: optimizedHistory.metrics.trimmed_message_count,
+      trimmedMessageCount:
+        optimizedHistory.metrics.trimmed_message_count +
+        (messages.length - historyWithoutCurrentPrompt.length),
+      model,
     });
     const finalPromptLength =
       instructionsText.length +
@@ -1762,6 +1770,8 @@ async function handleChatPost(req: Request) {
       promptLength: prompt.length,
       finalPromptLength,
       estimatedInputTokenSavings: inputCostMetrics.estimated_input_token_savings,
+      estimatedInputCostSavingsUsd:
+        inputCostMetrics.estimated_input_cost_savings_usd,
       trimmedMessageCount: inputCostMetrics.trimmed_message_count,
       providerCalled: true,
       quotaConsumed: false,

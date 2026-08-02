@@ -6,6 +6,10 @@ import {
   buildAnalysisProviderInput,
   type AnalysisAsset,
 } from "./analysis-assets";
+import {
+  logAiModelRoutingDecision,
+  resolveAiModelRoutingDecision,
+} from "./model-router";
 
 const researchEntityFields = [
   "asset_identification",
@@ -126,10 +130,19 @@ export async function extractResearchAssetEntities({
   }
 
   try {
+    const routingDecision = resolveAiModelRoutingDecision({
+      requestKind: "file_analysis",
+      category: "extraction",
+      previousModel: model,
+    });
+    logAiModelRoutingDecision(routingDecision, {
+      endpoint: "research-entity-extraction",
+      operation: "entity_extraction",
+    });
     const response = await withOpenAiCostOperation(
       { operationName: "entity_extraction" },
       () => client.responses.create({
-        model,
+        model: routingDecision.routedModel,
         instructions: `Extract every useful named entity and identifier visibly present in every uploaded asset, while returning only facts actually present.
 Never infer, geocode, correct, translate, or complete missing values.
 Preserve Turkish names, identifiers, decimal separators, units, and document wording exactly.

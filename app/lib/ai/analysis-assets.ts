@@ -5,6 +5,7 @@ import type {
   ResponseInput,
   ResponseInputContent,
 } from "openai/resources/responses/responses";
+import { dedupeExactPromptBlocks } from "@/app/lib/ai/token-optimization-core";
 
 export type AnalysisAsset = {
   name: string;
@@ -450,17 +451,21 @@ export function buildAnalysisProviderInput(
   prompt: string,
   assets: AnalysisAsset[]
 ): string | ResponseInput {
+  // Exact duplicate prompt blocks add tokens without adding evidence. Keep this
+  // at the shared provider boundary so report, research, and classifier calls
+  // receive the same lossless compaction.
+  const compactPrompt = dedupeExactPromptBlocks(prompt);
   const modelContent = buildAnalysisAssetModelContent(assets);
 
   if (modelContent.length === 0) {
-    return prompt;
+    return compactPrompt;
   }
 
   return [
     {
       role: "user",
       content: [
-        { type: "input_text", text: prompt },
+        { type: "input_text", text: compactPrompt },
         ...modelContent,
       ],
     },

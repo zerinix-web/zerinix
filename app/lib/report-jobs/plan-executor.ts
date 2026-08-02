@@ -40,6 +40,14 @@ import {
   compressResearchEvidence,
   type CompressedEvidence,
 } from "@/app/lib/ai/evidence-compression";
+import {
+  createPreResearchReportCacheKey,
+  createReportCacheData,
+  getCachedResearchFromReportData,
+  logSkippedResearchForReportCache,
+  resolveDomainResearchWithCache,
+  type ResearchCacheIdentity,
+} from "@/app/lib/ai/research-cache";
 import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 import { createAiJobDescriptor } from "@/app/lib/ai/queue";
 import {
@@ -52,7 +60,10 @@ import {
   formatValidationIntelligenceSummary,
   type AiFinancialModelContext,
 } from "@/app/lib/ai/financial-assumptions";
-import { createAiCostOptimizationMetrics } from "@/app/lib/ai/token-optimization";
+import {
+  createAiCostOptimizationMetrics,
+  dedupeExactPromptBlocks,
+} from "@/app/lib/ai/token-optimization";
 import {
   createExpertiseProfileFallback,
   formatExpertiseProfileForReportContext,
@@ -3037,6 +3048,73 @@ async function generateRealEstateInvestmentReport({
   }
 
   const { model, planTier, promptHash } = productionLimit;
+  const researchIdentity: ResearchCacheIdentity = {
+    normalizedPrompt: productionLimit.normalizedPrompt,
+    uploadedAssetHash: assetFingerprint,
+    analysisMode: dynamicResearchPlanningInput.selectedMode,
+    language: responseLanguage,
+    reportFamily: "real_estate",
+  };
+  const cacheKey = createPreResearchReportCacheKey({
+    endpoint: "/api/plan",
+    identity: researchIdentity,
+    model,
+    reportVariant: "real_estate_investment_analysis:sectioned:v3",
+  });
+  const cached = await getCachedAiResponse(supabase, user.id, cacheKey);
+
+  if (cached && !isReportGenerationFailureText(cached.responseText)) {
+    try {
+      const cachedResearch = getCachedResearchFromReportData(cached.responseData);
+      if (!cachedResearch) {
+        throw new Error("Cached real-estate report is missing its research provenance.");
+      }
+      const cachedReport = parseRealEstateReport(cached.responseText);
+      validateDomainResearchQuality({
+        report: cachedReport,
+        bundle: cachedResearch,
+        expectedDomain: "real_estate",
+      });
+      validateRealEstateReportLanguage(cachedReport, responseLanguage);
+      logSkippedResearchForReportCache({
+        identity: researchIdentity,
+        research: cachedResearch,
+      });
+      logDecisionPipelineMarker("REPORT", "started", reportRequestId, {
+        source: "cache",
+        researchSkipped: true,
+      });
+      logDecisionPipelineMarker("REPORT", "finished", reportRequestId, {
+        source: "cache",
+        fieldCount: Object.keys(cachedReport).length,
+      });
+
+      return new Response(
+        encoder.encode(
+          [
+            serializeDecisionPipelineStage(
+              "report_started_from_cache",
+              reportRequestId
+            ),
+            serializeRealEstateReportChunks(
+              prepareForPresentation(cachedReport, cachedResearch.evidence)
+            ),
+            serializeDecisionPipelineStage("report_finished", reportRequestId),
+          ].join("")
+        ),
+        { headers: createDecisionPipelineHeaders(reportRequestId) }
+      );
+    } catch (error) {
+      logOperationalInfo(
+        "[api:plan] ignored invalid pre-research real-estate cache",
+        {
+          reportRequestId: reportRequestId || null,
+          reason: error instanceof Error ? error.message : "Unknown validation error",
+        }
+      );
+    }
+  }
+
   const client = createOpenAiClient();
   logDecisionPipelineMarker("ENTITY", "started", reportRequestId, {
     assetCount: analysisAssets.length,
@@ -3065,15 +3143,20 @@ async function generateRealEstateInvestmentReport({
   logDecisionPipelineMarker("RESEARCH", "started", reportRequestId, {
     model,
   });
-  const domainResearch = await runDomainAwareResearch({
-    client,
-    model,
-    prompt: promptText,
-    assets: analysisAssets,
-    language: responseLanguage,
-    signal: req.signal,
-    researchUserId: user.id,
-    ...dynamicResearchPlanningInput,
+  const { research: domainResearch } = await resolveDomainResearchWithCache({
+    supabase,
+    userId: user.id,
+    identity: researchIdentity,
+    execute: () => runDomainAwareResearch({
+      client,
+      model,
+      prompt: promptText,
+      assets: analysisAssets,
+      language: responseLanguage,
+      signal: req.signal,
+      researchUserId: user.id,
+      ...dynamicResearchPlanningInput,
+    }),
   });
   logPlanStageDiagnostic({
     stage: "entity_extraction",
@@ -3206,15 +3289,6 @@ async function generateRealEstateInvestmentReport({
     requestId: reportRequestId || "unassigned",
     ...compressedResearch.metrics,
   });
-
-  const cacheKey = createAiCacheKey({
-    endpoint: "/api/plan",
-    normalizedPrompt: `${productionLimit.normalizedPrompt}\nassets:${assetFingerprint}\nresearch:${domainResearchContext}\nwriter:${adaptiveWriterContext}`,
-    mode: "real_estate_investment_analysis:sectioned:v3",
-    language: responseLanguage,
-    model,
-  });
-  const cached = await getCachedAiResponse(supabase, user.id, cacheKey);
 
   if (cached && !isReportGenerationFailureText(cached.responseText)) {
     try {
@@ -3658,6 +3732,7 @@ Do not include commentary outside the JSON object.`;
               language: responseLanguage,
               model,
               responseText: serializedReport,
+              responseData: createReportCacheData(domainResearch),
               tokenUsage,
               estimatedCostUsd,
               expiresInDays: 7,
@@ -4077,16 +4152,87 @@ async function generateSpecializedDomainReport({
   }
 
   const { model, planTier, promptHash } = productionLimit;
-  const client = createOpenAiClient();
-  const domainResearch = await runDomainAwareResearch({
-    client,
-    model,
-    prompt: promptText,
-    assets: analysisAssets,
+  const researchIdentity: ResearchCacheIdentity = {
+    normalizedPrompt: productionLimit.normalizedPrompt,
+    uploadedAssetHash: assetFingerprint,
+    analysisMode: dynamicResearchPlanningInput.selectedMode,
     language: responseLanguage,
-    signal: req.signal,
-    researchUserId: user.id,
-    ...dynamicResearchPlanningInput,
+    reportFamily: `${domain}_decision_analysis`,
+  };
+  const cacheKey = createPreResearchReportCacheKey({
+    endpoint: "/api/plan",
+    identity: researchIdentity,
+    model,
+    reportVariant: `${domain}_decision_analysis:fullReport:v1`,
+  });
+  const cached = await getCachedAiResponse(supabase, user.id, cacheKey);
+
+  if (cached && !isReportGenerationFailureText(cached.responseText)) {
+    try {
+      const cachedResearch = getCachedResearchFromReportData(cached.responseData);
+      if (domain === "legal" && !cachedResearch) {
+        throw new Error("Cached legal report is missing its research provenance.");
+      }
+      const cachedReport = parseDomainAnalysisReport(cached.responseText);
+      if (cachedResearch) {
+        validateDomainResearchQuality({
+          report: cachedReport,
+          bundle: cachedResearch,
+          expectedDomain: domain,
+        });
+      }
+      const presentedReport =
+        domain === "legal" && cachedResearch
+          ? validateDomainAnalysisReport(
+              prepareLegalDecisionReport({
+                report: cachedReport,
+                research: cachedResearch,
+                assets: analysisAssets,
+                prompt: promptText,
+                language: responseLanguage,
+              })
+            )
+          : cachedReport;
+
+      logSkippedResearchForReportCache({
+        identity: researchIdentity,
+        research: cachedResearch,
+      });
+      return new Response(
+        encoder.encode(
+          serializeDomainAnalysisReportChunks(domain, presentedReport)
+        ),
+        {
+          headers: {
+            "Content-Type": "application/x-ndjson; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+          },
+        }
+      );
+    } catch (error) {
+      logOperationalInfo("[api:plan] ignored invalid pre-research domain cache", {
+        domain,
+        reportRequestId: reportRequestId || null,
+        reason: error instanceof Error ? error.message : "Unknown validation error",
+      });
+    }
+  }
+
+  const client = createOpenAiClient();
+  const { research: domainResearch } = await resolveDomainResearchWithCache({
+    supabase,
+    userId: user.id,
+    identity: researchIdentity,
+    execute: () => runDomainAwareResearch({
+      client,
+      model,
+      prompt: promptText,
+      assets: analysisAssets,
+      language: responseLanguage,
+      signal: req.signal,
+      researchUserId: user.id,
+      ...dynamicResearchPlanningInput,
+    }),
   });
   if (domain === "legal") {
     assessLegalResearchCoverage(domainResearch.evidence, responseLanguage, {
@@ -4107,15 +4253,6 @@ async function generateSpecializedDomainReport({
       },
     })
   );
-
-  const cacheKey = createAiCacheKey({
-    endpoint: "/api/plan",
-    normalizedPrompt: `${productionLimit.normalizedPrompt}\nassets:${assetFingerprint}\nresearch:${researchContext}\nwriter:${adaptiveWriterContext}`,
-    mode: `${domain}_decision_analysis:fullReport:v1`,
-    language: responseLanguage,
-    model,
-  });
-  const cached = await getCachedAiResponse(supabase, user.id, cacheKey);
 
   if (cached && !isReportGenerationFailureText(cached.responseText)) {
     try {
@@ -4284,6 +4421,7 @@ Do not include commentary outside the JSON object.`;
               language: responseLanguage,
               model,
               responseText: serializedReport,
+              responseData: createReportCacheData(domainResearch),
               tokenUsage,
               estimatedCostUsd,
               expiresInDays: 7,
@@ -4910,45 +5048,19 @@ Write only the content for this section. Do not write a JSON object, field name,
     }
 
     if (isFullReportRequest) {
-      const businessResearchClient = createOpenAiClient();
-      const businessResearch = await runDomainAwareResearch({
-        client: businessResearchClient,
-        model,
-        prompt: promptText,
-        assets: analysisAssets,
+      const researchIdentity: ResearchCacheIdentity = {
+        normalizedPrompt: productionLimit.normalizedPrompt,
+        uploadedAssetHash: assetFingerprint,
+        analysisMode: dynamicResearchPlanningInput.selectedMode,
         language: responseLanguage,
-        signal: req.signal,
-        researchUserId: user.id,
-        ...dynamicResearchPlanningInput,
-      });
-      const businessResearchContext =
-        formatDomainResearchBundle(businessResearch);
-      const adaptiveWriterContext = formatAdaptiveReportWriterContext(
-        createAdaptiveReportWriterPlan({
-          expertiseProfile: dynamicResearchPlanningInput.expertiseProfile,
-          reportPlan: dynamicResearchPlanningInput.reportPlan,
-          validatedEvidence: businessResearch.validatedEvidence,
-          uploadedMaterialTypes: analysisAssets.map((asset) => asset.type),
-          outputContract: {
-            fields: planFields,
-            labels: Object.fromEntries(
-              planFields.map((fieldName) => [
-                fieldName,
-                planFieldLabels[responseLanguage][fieldName],
-              ])
-            ),
-          },
-        })
-      );
-
-      const fullReportCacheKey = createAiCacheKey({
+        reportFamily: "business_plan",
+      };
+      const fullReportCacheKey = createPreResearchReportCacheKey({
         endpoint: "/api/plan",
-        normalizedPrompt: userMemoryContext
-          ? `${productionLimit.normalizedPrompt}\nmemories:${userMemoryContext}\nassets:${assetFingerprint}\nresearch:${businessResearchContext}\nwriter:${adaptiveWriterContext}`
-          : `${productionLimit.normalizedPrompt}\nassets:${assetFingerprint}\nresearch:${businessResearchContext}\nwriter:${adaptiveWriterContext}`,
-        mode: `business_plan:${FULL_REPORT_FIELD}:research_v1:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
-        language: responseLanguage,
+        identity: researchIdentity,
         model,
+        reportVariant: `${FULL_REPORT_FIELD}:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
+        contextFingerprint: userMemoryContext,
       });
       const cachedFullReport = await getCachedAiResponse(
         supabase,
@@ -4962,6 +5074,26 @@ Write only the content for this section. Do not write a JSON object, field name,
         !isReportGenerationFailureText(cachedFullReport.responseText) &&
         detectLanguage(cachedFullReport.responseText) === responseLanguage
       ) {
+        const cachedBusinessResearch = getCachedResearchFromReportData(
+          cachedFullReport.responseData
+        );
+        const parsedCachedReport = parseFullPlanReport(
+          cachedFullReport.responseText,
+          canonicalFinancialAssumptions,
+          responseLanguage
+        );
+
+        if (cachedBusinessResearch) {
+          validateDomainResearchQuality({
+            report: parsedCachedReport,
+            bundle: cachedBusinessResearch,
+            expectedDomain: "business",
+          });
+        }
+        logSkippedResearchForReportCache({
+          identity: researchIdentity,
+          research: cachedBusinessResearch,
+        });
         logAiExecution({
           endpoint: "/api/plan",
           source: "cache",
@@ -4969,21 +5101,11 @@ Write only the content for this section. Do not write a JSON object, field name,
           model: cachedFullReport.model || model,
           cacheHit: true,
         });
-
         logPlanStage("cache_read", {
           reportField: FULL_REPORT_FIELD,
           reportRequestId: reportRequestId || null,
           cacheHit: true,
-        });
-        const parsedCachedReport = parseFullPlanReport(
-          cachedFullReport.responseText,
-          canonicalFinancialAssumptions,
-          responseLanguage
-        );
-        validateDomainResearchQuality({
-          report: parsedCachedReport,
-          bundle: businessResearch,
-          expectedDomain: "business",
+          researchSkipped: true,
         });
         const cachedReportMetadataContext = createReportMetadataContext({
           prompt: promptText,
@@ -5015,6 +5137,8 @@ Write only the content for this section. Do not write a JSON object, field name,
             report_request_id: reportRequestId || null,
             usage_kind: "full_report_cache_hit",
             actual_ai_call: false,
+            research_cache_hit: true,
+            skipped_gpt_research_calls: true,
             cachedEstimatedCostUsd: cachedFullReport.estimatedCostUsd,
             ...flattenReportMetadataForUsage(cachedReportMetadataContext),
           },
@@ -5030,6 +5154,43 @@ Write only the content for this section. Do not write a JSON object, field name,
           },
         });
       }
+
+      const businessResearchClient = createOpenAiClient();
+      const { research: businessResearch } =
+        await resolveDomainResearchWithCache({
+          supabase,
+          userId: user.id,
+          identity: researchIdentity,
+          execute: () => runDomainAwareResearch({
+            client: businessResearchClient,
+            model,
+            prompt: promptText,
+            assets: analysisAssets,
+            language: responseLanguage,
+            signal: req.signal,
+            researchUserId: user.id,
+            ...dynamicResearchPlanningInput,
+          }),
+        });
+      const businessResearchContext =
+        formatDomainResearchBundle(businessResearch);
+      const adaptiveWriterContext = formatAdaptiveReportWriterContext(
+        createAdaptiveReportWriterPlan({
+          expertiseProfile: dynamicResearchPlanningInput.expertiseProfile,
+          reportPlan: dynamicResearchPlanningInput.reportPlan,
+          validatedEvidence: businessResearch.validatedEvidence,
+          uploadedMaterialTypes: analysisAssets.map((asset) => asset.type),
+          outputContract: {
+            fields: planFields,
+            labels: Object.fromEntries(
+              planFields.map((fieldName) => [
+                fieldName,
+                planFieldLabels[responseLanguage][fieldName],
+              ])
+            ),
+          },
+        })
+      );
 
       if (cachedFullReport) {
         console.error("[api:plan] Ignoring cached failed full report content", {
@@ -5113,6 +5274,8 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
 - Do not include markdown code fences, braces inside string values, or commentary outside JSON.`;
       const fullReportInputCostMetrics = createAiCostOptimizationMetrics({
         beforeText: `${instructions}\n${fullReportInput}`,
+        afterText: `${instructions}\n${dedupeExactPromptBlocks(fullReportInput)}`,
+        model,
       });
       const queuedJob = createAiJobDescriptor({
         kind: "business_plan",
@@ -5262,6 +5425,7 @@ ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${di
                     language: responseLanguage,
                     model,
                     responseText: cacheResponseText,
+                    responseData: createReportCacheData(businessResearch),
                     tokenUsage,
                     estimatedCostUsd,
                     expiresInDays: 7,
