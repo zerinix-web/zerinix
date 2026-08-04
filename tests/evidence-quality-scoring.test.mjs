@@ -459,6 +459,10 @@ test("does not modify report generation, PDF generation, billing, or UI, and is 
       // ZERINIX Business Intelligence Orchestrator v1 legitimately
       // coordinates Evidence Quality Scoring as one of its 8 stages.
       file === "business-intelligence-orchestrator.ts" ||
+      // ZERINIX Decision Engine v1's Business Intelligence Orchestrator
+      // integration legitimately type-imports ScorableEvidenceItem to
+      // build the evidence pool it hands to the Orchestrator.
+      file === "decision-engine.ts" ||
       !file.endsWith(".ts")
     ) {
       continue;

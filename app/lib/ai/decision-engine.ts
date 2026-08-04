@@ -6,7 +6,14 @@ import {
   type AdaptiveIntelligenceResult,
 } from "./adaptive-intelligence-engine.ts";
 import { runIntelligencePipeline, type IntelligencePipelineOutput } from "./intelligence-pipeline.ts";
-import type { EvidenceAcquisitionCandidate } from "./evidence-acquisition-engine.ts";
+import type { EvidenceAcquisitionCandidate, EvidenceAcquisitionResult } from "./evidence-acquisition-engine.ts";
+import type { ScorableEvidenceItem } from "./evidence-quality-scoring.ts";
+import {
+  runBusinessIntelligenceOrchestration,
+  type BusinessIntelligenceContext,
+} from "./business-intelligence-orchestrator.ts";
+import { buildExecutiveDecisionBriefFromExpertReasoning, type ExecutiveDecisionBrief } from "./executive-decision-brief.ts";
+import type { ExpertReasoningResult } from "./expert-reasoning-engine.ts";
 
 // ZERINIX Decision Engine v1.
 //
@@ -58,6 +65,26 @@ import type { EvidenceAcquisitionCandidate } from "./evidence-acquisition-engine
 // must never fabricate a business-flavored answer to a medical,
 // engineering, HR, or contract document just because a report was
 // requested.
+//
+// Business Intelligence Orchestrator integration (v1, additive): for
+// supported Business Intelligence requests only (selectedDomain ===
+// "business_intelligence") that already pass Evidence Validation, this
+// engine runs the ZERINIX Business Intelligence Orchestrator exactly
+// once -- never a second, redundant pass over evidence, confidence,
+// conflict, corroboration, or research-planning modules, and never a
+// second run of Expert Reasoning Engine itself (its already-computed
+// result from Intelligence Pipeline is reused, and only specific real
+// fields -- confidence, confidenceExplanation, evidenceGaps,
+// evidenceTrace -- are merged with the Orchestrator's own real output
+// before being handed to Executive Decision Brief). This is still
+// entirely gated behind the same DECISION_ENGINE_ENABLED_ENV_VAR: no new
+// flag is introduced, and every other domain's code path -- and the
+// entire flow when the flag is off -- is byte-for-byte unchanged. If
+// the Orchestrator reports a critical failure or an
+// executiveDecisionSignal of "do_not_proceed_insufficient_evidence", the
+// engine stops safely (status "insufficient_evidence") with a real,
+// specific stop reason instead of building a brief -- never a fabricated
+// fallback result.
 
 export const decisionEngineStageValues = [
   "Adaptive Intelligence Engine",
@@ -125,6 +152,12 @@ export const decisionEngineResultSchema = z
     nextRecommendedAction: z.string().trim().max(400).nullable(),
     evidenceTrace: z.array(shortString(500)).max(40),
     executionTimeMs: z.number().min(0),
+    // True only when the Business Intelligence Orchestrator integration
+    // (see file header) actually ran for this request -- i.e. a
+    // supported Business Intelligence request that reached Evidence
+    // Validation successfully. False for every other domain, for a
+    // request that stopped earlier, and whenever the flag is off.
+    businessIntelligenceApplied: z.boolean(),
   })
   .strict();
 
@@ -137,6 +170,17 @@ export type DecisionEngineResult = z.infer<typeof decisionEngineResultSchema>;
 export type DecisionEngineResults = {
   adaptiveIntelligenceResult: AdaptiveIntelligenceResult | null;
   intelligencePipelineOutput: IntelligencePipelineOutput | null;
+  // Populated only when businessIntelligenceApplied is true. The full,
+  // unmodified Business Intelligence Orchestrator context -- every
+  // conflict, confidence driver/penalty, research requirement, and
+  // aggregate score is preserved here in full, not just the summarized
+  // trace lines folded into DecisionEngineResult.evidenceTrace.
+  businessIntelligenceContext: BusinessIntelligenceContext | null;
+  // Populated only when businessIntelligenceApplied is true. The fresh
+  // Executive Decision Brief built from the Orchestrator's context --
+  // the same object decision.executiveSummary/recommendationStatus/
+  // nextRecommendedAction were derived from.
+  executiveDecisionBrief: ExecutiveDecisionBrief | null;
 };
 
 export type DecisionEngineOutput = {
@@ -160,6 +204,10 @@ export type DecisionEngineInput = {
   additionalDirectionalSignals?: readonly string[];
   additionalAssumptions?: readonly string[];
   externalEvidenceCandidates?: readonly EvidenceAcquisitionCandidate[];
+  // Injectable clock, passed through to the Business Intelligence
+  // Orchestrator's own evidence-freshness scoring, primarily for
+  // deterministic tests. Omit to use the real current time.
+  now?: Date;
 };
 
 const NO_EVIDENCE_VALIDATION: EvidenceValidation = {
@@ -168,6 +216,70 @@ const NO_EVIDENCE_VALIDATION: EvidenceValidation = {
   missingEvidenceSummary: [],
   evidenceTrace: [],
 };
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+// Never re-fabricates anything: this mirrors the exact same
+// "missing"/no-fact skip rule Evidence Quality Scoring's own
+// scoreEvidenceAcquisitionResult() already applies, so the Business
+// Intelligence Orchestrator scores exactly the evidence Evidence
+// Acquisition Engine already verified -- never re-running that engine,
+// never inventing a pool item it doesn't have.
+function buildScorablePoolFromEvidenceAcquisition(
+  result: EvidenceAcquisitionResult
+): ScorableEvidenceItem[] {
+  return Object.entries(result.evidence)
+    .filter(([, evidence]) => evidence.evidence_type !== "missing" && Boolean(evidence.extracted_fact))
+    .map(([category, evidence]) => ({
+      id: category,
+      text: evidence.extracted_fact as string,
+      source: {
+        publisher: evidence.publisher,
+        url: evidence.url,
+        publishedDate: evidence.date,
+      },
+      statedConfidence: evidence.confidence,
+    }));
+}
+
+// Merges the Business Intelligence Orchestrator's real, already-
+// computed context into a COPY of Expert Reasoning Engine's own
+// already-computed result -- Expert Reasoning Engine is never re-run.
+// Only the fields the Orchestrator is genuinely authoritative on
+// (aggregate confidence, and the research gaps / orchestration trace it
+// detected) are overridden; every other field (detectedBusinessContext,
+// the per-topic reasoning sections, strategicOptions,
+// recommendedOption, verifiedFacts, directionalSignals, assumptions) is
+// preserved unchanged, so Executive Decision Brief's own existing,
+// unmodified logic still drives the recommendation itself.
+function mergeBusinessIntelligenceContextIntoExpertReasoning(
+  expertReasoningResult: ExpertReasoningResult,
+  context: BusinessIntelligenceContext
+): ExpertReasoningResult {
+  const researchGapNotes = context.aggregatedResearchRequirements.detectedGaps.map((gap) =>
+    `Business Intelligence Orchestrator research requirement: ${gap.split("_").join(" ")}.`.slice(0, 400)
+  );
+  const evidenceGaps = unique([...expertReasoningResult.evidenceGaps, ...researchGapNotes]).slice(0, 30);
+
+  const confidenceExplanation = `Business Intelligence Orchestrator aggregate confidence is ${context.aggregateConfidence}/100 (executive signal "${context.executiveDecisionSignal}"). ${context.confidence?.confidenceExplanation ?? expertReasoningResult.confidenceExplanation}`.slice(
+    0,
+    500
+  );
+
+  const evidenceTrace = unique([...expertReasoningResult.evidenceTrace, ...context.orchestrationTrace])
+    .map((line) => line.slice(0, 500))
+    .slice(0, 30);
+
+  return {
+    ...expertReasoningResult,
+    confidence: Math.max(0, Math.min(1, Math.round(context.aggregateConfidence) / 100)),
+    confidenceExplanation,
+    evidenceGaps,
+    evidenceTrace,
+  };
+}
 
 function validateEvidence(pipelineOutput: IntelligencePipelineOutput): EvidenceValidation {
   const { decisionStrategyResult, expertReasoningResult, evidenceAcquisitionResult } = pipelineOutput.results;
@@ -218,6 +330,8 @@ export function runDecisionEngine(input: DecisionEngineInput = {}): DecisionEngi
   const results: DecisionEngineResults = {
     adaptiveIntelligenceResult: null,
     intelligencePipelineOutput: null,
+    businessIntelligenceContext: null,
+    executiveDecisionBrief: null,
   };
 
   const enabled = input.enabled ?? isDecisionEngineEnabled();
@@ -242,6 +356,7 @@ export function runDecisionEngine(input: DecisionEngineInput = {}): DecisionEngi
           `Decision Engine is disabled (${DECISION_ENGINE_ENABLED_ENV_VAR} is not "true"); no stage was executed.`,
         ],
         executionTimeMs: Date.now() - startedAt,
+        businessIntelligenceApplied: false,
       },
       results,
     };
@@ -279,7 +394,8 @@ export function runDecisionEngine(input: DecisionEngineInput = {}): DecisionEngi
         | "recommendationStatus"
         | "nextRecommendedAction"
       >
-    > = {}
+    > = {},
+    businessIntelligenceApplied = false
   ): DecisionEngineOutput {
     return {
       decision: {
@@ -297,6 +413,7 @@ export function runDecisionEngine(input: DecisionEngineInput = {}): DecisionEngi
         nextRecommendedAction: overrides.nextRecommendedAction ?? null,
         evidenceTrace,
         executionTimeMs: Date.now() - startedAt,
+        businessIntelligenceApplied,
       },
       results,
     };
@@ -382,11 +499,114 @@ export function runDecisionEngine(input: DecisionEngineInput = {}): DecisionEngi
   executedStages.push("Expert Reasoning");
   evidenceTrace.push("Expert Reasoning sourced from Intelligence Pipeline's own result (not re-executed).");
 
-  // Stage 5: Executive Decision Brief -- same reuse.
+  const { decisionStrategyResult, expertReasoningResult, evidenceAcquisitionResult } =
+    intelligencePipelineOutput.results;
+
+  // Business Intelligence Orchestrator integration (see file header):
+  // supported Business Intelligence requests only. Runs exactly once,
+  // here, after Evidence Validation has already confirmed there is a
+  // real business request worth pursuing.
+  if (selectedDomain === "business_intelligence" && expertReasoningResult) {
+    const evidencePool = evidenceAcquisitionResult
+      ? buildScorablePoolFromEvidenceAcquisition(evidenceAcquisitionResult)
+      : [];
+
+    evidenceTrace.push(
+      `Running Business Intelligence Orchestrator on ${evidencePool.length} evidence item(s) derived from Evidence Acquisition Engine's own already-computed result (not re-run).`
+    );
+    const businessIntelligenceContext = runBusinessIntelligenceOrchestration({
+      enabled: true,
+      evidence: evidencePool,
+      domain: "business",
+      decisionComplexity: intelligencePipelineOutput.results.decisionIntentResult?.decisionComplexity,
+      now: input.now,
+    });
+    results.businessIntelligenceContext = businessIntelligenceContext;
+    evidenceTrace.push(
+      `Business Intelligence Orchestrator: aggregateConfidence=${businessIntelligenceContext.aggregateConfidence}, aggregateEvidenceQuality=${businessIntelligenceContext.aggregateEvidenceQuality}, executiveDecisionSignal="${businessIntelligenceContext.executiveDecisionSignal}".`
+    );
+    if (businessIntelligenceContext.aggregatedResearchRequirements.detectedGaps.length > 0) {
+      evidenceTrace.push(
+        `Business Intelligence Orchestrator detected research requirement(s): ${businessIntelligenceContext.aggregatedResearchRequirements.detectedGaps.join(", ")}.`
+      );
+    }
+    if (businessIntelligenceContext.conflictDetection?.overallSeverity) {
+      evidenceTrace.push(
+        `Business Intelligence Orchestrator detected a "${businessIntelligenceContext.conflictDetection.overallSeverity}"-severity evidence conflict (suggested confidence impact -${businessIntelligenceContext.conflictDetection.confidenceImpact}).`
+      );
+    }
+
+    if (businessIntelligenceContext.criticalFailure) {
+      const stopReason = `Business Intelligence Orchestrator critical failure at stage "${businessIntelligenceContext.criticalFailure.stage}": ${businessIntelligenceContext.criticalFailure.reason}`;
+      evidenceTrace.push(stopReason);
+      skipRemaining(["Executive Decision Brief"], stopReason);
+      return finish(
+        "insufficient_evidence",
+        stopReason,
+        {
+          selectedDomain,
+          reasoningApproach: adaptiveIntelligenceResult.reasoningProfile?.reasoningApproach ?? null,
+          evidenceValidation,
+        },
+        true
+      );
+    }
+
+    if (businessIntelligenceContext.executiveDecisionSignal === "do_not_proceed_insufficient_evidence") {
+      const stopReason = `Business Intelligence Orchestrator determined there is insufficient evidence to proceed (aggregate confidence ${businessIntelligenceContext.aggregateConfidence}/100).`;
+      evidenceTrace.push(stopReason);
+      skipRemaining(["Executive Decision Brief"], stopReason);
+      return finish(
+        "insufficient_evidence",
+        stopReason,
+        {
+          selectedDomain,
+          reasoningApproach: adaptiveIntelligenceResult.reasoningProfile?.reasoningApproach ?? null,
+          evidenceValidation,
+        },
+        true
+      );
+    }
+
+    // Stage 5: Executive Decision Brief -- called once, with the
+    // Business Intelligence Orchestrator's real context merged into a
+    // copy of Expert Reasoning Engine's own already-computed result
+    // (see mergeBusinessIntelligenceContextIntoExpertReasoning above).
+    const biInformedExpertReasoning = mergeBusinessIntelligenceContextIntoExpertReasoning(
+      expertReasoningResult,
+      businessIntelligenceContext
+    );
+    const executiveDecisionBrief = buildExecutiveDecisionBriefFromExpertReasoning(biInformedExpertReasoning, {
+      domainHint: "business",
+    });
+    results.executiveDecisionBrief = executiveDecisionBrief;
+    executedStages.push("Executive Decision Brief");
+    evidenceTrace.push(
+      `Executive Decision Brief built from the Business Intelligence Orchestrator's context; recommendation status "${executiveDecisionBrief.recommendationStatus}".`
+    );
+    evidenceTrace.push("Decision Engine is ready to hand off to the existing, unmodified report generator.");
+
+    return finish(
+      "ready_for_report_generation",
+      null,
+      {
+        selectedDomain,
+        reasoningApproach: adaptiveIntelligenceResult.reasoningProfile?.reasoningApproach ?? null,
+        evidenceValidation,
+        executiveSummary: executiveDecisionBrief.executiveRecommendation,
+        recommendationStatus: executiveDecisionBrief.recommendationStatus,
+        nextRecommendedAction: executiveDecisionBrief.immediateNextActions[0] ?? null,
+      },
+      true
+    );
+  }
+
+  // Stage 5: Executive Decision Brief -- same reuse. Unchanged existing
+  // flow for every domain other than business_intelligence (or if the
+  // branch above did not apply for any other reason).
   executedStages.push("Executive Decision Brief");
   evidenceTrace.push("Executive Decision Brief sourced from Intelligence Pipeline's own result (not re-executed).");
 
-  const { decisionStrategyResult } = intelligencePipelineOutput.results;
   evidenceTrace.push("Decision Engine is ready to hand off to the existing, unmodified report generator.");
 
   return finish("ready_for_report_generation", null, {

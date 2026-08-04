@@ -452,16 +452,29 @@ test("every enum-typed field in the result is drawn only from its documented enu
   assert.ok(executiveDecisionSignalValues.includes(result.executiveDecisionSignal));
 });
 
-test("does not modify report generation, PDF generation, billing, or UI, and is not wired into any production route or other module yet", async () => {
+test("does not modify report generation, PDF generation, billing, or UI, and is only referenced by its Decision Engine v1 integration -- no other module or production route", async () => {
   assert.doesNotMatch(engineSource, /from ["'].*(?:pdf-engine|report-engine|report-jobs|billing|auth)/i);
 
+  // decision-engine.ts is NOT itself a route -- it is only wired into
+  // app/api/plan/route.ts behind its own, separate, still-disabled-by-
+  // default DECISION_ENGINE_ENABLED_ENV_VAR flag (see
+  // decision-engine.test.mjs / decision-engine-plan-integration.test.mjs).
+  // route.ts itself must still never reference the Orchestrator directly.
   const planRouteSource = await readFile(new URL("../app/api/plan/route.ts", import.meta.url), "utf8");
   assert.doesNotMatch(planRouteSource, /business-intelligence-orchestrator|runBusinessIntelligenceOrchestration/);
 
   const aiDir = new URL("../app/lib/ai/", import.meta.url);
   const files = await readdir(aiDir);
   for (const file of files) {
-    if (file === "business-intelligence-orchestrator.ts" || !file.endsWith(".ts")) {
+    if (
+      file === "business-intelligence-orchestrator.ts" ||
+      // ZERINIX Decision Engine v1's Business Intelligence Orchestrator
+      // integration (see decision-engine.ts's file header) legitimately
+      // calls runBusinessIntelligenceOrchestration exactly once, for
+      // supported Business Intelligence requests only.
+      file === "decision-engine.ts" ||
+      !file.endsWith(".ts")
+    ) {
       continue;
     }
     const contents = await readFile(new URL(file, aiDir), "utf8");
