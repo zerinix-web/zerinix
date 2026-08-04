@@ -114,23 +114,36 @@ const SUPPORTED_RECOMMENDED_MODULES = new Set([
   "Decision Brief",
 ]);
 
-// A real uploaded document that layer 4/5 classified as a non-business
-// domain (Legal, Medical, Technical, Engineering, Real Estate, HR,
-// Government, Academic, Contract, Spreadsheet) is treated as
+// A real uploaded document that layer 4/5 confidently classified as a
+// non-business domain (Legal, Medical, Technical, Engineering, Real
+// Estate, HR, Government, Academic, Contract, Spreadsheet) is treated as
 // unsupported unconditionally, regardless of what other evidence buckets
 // were separately provided -- rule 6 protects the document's own
-// classification, not just the absence of business keywords.
+// classification, not just the absence of business keywords. "Unknown"
+// is deliberately NOT in this set: layer 4/5's 13-domain classifier is
+// coarser than this engine's own 10-domain keyword classifier below, so
+// an "Unknown" document (or no decisionPlan at all) should still get a
+// chance at the finer-grained classification instead of being blocked
+// on a classifier that simply didn't have a matching bucket for it.
+const HARD_UNSUPPORTED_DOCUMENT_DOMAINS = new Set<DocumentDomain>([
+  "Legal",
+  "Medical",
+  "Technical",
+  "Engineering",
+  "Real Estate",
+  "HR",
+  "Government",
+  "Academic",
+  "Contract",
+  "Spreadsheet",
+]);
+
 function isDocumentDomainSupported(decisionPlan: ExpertReasoningInput["decisionPlan"]) {
-  if (!decisionPlan) return null;
+  if (!decisionPlan) return false;
   if (SUPPORTED_DOCUMENT_DOMAINS.has(decisionPlan.detectedDomain)) return true;
-  if (
-    decisionPlan.recommendedAnalyses.some((item) =>
-      SUPPORTED_RECOMMENDED_MODULES.has(item.module)
-    )
-  ) {
-    return true;
-  }
-  return false;
+  return decisionPlan.recommendedAnalyses.some((item) =>
+    SUPPORTED_RECOMMENDED_MODULES.has(item.module)
+  );
 }
 
 type DomainSignal = Exclude<ReasoningDomain, "unsupported">;
@@ -193,13 +206,14 @@ function detectBusinessContext({
   decisionPlan: ExpertReasoningInput["decisionPlan"];
   combinedEvidenceText: string;
 }): ReasoningDomain {
-  const documentSupport = isDocumentDomainSupported(decisionPlan);
-  if (documentSupport === false) return "unsupported";
+  if (decisionPlan && HARD_UNSUPPORTED_DOCUMENT_DOMAINS.has(decisionPlan.detectedDomain)) {
+    return "unsupported";
+  }
 
   const classified = classifyReasoningDomain(combinedEvidenceText);
   if (classified) return classified.domain;
 
-  if (documentSupport === true) return "business_intelligence";
+  if (isDocumentDomainSupported(decisionPlan)) return "business_intelligence";
   return "unsupported";
 }
 
