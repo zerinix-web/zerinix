@@ -12,6 +12,7 @@ import { createAuthenticatedReportJobClient } from "@/app/lib/report-jobs/reques
 import { processReportJobQueue } from "@/app/lib/report-jobs/worker";
 import {
   getResponseLanguage,
+  resolveMarketIntelligenceLanguage,
   resolveReportLanguage,
 } from "@/app/lib/report-language";
 import {
@@ -29,6 +30,14 @@ import {
   createDynamicResearchPlanFallback,
   resolveDynamicResearchPlan,
 } from "@/app/lib/ai/dynamic-research-plan";
+import {
+  applyDocumentAwareModeOverride,
+  classifyAttachmentDocument,
+} from "@/app/lib/ai/document-intelligence";
+import { createLegalDocumentSummaryFallback } from "@/app/lib/ai/legal-document-understanding";
+import { createLegalCaseAnalysis } from "@/app/lib/ai/legal-case-analysis";
+import { createUniversalDocumentIntelligenceFallback } from "@/app/lib/ai/universal-document-intelligence";
+import { buildDecisionPlan } from "@/app/lib/ai/intelligence-router";
 
 export const maxDuration = 300;
 
@@ -38,6 +47,30 @@ type ReportJobRequestPayload = Record<string, unknown> & {
   reportReadiness?: unknown;
   attachments?: unknown;
 };
+
+function readRequestAttachmentAssets(body: ReportJobRequestPayload) {
+  return Array.isArray(body.attachments)
+    ? body.attachments.flatMap((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          return [];
+        }
+        const asset = value as Record<string, unknown>;
+        return [
+          {
+            name: typeof asset.name === "string" ? asset.name : "",
+            mimeType:
+              typeof asset.mimeType === "string"
+                ? asset.mimeType
+                : typeof asset.type === "string"
+                  ? asset.type
+                  : "",
+            textContent:
+              typeof asset.textContent === "string" ? asset.textContent : "",
+          },
+        ];
+      })
+    : [];
+}
 
 function readIdempotencyKey(request: Request, body: ReportJobRequestPayload) {
   const candidates = [
@@ -290,6 +323,77 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: attachmentValidationError }, { status: 400 });
   }
 
+  // Layer 4 of ZERINIX Intelligence: a universal, domain-agnostic
+  // Decision Intelligence pass over the uploaded attachment, independent
+  // of and unrelated to the legal-specific layers below. This never
+  // reads or changes body.analysisMode and is attached under its own
+  // key so any future module can consume it without depending on the
+  // legal-specific documentIntelligence object.
+  const universalDocumentIntelligence = createUniversalDocumentIntelligenceFallback({
+    assets: readRequestAttachmentAssets(body),
+  });
+  body.universalDocumentIntelligence = universalDocumentIntelligence;
+
+  // Layer 5 of ZERINIX Intelligence: the Decision Intelligence Router.
+  // This is not another document parser -- it only consumes layer 4's
+  // output above (plus the prompt) to decide which *future* intelligence
+  // modules would be worth running and which would not, with a rationale
+  // and confidence for each. It never generates a report, never answers
+  // the user, and is attached under its own key so it does not affect
+  // anything that reads body.analysisMode or body.documentIntelligence.
+  body.decisionPlan = buildDecisionPlan({
+    prompt: typeof body.prompt === "string" ? body.prompt : "",
+    documentIntelligence: universalDocumentIntelligence,
+  });
+
+  // First layer of ZERINIX document intelligence: a confidently detected
+  // attachment category can override the selected analysis mode before
+  // anything else reads body.analysisMode. This is the only place this
+  // runs, so every downstream read of body.analysisMode (expertise
+  // profile, report plan, research plan, market-mode dispatch) sees the
+  // corrected value. Only legal_document forces a change (into "chat" /
+  // Strategic Advisory) -- every other category and every case below the
+  // confidence threshold leaves body.analysisMode untouched.
+  const documentClassification = classifyAttachmentDocument({
+    assets: readRequestAttachmentAssets(body),
+  });
+  const documentAwareRouting = applyDocumentAwareModeOverride({
+    selectedMode: body.analysisMode,
+    classification: documentClassification,
+  });
+  if (documentAwareRouting.overridden) {
+    body.analysisMode = documentAwareRouting.selectedMode;
+  }
+  // Second layer of ZERINIX Legal Intelligence: for a confidently detected
+  // legal_document / legal_case_analysis attachment, generate a
+  // structured, attachment-only document summary before any advisory
+  // analysis runs. This does not build the legal report, PDF, timeline,
+  // risk scoring, or precedent search -- it only attaches the structured
+  // summary to the request payload for a later layer to consume.
+  const isLegalCaseAnalysis =
+    documentAwareRouting.documentCategory === "legal_document" &&
+    documentAwareRouting.analysisType === "legal_case_analysis";
+  const legalDocumentSummary = isLegalCaseAnalysis
+    ? createLegalDocumentSummaryFallback({
+        assets: readRequestAttachmentAssets(body),
+      })
+    : null;
+  // Third layer of ZERINIX Legal Intelligence: evidence-grounded case
+  // analysis, built only from the layer-2 structured summary above (not
+  // from the raw attachment again). This does not build the legal
+  // report, PDF, timeline, risk scoring, or precedent search yet -- it
+  // only attaches the analysis to the request payload for a later layer.
+  const legalCaseAnalysis = legalDocumentSummary
+    ? createLegalCaseAnalysis(legalDocumentSummary)
+    : null;
+  body.documentIntelligence = {
+    documentCategory: documentAwareRouting.documentCategory,
+    analysisType: documentAwareRouting.analysisType,
+    confidence: documentClassification.confidence,
+    ...(legalDocumentSummary ? { legalDocumentSummary } : {}),
+    ...(legalCaseAnalysis ? { legalCaseAnalysis } : {}),
+  };
+
   const idempotencyKey = readIdempotencyKey(req, body);
   const { data: existingJob, error: existingJobError } = await supabase
     .from("report_jobs")
@@ -316,12 +420,33 @@ export async function POST(req: Request) {
     return queuedResponse(existingJob, true);
   }
 
-  const reportLanguageCode = resolveReportLanguage({
-    explicitLanguage: body.explicitReportLanguage,
-    uiLanguage: body.uiLanguage || body.language || req.headers.get("x-zerinix-ui-language"),
-    browserLanguage: body.browserLanguage || req.headers.get("accept-language"),
-    requestText: typeof body.prompt === "string" ? body.prompt : "",
-  });
+  const isMarketIntelligenceRequest =
+    normalizeSelectedAnalysisMode(body.analysisMode) === "market";
+  // Market Intelligence never falls back to site/browser locale: a short,
+  // keyword-sparse prompt ("US AI accounting software") has no detectable
+  // language signal either way, and deferring to locale there is what
+  // produces a Turkish report from an English prompt. Explicit selection
+  // (Settings -> Preferred Language, when the user actually set it) still
+  // takes priority over prompt detection, matching every other mode.
+  const reportLanguageCode = isMarketIntelligenceRequest
+    ? resolveMarketIntelligenceLanguage({
+        explicitLanguage:
+          body.explicitReportLanguage ||
+          (
+            await supabase
+              .from("ai_chat_profiles")
+              .select("preferred_language")
+              .eq("user_id", user.id)
+              .maybeSingle()
+          ).data?.preferred_language,
+        requestText: typeof body.prompt === "string" ? body.prompt : "",
+      })
+    : resolveReportLanguage({
+        explicitLanguage: body.explicitReportLanguage,
+        uiLanguage: body.uiLanguage || body.language || req.headers.get("x-zerinix-ui-language"),
+        browserLanguage: body.browserLanguage || req.headers.get("accept-language"),
+        requestText: typeof body.prompt === "string" ? body.prompt : "",
+      });
   const reportLanguage = getResponseLanguage(reportLanguageCode);
   const expertiseProfile = readRequestExpertiseProfile(body);
   const modeMismatchMessage = getSelectedModeMismatchMessage({

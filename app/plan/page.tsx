@@ -40,6 +40,15 @@ export default async function PlanPage({ searchParams }: PlanPageProps) {
   }
 
   const conversationResult = await loadPlanConversations(supabase, user);
+  const { data: chatProfile } = await supabase
+    .from("ai_chat_profiles")
+    .select("preferred_language")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  // Passed to the client so the Market Intelligence loading-state language
+  // can match the server's resolution immediately, with no extra
+  // round-trip and no transient mismatch while the report streams in.
+  const preferredLanguage = chatProfile?.preferred_language || "";
   const params = searchParams ? await searchParams : {};
   const shouldStartFresh = params.new === "1" || params.new === "true";
   const regenerationReport = params.reportId
@@ -59,6 +68,10 @@ export default async function PlanPage({ searchParams }: PlanPageProps) {
           reportType: regenerationReport?.type || (initialMode === "market" ? "Market Analysis" : "Business Plan"),
           workspaceId: regenerationReport?.workspaceId || params.workspaceId || "",
           prompt: regenerationReport?.prompt || "",
+          // Regeneration must reuse the report's saved language rather than
+          // re-detecting it, so the language stays consistent across
+          // streaming, the saved report, PDF export, and regeneration.
+          reportLanguage: regenerationReport?.metadata?.reportLanguage || "",
         }
       : null;
 
@@ -73,6 +86,7 @@ export default async function PlanPage({ searchParams }: PlanPageProps) {
       initialMode={initialMode}
       initialWorkspaceId={regenerationContext?.workspaceId || params.workspaceId}
       regenerationContext={regenerationContext}
+      preferredLanguage={preferredLanguage}
     />
   );
 }

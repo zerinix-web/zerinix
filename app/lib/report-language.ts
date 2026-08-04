@@ -101,6 +101,44 @@ export function getResponseLanguage(code: ReportLanguageCode): ResponseLanguage 
   return languageNames[code];
 }
 
+/**
+ * Market Intelligence-only language resolution. Unlike `resolveReportLanguage`,
+ * this never falls back to site/browser locale: short, keyword-sparse category
+ * prompts ("US AI accounting software") score zero signal for every language,
+ * and falling through to locale in that case is what causes an English prompt
+ * to silently produce a Turkish report when the site/browser locale is Turkish.
+ * Priority is explicit selection, then prompt-detected language, then English.
+ */
+export function resolveMarketIntelligenceLanguage(input: {
+  explicitLanguage?: unknown;
+  requestText?: string;
+}): ReportLanguageCode {
+  const requestText = input.requestText || "";
+  const requestScores = scoreReportLanguages(requestText);
+  const detectedRequestLanguage = Object.values(requestScores).some((score) => score > 0)
+    ? detectReportLanguage(requestText)
+    : "en";
+  return normalizeReportLanguage(input.explicitLanguage) || detectedRequestLanguage;
+}
+
+/**
+ * Market Intelligence PDF export language. The report's own saved
+ * `metadata.reportLanguage` (the language that actually governed generation)
+ * outranks re-detecting from the prompt text or browser locale, so a
+ * correctly-generated report can never get a mismatched PDF.
+ */
+export function resolveMarketPdfLanguage(input: {
+  explicitLanguage?: unknown;
+  savedReportLanguage?: unknown;
+  requestText?: string;
+}): ReportLanguageCode {
+  return (
+    normalizeReportLanguage(input.explicitLanguage) ||
+    normalizeReportLanguage(input.savedReportLanguage) ||
+    resolveMarketIntelligenceLanguage({ requestText: input.requestText })
+  );
+}
+
 export function getReportLanguageCode(language: ResponseLanguage | ReportLanguageCode): ReportLanguageCode {
   return normalizeReportLanguage(language) || "en";
 }

@@ -477,8 +477,203 @@ export function formatMarketIntelligenceGraphForModel(
   return JSON.stringify(graph);
 }
 
-function localized(language: string, english: string, turkish: string) {
-  return language === "Turkish" ? turkish : english;
+type MarketGraphLanguage = "English" | "Turkish" | "German" | "French" | "Spanish";
+
+type MarketGraphCopyKey =
+  | "marketInfrastructureTitle"
+  | "pricingEvidenceLabel"
+  | "competitorComparisonTitle"
+  | "majorPlayersTitle"
+  | "insufficientMajorPlayers"
+  | "verifiedMarketSizeTitle"
+  | "planningEstimateTitle"
+  | "formulaLabel"
+  | "confidenceLabel"
+  | "tamSamSomUnavailable"
+  | "tableHeader"
+  | "notEstablished"
+  | "notPubliclyValidated"
+  | "notProvided"
+  | "publisherLabel"
+  | "publishedLabel"
+  | "accessedLabel"
+  | "sourceTypeLabel"
+  | "classificationLabel"
+  | "claimLinkageLabel"
+  | "basisLabel"
+  | "evidenceLabel"
+  | "assumptionOnlyScenario"
+  | "verifiedTag"
+  | "estimatedTag"
+  | "assumptionTag";
+
+const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, string>> = {
+  English: {
+    marketInfrastructureTitle: "Market Infrastructure",
+    pricingEvidenceLabel: "Pricing evidence",
+    competitorComparisonTitle: "Validated competitor comparison",
+    majorPlayersTitle: "Evidence-supported major players",
+    insufficientMajorPlayers:
+      "Insufficient independent evidence for Major Players ranking; validated commercial vendors remain available in the Competitive Landscape.",
+    verifiedMarketSizeTitle: "Verified market-size evidence",
+    planningEstimateTitle: "Planning Estimate — not externally verified market size",
+    formulaLabel: "Formula",
+    confidenceLabel: "Confidence",
+    tamSamSomUnavailable:
+      "Verified TAM / SAM / SOM is unavailable. A planning estimate was not produced because the validated graph contains neither a compatible market-size endpoint nor both a validated buyer-population input and validated annual-pricing input. Vendor breadth alone is not used to fabricate market sizing.",
+    tableHeader:
+      "| Vendor | Parent Company | Category | Segment | AI Capability | Key Use Cases | Pricing Model | Strengths | Weaknesses | Evidence Count | Confidence | Market Relevance |",
+    notEstablished: "Not established by validated evidence",
+    notPubliclyValidated: "Not publicly validated",
+    notProvided: "Not provided",
+    publisherLabel: "Publisher",
+    publishedLabel: "Published",
+    accessedLabel: "Accessed",
+    sourceTypeLabel: "Source type",
+    classificationLabel: "Classification",
+    claimLinkageLabel: "Claim linkage",
+    basisLabel: "Basis",
+    evidenceLabel: "Evidence",
+    assumptionOnlyScenario: "assumption-only scenario",
+    verifiedTag: "Verified",
+    estimatedTag: "Estimated",
+    assumptionTag: "Assumption",
+  },
+  Turkish: {
+    marketInfrastructureTitle: "Pazar Altyapısı",
+    pricingEvidenceLabel: "Fiyatlandırma kanıtı",
+    competitorComparisonTitle: "Doğrulanmış rakip karşılaştırması",
+    majorPlayersTitle: "Kanıt destekli başlıca oyuncular",
+    insufficientMajorPlayers:
+      "Başlıca Oyuncular sıralaması için bağımsız kanıt yetersiz; doğrulanmış ticari satıcılar Rekabet Ortamı bölümünde yer almaya devam ediyor.",
+    verifiedMarketSizeTitle: "Doğrulanmış pazar büyüklüğü kanıtı",
+    planningEstimateTitle: "Planlama Tahmini — dış kaynakla doğrulanmış pazar büyüklüğü değildir",
+    formulaLabel: "Formül",
+    confidenceLabel: "Güven",
+    tamSamSomUnavailable:
+      "Doğrulanmış TAM / SAM / SOM mevcut değil. Doğrulanmış grafikte uyumlu bir pazar büyüklüğü uç noktası veya birlikte doğrulanmış alıcı nüfusu ile yıllık fiyatlandırma girdileri bulunmadığı için planlama tahmini üretilmedi. Tedarikçi genişliği tek başına pazar büyüklüğü uydurmak için kullanılmaz.",
+    tableHeader:
+      "| Tedarikçi | Ana Şirket | Kategori | Segment | Yapay Zeka Yeteneği | Temel Kullanım Alanları | Fiyatlandırma Modeli | Güçlü Yönler | Zayıf Yönler | Kanıt Sayısı | Güven | Pazar Uygunluğu |",
+    notEstablished: "Doğrulanmış kanıtla belirlenmemiştir",
+    notPubliclyValidated: "Kamuya açık olarak doğrulanmamış",
+    notProvided: "Sağlanmadı",
+    publisherLabel: "Yayıncı",
+    publishedLabel: "Yayın tarihi",
+    accessedLabel: "Erişim tarihi",
+    sourceTypeLabel: "Kaynak türü",
+    classificationLabel: "Sınıflandırma",
+    claimLinkageLabel: "İddia bağlantısı",
+    basisLabel: "Temel",
+    evidenceLabel: "Kanıt",
+    assumptionOnlyScenario: "sadece varsayıma dayalı senaryo",
+    verifiedTag: "Doğrulanmış",
+    estimatedTag: "Tahmini",
+    assumptionTag: "Varsayım",
+  },
+  German: {
+    marketInfrastructureTitle: "Marktinfrastruktur",
+    pricingEvidenceLabel: "Preisnachweis",
+    competitorComparisonTitle: "Validierter Wettbewerbervergleich",
+    majorPlayersTitle: "Durch Nachweise gestützte Hauptakteure",
+    insufficientMajorPlayers:
+      "Unzureichende unabhängige Nachweise für die Rangliste der Hauptakteure; validierte kommerzielle Anbieter sind weiterhin in der Wettbewerbslandschaft verfügbar.",
+    verifiedMarketSizeTitle: "Verifizierter Nachweis zur Marktgröße",
+    planningEstimateTitle: "Planungsschätzung — keine extern verifizierte Marktgröße",
+    formulaLabel: "Formel",
+    confidenceLabel: "Konfidenz",
+    tamSamSomUnavailable:
+      "Verifizierte TAM-/SAM-/SOM-Werte sind nicht verfügbar. Es wurde keine Planungsschätzung erstellt, da der validierte Datensatz weder einen kompatiblen Marktgrößen-Endpunkt noch gleichzeitig einen validierten Käuferpopulations- und einen validierten Jahrespreis-Eingabewert enthält. Die Anbieterbreite allein wird nicht verwendet, um eine Marktgröße zu erfinden.",
+    tableHeader:
+      "| Anbieter | Muttergesellschaft | Kategorie | Segment | KI-Fähigkeit | Wichtigste Anwendungsfälle | Preismodell | Stärken | Schwächen | Anzahl Nachweise | Konfidenz | Marktrelevanz |",
+    notEstablished: "Durch validierte Nachweise nicht ermittelt",
+    notPubliclyValidated: "Nicht öffentlich validiert",
+    notProvided: "Nicht angegeben",
+    publisherLabel: "Herausgeber",
+    publishedLabel: "Veröffentlicht",
+    accessedLabel: "Zugegriffen",
+    sourceTypeLabel: "Quellentyp",
+    classificationLabel: "Klassifizierung",
+    claimLinkageLabel: "Aussagenbezug",
+    basisLabel: "Grundlage",
+    evidenceLabel: "Nachweis",
+    assumptionOnlyScenario: "reines Annahmenszenario",
+    verifiedTag: "Verifiziert",
+    estimatedTag: "Geschätzt",
+    assumptionTag: "Annahme",
+  },
+  French: {
+    marketInfrastructureTitle: "Infrastructure du marché",
+    pricingEvidenceLabel: "Preuve tarifaire",
+    competitorComparisonTitle: "Comparaison validée des concurrents",
+    majorPlayersTitle: "Principaux acteurs étayés par des preuves",
+    insufficientMajorPlayers:
+      "Preuves indépendantes insuffisantes pour le classement des principaux acteurs ; les fournisseurs commerciaux validés restent disponibles dans le paysage concurrentiel.",
+    verifiedMarketSizeTitle: "Preuve vérifiée de la taille du marché",
+    planningEstimateTitle: "Estimation de planification — taille de marché non vérifiée en externe",
+    formulaLabel: "Formule",
+    confidenceLabel: "Confiance",
+    tamSamSomUnavailable:
+      "Le TAM / SAM / SOM vérifié n'est pas disponible. Aucune estimation de planification n'a été produite car le graphe validé ne contient ni un point de référence de taille de marché compatible, ni à la fois une entrée validée de population d'acheteurs et une entrée validée de tarification annuelle. L'étendue des fournisseurs seule n'est pas utilisée pour fabriquer une taille de marché.",
+    tableHeader:
+      "| Fournisseur | Société mère | Catégorie | Segment | Capacité IA | Cas d'usage clés | Modèle tarifaire | Forces | Faiblesses | Nombre de preuves | Confiance | Pertinence pour le marché |",
+    notEstablished: "Non établi par des preuves validées",
+    notPubliclyValidated: "Non validé publiquement",
+    notProvided: "Non fourni",
+    publisherLabel: "Éditeur",
+    publishedLabel: "Publié",
+    accessedLabel: "Consulté",
+    sourceTypeLabel: "Type de source",
+    classificationLabel: "Classification",
+    claimLinkageLabel: "Lien avec l'affirmation",
+    basisLabel: "Base",
+    evidenceLabel: "Preuve",
+    assumptionOnlyScenario: "scénario basé uniquement sur des hypothèses",
+    verifiedTag: "Vérifié",
+    estimatedTag: "Estimé",
+    assumptionTag: "Hypothèse",
+  },
+  Spanish: {
+    marketInfrastructureTitle: "Infraestructura del mercado",
+    pricingEvidenceLabel: "Evidencia de precios",
+    competitorComparisonTitle: "Comparación validada de competidores",
+    majorPlayersTitle: "Principales actores respaldados por evidencia",
+    insufficientMajorPlayers:
+      "Evidencia independiente insuficiente para la clasificación de los principales actores; los proveedores comerciales validados siguen disponibles en el panorama competitivo.",
+    verifiedMarketSizeTitle: "Evidencia verificada del tamaño del mercado",
+    planningEstimateTitle: "Estimación de planificación — tamaño de mercado no verificado externamente",
+    formulaLabel: "Fórmula",
+    confidenceLabel: "Confianza",
+    tamSamSomUnavailable:
+      "El TAM / SAM / SOM verificado no está disponible. No se generó una estimación de planificación porque el gráfico validado no contiene ni un punto de referencia de tamaño de mercado compatible ni, a la vez, una entrada validada de población de compradores y una entrada validada de precios anuales. La amplitud de proveedores por sí sola no se utiliza para fabricar el tamaño del mercado.",
+    tableHeader:
+      "| Proveedor | Empresa matriz | Categoría | Segmento | Capacidad de IA | Casos de uso clave | Modelo de precios | Fortalezas | Debilidades | Cantidad de evidencia | Confianza | Relevancia para el mercado |",
+    notEstablished: "No establecido por evidencia validada",
+    notPubliclyValidated: "No validado públicamente",
+    notProvided: "No proporcionado",
+    publisherLabel: "Editor",
+    publishedLabel: "Publicado",
+    accessedLabel: "Consultado",
+    sourceTypeLabel: "Tipo de fuente",
+    classificationLabel: "Clasificación",
+    claimLinkageLabel: "Vínculo con la afirmación",
+    basisLabel: "Base",
+    evidenceLabel: "Evidencia",
+    assumptionOnlyScenario: "escenario basado únicamente en suposiciones",
+    verifiedTag: "Verificado",
+    estimatedTag: "Estimado",
+    assumptionTag: "Suposición",
+  },
+};
+
+function copyLanguage(language: string): MarketGraphLanguage {
+  return language in marketGraphCopy ? (language as MarketGraphLanguage) : "English";
+}
+
+function classificationTag(language: string, classification: "Verified" | "Estimated" | "Assumption") {
+  const copy = marketGraphCopy[copyLanguage(language)];
+  if (classification === "Verified") return copy.verifiedTag;
+  if (classification === "Estimated") return copy.estimatedTag;
+  return copy.assumptionTag;
 }
 
 function marketTableCell(value: string) {
@@ -497,9 +692,11 @@ export function projectMarketIntelligenceGraphToReport(
   const projection: MarketIntelligenceReportProjection = {};
   const vendorCoverage = graph.vendorIntelligence.coverage;
 
+  const copy = marketGraphCopy[copyLanguage(language)];
+
   if (graph.vendorIntelligence.marketInfrastructure.length > 0) {
     projection.marketInfrastructure = [
-      localized(language, "Market Infrastructure", "Pazar Altyapısı"),
+      copy.marketInfrastructureTitle,
       ...graph.vendorIntelligence.marketInfrastructure.map(
         (entity) =>
           `- ${entity.name} — ${entity.entityType.replace(/_/g, " ")} (${entity.reason}; ${entity.evidenceIds.map((id) => `[${id}]`).join(", ")})`
@@ -510,43 +707,33 @@ export function projectMarketIntelligenceGraphToReport(
   if (graph.competitors.length > 0) {
     const competitorLines = graph.vendorIntelligence.vendors.map(
       (vendor) =>
-        `| ${marketTableCell(vendor.name)} | ${marketTableCell(vendor.classifications.join(", "))} | ${marketTableCell(vendor.targetCustomer)} | ${marketTableCell(vendor.pricingModels.join(", ") || "Not publicly validated")} | ${marketTableCell(vendor.strength)} | ${marketTableCell(vendor.weakness)} | ${vendor.evidenceCount} | ${vendor.rankingScore}/100 | ${vendor.confidence}/100 (${vendor.confidenceLevel}) |`
+        `| ${marketTableCell(vendor.name)} | ${marketTableCell(vendor.parentCompany)} | ${marketTableCell(vendor.category)} | ${marketTableCell(vendor.segment)} | ${marketTableCell(vendor.aiCapability)} | ${marketTableCell(vendor.keyUseCases.join("; ") || copy.notEstablished)} | ${marketTableCell(vendor.pricingModels.join(", ") || copy.notPubliclyValidated)} | ${marketTableCell(vendor.strength)} | ${marketTableCell(vendor.weakness)} | ${vendor.evidenceCount} | ${vendor.confidence}/100 (${vendor.confidenceLevel}) | ${marketTableCell(vendor.marketRelevance)} |`
     );
     const pricingLines = graph.pricingModels.map(
       (pricing) =>
-        `- ${localized(language, "Pricing evidence", "Fiyatlandırma kanıtı")}: ${pricing.description} (${pricing.confidenceClassification}; confidence ${pricing.confidenceScore}/100 ${pricing.confidenceLevel}; ${pricing.evidenceIds.map((id) => `[${id}]`).join(", ")})`
+        `- ${copy.pricingEvidenceLabel}: ${pricing.description} (${classificationTag(language, pricing.confidenceClassification)}; ${copy.confidenceLabel.toLowerCase()} ${pricing.confidenceScore}/100 ${pricing.confidenceLevel}; ${pricing.evidenceIds.map((id) => `[${id}]`).join(", ")})`
     );
+    const discoveryLog = graph.vendorIntelligence.discoveryLog;
     projection.competitiveLandscape = [
-      localized(
-        language,
-        "Validated competitor comparison",
-        "Doğrulanmış rakip karşılaştırması"
-      ),
+      copy.competitorComparisonTitle,
       `Competitive Coverage Score: ${vendorCoverage.competitiveCoverageScore}/100 — ${vendorCoverage.reason}`,
-      "| Vendor | Position | Target | Pricing | Strength | Weakness | Evidence Count | Ranking | Confidence |",
-      "| --- | --- | --- | --- | --- | --- | ---: | ---: | --- |",
+      `Discovery: ${discoveryLog.candidatesDiscovered} candidate(s) found across ${discoveryLog.queriesPacked} packed discovery queries (${discoveryLog.queriesGenerated} terms considered); ${discoveryLog.vendorsValidated} validated; ${discoveryLog.sourcesAccepted} source(s) accepted, ${discoveryLog.sourcesRejected} rejected; ${discoveryLog.earlyStopReason}`,
+      copy.tableHeader,
+      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- |",
       ...competitorLines,
       ...pricingLines,
     ].join("\n");
     projection.majorPlayers = [
-      localized(
-        language,
-        "Evidence-supported major players",
-        "Kanıt destekli başlıca oyuncular"
-      ),
+      copy.majorPlayersTitle,
       ...graph.vendorIntelligence.vendors
         .filter((vendor) => vendor.eligibleForMajorPlayers)
         .map(
           (vendor) =>
-            `- ${vendor.name}: ${vendor.classifications.join(", ")}; target: ${vendor.targetCustomer} (ranking ${vendor.rankingScore}/100; confidence ${vendor.confidence}/100 ${vendor.confidenceLevel}; ${vendor.evidenceSources.map((id) => `[${id}]`).join(", ")})`
+            `- ${vendor.name} (${vendor.majorPlayerLabel}): ${vendor.classifications.join(", ")}; target: ${vendor.targetCustomer} (ranking ${vendor.rankingScore}/100; overall score ${vendor.overallVendorScore}/100; confidence ${vendor.confidence}/100 ${vendor.confidenceLevel}; ${vendor.evidenceSources.map((id) => `[${id}]`).join(", ")})`
       ),
     ].join("\n");
     if (!graph.vendorIntelligence.vendors.some((vendor) => vendor.eligibleForMajorPlayers)) {
-      projection.majorPlayers = localized(
-        language,
-        "Insufficient independent evidence for Major Players ranking; validated commercial vendors remain available in the Competitive Landscape.",
-        "Başlıca Oyuncular sıralaması için bağımsız kanıt yetersiz; doğrulanmış ticari satıcılar Rekabet Ortamı bölümünde yer almaya devam ediyor."
-      );
+      projection.majorPlayers = copy.insufficientMajorPlayers;
     }
   } else {
     projection.competitiveLandscape = vendorCoverage.reason;
@@ -555,14 +742,10 @@ export function projectMarketIntelligenceGraphToReport(
 
   if (graph.verifiedMarketSize.length > 0) {
     const sizing = [
-      localized(
-        language,
-        "Verified market-size evidence",
-        "Doğrulanmış pazar büyüklüğü kanıtı"
-      ),
+      copy.verifiedMarketSizeTitle,
       ...graph.verifiedMarketSize.map(
         (item) =>
-          `- [Verified] ${item.description} | Confidence: ${item.confidenceScore}/100 (${item.confidenceLevel}) | Evidence: ${item.evidenceIds.map((id) => `[${id}]`).join(", ")}`
+          `- [${copy.verifiedTag}] ${item.description} | ${copy.confidenceLabel}: ${item.confidenceScore}/100 (${item.confidenceLevel}) | ${copy.evidenceLabel}: ${item.evidenceIds.map((id) => `[${id}]`).join(", ")}`
       ),
     ].join("\n");
     projection.marketSize = sizing;
@@ -570,31 +753,23 @@ export function projectMarketIntelligenceGraphToReport(
   } else if (graph.planningEstimate) {
     const estimate = graph.planningEstimate;
     projection.tamSamSom = [
-      localized(
-        language,
-        "Planning Estimate — not externally verified market size",
-        "Planlama Tahmini — dış kaynakla doğrulanmış pazar büyüklüğü değildir"
-      ),
-      `TAM [Estimated]: ${estimate.tam}`,
-      `SAM [Estimated]: ${estimate.sam}`,
-      `SOM [Estimated]: ${estimate.som}`,
-      `${localized(language, "Formula", "Formül")}: ${estimate.formula}`,
+      copy.planningEstimateTitle,
+      `TAM [${copy.estimatedTag}]: ${estimate.tam}`,
+      `SAM [${copy.estimatedTag}]: ${estimate.sam}`,
+      `SOM [${copy.estimatedTag}]: ${estimate.som}`,
+      `${copy.formulaLabel}: ${estimate.formula}`,
       ...estimate.assumptions,
-      `${localized(language, "Confidence", "Güven")}: ${estimate.confidence}/100 (${estimate.confidenceLevel}) | Basis: ${estimate.basis} | Evidence: ${estimate.evidenceIds.map((id) => `[${id}]`).join(", ") || "assumption-only scenario"}`,
+      `${copy.confidenceLabel}: ${estimate.confidence}/100 (${estimate.confidenceLevel}) | ${copy.basisLabel}: ${estimate.basis} | ${copy.evidenceLabel}: ${estimate.evidenceIds.map((id) => `[${id}]`).join(", ") || copy.assumptionOnlyScenario}`,
     ].join("\n");
   } else {
-    projection.tamSamSom = localized(
-      language,
-      "Verified TAM / SAM / SOM is unavailable. A planning estimate was not produced because the validated graph contains neither a compatible market-size endpoint nor both a validated buyer-population input and validated annual-pricing input. Vendor breadth alone is not used to fabricate market sizing.",
-      "Doğrulanmış TAM / SAM / SOM mevcut değil. Doğrulanmış grafikte uyumlu bir pazar büyüklüğü uç noktası veya birlikte doğrulanmış alıcı nüfusu ile yıllık fiyatlandırma girdileri bulunmadığı için planlama tahmini üretilmedi. Tedarikçi genişliği tek başına pazar büyüklüğü uydurmak için kullanılmaz."
-    );
+    projection.tamSamSom = copy.tamSamSomUnavailable;
   }
 
   if (graph.cagr.length > 0) {
     projection.cagr = graph.cagr
       .map(
         (item) =>
-          `- [${item.confidenceClassification}] ${item.description} | Confidence: ${item.confidenceScore}/100 (${item.confidenceLevel}) | Evidence: ${item.evidenceIds.map((id) => `[${id}]`).join(", ")}`
+          `- [${classificationTag(language, item.confidenceClassification)}] ${item.description} | ${copy.confidenceLabel}: ${item.confidenceScore}/100 (${item.confidenceLevel}) | ${copy.evidenceLabel}: ${item.evidenceIds.map((id) => `[${id}]`).join(", ")}`
       )
       .join("\n");
   }
@@ -603,7 +778,7 @@ export function projectMarketIntelligenceGraphToReport(
     projection.sources = graph.sources
       .map(
         (source) =>
-          `- [${source.evidenceId}] ${source.title} | Publisher: ${source.publisher} | URL: ${source.url} | Published: ${source.publishedDate || "Not provided"} | Accessed: ${source.accessedAt || "Not provided"} | Source type: ${source.sourceType} | Classification: ${source.confidenceClassification} | Confidence: ${source.confidenceScore}/100 (${source.confidenceLevel}) | Claim linkage: ${source.claim}`
+          `- [${source.evidenceId}] ${source.title} | ${copy.publisherLabel}: ${source.publisher} | URL: ${source.url} | ${copy.publishedLabel}: ${source.publishedDate || copy.notProvided} | ${copy.accessedLabel}: ${source.accessedAt || copy.notProvided} | ${copy.sourceTypeLabel}: ${source.sourceType} | ${copy.classificationLabel}: ${classificationTag(language, source.confidenceClassification)} | ${copy.confidenceLabel}: ${source.confidenceScore}/100 (${source.confidenceLevel}) | ${copy.claimLinkageLabel}: ${source.claim}`
       )
       .join("\n");
   }

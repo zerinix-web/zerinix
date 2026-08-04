@@ -152,7 +152,8 @@ for (const prompt of markets) {
     assert.match(projection.marketInfrastructure, /SEC/);
 
     assert.match(projection.competitiveLandscape, /Competitive Coverage Score/);
-    assert.match(projection.competitiveLandscape, /\| Vendor \| Position \| Target \| Pricing \|/);
+    assert.match(projection.competitiveLandscape, /\| Vendor \| Parent Company \| Category \| Segment \|/);
+    assert.match(projection.competitiveLandscape, /Discovery: \d+ candidate/);
     assert.doesNotMatch(projection.majorPlayers, /No competitive evidence/i);
     assert.equal(graph.planningEstimate, null);
     assert.match(projection.tamSamSom, /Verified TAM \/ SAM \/ SOM is unavailable/);
@@ -186,7 +187,7 @@ test("vendor aliases deduplicate into one canonical Intuit (QuickBooks) entity",
   assert.equal(graph.vendorIntelligence.vendors.length, 1);
 });
 
-test("benchmark institutions can support discovery but never become vendors", () => {
+test("benchmark institutions can support discovery but never become vendors, and a single mention is not enough to validate a vendor", () => {
   const prompt = markets[0];
   const evidence = [
     {
@@ -197,10 +198,31 @@ test("benchmark institutions can support discovery but never become vendors", ()
         category: "AI accounting software",
       }),
       sourceType: "credible_market_data",
+      sourceTitle: "Independent analyst coverage of accounting software",
+      url: "https://gartner.com/research/vendor-landscape",
       claim: "Gartner coverage names QuickBooks, Xero, Sage, and NetSuite as accounting software vendors.",
       value: "QuickBooks, Xero, Sage, NetSuite",
     },
     {
+      // A second, independent commercial source naming the same four
+      // vendors. Requirement: two independent sources is one of the valid
+      // corroboration paths, but neither Gartner nor Capterra becomes a
+      // vendor itself.
+      ...vendorEvidence({
+        id: "B1b",
+        name: "Capterra",
+        domain: "capterra.com",
+        category: "AI accounting software",
+      }),
+      sourceType: "credible_market_data",
+      sourceTitle: "Independent directory coverage of accounting solutions",
+      url: "https://capterra.com/directory/accounting-software",
+      claim: "Capterra directory listings include QuickBooks, Xero, Sage, and NetSuite as accounting solutions.",
+      value: "QuickBooks, Xero, Sage, NetSuite",
+    },
+    {
+      // A single low-quality, unverified mention must not validate a vendor
+      // on its own even though it looks like an official page.
       ...vendorEvidence({
         id: "B2",
         name: "Fabricated Vendor",
@@ -217,10 +239,15 @@ test("benchmark institutions can support discovery but never become vendors", ()
 
   assert.deepEqual(names.sort(), ["Intuit (QuickBooks)", "Oracle NetSuite", "Sage", "Xero"]);
   assert.ok(!names.includes("Gartner"));
+  assert.ok(!names.includes("Capterra"));
   assert.ok(!names.includes("Fabricated Vendor"));
-  assert.equal(graph.vendorIntelligence.coverage.independentProviderSources, 1);
+  assert.equal(graph.vendorIntelligence.coverage.independentProviderSources, 2);
   assert.equal(graph.vendorIntelligence.coverage.sufficient, false);
   assert.equal(graph.vendorIntelligence.evidenceProviders[0].entityType, "analyst_firm");
+  for (const vendor of graph.vendorIntelligence.vendors) {
+    assert.ok(vendor.independentEvidenceCount >= 2);
+    assert.equal(vendor.validationPath, "two_independent_commercial_or_industry_sources");
+  }
 });
 
 test("organization classifier assigns one exclusive infrastructure or evidence role", () => {

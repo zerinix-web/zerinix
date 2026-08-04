@@ -60,6 +60,15 @@ const evidenceFixture = [
   evidence({ id: "R8", field: "competitors", company: "Botkeeper", url: "https://www.botkeeper.com/", claim: "Botkeeper offers AI-assisted bookkeeping services to accounting firms." }),
   evidence({ id: "R9", field: "competitors", company: "Dext", url: "https://dext.com/us", claim: "Dext provides automated bookkeeping and accounting data extraction." }),
   evidence({ id: "R10", field: "competitors", company: "AutoEntry", url: "https://www.autoentry.com/", claim: "AutoEntry automates accounting document data entry." }),
+  // These six vendors are named only by a single Gartner mention (R13) below
+  // -- adding their own official page gives each a second, independent
+  // corroborating source, consistent with the multi-source validation rule.
+  evidence({ id: "R15", field: "competitors", company: "Zoho Books", url: "https://www.zoho.com/us/books/", claim: "Zoho Books provides accounting software with invoicing automation for small businesses." }),
+  evidence({ id: "R16", field: "competitors", company: "BlackLine", url: "https://www.blackline.com/", claim: "BlackLine provides financial close automation software for enterprise accounting teams." }),
+  evidence({ id: "R17", field: "competitors", company: "FloQast", url: "https://floqast.com/", claim: "FloQast provides close management software for accounting teams." }),
+  evidence({ id: "R18", field: "competitors", company: "Vic.ai", url: "https://vic.ai/", claim: "Vic.ai provides AI-powered accounts payable automation software." }),
+  evidence({ id: "R19", field: "competitors", company: "Numeric", url: "https://numeric.io/", claim: "Numeric provides close management software for accounting teams." }),
+  evidence({ id: "R20", field: "competitors", company: "Puzzle", url: "https://puzzle.io/", claim: "Puzzle provides accounting software for startups." }),
   evidence({ id: "R11", field: "market_size", company: "Grand View Research", url: "https://www.grandviewresearch.com/industry-analysis/accounting-software-market", sourceType: "market_research", claim: "The US accounting software market planning baseline is estimated at $8.4 billion in 2025." }),
   evidence({ id: "R12", field: "cagr", company: "Grand View Research", url: "https://www.grandviewresearch.com/industry-analysis/accounting-software-market-size", sourceType: "market_research", claim: "The accounting software category is forecast to grow at a 9.2% CAGR through 2030." }),
   evidence({ id: "R13", field: "competitors", company: "Gartner", url: "https://www.gartner.com/en/information-technology/glossary/accounting-software", sourceType: "market_research", claim: "QuickBooks, Xero, Sage, NetSuite, Oracle, Zoho Books, FreshBooks, BlackLine, FloQast, Vic.ai, Numeric Accounting, and Puzzle Accounting are software vendors in the accounting market." }),

@@ -5,6 +5,7 @@ import {
   createDynamicResearchPlanFallback,
   dynamicResearchPlanSchema,
   dynamicResearchPlanToDecisionTasks,
+  filterMarketOnlyForbiddenTasks,
   formatDynamicResearchPlanForContext,
   resolveDynamicResearchPlan,
 } from "../app/lib/ai/dynamic-research-plan.ts";
@@ -145,6 +146,174 @@ test("retail spreadsheet creates externally relevant demand product and inventor
     "company_evidence",
     "industry_benchmarks",
   ]);
+});
+
+test("a public market research question with no uploaded company data never requires company-specific financial evidence", () => {
+  const context = makeContext(
+    "What are the top 10 AI accounting software platforms in the United States?",
+    "market"
+  );
+  const fields = context.researchPlan.tasks.map((task) => task.evidenceField);
+
+  assert.doesNotMatch(fields.join(" "), /company_financials|industry_benchmarks|macro_inputs/);
+  assert.ok(fields.includes("vendor_discovery"));
+  assert.ok(fields.includes("competitors"));
+  assert.ok(fields.includes("market_demand"));
+  assert.ok(
+    context.researchPlan.tasks.every((task) =>
+      task.evidenceField !== "company_financials" ? true : !task.required
+    )
+  );
+});
+
+test("the same public market question still resolves to Market Intelligence even if the domain classifier tags it finance/accounting", () => {
+  // detectDecisionDomain/classifyReportDomain classify this exact prompt as
+  // "accounting" purely from the word "accounting" -- this reproduces that
+  // forced classification to prove the market-intent keyword check (not
+  // domain precedence) is what protects public market questions.
+  const prompt = "What are the top 10 AI accounting software platforms in the United States?";
+  const expertiseProfile = createExpertiseProfileFallback({
+    prompt,
+    selectedMode: "market",
+    assets: [],
+    detectedDomain: "accounting",
+  });
+  const reportPlan = createDynamicReportPlanFallback({
+    expertiseProfile,
+    selectedMode: "market",
+    prompt,
+  });
+  const researchPlan = createDynamicResearchPlanFallback({
+    expertiseProfile,
+    reportPlan,
+    selectedMode: "market",
+    prompt,
+  });
+  const fields = researchPlan.tasks.map((task) => task.evidenceField);
+
+  assert.doesNotMatch(fields.join(" "), /company_financials|industry_benchmarks|macro_inputs/);
+  assert.ok(fields.includes("vendor_discovery"));
+  assert.ok(fields.includes("competitors"));
+});
+
+test("filterMarketOnlyForbiddenTasks strips company-specific fields only under market mode", () => {
+  const tasks = [
+    { field: "company_financials" },
+    { field: "industry_benchmarks" },
+    { field: "macro_inputs" },
+    { field: "vendor_discovery" },
+    { field: "competitors" },
+  ];
+
+  const filteredForMarket = filterMarketOnlyForbiddenTasks(tasks, "market");
+  assert.deepEqual(
+    filteredForMarket.map((task) => task.field),
+    ["vendor_discovery", "competitors"]
+  );
+
+  const untouchedForPlan = filterMarketOnlyForbiddenTasks(tasks, "plan");
+  assert.deepEqual(untouchedForPlan, tasks);
+
+  const untouchedForChat = filterMarketOnlyForbiddenTasks(tasks, "chat");
+  assert.deepEqual(untouchedForChat, tasks);
+
+  const untouchedForUndefined = filterMarketOnlyForbiddenTasks(
+    tasks,
+    undefined
+  );
+  assert.deepEqual(untouchedForUndefined, tasks);
+});
+
+test("filterMarketOnlyForbiddenTasks strips forbidden fields even when they originate from a validated AI-generated plan under market mode", () => {
+  // This reproduces the exact bypass mechanism that caused the reported
+  // regression: resolveDynamicResearchPlan() trusts a validated
+  // AI-generated `value` whenever its domain/subdomain/taskType/selectedMode
+  // match the expertise profile, regardless of which evidence fields the
+  // model chose to include. filterMarketOnlyForbiddenTasks() is applied
+  // after that resolution, at the single convergence point in
+  // domain-research.ts, so it protects market reports even when the
+  // forbidden fields come from a "trusted" AI plan rather than the
+  // deterministic fallback.
+  const expertiseProfile = createExpertiseProfileFallback({
+    prompt: "What are the top 10 AI accounting software platforms in the United States?",
+    selectedMode: "market",
+    assets: [],
+    detectedDomain: "finance",
+  });
+  const reportPlan = createDynamicReportPlanFallback({
+    expertiseProfile,
+    selectedMode: "market",
+    prompt: "What are the top 10 AI accounting software platforms in the United States?",
+  });
+  const fallback = createDynamicResearchPlanFallback({
+    expertiseProfile,
+    reportPlan,
+    selectedMode: "market",
+    prompt: "What are the top 10 AI accounting software platforms in the United States?",
+  });
+  const aiGeneratedValue = {
+    domain: fallback.domain,
+    subdomain: fallback.subdomain,
+    taskType: fallback.taskType,
+    selectedMode: fallback.selectedMode,
+    skippedTopics: fallback.skippedTopics,
+    confidence: fallback.confidence,
+    tasks: [
+      {
+        id: "market_vendor_discovery_ai",
+        topic: fallback.tasks[0].topic,
+        purpose: fallback.tasks[0].purpose,
+        evidenceField: fallback.tasks[0].evidenceField,
+        reportSectionId: fallback.tasks[0].reportSectionId,
+        decisionCriterion: fallback.tasks[0].decisionCriterion,
+        queries: fallback.tasks[0].queries,
+        preferredSourceTypes: fallback.tasks[0].preferredSourceTypes,
+        required: fallback.tasks[0].required,
+        priority: fallback.tasks[0].priority,
+        jurisdiction: fallback.tasks[0].jurisdiction,
+      },
+      {
+        id: "finance_company_financials",
+        topic: "Company financials",
+        purpose: "Assess reported revenue and margins.",
+        evidenceField: "company_financials",
+        reportSectionId: fallback.tasks[0].reportSectionId,
+        decisionCriterion: fallback.tasks[0].decisionCriterion,
+        queries: ["company financials"],
+        preferredSourceTypes: ["audited_statement"],
+        required: true,
+        priority: "critical",
+        jurisdiction: "",
+      },
+    ],
+  };
+  const resolved = resolveDynamicResearchPlan({
+    value: aiGeneratedValue,
+    fallback,
+    expertiseProfile,
+    reportPlan,
+    selectedMode: "market",
+  });
+
+  assert.ok(
+    resolved.tasks.some((task) => task.evidenceField === "company_financials"),
+    "resolveDynamicResearchPlan should trust the validated AI-generated task before the safety-net filter runs"
+  );
+
+  const decisionTasks = dynamicResearchPlanToDecisionTasks(resolved);
+  const filtered = filterMarketOnlyForbiddenTasks(decisionTasks, "market");
+
+  assert.doesNotMatch(
+    filtered.map((task) => task.field).join(" "),
+    /company_financials|industry_benchmarks|macro_inputs/
+  );
+});
+
+test("domain-research.ts applies filterMarketOnlyForbiddenTasks to the final merged task list", () => {
+  assert.match(
+    researchSource,
+    /filterMarketOnlyForbiddenTasks\(\s*\n?\s*dynamicResearchPlanToDecisionTasks\(dynamicResearchPlan\),\s*\n?\s*selectedMode/
+  );
 });
 
 test("duplicate tasks and semantically identical queries are removed", () => {

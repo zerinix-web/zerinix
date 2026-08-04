@@ -2,7 +2,6 @@ import type { DomainResearchEvidence } from "./domain-research.ts";
 import {
   classifyEvidencePublisher,
   classifyOrganizationEntity,
-  isCommercialVendorEntity,
   type ClassifiedOrganizationEntity,
 } from "./commercial-vendor-intelligence.ts";
 import {
@@ -10,11 +9,21 @@ import {
   classifyMarketConfidence,
   type MarketConfidenceLevel,
 } from "./market-research-coverage.ts";
+import { getMarketTaxonomyProfile, resolveMarketTaxonomy } from "./market-taxonomy.ts";
 import {
-  getMarketTaxonomyProfile,
-  resolveMarketTaxonomy,
-  resolveMarketVendorEntities,
-} from "./market-taxonomy.ts";
+  assessMarketRelevance,
+  buildVendorDiscoveryLog,
+  buildVendorDiscoveryQueryPlan,
+  classifyMajorPlayerLabel,
+  computeVendorDiscoveryScores,
+  extractVendorCandidateMentions,
+  isOfficialVendorEvidence,
+  isQualifyingVendorEvidence,
+  resolveVendorIdentity,
+  validateVendorCandidate,
+  type MajorPlayerLabel,
+  type VendorDiscoveryLog,
+} from "./vendor-discovery.ts";
 
 export type VendorMarketPosition =
   | "Market Leader"
@@ -36,29 +45,57 @@ export type VendorPricingModel =
   | "Enterprise"
   | "Transaction"
   | "Success fee"
-  | "Hybrid";
+  | "Hybrid"
+  | "Public list price"
+  | "Quote-based"
+  | "Per user"
+  | "Per company"
+  | "Per document"
+  | "Services included";
 
 export type VendorIntelligence = {
   name: string;
+  canonicalName: string;
+  aliases: string[];
+  productName: string;
+  companyName: string;
+  parentCompany: string;
   category: string;
+  segment: string;
+  aiCapability: string;
+  keyUseCases: string[];
   headquarters: string;
   targetCustomer: string;
   website: string;
   evidenceSources: string[];
   evidenceDomains: string[];
   evidenceCount: number;
+  mentionCount: number;
+  discoveryQueries: string[];
+  firstSeen: string;
+  lastSeen: string;
   confidence: number;
   confidenceLevel: MarketConfidenceLevel;
   position: VendorMarketPosition;
+  majorPlayerLabel: MajorPlayerLabel;
   classifications: VendorClassification[];
   pricingModels: VendorPricingModel[];
   pricingEvidence: string;
   strength: string;
   weakness: string;
   featureEvidenceCount: number;
+  productEvidenceCount: number;
   customerEvidenceCount: number;
   marketMentionCount: number;
   independentEvidenceCount: number;
+  officialEvidenceCount: number;
+  pricingEvidenceCount: number;
+  sourceDiversityScore: number;
+  commercialConfidence: number;
+  marketRelevanceScore: number;
+  overallVendorScore: number;
+  marketRelevance: string;
+  validationPath: string;
   rankingScore: number;
   eligibleForMajorPlayers: boolean;
 };
@@ -88,6 +125,7 @@ export type VendorIntelligenceGraph = {
   marketInfrastructure: ClassifiedOrganizationEntity[];
   evidenceProviders: ClassifiedOrganizationEntity[];
   coverage: VendorCoverage;
+  discoveryLog: VendorDiscoveryLog;
 };
 
 function evidenceText(item: DomainResearchEvidence) {
@@ -109,15 +147,6 @@ function hostname(value: string) {
   } catch {
     return "";
   }
-}
-
-function isValidatedVendorEvidence(item: DomainResearchEvidence) {
-  return (
-    Boolean(hostname(item.url)) &&
-    (item.label === "Verified from official source" ||
-      item.label === "Verified from external source") &&
-    calculateEvidenceConfidence(item) >= 48
-  );
 }
 
 function unique<T>(values: readonly T[]) {
@@ -170,6 +199,12 @@ function extractPricingModels(values: readonly string[]) {
     ["Transaction", /\bper transaction|transaction fee|per invoice|per document\b/i],
     ["Success fee", /\bsuccess fee|outcome[- ]based|contingency fee\b/i],
     ["Hybrid", /\bhybrid pricing|base fee plus|subscription plus usage\b/i],
+    ["Public list price", /\bpublic (?:list )?pricing|list price|published pricing|starting at \$/i],
+    ["Quote-based", /\bquote[- ]based|request a quote|contact sales for pricing|custom quote\b/i],
+    ["Per user", /\bper (?:user|seat)\b/i],
+    ["Per company", /\bper company|per organization|flat[- ]rate company\b/i],
+    ["Per document", /\bper document|per invoice|per filing\b/i],
+    ["Services included", /\bservices included|implementation included|onboarding included|managed service included\b/i],
   ];
   return models.filter(([, pattern]) => pattern.test(text)).map(([model]) => model);
 }
@@ -271,90 +306,139 @@ function mergeEntity(
   });
 }
 
+const nonVendorInstitutionalTypes = new Set([
+  "government",
+  "regulator",
+  "standards_body",
+  "research_provider",
+  "analyst_firm",
+  "consultancy",
+  "academic",
+  "open_source",
+  "community",
+]);
+
 export function buildVendorIntelligenceGraph(
   evidence: readonly DomainResearchEvidence[],
   prompt: string
 ): VendorIntelligenceGraph {
   const taxonomy = resolveMarketTaxonomy(prompt, evidence);
   const profile = taxonomy || getMarketTaxonomyProfile(prompt);
-  const evidenceByVendor = new Map<string, {
-    name: string;
-    items: DomainResearchEvidence[];
-    officialWebsite: string;
-  }>();
+  const evidenceById = new Map(evidence.map((item) => [item.id, item] as const));
   const organizationEntities = new Map<string, ClassifiedOrganizationEntity>();
 
+  // Institutional classification is keyed off every evidence item's raw
+  // publisher, independent of vendor discovery below, so regulators,
+  // government, and analyst/research entities are always captured.
   for (const item of evidence) {
-    const validatedVendorEvidence = isValidatedVendorEvidence(item);
-    const resolvedVendors = validatedVendorEvidence
-      ? resolveMarketVendorEntities(item, taxonomy)
-      : [];
-    const publisherEntity = classifyEvidencePublisher(item);
-    if (!isCommercialVendorEntity(publisherEntity) || resolvedVendors.length === 0) {
-      mergeEntity(organizationEntities, publisherEntity);
-    }
-    if (!validatedVendorEvidence) continue;
-    for (const entity of resolvedVendors) {
-      const classification = classifyOrganizationEntity({
-        name: entity.name,
-        url: item.url,
-        sourceType: item.sourceType,
-        context: evidenceText(item),
-        knownCommercialVendor: entity.matchedBy !== "company_source" ||
-          publisherEntity.entityType === "commercial_vendor",
-      });
-      const classifiedVendor = {
-        name: entity.name,
-        entityType: classification.entityType,
-        url: item.url,
-        evidenceIds: [item.id],
-        confidence: classification.confidence,
-        reason: classification.reason,
-      } satisfies ClassifiedOrganizationEntity;
-      mergeEntity(organizationEntities, classifiedVendor);
-      if (!isCommercialVendorEntity(classifiedVendor)) continue;
-      const key = entity.name.toLowerCase();
-      const current = evidenceByVendor.get(key) || {
-        name: entity.name,
-        items: [],
-        officialWebsite: "",
-      };
-      current.items.push(item);
-      if (entity.matchedBy === "domain" || entity.matchedBy === "company_source") {
-        current.officialWebsite ||= item.url;
-      }
-      evidenceByVendor.set(key, current);
-    }
+    mergeEntity(organizationEntities, classifyEvidencePublisher(item));
   }
 
-  const vendors = [...evidenceByVendor.values()]
-    .map(({ name, items, officialWebsite }) => {
-      const values = items.map(evidenceText);
+  // Candidate discovery: taxonomy alias/domain matches plus heuristic
+  // mentions from vendor-relevant evidence (review/directory sites,
+  // vendor-relevant fields and source types) so markets without a hardcoded
+  // taxonomy still produce real candidates.
+  const mentions = extractVendorCandidateMentions(evidence, taxonomy);
+  const aggregatedCandidates = resolveVendorIdentity(mentions);
+  const queryPlan = buildVendorDiscoveryQueryPlan(prompt, profile);
+
+  const relevantEvidenceIds = new Set<string>();
+  const acceptedEvidenceIds = new Set<string>();
+
+  const vendors = [...aggregatedCandidates.values()]
+    .flatMap((candidate) => {
+      const allItems = candidate.evidenceIds
+        .map((id) => evidenceById.get(id))
+        .filter((item): item is DomainResearchEvidence => Boolean(item));
+      if (allItems.length === 0) return [];
+      for (const item of allItems) relevantEvidenceIds.add(item.id);
+
+      const qualifyingItems = allItems.filter(isQualifyingVendorEvidence);
+      const evidenceTextJoined = allItems.map(evidenceText).join(" ");
+
+      // Curated taxonomy matches are trusted as commercial by construction
+      // (matching prior behavior); everything else runs the full
+      // institutional classifier so regulators/analysts/research firms
+      // picked up by the heuristic path are never treated as vendors.
+      const preliminaryClassification = candidate.matchedByTaxonomy
+        ? {
+            entityType: "commercial_vendor" as const,
+            confidence: 98,
+            reason: "Matched to the market taxonomy's commercial vendor catalog.",
+          }
+        : classifyOrganizationEntity({
+            name: candidate.canonicalName,
+            url: candidate.sourceUrls[0] || "",
+            sourceType: allItems[0].sourceType,
+            context: evidenceTextJoined,
+            knownCommercialVendor: false,
+          });
+
+      if (nonVendorInstitutionalTypes.has(preliminaryClassification.entityType)) {
+        mergeEntity(organizationEntities, {
+          name: candidate.canonicalName,
+          entityType: preliminaryClassification.entityType,
+          url: candidate.sourceUrls[0] || "",
+          evidenceIds: candidate.evidenceIds,
+          confidence: preliminaryClassification.confidence,
+          reason: preliminaryClassification.reason,
+        });
+        return [];
+      }
+
+      const validation = validateVendorCandidate(candidate, qualifyingItems);
+      const relevance = assessMarketRelevance(candidate, taxonomy, evidenceTextJoined, prompt);
+      const isValidatedVendor = validation.validated && relevance.relevant;
+
+      mergeEntity(organizationEntities, {
+        name: candidate.canonicalName,
+        entityType: isValidatedVendor ? "commercial_vendor" : preliminaryClassification.entityType,
+        url: candidate.sourceUrls[0] || "",
+        evidenceIds: candidate.evidenceIds,
+        confidence: isValidatedVendor
+          ? Math.max(preliminaryClassification.confidence, 80)
+          : preliminaryClassification.confidence,
+        reason: isValidatedVendor
+          ? `Validated commercial vendor via ${validation.validationPath.replace(/_/g, " ")}.`
+          : preliminaryClassification.reason,
+      });
+      if (!isValidatedVendor) return [];
+
+      for (const item of qualifyingItems) acceptedEvidenceIds.add(item.id);
+
+      const values = qualifyingItems.map(evidenceText);
       const text = values.join(" ");
-      const evidenceDomains = unique(items.map((item) => hostname(item.url)).filter(Boolean));
+      const evidenceDomains = unique(
+        qualifyingItems.map((item) => hostname(item.url)).filter(Boolean)
+      );
       const pricingModels = extractPricingModels(values);
       const targetCustomer = extractTargetCustomer(values);
       const confidence = Math.round(
-        items.reduce(
+        qualifyingItems.reduce(
           (sum, item) => sum + calculateEvidenceConfidence(item),
           0
-        ) / Math.max(1, items.length)
+        ) / Math.max(1, qualifyingItems.length)
       );
-      const position = choosePosition(text, items.length, evidenceDomains.length);
-      const featureItems = items.filter((item) =>
+      const position = choosePosition(text, qualifyingItems.length, evidenceDomains.length);
+      const featureItems = qualifyingItems.filter((item) =>
         /feature|product|integration|deployment|capabilit|workflow/i.test(evidenceText(item))
       );
-      const customerItems = items.filter((item) =>
+      const customerItems = qualifyingItems.filter((item) =>
         /customer|buyer|enterprise|smb|firm|hospital|contractor|security team/i.test(evidenceText(item))
       );
-      const weaknessItem = items.find((item) =>
+      const weaknessItem = qualifyingItems.find((item) =>
         /weakness|limitation|risk|gap|lacks?|constraint|downside/i.test(evidenceText(item))
       );
-      const strengthItem = featureItems[0] || items[0];
-      const pricingItem = items.find((item) => extractPricingModels([evidenceText(item)]).length > 0);
-      const marketMentionItems = items.filter((item) =>
+      const strengthItem = featureItems[0] || qualifyingItems[0];
+      const pricingItem = qualifyingItems.find(
+        (item) => extractPricingModels([evidenceText(item)]).length > 0
+      );
+      const marketMentionItems = qualifyingItems.filter((item) =>
         /market|vendor|competitor|competitive|leader|provider|platform/i.test(evidenceText(item))
       );
+      const officialWebsite =
+        qualifyingItems.find((item) => isOfficialVendorEvidence(item, candidate.sourceDomains))
+          ?.url || "";
       const independentEvidenceCount = evidenceDomains.length;
       const rankingScore = vendorRankingScore({
         independentEvidenceCount,
@@ -363,39 +447,90 @@ export function buildVendorIntelligenceGraph(
         customerEvidenceCount: customerItems.length,
         marketMentionCount: marketMentionItems.length,
       });
-      const evidenceCount = unique(items.map((item) => item.id)).length;
-
-      return {
-        name,
-        category: profile.productCategory,
-        headquarters: extractHeadquarters(values),
-        targetCustomer,
-        website: officialWebsite,
-        evidenceSources: unique(items.map((item) => item.id)),
-        evidenceDomains,
-        evidenceCount,
+      const evidenceCount = unique(qualifyingItems.map((item) => item.id)).length;
+      const classifications = classificationsFor(text, position, targetCustomer);
+      const scores = computeVendorDiscoveryScores(
+        validation,
+        candidate,
         confidence,
-        confidenceLevel: classifyMarketConfidence(confidence),
+        relevance.relevant
+      );
+      const majorPlayerLabel = classifyMajorPlayerLabel({
         position,
-        classifications: classificationsFor(text, position, targetCustomer),
-        pricingModels,
-        pricingEvidence: pricingItem
-          ? concise(pricingItem.value || pricingItem.claim)
-          : "No validated public pricing evidence",
-        strength: strengthItem?.claim
-          ? concise(strengthItem.claim)
-          : "No validated strength evidence",
-        weakness: weaknessItem?.claim
-          ? concise(weaknessItem.claim)
-          : "No validated weakness evidence",
-        featureEvidenceCount: featureItems.length,
+        classifications,
+        independentEvidenceCount,
         customerEvidenceCount: customerItems.length,
         marketMentionCount: marketMentionItems.length,
-        independentEvidenceCount,
-        rankingScore,
-        eligibleForMajorPlayers:
-          evidenceCount >= 2 && independentEvidenceCount >= 2 && rankingScore >= 40,
-      } satisfies VendorIntelligence;
+      });
+      const parentCompanyMatch = candidate.canonicalName.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+      const parentCompany = parentCompanyMatch
+        ? parentCompanyMatch[1].trim()
+        : candidate.canonicalName;
+      const productName = parentCompanyMatch
+        ? parentCompanyMatch[2].trim()
+        : candidate.canonicalName;
+      const aiSignal =
+        /\bai\b|artificial intelligence|machine learning|automat|copilot|generative|\bllm\b/i.test(
+          text
+        );
+
+      return [
+        {
+          name: candidate.canonicalName,
+          canonicalName: candidate.canonicalName,
+          aliases: candidate.aliases,
+          productName,
+          companyName: parentCompany,
+          parentCompany,
+          category: profile.productCategory,
+          segment: targetCustomer,
+          aiCapability: aiSignal
+            ? "AI-enabled (evidence-supported)"
+            : "Not established by validated evidence",
+          keyUseCases: unique(featureItems.slice(0, 3).map((item) => concise(item.claim, 120))),
+          headquarters: extractHeadquarters(values),
+          targetCustomer,
+          website: officialWebsite,
+          evidenceSources: unique(qualifyingItems.map((item) => item.id)),
+          evidenceDomains,
+          evidenceCount,
+          mentionCount: candidate.mentionCount,
+          discoveryQueries: candidate.discoveryQueries,
+          firstSeen: candidate.firstSeen,
+          lastSeen: candidate.lastSeen,
+          confidence,
+          confidenceLevel: classifyMarketConfidence(confidence),
+          position,
+          majorPlayerLabel,
+          classifications,
+          pricingModels,
+          pricingEvidence: pricingItem
+            ? concise(pricingItem.value || pricingItem.claim)
+            : "No validated public pricing evidence",
+          strength: strengthItem?.claim
+            ? concise(strengthItem.claim)
+            : "No validated strength evidence",
+          weakness: weaknessItem?.claim
+            ? concise(weaknessItem.claim)
+            : "No validated weakness evidence",
+          featureEvidenceCount: featureItems.length,
+          productEvidenceCount: featureItems.length,
+          customerEvidenceCount: customerItems.length,
+          marketMentionCount: marketMentionItems.length,
+          independentEvidenceCount,
+          officialEvidenceCount: validation.officialEvidenceCount,
+          pricingEvidenceCount: validation.pricingEvidenceCount,
+          sourceDiversityScore: scores.sourceDiversityScore,
+          commercialConfidence: scores.commercialConfidence,
+          marketRelevanceScore: scores.marketRelevanceScore,
+          overallVendorScore: scores.overallVendorScore,
+          marketRelevance: relevance.reason,
+          validationPath: validation.validationPath,
+          rankingScore,
+          eligibleForMajorPlayers:
+            evidenceCount >= 2 && independentEvidenceCount >= 2 && rankingScore >= 40,
+        } satisfies VendorIntelligence,
+      ];
     })
     .sort(
       (left, right) =>
@@ -422,13 +557,21 @@ export function buildVendorIntelligenceGraph(
     ).length,
   };
   const competitiveCoverageScore = coverageScore(rawCoverage);
+  const discoveryLog = buildVendorDiscoveryLog({
+    queryPlan,
+    candidatesDiscovered: aggregatedCandidates.size,
+    vendorsValidated: vendors.length,
+    sourcesAccepted: acceptedEvidenceIds.size,
+    sourcesRejected: Math.max(0, relevantEvidenceIds.size - acceptedEvidenceIds.size),
+    sufficientCoverage: vendors.length >= 5,
+  });
   const sufficient =
-    rawCoverage.vendorCount >= 3 &&
+    rawCoverage.vendorCount >= 5 &&
     rawCoverage.independentProviderSources >= 2 &&
     competitiveCoverageScore >= 35;
   const reason = sufficient
-    ? `${rawCoverage.vendorCount} independently evidenced vendors across ${rawCoverage.independentProviderSources} provider domains.`
-    : `Competitive evidence is insufficient: ${rawCoverage.vendorCount} vendors, ${rawCoverage.independentProviderSources} independent provider domains, ${rawCoverage.vendorsWithPricingEvidence} with pricing evidence, ${rawCoverage.vendorsWithFeatureEvidence} with feature evidence, and ${rawCoverage.vendorsWithCustomerEvidence} with customer evidence.`;
+    ? `${rawCoverage.vendorCount} independently evidenced vendors validated across ${rawCoverage.independentProviderSources} provider domains (of ${discoveryLog.candidatesDiscovered} candidates discovered).`
+    : `Competitive evidence is insufficient: ${rawCoverage.vendorCount} of ${discoveryLog.candidatesDiscovered} discovered vendor candidates validated (target: 5+), ${rawCoverage.independentProviderSources} independent provider domains, ${rawCoverage.vendorsWithPricingEvidence} with pricing evidence, ${rawCoverage.vendorsWithFeatureEvidence} with feature evidence, and ${rawCoverage.vendorsWithCustomerEvidence} with customer evidence. ${discoveryLog.earlyStopReason}`;
 
   const entities = [...organizationEntities.values()].sort(
     (left, right) =>
@@ -467,5 +610,6 @@ export function buildVendorIntelligenceGraph(
       sufficient,
       reason,
     },
+    discoveryLog,
   };
 }

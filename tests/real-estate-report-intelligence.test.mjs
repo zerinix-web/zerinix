@@ -340,7 +340,10 @@ test("planner and saved reports preserve the real-estate schema without startup 
   assert.match(planner, /isRealEstateReport[\s\S]*\? "Due-Diligence Report"[\s\S]*: "Investor Ready"/);
   assert.match(savedPdf, /Real Estate Evidence & Due-Diligence Methodology/);
   assert.match(savedPdf, /isRealEstateReport[\s\S]*Overall Investment Score/);
-  assert.match(savedPdf, /isRealEstateReport[\s\S]*\? "Due-Diligence Report"[\s\S]*: "Investor Ready"/);
+  assert.match(
+    savedPdf,
+    /isRealEstateReport[\s\S]*\? localizePdfPresentationLabel\("Due-Diligence Report", pdfLocale\)[\s\S]*: localizePdfPresentationLabel\("Investor Ready", pdfLocale\)/
+  );
   assert.match(reportUtils, /Real Estate Investment Analysis/);
   assert.match(reportUtils, /assetIdentification: "Asset Identification"/);
 });

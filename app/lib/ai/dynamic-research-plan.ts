@@ -10,7 +10,8 @@ import {
   type DynamicReportPlan,
 } from "./dynamic-report-plan.ts";
 import type { ResearchTask } from "../decision-intelligence/contracts.ts";
-import { expandMarketTaxonomyTerms } from "./market-taxonomy.ts";
+import { expandMarketTaxonomyTerms, getMarketTaxonomyProfile } from "./market-taxonomy.ts";
+import { buildVendorDiscoveryQueryPlan } from "./vendor-discovery.ts";
 
 const researchPriorityValues = ["critical", "high", "standard"] as const;
 const preferredSourceTypeValues = [
@@ -387,6 +388,10 @@ function createMarketIntelligenceSeeds(
   const taxonomyTerms = expandMarketTaxonomyTerms(prompt);
   const categoryQuery = taxonomyTerms.slice(0, 6).join(" OR ");
   const adjacentQuery = taxonomyTerms.slice(6, 12).join(" OR ");
+  const vendorDiscoveryQueryPlan = buildVendorDiscoveryQueryPlan(
+    prompt,
+    getMarketTaxonomyProfile(prompt)
+  );
 
   return [
     task({
@@ -521,6 +526,21 @@ function createMarketIntelligenceSeeds(
       required: false,
       criterionHints: ["competition", "company", "evidence"],
     }),
+    task({
+      id: "market_vendor_directory_discovery",
+      topic: "Vendor directories, reviews, and alternatives discovery",
+      purpose:
+        "Discover additional commercial vendors via review sites, software directories, buyer alternatives comparisons, and industry association listings, dynamically expanded from the market's exact name, category aliases, adjacent categories, buyer terminology, and use-case terminology.",
+      reportSectionId: sectionId(reportPlan, ["major_players", "competitive_landscape", "competition"]),
+      evidenceField: "vendor_discovery",
+      priority: "high",
+      preferredSourceTypes: ["credible_market_data", "company_source", "professional_standard"],
+      queries: vendorDiscoveryQueryPlan.packedQueries.length
+        ? vendorDiscoveryQueryPlan.packedQueries
+        : [q(context, categoryQuery, "top vendors alternatives G2 Capterra reviews pricing")],
+      required: false,
+      criterionHints: ["competition", "market", "evidence"],
+    }),
   ];
 }
 
@@ -561,9 +581,22 @@ function seedTasks(input: ResearchPlanInput) {
     return createRealEstateSeeds(expertiseProfile, reportPlan, extractedFacts);
   }
   const selectedMode = normalizeSelectedAnalysisMode(input.selectedMode);
+  // A public market-research question (e.g. "What are the top 10 AI
+  // accounting software platforms in the United States?") must route to
+  // Market Intelligence even when the domain classifier tags it
+  // "finance"/"accounting" purely from category vocabulary in the prompt --
+  // that classifier has no way to distinguish "analyze this company's
+  // accounting" from "survey the AI accounting software market", and a
+  // public survey can never produce company_financials/industry_benchmarks/
+  // macro_inputs (those describe one specific issuer's filings). Genuine
+  // company-specific analysis (an uploaded balance sheet, a named entity's
+  // financials) does not use ranking/category language like "top N" or
+  // "platforms/vendors/providers/solutions", so widening the market-intent
+  // signal below (rather than reordering domain precedence) keeps the
+  // evidence requirement fully intact for real company-specific requests.
   const isMarketIntelligenceRequest =
     selectedMode === "market" &&
-    (/(?:\bmarket\b|competitors?|competitive landscape|industry landscape|\bTAM\b|\bSAM\b|\bSOM\b|\bCAGR\b)/i.test(
+    (/(?:\bmarket\b|competitors?|competitive landscape|industry landscape|\bTAM\b|\bSAM\b|\bSOM\b|\bCAGR\b|\btop\s+\d+\b|\bleading\b|\bbest\b|platforms?|\bvendors?\b|\bproviders?\b|\bsolutions?\b|software\s+(?:companies|providers|vendors)|companies\s+in\b)/i.test(
       input.prompt || ""
     ) ||
       reportPlan.sections.some((section) =>
@@ -764,6 +797,27 @@ export function dynamicResearchPlanToDecisionTasks(
     ),
     jurisdiction: task.jurisdiction,
   }));
+}
+
+// These fields describe one specific company's filings, benchmarks, and
+// macro assumptions. A Market Intelligence request is a public market
+// survey with no single company to source them from, regardless of
+// whether the domain classifier (or an AI-generated plan) mislabels the
+// request "finance"/"accounting" from category vocabulary alone.
+export const MARKET_ONLY_FORBIDDEN_EVIDENCE_FIELDS = new Set([
+  "company_financials",
+  "industry_benchmarks",
+  "macro_inputs",
+]);
+
+export function filterMarketOnlyForbiddenTasks<T extends { field: string }>(
+  tasks: T[],
+  selectedMode: unknown
+): T[] {
+  if (normalizeSelectedAnalysisMode(selectedMode) !== "market") return tasks;
+  return tasks.filter(
+    (task) => !MARKET_ONLY_FORBIDDEN_EVIDENCE_FIELDS.has(task.field)
+  );
 }
 
 export function formatDynamicResearchPlanForContext(

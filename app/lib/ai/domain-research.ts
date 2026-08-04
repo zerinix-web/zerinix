@@ -55,6 +55,7 @@ import {
 import {
   createDynamicResearchPlanFallback,
   dynamicResearchPlanToDecisionTasks,
+  filterMarketOnlyForbiddenTasks,
   resolveDynamicResearchPlan,
   type DynamicResearchPlan,
 } from "./dynamic-research-plan.ts";
@@ -2191,7 +2192,14 @@ async function runDomainAwareResearchInternal({
     clarificationAnswers,
     availableEvidence,
   });
-  const dynamicTasks = dynamicResearchPlanToDecisionTasks(dynamicResearchPlan);
+  // A generic Market Intelligence request never has forbidden
+  // company-specific fields injected, whether they came from the
+  // deterministic fallback or a validated AI-generated plan (see
+  // filterMarketOnlyForbiddenTasks in dynamic-research-plan.ts).
+  const dynamicTasks = filterMarketOnlyForbiddenTasks(
+    dynamicResearchPlanToDecisionTasks(dynamicResearchPlan),
+    selectedMode
+  );
   const researchPlan = {
     ...legacyResearchPlan,
     plan: dynamicTasks.map((task) => ({

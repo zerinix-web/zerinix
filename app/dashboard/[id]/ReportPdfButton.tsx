@@ -58,6 +58,7 @@ import {
 } from "@/app/lib/report-engine/legal-report-rendering";
 import {
   repairReportLanguageSections,
+  resolveMarketPdfLanguage,
   resolveReportLanguage,
   validateReportLanguageConsistency,
 } from "@/app/lib/report-language";
@@ -72,6 +73,18 @@ function isFailedReport(report: DashboardReport) {
     report.sections.length === 0
   );
 }
+
+function isMarketIntelligenceDashboardReport(report: DashboardReport) {
+  return report.type === "Market Analysis";
+}
+
+const pdfLocaleToBcp47: Record<PdfLocale, string> = {
+  en: "en-US",
+  tr: "tr-TR",
+  de: "de-DE",
+  fr: "fr-FR",
+  es: "es-ES",
+};
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
@@ -1957,12 +1970,23 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         [report.title, report.type, ...normalizedSectionsBeforeLanguageRepair.map((section) => `${section.title}\n${section.content}`)]
           .filter(Boolean)
           .join("\n\n");
+      // Market Intelligence PDFs trust the report's own saved language
+      // (the value that actually governed generation) over re-detecting
+      // from prompt text or browser locale, so a correctly-generated
+      // report can never get a mismatched PDF. Every other report type
+      // keeps the existing resolution order unchanged.
       const pdfLocale = resolvePdfPresentationLocale(
-        resolveReportLanguage({
-          explicitLanguage: window.localStorage.getItem("zerinix_report_language"),
-          requestText: report.prompt,
-          uiLanguage: report.metadata?.reportLanguage,
-        }),
+        isMarketIntelligenceDashboardReport(report)
+          ? resolveMarketPdfLanguage({
+              explicitLanguage: window.localStorage.getItem("zerinix_report_language"),
+              savedReportLanguage: report.metadata?.reportLanguage,
+              requestText: report.prompt,
+            })
+          : resolveReportLanguage({
+              explicitLanguage: window.localStorage.getItem("zerinix_report_language"),
+              requestText: report.prompt,
+              uiLanguage: report.metadata?.reportLanguage,
+            }),
         pdfLanguageSource
       );
       const languageRepair = repairReportLanguageSections(
@@ -2182,7 +2206,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         pdf.rect(margin + 12, previewY + 4, 1.2, previewHeight - 8, "F");
         pdf.setFontSize(6.8);
         pdf.setTextColor("#99f6e4");
-        pdf.text("EXECUTIVE DECISION SNAPSHOT", margin + 18, previewY + 7.5);
+        pdf.text(localizePdfPresentationLabel("Executive Decision Snapshot", pdfLocale).toUpperCase(), margin + 18, previewY + 7.5);
         pdf.setFontSize(8.4);
         pdf.setTextColor("#e4e4e7");
         pdf.text(previewLines, margin + 18, previewY + 14.7, {
@@ -2193,12 +2217,12 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         const tagY = previewY + previewHeight + 5;
         drawTag(
           isRealEstateReport
-            ? "Due-Diligence Report"
+            ? localizePdfPresentationLabel("Due-Diligence Report", pdfLocale)
             : isLegalReport
               ? pdfLocale === "tr"
                 ? "Hukuki Analiz"
                 : "Legal Analysis"
-              : "Investor Ready",
+              : localizePdfPresentationLabel("Investor Ready", pdfLocale),
           margin + 12,
           tagY,
           isLegalReport ? 42 : 36
@@ -2283,11 +2307,11 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
               ],
             ]
           : [
-              ["Confidence Score", executiveSnapshot.confidence],
-              ["Financial Quality", executiveSnapshot.financialQuality],
-              ["Report Quality", executiveSnapshot.reportQuality],
-              ["Main Risk", executiveSnapshot.mainRisk],
-              ["Next Action", executiveSnapshot.nextAction],
+              [localizePdfPresentationLabel("Confidence Score", pdfLocale), executiveSnapshot.confidence],
+              [localizePdfPresentationLabel("Financial Quality", pdfLocale), executiveSnapshot.financialQuality],
+              [localizePdfPresentationLabel("Report Quality", pdfLocale), executiveSnapshot.reportQuality],
+              [localizePdfPresentationLabel("Main Risk", pdfLocale), executiveSnapshot.mainRisk],
+              [localizePdfPresentationLabel("Next Action", pdfLocale), executiveSnapshot.nextAction],
               [localizePdfPresentationLabel("Report Type", pdfLocale), localizePdfPresentationLabel(report.type, pdfLocale)],
             ]).map(([label, value]) => {
           const labelLines = wrapPdfText(label.toUpperCase(), cardWidth - 8).slice(0, 2);
@@ -2478,8 +2502,8 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
       const meta = `${localizePdfPresentationLabel(report.type, pdfLocale)} - ${
         report.createdAt
-          ? new Date(report.createdAt).toLocaleDateString("en-US")
-          : "No date"
+          ? new Date(report.createdAt).toLocaleDateString(pdfLocaleToBcp47[pdfLocale])
+          : localizePdfPresentationLabel("No date", pdfLocale)
       }`;
       pdf.setFontSize(8.5);
       pdf.setTextColor("#a1a1aa");
@@ -2487,19 +2511,19 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       y += 9;
 
       const summaryCards = [
-        `${pdfSections.length} Sections`,
+        `${pdfSections.length} ${localizePdfPresentationLabel("Sections", pdfLocale)}`,
         isLegalReport
           ? pdfLocale === "tr"
             ? "Hukuki Analiz"
             : "Legal Analysis"
-          : report.type,
+          : localizePdfPresentationLabel(report.type, pdfLocale),
         isRealEstateReport
-          ? "Due-Diligence Report"
+          ? localizePdfPresentationLabel("Due-Diligence Report", pdfLocale)
           : isLegalReport
             ? pdfLocale === "tr"
               ? "Karar Desteği"
               : "Decision Support"
-            : "Investor Ready",
+            : localizePdfPresentationLabel("Investor Ready", pdfLocale),
       ].map((label) => wrapPdfText(label, (contentWidth - 8) / 3 - 8).slice(0, 2));
       const summaryCardHeight = Math.max(
         12,

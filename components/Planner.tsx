@@ -99,8 +99,10 @@ import {
   getReportLanguageCode,
   getResponseLanguage,
   repairReportLanguageSections,
+  resolveMarketIntelligenceLanguage,
   resolveReportLanguage,
   validateReportLanguageConsistency,
+  type ReportLanguageCode,
 } from "@/app/lib/report-language";
 import {
   cleanPdfLegacyValidationIntelligenceContent,
@@ -348,6 +350,7 @@ type RegenerationContext = {
     | "Strategic Report";
   workspaceId: string;
   prompt: string;
+  reportLanguage?: string;
 };
 
 type LastRequest = {
@@ -366,6 +369,7 @@ type PlannerProps = {
   initialWorkspaceId?: string;
   initialReport?: InitialReport | null;
   regenerationContext?: RegenerationContext | null;
+  preferredLanguage?: string;
 };
 
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 60_000;
@@ -870,7 +874,24 @@ function getPlannerUiLanguage() {
     : document.cookie.match(/(?:^|;\s*)zerinix_locale_manual=([^;]+)/)?.[1] || "";
 }
 
-function resolvePlannerReportLanguage(value: string): ResponseLanguage {
+function resolvePlannerReportLanguage(
+  value: string,
+  mode?: ChatMode,
+  preferredLanguage?: string
+): ResponseLanguage {
+  if (mode === "market") {
+    // Market Intelligence never defers to site/browser locale -- a short
+    // category prompt has no reliable language signal either way, and
+    // falling back to locale there is what produces mismatched loading
+    // copy for an English prompt on a Turkish-locale browser. Preferred
+    // language (Settings) is consulted with the same priority the server
+    // uses, so the loading-state language matches the final resolution
+    // immediately instead of only after the server responds.
+    return getResponseLanguage(resolveMarketIntelligenceLanguage({
+      explicitLanguage: getExplicitReportLanguageSelection() || preferredLanguage,
+      requestText: value,
+    }));
+  }
   const browserLanguage = typeof navigator === "undefined" ? "" : navigator.language;
   return getResponseLanguage(resolveReportLanguage({
     explicitLanguage: getExplicitReportLanguageSelection(),
@@ -900,17 +921,18 @@ function getLanguageCopy(language: ResponseLanguage) {
         "Lütfen planlamak istediğiniz iş fikrini girin. Örneğin: lüks otel markası, AI hukuk asistanı veya premium özel hastane zinciri.",
       marketClarification:
         "Lütfen analiz edilmesini istediğiniz iş fikrini veya sektörü girin. Örneğin: lüks otel markası, elektrikli yat şirketi veya EV batarya üreticisi.",
+      preparingSubtitle: "Raporunuz hazırlanıyor…",
     };
   }
 
   if (language === "German") {
-    return { planTitle: "Geschäftsplan", marketTitle: "Marktintelligenzbericht", realEstateTitle: "Immobilien-Investitionsanalyse", preparingPlan: "## Geschäftsplan\n\nDie ersten Abschnitte werden erstellt...", preparingMarket: "## Marktintelligenzbericht\n\nDie Marktrecherche wird erstellt...", preparingRealEstate: "## Immobilien-Investitionsanalyse\n\nNachweise und Due Diligence werden erstellt...", waitingSection: "Dieser Abschnitt wartet auf die Analyse.", sectionFallback: "Für diesen Abschnitt liegt kein Inhalt vor.", genericError: "Ein Fehler ist aufgetreten.", retryError: "Die Berichtsanfrage wurde ohne verwertbare Antwort beendet.", marketError: "Bei der Marktanalyse ist ein Fehler aufgetreten.", marketRetryError: "Bei der Marktanalyse ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.", planClarification: "Bitte beschreiben Sie die zu analysierende Geschäftsidee.", marketClarification: "Bitte beschreiben Sie die zu analysierende Geschäftsidee oder Branche." };
+    return { planTitle: "Geschäftsplan", marketTitle: "Marktintelligenzbericht", realEstateTitle: "Immobilien-Investitionsanalyse", preparingPlan: "## Geschäftsplan\n\nDie ersten Abschnitte werden erstellt...", preparingMarket: "## Marktintelligenzbericht\n\nDie Marktrecherche wird erstellt...", preparingRealEstate: "## Immobilien-Investitionsanalyse\n\nNachweise und Due Diligence werden erstellt...", waitingSection: "Dieser Abschnitt wartet auf die Analyse.", sectionFallback: "Für diesen Abschnitt liegt kein Inhalt vor.", genericError: "Ein Fehler ist aufgetreten.", retryError: "Die Berichtsanfrage wurde ohne verwertbare Antwort beendet.", marketError: "Bei der Marktanalyse ist ein Fehler aufgetreten.", marketRetryError: "Bei der Marktanalyse ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.", planClarification: "Bitte beschreiben Sie die zu analysierende Geschäftsidee.", marketClarification: "Bitte beschreiben Sie die zu analysierende Geschäftsidee oder Branche.", preparingSubtitle: "Ihr Bericht wird vorbereitet…" };
   }
   if (language === "French") {
-    return { planTitle: "Plan d'affaires", marketTitle: "Rapport d'intelligence de marché", realEstateTitle: "Analyse d'investissement immobilier", preparingPlan: "## Plan d'affaires\n\nPréparation des premières sections...", preparingMarket: "## Rapport d'intelligence de marché\n\nPréparation de la recherche de marché...", preparingRealEstate: "## Analyse d'investissement immobilier\n\nPréparation des preuves et des diligences...", waitingSection: "Cette section attend l'analyse.", sectionFallback: "Aucun contenu n'a été produit pour cette section.", genericError: "Une erreur s'est produite.", retryError: "La demande de rapport a échoué sans réponse exploitable.", marketError: "Une erreur s'est produite pendant l'analyse de marché.", marketRetryError: "Une erreur s'est produite pendant l'analyse de marché. Veuillez réessayer.", planClarification: "Veuillez décrire l'idée d'entreprise à analyser.", marketClarification: "Veuillez décrire l'idée d'entreprise ou le secteur à analyser." };
+    return { planTitle: "Plan d'affaires", marketTitle: "Rapport d'intelligence de marché", realEstateTitle: "Analyse d'investissement immobilier", preparingPlan: "## Plan d'affaires\n\nPréparation des premières sections...", preparingMarket: "## Rapport d'intelligence de marché\n\nPréparation de la recherche de marché...", preparingRealEstate: "## Analyse d'investissement immobilier\n\nPréparation des preuves et des diligences...", waitingSection: "Cette section attend l'analyse.", sectionFallback: "Aucun contenu n'a été produit pour cette section.", genericError: "Une erreur s'est produite.", retryError: "La demande de rapport a échoué sans réponse exploitable.", marketError: "Une erreur s'est produite pendant l'analyse de marché.", marketRetryError: "Une erreur s'est produite pendant l'analyse de marché. Veuillez réessayer.", planClarification: "Veuillez décrire l'idée d'entreprise à analyser.", marketClarification: "Veuillez décrire l'idée d'entreprise ou le secteur à analyser.", preparingSubtitle: "Préparation de votre rapport…" };
   }
   if (language === "Spanish") {
-    return { planTitle: "Plan de negocio", marketTitle: "Informe de inteligencia de mercado", realEstateTitle: "Análisis de inversión inmobiliaria", preparingPlan: "## Plan de negocio\n\nPreparando las primeras secciones...", preparingMarket: "## Informe de inteligencia de mercado\n\nPreparando la investigación de mercado...", preparingRealEstate: "## Análisis de inversión inmobiliaria\n\nPreparando evidencia y diligencia debida...", waitingSection: "Esta sección está esperando el análisis.", sectionFallback: "No se generó contenido para esta sección.", genericError: "Se produjo un error.", retryError: "La solicitud del informe finalizó sin una respuesta utilizable.", marketError: "Se produjo un error durante el análisis de mercado.", marketRetryError: "Se produjo un error durante el análisis de mercado. Inténtelo de nuevo.", planClarification: "Describa la idea de negocio que desea analizar.", marketClarification: "Describa la idea de negocio o el sector que desea analizar." };
+    return { planTitle: "Plan de negocio", marketTitle: "Informe de inteligencia de mercado", realEstateTitle: "Análisis de inversión inmobiliaria", preparingPlan: "## Plan de negocio\n\nPreparando las primeras secciones...", preparingMarket: "## Informe de inteligencia de mercado\n\nPreparando la investigación de mercado...", preparingRealEstate: "## Análisis de inversión inmobiliaria\n\nPreparando evidencia y diligencia debida...", waitingSection: "Esta sección está esperando el análisis.", sectionFallback: "No se generó contenido para esta sección.", genericError: "Se produjo un error.", retryError: "La solicitud del informe finalizó sin una respuesta utilizable.", marketError: "Se produjo un error durante el análisis de mercado.", marketRetryError: "Se produjo un error durante el análisis de mercado. Inténtelo de nuevo.", planClarification: "Describa la idea de negocio que desea analizar.", marketClarification: "Describa la idea de negocio o el sector que desea analizar.", preparingSubtitle: "Preparando su informe…" };
   }
 
   return {
@@ -921,6 +943,7 @@ function getLanguageCopy(language: ResponseLanguage) {
     preparingMarket: "## Market Intelligence Report\n\nPreparing live market research...",
     preparingRealEstate:
       "## Real Estate Investment Analysis\n\nPreparing document evidence and due diligence...",
+    preparingSubtitle: "Preparing your report…",
     waitingSection: "This section is waiting for AI output.",
     sectionFallback: "The report service returned no content for this section.",
     genericError: "Something went wrong.",
@@ -1021,6 +1044,12 @@ function getInitialLastRequest({
     return {
       mode: regenerationContext.reportType === "Market Analysis" ? "market" : "plan",
       prompt: regenerationPrompt,
+      // Regeneration must reproduce the original report's language exactly,
+      // not re-detect it -- prompt-only re-detection can land on a
+      // different language than the one the saved report actually used.
+      language: regenerationContext.reportLanguage
+        ? getResponseLanguage(getReportLanguageCode(regenerationContext.reportLanguage as ReportLanguageCode))
+        : undefined,
     };
   }
 
@@ -7053,15 +7082,17 @@ const ReportPanel = memo(function ReportPanel({
 
 function ReportGenerationShell({
   title,
+  subtitle,
 }: {
   title: string;
+  subtitle?: string;
 }) {
   return (
     <section className="flex min-h-64 items-center justify-center rounded-[2rem] border border-white/10 bg-zinc-950/75 p-8 shadow-2xl shadow-black/50 backdrop-blur-2xl">
       <div className="text-center">
         <Loader2 className="mx-auto h-6 w-6 animate-spin text-teal-200" />
         <h2 className="mt-4 text-xl font-semibold text-white">{title}</h2>
-        <p className="mt-2 text-sm text-zinc-400">Preparing your report…</p>
+        <p className="mt-2 text-sm text-zinc-400">{subtitle || "Preparing your report…"}</p>
       </div>
     </section>
   );
@@ -7612,6 +7643,7 @@ export default function Planner({
   initialWorkspaceId = "",
   initialReport = null,
   regenerationContext = null,
+  preferredLanguage = "",
 }: PlannerProps) {
   const restoredReportMode =
     initialReport?.status?.toLowerCase() === "completed"
@@ -9166,7 +9198,15 @@ export default function Planner({
     setWorkflowCompletedSteps(0);
     const reportAttachments =
       attachmentOverride?.length ? attachmentOverride : attachments;
-    const reportLanguage = resolvePlannerReportLanguage(submittedPrompt);
+    // Regenerating the same report must reproduce its original language
+    // exactly, not re-detect it -- re-detection can land on a different
+    // language than the one the saved report actually used.
+    const isRegeneratingSavedReport =
+      Boolean(regenerationContext?.reportLanguage) &&
+      regenerationContext?.prompt.trim() === submittedPrompt;
+    const reportLanguage = isRegeneratingSavedReport
+      ? getResponseLanguage(getReportLanguageCode(regenerationContext!.reportLanguage as ReportLanguageCode))
+      : resolvePlannerReportLanguage(submittedPrompt, requestedMode, preferredLanguage);
     setLastRequest({
       mode: requestedMode,
       prompt: submittedPrompt,
@@ -9852,7 +9892,10 @@ export default function Planner({
     isReportWorking || planReport || marketReport || result ? (
       <>
         {isReportWorking ? (
-          <ReportGenerationShell title={currentReportTitle} />
+          <ReportGenerationShell
+            title={currentReportTitle}
+            subtitle={activeReportMode === "market" ? currentLanguageCopy.preparingSubtitle : undefined}
+          />
         ) : (
           <ReportPanel
             reportData={planReport || marketReport}
@@ -10101,7 +10144,10 @@ export default function Planner({
               />
 
               {isReportWorking ? (
-                <ReportGenerationShell title={currentReportTitle} />
+                <ReportGenerationShell
+                  title={currentReportTitle}
+                  subtitle={activeReportMode === "market" ? currentLanguageCopy.preparingSubtitle : undefined}
+                />
               ) : (planReport || marketReport || result) ? (
                 <ReportPanel
                   reportData={planReport || marketReport}

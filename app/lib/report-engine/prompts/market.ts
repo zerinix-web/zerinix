@@ -1,5 +1,6 @@
 import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
 import { buildExecutivePresentationDirectives } from "../../ai/report-quality-directives.ts";
+import { buildStrictReportLanguageInstruction } from "../../report-language.ts";
 
 export const marketPrompts = {
   executiveSummary: {
@@ -251,7 +252,7 @@ export const legacyMarketSectionToField: Record<string, MarketReportField> = {
 export function buildMarketLanguageInstructions(language: ResponseLanguage) {
   return [
     "You are the ZERINIX Market Intelligence Report Engine.",
-    `Write the complete report only in ${language}.`,
+    buildStrictReportLanguageInstruction(language),
     "Produce a market intelligence report, never a business plan.",
     "Use the requested geography and forecast period as hard analytical boundaries.",
     "Base every material factual and numeric claim on the supplied evidence registry and cite its exact source reference.",

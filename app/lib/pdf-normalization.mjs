@@ -172,12 +172,17 @@ const pdfPresentationLabelPairs = [
     ["Top 3 Risks", "İlk 3 Risk"],
     ["AI Ready", "AI Hazır"],
     ["Investor Ready", "Yatırımcıya Hazır"],
+    ["Executive Decision Snapshot", "Yönetici Karar Özeti"],
+    ["Sections", "Bölüm"],
+    ["No date", "Tarih yok"],
     ["Investment Decision Snapshot", "Yatırım Kararı Özeti"],
     ["AI Investment Score", "AI Yatırım Skoru"],
     ["Market Signal", "Pazar Sinyali"],
     ["Risk Posture", "Risk Duruşu"],
     ["Decision", "Karar"],
     ["Confidence", "Güven"],
+    ["Confidence Score", "Güven Skoru"],
+    ["Main Risk", "Ana Risk"],
     ["Decision Confidence", "Karar Güveni"],
     ["AI Decision Confidence", "AI Karar Güveni"],
     ["Validation Score", "Doğrulama Skoru"],
@@ -353,9 +358,9 @@ export function resolvePdfPresentationLocale(explicitLanguage, value = "") {
 }
 
 const additionalPdfLabels = {
-  de: new Map([["executive summary", "Zusammenfassung"], ["decision", "Entscheidung"], ["confidence score", "Konfidenzwert"], ["main risk", "Hauptrisiko"], ["next action", "Nächster Schritt"], ["legal assessment", "Rechtliche Bewertung"], ["risks", "Risiken"], ["recommendations", "Empfehlungen"], ["evidence", "Nachweise"], ["sources", "Quellen"], ["warnings", "Warnhinweise"], ["missing information", "Fehlende Informationen"], ["access date", "Zugriffsdatum"], ["reliability", "Verlässlichkeit"], ["page", "Seite"]]),
-  fr: new Map([["executive summary", "Synthèse exécutive"], ["decision", "Décision"], ["confidence score", "Indice de confiance"], ["main risk", "Risque principal"], ["next action", "Prochaine action"], ["legal assessment", "Évaluation juridique"], ["risks", "Risques"], ["recommendations", "Recommandations"], ["evidence", "Éléments probants"], ["sources", "Sources"], ["warnings", "Avertissements"], ["missing information", "Informations manquantes"], ["access date", "Date de consultation"], ["reliability", "Fiabilité"], ["page", "Page"]]),
-  es: new Map([["executive summary", "Resumen ejecutivo"], ["decision", "Decisión"], ["confidence score", "Índice de confianza"], ["main risk", "Riesgo principal"], ["next action", "Siguiente acción"], ["legal assessment", "Evaluación jurídica"], ["risks", "Riesgos"], ["recommendations", "Recomendaciones"], ["evidence", "Evidencia"], ["sources", "Fuentes"], ["warnings", "Advertencias"], ["missing information", "Información faltante"], ["access date", "Fecha de acceso"], ["reliability", "Fiabilidad"], ["page", "Página"]]),
+  de: new Map([["zerinix report", "ZERINIX BERICHT"], ["executive summary", "Zusammenfassung"], ["decision", "Entscheidung"], ["confidence score", "Konfidenzwert"], ["main risk", "Hauptrisiko"], ["next action", "Nächster Schritt"], ["legal assessment", "Rechtliche Bewertung"], ["risks", "Risiken"], ["recommendations", "Empfehlungen"], ["evidence", "Nachweise"], ["sources", "Quellen"], ["warnings", "Warnhinweise"], ["missing information", "Fehlende Informationen"], ["access date", "Zugriffsdatum"], ["reliability", "Verlässlichkeit"], ["page", "Seite"], ["financial quality", "Finanzielle Qualität"], ["report quality", "Berichtsqualität"], ["report type", "Berichtstyp"], ["market analysis", "Marktanalyse"], ["investor ready", "Investorenreif"], ["executive decision snapshot", "Zusammenfassung der Entscheidung"], ["sections", "Abschnitte"], ["no date", "Kein Datum"], ["table of contents", "Inhaltsverzeichnis"], ["click a section title to jump directly to that page.", "Klicken Sie auf einen Abschnittstitel, um direkt zu dieser Seite zu springen."]]),
+  fr: new Map([["zerinix report", "RAPPORT ZERINIX"], ["executive summary", "Synthèse exécutive"], ["decision", "Décision"], ["confidence score", "Indice de confiance"], ["main risk", "Risque principal"], ["next action", "Prochaine action"], ["legal assessment", "Évaluation juridique"], ["risks", "Risques"], ["recommendations", "Recommandations"], ["evidence", "Éléments probants"], ["sources", "Sources"], ["warnings", "Avertissements"], ["missing information", "Informations manquantes"], ["access date", "Date de consultation"], ["reliability", "Fiabilité"], ["page", "Page"], ["financial quality", "Qualité financière"], ["report quality", "Qualité du rapport"], ["report type", "Type de rapport"], ["market analysis", "Analyse de marché"], ["investor ready", "Prêt pour les investisseurs"], ["executive decision snapshot", "Aperçu de la décision exécutive"], ["sections", "Sections"], ["no date", "Aucune date"], ["table of contents", "Table des matières"], ["click a section title to jump directly to that page.", "Cliquez sur le titre d'une section pour accéder directement à cette page."]]),
+  es: new Map([["zerinix report", "INFORME ZERINIX"], ["executive summary", "Resumen ejecutivo"], ["decision", "Decisión"], ["confidence score", "Índice de confianza"], ["main risk", "Riesgo principal"], ["next action", "Siguiente acción"], ["legal assessment", "Evaluación jurídica"], ["risks", "Riesgos"], ["recommendations", "Recomendaciones"], ["evidence", "Evidencia"], ["sources", "Fuentes"], ["warnings", "Advertencias"], ["missing information", "Información faltante"], ["access date", "Fecha de acceso"], ["reliability", "Fiabilidad"], ["page", "Página"], ["financial quality", "Calidad financiera"], ["report quality", "Calidad del informe"], ["report type", "Tipo de informe"], ["market analysis", "Análisis de mercado"], ["investor ready", "Listo para inversores"], ["executive decision snapshot", "Resumen ejecutivo de la decisión"], ["sections", "Secciones"], ["no date", "Sin fecha"], ["table of contents", "Índice"], ["click a section title to jump directly to that page.", "Haga clic en el título de una sección para ir directamente a esa página."]]),
 };
 
 export function localizePdfPresentationLabel(value = "", locale = "en") {
