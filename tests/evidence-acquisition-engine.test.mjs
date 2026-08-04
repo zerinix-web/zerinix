@@ -324,6 +324,10 @@ test("does not touch report generation, PDF, UI, billing, authentication, or any
       file === "decision-engine.ts" ||
       file === "evidence-quality-scoring.ts" ||
       file === "live-research-engine.ts" ||
+      // ZERINIX Business Intelligence Orchestrator v1 legitimately
+      // type-imports EvidenceAcquisitionResult to pass it through to
+      // Live Research Engine.
+      file === "business-intelligence-orchestrator.ts" ||
       !file.endsWith(".ts")
     ) {
       continue;

@@ -314,7 +314,13 @@ test("does not modify report generation, PDF generation, billing, or UI, and is 
   const aiDir = new URL("../app/lib/ai/", import.meta.url);
   const files = await readdir(aiDir);
   for (const file of files) {
-    if (file === "confidence-engine.ts" || !file.endsWith(".ts")) {
+    if (
+      file === "confidence-engine.ts" ||
+      // ZERINIX Business Intelligence Orchestrator v1 legitimately
+      // coordinates Confidence Engine as one of its 8 stages.
+      file === "business-intelligence-orchestrator.ts" ||
+      !file.endsWith(".ts")
+    ) {
       continue;
     }
     const contents = await readFile(new URL(file, aiDir), "utf8");

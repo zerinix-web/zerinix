@@ -456,6 +456,9 @@ test("does not modify report generation, PDF generation, billing, or UI, and is 
       file === "conflict-detection-engine.ts" ||
       file === "evidence-corroboration-engine.ts" ||
       file === "live-research-engine.ts" ||
+      // ZERINIX Business Intelligence Orchestrator v1 legitimately
+      // coordinates Evidence Quality Scoring as one of its 8 stages.
+      file === "business-intelligence-orchestrator.ts" ||
       !file.endsWith(".ts")
     ) {
       continue;
