@@ -1,17 +1,31 @@
 import { z } from "zod";
 import type { DocumentDomain, UniversalDocumentIntelligence } from "./universal-document-intelligence.ts";
 import type { DecisionPlan } from "./intelligence-router.ts";
-import type { ExecutiveDecisionBrief, RecommendationStatus } from "./executive-decision-brief.ts";
 
 // ZERINIX Expert Reasoning Engine v1. This is a reasoning layer for the
 // existing supported business intelligence contexts only -- it does not
 // turn ZERINIX into a general-purpose chatbot or a universal specialist
 // platform, and it never adds a legal, medical, engineering, or HR
 // reasoning path. Every input it accepts is an already-structured object
-// from an earlier layer (document intelligence, decision plan, executive
-// decision brief) or an already-extracted evidence list; this engine
-// never re-parses raw documents and never invents a fact that is not
-// already present in one of those inputs.
+// from an earlier layer (document intelligence, decision plan) or an
+// already-extracted evidence list; this engine never re-parses raw
+// documents and never invents a fact that is not already present in one
+// of those inputs.
+//
+// This module owns RecommendationStatus (rather than importing it from
+// executive-decision-brief.ts) so the dependency runs one way only:
+// executive-decision-brief.ts consumes this engine's output, and this
+// engine never needs to import anything from executive-decision-brief.ts.
+
+export const recommendationStatusValues = [
+  "proceed",
+  "proceed_with_conditions",
+  "wait",
+  "reject",
+  "insufficient_evidence",
+] as const;
+
+export type RecommendationStatus = (typeof recommendationStatusValues)[number];
 
 export const reasoningDomainValues = [
   "business_intelligence",
@@ -66,6 +80,7 @@ export const expertReasoningResultSchema = z
     strategicOptions: z.array(strategicOptionSchema).max(6),
     recommendedOption: strategicOptionSchema.nullable(),
     rejectedOptions: z.array(strategicOptionSchema).max(6),
+    recommendationStatus: z.enum(recommendationStatusValues),
     evidenceGaps: z.array(shortString(400)).max(30),
     confidence: z.number().min(0).max(1),
     confidenceExplanation: shortString(500),
@@ -81,7 +96,6 @@ export type ExpertReasoningInput = {
   prompt?: string;
   documentIntelligence?: UniversalDocumentIntelligence;
   decisionPlan?: DecisionPlan;
-  executiveDecisionBrief?: ExecutiveDecisionBrief;
   marketResearchEvidence?: readonly string[];
   businessPlanEvidence?: readonly string[];
   financialEvidence?: readonly string[];
@@ -232,9 +246,7 @@ const REASONING_SECTION_PATTERNS = {
   investment: /\b(invest(?:ment)?|valuation|funding|equity|venture capital|return on investment|\broi\b)\b/i,
 } as const;
 
-function buildAssumptions(brief: ExecutiveDecisionBrief | undefined, hasNumbers: boolean) {
-  if (brief) return [...brief.assumptions];
-
+function buildAssumptions(hasNumbers: boolean) {
   const assumptions = [
     "Facts and figures presented in the supplied evidence are assumed accurate as stated; no independent, external verification was performed by this engine.",
     "This reasoning assumes the supplied evidence still reflects the current state of the decision being evaluated.",
@@ -339,7 +351,6 @@ export function runExpertReasoningEngine(input: ExpertReasoningInput): ExpertRea
     prompt = "",
     documentIntelligence,
     decisionPlan,
-    executiveDecisionBrief,
     marketResearchEvidence = [],
     businessPlanEvidence = [],
     financialEvidence = [],
@@ -349,37 +360,33 @@ export function runExpertReasoningEngine(input: ExpertReasoningInput): ExpertRea
   const evidenceTrace: string[] = [];
 
   const verifiedFacts = unique([
-    ...(executiveDecisionBrief?.verifiedEvidence || documentIntelligence?.evidence || []),
+    ...(documentIntelligence?.evidence || []),
     ...marketResearchEvidence,
     ...businessPlanEvidence,
     ...financialEvidence,
     ...userProvidedFacts,
   ]);
   evidenceTrace.push(
-    `verifiedFacts combines ${executiveDecisionBrief ? "executiveDecisionBrief.verifiedEvidence" : "documentIntelligence.evidence"} (${(executiveDecisionBrief?.verifiedEvidence || documentIntelligence?.evidence || []).length} item(s)), marketResearchEvidence (${marketResearchEvidence.length}), businessPlanEvidence (${businessPlanEvidence.length}), financialEvidence (${financialEvidence.length}), and userProvidedFacts (${userProvidedFacts.length}).`
+    `verifiedFacts combines documentIntelligence.evidence (${(documentIntelligence?.evidence || []).length} item(s)), marketResearchEvidence (${marketResearchEvidence.length}), businessPlanEvidence (${businessPlanEvidence.length}), financialEvidence (${financialEvidence.length}), and userProvidedFacts (${userProvidedFacts.length}).`
   );
 
-  const directionalSignals = unique([
-    ...(executiveDecisionBrief?.directionalSignals ||
-      (documentIntelligence
-        ? [...documentIntelligence.decisions, ...documentIntelligence.obligations]
-        : [])),
-  ]);
+  const directionalSignals = unique(
+    documentIntelligence
+      ? [...documentIntelligence.decisions, ...documentIntelligence.obligations]
+      : []
+  );
   evidenceTrace.push(
-    `directionalSignals is sourced from ${executiveDecisionBrief ? "executiveDecisionBrief.directionalSignals" : "documentIntelligence.decisions/obligations"} (${directionalSignals.length} item(s)).`
+    `directionalSignals is sourced from documentIntelligence.decisions/obligations (${directionalSignals.length} item(s)).`
   );
 
-  const keyRisks = unique([
-    ...(executiveDecisionBrief?.keyRisks || documentIntelligence?.risks || []),
-  ]);
+  const keyRisks = unique([...(documentIntelligence?.risks || [])]);
 
   const evidenceGaps = unique([
-    ...(executiveDecisionBrief?.missingCriticalEvidence || []),
     ...(decisionPlan?.missingEvidence || []),
     ...(documentIntelligence?.missingInformation || []),
   ]);
   evidenceTrace.push(
-    `evidenceGaps combines executiveDecisionBrief.missingCriticalEvidence (${(executiveDecisionBrief?.missingCriticalEvidence || []).length}), decisionPlan.missingEvidence (${(decisionPlan?.missingEvidence || []).length}), and documentIntelligence.missingInformation (${(documentIntelligence?.missingInformation || []).length}).`
+    `evidenceGaps combines decisionPlan.missingEvidence (${(decisionPlan?.missingEvidence || []).length}) and documentIntelligence.missingInformation (${(documentIntelligence?.missingInformation || []).length}).`
   );
 
   const combinedEvidenceText = [
@@ -401,7 +408,7 @@ export function runExpertReasoningEngine(input: ExpertReasoningInput): ExpertRea
   if (detectedBusinessContext === "unsupported") {
     return {
       detectedBusinessContext,
-      decisionObjective: decisionPlan?.detectedIntent || executiveDecisionBrief?.decisionQuestion || "",
+      decisionObjective: decisionPlan?.detectedIntent || "",
       verifiedFacts: [],
       directionalSignals: [],
       assumptions: [],
@@ -417,6 +424,7 @@ export function runExpertReasoningEngine(input: ExpertReasoningInput): ExpertRea
       strategicOptions: [],
       recommendedOption: null,
       rejectedOptions: [],
+      recommendationStatus: "insufficient_evidence",
       evidenceGaps: [],
       confidence: 0,
       confidenceExplanation:
@@ -474,37 +482,27 @@ export function runExpertReasoningEngine(input: ExpertReasoningInput): ExpertRea
     .slice(0, 10)
     .map((gap) => `What verifiable evidence exists for: ${gap}`);
 
-  const confidence = executiveDecisionBrief?.decisionConfidence ?? decisionPlan?.confidence ?? 0;
+  const confidence = decisionPlan?.confidence ?? 0;
   evidenceTrace.push(
-    executiveDecisionBrief
-      ? `confidence (${confidence}) is a direct pass-through of executiveDecisionBrief.decisionConfidence.`
-      : decisionPlan
-        ? `confidence (${confidence}) is a direct pass-through of decisionPlan.confidence.`
-        : `confidence (${confidence}) defaults to 0 because neither an executiveDecisionBrief nor a decisionPlan was supplied.`
+    decisionPlan
+      ? `confidence (${confidence}) is a direct pass-through of decisionPlan.confidence.`
+      : `confidence (${confidence}) defaults to 0 because no decisionPlan was supplied.`
   );
 
-  const status = executiveDecisionBrief?.recommendationStatus ||
-    deriveStatus({ verifiedFacts, keyRisks, evidenceGaps, confidence });
+  const status = deriveStatus({ verifiedFacts, keyRisks, evidenceGaps, confidence });
   evidenceTrace.push(
-    executiveDecisionBrief
-      ? `recommendedOption is based on executiveDecisionBrief.recommendationStatus ("${status}").`
-      : `recommendedOption is based on a locally derived status ("${status}") from verifiedFacts/keyRisks/evidenceGaps/confidence, because no executiveDecisionBrief was supplied.`
+    `recommendationStatus ("${status}") and recommendedOption are derived from verifiedFacts (${verifiedFacts.length}), keyRisks (${keyRisks.length}), evidenceGaps (${evidenceGaps.length}), and confidence (${confidence}).`
   );
 
   const strategicOptions = buildStrategicOptions({ status, evidenceGaps, keyRisks });
   const { recommended, rejected } = pickRecommendedOption(strategicOptions, status);
 
-  const assumptions = buildAssumptions(
-    executiveDecisionBrief,
-    (documentIntelligence?.entities.numbers.length || 0) > 0
-  );
+  const assumptions = buildAssumptions((documentIntelligence?.entities.numbers.length || 0) > 0);
 
   return {
     detectedBusinessContext,
     decisionObjective:
-      decisionPlan?.detectedIntent ||
-      executiveDecisionBrief?.decisionQuestion ||
-      (prompt ? prompt.slice(0, 400) : ""),
+      decisionPlan?.detectedIntent || (prompt ? prompt.slice(0, 400) : ""),
     verifiedFacts,
     directionalSignals,
     assumptions,
@@ -520,13 +518,12 @@ export function runExpertReasoningEngine(input: ExpertReasoningInput): ExpertRea
     strategicOptions,
     recommendedOption: recommended,
     rejectedOptions: rejected,
+    recommendationStatus: status,
     evidenceGaps,
     confidence,
-    confidenceExplanation: executiveDecisionBrief
-      ? "This is executiveDecisionBrief.decisionConfidence, passed through without recalculation."
-      : decisionPlan
-        ? "This is decisionPlan.confidence, passed through without recalculation."
-        : "No decision plan or executive decision brief was supplied, so no confidence basis exists.",
+    confidenceExplanation: decisionPlan
+      ? "This is decisionPlan.confidence, passed through without recalculation."
+      : "No decision plan was supplied, so no confidence basis exists.",
     evidenceTrace,
   };
 }
