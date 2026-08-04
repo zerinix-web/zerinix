@@ -307,12 +307,13 @@ test("does not touch report generation, PDF, UI, billing, authentication, or any
     /from ["'].*(?:pdf-engine|report-engine|report-jobs|billing|auth)/i
   );
 
-  // intelligence-pipeline.ts, decision-engine.ts, and
-  // evidence-quality-scoring.ts are allowed exceptions: they are the
-  // standalone, feature-flagged connectors/consumers explicitly built to
-  // import this engine's types and functions (ZERINIX Intelligence
-  // Pipeline v1, ZERINIX Decision Engine v1, and ZERINIX Evidence Quality
-  // Scoring v1). Every other file in app/lib/ai/ must still not
+  // intelligence-pipeline.ts, decision-engine.ts,
+  // evidence-quality-scoring.ts, and live-research-engine.ts are allowed
+  // exceptions: they are the standalone, feature-flagged connectors/
+  // consumers explicitly built to import this engine's types and
+  // functions (ZERINIX Intelligence Pipeline v1, ZERINIX Decision Engine
+  // v1, ZERINIX Evidence Quality Scoring v1, and ZERINIX Live Research
+  // Engine v1). Every other file in app/lib/ai/ must still not
   // reference it, and it must not be wired into any production route.
   const aiDir = new URL("../app/lib/ai/", import.meta.url);
   const files = await readdir(aiDir);
@@ -322,6 +323,7 @@ test("does not touch report generation, PDF, UI, billing, authentication, or any
       file === "intelligence-pipeline.ts" ||
       file === "decision-engine.ts" ||
       file === "evidence-quality-scoring.ts" ||
+      file === "live-research-engine.ts" ||
       !file.endsWith(".ts")
     ) {
       continue;
