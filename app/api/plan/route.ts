@@ -37,7 +37,9 @@ import {
 import { createLegalDocumentSummaryFallback } from "@/app/lib/ai/legal-document-understanding";
 import { createLegalCaseAnalysis } from "@/app/lib/ai/legal-case-analysis";
 import { createUniversalDocumentIntelligenceFallback } from "@/app/lib/ai/universal-document-intelligence";
-import { buildDecisionPlan } from "@/app/lib/ai/intelligence-router";
+import { buildDecisionPlan, type DecisionPlan } from "@/app/lib/ai/intelligence-router";
+import { runBrainOrchestrator } from "@/app/lib/ai/brain-orchestrator";
+import { logOperationalInfo } from "@/app/lib/security/logging";
 
 export const maxDuration = 300;
 
@@ -345,6 +347,7 @@ export async function POST(req: Request) {
     prompt: typeof body.prompt === "string" ? body.prompt : "",
     documentIntelligence: universalDocumentIntelligence,
   });
+  const decisionPlan = body.decisionPlan as DecisionPlan;
 
   // First layer of ZERINIX document intelligence: a confidently detected
   // attachment category can override the selected analysis mode before
@@ -418,6 +421,59 @@ export async function POST(req: Request) {
     }
 
     return queuedResponse(existingJob, true);
+  }
+
+  // ZERINIX Brain Orchestrator v1 integration. Feature-flagged so this new
+  // path can be disabled instantly without a deploy. Only ever runs for
+  // supported ZERINIX Business Intelligence contexts -- "chat" is the mode
+  // Layer 1 above already forces confident legal documents into, so
+  // excluding "chat" here also satisfies "never run for unsupported
+  // document categories" without a second document-category check. All
+  // early-stage engine results already computed above (Document
+  // Intelligence, Universal Document Intelligence, Intelligence Router)
+  // are passed in as `precomputed` so the orchestrator reuses them instead
+  // of re-executing those same deterministic functions a second time.
+  const brainOrchestratorEnabled =
+    process.env.ZERINIX_BRAIN_ORCHESTRATOR_ENABLED === "true";
+  const isSupportedBrainOrchestratorContext =
+    normalizeSelectedAnalysisMode(body.analysisMode) !== "chat";
+
+  if (brainOrchestratorEnabled && isSupportedBrainOrchestratorContext) {
+    const brainOutput = runBrainOrchestrator({
+      prompt: typeof body.prompt === "string" ? body.prompt : "",
+      attachments: readRequestAttachmentAssets(body),
+      precomputed: {
+        documentClassification,
+        documentRouting: documentAwareRouting,
+        universalDocumentIntelligence,
+        decisionPlan,
+      },
+    });
+    const brainExecution = brainOutput.execution;
+
+    logOperationalInfo("plan.brain_orchestrator", {
+      executedModules: brainExecution.executedModules,
+      skippedModules: brainExecution.skippedModules,
+      stopReason: brainExecution.stopReason,
+      executionTimeMs: brainExecution.executionTime,
+    });
+
+    if (
+      brainExecution.finalDecisionState.status === "insufficient_evidence" ||
+      brainExecution.stopReason
+    ) {
+      return NextResponse.json(
+        {
+          error: `A responsible report cannot be produced yet. ${brainExecution.finalDecisionState.summary}`,
+          code: "BRAIN_INSUFFICIENT_EVIDENCE",
+          missing: brainExecution.stopReason,
+          nextRecommendedAction: brainExecution.nextRecommendedAction,
+        },
+        { status: 422 }
+      );
+    }
+
+    body.brainExecutionResult = brainExecution;
   }
 
   const isMarketIntelligenceRequest =

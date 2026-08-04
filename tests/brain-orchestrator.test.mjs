@@ -198,13 +198,20 @@ test("never fabricates data: no dollar amounts appear in the execution result un
   }
 });
 
-test("does not create another intelligence engine, and does not modify report generation, PDF, billing, UI, or authentication", () => {
+test("does not create another intelligence engine, and does not itself modify report generation, PDF, billing, or authentication", () => {
   assert.doesNotMatch(
     orchestratorSource,
     /from ["'].*(?:pdf-engine|report-engine|billing|auth)/i
   );
-  assert.doesNotMatch(planRouteSource, /brain-orchestrator/);
-  assert.doesNotMatch(planRouteSource, /runBrainOrchestrator/);
+});
+
+test("is integrated into /api/plan behind a feature flag, and never replaces the report generator, PDF generation, billing, auth, or UI code in that route", () => {
+  assert.match(planRouteSource, /runBrainOrchestrator/);
+  assert.match(planRouteSource, /ZERINIX_BRAIN_ORCHESTRATOR_ENABLED/);
+  assert.doesNotMatch(
+    planRouteSource,
+    /from ["'].*(?:pdf-engine|report-engine|billing)/i
+  );
 });
 
 test("the orchestrator only coordinates the 7 existing engines and imports nothing from the legal-specific layers", () => {

@@ -2,7 +2,9 @@ import { z } from "zod";
 import {
   applyDocumentAwareModeOverride,
   classifyAttachmentDocument,
+  type DocumentAwareRoutingResult,
   type DocumentClassificationAsset,
+  type DocumentClassificationResult,
 } from "./document-intelligence.ts";
 import {
   createUniversalDocumentIntelligenceFallback,
@@ -114,6 +116,22 @@ export type BrainOrchestratorOutput = {
   results: BrainExecutionResults;
 };
 
+// A caller that already computed one or more of the early stages itself
+// (e.g. a route that must classify the attachment before this
+// orchestrator ever runs, to decide the request's analysisMode) can pass
+// those results in here. The orchestrator then reuses them verbatim
+// instead of calling the underlying engine a second time -- this is
+// what "prevent duplicate execution of existing intelligence modules"
+// means in practice: the same deterministic function is never invoked
+// twice for the same input just because two different callers both
+// needed its output.
+export type BrainOrchestratorPrecomputed = {
+  documentClassification?: DocumentClassificationResult;
+  documentRouting?: DocumentAwareRoutingResult;
+  universalDocumentIntelligence?: UniversalDocumentIntelligence;
+  decisionPlan?: DecisionPlan;
+};
+
 export type BrainOrchestratorInput = {
   prompt?: string;
   conversationContext?: readonly string[];
@@ -126,6 +144,7 @@ export type BrainOrchestratorInput = {
   additionalVerifiedEvidence?: readonly string[];
   additionalDirectionalSignals?: readonly string[];
   additionalAssumptions?: readonly string[];
+  precomputed?: BrainOrchestratorPrecomputed;
 };
 
 export function runBrainOrchestrator(input: BrainOrchestratorInput): BrainOrchestratorOutput {
@@ -141,6 +160,7 @@ export function runBrainOrchestrator(input: BrainOrchestratorInput): BrainOrches
     additionalVerifiedEvidence = [],
     additionalDirectionalSignals = [],
     additionalAssumptions = [],
+    precomputed,
   } = input;
 
   const startedAt = Date.now();
@@ -199,12 +219,20 @@ export function runBrainOrchestrator(input: BrainOrchestratorInput): BrainOrches
   // decides immediately whether this is a legal document that must never
   // reach a business engine (rule: never execute business engines for
   // unsupported document categories).
-  executionTrace.push("Running Document Intelligence.");
-  const documentClassification = classifyAttachmentDocument({ assets: attachments });
-  const documentRouting = applyDocumentAwareModeOverride({
-    selectedMode: "chat",
-    classification: documentClassification,
-  });
+  let documentClassification: DocumentClassificationResult;
+  let documentRouting: DocumentAwareRoutingResult;
+  if (precomputed?.documentClassification && precomputed?.documentRouting) {
+    documentClassification = precomputed.documentClassification;
+    documentRouting = precomputed.documentRouting;
+    executionTrace.push("Reusing precomputed Document Intelligence result (not re-executed).");
+  } else {
+    executionTrace.push("Running Document Intelligence.");
+    documentClassification = classifyAttachmentDocument({ assets: attachments });
+    documentRouting = applyDocumentAwareModeOverride({
+      selectedMode: "chat",
+      classification: documentClassification,
+    });
+  }
   results.documentIntelligence = documentClassification;
   executedModules.push("Document Intelligence");
   recordConfidence("Document Intelligence", documentClassification.confidence);
@@ -223,14 +251,19 @@ export function runBrainOrchestrator(input: BrainOrchestratorInput): BrainOrches
   }
 
   // Stage 2: Universal Document Intelligence.
-  executionTrace.push("Running Universal Document Intelligence.");
   let universalDocumentIntelligence: UniversalDocumentIntelligence;
-  try {
-    universalDocumentIntelligence = createUniversalDocumentIntelligenceFallback({
-      assets: attachments,
-    });
-  } catch (error) {
-    return handleFailure("Universal Document Intelligence", 1, error);
+  if (precomputed?.universalDocumentIntelligence) {
+    universalDocumentIntelligence = precomputed.universalDocumentIntelligence;
+    executionTrace.push("Reusing precomputed Universal Document Intelligence result (not re-executed).");
+  } else {
+    executionTrace.push("Running Universal Document Intelligence.");
+    try {
+      universalDocumentIntelligence = createUniversalDocumentIntelligenceFallback({
+        assets: attachments,
+      });
+    } catch (error) {
+      return handleFailure("Universal Document Intelligence", 1, error);
+    }
   }
   results.universalDocumentIntelligence = universalDocumentIntelligence;
   executedModules.push("Universal Document Intelligence");
@@ -240,12 +273,17 @@ export function runBrainOrchestrator(input: BrainOrchestratorInput): BrainOrches
   );
 
   // Stage 3: Intelligence Router.
-  executionTrace.push("Running Intelligence Router.");
   let decisionPlan: DecisionPlan;
-  try {
-    decisionPlan = buildDecisionPlan({ prompt, documentIntelligence: universalDocumentIntelligence });
-  } catch (error) {
-    return handleFailure("Intelligence Router", 2, error);
+  if (precomputed?.decisionPlan) {
+    decisionPlan = precomputed.decisionPlan;
+    executionTrace.push("Reusing precomputed Intelligence Router result (not re-executed).");
+  } else {
+    executionTrace.push("Running Intelligence Router.");
+    try {
+      decisionPlan = buildDecisionPlan({ prompt, documentIntelligence: universalDocumentIntelligence });
+    } catch (error) {
+      return handleFailure("Intelligence Router", 2, error);
+    }
   }
   results.decisionPlan = decisionPlan;
   executedModules.push("Intelligence Router");
