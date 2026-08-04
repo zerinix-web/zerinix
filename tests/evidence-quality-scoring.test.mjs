@@ -439,17 +439,27 @@ test("does not modify report generation, PDF generation, billing, or UI, and is 
   );
   assert.doesNotMatch(planRouteSource, /evidence-quality-scoring|scoreEvidenceQuality/);
 
+  // confidence-engine.ts and conflict-detection-engine.ts are allowed
+  // exceptions: they are the standalone, feature-flagged consumers
+  // explicitly built to import this module's types and functions
+  // (ZERINIX Confidence Engine v1 and ZERINIX Conflict Detection Engine
+  // v1). Every other file in app/lib/ai/ must still not reference it.
   const aiDir = new URL("../app/lib/ai/", import.meta.url);
   const files = await readdir(aiDir);
   for (const file of files) {
-    if (file === "evidence-quality-scoring.ts" || !file.endsWith(".ts")) {
+    if (
+      file === "evidence-quality-scoring.ts" ||
+      file === "confidence-engine.ts" ||
+      file === "conflict-detection-engine.ts" ||
+      !file.endsWith(".ts")
+    ) {
       continue;
     }
     const contents = await readFile(new URL(file, aiDir), "utf8");
     assert.doesNotMatch(
       contents,
       /evidence-quality-scoring|scoreEvidenceQuality/,
-      `expected ${file} to not yet reference the new standalone scoring module`
+      `expected ${file} to not reference the standalone scoring module`
     );
   }
 });
