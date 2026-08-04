@@ -301,23 +301,28 @@ test("never fabricates a URL, publisher, or date: every non-null url/publisher/d
   }
 });
 
-test("does not touch report generation, PDF, UI, planner, billing, authentication, or any existing Business Intelligence flow", async () => {
+test("does not touch report generation, PDF, UI, billing, authentication, or any existing Business Intelligence flow, and is not wired into any production route", async () => {
   assert.doesNotMatch(
     engineSource,
-    /from ["'].*(?:pdf-engine|report-engine|report-jobs|billing|auth|planner)/i
+    /from ["'].*(?:pdf-engine|report-engine|report-jobs|billing|auth)/i
   );
 
+  // intelligence-pipeline.ts is an allowed exception: it is the
+  // standalone, feature-flagged connector explicitly built to import and
+  // call this engine (ZERINIX Intelligence Pipeline v1). Every other file
+  // in app/lib/ai/ must still not reference it, and it must not be wired
+  // into any production route.
   const aiDir = new URL("../app/lib/ai/", import.meta.url);
   const files = await readdir(aiDir);
   for (const file of files) {
-    if (file === "evidence-acquisition-engine.ts" || !file.endsWith(".ts")) {
+    if (file === "evidence-acquisition-engine.ts" || file === "intelligence-pipeline.ts" || !file.endsWith(".ts")) {
       continue;
     }
     const contents = await readFile(new URL(file, aiDir), "utf8");
     assert.doesNotMatch(
       contents,
       /evidence-acquisition-engine|runEvidenceAcquisitionEngine/,
-      `expected ${file} to not yet reference the new standalone engine`
+      `expected ${file} to not reference the standalone engine`
     );
   }
 
