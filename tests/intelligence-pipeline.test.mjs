@@ -390,7 +390,7 @@ test("every try/catch stage calls handleFailure and skips its remaining real-ord
   assert.match(pipelineSource, /skipRemaining\(/);
 });
 
-test("does not modify report generation, PDF generation, billing, UI, and is not wired into any production route", async () => {
+test("does not modify report generation, PDF generation, billing, UI, and is not directly wired into any production route", async () => {
   assert.doesNotMatch(
     pipelineSource,
     /from ["'].*(?:pdf-engine|report-engine|report-jobs|billing|auth)/i
@@ -402,17 +402,21 @@ test("does not modify report generation, PDF generation, billing, UI, and is not
   );
   assert.doesNotMatch(planRouteSource, /intelligence-pipeline|runIntelligencePipeline/);
 
+  // decision-engine.ts is an allowed exception: it is the standalone,
+  // feature-flagged connector explicitly built to import and call this
+  // pipeline (ZERINIX Decision Engine v1). Every other file in
+  // app/lib/ai/ must still not reference it.
   const aiDir = new URL("../app/lib/ai/", import.meta.url);
   const files = await readdir(aiDir);
   for (const file of files) {
-    if (file === "intelligence-pipeline.ts" || !file.endsWith(".ts")) {
+    if (file === "intelligence-pipeline.ts" || file === "decision-engine.ts" || !file.endsWith(".ts")) {
       continue;
     }
     const contents = await readFile(new URL(file, aiDir), "utf8");
     assert.doesNotMatch(
       contents,
       /intelligence-pipeline\.ts|runIntelligencePipeline/,
-      `expected ${file} to not yet reference the new standalone pipeline`
+      `expected ${file} to not reference the standalone pipeline`
     );
   }
 });

@@ -307,15 +307,21 @@ test("does not touch report generation, PDF, UI, billing, authentication, or any
     /from ["'].*(?:pdf-engine|report-engine|report-jobs|billing|auth)/i
   );
 
-  // intelligence-pipeline.ts is an allowed exception: it is the
-  // standalone, feature-flagged connector explicitly built to import and
-  // call this engine (ZERINIX Intelligence Pipeline v1). Every other file
-  // in app/lib/ai/ must still not reference it, and it must not be wired
-  // into any production route.
+  // intelligence-pipeline.ts and decision-engine.ts are allowed
+  // exceptions: they are the standalone, feature-flagged connectors
+  // explicitly built to import and call this engine (ZERINIX
+  // Intelligence Pipeline v1 and ZERINIX Decision Engine v1). Every other
+  // file in app/lib/ai/ must still not reference it, and it must not be
+  // wired into any production route.
   const aiDir = new URL("../app/lib/ai/", import.meta.url);
   const files = await readdir(aiDir);
   for (const file of files) {
-    if (file === "evidence-acquisition-engine.ts" || file === "intelligence-pipeline.ts" || !file.endsWith(".ts")) {
+    if (
+      file === "evidence-acquisition-engine.ts" ||
+      file === "intelligence-pipeline.ts" ||
+      file === "decision-engine.ts" ||
+      !file.endsWith(".ts")
+    ) {
       continue;
     }
     const contents = await readFile(new URL(file, aiDir), "utf8");

@@ -39,6 +39,7 @@ import { createLegalCaseAnalysis } from "@/app/lib/ai/legal-case-analysis";
 import { createUniversalDocumentIntelligenceFallback } from "@/app/lib/ai/universal-document-intelligence";
 import { buildDecisionPlan, type DecisionPlan } from "@/app/lib/ai/intelligence-router";
 import { runBrainOrchestrator } from "@/app/lib/ai/brain-orchestrator";
+import { isDecisionEngineEnabled, runDecisionEngine } from "@/app/lib/ai/decision-engine";
 import { logOperationalInfo } from "@/app/lib/security/logging";
 
 export const maxDuration = 300;
@@ -474,6 +475,59 @@ export async function POST(req: Request) {
     }
 
     body.brainExecutionResult = brainExecution;
+  }
+
+  // ZERINIX Decision Engine v1 integration. Independently feature-flagged
+  // from the Brain Orchestrator block above -- this replaces the generic
+  // report-generation entry point with Adaptive Intelligence Engine ->
+  // Intelligence Pipeline -> Evidence Validation -> Expert Reasoning ->
+  // Executive Decision Brief, but only ever decides whether to hand off
+  // to the existing, completely unmodified report-generation / PDF /
+  // billing / UI flow below; it never calls or replaces any of those
+  // itself. Defaults to disabled (ZERINIX_DECISION_ENGINE_ENABLED unset),
+  // so every existing report continues to work exactly as before unless
+  // this flag is explicitly set to "true". Gated on the same "not chat
+  // mode" condition as the Brain Orchestrator block for the same reason:
+  // Layer 1 above already diverts confident legal documents into chat
+  // mode, so this excludes them without a second document-category
+  // check -- any other domain that reaches the Decision Engine (medical,
+  // engineering, HR, contract, etc.) is still handled safely, since
+  // Intelligence Pipeline's own business-reasoning engines already
+  // degrade to insufficient_evidence for non-business domains rather
+  // than fabricating a business-flavored response.
+  const decisionEngineEnabled = isDecisionEngineEnabled();
+  const isSupportedDecisionEngineContext =
+    normalizeSelectedAnalysisMode(body.analysisMode) !== "chat";
+
+  if (decisionEngineEnabled && isSupportedDecisionEngineContext) {
+    const decisionEngineOutput = runDecisionEngine({
+      enabled: true,
+      prompt: typeof body.prompt === "string" ? body.prompt : "",
+      attachments: readRequestAttachmentAssets(body),
+    });
+    const decision = decisionEngineOutput.decision;
+
+    logOperationalInfo("plan.decision_engine", {
+      executedStages: decision.executedStages,
+      skippedStages: decision.skippedStages,
+      status: decision.status,
+      stopReason: decision.stopReason,
+      executionTimeMs: decision.executionTimeMs,
+    });
+
+    if (decision.status !== "ready_for_report_generation") {
+      return NextResponse.json(
+        {
+          error: `A responsible report cannot be produced yet. ${decision.stopReason || "Insufficient evidence."}`,
+          code: "DECISION_ENGINE_INSUFFICIENT_EVIDENCE",
+          missing: decision.evidenceValidation.missingEvidenceSummary,
+          nextRecommendedAction: decision.nextRecommendedAction,
+        },
+        { status: 422 }
+      );
+    }
+
+    body.decisionEngineResult = decision;
   }
 
   const isMarketIntelligenceRequest =

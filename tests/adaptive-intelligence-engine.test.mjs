@@ -322,7 +322,7 @@ test("every fixture's detectedDocumentType is a human-readable label matching it
   }
 });
 
-test("does not modify report generation, PDF generation, billing, or UI, and is not wired into any production route or other module yet", async () => {
+test("does not modify report generation, PDF generation, billing, or UI, and is not directly wired into any production route", async () => {
   assert.doesNotMatch(
     engineSource,
     /from ["'].*(?:pdf-engine|report-engine|report-jobs|billing|auth)/i
@@ -334,17 +334,21 @@ test("does not modify report generation, PDF generation, billing, or UI, and is 
   );
   assert.doesNotMatch(planRouteSource, /adaptive-intelligence-engine|runAdaptiveIntelligenceEngine/);
 
+  // decision-engine.ts is an allowed exception: it is the standalone,
+  // feature-flagged connector explicitly built to import and call this
+  // engine (ZERINIX Decision Engine v1). Every other file in
+  // app/lib/ai/ must still not reference it.
   const aiDir = new URL("../app/lib/ai/", import.meta.url);
   const files = await readdir(aiDir);
   for (const file of files) {
-    if (file === "adaptive-intelligence-engine.ts" || !file.endsWith(".ts")) {
+    if (file === "adaptive-intelligence-engine.ts" || file === "decision-engine.ts" || !file.endsWith(".ts")) {
       continue;
     }
     const contents = await readFile(new URL(file, aiDir), "utf8");
     assert.doesNotMatch(
       contents,
       /adaptive-intelligence-engine|runAdaptiveIntelligenceEngine/,
-      `expected ${file} to not yet reference the new standalone engine`
+      `expected ${file} to not reference the standalone engine`
     );
   }
 });
