@@ -102,6 +102,7 @@ export type ReportMetadata = {
   reportAuditTrail?: import("@/app/lib/report-engine/report-audit-trail").ReportAuditTrailResult;
   reportExplainability?: import("@/app/lib/report-engine/explainability-engine").ExplainabilityEngineResult;
   reportReproducibility?: import("@/app/lib/report-engine/decision-reproducibility-engine").ReproducibilityRecord;
+  reportVersion?: import("@/app/lib/report-engine/report-versioning-engine").ReportVersionManifest;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

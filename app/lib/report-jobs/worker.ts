@@ -46,6 +46,7 @@ import { checkReportConsistency } from "@/app/lib/report-engine/report-consisten
 import { generateReportAuditTrail } from "@/app/lib/report-engine/report-audit-trail";
 import { generateExplainabilityReport } from "@/app/lib/report-engine/explainability-engine";
 import { generateReproducibilityRecord } from "@/app/lib/report-engine/decision-reproducibility-engine";
+import { generateReportVersionManifest } from "@/app/lib/report-engine/report-versioning-engine";
 
 const JOB_LEASE_SECONDS = 120;
 const JOB_HEARTBEAT_MS = 20_000;
@@ -933,6 +934,30 @@ export async function processNextReportJob(options: ReportWorkerOptions = {}) {
     });
     if (reproducibility.generated) {
       report.metadata = { ...(report.metadata || {}), reportReproducibility: reproducibility };
+    }
+
+    // ZERINIX Report Versioning Engine v1: runs LAST, immediately
+    // after the Decision Reproducibility Engine above, folding in the
+    // real, already-computed qualityValidation/consistencyCheck/
+    // auditTrail/explainability/reproducibility results -- never
+    // recomputing any of them. Like the three modules above, this one
+    // never throws/blocks a report -- it only attaches immutable
+    // version metadata and a structured compatibility manifest.
+    // Disabled by default; when disabled, `generated` is false and
+    // this block is a no-op. On a pass, the result is attached as a
+    // sixth, additive, optional reports.metadata field.
+    const versionManifest = generateReportVersionManifest({
+      executiveDecisionPackage: job.request_payload.executiveDecisionSystemResult,
+      strategicDecisionMemo: job.request_payload.strategicDecisionMemo,
+      executiveBrief: job.request_payload.executiveBrief,
+      qualityValidation,
+      consistencyCheck,
+      auditTrail,
+      explainability,
+      reproducibility,
+    });
+    if (versionManifest.generated) {
+      report.metadata = { ...(report.metadata || {}), reportVersion: versionManifest };
     }
 
     const persistenceStartedAt = Date.now();
