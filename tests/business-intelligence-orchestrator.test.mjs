@@ -473,6 +473,12 @@ test("does not modify report generation, PDF generation, billing, or UI, and is 
       // calls runBusinessIntelligenceOrchestration exactly once, for
       // supported Business Intelligence requests only.
       file === "decision-engine.ts" ||
+      // ZERINIX Executive Decision System v1 legitimately type-imports
+      // businessIntelligenceContextSchema to validate the Orchestrator
+      // context it passes through unmodified from Decision Engine's own
+      // output -- it never calls runBusinessIntelligenceOrchestration
+      // itself.
+      file === "executive-decision-system.ts" ||
       !file.endsWith(".ts")
     ) {
       continue;
