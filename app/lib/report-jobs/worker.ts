@@ -43,6 +43,7 @@ import { dynamicReportPlanSchema } from "@/app/lib/ai/dynamic-report-plan";
 import { dynamicResearchPlanSchema } from "@/app/lib/ai/dynamic-research-plan";
 import { validateExecutiveReportQuality } from "@/app/lib/report-engine/executive-report-quality-validator";
 import { checkReportConsistency } from "@/app/lib/report-engine/report-consistency-checker";
+import { generateReportAuditTrail } from "@/app/lib/report-engine/report-audit-trail";
 
 const JOB_LEASE_SECONDS = 120;
 const JOB_HEARTBEAT_MS = 20_000;
@@ -858,6 +859,31 @@ export async function processNextReportJob(options: ReportWorkerOptions = {}) {
     }
     if (consistencyCheck.checked) {
       report.metadata = { ...(report.metadata || {}), reportConsistencyCheck: consistencyCheck };
+    }
+
+    // ZERINIX Report Audit Trail Generator v1: runs immediately AFTER
+    // both validation modules above, on the same already-validated
+    // report and the same already-computed request_payload fields --
+    // never recomputing Executive Decision System, Strategic Decision
+    // Memo, or Executive Brief. Unlike the two modules above, this one
+    // never throws/blocks a report -- it only records how each of 8
+    // tracked report categories was produced (source engines, evidence
+    // references, confidence derivation, the Quality Validator's and
+    // Consistency Checker's own already-computed findings for that
+    // category, generation timestamp, execution order, and version
+    // identifiers). Disabled by default; when disabled, `generated` is
+    // false and this block is a no-op. On a pass, the result is
+    // attached as a third, additive, optional reports.metadata field.
+    const auditTrail = generateReportAuditTrail({
+      sections: report.sections,
+      executiveDecisionPackage: job.request_payload.executiveDecisionSystemResult,
+      strategicDecisionMemo: job.request_payload.strategicDecisionMemo,
+      executiveBrief: job.request_payload.executiveBrief,
+      qualityValidation,
+      consistencyCheck,
+    });
+    if (auditTrail.generated) {
+      report.metadata = { ...(report.metadata || {}), reportAuditTrail: auditTrail };
     }
 
     const persistenceStartedAt = Date.now();

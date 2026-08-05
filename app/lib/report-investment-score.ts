@@ -99,6 +99,7 @@ export type ReportMetadata = {
   researchPlan?: import("@/app/lib/ai/dynamic-research-plan").DynamicResearchPlan;
   reportQualityValidation?: import("@/app/lib/report-engine/executive-report-quality-validator").ExecutiveReportQualityValidationResult;
   reportConsistencyCheck?: import("@/app/lib/report-engine/report-consistency-checker").ReportConsistencyCheckResult;
+  reportAuditTrail?: import("@/app/lib/report-engine/report-audit-trail").ReportAuditTrailResult;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
