@@ -44,6 +44,7 @@ import { dynamicResearchPlanSchema } from "@/app/lib/ai/dynamic-research-plan";
 import { validateExecutiveReportQuality } from "@/app/lib/report-engine/executive-report-quality-validator";
 import { checkReportConsistency } from "@/app/lib/report-engine/report-consistency-checker";
 import { generateReportAuditTrail } from "@/app/lib/report-engine/report-audit-trail";
+import { generateExplainabilityReport } from "@/app/lib/report-engine/explainability-engine";
 
 const JOB_LEASE_SECONDS = 120;
 const JOB_HEARTBEAT_MS = 20_000;
@@ -884,6 +885,29 @@ export async function processNextReportJob(options: ReportWorkerOptions = {}) {
     });
     if (auditTrail.generated) {
       report.metadata = { ...(report.metadata || {}), reportAuditTrail: auditTrail };
+    }
+
+    // ZERINIX Explainability Engine v1: runs immediately AFTER the
+    // Report Audit Trail Generator above, on the same already-
+    // computed request_payload fields and the same already-computed
+    // qualityValidation/consistencyCheck results -- never recomputing
+    // Executive Decision System, Strategic Decision Memo, Executive
+    // Brief, or either validator/checker, and never calling an LLM.
+    // Like the Audit Trail Generator, this one never throws/blocks a
+    // report -- it only explains why each real recommendation,
+    // verdict, risk, opportunity, and confidence assessment was
+    // reached. Disabled by default; when disabled, `generated` is
+    // false and this block is a no-op. On a pass, the result is
+    // attached as a fourth, additive, optional reports.metadata field.
+    const explainability = generateExplainabilityReport({
+      executiveDecisionPackage: job.request_payload.executiveDecisionSystemResult,
+      strategicDecisionMemo: job.request_payload.strategicDecisionMemo,
+      executiveBrief: job.request_payload.executiveBrief,
+      qualityValidation,
+      consistencyCheck,
+    });
+    if (explainability.generated) {
+      report.metadata = { ...(report.metadata || {}), reportExplainability: explainability };
     }
 
     const persistenceStartedAt = Date.now();
