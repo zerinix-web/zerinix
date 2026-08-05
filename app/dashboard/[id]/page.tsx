@@ -44,9 +44,11 @@ import type {
   ReportBenchmarkFit,
   ReportBenchmarkScore,
   ReportInvestmentScore,
+  ReportMetadata,
   ReportQualityScore,
   ReportValidationIntelligence,
 } from "@/app/lib/report-investment-score";
+import { readExecutiveDecisionIntelligenceSummary } from "@/app/lib/report-engine/executive-decision-intelligence-presentation";
 import {
   detectPdfPresentationLocale,
   localizePdfPresentationLabel,
@@ -1866,6 +1868,59 @@ function ExecutiveSnapshotPanel({
   );
 }
 
+function ExecutiveDecisionIntelligencePanel({ metadata }: { metadata?: ReportMetadata }) {
+  const summary = readExecutiveDecisionIntelligenceSummary(metadata);
+
+  if (!summary) {
+    return null;
+  }
+
+  const badges = [
+    summary.qualityPassed === null ? null : { label: "Quality", value: summary.qualityPassed ? "Passed" : "Flagged" },
+    summary.consistencyPassed === null
+      ? null
+      : { label: "Consistency", value: summary.consistencyPassed ? "Passed" : "Flagged" },
+    summary.reproducibility.present
+      ? {
+          label: "Reproducibility",
+          value: summary.reproducibility.status === "fingerprinted" ? "Fingerprinted" : "Insufficient data",
+        }
+      : null,
+    summary.version.present ? { label: "Schema", value: summary.version.reportSchemaVersion ?? "" } : null,
+  ].filter((badge): badge is { label: string; value: string } => badge !== null);
+
+  return (
+    <div className="mb-5 rounded-[1.75rem] border border-sky-200/15 bg-[linear-gradient(135deg,rgba(125,211,252,0.09),rgba(255,255,255,0.025))] p-4 shadow-inner shadow-sky-950/10">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-sky-200/75">
+        Executive Decision Intelligence
+      </p>
+      {summary.verdict ? (
+        <h4 className="mt-2 text-lg font-semibold tracking-tight text-white">{summary.verdict}</h4>
+      ) : null}
+      {summary.recommendation ? (
+        <p className="mt-2 text-sm leading-6 text-zinc-300">{summary.recommendation}</p>
+      ) : null}
+      {summary.aggregateConfidence !== null ? (
+        <p className="mt-2 text-xs font-semibold text-zinc-400">
+          Aggregate confidence: {summary.aggregateConfidence}/100
+        </p>
+      ) : null}
+      {badges.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {badges.map((badge) => (
+            <span
+              key={badge.label}
+              className="rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-xs font-semibold text-zinc-200"
+            >
+              {badge.label}: {badge.value}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function getBenchmarkFitLocale(source = "") {
   return /[çğıöşüÇĞİÖŞÜ]|\b(ve|için|pazar|müşteri|yatırım|doğrulama)\b/i.test(source)
     ? "tr"
@@ -3245,6 +3300,7 @@ export default async function ReportDetailPage({
                                 investmentScore={report.investmentScore}
                                 reportQuality={report.metadata?.reportQuality}
                               />
+                              <ExecutiveDecisionIntelligencePanel metadata={report.metadata} />
                               {hasReportSectionVisual(section.title) &&
                               !section.title.toLowerCase().includes("executive summary") &&
                               !isFinancialDashboard ? (

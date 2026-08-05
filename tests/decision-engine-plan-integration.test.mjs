@@ -25,11 +25,11 @@ function decisionEngineBlockSource() {
   return planRouteSource.slice(start, marketIndex);
 }
 
-test("the /api/plan route wires Decision Engine behind its own feature flag, gated to non-chat (supported) analysis modes", () => {
+test("the /api/plan route wires Decision Engine behind its own feature flag, gated to Business Idea Validation (\"plan\" mode) only", () => {
   const block = decisionEngineBlockSource();
 
   assert.match(block, /isDecisionEngineEnabled\(\)/);
-  assert.match(block, /normalizeSelectedAnalysisMode\(body\.analysisMode\) !== "chat"/);
+  assert.match(block, /normalizeSelectedAnalysisMode\(body\.analysisMode\) === "plan"/);
   assert.match(block, /if \(decisionEngineEnabled && isSupportedDecisionEngineContext\)/);
   assert.match(block, /runDecisionEngine\(/);
 

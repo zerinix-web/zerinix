@@ -520,17 +520,27 @@ export async function POST(req: Request) {
   // is off (the default), this `if` is skipped entirely and the
   // Decision Engine block runs exactly as it did before this
   // integration -- byte-for-byte unchanged -- so the current production
-  // flow is fully preserved. Supported Business Intelligence requests
-  // only: Decision Engine's own Adaptive Intelligence Engine stage
-  // already makes that determination internally (selectedDomain ===
-  // "business_intelligence"); this route only applies the same "not
-  // chat mode" pre-filter every sibling integration block already uses.
+  // flow is fully preserved.
+  //
+  // Scoped to Business Idea Validation ONLY ("plan" mode) -- deliberately
+  // narrower than the shared "not chat mode" pre-filter the Brain
+  // Orchestrator block above still uses. Market Intelligence
+  // ("market" mode) has its own, separate report-generation pipeline
+  // (`executeMarketAnalysisRequest`, delegated to from inside
+  // plan-executor.ts once a job is enqueued); if this block used the
+  // broader "not chat" filter instead, turning the flag on would let a
+  // market-mode request reach Decision Engine/EDS here FIRST, and any
+  // non-"ready_for_report_generation" status would return a 422 before
+  // the job is ever enqueued -- before Market Intelligence's own
+  // pipeline gets a chance to run at all. Scoping to "plan" here is a
+  // deliberate product decision for THIS integration, not a change to
+  // the Brain Orchestrator block's own, separate, pre-existing scope.
   const executiveDecisionSystemEnabled = isExecutiveDecisionSystemEnabled();
   const isSupportedExecutiveDecisionSystemContext =
-    normalizeSelectedAnalysisMode(body.analysisMode) !== "chat";
+    normalizeSelectedAnalysisMode(body.analysisMode) === "plan";
   const decisionEngineEnabled = isDecisionEngineEnabled();
   const isSupportedDecisionEngineContext =
-    normalizeSelectedAnalysisMode(body.analysisMode) !== "chat";
+    normalizeSelectedAnalysisMode(body.analysisMode) === "plan";
 
   if (executiveDecisionSystemEnabled && isSupportedExecutiveDecisionSystemContext) {
     const { package: executiveDecisionPackage } = runExecutiveDecisionSystem({

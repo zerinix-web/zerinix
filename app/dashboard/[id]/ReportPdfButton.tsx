@@ -57,6 +57,10 @@ import {
   isLegalRenderableReport,
 } from "@/app/lib/report-engine/legal-report-rendering";
 import {
+  readExecutiveDecisionIntelligenceSummary,
+  type ExecutiveDecisionIntelligenceSummary,
+} from "@/app/lib/report-engine/executive-decision-intelligence-presentation";
+import {
   repairReportLanguageSections,
   resolveMarketPdfLanguage,
   resolveReportLanguage,
@@ -2467,7 +2471,95 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         drawFooter();
       };
 
+      const drawExecutiveDecisionIntelligencePage = (
+        summary: ExecutiveDecisionIntelligenceSummary
+      ) => {
+        paintPage();
+        pdf.setFillColor("#020617");
+        pdf.setDrawColor("#134e4a");
+        pdf.roundedRect(margin, 18, contentWidth, pageHeight - 36, 8, 8, "FD");
+        pdf.setFillColor("#0ea5e9");
+        pdf.rect(margin, 18, 2, pageHeight - 36, "F");
+
+        let cursorY = 36;
+        pdf.setFontSize(9);
+        pdf.setTextColor("#7dd3fc");
+        pdf.text(
+          pdfLocale === "tr" ? "YÖNETİCİ KARAR ZEKASI" : "EXECUTIVE DECISION INTELLIGENCE",
+          margin + 12,
+          cursorY
+        );
+        cursorY += 12;
+
+        if (summary.verdict) {
+          pdf.setFontSize(15);
+          pdf.setTextColor("#f8fafc");
+          const verdictLines = wrapPdfText(summary.verdict, contentWidth - 24);
+          for (const line of verdictLines) {
+            pdf.text(line, margin + 12, cursorY);
+            cursorY += 7;
+          }
+          cursorY += 3;
+        }
+
+        if (summary.recommendation) {
+          pdf.setFontSize(10.5);
+          pdf.setTextColor("#cbd5e1");
+          const recommendationLines = wrapPdfText(summary.recommendation, contentWidth - 24);
+          for (const line of recommendationLines) {
+            pdf.text(line, margin + 12, cursorY);
+            cursorY += 5.5;
+          }
+          cursorY += 3;
+        }
+
+        if (summary.aggregateConfidence !== null) {
+          pdf.setFontSize(10);
+          pdf.setTextColor("#94a3b8");
+          pdf.text(
+            `${pdfLocale === "tr" ? "Toplam güven" : "Aggregate confidence"}: ${summary.aggregateConfidence}/100`,
+            margin + 12,
+            cursorY
+          );
+          cursorY += 10;
+        }
+
+        const badges: string[] = [];
+        if (summary.qualityPassed !== null) {
+          badges.push(`Quality: ${summary.qualityPassed ? "Passed" : "Flagged"}`);
+        }
+        if (summary.consistencyPassed !== null) {
+          badges.push(`Consistency: ${summary.consistencyPassed ? "Passed" : "Flagged"}`);
+        }
+        if (summary.reproducibility.present) {
+          badges.push(
+            `Reproducibility: ${summary.reproducibility.status === "fingerprinted" ? "Fingerprinted" : "Insufficient data"}`
+          );
+        }
+        if (summary.version.present && summary.version.reportSchemaVersion) {
+          badges.push(`Schema: ${summary.version.reportSchemaVersion}`);
+        }
+
+        let badgeX = margin + 12;
+        for (const badge of badges) {
+          const badgeWidth = pdf.getTextWidth(badge) + 10;
+          if (badgeX + badgeWidth > margin + contentWidth - 12) {
+            badgeX = margin + 12;
+            cursorY += 12;
+          }
+          drawTag(badge, badgeX, cursorY, badgeWidth);
+          badgeX += badgeWidth + 6;
+        }
+
+        drawFooter();
+      };
+
       drawCoverPage();
+      const executiveDecisionIntelligenceSummary = readExecutiveDecisionIntelligenceSummary(report.metadata);
+      if (executiveDecisionIntelligenceSummary) {
+        pdf.addPage();
+        drawExecutiveDecisionIntelligencePage(executiveDecisionIntelligenceSummary);
+      }
       pdf.addPage();
       const tocPage = pdf.getNumberOfPages();
       paintPage();
