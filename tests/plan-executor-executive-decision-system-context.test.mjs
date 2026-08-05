@@ -15,9 +15,14 @@ import { readFileSync } from "node:fs";
 const planExecutorSource = readFileSync("app/lib/report-jobs/plan-executor.ts", "utf8");
 
 test("imports the real, pure formatting module -- never redefines or duplicates its logic inline", () => {
+  // The import now also brings in formatExecutiveBriefSupplementaryContext
+  // (see the Executive Decision Memo/Executive Brief pipeline wiring),
+  // so this only asserts formatExecutiveDecisionSystemContext is
+  // imported FROM the real module, not the exact historical import
+  // statement shape.
   assert.match(
     planExecutorSource,
-    /import \{ formatExecutiveDecisionSystemContext \} from "@\/app\/lib\/report-engine\/executive-decision-system-context";/
+    /formatExecutiveDecisionSystemContext,?\s*[\s\S]{0,80}from "@\/app\/lib\/report-engine\/executive-decision-system-context";/
   );
   const importCount = (planExecutorSource.match(/formatExecutiveDecisionSystemContext\(/g) || []).length;
   // Called exactly once, right where body is parsed, and reused by

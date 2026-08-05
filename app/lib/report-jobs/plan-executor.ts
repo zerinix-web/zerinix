@@ -116,7 +116,10 @@ import {
 } from "@/app/lib/ai/report-quality-directives";
 import { dedupeReportParagraphsAcrossSections } from "@/app/lib/report-content-quality.mjs";
 import { labelModelDerivedFinancialClaims } from "@/app/lib/report-engine/financial-claim-labeling";
-import { formatExecutiveDecisionSystemContext } from "@/app/lib/report-engine/executive-decision-system-context";
+import {
+  formatExecutiveDecisionSystemContext,
+  formatExecutiveBriefSupplementaryContext,
+} from "@/app/lib/report-engine/executive-decision-system-context";
 import { normalizeReportSourceSection } from "@/app/lib/report-source-normalization.mjs";
 import {
   localizePdfPresentationLabel,
@@ -4750,6 +4753,20 @@ async function executePlanRequestInner(
     const executiveDecisionSystemCompactRule = executiveDecisionSystemContext
       ? `- ${executiveDecisionSystemContext.compactQualityRuleBullet}\n`
       : "";
+    // ZERINIX Executive Brief Generator v1 supplementary context
+    // (additive): the end-to-end pipeline's final stage before this
+    // one (Executive Decision System -> Strategic Decision Memo ->
+    // Executive Brief). Only ever real when route.ts's Executive
+    // Decision System integration actually reached
+    // ready_for_report_generation for this request -- computed once,
+    // here, reusing the already-computed Executive Brief; never
+    // re-derived. Supplements, never repeats, the context block above.
+    const executiveBriefSupplementaryContext = formatExecutiveBriefSupplementaryContext(
+      body?.executiveBrief
+    );
+    const executiveBriefSupplementaryContextBlock = executiveBriefSupplementaryContext
+      ? `\n${executiveBriefSupplementaryContext.contextBlock}\n`
+      : "";
     const isUniversalInputRequest =
       req.headers.get("x-zerinix-universal-input") === "true";
 
@@ -5108,6 +5125,7 @@ ${assetEvidenceInstructions ? `\nAsset evidence rules:\n${assetEvidenceInstructi
 
 ${financialAssumptionsContext}
 ${executiveDecisionSystemContextBlock}
+${executiveBriefSupplementaryContextBlock}
 ${userMemoryInstruction ? `\n${userMemoryInstruction}\n` : ""}
 
 Section to generate: ${planFieldLabels[responseLanguage][reportField]}
@@ -5407,6 +5425,7 @@ ${adaptiveWriterContext}
 
 ${unifiedFinancialAssumptionsContext}
 ${executiveDecisionSystemContextBlock}
+${executiveBriefSupplementaryContextBlock}
 ${userMemoryInstruction ? `\n${userMemoryInstruction}\n` : ""}
 
 Generate the complete Business Plan report as one structured JSON object.

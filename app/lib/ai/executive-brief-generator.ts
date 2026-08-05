@@ -8,7 +8,9 @@ import { executiveDecisionSignalValues } from "./business-intelligence-orchestra
 import { confidenceDriverSchema, confidencePenaltySchema } from "./confidence-engine.ts";
 import {
   strategicRecommendedActionSchema,
+  strategicDecisionMemoSchema,
   type StrategicRecommendedAction,
+  type StrategicDecisionMemo,
 } from "./strategic-decision-memo.ts";
 import type { ExecutiveDecisionBrief } from "./executive-decision-brief.ts";
 import type { BusinessIntelligenceContext } from "./business-intelligence-orchestrator.ts";
@@ -47,6 +49,20 @@ import type { BusinessIntelligenceContext } from "./business-intelligence-orches
 // unknowns in four separate, clearly labeled lists, exactly matching
 // the same distinction already established for report-generation
 // context (see executive-decision-system-context.ts).
+//
+// Pipeline wiring (v1.1, additive): this generator optionally accepts
+// an already-computed Strategic Decision Memo (the same Executive
+// Decision Package, reshaped one stage earlier). When a real, already-
+// generated memo is supplied, Critical Risks, Strategic Opportunities,
+// Immediate Next Actions, and Confidence Assessment are read directly
+// from the memo's own already-computed, already-cited fields instead
+// of being independently re-derived -- the two modules' derivation
+// logic for those categories is identical, so reusing the memo's real
+// output here is a genuine "no duplicated execution" optimization, not
+// a behavioral change: the numbers and citations are the same either
+// way. When no memo is supplied (or it never generated anything real),
+// this module falls back to its own original, independent derivation,
+// exactly as before -- fully backward compatible.
 //
 // Scope (v1): this module does not modify UI, API contracts, report
 // schema, routing, billing, authentication, PDF generation, or
@@ -128,6 +144,13 @@ export type ExecutiveBriefGeneratorInput = {
   // against the real executiveDecisionPackageSchema before anything is
   // read from it.
   executiveDecisionPackage?: unknown;
+  // An already-computed Strategic Decision Memo for the SAME
+  // executiveDecisionPackage, if the caller already built one (see
+  // file header). Untyped and optional on purpose -- validated
+  // against the real strategicDecisionMemoSchema before anything is
+  // read from it; omitted or invalid falls back to this module's own
+  // independent derivation.
+  strategicDecisionMemo?: unknown;
   // Explicit override, primarily for tests; when omitted, falls back
   // to the ZERINIX_EXECUTIVE_BRIEF_GENERATOR_ENABLED environment
   // variable.
@@ -301,15 +324,24 @@ function buildGeneratedBrief(
   enabled: boolean,
   pkg: ExecutiveDecisionPackage,
   brief: ExecutiveDecisionBrief,
-  businessIntelligence: BusinessIntelligenceContext
+  businessIntelligence: BusinessIntelligenceContext,
+  memo: StrategicDecisionMemo | undefined
 ): ExecutiveBrief {
   const briefTrace: string[] = [
     `Executive Brief generated from Executive Decision System status "${pkg.status}" (executive decision signal "${businessIntelligence.executiveDecisionSignal}").`,
   ];
 
-  const immediateNextActions = buildImmediateNextActions(brief, businessIntelligence);
-  const criticalRisks = buildCriticalRisks(brief, businessIntelligence);
-  const strategicOpportunities = brief.executiveAdvisory ? [...brief.executiveAdvisory.opportunities] : [];
+  const reuseMemo = memo?.generated === true;
+  if (reuseMemo) {
+    briefTrace.push(
+      "Reused the already-computed Strategic Decision Memo's own risks, opportunities, recommended actions, and confidence assessment instead of re-deriving them."
+    );
+  }
+
+  const immediateNextActions = reuseMemo ? memo.recommendedActions : buildImmediateNextActions(brief, businessIntelligence);
+  const criticalRisks = reuseMemo ? memo.risks : buildCriticalRisks(brief, businessIntelligence);
+  const strategicOpportunities = reuseMemo ? memo.opportunities : brief.executiveAdvisory ? [...brief.executiveAdvisory.opportunities] : [];
+  const confidenceAssessment = reuseMemo ? memo.confidence : buildConfidenceAssessment(brief, businessIntelligence);
   briefTrace.push(
     `Assembled ${immediateNextActions.length} immediate next action(s), ${criticalRisks.length} critical risk(s), and ${strategicOpportunities.length} strategic opportunity/opportunities.`
   );
@@ -327,7 +359,7 @@ function buildGeneratedBrief(
     strategicOpportunities,
     recommendedDecisions: buildRecommendedDecisions(brief),
     immediateNextActions,
-    confidenceAssessment: buildConfidenceAssessment(brief, businessIntelligence),
+    confidenceAssessment,
     supportingEvidenceSummary: buildSupportingEvidenceSummary(brief, businessIntelligence),
     evidenceTrace: uniqueStrings([...brief.evidenceTrace, ...pkg.decision.evidenceTrace]).slice(0, 30),
     briefTrace,
@@ -365,5 +397,8 @@ export function generateExecutiveBrief(
     );
   }
 
-  return buildGeneratedBrief(enabled, pkg, brief, businessIntelligence);
+  const parsedMemo = strategicDecisionMemoSchema.safeParse(input.strategicDecisionMemo);
+  const memo = parsedMemo.success ? parsedMemo.data : undefined;
+
+  return buildGeneratedBrief(enabled, pkg, brief, businessIntelligence, memo);
 }

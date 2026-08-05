@@ -44,6 +44,8 @@ import {
   isExecutiveDecisionSystemEnabled,
   runExecutiveDecisionSystem,
 } from "@/app/lib/ai/executive-decision-system";
+import { buildStrategicDecisionMemo } from "@/app/lib/ai/strategic-decision-memo";
+import { generateExecutiveBrief } from "@/app/lib/ai/executive-brief-generator";
 import { logOperationalInfo } from "@/app/lib/security/logging";
 
 export const maxDuration = 300;
@@ -547,6 +549,16 @@ export async function POST(req: Request) {
       stopReason: executiveDecisionPackage.stopReason,
     });
 
+    // End-to-end pipeline (v1): Executive Decision System -> Strategic
+    // Decision Memo -> Executive Brief, each computed exactly once,
+    // right here, from the SAME in-memory executiveDecisionPackage --
+    // never re-validated, never re-run. Only meaningful on the success
+    // path (both require businessIntelligence/executiveDecisionBrief,
+    // which only exist when status is ready_for_report_generation); on
+    // any other status they would just report generated:false, so they
+    // are computed after, not before, the status check below to avoid
+    // wasted work on a request that is about to be rejected anyway.
+
     if (executiveDecisionPackage.status !== "ready_for_report_generation") {
       // Structured explanation, never a fabricated fallback: every
       // field below is a direct, already-computed real value from the
@@ -579,6 +591,28 @@ export async function POST(req: Request) {
       );
     }
 
+    // Strategic Decision Memo and Executive Brief: each computed
+    // exactly once, from the same executiveDecisionPackage above --
+    // never re-running Decision Engine, Business Intelligence
+    // Orchestrator, or any engine beneath them. Executive Brief reuses
+    // the Memo's own already-computed risks/opportunities/actions/
+    // confidence instead of re-deriving them a second time (see
+    // executive-brief-generator.ts's file header).
+    const strategicDecisionMemo = buildStrategicDecisionMemo({
+      enabled: true,
+      executiveDecisionPackage,
+    });
+    const executiveBrief = generateExecutiveBrief({
+      enabled: true,
+      executiveDecisionPackage,
+      strategicDecisionMemo,
+    });
+
+    logOperationalInfo("plan.executive_brief_pipeline", {
+      strategicDecisionMemoGenerated: strategicDecisionMemo.generated,
+      executiveBriefGenerated: executiveBrief.generated,
+    });
+
     // Structured context handoff: the existing report generator is
     // never called or modified here -- this only attaches the already-
     // computed package (and, for backward compatibility, the same
@@ -587,6 +621,8 @@ export async function POST(req: Request) {
     // report-generation pipeline.
     body.decisionEngineResult = executiveDecisionPackage.decision;
     body.executiveDecisionSystemResult = executiveDecisionPackage;
+    body.strategicDecisionMemo = strategicDecisionMemo;
+    body.executiveBrief = executiveBrief;
   } else if (decisionEngineEnabled && isSupportedDecisionEngineContext) {
     const decisionEngineOutput = runDecisionEngine({
       enabled: true,

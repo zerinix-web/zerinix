@@ -324,11 +324,17 @@ test("never fabricates: the whole memo always parses under the strict schema, fo
   }
 });
 
-test("does not modify UI, PDF generation, billing, authentication, routing, or report schemas, and is not wired into any production route or other module yet", async () => {
+test("does not modify UI, PDF generation, billing, authentication, routing, or report schemas, and is wired into app/api/plan/route.ts only, behind the Executive Decision System success path", async () => {
   assert.doesNotMatch(engineSource, /from ["'].*(?:pdf-engine|report-engine|report-jobs|billing|auth)/i);
 
+  // ZERINIX end-to-end Executive Decision production flow (v1): route.ts
+  // legitimately calls buildStrategicDecisionMemo exactly once, from the
+  // same executiveDecisionPackage the Executive Decision System already
+  // computed -- see the end-to-end pipeline test file for full coverage.
   const planRouteSource = await readFile(new URL("../app/api/plan/route.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(planRouteSource, /strategic-decision-memo|buildStrategicDecisionMemo/);
+  assert.match(planRouteSource, /buildStrategicDecisionMemo\(/);
+  const routeCallCount = (planRouteSource.match(/buildStrategicDecisionMemo\(/g) || []).length;
+  assert.equal(routeCallCount, 1, "buildStrategicDecisionMemo must be called exactly once in route.ts");
 
   const aiDir = new URL("../app/lib/ai/", import.meta.url);
   const files = await readdir(aiDir);

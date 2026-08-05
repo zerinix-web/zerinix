@@ -2,6 +2,7 @@ import {
   executiveDecisionPackageSchema,
   type ExecutiveDecisionPackage,
 } from "../ai/executive-decision-system.ts";
+import { executiveBriefSchema } from "../ai/executive-brief-generator.ts";
 
 // Formats ZERINIX Executive Decision System v1's output into additive
 // prompt context for the existing "Strategic Report" (business plan)
@@ -23,6 +24,19 @@ import {
 // Scoring, Evidence Corroboration Engine, or Research Prioritization
 // (via Business Intelligence Orchestrator) or Executive Decision
 // Brief -- there is no synthesis, scoring, or invented text here.
+//
+// Pipeline wiring (v1.1, additive): formatExecutiveBriefSupplementaryContext
+// below is a SEPARATE, additive function that formats ZERINIX Executive
+// Brief Generator v1's own output (the Executive Decision System ->
+// Strategic Decision Memo -> Executive Brief pipeline's final stage
+// before this one) -- but only the content genuinely NOT already
+// covered by formatExecutiveDecisionSystemContext above (its Executive
+// Summary line, Recommended Decisions, and Supporting Evidence
+// Summary's deterministic source-reliability/corroboration counts).
+// Both functions' output is meant to be interpolated together: the
+// original function still supplies the full verified-facts/
+// assumptions/conflicts/confidence detail, so the supplementary block
+// never repeats it.
 
 const MAX_LIST_ITEMS = 12;
 const MAX_TRACE_ITEMS = 15;
@@ -174,4 +188,49 @@ ${formatBulletBlock("Highest-priority next actions", nextActions, MAX_NEXT_ACTIO
     qualityRuleBullets: QUALITY_RULE_BULLETS,
     compactQualityRuleBullet: COMPACT_QUALITY_RULE_BULLET,
   };
+}
+
+export type ExecutiveBriefSupplementaryPromptContext = {
+  contextBlock: string;
+};
+
+// The Executive Brief only ever carries real content when it was
+// actually generated from a full Executive Decision Package (see
+// executive-brief-generator.ts) -- validated defensively here for the
+// same reason as above: this reads an untrusted `unknown` stored job
+// payload field, not a live in-memory object.
+export function formatExecutiveBriefSupplementaryContext(
+  rawBrief: unknown
+): ExecutiveBriefSupplementaryPromptContext | null {
+  const parsed = executiveBriefSchema.safeParse(rawBrief);
+  if (!parsed.success || !parsed.data.generated) {
+    return null;
+  }
+
+  const brief = parsed.data;
+  const summary = brief.supportingEvidenceSummary;
+
+  const recommendedDecisionsBlock = formatBulletBlock(
+    "Recommended decisions",
+    brief.recommendedDecisions,
+    MAX_LIST_ITEMS
+  );
+
+  const evidenceSummaryLines = [
+    `Evidence quality score: ${summary.evidenceQualityScore ?? "not available"}${
+      typeof summary.evidenceQualityScore === "number" ? "/100" : ""
+    }.`,
+    summary.sourceReliabilitySummary ? `Source reliability: ${summary.sourceReliabilitySummary}` : null,
+    summary.corroborationSummary ? `Corroboration: ${summary.corroborationSummary}` : null,
+  ].filter((line): line is string => Boolean(line));
+
+  const contextBlock = `Executive Brief context (the final, curated stage of the Executive Decision System -> Strategic Decision Memo -> Executive Brief pipeline; supplements, never repeats, the Executive Decision System context above):
+Executive summary: ${brief.executiveSummary ?? "not available"}
+
+${recommendedDecisionsBlock}
+
+Supporting evidence summary:
+${evidenceSummaryLines.map((line) => `- ${line}`).join("\n")}`;
+
+  return { contextBlock };
 }
