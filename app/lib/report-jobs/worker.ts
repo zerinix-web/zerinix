@@ -41,6 +41,7 @@ import {
 import { expertiseProfileSchema } from "@/app/lib/ai/expertise-profile";
 import { dynamicReportPlanSchema } from "@/app/lib/ai/dynamic-report-plan";
 import { dynamicResearchPlanSchema } from "@/app/lib/ai/dynamic-research-plan";
+import { validateExecutiveReportQuality } from "@/app/lib/report-engine/executive-report-quality-validator";
 
 const JOB_LEASE_SECONDS = 120;
 const JOB_HEARTBEAT_MS = 20_000;
@@ -786,6 +787,46 @@ export async function processNextReportJob(options: ReportWorkerOptions = {}) {
     void updateProgress(supabase, job.id, workerId, "generating", 75, "report_generation");
     const parsingStartedAt = Date.now();
     const report = await readExecutionResponse(response, job.request_payload);
+
+    // ZERINIX Executive Report Quality Validator v1: the real, final
+    // gate before any report is persisted (and therefore visible to
+    // the user via the dashboard) -- reusing the SAME request_payload
+    // fields already carried by earlier ZERINIX Executive Decision
+    // work (executiveDecisionSystemResult / strategicDecisionMemo /
+    // executiveBrief), never recomputing them. Disabled by default
+    // (like every other ZERINIX module); when disabled, `validated` is
+    // false and this block is a no-op, so the existing pipeline is
+    // completely unaffected unless the flag is explicitly turned on.
+    // A blocking finding (critical/error severity) throws here, which
+    // flows into this function's own, pre-existing catch block below
+    // exactly like any other report-generation failure (e.g.
+    // readExecutionResponse's own missing-field validation) --
+    // reusing the existing terminal-failure path rather than adding a
+    // new one, so no report ever reaches persistCompletedReport in a
+    // state this validator considers broken. On a pass, the result is
+    // attached as an additive, optional reports.metadata field -- no
+    // existing API/response contract changes.
+    const qualityValidation = validateExecutiveReportQuality({
+      sections: report.sections,
+      expectedFields: getExpectedFields(report.domain),
+      executiveDecisionPackage: job.request_payload.executiveDecisionSystemResult,
+      strategicDecisionMemo: job.request_payload.strategicDecisionMemo,
+      executiveBrief: job.request_payload.executiveBrief,
+    });
+    if (qualityValidation.validated && !qualityValidation.passed) {
+      const blockingIssues = qualityValidation.issues.filter(
+        (issue) => issue.severity === "critical" || issue.severity === "error"
+      );
+      throw new Error(
+        `Report failed Executive Report Quality Validator: ${blockingIssues
+          .map((issue) => `[${issue.severity}] ${issue.category}: ${issue.message}`)
+          .join(" | ")}`
+      );
+    }
+    if (qualityValidation.validated) {
+      report.metadata = { ...(report.metadata || {}), reportQualityValidation: qualityValidation };
+    }
+
     const persistenceStartedAt = Date.now();
     const resultPayload = await persistCompletedReport({ supabase, job, report });
     const completionStartedAt = Date.now();
