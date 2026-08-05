@@ -16,14 +16,28 @@ const planExecutorSource = readFileSync("app/lib/report-jobs/plan-executor.ts", 
 
 test("imports the real, pure formatting module -- never redefines or duplicates its logic inline", () => {
   // The import now also brings in formatExecutiveBriefSupplementaryContext
-  // (see the Executive Decision Memo/Executive Brief pipeline wiring),
-  // so this only asserts formatExecutiveDecisionSystemContext is
-  // imported FROM the real module, not the exact historical import
-  // statement shape.
-  assert.match(
-    planExecutorSource,
-    /formatExecutiveDecisionSystemContext,?\s*[\s\S]{0,80}from "@\/app\/lib\/report-engine\/executive-decision-system-context";/
+  // and formatStrategicDecisionMemoReportSection (see the Executive
+  // Decision Memo/Executive Brief pipeline wiring), so this locates the
+  // whole `import { ... } from ".../executive-decision-system-context"`
+  // statement by its closing `from` clause (robust to how many symbols
+  // it lists or how they're wrapped) and checks every expected symbol
+  // is named somewhere inside it, rather than asserting an exact
+  // historical import statement shape.
+  const importStatementEnd = planExecutorSource.indexOf(
+    'from "@/app/lib/report-engine/executive-decision-system-context";'
   );
+  assert.ok(importStatementEnd >= 0, "expected an import from executive-decision-system-context");
+  const importStatementStart = planExecutorSource.lastIndexOf("import {", importStatementEnd);
+  assert.ok(importStatementStart >= 0);
+  const importStatement = planExecutorSource.slice(importStatementStart, importStatementEnd);
+  for (const symbol of [
+    "formatExecutiveDecisionSystemContext",
+    "formatExecutiveBriefSupplementaryContext",
+    "formatStrategicDecisionMemoReportSection",
+  ]) {
+    assert.match(importStatement, new RegExp(symbol), `expected ${symbol} to be imported`);
+  }
+
   const importCount = (planExecutorSource.match(/formatExecutiveDecisionSystemContext\(/g) || []).length;
   // Called exactly once, right where body is parsed, and reused by
   // every prompt below -- never re-derived per field/section.

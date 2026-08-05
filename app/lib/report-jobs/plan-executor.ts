@@ -119,6 +119,7 @@ import { labelModelDerivedFinancialClaims } from "@/app/lib/report-engine/financ
 import {
   formatExecutiveDecisionSystemContext,
   formatExecutiveBriefSupplementaryContext,
+  formatStrategicDecisionMemoReportSection,
 } from "@/app/lib/report-engine/executive-decision-system-context";
 import { normalizeReportSourceSection } from "@/app/lib/report-source-normalization.mjs";
 import {
@@ -4767,6 +4768,27 @@ async function executePlanRequestInner(
     const executiveBriefSupplementaryContextBlock = executiveBriefSupplementaryContext
       ? `\n${executiveBriefSupplementaryContext.contextBlock}\n`
       : "";
+    // ZERINIX Strategic Decision Memo v1 as a first-class report
+    // section (additive): computed once, here, reusing the already-
+    // computed Memo -- never re-derived. `null` whenever no real memo
+    // exists for this request (the flag was off, this domain never
+    // reached Business Intelligence Orchestrator, etc.), in which case
+    // every code path below is byte-for-byte identical to before this
+    // integration -- the model's own, legacy, deterministically-built
+    // Executive Recommendation content (buildCanonicalExecutiveRecommendation
+    // and its appended intelligence blocks, both unmodified) is used
+    // exactly as it always has been. When real, this string REPLACES
+    // that section's content post-hoc, at the single point each
+    // response path actually finalizes what it returns/streams (see
+    // below) -- never by altering parseFullPlanReport/
+    // normalizeFullPlanReport, and never by altering what gets written
+    // to the AI response cache (only the per-request, in-memory value
+    // returned to THIS caller is overridden, so a future cache hit for
+    // a different request is never contaminated with this request's
+    // memo content).
+    const strategicDecisionMemoReportSection = formatStrategicDecisionMemoReportSection(
+      body?.strategicDecisionMemo
+    );
     const isUniversalInputRequest =
       req.headers.get("x-zerinix-universal-input") === "true";
 
@@ -5311,6 +5333,17 @@ Write only the content for this section. Do not write a JSON object, field name,
           },
         });
 
+        // Strategic Decision Memo as a first-class section (cache-hit
+        // path): applied last, after validation/metadata/usage
+        // recording above have all already run against the original,
+        // cached, memo-agnostic content -- and never written back into
+        // the cache itself, so a future cache hit for a different
+        // request (with its own, different memo, or none at all) is
+        // never contaminated by this request's memo.
+        if (strategicDecisionMemoReportSection) {
+          parsedCachedReport.executiveRecommendation = strategicDecisionMemoReportSection;
+        }
+
         return new Response(encoder.encode(
           serializePlanReportMetadataChunk(cachedUnifiedFinancialContext) +
             serializePlanReportChunks(parsedCachedReport)
@@ -5617,6 +5650,16 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             });
             const cacheResponseText = JSON.stringify(parsedReport);
 
+            // Strategic Decision Memo as a first-class section (live-
+            // generation path): applied AFTER cacheResponseText is
+            // captured, so the AI response cache always stores the
+            // original, memo-agnostic content -- only the in-memory
+            // parsedReport actually streamed/returned to this request
+            // is overridden.
+            if (strategicDecisionMemoReportSection) {
+              parsedReport.executiveRecommendation = strategicDecisionMemoReportSection;
+            }
+
             fullReportStage = "stream_response";
             enqueue(serializePlanReportChunks(parsedReport));
 
@@ -5713,6 +5756,16 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
                 bundle: businessResearch,
                 expectedDomain: "business",
               });
+              // Strategic Decision Memo as a first-class section (timeout-
+              // fallback path): the Memo was already fully computed
+              // before this OpenAI call was even made, so it is real
+              // and available here too, even though the report call
+              // itself timed out -- applying it improves the degraded
+              // fallback's content instead of leaving it purely
+              // generic.
+              if (strategicDecisionMemoReportSection) {
+                fallbackReport.executiveRecommendation = strategicDecisionMemoReportSection;
+              }
               enqueue(serializePlanReportChunks(fallbackReport));
               logReportTimingSummary({
                 requestId: reportRequestId,
