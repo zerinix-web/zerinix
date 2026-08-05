@@ -40,6 +40,10 @@ import { createUniversalDocumentIntelligenceFallback } from "@/app/lib/ai/univer
 import { buildDecisionPlan, type DecisionPlan } from "@/app/lib/ai/intelligence-router";
 import { runBrainOrchestrator } from "@/app/lib/ai/brain-orchestrator";
 import { isDecisionEngineEnabled, runDecisionEngine } from "@/app/lib/ai/decision-engine";
+import {
+  isExecutiveDecisionSystemEnabled,
+  runExecutiveDecisionSystem,
+} from "@/app/lib/ai/executive-decision-system";
 import { logOperationalInfo } from "@/app/lib/security/logging";
 
 export const maxDuration = 300;
@@ -73,6 +77,10 @@ function readRequestAttachmentAssets(body: ReportJobRequestPayload) {
         ];
       })
     : [];
+}
+
+function uniqueStrings(values: readonly string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 function readIdempotencyKey(request: Request, body: ReportJobRequestPayload) {
@@ -495,11 +503,91 @@ export async function POST(req: Request) {
   // Intelligence Pipeline's own business-reasoning engines already
   // degrade to insufficient_evidence for non-business domains rather
   // than fabricating a business-flavored response.
+  //
+  // ZERINIX Executive Decision System v1 integration (below, checked
+  // FIRST): Executive Decision System already calls Decision Engine
+  // internally exactly once -- which itself already runs Business
+  // Intelligence Orchestrator, Confidence Engine, Conflict Detection,
+  // Evidence Quality Scoring, Source Reliability Engine, Evidence
+  // Corroboration Engine, Live Research Engine, and Research
+  // Prioritization/Execution Planning exactly once each. Running the
+  // Decision Engine block below AS WELL for the same request would
+  // duplicate every one of those modules a second time, so the two
+  // blocks are deliberately mutually exclusive (if/else if): never both
+  // executed for one request. When ZERINIX_EXECUTIVE_DECISION_SYSTEM_ENABLED
+  // is off (the default), this `if` is skipped entirely and the
+  // Decision Engine block runs exactly as it did before this
+  // integration -- byte-for-byte unchanged -- so the current production
+  // flow is fully preserved. Supported Business Intelligence requests
+  // only: Decision Engine's own Adaptive Intelligence Engine stage
+  // already makes that determination internally (selectedDomain ===
+  // "business_intelligence"); this route only applies the same "not
+  // chat mode" pre-filter every sibling integration block already uses.
+  const executiveDecisionSystemEnabled = isExecutiveDecisionSystemEnabled();
+  const isSupportedExecutiveDecisionSystemContext =
+    normalizeSelectedAnalysisMode(body.analysisMode) !== "chat";
   const decisionEngineEnabled = isDecisionEngineEnabled();
   const isSupportedDecisionEngineContext =
     normalizeSelectedAnalysisMode(body.analysisMode) !== "chat";
 
-  if (decisionEngineEnabled && isSupportedDecisionEngineContext) {
+  if (executiveDecisionSystemEnabled && isSupportedExecutiveDecisionSystemContext) {
+    const { package: executiveDecisionPackage } = runExecutiveDecisionSystem({
+      enabled: true,
+      prompt: typeof body.prompt === "string" ? body.prompt : "",
+      attachments: readRequestAttachmentAssets(body),
+    });
+    const businessIntelligence = executiveDecisionPackage.businessIntelligence;
+    const criticalFailure = businessIntelligence?.criticalFailure ?? null;
+
+    logOperationalInfo("plan.executive_decision_system", {
+      status: executiveDecisionPackage.status,
+      businessIntelligenceApplied: executiveDecisionPackage.businessIntelligenceApplied,
+      executiveDecisionSignal: businessIntelligence?.executiveDecisionSignal ?? null,
+      criticalFailureStage: criticalFailure?.stage ?? null,
+      stopReason: executiveDecisionPackage.stopReason,
+    });
+
+    if (executiveDecisionPackage.status !== "ready_for_report_generation") {
+      // Structured explanation, never a fabricated fallback: every
+      // field below is a direct, already-computed real value from the
+      // package -- an empty array/null means that stage genuinely never
+      // ran or found nothing, never an invented placeholder.
+      const missingEvidence = uniqueStrings([
+        ...executiveDecisionPackage.decision.evidenceValidation.missingEvidenceSummary,
+        ...(businessIntelligence?.aggregatedResearchRequirements.detectedGaps ?? []),
+      ]);
+      const confidencePenalties = businessIntelligence?.confidence?.confidencePenalties ?? [];
+      const detectedConflicts = businessIntelligence?.conflictDetection?.conflicts ?? [];
+      const topResearchTask = businessIntelligence?.researchPrioritization?.prioritizedTasks[0] ?? null;
+
+      return NextResponse.json(
+        {
+          error: `A responsible report cannot be produced yet. ${executiveDecisionPackage.stopReason || "Insufficient evidence."}`,
+          code: criticalFailure
+            ? "EXECUTIVE_DECISION_SYSTEM_CRITICAL_FAILURE"
+            : "EXECUTIVE_DECISION_SYSTEM_INSUFFICIENT_EVIDENCE",
+          reason: criticalFailure ? "critical_failure" : "insufficient_evidence",
+          missingEvidence,
+          confidencePenalties,
+          detectedConflicts,
+          highestValueNextResearchAction: topResearchTask
+            ? { topic: topResearchTask.topic, explanation: topResearchTask.explanation }
+            : null,
+          nextRecommendedAction: executiveDecisionPackage.nextRecommendedAction,
+        },
+        { status: 422 }
+      );
+    }
+
+    // Structured context handoff: the existing report generator is
+    // never called or modified here -- this only attaches the already-
+    // computed package (and, for backward compatibility, the same
+    // decisionEngineResult field the block below would have set) to the
+    // request body that already flows, unmodified, into the existing
+    // report-generation pipeline.
+    body.decisionEngineResult = executiveDecisionPackage.decision;
+    body.executiveDecisionSystemResult = executiveDecisionPackage;
+  } else if (decisionEngineEnabled && isSupportedDecisionEngineContext) {
     const decisionEngineOutput = runDecisionEngine({
       enabled: true,
       prompt: typeof body.prompt === "string" ? body.prompt : "",

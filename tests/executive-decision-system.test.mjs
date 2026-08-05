@@ -280,9 +280,15 @@ test("keeps every existing module independent: this file only reads exported fun
   assert.ok(exportCount >= 2, "expected this facade to export its own flag/schema, not redefine anyone else's");
 });
 
-test("is not wired into any production route yet", async () => {
+test("is wired into app/api/plan/route.ts behind its own feature flag only, and referenced nowhere else", async () => {
+  // ZERINIX Executive Decision System v1's own /api/plan integration
+  // (see tests/executive-decision-system-plan-integration.test.mjs)
+  // legitimately calls runExecutiveDecisionSystem exactly once, gated
+  // behind ZERINIX_EXECUTIVE_DECISION_SYSTEM_ENABLED (default disabled),
+  // mutually exclusive with the pre-existing Decision Engine block.
   const planRouteSource = await readFile(new URL("../app/api/plan/route.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(planRouteSource, /executive-decision-system|runExecutiveDecisionSystem/);
+  assert.match(planRouteSource, /runExecutiveDecisionSystem\(/);
+  assert.match(planRouteSource, /isExecutiveDecisionSystemEnabled\(\)/);
 
   const aiDir = new URL("../app/lib/ai/", import.meta.url);
   const files = await readdir(aiDir);

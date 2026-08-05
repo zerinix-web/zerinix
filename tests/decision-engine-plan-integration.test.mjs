@@ -113,7 +113,13 @@ test("existing plan and market regression surfaces remain unchanged: every pre-e
 
 test("logging only records safe metadata (executed/skipped stages, status, stop reason, execution time), never raw evidence/pipeline results", () => {
   const block = decisionEngineBlockSource();
-  const logCallStart = block.indexOf("logOperationalInfo(");
+  // Search specifically for the Decision Engine block's own logging
+  // call by name -- the block now also contains the Executive Decision
+  // System integration's own, separate logOperationalInfo("plan.executive_decision_system", ...)
+  // call ahead of it (see the dedicated executive-decision-system
+  // plan-integration test file), so a purely positional "first
+  // logOperationalInfo(" search would grab the wrong one.
+  const logCallStart = block.indexOf('logOperationalInfo("plan.decision_engine"');
   const logCallEnd = block.indexOf(");", logCallStart) + 2;
   const logCall = block.slice(logCallStart, logCallEnd);
 
