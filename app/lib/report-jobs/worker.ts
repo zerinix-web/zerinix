@@ -42,6 +42,7 @@ import { expertiseProfileSchema } from "@/app/lib/ai/expertise-profile";
 import { dynamicReportPlanSchema } from "@/app/lib/ai/dynamic-report-plan";
 import { dynamicResearchPlanSchema } from "@/app/lib/ai/dynamic-research-plan";
 import { validateExecutiveReportQuality } from "@/app/lib/report-engine/executive-report-quality-validator";
+import { checkReportConsistency } from "@/app/lib/report-engine/report-consistency-checker";
 
 const JOB_LEASE_SECONDS = 120;
 const JOB_HEARTBEAT_MS = 20_000;
@@ -825,6 +826,38 @@ export async function processNextReportJob(options: ReportWorkerOptions = {}) {
     }
     if (qualityValidation.validated) {
       report.metadata = { ...(report.metadata || {}), reportQualityValidation: qualityValidation };
+    }
+
+    // ZERINIX Report Consistency Checker v1: runs immediately AFTER
+    // the Executive Report Quality Validator above (per the check
+    // ordering this module is meant to follow), on the same already-
+    // validated report and the same already-computed request_payload
+    // fields -- never recomputing Executive Decision System, Strategic
+    // Decision Memo, or Executive Brief. Disabled by default; when
+    // disabled, `checked` is false and this block is a no-op. A
+    // blocking finding (critical/error severity) throws here, reusing
+    // the exact same pre-existing terminal-failure path as the quality
+    // validator above and readExecutionResponse's own validation. On a
+    // pass, the result is attached as a second, additive, optional
+    // reports.metadata field.
+    const consistencyCheck = checkReportConsistency({
+      sections: report.sections,
+      executiveDecisionPackage: job.request_payload.executiveDecisionSystemResult,
+      strategicDecisionMemo: job.request_payload.strategicDecisionMemo,
+      executiveBrief: job.request_payload.executiveBrief,
+    });
+    if (consistencyCheck.checked && !consistencyCheck.consistent) {
+      const blockingIssues = consistencyCheck.issues.filter(
+        (issue) => issue.severity === "critical" || issue.severity === "error"
+      );
+      throw new Error(
+        `Report failed Report Consistency Checker: ${blockingIssues
+          .map((issue) => `[${issue.severity}] ${issue.type}: ${issue.message}`)
+          .join(" | ")}`
+      );
+    }
+    if (consistencyCheck.checked) {
+      report.metadata = { ...(report.metadata || {}), reportConsistencyCheck: consistencyCheck };
     }
 
     const persistenceStartedAt = Date.now();
