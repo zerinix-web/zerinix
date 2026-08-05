@@ -484,6 +484,11 @@ test("does not modify report generation, PDF generation, billing, or UI, and is 
       // BusinessIntelligenceContext) to shape its own memo -- it never
       // calls runBusinessIntelligenceOrchestration itself.
       file === "strategic-decision-memo.ts" ||
+      // ZERINIX Executive Brief Generator v1 legitimately reuses
+      // executiveDecisionSignalValues (and type-imports
+      // BusinessIntelligenceContext) to shape its own brief -- it never
+      // calls runBusinessIntelligenceOrchestration itself.
+      file === "executive-brief-generator.ts" ||
       !file.endsWith(".ts")
     ) {
       continue;

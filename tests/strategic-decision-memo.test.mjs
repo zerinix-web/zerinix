@@ -333,7 +333,14 @@ test("does not modify UI, PDF generation, billing, authentication, routing, or r
   const aiDir = new URL("../app/lib/ai/", import.meta.url);
   const files = await readdir(aiDir);
   for (const file of files) {
-    if (file === "strategic-decision-memo.ts" || !file.endsWith(".ts")) {
+    if (
+      file === "strategic-decision-memo.ts" ||
+      // ZERINIX Executive Brief Generator v1 legitimately reuses
+      // strategicRecommendedActionSchema/StrategicRecommendedAction for
+      // its own Immediate Next Actions section.
+      file === "executive-brief-generator.ts" ||
+      !file.endsWith(".ts")
+    ) {
       continue;
     }
     const contents = await readFile(new URL(file, aiDir), "utf8");

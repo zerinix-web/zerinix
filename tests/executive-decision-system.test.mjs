@@ -298,6 +298,9 @@ test("is wired into app/api/plan/route.ts behind its own feature flag only, and 
       // ZERINIX Strategic Decision Memo v1 legitimately validates
       // Executive Decision System output via executiveDecisionPackageSchema.
       file === "strategic-decision-memo.ts" ||
+      // ZERINIX Executive Brief Generator v1 legitimately validates
+      // Executive Decision System output via executiveDecisionPackageSchema.
+      file === "executive-brief-generator.ts" ||
       !file.endsWith(".ts")
     ) {
       continue;

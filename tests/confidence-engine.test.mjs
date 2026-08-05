@@ -323,6 +323,10 @@ test("does not modify report generation, PDF generation, billing, or UI, and is 
       // confidenceDriverSchema/confidencePenaltySchema for its own
       // Confidence category.
       file === "strategic-decision-memo.ts" ||
+      // ZERINIX Executive Brief Generator v1 legitimately reuses
+      // confidenceDriverSchema/confidencePenaltySchema for its own
+      // Confidence Assessment section.
+      file === "executive-brief-generator.ts" ||
       !file.endsWith(".ts")
     ) {
       continue;
