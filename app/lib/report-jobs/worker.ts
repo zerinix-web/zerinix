@@ -45,6 +45,7 @@ import { validateExecutiveReportQuality } from "@/app/lib/report-engine/executiv
 import { checkReportConsistency } from "@/app/lib/report-engine/report-consistency-checker";
 import { generateReportAuditTrail } from "@/app/lib/report-engine/report-audit-trail";
 import { generateExplainabilityReport } from "@/app/lib/report-engine/explainability-engine";
+import { generateReproducibilityRecord } from "@/app/lib/report-engine/decision-reproducibility-engine";
 
 const JOB_LEASE_SECONDS = 120;
 const JOB_HEARTBEAT_MS = 20_000;
@@ -908,6 +909,30 @@ export async function processNextReportJob(options: ReportWorkerOptions = {}) {
     });
     if (explainability.generated) {
       report.metadata = { ...(report.metadata || {}), reportExplainability: explainability };
+    }
+
+    // ZERINIX Decision Reproducibility Engine v1: runs immediately
+    // AFTER the Explainability Engine above, on the same already-
+    // computed request_payload fields plus the audit trail and
+    // explainability results just computed in this same request --
+    // never recomputing Executive Decision System, Strategic Decision
+    // Memo, Executive Brief, or either module above, and never
+    // re-running the pipeline a second time (that would violate this
+    // pipeline's own "exactly once" guarantee). Like the two modules
+    // above, this one never throws/blocks a report -- it only records
+    // a deterministic reproducibility fingerprint and execution
+    // metadata. Disabled by default; when disabled, `generated` is
+    // false and this block is a no-op. On a pass, the result is
+    // attached as a fifth, additive, optional reports.metadata field.
+    const reproducibility = generateReproducibilityRecord({
+      executiveDecisionPackage: job.request_payload.executiveDecisionSystemResult,
+      strategicDecisionMemo: job.request_payload.strategicDecisionMemo,
+      executiveBrief: job.request_payload.executiveBrief,
+      auditTrail,
+      explainability,
+    });
+    if (reproducibility.generated) {
+      report.metadata = { ...(report.metadata || {}), reportReproducibility: reproducibility };
     }
 
     const persistenceStartedAt = Date.now();
