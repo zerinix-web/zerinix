@@ -319,6 +319,10 @@ test("does not modify report generation, PDF generation, billing, or UI, and is 
       // ZERINIX Business Intelligence Orchestrator v1 legitimately
       // coordinates Confidence Engine as one of its 8 stages.
       file === "business-intelligence-orchestrator.ts" ||
+      // ZERINIX Strategic Decision Memo v1 legitimately reuses
+      // confidenceDriverSchema/confidencePenaltySchema for its own
+      // Confidence category.
+      file === "strategic-decision-memo.ts" ||
       !file.endsWith(".ts")
     ) {
       continue;

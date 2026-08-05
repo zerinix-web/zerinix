@@ -479,6 +479,11 @@ test("does not modify report generation, PDF generation, billing, or UI, and is 
       // output -- it never calls runBusinessIntelligenceOrchestration
       // itself.
       file === "executive-decision-system.ts" ||
+      // ZERINIX Strategic Decision Memo v1 legitimately reuses
+      // executiveDecisionSignalValues (and type-imports
+      // BusinessIntelligenceContext) to shape its own memo -- it never
+      // calls runBusinessIntelligenceOrchestration itself.
+      file === "strategic-decision-memo.ts" ||
       !file.endsWith(".ts")
     ) {
       continue;

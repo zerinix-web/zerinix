@@ -293,7 +293,13 @@ test("is wired into app/api/plan/route.ts behind its own feature flag only, and 
   const aiDir = new URL("../app/lib/ai/", import.meta.url);
   const files = await readdir(aiDir);
   for (const file of files) {
-    if (file === "executive-decision-system.ts" || !file.endsWith(".ts")) {
+    if (
+      file === "executive-decision-system.ts" ||
+      // ZERINIX Strategic Decision Memo v1 legitimately validates
+      // Executive Decision System output via executiveDecisionPackageSchema.
+      file === "strategic-decision-memo.ts" ||
+      !file.endsWith(".ts")
+    ) {
       continue;
     }
     const contents = await readFile(new URL(file, aiDir), "utf8");

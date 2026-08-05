@@ -347,6 +347,9 @@ test("does not modify report generation, PDF generation, billing, or UI, and is 
       // ZERINIX Business Intelligence Orchestrator v1 legitimately
       // coordinates Research Prioritization Engine as one of its 8 stages.
       file === "business-intelligence-orchestrator.ts" ||
+      // ZERINIX Strategic Decision Memo v1 legitimately reuses
+      // prioritizedResearchTaskSchema for its own researchPriorities field.
+      file === "strategic-decision-memo.ts" ||
       !file.endsWith(".ts")
     ) {
       continue;
