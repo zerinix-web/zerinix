@@ -309,20 +309,29 @@ export function validateRealEstateReportLanguage(
   for (const section of repair.sections) {
     report[section.field] = section.content;
   }
+  let removedAnyLanguageMismatch = repair.warnings.length > 0;
 
+  // Disclosure text for the report's own "Missing Information"
+  // section only -- never injected into an unrelated section's
+  // content, which would present an internal pipeline notice as if it
+  // were due-diligence prose. Worded around the report's language
+  // requirement rather than "translation failure": this pipeline
+  // never performs machine translation, so a translation-error framing
+  // would expose a mechanism that doesn't exist.
   const localizedWarning = {
     English:
-      "Some wording in this section could not be translated reliably and was omitted.",
+      "Part of this report did not meet the report's language requirement and was removed for consistency.",
     Turkish:
-      "Bu bölümdeki bazı ifadeler güvenilir biçimde çevrilemediği için çıkarıldı.",
+      "Bu raporun bir kısmı, raporun dil gereksinimini karşılamadığı için tutarlılık amacıyla kaldırıldı.",
     German:
-      "Einige Formulierungen in diesem Abschnitt konnten nicht zuverlässig übersetzt werden und wurden ausgelassen.",
+      "Ein Teil dieses Berichts erfüllte die Sprachanforderung des Berichts nicht und wurde aus Konsistenzgründen entfernt.",
     French:
-      "Certaines formulations de cette section n’ont pas pu être traduites de façon fiable et ont été omises.",
+      "Une partie de ce rapport ne respectait pas l'exigence linguistique du rapport et a été retirée pour en assurer la cohérence.",
     Spanish:
-      "Algunas expresiones de esta sección no pudieron traducirse de forma fiable y se omitieron.",
+      "Parte de este informe no cumplía con el requisito de idioma del informe y se eliminó para mantener la coherencia.",
   }[language];
   for (const field of fieldsToRepair) {
+    if (field === "missingInformation") continue;
     let removedLanguageMismatch = false;
     const lines = report[field]
       .split(/\n+/)
@@ -338,10 +347,13 @@ export function validateRealEstateReportLanguage(
         if (invalid) removedLanguageMismatch = true;
         return !invalid;
       });
-    if (removedLanguageMismatch && !lines.includes(localizedWarning)) {
-      lines.push(localizedWarning);
-    }
+    if (removedLanguageMismatch) removedAnyLanguageMismatch = true;
     report[field] = lines.join("\n");
+  }
+  if (removedAnyLanguageMismatch && !report.missingInformation.includes(localizedWarning)) {
+    report.missingInformation = [report.missingInformation.trim(), localizedWarning]
+      .filter(Boolean)
+      .join("\n");
   }
 
   const analyticalLines = realEstateFields

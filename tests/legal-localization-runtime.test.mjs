@@ -77,5 +77,9 @@ test("mixed-language legal content is repaired without blocking export", () => {
   const result = renderFixturePdf(englishRequest, mixedSections, "tr", "tr-TR");
   assert.ok(result.byteLength > 1_000);
   assert.doesNotMatch(result.visibleText, /Bu bölüm yatırım/);
-  assert.match(result.visibleText, /could not be translated reliably/i);
+  // Internal translation-fallback wording must never reach rendered
+  // report text or the exported PDF -- it belongs only in `warnings`,
+  // which `renderFixturePdf` here intentionally does not fold into
+  // `visibleText`/the PDF stream.
+  assert.doesNotMatch(result.visibleText, /could not be translated reliably|translated reliably/i);
 });

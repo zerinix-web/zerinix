@@ -178,13 +178,32 @@ type ReportLanguageSection = {
   content: string;
 };
 
+// User-facing disclosure text for the `warnings` channel only (see
+// repairReportLanguageSections below) -- never injected into section
+// content. Deliberately worded around the report's language
+// requirement rather than "translation failure": the pipeline never
+// performs machine translation, so describing this as a translation
+// error would expose an internal mechanism that doesn't exist and
+// read as a system diagnostic rather than a normal content notice.
 const languageRepairWarnings: Record<ReportLanguageCode, string> = {
-  en: "A section could not be translated reliably and was omitted. Review the original report content if needed.",
-  tr: "Bir bölüm güvenilir biçimde çevrilemediği için çıkarıldı. Gerekirse özgün rapor içeriğini inceleyin.",
-  de: "Ein Abschnitt konnte nicht zuverlässig übersetzt werden und wurde ausgelassen. Prüfen Sie bei Bedarf den ursprünglichen Bericht.",
-  fr: "Une section n’a pas pu être traduite de façon fiable et a été omise. Consultez le rapport d’origine si nécessaire.",
-  es: "Una sección no pudo traducirse de forma fiable y se omitió. Revise el informe original si es necesario.",
+  en: "Part of this section did not meet the report's language requirement and was removed for consistency.",
+  tr: "Bu bölümün bir kısmı, raporun dil gereksinimini karşılamadığı için tutarlılık amacıyla kaldırıldı.",
+  de: "Ein Teil dieses Abschnitts erfüllte die Sprachanforderung des Berichts nicht und wurde aus Konsistenzgründen entfernt.",
+  fr: "Une partie de cette section ne respectait pas l'exigence linguistique du rapport et a été retirée pour en assurer la cohérence.",
+  es: "Parte de esta sección no cumplía con el requisito de idioma del informe y se eliminó para mantener la coherencia.",
 };
+
+// Financial/business acronyms and technical terms that must never be
+// treated as language signal: they are language-neutral by
+// convention (used verbatim across en/tr/de/fr/es reports) and would
+// otherwise inflate a fragment's "foreign" score under the finer
+// residual-detection pass below.
+const languageNeutralTermPattern =
+  /\b(?:CAC|LTV|ARPA|ARPU|ICP|B2B|B2C|D2C|HoReCa|SaaS|KPIs?|ROI|MRR|ARR|TAM|SAM|SOM|EBITDA|CAGR|NPS|MVP|GMV|IRR|NPV|API|CEO|CFO|CTO|COO|PDF)\b/gi;
+
+function maskLanguageNeutralTerms(text: string) {
+  return text.replace(/https?:\/\/\S+/gi, " ").replace(languageNeutralTermPattern, " ");
+}
 
 function replaceKnownReportCopy(value: string, code: ReportLanguageCode) {
   let repaired = value;
@@ -241,12 +260,27 @@ export function findReportLanguageIssues(
     .filter((line) => !/https?:\/\/|^\s*(?:URL|R\d+|\[[^\]]+\])\s*:/i.test(line))
     .join("\n");
   for (const segment of prose.split(/\n+|(?<=[.!?])\s+/).map((item) => item.trim())) {
-    if (segment.length < 30) continue;
-    const segmentScores = scoreReportLanguages(segment);
+    // Fragments below 12 chars are too short to score reliably at all
+    // (a single word, a stray token) -- skip them outright rather than
+    // risk a false positive.
+    if (segment.length < 12) continue;
+    const maskedSegment = maskLanguageNeutralTerms(segment);
+    if (!maskedSegment.trim()) continue;
+    const segmentScores = scoreReportLanguages(maskedSegment);
     const foreign = reportLanguageCodes
       .filter((candidate) => candidate !== code)
       .sort((left, right) => segmentScores[right] - segmentScores[left])[0];
-    if (segmentScores[foreign] >= 3 && segmentScores[foreign] > segmentScores[code]) {
+    // Primary check: long fragments (>=30 chars) need a strong foreign
+    // signal (score >= 3) to flag, matching the original heuristic.
+    // Residual check: shorter fragments (12-29 chars) -- the exact gap
+    // where a short, keyword-bearing foreign phrase (e.g. a leftover
+    // English label or short sentence) previously scored high enough
+    // to be foreign but was never long enough to be looked at -- only
+    // need a slightly lower bar (score >= 2) since the length itself
+    // already limits how much signal can accumulate.
+    const isPrimaryMatch = segment.length >= 30 && segmentScores[foreign] >= 3;
+    const isResidualMatch = segment.length < 30 && segmentScores[foreign] >= 2;
+    if ((isPrimaryMatch || isResidualMatch) && segmentScores[foreign] > segmentScores[code]) {
       issues.push({
         kind: "foreign_prose",
         segment,
@@ -300,13 +334,16 @@ export function repairReportLanguageSections<T extends ReportLanguageSection>(
         return false;
       })
       .join("\n");
+    // The removal itself is disclosed only through `warnings` (the
+    // existing, correctly-scoped channel Planner already renders as a
+    // dedicated "Warnings / Missing Evidence" section) -- never
+    // written into `content`. Injecting it into content would present
+    // an internal pipeline notice as if it were report prose.
     if (sectionHadUnrepairableProse) warnings.push(languageRepairWarnings[code]);
     return {
       ...section,
       title,
-      content: [content, sectionHadUnrepairableProse ? languageRepairWarnings[code] : ""]
-        .filter(Boolean)
-        .join("\n"),
+      content,
     } as T;
   });
   return {

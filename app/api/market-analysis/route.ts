@@ -1044,6 +1044,34 @@ function applySharedMarketGraph(
   };
 }
 
+// Unlike plan-executor.ts's business-report path (createPlanFieldFallback),
+// this parser previously left `report[field] = ""` for any field the
+// model omitted or returned as failure text -- worker.ts's
+// readExecutionResponse treats an empty field exactly like a missing
+// one, so a single omitted field could fail the whole run with
+// "Report payload is missing required sections". These fallbacks are
+// deliberately generic and honest (never a fabricated market fact,
+// always framed as a validation gap) so the missing/invalid-field
+// tracking below (unchanged, still fully accurate for diagnostics)
+// stays meaningful while the report payload itself is always complete.
+const marketFieldFallbackTemplates: Record<ResponseLanguage, (label: string) => string> = {
+  English: (label) =>
+    `[Estimated] ${label}: This section could not be generated with sufficient evidence in this run and requires additional research before a confident assessment can be made. Treat this as a validation gap, not a market finding.`,
+  Turkish: (label) =>
+    `[Tahmini] ${label}: Bu bölüm bu çalıştırmada yeterli kanıtla oluşturulamadı ve güvenilir bir değerlendirme yapılmadan önce ek araştırma gerektiriyor. Bunu bir pazar bulgusu değil, bir doğrulama boşluğu olarak değerlendirin.`,
+  German: (label) =>
+    `[Geschätzt] ${label}: Dieser Abschnitt konnte in diesem Durchlauf nicht mit ausreichender Evidenz erstellt werden und erfordert weitere Recherche, bevor eine verlässliche Einschätzung möglich ist. Dies ist eine Validierungslücke, kein Marktbefund.`,
+  French: (label) =>
+    `[Estimé] ${label} : cette section n'a pas pu être générée avec des preuves suffisantes lors de cette exécution et nécessite des recherches supplémentaires avant qu'une évaluation fiable puisse être établie. Il s'agit d'une lacune de validation, non d'un constat de marché.`,
+  Spanish: (label) =>
+    `[Estimado] ${label}: esta sección no pudo generarse con evidencia suficiente en esta ejecución y requiere investigación adicional antes de poder realizar una evaluación fiable. Considere esto una brecha de validación, no un hallazgo de mercado.`,
+};
+
+function createMarketFieldFallback(field: MarketReportField, language: ResponseLanguage) {
+  const label = marketFieldLabels[language][field];
+  return marketFieldFallbackTemplates[language](label);
+}
+
 function ensureMarketReportQuality(
   report: Record<MarketReportField, string>,
   context?: AiFinancialModelContext,
@@ -1131,13 +1159,13 @@ function parseFullMarketReport(
 
     if (typeof content !== "string" || !content.trim()) {
       missingFields.push(field);
-      report[field] = "";
+      report[field] = createMarketFieldFallback(field, language);
       continue;
     }
 
     if (isReportGenerationFailureText(content)) {
       invalidFields.push(field);
-      report[field] = "";
+      report[field] = createMarketFieldFallback(field, language);
       continue;
     }
 

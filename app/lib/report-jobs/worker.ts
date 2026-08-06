@@ -286,6 +286,26 @@ function getFieldTitle(
   return planFieldLabels[language][field as PlanReportField] || field;
 }
 
+// Live-reproduced bug: "scenarioAnalysis" is a field name shared by
+// planFields, realEstateFields, AND domainAnalysisFields (each schema
+// defined independently). The old fallback below matched on ANY
+// shared field name, so a real, complete business-plan report event
+// stream -- which always includes "scenarioAnalysis" -- was
+// misclassified as "real_estate" whenever payload/event reportDomain
+// was absent, and worker.ts then checked the response against the
+// wrong field list, reporting every real field as "missing." These
+// derived lists only ever match on a field name that is exclusive to
+// that domain, so a shared field name can never cause a false match
+// again, including for schemas added later.
+const realEstateDistinguishingFields = realEstateFields.filter(
+  (field) => !(planFields as readonly string[]).includes(field)
+);
+const domainAnalysisDistinguishingFields = domainAnalysisFields.filter(
+  (field) =>
+    !(planFields as readonly string[]).includes(field) &&
+    !(realEstateFields as readonly string[]).includes(field)
+);
+
 function inferDomain(
   payload: Record<string, unknown>,
   events: Array<Record<string, unknown>>
@@ -306,11 +326,11 @@ function inferDomain(
     return candidate;
   }
 
-  if (events.some((event) => realEstateFields.some((field) => field in event))) {
+  if (events.some((event) => realEstateDistinguishingFields.some((field) => field in event))) {
     return "real_estate";
   }
 
-  if (events.some((event) => domainAnalysisFields.some((field) => field in event))) {
+  if (events.some((event) => domainAnalysisDistinguishingFields.some((field) => field in event))) {
     return "legal";
   }
 

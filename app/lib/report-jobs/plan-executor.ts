@@ -181,6 +181,10 @@ import {
   assessLegalResearchCoverage,
   prepareLegalDecisionReport,
 } from "@/app/lib/report-engine/legal-report-quality";
+import {
+  stripFencedCodeBlocks,
+  stripLeakedPromptEchoLines,
+} from "@/app/lib/report-jobs/prompt-echo-sanitization";
 
 type PlanReportChunk = Partial<Record<PlanReportField, string>>;
 type RealEstateReport = Record<RealEstateReportField, string>;
@@ -901,7 +905,7 @@ function createReportBusinessDescription(value: string) {
   return cleanValue.slice(0, 160);
 }
 
-function sanitizeVisibleReportContent(content: string) {
+export function sanitizeVisibleReportContent(content: string, promptText = "") {
   const internalLinePatterns = [
     /\bbased on the entire report\b/i,
     /\bwould you invest today\b/i,
@@ -919,7 +923,12 @@ function sanitizeVisibleReportContent(content: string) {
     /\bvalidation prompt/i,
   ];
 
-  return sanitizeAiResponseText(content)
+  const withoutCodeFences = stripFencedCodeBlocks(content);
+  const withoutPromptEcho = promptText
+    ? stripLeakedPromptEchoLines(withoutCodeFences, promptText)
+    : withoutCodeFences;
+
+  return sanitizeAiResponseText(withoutPromptEcho)
     .split("\n")
     .filter((line) => !internalLinePatterns.some((pattern) => pattern.test(line)))
     .join("\n")
@@ -2288,7 +2297,8 @@ function normalizeFullPlanReport(
 function parseFullPlanReport(
   value: string,
   context?: AiFinancialModelContext,
-  language: ResponseLanguage = "English"
+  language: ResponseLanguage = "English",
+  promptText = ""
 ): Record<PlanReportField, string> {
   let parsed: Record<string, unknown>;
 
@@ -2318,7 +2328,7 @@ function parseFullPlanReport(
       ? rawContent
       : createPlanFieldFallback(field, parsed, context, language);
 
-    const sanitizedContent = sanitizeVisibleReportContent(content);
+    const sanitizedContent = sanitizeVisibleReportContent(content, promptText);
 
     if (!sanitizedContent) {
       report[field] = ensureCompleteReportText(
@@ -5269,7 +5279,8 @@ Write only the content for this section. Do not write a JSON object, field name,
         const parsedCachedReport = parseFullPlanReport(
           cachedFullReport.responseText,
           cachedUnifiedFinancialContext,
-          responseLanguage
+          responseLanguage,
+          promptText
         );
 
         if (cachedBusinessResearch) {
@@ -5634,7 +5645,8 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             const parsedReport = parseFullPlanReport(
               responseText,
               unifiedFinancialContext,
-              responseLanguage
+              responseLanguage,
+              promptText
             );
             validateDomainResearchQualitySafely({
               report: parsedReport,

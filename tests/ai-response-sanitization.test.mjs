@@ -36,7 +36,11 @@ test("API chat sanitizes cached, mock, and completed response text", () => {
 });
 
 test("report generation and saved report detail use AI response sanitization", () => {
-  assert.match(planRouteSource, /sanitizeAiResponseText\(content\)/);
+  // sanitizeVisibleReportContent strips leaked prompt echoes/code
+  // fences ahead of the shared sanitizer, so it now calls
+  // sanitizeAiResponseText on that intermediate value rather than the
+  // raw `content` param directly -- same sanitizer, same pipeline.
+  assert.match(planRouteSource, /sanitizeAiResponseText\(withoutPromptEcho\)/);
   assert.match(marketRouteSource, /sanitizeAiResponseText\(value\)/);
   assert.match(plannerSource, /return sanitizeAiResponseText\(content\)/);
   assert.match(reportDetailSource, /sanitizeAiResponseText\(content\)/);

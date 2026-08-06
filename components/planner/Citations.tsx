@@ -171,6 +171,14 @@ export function getFinalDedupePdfSources(citations: CitationData[]) {
   >();
 
   dedupePdfCitations(citations).forEach((citation) => {
+    const hasUsableEvidence =
+      Boolean(citation.url) ||
+      isPlausibleCitationField(citation.organization) ||
+      isPlausibleCitationField(citation.sourceTitle, 4);
+    if (!hasUsableEvidence) {
+      return;
+    }
+
     const domain = getCitationDomain(citation.url, citation.organization);
     const domainNameKey = normalizePdfText(domain.split(".")[0] || "")
       .toLowerCase()
@@ -226,6 +234,17 @@ export function normalizeCitationUrl(value = "") {
   return /^https?:\/\//i.test(normalized) ? normalized : "";
 }
 
+// Stray metadata-line values that survive `metadataMatch` but carry no
+// real citation evidence (e.g. a leaked "Publisher: user" line) --
+// too short/generic to be an actual publisher or title.
+const STRAY_CITATION_FIELD_VALUES =
+  /^(?:user|assistant|system|yes|no|n\/a|na|none|unknown|null|undefined)$/i;
+
+function isPlausibleCitationField(value = "", minLength = 3) {
+  const trimmed = value.trim();
+  return trimmed.length >= minLength && !STRAY_CITATION_FIELD_VALUES.test(trimmed);
+}
+
 export function parseCitations(content: string): CitationData[] {
   if (/\bsource\s+unavailable\b/i.test(content)) {
     return [];
@@ -238,7 +257,11 @@ export function parseCitations(content: string): CitationData[] {
   const entries: CitationData[] = [];
   let current: Partial<CitationData> = {};
   const flushCurrent = () => {
-    if (current.sourceTitle || current.organization || current.url) {
+    const hasUsableEvidence =
+      Boolean(current.url) ||
+      isPlausibleCitationField(current.organization || "") ||
+      isPlausibleCitationField(current.sourceTitle || "", 4);
+    if (hasUsableEvidence) {
       entries.push({
         sourceTitle: current.sourceTitle || current.organization || "Untitled source",
         organization: current.organization || "Publisher not specified",

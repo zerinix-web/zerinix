@@ -246,6 +246,14 @@ function getFinalDedupePdfSources(citations: CitationData[]) {
   >();
 
   dedupePdfCitations(citations).forEach((citation) => {
+    const hasUsableEvidence =
+      Boolean(citation.url) ||
+      isPlausibleCitationField(citation.organization) ||
+      isPlausibleCitationField(citation.sourceTitle, 4);
+    if (!hasUsableEvidence) {
+      return;
+    }
+
     const domain = getCitationDomain(citation.url, citation.organization);
     const domainNameKey = normalizeCitationKey(domain.split(".")[0] || "");
     const sourceName = getCitationSourceName(citation);
@@ -374,6 +382,17 @@ function deriveBusinessDescriptionFromSections(
     : normalizePdfText(report.title || "Analyzed business/company profile");
 }
 
+// Stray metadata-line values that survive `metadataMatch` but carry no
+// real citation evidence (e.g. a leaked "Publisher: user" line) --
+// too short/generic to be an actual publisher or title.
+const STRAY_CITATION_FIELD_VALUES =
+  /^(?:user|assistant|system|yes|no|n\/a|na|none|unknown|null|undefined)$/i;
+
+function isPlausibleCitationField(value = "", minLength = 3) {
+  const trimmed = value.trim();
+  return trimmed.length >= minLength && !STRAY_CITATION_FIELD_VALUES.test(trimmed);
+}
+
 function parseCitations(content: string): CitationData[] {
   if (/\bsource\s+unavailable\b/i.test(content)) {
     return [];
@@ -385,7 +404,11 @@ function parseCitations(content: string): CitationData[] {
   const entries: CitationData[] = [];
   let current: Partial<CitationData> = {};
   const flushCurrent = () => {
-    if (current.sourceTitle || current.organization || current.url) {
+    const hasUsableEvidence =
+      Boolean(current.url) ||
+      isPlausibleCitationField(current.organization || "") ||
+      isPlausibleCitationField(current.sourceTitle || "", 4);
+    if (hasUsableEvidence) {
       entries.push({
         sourceTitle: current.sourceTitle || current.organization || "Untitled source",
         organization: current.organization || "Publisher not specified",
@@ -572,7 +595,10 @@ function formatPdfCitationContent(content: string, realEstate = false) {
         `  Confidence: ${source.trustLabel}`,
       ].join("\n")
     )
-    .join("\n");
+    // A blank line between entries gives each source card visual room to
+    // breathe -- purely a PDF rendering/formatting choice, not a change
+    // to the underlying citation data.
+    .join("\n\n");
 
   return `${sourceLines}\n\n${methodologyBlock}`;
 }
@@ -1964,8 +1990,20 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       const bodyX = margin + 20;
       const bodyWidth = contentWidth - 28;
       const bodyLineHeight = 5.25;
+      // KPI explanation prose is denser than most sections, so it gets a
+      // taller line-height (matching Executive Summary's existing
+      // treatment) to avoid feeling cramped.
+      const kpiBodyLineHeight = 5.75;
       const cardHeaderHeight = 24;
       const cardBottomPadding = 9;
+      // Minimum gaps in mm equivalent to the requested pixel minimums
+      // (1px ~= 0.2646mm at 96dpi), rounded up for a safety margin.
+      // Reused for every section-to-section gap, not just SWOT, so the
+      // "at least 32px between major sections" rule holds everywhere.
+      const minHeadingToContentGap = 4.5; // >= 16px
+      const minSectionGap = 9; // >= 32px
+      const minPageBottomPadding = 11; // >= 40px (on top of the page margin)
+      const maxUsableCardHeight = pageHeight - margin - margin;
       const normalizedSectionsBeforeLanguageRepair = dedupeReportSections(
         normalizeSavedPdfSectionsBeforeRender(report.sections)
       );
@@ -2666,7 +2704,29 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           .filter(Boolean)
           .join("\n");
 
+      // SWOT bullet line pitch/box padding, named so the height formula
+      // below and the drawing code in drawSectionVisual stay in sync --
+      // changing one without the other would either crowd the text or
+      // under-report the box height (letting text spill past the box).
+      const swotBulletLineHeight = 4.6;
+      const swotBoxBottomPadding = 5;
       const getSwotLayout = (content: string, width: number) => {
+        // pdf.splitTextToSize() measures wrapping using whatever font
+        // size happens to be active on `pdf` at call time -- it takes
+        // no size argument of its own. This function is called both
+        // for height budgeting (before the section title is drawn,
+        // whatever font size the previous section left behind) and for
+        // actual drawing (right after the title's setFontSize(14)), so
+        // without pinning the size explicitly here, those two calls
+        // measure the same bullets at two different font sizes and
+        // disagree on how many lines they wrap to -- which is exactly
+        // what let SWOT boxes render taller than their budgeted card
+        // height and spill into the next section. Pin to the real
+        // bullet font size (matching the draw call below) and restore
+        // whatever was active before, since this is otherwise called
+        // as a pure measurement function.
+        const previousFontSize = pdf.getFontSize();
+        pdf.setFontSize(6.6);
         const quadrants = [
           ["Strengths", "#042f2e"],
           ["Weaknesses", "#18181b"],
@@ -2678,14 +2738,15 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         const items = quadrants.map(([label, color]) => {
           const bulletLines = extractSwotBullets(content, label, fullReportContent)
             .slice(0, 3)
-            .map((bullet) => pdf.splitTextToSize(`• ${bullet}`, boxWidth - 6) as string[]);
+            .map((bullet) => pdf.splitTextToSize(`• ${bullet}`, boxWidth - 7) as string[]);
           const textLineCount = Math.max(1, bulletLines.reduce((count, lines) => count + lines.length, 0));
-          const boxHeight = Math.max(29, 11 + textLineCount * 4.2);
+          const boxHeight = Math.max(31, 11 + textLineCount * swotBulletLineHeight + swotBoxBottomPadding);
 
           return { label, color, bulletLines, boxHeight };
         });
-        const firstRowHeight = Math.max(items[0]?.boxHeight ?? 29, items[1]?.boxHeight ?? 29);
-        const secondRowHeight = Math.max(items[2]?.boxHeight ?? 29, items[3]?.boxHeight ?? 29);
+        pdf.setFontSize(previousFontSize);
+        const firstRowHeight = Math.max(items[0]?.boxHeight ?? 31, items[1]?.boxHeight ?? 31);
+        const secondRowHeight = Math.max(items[2]?.boxHeight ?? 31, items[3]?.boxHeight ?? 31);
 
         return {
           gap,
@@ -2750,7 +2811,10 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       const drawSectionVisual = (section: PdfReportSection, sectionY: number) => {
         const { title, content, field } = section;
         const normalizedTitle = title.toLowerCase();
-        const visualY = sectionY + 19;
+        // The card header strip ends at sectionY + 18; keep at least
+        // minHeadingToContentGap (>= 16px) of breathing room below it
+        // before any visual content starts.
+        const visualY = sectionY + 18 + minHeadingToContentGap;
         const isTamSamSomSection = field === "tamSamSom" || normalizedTitle.includes("tam / sam / som");
         const isFinancialDashboardSection = field === "financialDashboard" || normalizedTitle.includes("financial dashboard") || normalizedTitle.includes("finansal panel");
         const isFounderScoreSection =
@@ -2824,15 +2888,15 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             pdf.setFontSize(7.2);
             pdf.setTextColor("#ccfbf1");
             pdf.text(localizePdfPresentationLabel(label, pdfLocale).toUpperCase(), x + 3, boxY + 5);
-            pdf.setFontSize(6.2);
+            pdf.setFontSize(6.6);
             pdf.setTextColor("#d4d4d8");
-            let bulletY = boxY + 10;
+            let bulletY = boxY + 10.5;
             bulletLines.forEach((lines) => {
               pdf.text(lines.map((line) => localizePdfPresentationText(line, pdfLocale)), x + 3, bulletY, {
-                lineHeightFactor: 1.14,
-                maxWidth: swotLayout.boxWidth - 6,
+                lineHeightFactor: 1.22,
+                maxWidth: swotLayout.boxWidth - 7,
               });
-              bulletY += lines.length * 4.2;
+              bulletY += lines.length * swotBulletLineHeight;
             });
           });
 
@@ -3004,10 +3068,10 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             pdf.setFontSize(6.2);
             pdf.setTextColor("#ccfbf1");
             pdf.text(localizePdfPresentationLabel(step, pdfLocale), x + 2, visualY + 5.7, { maxWidth: stepWidth - 4 });
-            pdf.setFontSize(5.2);
+            pdf.setFontSize(5.6);
             pdf.setTextColor("#a1a1aa");
             pdf.text(wrapPdfText(localizePdfPresentationText(extractRoadmapAction(content, step), pdfLocale), stepWidth - 4).slice(0, 4), x + 2, visualY + 11, {
-              lineHeightFactor: 1.1,
+              lineHeightFactor: 1.16,
               maxWidth: stepWidth - 4,
             });
           });
@@ -3108,7 +3172,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
               : 0;
             const itemHeight = isFinancialDashboard && financialLayout
               ? financialLayout.rowHeights[rowIndex]
-              : isKpiDashboard ? 28 : isScenario ? 20 : isUnitEconomics ? 19 : 10;
+              : isKpiDashboard ? 31 : isScenario ? 20 : isUnitEconomics ? 19 : 10;
             const itemY = isFinancialDashboard && financialLayout
               ? visualY + priorRowHeight + rowIndex * 3
               : visualY + rowIndex * (itemHeight + 3);
@@ -3152,14 +3216,37 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
                 : (score === null ? "—" : `${score}%`);
               const status = typeof typedItem !== "string" ? typedItem.status || "Watch" : "Watch";
               pdf.setTextColor("#f4f4f5");
-              drawSingleLine(kpiValue, x + 2, primaryValueY, itemWidth - 4, 7.5, 4.2, false);
-              pdf.setFontSize(5.3);
+              // Some KPI "values" are a short number/percent, but others
+              // are a full descriptive sentence (no score available).
+              // drawSingleLine only shrinks font size, it never wraps --
+              // for a long sentence that still doesn't fit at its
+              // smallest allowed size, that let text run past the card's
+              // right edge into the next card. Measure at that same
+              // floor size first, and only fall back to wrapping (safe,
+              // capped at 2 lines) when a single line genuinely can't
+              // hold the text.
+              pdf.setFontSize(4.2);
+              const kpiValueFitsOnOneLine = pdf.getTextWidth(kpiValue) <= itemWidth - 4;
+              let kpiValueLineCount = 1;
+              if (kpiValueFitsOnOneLine) {
+                drawSingleLine(kpiValue, x + 2, primaryValueY, itemWidth - 4, 7.5, 4.2, false);
+              } else {
+                pdf.setFontSize(6);
+                const wrappedKpiValueLines = (pdf.splitTextToSize(kpiValue, itemWidth - 4) as string[]).slice(0, 2);
+                pdf.text(wrappedKpiValueLines, x + 2, primaryValueY, {
+                  lineHeightFactor: 1.16,
+                  maxWidth: itemWidth - 4,
+                });
+                kpiValueLineCount = wrappedKpiValueLines.length;
+              }
+              pdf.setFontSize(5.6);
               pdf.setTextColor("#a1a1aa");
-              pdf.text(`${localizePdfPresentationLabel("Status", pdfLocale)}: ${localizePdfPresentationLabel(status, pdfLocale)}`, x + 2, primaryValueY + 4.8, { maxWidth: itemWidth - 4 });
+              const kpiStatusY = primaryValueY + (kpiValueLineCount - 1) * 4.6 + 4.8;
+              pdf.text(`${localizePdfPresentationLabel("Status", pdfLocale)}: ${localizePdfPresentationLabel(status, pdfLocale)}`, x + 2, kpiStatusY, { maxWidth: itemWidth - 4 });
               pdf.setFillColor("#27272a");
-              pdf.roundedRect(x + 2, itemY + itemHeight - 4.2, itemWidth - 4, 1.5, 0.7, 0.7, "F");
+              pdf.roundedRect(x + 2, itemY + itemHeight - 5, itemWidth - 4, 1.5, 0.7, 0.7, "F");
               pdf.setFillColor("#5eead4");
-              pdf.roundedRect(x + 2, itemY + itemHeight - 4.2, Math.max(0, ((itemWidth - 4) * (score ?? 0)) / 100), 1.5, 0.7, 0.7, "F");
+              pdf.roundedRect(x + 2, itemY + itemHeight - 5, Math.max(0, ((itemWidth - 4) * (score ?? 0)) / 100), 1.5, 0.7, 0.7, "F");
               return;
             }
             if (isScenario) {
@@ -3200,14 +3287,14 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
               pdf.setFontSize(6);
               pdf.setTextColor("#5eead4");
               pdf.text(localizePdfPresentationLabel("METRIC DETAILS", pdfLocale), bodyX + 3, detailsY);
-              pdf.setFontSize(5.5);
+              pdf.setFontSize(5.8);
               pdf.setTextColor("#a1a1aa");
               pdf.text(
                 financialLayout.detailLines.map((line) => localizePdfPresentationText(line, pdfLocale)),
                 bodyX + 3,
                 detailsY + 4,
                 {
-                lineHeightFactor: 1.1,
+                lineHeightFactor: 1.16,
                 maxWidth: bodyWidth - 6,
                 }
               );
@@ -3217,7 +3304,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           }
 
           if (isKpiDashboard) {
-            return 62;
+            return 68;
           }
 
           if (isScenario) {
@@ -3277,7 +3364,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         }
 
         if (normalizedTitle.includes("kpi")) {
-          return 62;
+          return 68;
         }
 
         if (normalizedTitle.includes("unit economics")) {
@@ -3378,7 +3465,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           });
 
           drawSectionVisual(section, y);
-          y += cardHeight + 4;
+          y += cardHeight + minSectionGap;
 
           if (hasBodyText) {
             let bodyLineIndex = 0;
@@ -3410,14 +3497,43 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
         const safeBodyLines = bodyLines.length > 0 ? bodyLines : [""];
         const isExecutiveSummarySection = section.title.toLowerCase().includes("executive summary");
-        const sectionBodyLineHeight = isExecutiveSummarySection ? 5.75 : bodyLineHeight;
+        const isKpiPdfSection =
+          section.field === "kpiDashboard" ||
+          section.field === "kpis" ||
+          section.title.toLowerCase().includes("kpi");
+        const isSourcePdfSection = isSourceSectionTitle(section.title);
+        // Sources cards get extra bottom padding (>= 40px) -- the
+        // general cardBottomPadding (9mm, ~34px) is close but falls
+        // just short of the requested minimum for this section.
+        const sectionCardBottomPadding = isSourcePdfSection ? minPageBottomPadding : cardBottomPadding;
+        const sectionBodyLineHeight = isExecutiveSummarySection
+          ? 5.75
+          : isKpiPdfSection
+            ? kpiBodyLineHeight
+            : bodyLineHeight;
         let lineIndex = 0;
+
+        // Prefer moving an entire section to a fresh page over starting a
+        // split ("continued") card: only content that is genuinely too
+        // long for a single page (fullCardHeight > maxUsableCardHeight)
+        // still falls through to the incremental chunking below. This is
+        // what keeps SWOT/KPI visuals and short source lists from being
+        // split just because they didn't quite fit in what was left of
+        // the current page.
+        const fullBodyTextHeight = hasBodyText ? safeBodyLines.length * sectionBodyLineHeight : 0;
+        const fullCardHeight = Math.max(
+          31,
+          cardHeaderHeight + visualHeight + fullBodyTextHeight + sectionCardBottomPadding
+        );
+        if (fullCardHeight <= maxUsableCardHeight) {
+          ensureSpace(fullCardHeight);
+        }
 
         while (lineIndex < safeBodyLines.length) {
           const activeVisualHeight = lineIndex === 0 ? visualHeight : 0;
           const bodyTextHeight = hasBodyText ? sectionBodyLineHeight : 0;
           const minimumCardHeight =
-            cardHeaderHeight + activeVisualHeight + bodyTextHeight + cardBottomPadding + 3;
+            cardHeaderHeight + activeVisualHeight + bodyTextHeight + sectionCardBottomPadding + 3;
 
           ensureSpace(minimumCardHeight);
 
@@ -3429,11 +3545,34 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           }
 
           const availableHeight =
-            pageHeight - margin - y - cardHeaderHeight - activeVisualHeight - cardBottomPadding;
+            pageHeight - margin - y - cardHeaderHeight - activeVisualHeight - sectionCardBottomPadding;
           let maxLines = Math.max(1, Math.floor(availableHeight / sectionBodyLineHeight));
           if (safeBodyLines.length - lineIndex - maxLines === 1 && maxLines > 1) {
             maxLines -= 1;
           }
+
+          // Keep each source entry ("• Name" plus its metadata lines)
+          // together: never cut between a bullet's start and its last
+          // metadata line unless that single entry alone cannot fit on
+          // a fresh page (a case this fixed-width content never hits in
+          // practice, but the fallback keeps this safe either way).
+          if (isSourcePdfSection && lineIndex + maxLines < safeBodyLines.length) {
+            let snappedBoundary = -1;
+            for (
+              let candidate = lineIndex + maxLines;
+              candidate > lineIndex;
+              candidate -= 1
+            ) {
+              if (safeBodyLines[candidate]?.startsWith("•")) {
+                snappedBoundary = candidate;
+                break;
+              }
+            }
+            if (snappedBoundary > lineIndex) {
+              maxLines = snappedBoundary - lineIndex;
+            }
+          }
+
           const lines = safeBodyLines.slice(lineIndex, lineIndex + maxLines);
           const isContinued = lineIndex > 0;
           const cardHeight = Math.max(
@@ -3441,7 +3580,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             cardHeaderHeight +
               activeVisualHeight +
               (hasBodyText ? lines.length * sectionBodyLineHeight : 0) +
-              cardBottomPadding
+              sectionCardBottomPadding
           );
 
           drawPdfSectionCardFrame(pdf, { margin, y, contentWidth, cardHeight });
@@ -3449,9 +3588,11 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           pdf.setFontSize(14);
           pdf.setTextColor("#ffffff");
           const displaySectionTitle = getPdfSectionCardTitle(section, pdfLocale);
-          const sectionTitle = isContinued && isSourceSectionTitle(section.title)
-            ? ""
-            : `${displaySectionTitle}${isContinued ? pdfLocale === "tr" ? " devamı" : " continued" : ""}`;
+          const sectionTitle = isContinued
+            ? isSourcePdfSection
+              ? `${displaySectionTitle} ${pdfLocale === "tr" ? "(devamı)" : "(continued)"}`
+              : `${displaySectionTitle}${pdfLocale === "tr" ? " devamı" : " continued"}`
+            : displaySectionTitle;
 
           if (sectionTitle) {
             pdf.text(sectionTitle, bodyX, y + 12.5, {
@@ -3467,14 +3608,17 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           if (hasBodyText) {
             pdf.setFontSize(isExecutiveSummarySection ? 9.2 : 8.8);
             pdf.setTextColor("#d4d4d8");
-            pdf.text(lines, bodyX, y + 24 + drawnVisualHeight, {
-              lineHeightFactor: isExecutiveSummarySection ? 1.38 : 1.3,
+            pdf.text(lines, bodyX, y + minHeadingToContentGap + 19.5 + drawnVisualHeight, {
+              // KPI explanation prose gets the same taller line-height as
+              // Executive Summary (both use kpiBodyLineHeight === 5.75 for
+              // their pagination budget, so the rendered spacing must match).
+              lineHeightFactor: isExecutiveSummarySection || isKpiPdfSection ? 1.38 : 1.3,
               maxWidth: bodyWidth,
             });
           }
 
           lineIndex += lines.length;
-          y += cardHeight + 5;
+          y += cardHeight + minSectionGap;
         }
       });
 

@@ -1225,7 +1225,15 @@ export function normalizePdfSourceDomain(value = "") {
   try {
     domain = new URL(urlMatch).hostname;
   } catch {
-    domain = urlMatch;
+    // urlMatch isn't a parseable absolute URL, which almost always
+    // means it's free-form organization prose (e.g. "R7: finansal
+    // muhasebe ansiklopedileri"), not a domain. Only accept it as a
+    // domain if it's actually shaped like one (a single token, no
+    // spaces, at least one dot) -- e.g. a bare "nytimes.com" with no
+    // protocol. Otherwise return "" rather than mangling prose into a
+    // fake dotted "domain" by collapsing its punctuation/whitespace.
+    const bareDomainMatch = urlMatch.trim().match(/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i);
+    domain = bareDomainMatch ? bareDomainMatch[0] : "";
   }
 
   domain = domain

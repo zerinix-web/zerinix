@@ -225,7 +225,13 @@ test("Turkish real-estate language gate removes only arbitrary English prose", (
 
   assert.equal(validateRealEstateReportLanguage(report, "Turkish"), report);
   assert.doesNotMatch(report.location, /The property should/);
-  assert.match(report.location, /güvenilir biçimde çevrilemediği/i);
+  // The removal notice must never land in an unrelated section's
+  // content (here, Location) -- only in Missing Information, this
+  // domain's own disclosure field. Content must also never expose the
+  // mechanism ("translated"/"çevrilemediği").
+  assert.doesNotMatch(report.location, /çevrilemediği|translated|dil gereksinimini/i);
+  assert.match(report.missingInformation, /dil gereksinimini karşılamadığı/i);
+  assert.doesNotMatch(report.missingInformation, /çevrilemediği|translated/i);
 });
 
 test("source titles and URLs do not trigger the Turkish language gate", () => {

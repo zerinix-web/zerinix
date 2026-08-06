@@ -71,12 +71,19 @@ test("mixed-language validation is non-fatal and repairs only the offending sect
   assert.equal(repaired.sections[0].title, "Yönetici Özeti");
   assert.match(repaired.sections[0].content, /mevcut kanıtlar dikkatle değerlendirilmiştir/i);
   assert.doesNotMatch(repaired.sections[0].content, /The report explains/);
-  assert.match(repaired.sections[0].content, /güvenilir biçimde çevrilemediği/i);
+  // The removal notice must never be written into rendered section
+  // content -- only into `warnings`, the channel Planner surfaces as
+  // its own dedicated "Warnings / Missing Evidence" section. Content
+  // should also never expose the mechanism ("translated") -- see the
+  // warnings assertion below for the correct, customer-appropriate text.
+  assert.doesNotMatch(repaired.sections[0].content, /çevrilemediği|translated|dil gereksinimini/i);
   assert.equal(
     repaired.sections[1].content,
     "İmar belirsizliği yatırım kararını sınırlandırmaktadır."
   );
   assert.equal(repaired.warnings.length, 1);
+  assert.match(repaired.warnings[0], /dil gereksinimini karşılamadığı/i);
+  assert.doesNotMatch(repaired.warnings[0], /çevrilemediği|translated/i);
   assert.equal(
     validateReportLanguageConsistency(
       repaired.sections.map((section) => `${section.title}\n${section.content}`).join("\n"),
