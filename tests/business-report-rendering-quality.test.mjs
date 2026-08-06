@@ -5,6 +5,10 @@ import { readFileSync } from "node:fs";
 const plannerSource = readFileSync("components/Planner.tsx", "utf8");
 const pdfSource = readFileSync("app/dashboard/[id]/ReportPdfButton.tsx", "utf8");
 const normalizationSource = readFileSync("app/lib/pdf-normalization.mjs", "utf8");
+// Planner.tsx's own citation logic was extracted into
+// components/planner/Citations.tsx as part of incremental
+// modularization -- same logic, new file.
+const plannerCitationsSource = readFileSync("components/planner/Citations.tsx", "utf8");
 
 test("TAM SAM SOM cards are populated from normalized report values", () => {
   for (const source of [plannerSource, pdfSource]) {
@@ -48,7 +52,7 @@ test("SWOT quadrants use SWOT extraction instead of empty section-local snippets
 });
 
 test("Sources are structured, typed, and deduplicated before rendering", () => {
-  for (const source of [plannerSource, pdfSource]) {
+  for (const source of [plannerCitationsSource, pdfSource]) {
     assert.match(source, /sourceType/);
     assert.match(source, /normalizeSourceType/);
     assert.match(source, /Publisher not specified/);

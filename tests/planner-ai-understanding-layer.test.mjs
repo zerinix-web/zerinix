@@ -160,7 +160,10 @@ test("completed report payloads render even when research contains advisory warn
   assert.match(reportWorkerSource, /warnings\.push\(errorText\)/);
   assert.match(reportWorkerSource, /persistCompletedReport/);
   assert.match(plannerSource, /jobStatus\.status === "completed"/);
-  assert.match(plannerSource, /const reportCompleted =[\s\S]*hasCompletePayload/);
+  assert.match(
+    plannerSource,
+    /const hasCompletePayload =\s*\n\s*completedFields\.size === outputFields\.length/
+  );
   assert.match(plannerSource, /moveReportAdvisoriesIntoWarningsSection/);
   assert.match(plannerSource, /Warnings \/ Missing Evidence/);
   assert.doesNotMatch(

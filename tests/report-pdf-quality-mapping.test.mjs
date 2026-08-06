@@ -47,7 +47,15 @@ test("PDF financial metrics can resolve gross margin from the complete report", 
 });
 
 test("PDF citations deduplicate source entries while preserving metadata", () => {
-  for (const file of pdfSurfaceFiles) {
+  // Planner.tsx's own citation deduplication was extracted into
+  // components/planner/Citations.tsx as part of incremental
+  // modularization -- same logic, new file. ReportPdfButton.tsx keeps
+  // its own separate, independent implementation unchanged.
+  const citationDedupeFiles = [
+    "components/planner/Citations.tsx",
+    "app/dashboard/[id]/ReportPdfButton.tsx",
+  ];
+  for (const file of citationDedupeFiles) {
     const source = readFileSync(file, "utf8");
 
     assert.match(source, /const unique = new Map<string, CitationData>\(\)/);
