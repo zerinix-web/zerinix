@@ -7,8 +7,8 @@ import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
 export const planPrompts = {
   executiveSummary: {
     prompt:
-      "Write an investor-grade Executive Summary with one job only: executive decision. Start with exactly one final decision from PASS, HOLD, VALIDATE, or REJECT plus Decision Confidence, then cover the business-specific thesis, Investment Score, Estimated Valuation, Funding Stage, the decisive evidence gap, primary risk, and next critical action. Keep the same decision spine later used by Executive Recommendation and Roadmap, but do not reuse their wording. Early-stage ideas without validation should usually be HOLD or VALIDATE, not REJECT. Do not quote the user's prompt or any analysis question. Do not explain the business model, product, market sizing, SWOT, pricing, GTM, risks, or roadmap. Use only concise evidence labels when they change the verdict. Max 120 words.",
-    maxTokens: 650,
+      "Write an executive consulting deliverable, not an AI response. Use exactly this structure: (1) Bottom Line -- 2-3 sentences opening with exactly one decision from PASS, HOLD, VALIDATE, or REJECT plus Decision Confidence. Early-stage ideas without validation should usually be HOLD or VALIDATE, not REJECT. (2) Key Findings -- 3 to 5 bullets ranked by business impact, most decision-relevant first. (3) Biggest Opportunity -- one sentence naming the single highest-upside factor. (4) Biggest Risk -- one sentence naming the single most decision-changing risk. (5) Recommendation -- at most 3 bullets, concrete next actions only. Keep the same decision spine later used by Executive Recommendation and Roadmap, but do not reuse their sentences or repeat findings verbatim from other sections. Do not quote the user's prompt or any analysis question. Do not explain the business model, product, market sizing, SWOT, pricing, GTM, or roadmap in full -- only what changes the decision. No filler phrases, no generic AI phrasing (\"as an AI\", \"in conclusion\", \"it is important to note\"), no repeated evidence-label tags on every line. Max 180 words.",
+    maxTokens: 750,
   },
   problem: {
     prompt:

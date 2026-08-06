@@ -1873,69 +1873,88 @@ function scorePercent(score: number, maximumScore: number) {
   return maximumScore > 0 ? Math.round((score / maximumScore) * 100) : 0;
 }
 
+// Ranks investment-score categories by how much each one currently
+// costs the overall score (maximumScore - score), which is already
+// weight-adjusted since maximumScore encodes that category's fixed
+// weight (see CATEGORY_WEIGHTS in investment-score.ts). This turns
+// already-computed, already-explained category data into "key
+// findings ranked by business impact" without inventing anything new.
+// A crude but dependency-free "are these two sentences basically the
+// same claim" check, used only to stop Biggest Opportunity and Biggest
+// Risk from ever resolving to the same (or near-same) source text --
+// which otherwise makes the shared cross-section dedup pass collapse
+// one of them into a nonsensical self-reference ("See Executive
+// Summary for the established premise" pointing at itself).
+function textsAreTooSimilarForSummary(a: string, b: string) {
+  const toWordSet = (value: string) =>
+    new Set(
+      value
+        .toLowerCase()
+        .replace(/[^a-z0-9çğıöşü\s]/gi, "")
+        .split(/\s+/)
+        .filter((word) => word.length > 3)
+    );
+  const setA = toWordSet(a);
+  const setB = toWordSet(b);
+  if (setA.size === 0 || setB.size === 0) return false;
+  let shared = 0;
+  for (const word of setA) {
+    if (setB.has(word)) shared += 1;
+  }
+  return shared / Math.min(setA.size, setB.size) >= 0.6;
+}
+
+function rankInvestmentScoreFindingsByImpact(score: AiFinancialModelContext["investmentScore"]) {
+  return Object.values(score.categories)
+    .filter((category) => category.explanation?.trim())
+    .sort((a, b) => (b.maximumScore - b.score) - (a.maximumScore - a.score))
+    .map((category) => category.explanation.trim());
+}
+
 function buildExecutiveScorecard(
   context: AiFinancialModelContext,
   language: ResponseLanguage
 ) {
+  const score = context.investmentScore;
   const confidence = context.reportIntelligence.totalScore;
-  const confidenceLevel =
-    confidence >= 75
-      ? reportText(language, "High", "Yüksek")
-      : confidence >= 55
-        ? reportText(language, "Medium", "Orta")
-        : reportText(language, "Low", "Düşük");
-  const opportunityScore = scorePercent(
-    context.investmentScore.decisionEngine.marketScore.score,
-    context.investmentScore.decisionEngine.marketScore.maximumScore
-  );
-  const opportunityLevel =
-    opportunityScore >= 70
-      ? reportText(language, "High", "Yüksek")
-      : opportunityScore >= 50
-        ? reportText(language, "Medium", "Orta")
-        : reportText(language, "Low", "Düşük");
-  const riskLevel =
-    context.investmentScore.totalScore < 45
-      ? reportText(language, "High", "Yüksek")
-      : context.investmentScore.totalScore < 70
-        ? reportText(language, "Medium", "Orta")
-        : reportText(language, "Low", "Düşük");
-  const executionScore = scorePercent(
-    context.investmentScore.decisionEngine.executionScore.score,
-    context.investmentScore.decisionEngine.executionScore.maximumScore
-  );
-  const timeToMarket =
-    executionScore >= 70
-      ? reportText(language, "3-6 months", "3-6 ay")
-      : executionScore >= 50
-        ? reportText(language, "6-12 months", "6-12 ay")
-        : reportText(language, "12-18 months", "12-18 ay");
   const decision = localizeDecision(getVisibleDecision(context), language);
-  const readiness =
-    getVisibleDecision(context) === "VALIDATE"
-      ? reportText(language, "Conditionally ready", "Koşullu hazır")
-      : getVisibleDecision(context) === "PASS"
-        ? reportText(language, "Not ready", "Hazır değil")
-        : reportText(language, "Validation required", "Doğrulama gerekli");
+  const findings = rankInvestmentScoreFindingsByImpact(score).slice(0, 5);
+  const keyFindings = findings.length >= 3 ? findings : findings.concat(
+    [score.strengths[1], score.weaknesses[0]].filter((item): item is string => Boolean(item?.trim()))
+  ).slice(0, 5);
+  const biggestOpportunity = score.strengths[0]?.trim()
+    || reportText(
+      language,
+      `${context.inputs.industry} demand has not yet been validated but remains the clearest path to a defensible beachhead.`,
+      `${context.inputs.industry} talebi henüz doğrulanmadı, ancak savunulabilir bir başlangıç pazarı için en net yol olmaya devam ediyor.`
+    );
+  const fallbackBiggestRisk = reportText(language, "Primary customer, pricing, and retention evidence remain unverified.", "Birincil müşteri, fiyatlandırma ve elde tutma kanıtı doğrulanmamış durumda.");
+  const rawBiggestRisk = score.topRisks[0]?.trim() || score.weaknesses[0]?.trim();
+  const biggestRisk = rawBiggestRisk && !textsAreTooSimilarForSummary(rawBiggestRisk, biggestOpportunity)
+    ? rawBiggestRisk
+    : fallbackBiggestRisk;
+
+  const bottomLine = reportText(
+    language,
+    `Bottom Line: ${decision} on this ${context.inputs.industry} ${context.inputs.businessModel} opportunity. Confidence sits at ${confidence}/100, and the recommendation holds only if ${context.investmentScore.nextCriticalAction.replace(/\.$/, "")}. At the current evidence level, this is a founder-diligence memo, not a funding decision.`,
+    `Sonuç: bu ${context.inputs.industry} ${context.inputs.businessModel} fırsatı için karar ${decision}. Güven skoru ${confidence}/100 ve bu tavsiye yalnızca ${context.investmentScore.nextCriticalAction.replace(/\.$/, "")} koşuluyla geçerlidir. Mevcut kanıt düzeyinde bu, bir finansman kararı değil, kurucu düzeyinde bir durum tespiti notudur.`
+  );
 
   return [
-    reportText(language, "Executive Scorecard", "Yönetici Skor Kartı"),
-    reportText(language, `[Estimated] Overall Recommendation: ${decision}`, `[Tahmini] Genel Tavsiye: ${decision}`),
-    reportText(
-      language,
-      `[Estimated] Confidence Score: ${confidence}/100 (${confidenceLevel}) — evidence coverage, financial certainty, and validation readiness determine this level.`,
-      `[Tahmini] Güven Skoru: ${confidence}/100 (${confidenceLevel}) — bu düzeyi kanıt kapsamı, finansal kesinlik ve doğrulama hazırlığı belirler.`
-    ),
-    reportText(language, `[Estimated] Opportunity Level: ${opportunityLevel} (${opportunityScore}/100)`, `[Tahmini] Fırsat Seviyesi: ${opportunityLevel} (${opportunityScore}/100)`),
-    reportText(language, `[Estimated] Risk Level: ${riskLevel}`, `[Tahmini] Risk Seviyesi: ${riskLevel}`),
-    reportText(language, `[Assumption] Estimated Time to Market: ${timeToMarket}, conditional on the stated validation gates.`, `[Varsayım] Tahmini Pazara Çıkış Süresi: belirtilen doğrulama kapılarına bağlı olarak ${timeToMarket}.`),
-    reportText(language, `[Estimated] Investment Readiness: ${readiness}`, `[Tahmini] Yatırım Hazırlığı: ${readiness}`),
-    reportText(
-      language,
-      `[Assumption] Decision Summary: ${context.investmentScore.nextCriticalAction}; release additional capital only after the highest-risk proof gate is met.`,
-      `[Varsayım] Karar Özeti: ${context.investmentScore.nextCriticalAction}; ek sermayeyi yalnızca en riskli kanıt kapısı karşılandıktan sonra serbest bırakın.`
-    ),
-  ].join("\n");
+    bottomLine,
+    "",
+    reportText(language, "Key Findings:", "Temel Bulgular:"),
+    ...keyFindings.map((finding) => `- ${finding}`),
+    "",
+    reportText(language, `Biggest Opportunity: ${biggestOpportunity}`, `En Büyük Fırsat: ${biggestOpportunity}`),
+    "",
+    reportText(language, `Biggest Risk: ${biggestRisk}`, `En Büyük Risk: ${biggestRisk}`),
+    "",
+    reportText(language, "Recommendation:", "Tavsiye:"),
+    reportText(language, `- ${decision}: ${context.investmentScore.estimatedValuation ? `proceed within a ${context.investmentScore.fundingStage} framing` : "hold additional capital"} until the primary evidence gate closes.`, `- ${decision}: birincil kanıt kapısı kapanana kadar ${context.investmentScore.estimatedValuation ? `${context.investmentScore.fundingStage} çerçevesinde ilerleyin` : "ek sermayeyi bekletin"}.`),
+    reportText(language, `- Next 90 days: ${context.investmentScore.nextCriticalAction}`, `- Sonraki 90 gün: ${context.investmentScore.nextCriticalAction}`),
+    reportText(language, "- Revisit this decision once the highest-impact finding above is closed with primary evidence.", "- Bu kararı, yukarıdaki en etkili bulgu birincil kanıtla kapatıldıktan sonra yeniden değerlendirin."),
+  ].filter((line) => line !== undefined).join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
 function appendIntelligenceBlock(content: string, title: string, lines: string[]) {

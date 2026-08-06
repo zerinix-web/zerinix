@@ -5,8 +5,8 @@ import { buildStrictReportLanguageInstruction } from "../../report-language.ts";
 export const marketPrompts = {
   executiveSummary: {
     prompt:
-      "Answer the user's exact market question with an executive verdict, the requested-period outlook, the most decision-relevant growth signal, competitive intensity, primary uncertainty, and strategic implication. Interpret the causal drivers and decision impact rather than listing facts. Use only supported market evidence. Do not introduce business-plan, founder, product, pricing-strategy, sales-strategy, or unit-economics content. Max 150 words.",
-    maxTokens: 1100,
+      "Write an executive consulting deliverable answering the user's exact market question, not an AI response. Use exactly this structure: (1) Bottom Line -- 2-3 sentences opening with one executive verdict for the requested period. (2) Key Findings -- 3 to 5 bullets ranked by business impact, most decision-relevant first (growth signal, competitive intensity, structural drivers). (3) Biggest Opportunity -- one sentence naming the single highest-upside factor. (4) Biggest Risk -- one sentence naming the single most decision-changing uncertainty. (5) Recommendation -- at most 3 bullets, concrete next actions only. Interpret causal drivers and decision impact rather than listing facts. Use only supported market evidence. Do not introduce business-plan, founder, product, pricing-strategy, sales-strategy, or unit-economics content. No filler phrases, no generic AI phrasing, no repeated evidence-label tags on every line. Max 200 words.",
+    maxTokens: 1300,
   },
   marketOverview: {
     prompt:

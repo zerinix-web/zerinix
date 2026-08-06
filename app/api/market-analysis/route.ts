@@ -820,146 +820,108 @@ void [
 ];
 }
 
-function marketScorePercent(score: number, maximumScore: number) {
-  return maximumScore > 0 ? Math.round((score / maximumScore) * 100) : 0;
+
+// Same ranking as plan-executor.ts's buildExecutiveScorecard: the
+// category's point gap (maximumScore - score) is already weight-
+// adjusted (maximumScore encodes that category's fixed weight), so
+// sorting by it turns already-computed, already-explained category
+// data into "key findings ranked by business impact" for free.
+function rankInvestmentScoreFindingsByImpact(score: AiFinancialModelContext["investmentScore"]) {
+  return Object.values(score.categories)
+    .filter((category) => category.explanation?.trim())
+    .sort((a, b) => (b.maximumScore - b.score) - (a.maximumScore - a.score))
+    .map((category) => category.explanation.trim());
 }
 
-function marketLevelLabel(language: ResponseLanguage, level: "High" | "Medium" | "Low") {
-  if (level === "High") return marketText(language, "High", "Yüksek", "Hoch", "Élevé", "Alto");
-  if (level === "Medium") return marketText(language, "Medium", "Orta", "Mittel", "Moyen", "Medio");
-  return marketText(language, "Low", "Düşük", "Niedrig", "Faible", "Bajo");
-}
-
-function buildMarketEvidenceScoreLines(
-  coverage: MarketResearchCoverage,
-  language: ResponseLanguage
-) {
-  const estimatedTag = marketText(language, "Estimated", "Tahmini", "Geschätzt", "Estimé", "Estimado");
-  return [
-    marketText(language, `[Estimated] Market Confidence: ${coverage.dimensions.marketConfidence}/100`, `[Tahmini] Pazar Güveni: ${coverage.dimensions.marketConfidence}/100`, `[${estimatedTag}] Marktvertrauen: ${coverage.dimensions.marketConfidence}/100`, `[${estimatedTag}] Confiance du marché : ${coverage.dimensions.marketConfidence}/100`, `[${estimatedTag}] Confianza del mercado: ${coverage.dimensions.marketConfidence}/100`),
-    marketText(language, `[Estimated] Competitive Evidence: ${coverage.dimensions.competitiveEvidence}/100`, `[Tahmini] Rekabet Kanıtı: ${coverage.dimensions.competitiveEvidence}/100`, `[${estimatedTag}] Wettbewerbsnachweis: ${coverage.dimensions.competitiveEvidence}/100`, `[${estimatedTag}] Preuve concurrentielle : ${coverage.dimensions.competitiveEvidence}/100`, `[${estimatedTag}] Evidencia competitiva: ${coverage.dimensions.competitiveEvidence}/100`),
-    marketText(
-      language,
-      `[Estimated] Financial Evidence: ${coverage.dimensions.financialEvidence}/100${coverage.verifiedMarketSizeAvailable ? "" : " — verified TAM / SAM / SOM endpoints are unavailable"}`,
-      `[Tahmini] Finansal Kanıt: ${coverage.dimensions.financialEvidence}/100${coverage.verifiedMarketSizeAvailable ? "" : " — doğrulanmış TAM / SAM / SOM uç noktaları mevcut değil"}`,
-      `[${estimatedTag}] Finanzieller Nachweis: ${coverage.dimensions.financialEvidence}/100${coverage.verifiedMarketSizeAvailable ? "" : " — verifizierte TAM-/SAM-/SOM-Werte sind nicht verfügbar"}`,
-      `[${estimatedTag}] Preuve financière : ${coverage.dimensions.financialEvidence}/100${coverage.verifiedMarketSizeAvailable ? "" : " — les valeurs TAM / SAM / SOM vérifiées ne sont pas disponibles"}`,
-      `[${estimatedTag}] Evidencia financiera: ${coverage.dimensions.financialEvidence}/100${coverage.verifiedMarketSizeAvailable ? "" : " — los valores TAM / SAM / SOM verificados no están disponibles"}`
-    ),
-    marketText(language, `[Estimated] Product Evidence: ${coverage.dimensions.productEvidence}/100`, `[Tahmini] Ürün Kanıtı: ${coverage.dimensions.productEvidence}/100`, `[${estimatedTag}] Produktnachweis: ${coverage.dimensions.productEvidence}/100`, `[${estimatedTag}] Preuve produit : ${coverage.dimensions.productEvidence}/100`, `[${estimatedTag}] Evidencia de producto: ${coverage.dimensions.productEvidence}/100`),
-    marketText(language, `[Estimated] Execution Readiness: ${coverage.dimensions.executionReadiness}/100`, `[Tahmini] Yürütme Hazırlığı: ${coverage.dimensions.executionReadiness}/100`, `[${estimatedTag}] Umsetzungsbereitschaft: ${coverage.dimensions.executionReadiness}/100`, `[${estimatedTag}] Préparation à l'exécution : ${coverage.dimensions.executionReadiness}/100`, `[${estimatedTag}] Preparación para la ejecución: ${coverage.dimensions.executionReadiness}/100`),
-    marketText(
-      language,
-      `[Estimated] Founder Readiness: ${coverage.dimensions.founderReadiness}/100 — based on founder, validation, team, capital, and execution inputs rather than missing external market data.`,
-      `[Tahmini] Kurucu Hazırlığı: ${coverage.dimensions.founderReadiness}/100 — eksik dış pazar verisi yerine kurucu, doğrulama, ekip, sermaye ve yürütme girdilerine dayanır.`,
-      `[${estimatedTag}] Gründerbereitschaft: ${coverage.dimensions.founderReadiness}/100 — basierend auf Gründer-, Validierungs-, Team-, Kapital- und Umsetzungsdaten und nicht auf fehlenden externen Marktdaten.`,
-      `[${estimatedTag}] Préparation du fondateur : ${coverage.dimensions.founderReadiness}/100 — fondée sur les données du fondateur, de validation, d'équipe, de capital et d'exécution plutôt que sur des données de marché externes manquantes.`,
-      `[${estimatedTag}] Preparación del fundador: ${coverage.dimensions.founderReadiness}/100 — basada en datos del fundador, validación, equipo, capital y ejecución, en lugar de datos de mercado externos faltantes.`
-    ),
-  ];
+// A crude but dependency-free "are these two sentences basically the
+// same claim" check, used only to stop Biggest Opportunity and Biggest
+// Risk from ever resolving to the same (or near-same) source text --
+// which otherwise makes the shared cross-section dedup pass collapse
+// one of them into a nonsensical self-reference ("See Executive
+// Summary for the established premise" pointing at itself).
+function textsAreTooSimilarForSummary(a: string, b: string) {
+  const toWordSet = (value: string) =>
+    new Set(
+      value
+        .toLowerCase()
+        .replace(/[^a-z0-9çğıöşü\s]/gi, "")
+        .split(/\s+/)
+        .filter((word) => word.length > 3)
+    );
+  const setA = toWordSet(a);
+  const setB = toWordSet(b);
+  if (setA.size === 0 || setB.size === 0) return false;
+  let shared = 0;
+  for (const word of setA) {
+    if (setB.has(word)) shared += 1;
+  }
+  return shared / Math.min(setA.size, setB.size) >= 0.6;
 }
 
 function buildMarketExecutiveScorecard(
   context: AiFinancialModelContext,
-  language: ResponseLanguage,
-  coverage?: MarketResearchCoverage
+  language: ResponseLanguage
 ) {
-  const estimatedTag = marketText(language, "Estimated", "Tahmini", "Geschätzt", "Estimé", "Estimado");
-  const assumptionTag = marketText(language, "Assumption", "Varsayım", "Annahme", "Hypothèse", "Suposición");
+  const score = context.investmentScore;
   const confidence = context.reportIntelligence.totalScore;
-  const confidenceLevel = confidence >= 75
-    ? marketLevelLabel(language, "High")
-    : confidence >= 55
-      ? marketLevelLabel(language, "Medium")
-      : marketLevelLabel(language, "Low");
-  const opportunityScore = marketScorePercent(
-    context.investmentScore.decisionEngine.marketScore.score,
-    context.investmentScore.decisionEngine.marketScore.maximumScore
-  );
-  const opportunityLevel = opportunityScore >= 70
-    ? marketLevelLabel(language, "High")
-    : opportunityScore >= 50
-      ? marketLevelLabel(language, "Medium")
-      : marketLevelLabel(language, "Low");
-  const riskLevel = context.investmentScore.totalScore < 45
-    ? marketLevelLabel(language, "High")
-    : context.investmentScore.totalScore < 70
-      ? marketLevelLabel(language, "Medium")
-      : marketLevelLabel(language, "Low");
-  const executionScore = marketScorePercent(
-    context.investmentScore.decisionEngine.executionScore.score,
-    context.investmentScore.decisionEngine.executionScore.maximumScore
-  );
-  const timeToMarket = executionScore >= 70
-    ? marketText(language, "3-6 months", "3-6 ay", "3-6 Monate", "3 à 6 mois", "3-6 meses")
-    : executionScore >= 50
-      ? marketText(language, "6-12 months", "6-12 ay", "6-12 Monate", "6 à 12 mois", "6-12 meses")
-      : marketText(language, "12-18 months", "12-18 ay", "12-18 Monate", "12 à 18 mois", "12-18 meses");
-  const rawDecision = context.investmentScore.recommendation === "GO"
+  const rawDecision = score.recommendation === "GO"
     ? "VALIDATE"
-    : context.investmentScore.recommendation === "PASS" && context.investmentScore.confidence < 35
+    : score.recommendation === "PASS" && score.confidence < 35
       ? "PASS"
       : "HOLD";
   const decision = localizeMarketDecision(rawDecision, language);
-  const readiness = rawDecision === "VALIDATE"
-    ? marketText(language, "Conditionally ready", "Koşullu hazır", "Bedingt bereit", "Prêt sous conditions", "Listo condicionalmente")
-    : rawDecision === "PASS"
-      ? marketText(language, "Not ready", "Hazır değil", "Nicht bereit", "Pas prêt", "No listo")
-      : marketText(language, "Validation required", "Doğrulama gerekli", "Validierung erforderlich", "Validation requise", "Validación requerida");
+  const findings = rankInvestmentScoreFindingsByImpact(score).slice(0, 5);
+  const keyFindings = findings.length >= 3
+    ? findings
+    : findings.concat(
+        [score.strengths[1], score.weaknesses[0]].filter((item): item is string => Boolean(item?.trim()))
+      ).slice(0, 5);
+  const biggestOpportunity = score.strengths[0]?.trim()
+    || marketText(
+      language,
+      "Reachable demand has not yet been validated but remains the clearest path to a defensible entry.",
+      "Erişilebilir talep henüz doğrulanmadı, ancak savunulabilir bir giriş için en net yol olmaya devam ediyor.",
+      "Erreichbare Nachfrage wurde noch nicht validiert, bleibt aber der klarste Weg zu einem verteidigbaren Markteintritt.",
+      "La demande accessible n'a pas encore été validée, mais reste la voie la plus claire vers une entrée défendable.",
+      "La demanda alcanzable aún no se ha validado, pero sigue siendo el camino más claro hacia una entrada defendible."
+    );
+  const fallbackBiggestRisk = marketText(
+    language,
+    "Verified market-size and pricing endpoints remain unresolved.",
+    "Doğrulanmış pazar büyüklüğü ve fiyatlandırma uç noktaları çözülmemiş durumda.",
+    "Verifizierte Marktgrößen- und Preisendpunkte sind weiterhin ungeklärt.",
+    "Les paramètres vérifiés de taille de marché et de tarification restent non résolus.",
+    "Los parámetros verificados de tamaño de mercado y precios siguen sin resolverse."
+  );
+  const rawBiggestRisk = score.topRisks[0]?.trim() || score.weaknesses[0]?.trim();
+  const biggestRisk = rawBiggestRisk && !textsAreTooSimilarForSummary(rawBiggestRisk, biggestOpportunity)
+    ? rawBiggestRisk
+    : fallbackBiggestRisk;
+
+  const bottomLine = marketText(
+    language,
+    `Bottom Line: ${decision}. Confidence sits at ${confidence}/100, and the recommendation holds only if ${score.nextCriticalAction.replace(/\.$/, "")}. At the current evidence level, this is a directional read, not a funded market-entry decision.`,
+    `Sonuç: ${decision}. Güven skoru ${confidence}/100 ve bu tavsiye yalnızca ${score.nextCriticalAction.replace(/\.$/, "")} koşuluyla geçerlidir. Mevcut kanıt düzeyinde bu, finanse edilmiş bir pazara giriş kararı değil, yönlü bir değerlendirmedir.`,
+    `Kernaussage: ${decision}. Das Konfidenzniveau liegt bei ${confidence}/100, und die Empfehlung gilt nur, wenn ${score.nextCriticalAction.replace(/\.$/, "")}. Beim aktuellen Evidenzniveau ist dies eine richtungsweisende Einschätzung, keine finanzierte Markteintrittsentscheidung.`,
+    `Conclusion : ${decision}. Le niveau de confiance est de ${confidence}/100, et la recommandation ne tient que si ${score.nextCriticalAction.replace(/\.$/, "")}. Au niveau de preuve actuel, il s'agit d'une lecture directionnelle, non d'une décision d'entrée sur le marché financée.`,
+    `Conclusión: ${decision}. El nivel de confianza es de ${confidence}/100, y la recomendación se mantiene solo si ${score.nextCriticalAction.replace(/\.$/, "")}. Con el nivel de evidencia actual, esta es una lectura direccional, no una decisión financiada de entrada al mercado.`
+  );
 
   return [
-    marketText(language, "Executive Scorecard", "Yönetici Skor Kartı", "Management-Scorecard", "Tableau de bord exécutif", "Cuadro de mando ejecutivo"),
-    marketText(language, `[Estimated] Overall Recommendation: ${decision}`, `[Tahmini] Genel Tavsiye: ${decision}`, `[${estimatedTag}] Gesamtempfehlung: ${decision}`, `[${estimatedTag}] Recommandation globale : ${decision}`, `[${estimatedTag}] Recomendación general: ${decision}`),
-    marketText(
-      language,
-      `[Estimated] Confidence Score: ${confidence}/100 (${confidenceLevel}) — source coverage, market evidence, and unresolved gaps determine this level.`,
-      `[Tahmini] Güven Skoru: ${confidence}/100 (${confidenceLevel}) — bu düzeyi kaynak kapsamı, pazar kanıtı ve çözülmemiş boşluklar belirler.`,
-      `[${estimatedTag}] Konfidenzwert: ${confidence}/100 (${confidenceLevel}) — Quellenabdeckung, Marktnachweise und ungelöste Lücken bestimmen dieses Niveau.`,
-      `[${estimatedTag}] Indice de confiance : ${confidence}/100 (${confidenceLevel}) — la couverture des sources, les preuves de marché et les lacunes non résolues déterminent ce niveau.`,
-      `[${estimatedTag}] Índice de confianza: ${confidence}/100 (${confidenceLevel}) — la cobertura de fuentes, la evidencia de mercado y las brechas no resueltas determinan este nivel.`
-    ),
-    marketText(
-      language,
-      `[Estimated] Opportunity Level: ${opportunityLevel} (${opportunityScore}/100)`,
-      `[Tahmini] Fırsat Seviyesi: ${opportunityLevel} (${opportunityScore}/100)`,
-      `[${estimatedTag}] Chancenniveau: ${opportunityLevel} (${opportunityScore}/100)`,
-      `[${estimatedTag}] Niveau d'opportunité : ${opportunityLevel} (${opportunityScore}/100)`,
-      `[${estimatedTag}] Nivel de oportunidad: ${opportunityLevel} (${opportunityScore}/100)`
-    ),
-    marketText(
-      language,
-      `[Estimated] Risk Level: ${riskLevel}`,
-      `[Tahmini] Risk Seviyesi: ${riskLevel}`,
-      `[${estimatedTag}] Risikoniveau: ${riskLevel}`,
-      `[${estimatedTag}] Niveau de risque : ${riskLevel}`,
-      `[${estimatedTag}] Nivel de riesgo: ${riskLevel}`
-    ),
-    marketText(
-      language,
-      `[Assumption] Estimated Time to Market: ${timeToMarket}, conditional on market-entry proof gates.`,
-      `[Varsayım] Tahmini Pazara Çıkış Süresi: pazara giriş kanıt kapılarına bağlı olarak ${timeToMarket}.`,
-      `[${assumptionTag}] Geschätzte Markteinführungszeit: ${timeToMarket}, abhängig von den Nachweisgates für den Markteintritt.`,
-      `[${assumptionTag}] Délai de mise sur le marché estimé : ${timeToMarket}, sous réserve des jalons de preuve d'entrée sur le marché.`,
-      `[${assumptionTag}] Tiempo estimado de lanzamiento al mercado: ${timeToMarket}, condicionado a los hitos de validación de entrada al mercado.`
-    ),
-    marketText(
-      language,
-      `[Estimated] Investment Readiness: ${readiness}`,
-      `[Tahmini] Yatırım Hazırlığı: ${readiness}`,
-      `[${estimatedTag}] Investitionsbereitschaft: ${readiness}`,
-      `[${estimatedTag}] Préparation à l'investissement : ${readiness}`,
-      `[${estimatedTag}] Preparación para la inversión: ${readiness}`
-    ),
-    ...(coverage ? buildMarketEvidenceScoreLines(coverage, language) : []),
-    marketText(
-      language,
-      `[Assumption] Decision Summary: ${context.investmentScore.nextCriticalAction}; expand only after the entry thesis is supported by repeatable demand evidence.`,
-      `[Varsayım] Karar Özeti: ${context.investmentScore.nextCriticalAction}; yalnızca giriş tezi tekrarlanabilir talep kanıtıyla desteklendikten sonra genişleyin.`,
-      `[${assumptionTag}] Entscheidungszusammenfassung: ${context.investmentScore.nextCriticalAction}; erst ausbauen, nachdem die Eintrittsthese durch wiederholbare Nachweise der Nachfrage gestützt wird.`,
-      `[${assumptionTag}] Résumé de la décision : ${context.investmentScore.nextCriticalAction} ; n'étendre qu'une fois la thèse d'entrée étayée par des preuves de demande reproductibles.`,
-      `[${assumptionTag}] Resumen de la decisión: ${context.investmentScore.nextCriticalAction}; expandir solo después de que la tesis de entrada esté respaldada por evidencia repetible de demanda.`
-    ),
-  ].join("\n");
+    bottomLine,
+    "",
+    marketText(language, "Key Findings:", "Temel Bulgular:", "Wichtigste Erkenntnisse:", "Principales constats :", "Principales hallazgos:"),
+    ...keyFindings.map((finding) => `- ${finding}`),
+    "",
+    marketText(language, `Biggest Opportunity: ${biggestOpportunity}`, `En Büyük Fırsat: ${biggestOpportunity}`, `Größte Chance: ${biggestOpportunity}`, `Principale opportunité : ${biggestOpportunity}`, `Mayor oportunidad: ${biggestOpportunity}`),
+    "",
+    marketText(language, `Biggest Risk: ${biggestRisk}`, `En Büyük Risk: ${biggestRisk}`, `Größtes Risiko: ${biggestRisk}`, `Principal risque : ${biggestRisk}`, `Mayor riesgo: ${biggestRisk}`),
+    "",
+    marketText(language, "Recommendation:", "Tavsiye:", "Empfehlung:", "Recommandation :", "Recomendación:"),
+    marketText(language, `- ${decision} on further commitment until the primary evidence gate closes.`, `- Birincil kanıt kapısı kapanana kadar ${decision.toLowerCase()} ile ilerleyin.`, `- ${decision} bei weiterem Engagement, bis das primäre Evidenz-Gate geschlossen ist.`, `- ${decision} sur tout engagement supplémentaire jusqu'à la clôture du principal jalon de preuve.`, `- ${decision} sobre cualquier compromiso adicional hasta que se cierre la principal brecha de evidencia.`),
+    marketText(language, `- Next step: ${score.nextCriticalAction}`, `- Sonraki adım: ${score.nextCriticalAction}`, `- Nächster Schritt: ${score.nextCriticalAction}`, `- Prochaine étape : ${score.nextCriticalAction}`, `- Siguiente paso: ${score.nextCriticalAction}`),
+    marketText(language, "- Revisit this decision once the highest-impact finding above is closed with primary evidence.", "- Bu kararı, yukarıdaki en etkili bulgu birincil kanıtla kapatıldıktan sonra yeniden değerlendirin.", "- Diese Entscheidung erneut prüfen, sobald der wirkungsvollste Befund oben durch Primärevidenz geschlossen ist.", "- Réexaminer cette décision une fois que le constat le plus impactant ci-dessus est étayé par des preuves primaires.", "- Revisar esta decisión una vez que el hallazgo de mayor impacto anterior se haya cerrado con evidencia primaria."),
+  ].join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
 function buildMarketCeoSummary(
@@ -1095,29 +1057,14 @@ function ensureMarketReportQuality(
   }
 
   if (context) {
-    const scorecardHeading = language === "Turkish"
-      ? "Yönetici Skor Kartı"
-      : "Executive Scorecard";
     const ceoSummaryHeading = language === "Turkish" ? "CEO Özeti" : "CEO Summary";
 
-    if (!normalized.executiveSummary.includes(scorecardHeading)) {
-      normalized.executiveSummary = `${buildMarketExecutiveScorecard(context, language, coverage)}\n\n${normalized.executiveSummary}`.trim();
-    }
-
-    if (coverage) {
-      const coverageLabels = language === "Turkish"
-        ? ["Pazar Güveni", "Rekabet Kanıtı", "Finansal Kanıt", "Ürün Kanıtı", "Yürütme Hazırlığı", "Kurucu Hazırlığı"]
-        : ["Market Confidence", "Competitive Evidence", "Financial Evidence", "Product Evidence", "Execution Readiness", "Founder Readiness"];
-      const missingCoverageLines = buildMarketEvidenceScoreLines(
-        coverage,
-        language
-      ).filter((_, index) =>
-        !normalized.executiveSummary.includes(coverageLabels[index])
-      );
-      if (missingCoverageLines.length) {
-        normalized.executiveSummary = `${normalized.executiveSummary}\n${missingCoverageLines.join("\n")}`.trim();
-      }
-    }
+    // Full replace, not prepend: the deterministic scorecard is now a
+    // complete Bottom Line / Key Findings / Biggest Opportunity /
+    // Biggest Risk / Recommendation synthesis on its own. Concatenating
+    // it with the model's own separate executive-summary draft would
+    // just repeat the same verdict twice in one section.
+    normalized.executiveSummary = buildMarketExecutiveScorecard(context, language);
 
     if (!normalized.strategicRecommendations.includes(ceoSummaryHeading)) {
       normalized.strategicRecommendations = `${normalized.strategicRecommendations}\n\n${buildMarketCeoSummary(context, language)}`.trim();

@@ -107,9 +107,17 @@ test("deterministic executive blocks preserve provenance and calibrated confiden
   const marketSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
 
   for (const source of [planSource, marketSource]) {
-    assert.match(source, /\[Estimated\] Overall Recommendation/);
-    assert.match(source, /\[Assumption\] Estimated Time to Market/);
-    assert.match(source, /Confidence Score:.*evidence|Confidence Score:.*source/s);
+    // Executive Summary: Bottom Line / Key Findings / Biggest
+    // Opportunity / Biggest Risk / Recommendation (max 3 bullets),
+    // synthesized from real, already-computed investment-score data
+    // rather than a per-field bracket-tagged data dump.
+    assert.match(source, /Bottom Line:/);
+    assert.match(source, /Key Findings:/);
+    assert.match(source, /Biggest Opportunity:/);
+    assert.match(source, /Biggest Risk:/);
+    assert.match(source, /rankInvestmentScoreFindingsByImpact/);
+    // The CEO Summary block (a separate, unrelated field) keeps its
+    // own existing labels untouched.
     assert.match(source, /Biggest Opportunity/);
     assert.match(source, /Biggest Risk/);
     assert.match(source, /First 90 Days/);

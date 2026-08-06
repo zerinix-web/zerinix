@@ -256,9 +256,9 @@ test("market-analysis route's marketText helper supports all 5 languages", () =>
     marketRoute,
     /function marketText\(\s*language: ResponseLanguage,\s*english: string,\s*turkish: string,\s*german = english,\s*french = english,\s*spanish = english\s*\)/
   );
-  assert.match(marketRoute, /Gesamtempfehlung/); // German scorecard line
-  assert.match(marketRoute, /Recommandation globale/); // French scorecard line
-  assert.match(marketRoute, /Recomendación general/); // Spanish scorecard line
+  assert.match(marketRoute, /Kernaussage:/); // German Executive Summary Bottom Line
+  assert.match(marketRoute, /Conclusion :/); // French Executive Summary Bottom Line
+  assert.match(marketRoute, /Conclusión:/); // Spanish Executive Summary Bottom Line
   assert.match(marketRoute, /CEO-Zusammenfassung/);
   assert.match(marketRoute, /Résumé du PDG/);
   assert.match(marketRoute, /Resumen del CEO/);
