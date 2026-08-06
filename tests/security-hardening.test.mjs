@@ -310,7 +310,11 @@ test("client-rendered files do not reference server-only secrets", () => {
 });
 
 test("code block HTML rendering escapes user code before syntax highlighting", () => {
-  for (const file of ["components/Planner.tsx", "components/AIChatWorkspace.tsx"]) {
+  // Planner.tsx's own highlightCode/CodeBlock were extracted into
+  // components/planner/MarkdownRenderer.tsx as part of incremental
+  // modularization -- same logic, new file. AIChatWorkspace.tsx keeps
+  // its own separate, independent implementation unchanged.
+  for (const file of ["components/planner/MarkdownRenderer.tsx", "components/AIChatWorkspace.tsx"]) {
     const source = read(file);
     const functionStart = source.indexOf("function highlightCode");
     const functionEnd = source.indexOf("function CodeBlock", functionStart);
