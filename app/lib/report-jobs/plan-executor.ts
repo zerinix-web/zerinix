@@ -2478,8 +2478,11 @@ function normalizeFullPlanReport(
   // Read-only: analyzes the existing sourcesAssumptions text without
   // mutating it, so the PDF's own citation parser (which runs on that
   // field separately) is completely unaffected. Only the trust-tier
-  // name overview goes into executiveSummary -- never full per-source
-  // detail, which stays in report.metadata.sourceIntelligence.
+  // name overview goes into executiveSummary -- full per-source detail
+  // is never written to the client-facing report.metadata; it only
+  // reaches recordAiUsage's internal billing/usage-log metadata via
+  // flattenReportMetadataForUsage (see createReportMetadataContext in
+  // report-engine/metadata.ts).
   const sourceIntelligenceRecords = analyzeReportSourceIntelligence(deduped.sourcesAssumptions);
   const sourceReliabilityOverview = buildSourceReliabilityOverview(sourceIntelligenceRecords, language);
   if (sourceReliabilityOverview) {

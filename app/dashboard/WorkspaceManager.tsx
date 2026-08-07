@@ -119,7 +119,7 @@ export default function WorkspaceManager({
             <select
               value={sort}
               onChange={(event) => setSort(event.target.value as typeof sort)}
-              className="min-h-12 bg-transparent text-sm text-zinc-200 outline-none"
+              className="min-h-12 rounded-lg bg-transparent text-sm text-zinc-200 outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
             >
               <option value="recent">Recently updated</option>
               <option value="name">Name A-Z</option>

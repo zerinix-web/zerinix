@@ -4256,7 +4256,7 @@ function ConversationSidebar({
         <span>{visibleConversations.length}</span>
       </div>
 
-      <label className="mt-3 hidden items-center gap-2 rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-zinc-500 md:flex">
+      <label className="mt-3 hidden items-center gap-2 rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-zinc-500 focus-within:ring-2 focus-within:ring-teal-200/30 md:flex">
         <Search className="h-4 w-4 text-teal-200" />
         <input
           value={searchQuery}
@@ -6318,7 +6318,7 @@ const ChatComposer = memo(function ChatComposer({
                     type="button"
                     onClick={() => onRemoveAttachment(attachment.id)}
                     aria-label={`Remove ${attachment.name}`}
-                    className="flex h-6 w-6 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/10 hover:text-white"
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/10 hover:text-white"
                   >
                     ×
                   </button>

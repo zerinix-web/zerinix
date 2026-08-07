@@ -2037,7 +2037,7 @@ export default function AIChatWorkspace({
           </Link>
         </div>
 
-        <div className="mt-5 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-zinc-500">
+        <div className="mt-5 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-zinc-500 focus-within:ring-2 focus-within:ring-teal-200/30">
           <Search className="h-4 w-4" />
           <input
             value={searchQuery}
@@ -2516,7 +2516,7 @@ export default function AIChatWorkspace({
                     onChange={(event) =>
                       setModelPreference(event.target.value as ChatModelPreference)
                     }
-                    className="min-h-11 rounded-2xl border border-white/10 bg-black/40 px-4 py-2 text-sm font-medium text-zinc-200 outline-none transition hover:bg-white/10"
+                    className="min-h-11 rounded-2xl border border-white/10 bg-black/40 px-4 py-2 text-sm font-medium text-zinc-200 outline-none transition hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-teal-200/30"
                     aria-label="Select advisor response mode"
                   >
                     {modelOptions.map((option) => (

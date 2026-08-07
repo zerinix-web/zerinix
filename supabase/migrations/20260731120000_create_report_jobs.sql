@@ -1,6 +1,6 @@
 create extension if not exists "pgcrypto";
 
-create table public.report_jobs (
+create table if not exists public.report_jobs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   status text not null default 'queued',
@@ -67,25 +67,25 @@ create table public.report_jobs (
   )
 );
 
-create index report_jobs_user_created_at_idx
+create index if not exists report_jobs_user_created_at_idx
   on public.report_jobs (user_id, created_at desc);
 
-create index report_jobs_status_next_attempt_at_idx
+create index if not exists report_jobs_status_next_attempt_at_idx
   on public.report_jobs (status, next_attempt_at);
 
-create index report_jobs_lease_expires_at_idx
+create index if not exists report_jobs_lease_expires_at_idx
   on public.report_jobs (lease_expires_at)
   where lease_expires_at is not null;
 
-create index report_jobs_idempotency_key_idx
+create index if not exists report_jobs_idempotency_key_idx
   on public.report_jobs (idempotency_key)
   where idempotency_key is not null;
 
-create index report_jobs_report_id_idx
+create index if not exists report_jobs_report_id_idx
   on public.report_jobs (report_id)
   where report_id is not null;
 
-create unique index report_jobs_active_user_idempotency_key_idx
+create unique index if not exists report_jobs_active_user_idempotency_key_idx
   on public.report_jobs (user_id, idempotency_key)
   where idempotency_key is not null
     and status not in ('completed', 'failed', 'cancelled');
@@ -101,6 +101,7 @@ begin
 end;
 $$;
 
+drop trigger if exists set_report_jobs_updated_at on public.report_jobs;
 create trigger set_report_jobs_updated_at
 before update on public.report_jobs
 for each row
@@ -108,6 +109,7 @@ execute function public.set_report_jobs_updated_at();
 
 alter table public.report_jobs enable row level security;
 
+drop policy if exists "Users can insert own queued report jobs" on public.report_jobs;
 create policy "Users can insert own queued report jobs"
 on public.report_jobs
 for insert
@@ -132,12 +134,14 @@ with check (
   and cancelled_at is null
 );
 
+drop policy if exists "Users can read own report jobs" on public.report_jobs;
 create policy "Users can read own report jobs"
 on public.report_jobs
 for select
 to authenticated
 using ((select auth.uid()) = user_id);
 
+drop policy if exists "Users can cancel own pending report jobs" on public.report_jobs;
 create policy "Users can cancel own pending report jobs"
 on public.report_jobs
 for update

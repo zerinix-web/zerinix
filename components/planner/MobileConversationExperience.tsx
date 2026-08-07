@@ -345,7 +345,7 @@ export const MobileConversationExperience = memo(function MobileConversationExpe
                   type="button"
                   onClick={() => onRemoveAttachment(attachment.id)}
                   aria-label={`Remove ${attachment.name}`}
-                  className="flex h-6 w-6 items-center justify-center rounded-full text-zinc-500 active:bg-white/10"
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 active:bg-white/10"
                 >
                   ×
                 </button>
