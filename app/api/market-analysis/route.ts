@@ -94,6 +94,13 @@ import {
   analyzeReportSourceIntelligence,
   buildSourceReliabilityOverview,
 } from "@/app/lib/report-source-intelligence";
+import {
+  classifyFinancialMetricEvidenceType,
+  consolidateFinancialAssumptions,
+  formatKeyFinancialAssumptionsList,
+  hasVerifiedUserProvidedData,
+  localizeFinancialEvidenceType,
+} from "@/app/lib/financial-evidence-labeling";
 import { normalizeReportSourceSection } from "@/app/lib/report-source-normalization.mjs";
 import {
   localizePdfPresentationLabel,
@@ -1127,6 +1134,58 @@ function buildMarketExecutiveSummaryConfidenceRollup(
   ].join("\n");
 }
 
+const financialAssumptionsCopy: Record<ResponseLanguage, { heading: string }> = {
+  English: { heading: "Key Financial Metrics" },
+  Turkish: { heading: "Temel Finansal Metrikler" },
+  German: { heading: "Wichtige Finanzkennzahlen" },
+  French: { heading: "Principaux indicateurs financiers" },
+  Spanish: { heading: "Principales métricas financieras" },
+};
+
+// Market Intelligence has no dedicated "financialAssumptions" report
+// field (unlike Business Idea Validation's), so this appends the same
+// evidence-type + confidence labeling directly onto tamSamSom -- the
+// field that already owns TAM/SAM/SOM -- plus one deduplicated
+// "Financial Assumptions" list (requirement 4/5), reusing the same
+// AiFinancialModelContext metrics engine plan-executor.ts uses.
+function buildMarketFinancialConfidenceAppendix(
+  context: AiFinancialModelContext,
+  language: ResponseLanguage
+) {
+  const hasUserEvidence = hasVerifiedUserProvidedData(context.financialConsistency.sources.userProvidedData);
+  const keyMetrics = [
+    context.metrics.tam,
+    context.metrics.sam,
+    context.metrics.som,
+    context.metrics.cac,
+    context.metrics.ltv,
+    context.metrics.grossMargin,
+    context.metrics.arr,
+  ];
+  const metricLines = keyMetrics.map((metric) => {
+    const evidenceType = localizeFinancialEvidenceType(
+      classifyFinancialMetricEvidenceType(metric, hasUserEvidence),
+      language
+    );
+    return marketText(
+      language,
+      `- ${metric.label}: ${metric.displayValue} | evidence=${evidenceType} | confidence=${metric.confidence}`,
+      `- ${metric.label}: ${metric.displayValue} | kanıt=${evidenceType} | güven=${metric.confidence}`,
+      `- ${metric.label}: ${metric.displayValue} | Nachweis=${evidenceType} | Konfidenz=${metric.confidence}`,
+      `- ${metric.label}: ${metric.displayValue} | preuve=${evidenceType} | confiance=${metric.confidence}`,
+      `- ${metric.label}: ${metric.displayValue} | evidencia=${evidenceType} | confianza=${metric.confidence}`
+    );
+  });
+  const consolidatedAssumptions = consolidateFinancialAssumptions(keyMetrics);
+  const keyAssumptionsList = formatKeyFinancialAssumptionsList(consolidatedAssumptions, language);
+
+  return [
+    financialAssumptionsCopy[language].heading,
+    ...metricLines,
+    ...(keyAssumptionsList ? ["", keyAssumptionsList] : []),
+  ].join("\n");
+}
+
 function ensureMarketReportQuality(
   report: Record<MarketReportField, string>,
   context?: AiFinancialModelContext,
@@ -1186,6 +1245,10 @@ function ensureMarketReportQuality(
   const sourceReliabilityOverview = buildSourceReliabilityOverview(sourceIntelligenceRecords, language);
   if (sourceReliabilityOverview) {
     deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${sourceReliabilityOverview}`;
+  }
+
+  if (context) {
+    deduped.tamSamSom = `${deduped.tamSamSom.trim()}\n\n${buildMarketFinancialConfidenceAppendix(context, language)}`;
   }
 
   return deduped;

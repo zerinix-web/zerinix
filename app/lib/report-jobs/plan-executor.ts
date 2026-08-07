@@ -124,6 +124,13 @@ import {
   analyzeReportSourceIntelligence,
   buildSourceReliabilityOverview,
 } from "@/app/lib/report-source-intelligence";
+import {
+  classifyFinancialMetricEvidenceType,
+  consolidateFinancialAssumptions,
+  formatKeyFinancialAssumptionsList,
+  hasVerifiedUserProvidedData,
+  localizeFinancialEvidenceType,
+} from "@/app/lib/financial-evidence-labeling";
 import { labelModelDerivedFinancialClaims } from "@/app/lib/report-engine/financial-claim-labeling";
 import {
   formatExecutiveDecisionSystemContext,
@@ -1523,13 +1530,13 @@ function localizeDecision(decision: string, language: ResponseLanguage) {
 
 function metricLine(
   metric: AiFinancialModelContext["metrics"][keyof AiFinancialModelContext["metrics"]],
-  language: ResponseLanguage
+  language: ResponseLanguage,
+  hasUserEvidence = false
 ) {
   const labels =
     language === "Turkish"
       ? {
           evidence: "kanıt",
-          assumption: "Planlama varsayımı",
           formula: "formül",
           assumptions: "varsayımlar",
           benchmark: "referans",
@@ -1537,16 +1544,22 @@ function metricLine(
         }
       : {
           evidence: "evidence",
-          assumption: "Planning assumption",
           formula: "formula",
           assumptions: "assumptions",
           benchmark: "benchmark",
           confidence: "confidence",
         };
+  // Accurate per-metric label from its own real formula/benchmark
+  // text -- never the previous hardcoded "Planning assumption" for
+  // every metric regardless of how it was actually derived.
+  const evidenceType = localizeFinancialEvidenceType(
+    classifyFinancialMetricEvidenceType(metric, hasUserEvidence),
+    language
+  );
 
   return [
     `${localizeMetricLabel(metric.label, language)}: ${metric.displayValue}`,
-    `${labels.evidence}=${labels.assumption}`,
+    `${labels.evidence}=${evidenceType}`,
     `${labels.formula}=${metric.formula}`,
     `${labels.assumptions}=${metric.assumptions.join("; ")}`,
     `${labels.benchmark}=${metric.benchmarkComparison}`,
@@ -1557,13 +1570,17 @@ function metricLine(
 function marketSizeLine(
   label: string,
   metric: AiFinancialModelContext["metrics"][keyof AiFinancialModelContext["metrics"]],
-  language: ResponseLanguage = "English"
+  language: ResponseLanguage = "English",
+  hasUserEvidence = false
 ) {
-  return `${label}: ${metric.displayValue} | ${
-    language === "Turkish"
-      ? "kanıt=Planlama varsayımı"
-      : "evidence=Planning assumption"
-  }`;
+  const evidenceType = localizeFinancialEvidenceType(
+    classifyFinancialMetricEvidenceType(metric, hasUserEvidence),
+    language
+  );
+  const evidenceLabel = language === "Turkish" ? "kanıt" : "evidence";
+  const confidenceLabel = language === "Turkish" ? "güven" : "confidence";
+
+  return `${label}: ${metric.displayValue} | ${evidenceLabel}=${evidenceType} | ${confidenceLabel}=${metric.confidence}`;
 }
 
 function formatPlanUsd(value: number) {
@@ -1581,10 +1598,11 @@ function buildCanonicalTamSamSom(
   context: AiFinancialModelContext,
   language: ResponseLanguage = "English"
 ) {
+  const hasUserEvidence = hasVerifiedUserProvidedData(context.financialConsistency.sources.userProvidedData);
   return [
-    marketSizeLine("TAM", context.metrics.tam, language),
-    marketSizeLine("SAM", context.metrics.sam, language),
-    marketSizeLine("SOM", context.metrics.som, language),
+    marketSizeLine("TAM", context.metrics.tam, language, hasUserEvidence),
+    marketSizeLine("SAM", context.metrics.sam, language, hasUserEvidence),
+    marketSizeLine("SOM", context.metrics.som, language, hasUserEvidence),
   ].join("\n");
 }
 
@@ -1623,38 +1641,41 @@ function buildCanonicalTamSamSomSection(
       "Kategori sınırları, erişilebilir müşteri segmentleri ve elde edilebilir pay güncel pazar kanıtlarıyla doğrulanana kadar bu büyüklükleme yön gösteren bir planlama modeli olarak ele alınmalıdır."
     );
 
+  const hasUserEvidence = hasVerifiedUserProvidedData(context.financialConsistency.sources.userProvidedData);
   return [
-    marketSizeLine("TAM", context.metrics.tam, language),
-    marketSizeLine("SAM", context.metrics.sam, language),
-    marketSizeLine("SOM", context.metrics.som, language),
+    marketSizeLine("TAM", context.metrics.tam, language, hasUserEvidence),
+    marketSizeLine("SAM", context.metrics.sam, language, hasUserEvidence),
+    marketSizeLine("SOM", context.metrics.som, language, hasUserEvidence),
     `${reportLabel(language, "Commentary", "Yorum")}: ${commentary}`,
     buildExecutiveInsight(context, reportText(language, "Market sizing", "Pazar büyüklüğü"), language),
   ].join("\n");
 }
 
 function buildCanonicalUnitEconomics(context: AiFinancialModelContext, language: ResponseLanguage = "English") {
+  const hasUserEvidence = hasVerifiedUserProvidedData(context.financialConsistency.sources.userProvidedData);
   return [
-    metricLine(context.metrics.arpa, language),
-    metricLine(context.metrics.grossMargin, language),
-    metricLine(context.metrics.cac, language),
-    metricLine(context.metrics.ltv, language),
-    metricLine(context.metrics.cacPayback, language),
+    metricLine(context.metrics.arpa, language, hasUserEvidence),
+    metricLine(context.metrics.grossMargin, language, hasUserEvidence),
+    metricLine(context.metrics.cac, language, hasUserEvidence),
+    metricLine(context.metrics.ltv, language, hasUserEvidence),
+    metricLine(context.metrics.cacPayback, language, hasUserEvidence),
   ].join("\n");
 }
 
 function buildCanonicalFinancialDashboard(context: AiFinancialModelContext, language: ResponseLanguage = "English") {
+  const hasUserEvidence = hasVerifiedUserProvidedData(context.financialConsistency.sources.userProvidedData);
   return [
-    metricLine(context.metrics.arr, language),
-    metricLine(context.metrics.mrr, language),
-    metricLine(context.metrics.grossMargin, language),
-    metricLine(context.metrics.cac, language),
-    metricLine(context.metrics.ltv, language),
-    metricLine(context.metrics.cacPayback, language),
-    metricLine(context.metrics.monthlyBurn, language),
-    metricLine(context.metrics.runway, language),
-    metricLine(context.metrics.ebitda, language),
-    metricLine(context.metrics.breakEvenMonth, language),
-    metricLine(context.metrics.investmentNeeded, language),
+    metricLine(context.metrics.arr, language, hasUserEvidence),
+    metricLine(context.metrics.mrr, language, hasUserEvidence),
+    metricLine(context.metrics.grossMargin, language, hasUserEvidence),
+    metricLine(context.metrics.cac, language, hasUserEvidence),
+    metricLine(context.metrics.ltv, language, hasUserEvidence),
+    metricLine(context.metrics.cacPayback, language, hasUserEvidence),
+    metricLine(context.metrics.monthlyBurn, language, hasUserEvidence),
+    metricLine(context.metrics.runway, language, hasUserEvidence),
+    metricLine(context.metrics.ebitda, language, hasUserEvidence),
+    metricLine(context.metrics.breakEvenMonth, language, hasUserEvidence),
+    metricLine(context.metrics.investmentNeeded, language, hasUserEvidence),
   ].join("\n");
 }
 
@@ -2154,7 +2175,16 @@ function buildCanonicalSwot(
 }
 
 function buildCanonicalFinancialAssumptions(context: AiFinancialModelContext, language: ResponseLanguage) {
+  // Requirement 4/5: one deduplicated "Financial Assumptions" bullet
+  // list up front, consolidating every metric's real assumptions
+  // (ARR, TAM, CAC, LTV, margins, etc.) so an assumption shared by
+  // several figures (e.g. the same complexity multiplier behind both
+  // CAC and LTV) is stated once, not repeated per metric.
+  const consolidatedAssumptions = consolidateFinancialAssumptions(Object.values(context.metrics));
+  const keyAssumptionsList = formatKeyFinancialAssumptionsList(consolidatedAssumptions, language);
+
   return [
+    ...(keyAssumptionsList ? [keyAssumptionsList, ""] : []),
     formatFinancialConsistencyReport(context, language),
     reportLabel(language, "User-provided facts:", "Kullanıcı tarafından sağlanan bilgiler:"),
     reportText(language, `- Business context: ${context.normalizedBusinessIdea}`, `- İş bağlamı: ${context.normalizedBusinessIdea}`),
