@@ -115,6 +115,11 @@ import {
   buildFullReportStructureDirectives,
 } from "@/app/lib/ai/report-quality-directives";
 import { dedupeReportParagraphsAcrossSections } from "@/app/lib/report-content-quality.mjs";
+import {
+  appendEvidenceConfidenceBlock,
+  assessSectionEvidenceConfidence,
+  type SectionEvidenceAssessment,
+} from "@/app/lib/report-evidence-confidence";
 import { labelModelDerivedFinancialClaims } from "@/app/lib/report-engine/financial-claim-labeling";
 import {
   formatExecutiveDecisionSystemContext,
@@ -2168,6 +2173,92 @@ function buildCanonicalFinancialAssumptions(context: AiFinancialModelContext, la
   ].join("\n");
 }
 
+// "Major" report sections for the Evidence & Confidence feature:
+// substantive, AI-authored narrative fields where a content-derived
+// evidence assessment adds real signal. Deliberately excludes fields
+// already covered by their own deterministic confidence framing
+// (financialAssumptions' User-provided/Market-derived/AI-assumption
+// labels, the canonical numeric dashboards, founderScore, the
+// roadmaps) so this doesn't duplicate or contradict an existing,
+// more-precise signal with a cruder text-derived one. executiveSummary
+// gets its own rollup (see buildExecutiveSummaryConfidenceRollup)
+// instead of the generic per-section block. executiveRecommendation is
+// also excluded: it's densely packed with real, computed decision-
+// engine percentages (Decision Confidence, Market/Competition/
+// Execution/Product Confidence, etc.) that carry no bracket evidence
+// tag by convention, so the text-derived scanner below mistakes them
+// en masse for unsupported claims and scores an already well-grounded
+// section as unfairly Low -- observed on a live-generated report.
+const majorPlanFieldsForEvidenceConfidence: PlanReportField[] = [
+  "problem",
+  "solution",
+  "targetCustomer",
+  "marketOpportunity",
+  "competitorLandscape",
+  "businessModel",
+  "swotAnalysis",
+  "portersFiveForces",
+  "pricingStrategy",
+  "goToMarketPlan",
+  "salesStrategy",
+  "risks",
+];
+
+function appendEvidenceConfidenceToMajorPlanSections(
+  report: Record<PlanReportField, string>,
+  language: ResponseLanguage
+) {
+  const assessments: Array<{ field: PlanReportField; assessment: SectionEvidenceAssessment }> = [];
+
+  for (const field of majorPlanFieldsForEvidenceConfidence) {
+    const content = report[field];
+
+    if (!content?.trim()) {
+      continue;
+    }
+
+    assessments.push({ field, assessment: assessSectionEvidenceConfidence(content) });
+    report[field] = appendEvidenceConfidenceBlock(content, language);
+  }
+
+  return assessments;
+}
+
+function buildExecutiveSummaryConfidenceRollup(
+  assessments: Array<{ field: PlanReportField; assessment: SectionEvidenceAssessment }>,
+  language: ResponseLanguage
+) {
+  if (!assessments.length) {
+    return "";
+  }
+
+  const overallConfidence = Math.round(
+    assessments.reduce((sum, entry) => sum + entry.assessment.confidenceScore, 0) / assessments.length
+  );
+  const rankedByConfidence = [...assessments].sort(
+    (a, b) => b.assessment.confidenceScore - a.assessment.confidenceScore
+  );
+  const highest = rankedByConfidence[0];
+  const lowest = rankedByConfidence[rankedByConfidence.length - 1];
+  const biggestUnknown = [...assessments].sort(
+    (a, b) =>
+      b.assessment.unsupportedNumericClaimCount + b.assessment.missingEvidence.length -
+      (a.assessment.unsupportedNumericClaimCount + a.assessment.missingEvidence.length)
+  )[0];
+  const biggestUnknownDetail =
+    biggestUnknown.assessment.missingEvidence[0] ||
+    reportText(language, "no significant evidence gap was detected.", "önemli bir kanıt boşluğu tespit edilmedi.");
+  const label = (field: PlanReportField) => planFieldLabels[language][field];
+
+  return [
+    reportText(language, "Report Confidence:", "Rapor Güveni:"),
+    reportText(language, `- Overall Report Confidence: ${overallConfidence}/100`, `- Genel Rapor Güveni: ${overallConfidence}/100`),
+    reportText(language, `- Biggest Unknown: ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`, `- En Büyük Bilinmeyen: ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`),
+    reportText(language, `- Highest Confidence Finding: ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`, `- En Yüksek Güvenli Bulgu: ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`),
+    reportText(language, `- Lowest Confidence Finding: ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`, `- En Düşük Güvenli Bulgu: ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`),
+  ].join("\n");
+}
+
 function normalizeFullPlanReport(
   report: Record<PlanReportField, string>,
   context?: AiFinancialModelContext,
@@ -2187,13 +2278,13 @@ function normalizeFullPlanReport(
       normalized[field] = enforcePlanReportLanguage(normalized[field], language);
     }
 
-    return dedupeReportParagraphsAcrossSections(normalized, {
+    const dedupedWithoutContext = dedupeReportParagraphsAcrossSections(normalized, {
       language,
       sectionLabels: planFieldLabels[language],
-    }) as Record<
-      PlanReportField,
-      string
-    >;
+    }) as Record<PlanReportField, string>;
+    appendEvidenceConfidenceToMajorPlanSections(dedupedWithoutContext, language);
+
+    return dedupedWithoutContext;
   }
 
   const canonicalTamSamSom = buildCanonicalTamSamSom(context, language);
@@ -2304,13 +2395,18 @@ function normalizeFullPlanReport(
     );
   }
 
-  return dedupeReportParagraphsAcrossSections(normalized, {
+  const deduped = dedupeReportParagraphsAcrossSections(normalized, {
     language,
     sectionLabels: planFieldLabels[language],
-  }) as Record<
-    PlanReportField,
-    string
-  >;
+  }) as Record<PlanReportField, string>;
+
+  const evidenceAssessments = appendEvidenceConfidenceToMajorPlanSections(deduped, language);
+  const confidenceRollup = buildExecutiveSummaryConfidenceRollup(evidenceAssessments, language);
+  if (confidenceRollup) {
+    deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${confidenceRollup}`;
+  }
+
+  return deduped;
 }
 
 function parseFullPlanReport(

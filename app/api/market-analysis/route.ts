@@ -85,6 +85,11 @@ import {
   loadUserMemoriesForUser,
 } from "@/app/lib/ai/user-memory";
 import { dedupeReportParagraphsAcrossSections } from "@/app/lib/report-content-quality.mjs";
+import {
+  appendEvidenceConfidenceBlock,
+  assessSectionEvidenceConfidence,
+  type SectionEvidenceAssessment,
+} from "@/app/lib/report-evidence-confidence";
 import { normalizeReportSourceSection } from "@/app/lib/report-source-normalization.mjs";
 import {
   localizePdfPresentationLabel,
@@ -1034,6 +1039,90 @@ function createMarketFieldFallback(field: MarketReportField, language: ResponseL
   return marketFieldFallbackTemplates[language](label);
 }
 
+// Same scoping rationale as plan-executor.ts's majorPlanFieldsForEvidenceConfidence:
+// substantive, AI-authored narrative fields only. Excludes executiveSummary
+// (own rollup below), tamSamSom (template-driven numeric section), and
+// sources (a citation list, not a claim to grade).
+const majorMarketFieldsForEvidenceConfidence: MarketReportField[] = [
+  "marketOverview",
+  "marketSize",
+  "cagr",
+  "marketSegmentation",
+  "regionalAnalysis",
+  "industryTrends",
+  "competitiveLandscape",
+  "majorPlayers",
+  "customerSegments",
+  "marketDrivers",
+  "barriers",
+  "opportunities",
+  "threats",
+  "portersFiveForces",
+  "strategicRecommendations",
+];
+
+function appendEvidenceConfidenceToMajorMarketSections(
+  report: Record<MarketReportField, string>,
+  language: ResponseLanguage
+) {
+  const assessments: Array<{ field: MarketReportField; assessment: SectionEvidenceAssessment }> = [];
+
+  for (const field of majorMarketFieldsForEvidenceConfidence) {
+    const content = report[field];
+
+    if (!content?.trim()) {
+      continue;
+    }
+
+    assessments.push({ field, assessment: assessSectionEvidenceConfidence(content) });
+    report[field] = appendEvidenceConfidenceBlock(content, language);
+  }
+
+  return assessments;
+}
+
+function buildMarketExecutiveSummaryConfidenceRollup(
+  assessments: Array<{ field: MarketReportField; assessment: SectionEvidenceAssessment }>,
+  language: ResponseLanguage
+) {
+  if (!assessments.length) {
+    return "";
+  }
+
+  const overallConfidence = Math.round(
+    assessments.reduce((sum, entry) => sum + entry.assessment.confidenceScore, 0) / assessments.length
+  );
+  const rankedByConfidence = [...assessments].sort(
+    (a, b) => b.assessment.confidenceScore - a.assessment.confidenceScore
+  );
+  const highest = rankedByConfidence[0];
+  const lowest = rankedByConfidence[rankedByConfidence.length - 1];
+  const biggestUnknown = [...assessments].sort(
+    (a, b) =>
+      b.assessment.unsupportedNumericClaimCount + b.assessment.missingEvidence.length -
+      (a.assessment.unsupportedNumericClaimCount + a.assessment.missingEvidence.length)
+  )[0];
+  const biggestUnknownDetail =
+    biggestUnknown.assessment.missingEvidence[0] ||
+    marketText(
+      language,
+      "no significant evidence gap was detected.",
+      "önemli bir kanıt boşluğu tespit edilmedi.",
+      "es wurde keine wesentliche Evidenzlücke festgestellt.",
+      "aucune lacune de preuve significative n'a été détectée.",
+      "no se detectó ninguna brecha de evidencia significativa."
+    );
+  const label = (field: MarketReportField) => marketFieldLabels[language][field];
+
+  return [
+    marketText(language, "Report Confidence:", "Rapor Güveni:", "Berichtskonfidenz:", "Confiance du rapport :", "Confianza del informe:"),
+    marketText(language, `- Overall Report Confidence: ${overallConfidence}/100`, `- Genel Rapor Güveni: ${overallConfidence}/100`, `- Gesamtberichtskonfidenz: ${overallConfidence}/100`, `- Confiance globale du rapport : ${overallConfidence}/100`, `- Confianza general del informe: ${overallConfidence}/100`),
+    marketText(language, `- Biggest Unknown: ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`, `- En Büyük Bilinmeyen: ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`, `- Größte Unbekannte: ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`, `- Plus grande inconnue : ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`, `- Mayor incógnita: ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`),
+    marketText(language, `- Highest Confidence Finding: ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`, `- En Yüksek Güvenli Bulgu: ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`, `- Befund mit höchster Konfidenz: ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`, `- Constat le plus fiable : ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`, `- Hallazgo de mayor confianza: ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`),
+    marketText(language, `- Lowest Confidence Finding: ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`, `- En Düşük Güvenli Bulgu: ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`, `- Befund mit niedrigster Konfidenz: ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`, `- Constat le moins fiable : ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`, `- Hallazgo de menor confianza: ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`),
+  ].join("\n");
+}
+
 function ensureMarketReportQuality(
   report: Record<MarketReportField, string>,
   context?: AiFinancialModelContext,
@@ -1071,13 +1160,20 @@ function ensureMarketReportQuality(
     }
   }
 
-  return dedupeReportParagraphsAcrossSections(normalized, {
+  const deduped = dedupeReportParagraphsAcrossSections(normalized, {
     language,
     sectionLabels: fieldLabelsByLanguage[language],
-  }) as Record<
-    MarketReportField,
-    string
-  >;
+  }) as Record<MarketReportField, string>;
+
+  const evidenceAssessments = appendEvidenceConfidenceToMajorMarketSections(deduped, language);
+  if (context) {
+    const confidenceRollup = buildMarketExecutiveSummaryConfidenceRollup(evidenceAssessments, language);
+    if (confidenceRollup) {
+      deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${confidenceRollup}`;
+    }
+  }
+
+  return deduped;
 }
 
 function parseFullMarketReport(
