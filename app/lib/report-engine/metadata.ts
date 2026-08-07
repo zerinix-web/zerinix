@@ -9,6 +9,7 @@ import { createMarketIntelligence } from "@/app/lib/market-intelligence";
 import { evaluateReportConfidence } from "@/app/lib/report-confidence";
 import { createReportPersonalization } from "@/app/lib/report-personalization";
 import { scoreReportSources } from "@/app/lib/source-reliability";
+import { analyzeReportSourceIntelligence, collectSourceFieldText } from "@/app/lib/report-source-intelligence";
 import { validateReportSections } from "./validation";
 
 type ReportMetadataOperationType = "plan_report" | "market_report";
@@ -28,6 +29,7 @@ export function createReportMetadataContext({
 }) {
   const reportValidation = validateReportSections(report);
   const sourceReliability = scoreReportSources(report);
+  const sourceIntelligence = analyzeReportSourceIntelligence(collectSourceFieldText(report));
   const liveEvidence = aggregateReportEvidence({ report });
   const reportConfidence = evaluateReportConfidence({
     report,
@@ -102,6 +104,11 @@ export function createReportMetadataContext({
   return {
     reportValidation,
     sourceReliability,
+    // Per-source detail (type, trust level, freshness, explanation,
+    // deduplicated reference ids) -- an array, so it is kept as its
+    // own named field below rather than spread like the other,
+    // flat-object metadata bundles.
+    sourceIntelligence,
     liveEvidence,
     reportConfidence,
     decisionIntelligence,
@@ -120,6 +127,7 @@ export function flattenReportMetadataForUsage(
   return {
     ...metadata.reportValidation,
     ...metadata.sourceReliability,
+    sourceIntelligence: metadata.sourceIntelligence,
     ...metadata.liveEvidence,
     ...metadata.reportConfidence,
     ...metadata.decisionIntelligence,

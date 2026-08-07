@@ -90,6 +90,10 @@ import {
   assessSectionEvidenceConfidence,
   type SectionEvidenceAssessment,
 } from "@/app/lib/report-evidence-confidence";
+import {
+  analyzeReportSourceIntelligence,
+  buildSourceReliabilityOverview,
+} from "@/app/lib/report-source-intelligence";
 import { normalizeReportSourceSection } from "@/app/lib/report-source-normalization.mjs";
 import {
   localizePdfPresentationLabel,
@@ -1171,6 +1175,17 @@ function ensureMarketReportQuality(
     if (confidenceRollup) {
       deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${confidenceRollup}`;
     }
+  }
+
+  // Read-only: analyzes the existing sources text without mutating it,
+  // so the PDF's own citation parser (which runs on that field
+  // separately) is completely unaffected. Only the trust-tier name
+  // overview goes into executiveSummary -- full per-source detail
+  // stays in report.metadata.sourceIntelligence.
+  const sourceIntelligenceRecords = analyzeReportSourceIntelligence(deduped.sources);
+  const sourceReliabilityOverview = buildSourceReliabilityOverview(sourceIntelligenceRecords, language);
+  if (sourceReliabilityOverview) {
+    deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${sourceReliabilityOverview}`;
   }
 
   return deduped;

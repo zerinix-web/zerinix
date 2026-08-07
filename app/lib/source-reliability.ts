@@ -35,7 +35,12 @@ const categories: SourceReliabilityCategory[] = [
 const trustedIndustryPublishers =
   /\b(statista|mckinsey|bcg|deloitte|pwc|ey|kpmg|gartner|forrester|cb insights|pitchbook|crunchbase|euromonitor|nielsen|idc|gsma)\b/i;
 const governmentPublishers =
-  /\b(world bank|imf|oecd|eurostat|tüik|tuik|tcmb|fed|federal reserve|sec|gov\.uk|data\.gov|who|united nations|un\b|commerce department|ministry)\b/i;
+  /\b(world bank|imf|oecd|eurostat|tüik|tuik|tcmb|fed|federal reserve|sec|gov\.uk|data\.gov|united nations|un\b|commerce department|ministry|world health organization)\b/i;
+// Checked separately, case-sensitively: the bare word "who" is common
+// English (interrogative/relative pronoun) and false-positives as a
+// government source ("Who Eats by ATX Is For") when matched case-
+// insensitively. Only the literal acronym "WHO" is a real signal.
+const worldHealthOrganizationAcronym = /\bWHO\b/;
 const academicPublishers =
   /\b(university|journal|research institute|arxiv|ssrn|springer|elsevier|jstor|nature|science|edu\b)\b/i;
 const officialSignals = /\b(official|company website|annual report|investor relations|10-k|form 10-k|sec filing)\b/i;
@@ -106,7 +111,11 @@ export function classifySourceReliability(candidate: SourceCandidate): {
     return { category: "AI Generated", score: 35 };
   }
 
-  if (governmentPublishers.test(text) || /\.(gov|gov\.tr|int)$/i.test(domain)) {
+  if (
+    governmentPublishers.test(text) ||
+    worldHealthOrganizationAcronym.test(text) ||
+    /\.(gov|gov\.tr|int)$/i.test(domain)
+  ) {
     return { category: "Government", score: 92 };
   }
 

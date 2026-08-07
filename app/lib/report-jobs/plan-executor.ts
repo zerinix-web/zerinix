@@ -120,6 +120,10 @@ import {
   assessSectionEvidenceConfidence,
   type SectionEvidenceAssessment,
 } from "@/app/lib/report-evidence-confidence";
+import {
+  analyzeReportSourceIntelligence,
+  buildSourceReliabilityOverview,
+} from "@/app/lib/report-source-intelligence";
 import { labelModelDerivedFinancialClaims } from "@/app/lib/report-engine/financial-claim-labeling";
 import {
   formatExecutiveDecisionSystemContext,
@@ -2404,6 +2408,17 @@ function normalizeFullPlanReport(
   const confidenceRollup = buildExecutiveSummaryConfidenceRollup(evidenceAssessments, language);
   if (confidenceRollup) {
     deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${confidenceRollup}`;
+  }
+
+  // Read-only: analyzes the existing sourcesAssumptions text without
+  // mutating it, so the PDF's own citation parser (which runs on that
+  // field separately) is completely unaffected. Only the trust-tier
+  // name overview goes into executiveSummary -- never full per-source
+  // detail, which stays in report.metadata.sourceIntelligence.
+  const sourceIntelligenceRecords = analyzeReportSourceIntelligence(deduped.sourcesAssumptions);
+  const sourceReliabilityOverview = buildSourceReliabilityOverview(sourceIntelligenceRecords, language);
+  if (sourceReliabilityOverview) {
+    deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${sourceReliabilityOverview}`;
   }
 
   return deduped;
