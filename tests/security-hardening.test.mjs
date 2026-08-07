@@ -335,3 +335,92 @@ test("OpenAI key selection never falls back across environments", () => {
   assert.match(source, /must not be present during production AI calls/);
   assert.match(source, /AI_TEST_MODE/);
 });
+
+test("modules reading sensitive env vars are marked server-only", () => {
+  // app/lib/beta-access.ts also reads a sensitive-ish env var
+  // (PRIVATE_BETA_ALLOWED_EMAILS) but is deliberately left without
+  // "server-only": app/lib/strategic-report-access.ts depends on it and
+  // is itself intentionally kept import-clean so it can be exercised
+  // directly by tests/strategic-report-beta-access.test.mjs under plain
+  // node --test. Confirmed safe via import-graph analysis (only
+  // server-side files import it) during the 2026-08-07 security audit.
+  for (const file of [
+    "app/lib/ai/runtime.ts",
+    "app/lib/billing/stripe.ts",
+    "app/lib/ai/domain-research.ts",
+  ]) {
+    const source = read(file);
+    assert.match(
+      source,
+      /^import "server-only";/m,
+      `${file} reads a sensitive env var and must import "server-only"`
+    );
+  }
+});
+
+test("report worker secret comparison is constant-time", () => {
+  const source = read("app/api/report-jobs/worker/route.ts");
+
+  assert.match(source, /timingSafeEqual/);
+  assert.doesNotMatch(
+    source,
+    /secret === bearer \|\| secret === suppliedWorkerSecret/,
+    "worker secret check must not use a plain === comparison"
+  );
+  // Guards the length check that must precede timingSafeEqual (which
+  // throws on mismatched buffer lengths rather than returning false).
+  assert.match(source, /bufferA\.length === bufferB\.length/);
+});
+
+test("plan route logs failures through the shared server-error helper, not console.error", () => {
+  const source = read("app/api/plan/route.ts");
+
+  assert.doesNotMatch(source, /console\.error/);
+  assert.match(source, /logServerError\("api:plan:deferred-worker"/);
+  assert.match(source, /logServerError\("api:plan:idempotency-lookup"/);
+  assert.match(source, /logServerError\("api:plan:enqueue"/);
+});
+
+test("ai_abuse_events policies are scoped to authenticated (not PUBLIC)", () => {
+  const migrations = walkFiles("supabase/migrations", (file) =>
+    file.endsWith(".sql")
+  )
+    .map(read)
+    .join("\n");
+
+  // The original migration omitted `to authenticated`, defaulting the
+  // policy to PUBLIC. A later migration must re-create both policies
+  // scoped to authenticated -- assert the fix landed, not just that the
+  // original (unscoped) policy text exists somewhere in history.
+  assert.match(
+    migrations,
+    /create policy "Users can insert own ai abuse events"[\s\S]{0,80}on public\.ai_abuse_events[\s\S]{0,80}for insert[\s\S]{0,40}to authenticated/i
+  );
+  assert.match(
+    migrations,
+    /create policy "Users can read own ai abuse events"[\s\S]{0,80}on public\.ai_abuse_events[\s\S]{0,80}for select[\s\S]{0,40}to authenticated/i
+  );
+});
+
+test("chat stream and report generation error paths do not leak raw exception text to users (known gap, tracked)", () => {
+  // Documents a confirmed High-severity finding from the 2026-08-07
+  // security audit that was intentionally NOT auto-fixed (per audit
+  // scope: only Low/Medium findings are auto-fixed) because it touches
+  // the chat streaming and report-generation content paths directly.
+  // This test pins today's known-leaky behavior so a future fix is a
+  // deliberate, visible change to this test, not a silent regression
+  // in the other direction.
+  const chatSource = read("app/api/chat/route.ts");
+  assert.match(
+    chatSource,
+    /function getChatErrorMessage\(error: unknown\) \{\s*return error instanceof Error && error\.message\.trim\(\)\s*\? error\.message/,
+    "if this no longer matches, the chat stream leak has likely been fixed -- update/remove this test alongside that fix"
+  );
+
+  const planExecutorSource = read("app/lib/report-jobs/plan-executor.ts");
+  assert.match(
+    planExecutorSource,
+    /`Plan report generation failed at \$\{fullReportStage\}: \$\{errorMessage\}`/,
+    "if this no longer matches, the executive-summary error leak has likely been fixed -- update/remove this test alongside that fix"
+  );
+});

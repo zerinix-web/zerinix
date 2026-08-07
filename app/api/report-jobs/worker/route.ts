@@ -1,8 +1,20 @@
+import { timingSafeEqual } from "node:crypto";
 import { after, NextResponse } from "next/server";
 import { processReportJobQueue } from "@/app/lib/report-jobs/worker";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+
+// Constant-time comparison: a plain `===` on secrets leaks timing
+// information proportional to the matching prefix length. Length is
+// checked first (timingSafeEqual throws on mismatched lengths), which
+// leaks only the secret's length -- an accepted tradeoff, since the
+// secret's length isn't itself sensitive.
+function timingSafeEqualString(a: string, b: string) {
+  const bufferA = Buffer.from(a);
+  const bufferB = Buffer.from(b);
+  return bufferA.length === bufferB.length && timingSafeEqual(bufferA, bufferB);
+}
 
 function isAuthorizedWorkerRequest(request: Request) {
   const authorization = request.headers.get("authorization") || "";
@@ -21,7 +33,9 @@ function isAuthorizedWorkerRequest(request: Request) {
   }
 
   return allowedSecrets.some(
-    (secret) => secret === bearer || secret === suppliedWorkerSecret
+    (secret) =>
+      timingSafeEqualString(secret, bearer) ||
+      timingSafeEqualString(secret, suppliedWorkerSecret)
   );
 }
 

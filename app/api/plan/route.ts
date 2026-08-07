@@ -47,6 +47,7 @@ import {
 import { buildStrategicDecisionMemo } from "@/app/lib/ai/strategic-decision-memo";
 import { generateExecutiveBrief } from "@/app/lib/ai/executive-brief-generator";
 import { logOperationalInfo } from "@/app/lib/security/logging";
+import { logServerError } from "@/app/lib/security/errors";
 
 export const maxDuration = 300;
 
@@ -247,7 +248,7 @@ function startReportWorker(jobId: string) {
   });
   after(async () => {
     await workerPromise.catch((error) => {
-      console.error("[report-jobs] deferred worker failed", error);
+      logServerError("api:plan:deferred-worker", error);
     });
   });
 }
@@ -419,7 +420,7 @@ export async function POST(req: Request) {
     .maybeSingle();
 
   if (existingJobError) {
-    console.error("[report-jobs] idempotency lookup failed", existingJobError);
+    logServerError("api:plan:idempotency-lookup", existingJobError);
     return NextResponse.json(
       { error: "Report queue is temporarily unavailable." },
       { status: 503 }
@@ -759,7 +760,7 @@ export async function POST(req: Request) {
       }
     }
 
-    console.error("[report-jobs] enqueue failed", createError);
+    logServerError("api:plan:enqueue", createError);
     return NextResponse.json(
       { error: "Report could not be queued." },
       { status: 503 }

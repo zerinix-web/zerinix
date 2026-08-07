@@ -1,3 +1,5 @@
+import "server-only";
+
 import type OpenAI from "openai";
 import type {
   Response as OpenAIResponse,
