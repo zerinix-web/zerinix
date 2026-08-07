@@ -1522,8 +1522,7 @@ export async function executeMarketAnalysisRequest(
       if (!ipRateLimit.allowed) {
         return NextResponse.json(
           {
-            error:
-              "Daily AI usage limit reached. Please try again tomorrow or upgrade your plan.",
+            error: "Too many requests. Please wait a moment and try again.",
           },
           {
             status: 429,
@@ -1570,8 +1569,7 @@ export async function executeMarketAnalysisRequest(
       if (!rateLimit.allowed) {
         return NextResponse.json(
           {
-            error:
-              "Daily AI usage limit reached. Please try again tomorrow or upgrade your plan.",
+            error: "Too many requests. Please wait a moment and try again.",
           },
           {
             status: 429,

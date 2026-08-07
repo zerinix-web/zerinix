@@ -279,7 +279,7 @@ export async function POST(req: Request) {
 
   if (!ipRateLimit.allowed) {
     return NextResponse.json(
-      { error: "Daily AI usage limit reached. Please try again later." },
+      { error: "Too many requests. Please wait a moment and try again." },
       { status: 429, headers: getRateLimitHeaders(ipRateLimit) }
     );
   }
@@ -306,7 +306,7 @@ export async function POST(req: Request) {
 
   if (!userRateLimit.allowed) {
     return NextResponse.json(
-      { error: "Daily AI usage limit reached. Please try again later." },
+      { error: "Too many requests. Please wait a moment and try again." },
       { status: 429, headers: getRateLimitHeaders(userRateLimit) }
     );
   }

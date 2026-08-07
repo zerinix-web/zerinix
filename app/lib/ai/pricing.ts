@@ -1,11 +1,9 @@
 import "server-only";
 
 import type { TokenUsage } from "@/app/lib/ai/governance";
+import { resolveModelPricing, type AiModelPricing } from "@/app/lib/ai/model-pricing-defaults";
 
-export type AiModelPricing = {
-  input: number;
-  output: number;
-};
+export type { AiModelPricing };
 
 type AiCostConfig = {
   pricing?: Record<string, AiModelPricing>;
@@ -66,7 +64,7 @@ export function getAiCostConfig(): AiCostConfig {
 }
 
 export function getModelPricing(model: string) {
-  return getAiCostConfig().pricing?.[model] ?? null;
+  return resolveModelPricing(model, getAiCostConfig().pricing);
 }
 
 export function estimateModelCostUsd(model: string, tokenUsage: TokenUsage) {
