@@ -131,6 +131,10 @@ import {
   hasVerifiedUserProvidedData,
   localizeFinancialEvidenceType,
 } from "@/app/lib/financial-evidence-labeling";
+import {
+  runConsistencyValidationPass,
+  type MetricConsistencyTarget,
+} from "@/app/lib/report-consistency-validation";
 import { labelModelDerivedFinancialClaims } from "@/app/lib/report-engine/financial-claim-labeling";
 import {
   formatExecutiveDecisionSystemContext,
@@ -2258,6 +2262,37 @@ function appendEvidenceConfidenceToMajorPlanSections(
   return assessments;
 }
 
+// Requirement: TAM/CAGR/ARR/CAC/LTV/margin/timeline mentions must
+// agree everywhere they appear. Every target below reuses the exact
+// same canonical AiFinancialModelContext.metrics values every
+// deterministic section (Financial Dashboard, Unit Economics, TAM/
+// SAM/SOM) is already built from -- "the latest structured value"
+// this task asks corrections to prefer. Label patterns are anchored
+// on \b...\b in the validator, so "CAC" never matches inside "CAC
+// Payback" (the connector after a bare "CAC" match would have to be
+// " Payback", which isn't a recognized connector shape).
+function buildPlanFinancialConsistencyTargets(
+  context: AiFinancialModelContext
+): MetricConsistencyTarget[] {
+  const { metrics } = context;
+  return [
+    { labelPattern: "TAM", canonicalDisplayValue: metrics.tam.displayValue, type: "market_size_mismatch" },
+    { labelPattern: "SAM", canonicalDisplayValue: metrics.sam.displayValue, type: "market_size_mismatch" },
+    { labelPattern: "SOM", canonicalDisplayValue: metrics.som.displayValue, type: "market_size_mismatch" },
+    { labelPattern: "ARR", canonicalDisplayValue: metrics.arr.displayValue, type: "financial_metric_mismatch" },
+    { labelPattern: "MRR", canonicalDisplayValue: metrics.mrr.displayValue, type: "financial_metric_mismatch" },
+    { labelPattern: "CAC Payback", canonicalDisplayValue: metrics.cacPayback.displayValue, type: "timeline_mismatch" },
+    { labelPattern: "CAC", canonicalDisplayValue: metrics.cac.displayValue, type: "financial_metric_mismatch" },
+    { labelPattern: "LTV", canonicalDisplayValue: metrics.ltv.displayValue, type: "financial_metric_mismatch" },
+    { labelPattern: "Gross Margin", canonicalDisplayValue: metrics.grossMargin.displayValue, type: "financial_metric_mismatch" },
+    { labelPattern: "Monthly Burn", canonicalDisplayValue: metrics.monthlyBurn.displayValue, type: "financial_metric_mismatch" },
+    { labelPattern: "Runway", canonicalDisplayValue: metrics.runway.displayValue, type: "timeline_mismatch" },
+    { labelPattern: "EBITDA", canonicalDisplayValue: metrics.ebitda.displayValue, type: "financial_metric_mismatch" },
+    { labelPattern: "Break-even Month", canonicalDisplayValue: metrics.breakEvenMonth.displayValue, type: "timeline_mismatch" },
+    { labelPattern: "Investment Needed", canonicalDisplayValue: metrics.investmentNeeded.displayValue, type: "financial_metric_mismatch" },
+  ];
+}
+
 function buildExecutiveSummaryConfidenceRollup(
   assessments: Array<{ field: PlanReportField; assessment: SectionEvidenceAssessment }>,
   language: ResponseLanguage
@@ -2449,6 +2484,34 @@ function normalizeFullPlanReport(
   const sourceReliabilityOverview = buildSourceReliabilityOverview(sourceIntelligenceRecords, language);
   if (sourceReliabilityOverview) {
     deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${sourceReliabilityOverview}`;
+  }
+
+  // Final consistency validation pass, run last so it sees every prior
+  // addition. Silently corrects any section that contradicts the
+  // report's own canonical decision/metrics -- never adds visible text,
+  // never surfaces a message to the user. The score/correction log are
+  // for internal quality tracking only (logged below), never written
+  // into report content.
+  const consistencyResult = runConsistencyValidationPass({
+    sections: deduped,
+    fields: planFields,
+    language,
+    authoritativeDecision: localizeDecision(getVisibleDecision(context), language),
+    decisionProtectedFields: ["executiveSummary", "executiveRecommendation"],
+    metricTargets: buildPlanFinancialConsistencyTargets(context),
+    metricProtectedFields: ["financialDashboard", "unitEconomics", "tamSamSom"],
+    riskOpportunity: {
+      risksField: "risks",
+      opportunitiesHostField: "swotAnalysis",
+      opportunitiesHeading: reportLabel(language, "Opportunities:", "Fırsatlar:"),
+    },
+  });
+  if (consistencyResult.correctionsApplied.length > 0) {
+    logOperationalInfo("[api:plan] consistency validation applied corrections", {
+      consistencyScore: consistencyResult.score,
+      correctionCount: consistencyResult.correctionsApplied.length,
+      correctionTypes: consistencyResult.correctionsApplied.map((correction) => correction.type),
+    });
   }
 
   return deduped;

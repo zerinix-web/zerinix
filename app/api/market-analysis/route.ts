@@ -101,6 +101,10 @@ import {
   hasVerifiedUserProvidedData,
   localizeFinancialEvidenceType,
 } from "@/app/lib/financial-evidence-labeling";
+import {
+  runConsistencyValidationPass,
+  type MetricConsistencyTarget,
+} from "@/app/lib/report-consistency-validation";
 import { normalizeReportSourceSection } from "@/app/lib/report-source-normalization.mjs";
 import {
   localizePdfPresentationLabel,
@@ -1186,6 +1190,29 @@ function buildMarketFinancialConfidenceAppendix(
   ].join("\n");
 }
 
+// Same rationale as plan-executor.ts's buildPlanFinancialConsistencyTargets:
+// every target reuses the exact canonical metric value Market
+// Intelligence's own tamSamSom appendix (buildMarketFinancialConfidenceAppendix,
+// above) is built from, so a contradicting mention elsewhere in the
+// report (marketSize, cagr, marketOverview, ...) gets corrected to the
+// same "latest structured value" rather than a second, independent
+// number.
+function buildMarketFinancialConsistencyTargets(
+  context: AiFinancialModelContext
+): MetricConsistencyTarget[] {
+  const { metrics } = context;
+  return [
+    { labelPattern: "TAM", canonicalDisplayValue: metrics.tam.displayValue, type: "market_size_mismatch" },
+    { labelPattern: "SAM", canonicalDisplayValue: metrics.sam.displayValue, type: "market_size_mismatch" },
+    { labelPattern: "SOM", canonicalDisplayValue: metrics.som.displayValue, type: "market_size_mismatch" },
+    { labelPattern: "CAGR|revenue growth|growth rate", canonicalDisplayValue: metrics.revenueGrowth.displayValue, type: "growth_rate_mismatch" },
+    { labelPattern: "ARR", canonicalDisplayValue: metrics.arr.displayValue, type: "financial_metric_mismatch" },
+    { labelPattern: "CAC", canonicalDisplayValue: metrics.cac.displayValue, type: "financial_metric_mismatch" },
+    { labelPattern: "LTV", canonicalDisplayValue: metrics.ltv.displayValue, type: "financial_metric_mismatch" },
+    { labelPattern: "Gross Margin", canonicalDisplayValue: metrics.grossMargin.displayValue, type: "financial_metric_mismatch" },
+  ];
+}
+
 function ensureMarketReportQuality(
   report: Record<MarketReportField, string>,
   context?: AiFinancialModelContext,
@@ -1249,6 +1276,42 @@ function ensureMarketReportQuality(
 
   if (context) {
     deduped.tamSamSom = `${deduped.tamSamSom.trim()}\n\n${buildMarketFinancialConfidenceAppendix(context, language)}`;
+
+    // Final consistency validation pass, run last so it sees every
+    // prior addition. Silently corrects any section that contradicts
+    // the report's own canonical decision/metrics -- never adds
+    // visible text, never surfaces a message to the user.
+    // (Same decision derivation as buildMarketExecutiveScorecard's
+    // rawDecision above -- the module-level getVisibleDecision helper
+    // defined near the unused buildCanonicalMarket* cluster is scoped
+    // inside that cluster's own enclosing block and isn't reachable
+    // here, so this repeats the same 3-line mapping inline rather than
+    // depending on it.)
+    const rawConsistencyDecision = context.investmentScore.recommendation === "GO"
+      ? "VALIDATE"
+      : context.investmentScore.recommendation === "PASS" && context.investmentScore.confidence < 35
+        ? "PASS"
+        : "HOLD";
+    const consistencyResult = runConsistencyValidationPass({
+      sections: deduped,
+      fields: reportFields,
+      language,
+      authoritativeDecision: localizeMarketDecision(rawConsistencyDecision, language),
+      decisionProtectedFields: ["executiveSummary", "strategicRecommendations"],
+      metricTargets: buildMarketFinancialConsistencyTargets(context),
+      metricProtectedFields: ["tamSamSom"],
+      riskOpportunity: {
+        risksField: "threats",
+        opportunitiesHostField: "opportunities",
+      },
+    });
+    if (consistencyResult.correctionsApplied.length > 0) {
+      logOperationalInfo("[api:market-analysis] consistency validation applied corrections", {
+        consistencyScore: consistencyResult.score,
+        correctionCount: consistencyResult.correctionsApplied.length,
+        correctionTypes: consistencyResult.correctionsApplied.map((correction) => correction.type),
+      });
+    }
   }
 
   return deduped;
