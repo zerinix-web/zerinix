@@ -1,6 +1,7 @@
 import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
 import type { ReportDomain } from "@/app/lib/report-engine/domain";
 import { buildExecutivePresentationDirectives } from "../../ai/report-quality-directives.ts";
+import { buildStrictReportLanguageInstruction } from "../../report-language.ts";
 
 export type SpecializedReportDomain = Exclude<
   ReportDomain,
@@ -150,6 +151,7 @@ export function buildDomainAnalysisInstructions(
   return [
     `You are the ZERINIX ${domainRole[domain]}`,
     `Respond entirely in ${language}, preserving evidence labels and evidence registry IDs exactly.`,
+    buildStrictReportLanguageInstruction(language),
     "Use the uploaded assets as primary evidence and the completed research registry as external evidence.",
     "Every factual bullet or paragraph must begin with exactly one label: [Verified from uploaded asset], [Verified from external source], [User-provided], [Estimate], [Unknown], or [Recommendation].",
     "Every material factual claim must include inline provenance: [Asset: filename], [R#], [User], [Method: ...], [Required: ...], or [Basis: ...].",

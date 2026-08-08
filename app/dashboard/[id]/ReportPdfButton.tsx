@@ -583,8 +583,14 @@ function formatPdfCitationContent(content: string, realEstate = false) {
   }
 
   const finalDedupeSources = getFinalDedupePdfSources(citations);
+  // No cap here: the on-screen CitationList renders every deduplicated
+  // source with no limit, and this content flows through the same
+  // multi-page body-text pagination as any other section (confirmed to
+  // correctly snap page breaks to bullet boundaries for Sources cards),
+  // so capping here only meant a report with more than 8 real, unique
+  // sources silently showed fewer citations in the PDF export than on
+  // screen, with no indication anything was omitted.
   const sourceLines = finalDedupeSources
-    .slice(0, 8)
     .map((source) =>
       [
         `• ${source.sourceName}`,
@@ -2135,6 +2141,18 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       const wrapPdfText = (text: string, width: number) =>
         wrapPdfTextWithEngine({ pdf, text, width, normalizeText: normalizePdfText });
 
+      // Fixed-line-count cells (table cells, roadmap steps, scenario
+      // snippets) hard-slice a wrapped line array to fit their budgeted
+      // height; slicing alone silently drops the remainder with no
+      // visual cue that content was cut. Mirrors the real-estate PDF
+      // engine's own truncateLines(), which already does this correctly.
+      const truncatePdfCellLines = (lines: string[], maxLines: number) => {
+        if (lines.length <= maxLines) return lines;
+        const output = lines.slice(0, maxLines);
+        output[maxLines - 1] = `${output[maxLines - 1].replace(/[.,;:]*$/, "")}...`;
+        return output;
+      };
+
       const conciseCoverText = (text: string, maxLength = 94) => {
         const normalized = normalizePdfText(text)
           .replace(/^[-*•]\s+/, "")
@@ -2758,6 +2776,18 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       };
 
       const getFinancialLayout = (content: string, width: number) => {
+        // Same class of bug the SWOT layout above already documents and
+        // fixes: pdf.splitTextToSize()/wrapPdfText() measure wrapping at
+        // whatever font size happens to be active on `pdf` when called,
+        // which varies depending on whether this ran for height
+        // budgeting (getVisualHeight, before this card's own font is
+        // set) or for the actual draw call -- and drawSectionVisual
+        // draws labelLines at 6.2 and detailLines/descriptionLines at
+        // 5.8 (below), neither of which was pinned here before. Pin
+        // each measurement to its real draw-time font and restore
+        // whatever was active, since this is otherwise a pure
+        // measurement function.
+        const previousFontSize = pdf.getFontSize();
         const metricContent = content;
         const labels = normalizePdfFinancialMetrics(content, fullReportContent);
         const columns = 3;
@@ -2766,8 +2796,10 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           .map((item) => {
             const value = item.value;
             const compactValue = item.compactValue;
+            pdf.setFontSize(6.2);
             const labelLines = wrapPdfText(item.label, itemWidth - 4).slice(0, 2);
             const description = extractShortDescription(metricContent, item.aliases);
+            pdf.setFontSize(5.8);
             const descriptionLines = description
               ? (pdf.splitTextToSize(`${item.label}: ${description}`, width - 6) as string[])
               : [];
@@ -2784,6 +2816,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             };
           })
           .filter((item) => item.compactValue);
+        pdf.setFontSize(previousFontSize);
         const rowHeights = items.reduce<number[]>((rows, item, index) => {
           const rowIndex = Math.floor(index / columns);
           rows[rowIndex] = Math.max(rows[rowIndex] ?? 0, item.height);
@@ -3047,7 +3080,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
               const width = columns[cellIndex]?.width ?? 20;
               pdf.setFontSize(cellIndex === 0 ? 6.3 : 5.5);
               pdf.setTextColor(cellIndex === 0 ? "#f4f4f5" : "#d4d4d8");
-              pdf.text(wrapPdfText(value || "Validation required", width - 4).slice(0, 2), cellX + 2, rowY + 4.7, {
+              pdf.text(truncatePdfCellLines(wrapPdfText(value || "Validation required", width - 4), 2), cellX + 2, rowY + 4.7, {
                 lineHeightFactor: 1.1,
                 maxWidth: width - 4,
               });
@@ -3070,7 +3103,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
             pdf.text(localizePdfPresentationLabel(step, pdfLocale), x + 2, visualY + 5.7, { maxWidth: stepWidth - 4 });
             pdf.setFontSize(5.6);
             pdf.setTextColor("#a1a1aa");
-            pdf.text(wrapPdfText(localizePdfPresentationText(extractRoadmapAction(content, step), pdfLocale), stepWidth - 4).slice(0, 4), x + 2, visualY + 11, {
+            pdf.text(truncatePdfCellLines(wrapPdfText(localizePdfPresentationText(extractRoadmapAction(content, step), pdfLocale), stepWidth - 4), 4), x + 2, visualY + 11, {
               lineHeightFactor: 1.16,
               maxWidth: stepWidth - 4,
             });
@@ -3253,7 +3286,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
               const snippet = extractScenarioSnippet(content, label) || extractKeywordInsight(content, [label]);
               pdf.setTextColor("#f4f4f5");
               pdf.setFontSize(6);
-              pdf.text(pdf.splitTextToSize(localizePdfPresentationText(snippet || "Scenario path under review.", pdfLocale), itemWidth - 4).slice(0, 2), x + 2, itemY + 8.1, {
+              pdf.text(truncatePdfCellLines(pdf.splitTextToSize(localizePdfPresentationText(snippet || "Scenario path under review.", pdfLocale), itemWidth - 4) as string[], 2), x + 2, itemY + 8.1, {
                 lineHeightFactor: 1.12,
                 maxWidth: itemWidth - 4,
               });
@@ -3441,7 +3474,19 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
                   ),
                   pdfLocale
                 );
+        // Same font-measurement bug the SWOT/financial layouts above
+        // already document: splitPdfReadableLines measures wrapping at
+        // whatever font is active on `pdf` right now, which is whatever
+        // the PREVIOUS section's drawing left behind (this runs before
+        // this section's own setFontSize call below) -- not the font
+        // this section's body will actually be drawn at (9.2 for
+        // Executive Summary, 8.8 otherwise). Pin to the real draw-time
+        // font before measuring so the line count used for pagination
+        // budgeting matches what jsPDF will actually render.
+        const bodyLinesPreviousFontSize = pdf.getFontSize();
+        pdf.setFontSize(section.title.toLowerCase().includes("executive summary") ? 9.2 : 8.8);
         const bodyLines = splitPdfReadableLines(sectionBodyContent, bodyWidth);
+        pdf.setFontSize(bodyLinesPreviousFontSize);
         const hasBodyText = sectionBodyContent.trim().length > 0;
 
         if (isSourceSectionTitle(section.title) && !hasBodyText) {

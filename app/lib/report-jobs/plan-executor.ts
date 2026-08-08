@@ -2001,6 +2001,23 @@ function appendIntelligenceBlock(content: string, title: string, lines: string[]
   return `${content.trim()}\n\n${title}:\n${cleanLines.join("\n")}`.trim();
 }
 
+// The risks field prompt (plan.ts) explicitly asks the model to write a
+// full Probability/Impact/Severity/Mitigation/Early-Warning-Signal risk
+// matrix directly in its own prose, AND explicitly says "Do not add a
+// heading" for it -- so appendIntelligenceBlock's own heading-match
+// duplicate check (looking for the literal string "Risk Matrix") can
+// never detect that content and always appended a second, templated
+// risk matrix underneath, with independently-assigned severity that
+// could contradict the model's own analysis for the same risk. This
+// checks for the matrix's actual required structure instead of a
+// heading that was never supposed to exist.
+function risksAlreadyIncludeRiskMatrix(content: string) {
+  return (
+    /\b(?:probability|olasılık)\b/i.test(content) &&
+    /\b(?:mitigation|azaltım|azaltma)\b/i.test(content)
+  );
+}
+
 function removeLegacyValidationIntelligenceBlock(content: string) {
   return content
     .split(/\n{2,}/)
@@ -2406,11 +2423,13 @@ function normalizeFullPlanReport(
     reportLabel(language, "AI Executive Insight", "AI Yönetici İçgörüsü"),
     [buildExecutiveInsight(context, reportText(language, "Competitive positioning", "Rekabet konumlandırması"), language)]
   );
-  normalized.risks = appendIntelligenceBlock(
-    normalized.risks,
-    reportLabel(language, "Risk Matrix", "Risk Matrisi"),
-    buildRiskMatrix(context, language)
-  );
+  normalized.risks = risksAlreadyIncludeRiskMatrix(normalized.risks)
+    ? normalized.risks
+    : appendIntelligenceBlock(
+        normalized.risks,
+        reportLabel(language, "Risk Matrix", "Risk Matrisi"),
+        buildRiskMatrix(context, language)
+      );
   normalized.executiveRecommendation = appendIntelligenceBlock(
     normalized.executiveRecommendation,
     reportLabel(language, "AI Confidence Breakdown", "AI Güven Dağılımı"),
