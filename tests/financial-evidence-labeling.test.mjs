@@ -129,10 +129,17 @@ test("plan-executor.ts's Financial Assumptions section includes the deduplicated
   assert.match(planSource, /formatKeyFinancialAssumptionsList/);
 });
 
-test("market-analysis route.ts appends confidence-labeled key metrics and a deduplicated assumptions list to tamSamSom", () => {
-  assert.match(marketSource, /buildMarketFinancialConfidenceAppendix/);
-  assert.match(marketSource, /deduped\.tamSamSom = `\$\{deduped\.tamSamSom\.trim\(\)\}/);
-  assert.match(marketSource, /consolidateFinancialAssumptions\(keyMetrics\)/);
+// Report-isolation fix: market-analysis/route.ts used to append CAC/LTV/
+// ARR/Gross-Margin unit-economics metrics (computed by a Business Idea
+// Validation-style financial model, not real market research) onto its
+// tamSamSom section via buildMarketFinancialConfidenceAppendix. Market
+// Intelligence has no CAC/LTV/ARR field and no financial model of a
+// hypothetical company, so this was removed rather than kept -- this test
+// now asserts the removal instead of the old behavior.
+test("market-analysis route.ts no longer appends Business Idea Validation's unit-economics metrics to tamSamSom", () => {
+  assert.doesNotMatch(marketSource, /buildMarketFinancialConfidenceAppendix\(/);
+  assert.doesNotMatch(marketSource, /from "@\/app\/lib\/financial-evidence-labeling"/);
+  assert.doesNotMatch(marketSource, /consolidateFinancialAssumptions\(/);
 });
 
 test("neither plan-executor.ts nor market-analysis route.ts declares a new report schema field for financial evidence labeling", () => {

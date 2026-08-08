@@ -394,11 +394,18 @@ export function applyMarketResearchCoverageToContext(
 export function formatMarketResearchCoverageForReport(
   coverage: MarketResearchCoverage
 ) {
+  // This text is injected into the model's context for every Market
+  // Intelligence field generation call. It must never name "founder" or
+  // "execution" dimensions -- even inside an instruction telling the model
+  // NOT to collapse them, the words themselves prime a startup-founder
+  // framing that has no place in a market research report. Only the
+  // market-native dimensions (market, competitive, market-sizing, product)
+  // are ever surfaced here.
   return [
     "Aggregate market evidence coverage (scoring guidance, not a source):",
     `- Verified sources: ${coverage.verifiedSources}; independent domains: ${coverage.independentDomains}; source types: ${coverage.sourceTypeDiversity}.`,
     `- Competitor breadth: ${coverage.competitorBreadth}; claim coverage: ${coverage.claimCoverage}%; average quality: ${coverage.averageQuality}/100.`,
     `- Verified market-size endpoints: ${coverage.verifiedMarketSizeAvailable ? "available" : "unavailable"}.`,
-    "- Missing market-size endpoints reduce financial confidence only; do not collapse market, competition, product, execution, or founder dimensions.",
+    "- Missing market-size endpoints reduce market-sizing confidence only; do not collapse market, competitive, or product-evidence dimensions.",
   ].join("\n");
 }

@@ -135,6 +135,7 @@ import {
   runConsistencyValidationPass,
   type MetricConsistencyTarget,
 } from "@/app/lib/report-consistency-validation";
+import { assertReportIsolation } from "@/app/lib/report-engine/report-isolation-validator";
 import { labelModelDerivedFinancialClaims } from "@/app/lib/report-engine/financial-claim-labeling";
 import {
   formatExecutiveDecisionSystemContext,
@@ -516,7 +517,13 @@ function parseDomainAnalysisReport(value: string): DomainAnalysisReport {
     ])
   ) as DomainAnalysisReport;
 
-  return validateDomainAnalysisReport(report);
+  const validated = validateDomainAnalysisReport(report);
+
+  // Defensive: Strategic Advisory must inherit neither Business Idea
+  // Validation's nor Market Intelligence's report-specific vocabulary.
+  assertReportIsolation("strategic_advisory", validated);
+
+  return validated;
 }
 
 function parseRealEstateReport(value: string): RealEstateReport {
@@ -2535,6 +2542,13 @@ function normalizeFullPlanReport(
       correctionTypes: consistencyResult.correctionsApplied.map((correction) => correction.type),
     });
   }
+
+  // Defensive, not expected to ever fire here: Business Idea Validation is
+  // the legitimate owner of founder/EBITDA/runway vocabulary, so this only
+  // guards against Market Intelligence's or Strategic Advisory's own
+  // report-specific templates (e.g. a "Market Overview" or "Regional
+  // Analysis" section heading) leaking in the other direction.
+  assertReportIsolation("business_plan", deduped);
 
   return deduped;
 }

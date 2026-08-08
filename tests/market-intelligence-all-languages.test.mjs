@@ -18,6 +18,10 @@ const planRoute = readFileSync("app/api/plan/route.ts", "utf8");
 const plannerSource = readFileSync("components/Planner.tsx", "utf8");
 const planPageSource = readFileSync("app/plan/page.tsx", "utf8");
 const marketRoute = readFileSync("app/api/market-analysis/route.ts", "utf8");
+const marketPresentation = readFileSync(
+  "app/lib/report-engine/market-intelligence-presentation.ts",
+  "utf8"
+);
 const pdfButton = readFileSync("app/dashboard/[id]/ReportPdfButton.tsx", "utf8");
 
 const checkedAt = "2026-08-02T00:00:00.000Z";
@@ -256,12 +260,24 @@ test("market-analysis route's marketText helper supports all 5 languages", () =>
     marketRoute,
     /function marketText\(\s*language: ResponseLanguage,\s*english: string,\s*turkish: string,\s*german = english,\s*french = english,\s*spanish = english\s*\)/
   );
-  assert.match(marketRoute, /Kernaussage:/); // German Executive Summary Bottom Line
-  assert.match(marketRoute, /Conclusion :/); // French Executive Summary Bottom Line
-  assert.match(marketRoute, /Conclusión:/); // Spanish Executive Summary Bottom Line
-  assert.match(marketRoute, /CEO-Zusammenfassung/);
-  assert.match(marketRoute, /Résumé du PDG/);
-  assert.match(marketRoute, /Resumen del CEO/);
+});
+
+// The deterministic Bottom Line / Market Entry Recommendation synthesis
+// moved into its own isolated module (market-intelligence-presentation.ts)
+// as part of the report-isolation fix -- it must keep the same full
+// 5-language support the old inline buildMarketExecutiveScorecard /
+// buildMarketCeoSummary had, not silently regress to English-only DE/FR/ES.
+test("market-intelligence-presentation.ts's Bottom Line and Market Entry Recommendation support all 5 languages", () => {
+  assert.match(marketPresentation, /Kernaussage:/); // German Bottom Line
+  assert.match(marketPresentation, /Conclusion :/); // French Bottom Line
+  assert.match(marketPresentation, /Conclusión:/); // Spanish Bottom Line
+  assert.match(marketPresentation, /Markteintrittsempfehlung/); // German heading
+  assert.match(marketPresentation, /Recommandation d'entrée sur le marché/); // French heading
+  assert.match(marketPresentation, /Recomendación de entrada al mercado/); // Spanish heading
+  // Its own decision vocabulary, not Business Plan's PASS/HOLD/VALIDATE/REJECT.
+  assert.match(marketPresentation, /EINTRETEN/);
+  assert.match(marketPresentation, /ENTRER/);
+  assert.match(marketPresentation, /ENTRAR/);
 });
 
 test("PDF cover-card labels are localized for German/French/Spanish market reports", () => {
