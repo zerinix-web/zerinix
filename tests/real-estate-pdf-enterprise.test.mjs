@@ -12,8 +12,15 @@ const realEstatePdf = readFileSync(
 );
 
 test("real-estate reports use the dedicated enterprise PDF before the legacy exporter", () => {
+  // The legacy PDF body was extracted into the top-level, Node-callable
+  // buildStandardReportPdf() (so it can be generated and inspected outside
+  // a React render tree) -- its own createPdfDocument() call now lexically
+  // precedes the component in the file, but the runtime guarantee this test
+  // protects is unchanged: within downloadPdf() itself, the real-estate
+  // branch is checked (and returns early) before ever calling
+  // buildStandardReportPdf().
   const branchIndex = exporter.indexOf("isRealEstateDashboardReport(report)");
-  const legacyIndex = exporter.indexOf("const pdf = createPdfDocument()", branchIndex);
+  const legacyIndex = exporter.indexOf("const pdf = buildStandardReportPdf(", branchIndex);
 
   assert.ok(branchIndex > 0);
   assert.ok(legacyIndex > branchIndex);

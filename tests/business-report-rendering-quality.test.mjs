@@ -11,11 +11,23 @@ const normalizationSource = readFileSync("app/lib/pdf-normalization.mjs", "utf8"
 const plannerCitationsSource = readFileSync("components/planner/Citations.tsx", "utf8");
 
 test("TAM SAM SOM cards are populated from normalized report values", () => {
-  for (const source of [plannerSource, pdfSource]) {
-    assert.match(source, /function extractMarketSizeValue/);
-    assert.match(source, /extractMarketSizeValue\(`\$\{content\}\\n\$\{fullReportContent\}`, label\)/);
-    assert.match(source, /[kKmMbBtT%]/);
-  }
+  assert.match(plannerSource, /function extractMarketSizeValue/);
+  assert.match(plannerSource, /extractMarketSizeValue\(`\$\{content\}\\n\$\{fullReportContent\}`, label\)/);
+  assert.match(plannerSource, /[kKmMbBtT%]/);
+
+  // pdfSource's getTamRows tries this section's own content (visualContent,
+  // then the section's raw prose) before ever falling back to searching the
+  // rest of the report -- fixes a real cross-section bleed where an
+  // unrelated "Payback"/"SOM" mention elsewhere in the report could win
+  // over this section's own value. Still falls back to fullReportContent
+  // as a last resort, preserving the original guarantee this test protects.
+  assert.match(pdfSource, /function extractMarketSizeValue/);
+  assert.match(pdfSource, /getTamRows = \(visualContent: string, rawContent = ""\)/);
+  assert.match(
+    pdfSource,
+    /extractMarketSizeValue\(visualContent, label\)[\s\S]{0,80}extractMarketSizeValue\(rawContent, label\)[\s\S]{0,80}extractMarketSizeValue\(`\$\{visualContent\}\\n\$\{fullReportContent\}`, label\)/
+  );
+  assert.match(pdfSource, /[kKmMbBtT%]/);
 });
 
 test("Executive Recommendation confidence supports score and conviction language", () => {

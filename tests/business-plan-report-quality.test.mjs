@@ -68,7 +68,17 @@ test("Business Plan API logs stage-specific failures instead of returning generi
 
 test("Business Plan renderers recognize non-SaaS financial labels", () => {
   assert.match(plannerSource, /rider cac\|rider ltv\|active riders\|yearly revenue\|monthly revenue/);
-  assert.match(dashboardPdfSource, /rider cac\|rider ltv\|active riders\|yearly revenue\|monthly revenue/);
+
+  // dashboardPdfSource's mobility-detection regex deliberately dropped
+  // "yearly revenue"/"monthly revenue" as trigger words: they are the
+  // mobility fallback *labels* themselves (mobilityFinancialDashboardMetrics
+  // below), not a mobility signal, and financialAssumptions' own prompt
+  // instructs every report -- any vertical -- to write "MRR/Monthly
+  // Revenue", so keeping them as triggers mislabeled ordinary non-mobility
+  // Business Plan reports with rideshare-specific metric names.
+  assert.match(dashboardPdfSource, /rider cac\|rider ltv\|active riders/);
+  assert.doesNotMatch(dashboardPdfSource, /yearly revenue\|monthly revenue/);
+  assert.match(dashboardPdfSource, /mobilityFinancialDashboardMetrics/);
 });
 
 test("PDF cover Business Idea does not render raw saved prompt text", () => {

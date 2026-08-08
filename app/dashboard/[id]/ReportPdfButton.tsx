@@ -341,7 +341,13 @@ function getBusinessIdeaFromPrompt(value: string) {
     return "";
   }
 
-  return cleaned.slice(0, 180);
+  if (cleaned.length <= 180) {
+    return cleaned;
+  }
+
+  const truncated = cleaned.slice(0, 180).replace(/\s+\S*$/, "");
+
+  return `${truncated || cleaned.slice(0, 180)}…`;
 }
 
 function deriveBusinessDescriptionFromSections(
@@ -431,12 +437,18 @@ function parseCitations(content: string): CitationData[] {
           rawLine.match(/\bhttps?:\/\/[^\s)]+/i)?.[0]?.trim() ||
           ""
       );
+      // Kept separate from `strippedLine` below: a dedicated "URL: https://..."
+      // line has nothing left after stripping its own value, which made
+      // metadataMatch fail to even recognize it as a "url" field and silently
+      // drop every citation's URL. Only strip inline URLs from the OTHER
+      // metadata fields' cosmetic display text (e.g. a title that trails off
+      // into a raw link), never from the line used to detect the field itself.
       const line = rawLine
         .replace(/^[-*•]\s*/, "")
         .replace(/\*\*/g, "")
         .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/gi, "$1")
-        .replace(/\bhttps?:\/\/[^\s)]+/gi, "")
         .trim();
+      const strippedLine = line.replace(/\bhttps?:\/\/[^\s)]+/gi, "").trim();
 
       if (!line) {
         return;
@@ -447,7 +459,8 @@ function parseCitations(content: string): CitationData[] {
       );
       if (metadataMatch) {
         const key = metadataMatch[1].toLowerCase();
-        const value = metadataMatch[2].trim();
+        const rawValue = metadataMatch[2].trim();
+        const value = key === "url" ? rawValue : rawValue.replace(/\bhttps?:\/\/[^\s)]+/gi, "").trim();
 
         if ((key === "title" || key === "source") && current.sourceTitle) {
           flushCurrent();
@@ -471,7 +484,11 @@ function parseCitations(content: string): CitationData[] {
         return;
       }
 
-      const citationMatch = line.match(
+      if (!strippedLine) {
+        return;
+      }
+
+      const citationMatch = strippedLine.match(
         /^([^—–|-]{2,80})\s*[—–-]\s*(.+?)(?:\s*\((\d{4})\))?(?:\s*[.;:]?\s*)?$/
       );
 
@@ -496,7 +513,7 @@ function parseCitations(content: string): CitationData[] {
         ...(publicationYear ? { publicationYear } : {}),
         ...(fallbackConfidence ? { confidence: fallbackConfidence } : {}),
         ...(url ? { url } : {}),
-        sourceType: normalizeSourceType(line),
+        sourceType: normalizeSourceType(strippedLine),
       });
     });
   flushCurrent();
@@ -800,7 +817,16 @@ function normalizePdfFinancialMetrics(content: string, fullReportContent = "") {
 
   return getFinancialDashboardMetrics(metricContent)
     .map((metric) => {
-      const value = extractCanonicalFinancialMetricValue(metricContent, metric.label, metric.aliases);
+      // Prefer a match from this card's own section content before ever
+      // considering the rest of the report: Financial Assumptions
+      // legitimately describes every one of these same metric names in
+      // prose ("Payback: derived from CAC/ARPA, confidence Medium."), and
+      // without this precedence that assumption sentence -- not this
+      // card's own value -- would win whenever it's a plain "Label:" line
+      // and this section only states the metric under a longer alias.
+      const value =
+        extractCanonicalFinancialMetricValue(content, metric.label, metric.aliases) ||
+        extractCanonicalFinancialMetricValue(metricContent, metric.label, metric.aliases);
       const compactValue = compactPdfMetricValue(value);
 
       return {
@@ -858,9 +884,23 @@ function compactPdfMetricValue(value: string) {
     .replace(/\s+([kKmMbB%$])/g, "$1")
     .replace(/([kKmMbB%])\s+\$/g, "$1$")
     .trim();
-  const numericMatch = cleanValue.match(
-    /(?:[$€₺]\s*)?\d+(?:[.,]\d+)*(?:\.\d+)?\s*(?:[kKmMbB%]|months?|ay|gün|days?)?\s*(?:[$€₺])?/i
-  );
+  // Fields like TAM/SAM/SOM are explicitly instructed to "use ranges"
+  // instead of inventing false precision, so a value such as "$2.1-2.8B"
+  // is expected AI output, not an edge case. Capture an optional second
+  // bound instead of stopping at the first number and silently dropping
+  // the rest of the range from every metric card that reuses this
+  // formatter.
+  const singleBoundPattern = `(?:[$€₺]\\s*)?\\d+(?:[.,]\\d+)*(?:\\.\\d+)?\\s*(?:[kKmMbB%]|months?|ay|gün|days?)?\\s*(?:[$€₺])?`;
+  const rangePattern = `${singleBoundPattern}(?:\\s*[-–—]\\s*${singleBoundPattern})?`;
+  // These cards are inherently monetary, so an explicit currency-prefixed
+  // number anywhere in the text outranks a bare number that happens to
+  // appear earlier in the same sentence (e.g. "near-term obtainable share
+  // over 18 months, estimated at $3-5M" -- the dollar figure is the
+  // metric's real value, "18" is incidental).
+  const currencyPattern = `[$€₺]\\s*\\d+(?:[.,]\\d+)*(?:\\.\\d+)?\\s*(?:[kKmMbB%])?(?:\\s*[-–—]\\s*(?:[$€₺]\\s*)?\\d+(?:[.,]\\d+)*(?:\\.\\d+)?\\s*(?:[kKmMbB%])?)?`;
+  const numericMatch =
+    cleanValue.match(new RegExp(currencyPattern, "i")) ||
+    cleanValue.match(new RegExp(rangePattern, "i"));
 
   return numericMatch?.[0]?.replace(/\s+/g, " ").replace(/([kKmMbB%])\s+([$€₺])/g, "$1$2") || cleanValue.split(/\s{2,}/)[0] || "";
 }
@@ -870,11 +910,21 @@ function extractMarketSizeVisualValue(content: string, label: string) {
   const line = normalizePdfText(content)
     .split("\n")
     .find((item) => new RegExp(`^\\s*${escapedLabel}\\s*[:\\-–—]`, "i").test(item.trim()));
+  // The tamSamSom prompt explicitly instructs "use ranges" instead of
+  // inventing false precision, so a value like "$2.1-2.8B" is the expected
+  // shape, not an edge case -- capture an optional second bound instead of
+  // stopping at the first number and silently dropping the rest of the
+  // range.
+  const singleBound = `(?:[<>~≈]?\\s*)?[€$₺]?\\s*\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT%])?`;
   const value = line?.match(
-    new RegExp(`^\\s*${escapedLabel}\\s*[:\\-–—]\\s*((?:[<>~≈]?\\s*)?[€$₺]?\\s*\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT%])?)`, "i")
+    new RegExp(`^\\s*${escapedLabel}\\s*[:\\-–—]\\s*(${singleBound}(?:\\s*[-–—]\\s*${singleBound})?)`, "i")
   )?.[1];
 
-  return value ? compactPdfMetricValue(value) : "";
+  // Already exactly the compact number(s)+unit shape by construction --
+  // running it through compactPdfMetricValue would re-truncate a captured
+  // range (e.g. "$2.1-2.8B") down to its first bound, undoing the match
+  // above.
+  return value ? value.replace(/\s+/g, " ").trim() : "";
 }
 
 function extractMarketSizeValue(content: string, label: string) {
@@ -885,7 +935,14 @@ function extractMarketSizeValue(content: string, label: string) {
 }
 
 function isMobilityReportContent(content: string) {
-  return /\b(scooter|micromobility|micro mobility|shared mobility|bike sharing|bikeshare|per-ride|urban riders|commuters|fleet utilization|rental|rider cac|rider ltv|active riders|yearly revenue|monthly revenue)\b/i.test(
+  // "yearly revenue"/"monthly revenue" were deliberately removed from this
+  // list: they are the mobility fallback labels themselves (see
+  // mobilityFinancialDashboardMetrics above), not a mobility signal --
+  // financialAssumptions' own prompt instructs every report, regardless
+  // of vertical, to write "MRR/Monthly Revenue", so keeping them here
+  // caused ordinary non-mobility reports to be mislabeled with
+  // rideshare-specific metric names.
+  return /\b(scooter|micromobility|micro mobility|shared mobility|bike sharing|bikeshare|per-ride|urban riders|commuters|fleet utilization|rental|rider cac|rider ltv|active riders)\b/i.test(
     content
   );
 }
@@ -1039,7 +1096,18 @@ function extractSectionSnippet(content: string, title: string) {
 }
 
 function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // normalizePdfText inserts a non-breaking space (U+00A0) between a
+  // number and a following unit word (e.g. "30 days" -> "30 days")
+  // so prose never orphans a number from its unit across a line break --
+  // but that also fires on structural labels like "Next 30 Days" or
+  // "12 Months" used throughout this file for section/roadmap-step
+  // matching, silently turning their literal space into U+00A0. Every
+  // caller here builds patterns from label/alias strings that still have
+  // an ordinary space, so match either character wherever one was
+  // expected instead of only the plain space.
+  return value
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/ /g, "[ \\u00a0]");
 }
 
 const swotLabelAliases: Record<string, string[]> = {
@@ -1068,12 +1136,11 @@ function extractAliasedSectionSnippet(
     .join("|");
 
   if (labelPattern) {
-    const lineMatch = normalizedContent.match(
-      new RegExp(
-        `(?:^|\\n)\\s*(?:#{1,6}\\s*)?(?:[-*•]\\s*)?(?:\\*\\*)?(?:${labelPattern})(?:\\*\\*)?\\s*(?:case|senaryo)?\\s*[:\\-–—]\\s*([\\s\\S]*?)(?=${stopPattern ? `\\n\\s*(?:#{1,6}\\s*)?(?:[-*•]\\s*)?(?:\\*\\*)?(?:${stopPattern})(?:\\*\\*)?\\s*(?:case|senaryo)?\\s*[:\\-–—]` : "$"}|$)`,
-        "i"
-      )
+    const lineMatchRegex = new RegExp(
+      `(?:^|\\n)\\s*(?:#{1,6}\\s*)?(?:[-*•]\\s*)?(?:\\*\\*)?(?:${labelPattern})(?:\\*\\*)?\\s*(?:case|senaryo)?\\s*[:\\-–—]\\s*([\\s\\S]*?)(?=${stopPattern ? `\\n\\s*(?:#{1,6}\\s*)?(?:[-*•]\\s*)?(?:\\*\\*)?(?:${stopPattern})(?:\\*\\*)?\\s*(?:case|senaryo)?\\s*[:\\-–—]` : "$"}|$)`,
+      "i"
     );
+    const lineMatch = normalizedContent.match(lineMatchRegex);
 
     if (lineMatch?.[1]?.trim()) {
       return lineMatch[1].trim();
@@ -1314,10 +1381,24 @@ function extractCompetitorRows(content: string) {
     return rows.filter((row) => row.company || row.positioning || row.strengths || row.weaknesses || row.threat).slice(0, 4);
   }
 
+  // competitorLandscape's own prompt explicitly instructs a trailing
+  // "Include incumbent response, switching barriers, and the gap for a new
+  // entrant. End with a concise executive implication..." sentence -- the
+  // generic "capitalized phrase followed by a colon" company-name guess
+  // below would otherwise misread that closing commentary as another
+  // competitor row (e.g. "Executive implication: ..." -> company name
+  // "Executive implication"). Every other analytical section is under the
+  // same "compact executive implication line" directive
+  // (report-quality-directives.ts), so this guard is not competitor-page
+  // specific busywork -- it is the one place that summary sentence
+  // actually collides with a row-parsing heuristic.
+  const competitorSummaryLinePattern =
+    /^(?:Executive implication|Incumbent response(?: risk)?|Switching barriers?|Gap for (?:a )?new entrant)\s*[:\-–—]/i;
+
   normalized
     .split("\n")
     .map((line) => line.trim().replace(/^[-*•]\s+/, ""))
-    .filter((line) => line.length > 14)
+    .filter((line) => line.length > 14 && !competitorSummaryLinePattern.test(line))
     .forEach((line) => {
       const company =
         parseInlineCompetitorField(line, "Company") ||
@@ -1635,6 +1716,14 @@ function cleanPdfEvidenceMetadataText(value: string) {
     .trim();
 }
 
+const moreTocSectionsCopy: Record<PdfLocale, (count: number) => string> = {
+  en: (count) => `+${count} more section${count === 1 ? "" : "s"} in this report`,
+  tr: (count) => `Bu raporda +${count} bölüm daha var`,
+  de: (count) => `+${count} weitere${count === 1 ? "r" : ""} Abschnitt${count === 1 ? "" : "e"} in diesem Bericht`,
+  fr: (count) => `+${count} section${count === 1 ? "" : "s"} supplémentaire${count === 1 ? "" : "s"} dans ce rapport`,
+  es: (count) => `+${count} sección${count === 1 ? "" : "es"} más en este informe`,
+};
+
 function isTamSamSomTitle(title: string) {
   return /\btam\b[\s/|,·-]*\bsam\b[\s/|,·-]*\bsom\b/i.test(title);
 }
@@ -1931,66 +2020,19 @@ function deliverPdf(
   window.setTimeout(() => URL.revokeObjectURL(url), 120000);
 }
 
-export default function ReportPdfButton({ report }: { report: DashboardReport }) {
-  const [exporting, setExporting] = useState(false);
-  const [error, setError] = useState("");
-  const failedReport = isFailedReport(report);
-
-  const [fontBase64, setFontBase64] = useState("");
-
-  useEffect(() => {
-    let mounted = true;
-
-    loadPdfFont()
-      .then((loadedFont) => {
-        if (mounted) {
-          setFontBase64(loadedFont);
-        }
-      })
-      .catch((fontError) => {
-        console.error(fontError);
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  function downloadPdf() {
-    if (failedReport) {
-      setError("Report generation failed. PDF export is available only after a report completes successfully.");
-      return;
-    }
-
-    if (exporting) {
-      return;
-    }
-
-    if (!fontBase64) {
-      setError("PDF font is still loading. Please try again in a few seconds.");
-      return;
-    }
-
-    setExporting(true);
-    setError("");
-
-    try {
-      if (isRealEstateDashboardReport(report)) {
-        const resolvedExportLanguage = resolveReportLanguage({
-          explicitLanguage: window.localStorage.getItem("zerinix_report_language"),
-          requestText: report.prompt,
-          uiLanguage: report.metadata?.reportLanguage,
-          browserLanguage: navigator.language,
-        });
-        const realEstatePdf = createRealEstateReportPdf({
-          report,
-          fontBase64,
-          language: resolvedExportLanguage,
-        });
-        deliverPdf(realEstatePdf, report, setError);
-        return;
-      }
-
+// Extracted verbatim from the inline body of downloadPdf() below --
+// same code, same order, no logic changes -- so it can be called
+// directly (from a Node script, generating a real PDF to inspect)
+// without needing a React render tree. Parameter names intentionally
+// match the identifiers the moved body already references, so no
+// internal line needed to change.
+export function buildStandardReportPdf({
+  report,
+  fontBase64,
+}: {
+  report: DashboardReport;
+  fontBase64: string;
+}) {
       const pdf = createPdfDocument();
       const { pageWidth, pageHeight, margin, contentWidth } = getPdfPageMetrics(pdf);
       const bodyX = margin + 20;
@@ -2335,7 +2377,19 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         pdf.setTextColor(recommendationText);
         pdf.text(localizePdfPresentationLabel("Decision", pdfLocale).toUpperCase(), scoreX + 72, scoreY + 8);
         pdf.setFontSize(18);
-        pdf.text(legalDecision, scoreX + 72, scoreY + 20);
+        // This banner is a fixed single-line, fixed-height row -- extractDecision
+        // normally returns a short keyword (GO/WAIT/NO-GO), but defend against
+        // any longer text still reaching here (e.g. a malformed AI response
+        // with no recognizable decision keyword anywhere) so it can never
+        // overflow past the card or off the page edge the way an unbounded
+        // pdf.text() call would.
+        const decisionBannerWidth = contentWidth - 102 - 12;
+        const decisionFirstLine = (pdf.splitTextToSize(legalDecision, decisionBannerWidth) as string[])[0] || "";
+        const decisionDisplay =
+          decisionFirstLine === legalDecision
+            ? legalDecision
+            : `${decisionFirstLine.replace(/\s+\S*$/, "")}…`;
+        pdf.text(decisionDisplay, scoreX + 72, scoreY + 20);
 
         const cardWidth = (contentWidth - 86) / 2;
         const kpis = (isLegalReport
@@ -2374,11 +2428,27 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
               [localizePdfPresentationLabel("Next Action", pdfLocale), executiveSnapshot.nextAction],
               [localizePdfPresentationLabel("Report Type", pdfLocale), localizePdfPresentationLabel(report.type, pdfLocale)],
             ]).map(([label, value]) => {
+          // Same bug class getFinancialLayout above already documents:
+          // wrapPdfText measures at whatever font size happens to be active
+          // on `pdf` right now (here, still 18pt left over from the
+          // Decision banner just drawn), not the 7.5/9.5pt these labels and
+          // values actually draw at below -- which forced short words like
+          // "CONFIDENCE" to hard-wrap mid-word. Pin to the real draw-time
+          // sizes for measurement only, then restore.
+          const previousCoverFontSize = pdf.getFontSize();
+          pdf.setFontSize(7.5);
           const labelLines = wrapPdfText(label.toUpperCase(), cardWidth - 8).slice(0, 2);
-          const valueLines = wrapPdfText(
-            conciseCoverText(value, 46),
-            cardWidth - 8
-          ).slice(0, 2);
+          pdf.setFontSize(9.5);
+          // conciseCoverText already shortens to ~46 chars with an ellipsis,
+          // but that string can still wrap into more than 2 lines inside
+          // this narrow two-column card -- truncate with our own ellipsis
+          // instead of silently dropping the tail (and conciseCoverText's
+          // own "…") with no indication anything was cut.
+          const valueLines = truncatePdfCellLines(
+            wrapPdfText(conciseCoverText(value, 46), cardWidth - 8),
+            2
+          );
+          pdf.setFontSize(previousCoverFontSize);
           const height = Math.max(18, 7 + labelLines.length * 3.1 + valueLines.length * 4.2);
 
           return { labelLines, valueLines, height };
@@ -2695,13 +2765,24 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
       y += summaryCardHeight + 6;
 
-      const getTamRows = (content: string) =>
+      const getTamRows = (visualContent: string, rawContent = "") =>
         ([
           ["TAM", "#134e4a"],
           ["SAM", "#115e59"],
           ["SOM", "#5eead4"],
         ] as const).map(([label, color]) => {
-          const value = extractMarketSizeValue(`${content}\n${fullReportContent}`, label);
+          // getTamVisualContent already strips the section down to just its
+          // "LABEL: value" lines, but drops a label entirely when the value
+          // doesn't start immediately after the colon (e.g. "SOM: near-term
+          // obtainable share is $3-5M..."). Fall back to this section's own
+          // prose -- not the whole report -- before ever considering
+          // fullReportContent, so an unrelated number from another section
+          // can't win over this section's real, just-differently-phrased
+          // value.
+          const value =
+            extractMarketSizeValue(visualContent, label) ||
+            extractMarketSizeValue(rawContent, label) ||
+            extractMarketSizeValue(`${visualContent}\n${fullReportContent}`, label);
           const rowHeight = 15;
 
           return { label, color, value, rowHeight };
@@ -2887,7 +2968,7 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
 
         if (isTamSamSomSection) {
           const tamVisualContent = getTamVisualContent(content);
-          const rows = getTamRows(tamVisualContent);
+          const rows = getTamRows(tamVisualContent, content);
           let rowY = visualY;
 
           rows.forEach(({ label, color, value, rowHeight }, index) => {
@@ -3216,7 +3297,15 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
               ? typedItem.value
               : isUnitEconomics && label === "Gross Margin"
                 ? formatMetricCardValue(extractStrictMetricValueFromAliases(content, ["grossMargin", "Gross Margin", "Brüt Marj"]))
-                : formatMetricCardValue(extractMetricValueFromAliases(metricContent, aliases));
+                // Prefer this card's own section content before falling back to
+                // the rest of the report: Financial Assumptions legitimately
+                // describes every one of these same metric names in prose
+                // ("Payback: derived from CAC/ARPA, confidence Medium."), and
+                // without this precedence that assumption sentence -- not this
+                // section's own value -- wins whenever this section only
+                // states the metric under a longer alias.
+                : formatMetricCardValue(extractMetricValueFromAliases(content, aliases)) ||
+                  formatMetricCardValue(extractMetricValueFromAliases(metricContent, aliases));
             const compactValue = compactPdfMetricValue(value);
             const labelLines =
               typeof typedItem !== "string" && typedItem.labelLines
@@ -3427,9 +3516,10 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
         pdf.text(localizePdfPresentationText("Click a section title to jump directly to that page.", pdfLocale), margin, 64);
 
         let tocY = 82;
-        tocEntries.slice(0, 18).forEach((entry, index) => {
+        let tocDrawnCount = 0;
+        for (const [index, entry] of tocEntries.entries()) {
           if (tocY > pageHeight - 26) {
-            return;
+            break;
           }
 
           pdf.setFillColor(index % 2 === 0 ? "#09090b" : "#050505");
@@ -3443,7 +3533,26 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
           pdf.setTextColor("#5eead4");
           pdf.text(String(entry.page), pageWidth - margin - 10, tocY + 1.5);
           tocY += 14;
-        });
+          tocDrawnCount += 1;
+        }
+
+        // The TOC is a single fixed page reserved before section pagination
+        // runs, so it cannot grow to fit an arbitrary number of entries.
+        // Long reports (e.g. a full 25-field Business Plan) can have more
+        // sections than fit here -- surface the count instead of silently
+        // dropping their entries with no indication anything is missing.
+        // Every section still exists in the body; only its TOC shortcut is
+        // omitted.
+        const hiddenTocCount = tocEntries.length - tocDrawnCount;
+        if (hiddenTocCount > 0) {
+          pdf.setFontSize(8);
+          pdf.setTextColor("#71717a");
+          pdf.text(
+            moreTocSectionsCopy[pdfLocale](hiddenTocCount),
+            margin,
+            Math.min(tocY + 2, pageHeight - 18)
+          );
+        }
 
         drawFooter();
       };
@@ -3679,6 +3788,70 @@ export default function ReportPdfButton({ report }: { report: DashboardReport })
       }
 
       pdf.setPage(finalPage);
+  return pdf;
+}
+
+export default function ReportPdfButton({ report }: { report: DashboardReport }) {
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState("");
+  const failedReport = isFailedReport(report);
+
+  const [fontBase64, setFontBase64] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+
+    loadPdfFont()
+      .then((loadedFont) => {
+        if (mounted) {
+          setFontBase64(loadedFont);
+        }
+      })
+      .catch((fontError) => {
+        console.error(fontError);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  function downloadPdf() {
+    if (failedReport) {
+      setError("Report generation failed. PDF export is available only after a report completes successfully.");
+      return;
+    }
+
+    if (exporting) {
+      return;
+    }
+
+    if (!fontBase64) {
+      setError("PDF font is still loading. Please try again in a few seconds.");
+      return;
+    }
+
+    setExporting(true);
+    setError("");
+
+    try {
+      if (isRealEstateDashboardReport(report)) {
+        const resolvedExportLanguage = resolveReportLanguage({
+          explicitLanguage: window.localStorage.getItem("zerinix_report_language"),
+          requestText: report.prompt,
+          uiLanguage: report.metadata?.reportLanguage,
+          browserLanguage: navigator.language,
+        });
+        const realEstatePdf = createRealEstateReportPdf({
+          report,
+          fontBase64,
+          language: resolvedExportLanguage,
+        });
+        deliverPdf(realEstatePdf, report, setError);
+        return;
+      }
+
+      const pdf = buildStandardReportPdf({ report, fontBase64 });
 
       deliverPdf(pdf, report, setError);
     } catch (downloadError) {

@@ -437,6 +437,15 @@ function prepareTurkishPdfPresentation(report: DashboardReport) {
 function normalizeText(value: string) {
   return value
     .normalize("NFKC")
+    // The embedded Geist font has no glyph for U+20BA (Turkish Lira
+    // sign) -- jsPDF silently drops the character entirely rather than
+    // rendering a placeholder, so any amount like "\u20BA84,500,000"
+    // rendered as "84,500,000" with the currency indicator gone
+    // without a trace. Substituting the ASCII-safe "TL" prefix (the
+    // standard written abbreviation) preserves the currency context
+    // the symbol was conveying, using the same prefix convention as
+    // the other currency symbols ($/\u20AC/\u00A3) already in this pipeline.
+    .replace(/\u20BA\s*/g, "TL ")
     .replace(/[\u200B-\u200D\uFEFF]/g, "")
     .replace(/[–—−]/g, "-")
     .replace(/…/g, "...")
@@ -891,19 +900,48 @@ function institutionNameFromSourceUrl(url: string, locale: PdfLocale) {
   return match ? (locale === "tr" ? match[1] : match[2]) : domain;
 }
 
+// A single logical citation is not guaranteed to survive as one text
+// line by the time it reaches here: repairReportLanguageSections (run
+// unconditionally on every real-estate PDF export, upstream of this
+// function) splits content into one sentence per line for its own
+// language-consistency filtering, before rejoining the surviving
+// sentences with newlines. A citation naturally spans several
+// sentences ("Title.", "URL accessed date.", "Explanation.") and the
+// evidence tag lives in the first sentence while the URL often lands
+// in a later one -- so a strictly single-line tag+URL check misses
+// real citations whenever that split falls between them, which is the
+// common case, not an edge case. This groups every tag-starting line
+// together with the lines that follow it up to the next tag-starting
+// line, so the extraction below runs against the citation's full text
+// regardless of how repairReportLanguageSections happened to break it.
+function groupCitationLines(lines: string[]) {
+  const isTagLine = (line: string) =>
+    /\[(?:Verified from official source|Verified from external source)\]/i.test(line) ||
+    /(?:^|[-•*]\s*)Kaynak\s*:/i.test(line);
+  const groups: string[] = [];
+  let current: string[] = [];
+
+  for (const line of lines) {
+    if (isTagLine(line)) {
+      if (current.length) groups.push(current.join(" "));
+      current = [line];
+    } else if (current.length) {
+      current.push(line);
+    }
+  }
+  if (current.length) groups.push(current.join(" "));
+
+  return groups;
+}
+
 function extractRealEstateSourcesForRender(
   report: DashboardReport,
   locale: PdfLocale
 ): SourceItem[] {
-  const cleanedLines = collectRealEstateResearchSourceContent(
-    report.sections
-  ).flatMap((content) =>
-    stripDiagnosticLines(content).split("\n").filter(Boolean)
-  ).filter(
-    (line) =>
-      /\[(?:Verified from official source|Verified from external source)\]/i.test(
-        line
-      ) || /(?:^|[-•*]\s*)Kaynak\s*:/i.test(line)
+  const cleanedLines = groupCitationLines(
+    collectRealEstateResearchSourceContent(report.sections).flatMap((content) =>
+      stripDiagnosticLines(content).split("\n").filter(Boolean)
+    )
   );
   const seen = new Set<string>();
   const sources: SourceItem[] = [];

@@ -229,7 +229,15 @@ function extractDecision(content: string, isTurkish = false) {
     "Final decision",
     "Nihai karar",
   ]);
-  const decisionMatch = (labeled || content).match(/\b(GO|WAIT|NO-GO|NO GO|HOLD|VALIDATE|PASS|REJECT)\b/i);
+  // Recommendation's own labeled span is often just next-step bullets, not
+  // a restatement of the verdict (the executiveSummary prompt puts the
+  // actual PASS/HOLD/VALIDATE/REJECT keyword in a separate "Bottom Line"
+  // sentence) -- fall back to searching the whole field content for the
+  // canonical keyword before ever returning the labeled text verbatim and
+  // unbounded, which the cover page renders at 18pt with no wrapping.
+  const decisionMatch =
+    (labeled && labeled.match(/\b(GO|WAIT|NO-GO|NO GO|HOLD|VALIDATE|PASS|REJECT)\b/i)) ||
+    content.match(/\b(GO|WAIT|NO-GO|NO GO|HOLD|VALIDATE|PASS|REJECT)\b/i);
 
   if (!decisionMatch) {
     return labeled || (isTurkish ? "BEKLE" : "WAIT");
@@ -265,7 +273,17 @@ function extractConfidenceValue(content: string, isTurkish = false) {
 
 function extractPercentScore(content: string, labels: string[]) {
   const labeled = extractLabelValue(content, labels);
-  const match = (labeled || content).match(/\b(\d{1,3})\s*(?:%|\/\s*100)?\b/);
+  // A bare number is only safe to trust within the labeled span itself
+  // (e.g. "Founder Score: 72" with no "%"). Falling back to the same bare
+  // match against the *entire* report when no label is found at all (true
+  // for every Market Analysis/Strategic Report, which have no Founder
+  // Score field) picks up the first unrelated short number anywhere in the
+  // text -- e.g. the "5" in "$5.9B" market size -- and displays it as a
+  // fabricated score. Require an explicit "%"/"/100" suffix for that
+  // unlabeled fallback so it can't misfire on an arbitrary figure.
+  const match = labeled
+    ? labeled.match(/\b(\d{1,3})\s*(?:%|\/\s*100)?\b/)
+    : content.match(/\b(\d{1,3})\s*(?:%|\/\s*100)\b/);
 
   if (!match) {
     return null;

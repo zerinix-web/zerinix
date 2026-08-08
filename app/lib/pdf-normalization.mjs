@@ -1,6 +1,16 @@
 export function normalizePdfText(value) {
   return preservePdfInlineTokens(value
     .normalize("NFC")
+    // The embedded Geist font has no glyph for U+20BA (Turkish Lira
+    // sign) -- jsPDF silently drops the character entirely rather than
+    // rendering a placeholder, so an amount like "TRY84,500,000"
+    // (written with the actual symbol) renders as "84,500,000" with
+    // the currency indicator gone without a trace. Substituting the
+    // ASCII-safe "TL" prefix (the standard written abbreviation)
+    // preserves the currency context the symbol was conveying, using
+    // the same prefix convention as the other currency symbols
+    // ($/EUR/GBP) already produced by this pipeline.
+    .replace(/\u20ba\s*/g, "TL ")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .replace(/\t/g, "  ")

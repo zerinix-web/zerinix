@@ -223,7 +223,14 @@ function replaceKnownReportCopy(value: string, code: ReportLanguageCode) {
     for (const key of Object.keys(copy[code]) as ReportCopyKey[]) {
       const source = copy[sourceCode][key];
       if (!source || source === copy[code][key]) continue;
-      repaired = repaired.replaceAll(source, copy[code][key]);
+      // Word-bounded, not a raw substring replaceAll: short tokens like
+      // "AL" (Turkish for "buy") are literal substrings of many unrelated
+      // ALL-CAPS words (e.g. "VALIDATE" -> "VBUYIDATE" when code is "en"),
+      // so an unbounded replace corrupts them. \b only matches a
+      // standalone occurrence of the foreign-language copy token, which is
+      // the actual leak this function is meant to repair.
+      const escapedSource = source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      repaired = repaired.replace(new RegExp(`\\b${escapedSource}\\b`, "g"), copy[code][key]);
     }
   }
 
