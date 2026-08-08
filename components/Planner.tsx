@@ -51,7 +51,10 @@ import {
   type MobileConversationMessage,
 } from "@/components/planner/MobileConversationExperience";
 import { createClient, restoreSupabaseSession } from "@/app/lib/supabase/client";
-import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
+import {
+  sanitizeAiResponseText,
+  extractChatStreamError,
+} from "@/app/lib/ai/response-sanitization";
 import {
   buildExecutiveSnapshot,
   compactExecutiveDecisionMemoSections,
@@ -7798,10 +7801,22 @@ export default function Planner({
       }
 
       output += decoder.decode(value, { stream: true });
+
+      const streamError = extractChatStreamError(output);
+      if (streamError !== null) {
+        throw new Error(streamError);
+      }
+
       onChunk(sanitizeAiResponseText(output));
     }
 
     output += decoder.decode();
+
+    const streamError = extractChatStreamError(output);
+    if (streamError !== null) {
+      throw new Error(streamError);
+    }
+
     const sanitizedOutput = sanitizeAiResponseText(output);
     onChunk(sanitizedOutput);
 

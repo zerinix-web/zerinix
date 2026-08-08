@@ -11,7 +11,10 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
-import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
+import {
+  sanitizeAiResponseText,
+  extractChatStreamError,
+} from "@/app/lib/ai/response-sanitization";
 import { MobileBottomNavigation } from "@/components/MobileNavigation";
 import {
   AlertCircle,
@@ -1580,10 +1583,22 @@ export default function AIChatWorkspace({
       }
 
       output += decoder.decode(value, { stream: true });
+
+      const streamError = extractChatStreamError(output);
+      if (streamError !== null) {
+        throw new Error(streamError);
+      }
+
       onChunk(sanitizeAiResponseText(output));
     }
 
     output += decoder.decode();
+
+    const streamError = extractChatStreamError(output);
+    if (streamError !== null) {
+      throw new Error(streamError);
+    }
+
     const sanitizedOutput = sanitizeAiResponseText(output);
     onChunk(sanitizedOutput);
 

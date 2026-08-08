@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Archive,
@@ -136,16 +136,28 @@ export default function ReportManager({
   const [viewFilter, setViewFilter] = useState<ReportViewFilter>("active");
   const [sort, setSort] = useState<ReportSort>("newest");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const [pinnedReportIds, setPinnedReportIds] = useState<Set<string>>(() =>
-    readStoredIds(PINNED_REPORTS_KEY)
-  );
-  const [favoriteReportIds, setFavoriteReportIds] = useState<Set<string>>(() =>
-    readStoredIds(FAVORITE_REPORTS_KEY)
-  );
-  const [archivedReportIds, setArchivedReportIds] = useState<Set<string>>(() =>
-    readStoredIds(ARCHIVED_REPORTS_KEY)
-  );
+  // Starts empty (matching what the server renders) rather than reading
+  // localStorage in the lazy initializer -- reading it there ran fine on
+  // the client but returned an empty set on the server, so any returning
+  // user with a pinned/favorited/archived report saw the list render
+  // once unfiltered/unsorted, then immediately reorder/filter right
+  // after hydration, on every load of this page. Read once after mount
+  // instead, same as any other client-only data source.
+  const [pinnedReportIds, setPinnedReportIds] = useState<Set<string>>(() => new Set());
+  const [favoriteReportIds, setFavoriteReportIds] = useState<Set<string>>(() => new Set());
+  const [archivedReportIds, setArchivedReportIds] = useState<Set<string>>(() => new Set());
   const [copiedReportId, setCopiedReportId] = useState("");
+
+  useEffect(() => {
+    // Intentional one-time sync from a genuinely external system
+    // (localStorage, unreadable during SSR) on mount -- not a derived
+    // value duplicating props/existing render state, which is what this
+    // lint rule is meant to catch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPinnedReportIds(readStoredIds(PINNED_REPORTS_KEY));
+    setFavoriteReportIds(readStoredIds(FAVORITE_REPORTS_KEY));
+    setArchivedReportIds(readStoredIds(ARCHIVED_REPORTS_KEY));
+  }, []);
 
   const reportCounts = useMemo(() => {
     const completed = reports.filter(

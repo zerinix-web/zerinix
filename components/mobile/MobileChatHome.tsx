@@ -28,7 +28,10 @@ import {
   type ReactNode,
 } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
+import {
+  sanitizeAiResponseText,
+  extractChatStreamError,
+} from "@/app/lib/ai/response-sanitization";
 import {
   createClient,
   restoreSupabaseSession,
@@ -1127,11 +1130,23 @@ export default function MobileChatHome({
         }
 
         responseText += decoder.decode(value, { stream: true });
+
+        const streamError = extractChatStreamError(responseText);
+        if (streamError !== null) {
+          throw new Error(streamError);
+        }
+
         pendingStreamingText = sanitizeMobileChatResponse(responseText);
         scheduleStreamingUpdate();
       }
 
       responseText += decoder.decode();
+
+      const finalStreamError = extractChatStreamError(responseText);
+      if (finalStreamError !== null) {
+        throw new Error(finalStreamError);
+      }
+
       const finalText =
         sanitizeMobileChatResponse(responseText) ||
         "I could not generate a response. Please try again.";

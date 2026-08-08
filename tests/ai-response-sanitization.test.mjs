@@ -20,7 +20,7 @@ test("shared AI response sanitizer removes accidental non-English prefixes", () 
 
 test("chat streaming sanitizes accumulated output before rendering and persistence", () => {
   for (const source of [chatWorkspaceSource, plannerSource]) {
-    assert.match(source, /import \{ sanitizeAiResponseText \}/);
+    assert.match(source, /import \{[\s\S]{0,80}sanitizeAiResponseText/);
     assert.match(source, /onChunk\(sanitizeAiResponseText\(output\)\)/);
     assert.match(source, /const sanitizedOutput = sanitizeAiResponseText\(output\)/);
     assert.match(source, /return sanitizedOutput/);
@@ -28,7 +28,7 @@ test("chat streaming sanitizes accumulated output before rendering and persisten
 });
 
 test("API chat sanitizes cached, mock, and completed response text", () => {
-  assert.match(chatRouteSource, /import \{ sanitizeAiResponseText \}/);
+  assert.match(chatRouteSource, /import \{[\s\S]{0,80}sanitizeAiResponseText/);
   assert.match(chatRouteSource, /const sanitizedContent = sanitizeAiResponseText\(content\)/);
   assert.match(chatRouteSource, /sanitizeAiResponseText\(\[/);
   assert.match(chatRouteSource, /const sanitizedCompletedText = sanitizeAiResponseText\(completedText\)/);

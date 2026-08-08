@@ -54,7 +54,10 @@ import {
   isAiTestMode,
   logAiExecution,
 } from "@/app/lib/ai/runtime";
-import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
+import {
+  sanitizeAiResponseText,
+  markChatStreamError,
+} from "@/app/lib/ai/response-sanitization";
 import {
   addTokenUsage,
   CHAT_RESPONSE_CONTINUATION_INPUT,
@@ -2248,10 +2251,17 @@ async function handleChatPost(req: Request) {
             logServerError("api:chat:stream", error);
             const errorMessage = getChatErrorMessage(error);
 
-            if (!streamedText.trim()) {
-              controller.enqueue(encoder.encode(errorMessage));
-            }
-
+            // Always signal the failure into the stream, whether or not
+            // text already streamed. Once the 200 response has started,
+            // there's no other way to tell the client this failed --
+            // previously, if streamedText was non-empty, nothing was
+            // enqueued at all and the client would treat the truncated
+            // partial answer as a complete, successful one; if empty,
+            // the raw fallback error string was enqueued as if it were
+            // real assistant content. Every client reads this sentinel
+            // (see extractChatStreamError) and throws instead of
+            // completing the message.
+            controller.enqueue(encoder.encode(markChatStreamError(errorMessage)));
             controller.close();
 
             await recordAiUsage(supabase, {
