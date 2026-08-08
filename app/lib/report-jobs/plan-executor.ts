@@ -5107,7 +5107,13 @@ async function executePlanRequestInner(
     const baseAssetFingerprint = createAnalysisAssetFingerprint(analysisAssets);
     const promptText = typeof prompt === "string" ? prompt : "";
     const responseLanguage = normalizeLanguage(language, promptText);
-    const requestedField = typeof field === "string" ? field : "executiveSummary";
+    // A missing/non-string field must fail cheap, not expensive: the
+    // legacy per-field branch below runs its own live web search per
+    // field, so silently defaulting to an arbitrary field name (as this
+    // used to do) would route a malformed request into the single most
+    // expensive path in this file instead of the normal, cost-optimized
+    // full-report path every real caller actually uses.
+    const requestedField = typeof field === "string" ? field : FULL_REPORT_FIELD;
     const isFullReportRequest = requestedField === FULL_REPORT_FIELD;
     const reportField = isFullReportRequest ? "executiveSummary" : requestedField;
     const usageReportField = isFullReportRequest ? FULL_REPORT_FIELD : reportField;
@@ -5911,7 +5917,16 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             fullReportStage = "stream_response";
             enqueue(serializePlanReportChunks(parsedReport));
 
-            void withReportTimeout(
+            // Awaited (not fire-and-forget): the usage-write below marks
+            // actual_ai_call: true, which countAiCallsForReport relies on
+            // to block a second real generation call for this
+            // reportRequestId. Not awaiting it left a real race window --
+            // a retry's guard check could run before this write landed,
+            // seeing zero recorded calls and allowing a duplicate,
+            // full-price generation. market-analysis/route.ts already
+            // awaits the equivalent write; this brings plan-executor.ts
+            // in line with that already-correct pattern.
+            await withReportTimeout(
               (async () => {
                 if (!isReportGenerationFailureText(cacheResponseText)) {
                   fullReportStage = "cache_write";

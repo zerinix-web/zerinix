@@ -317,6 +317,16 @@ async function handleUnderstandingPost(request: Request) {
             }))
           ),
           max_output_tokens: 5_400,
+          // Every sibling classification/extraction call in this codebase
+          // (research-entity-extraction.ts, the per-field report prompts)
+          // sets this explicitly; this one previously didn't, leaving
+          // reasoning effort at the model's own default for a task this
+          // call's own instructions describe as conservative schema-only
+          // classification -- not open-ended reasoning. This call gates
+          // every chat/plan/market-analysis request, so unnecessary
+          // reasoning tokens here add latency to the whole pipeline, not
+          // just this one call.
+          reasoning: { effort: "minimal" },
           text: { format: createUnderstandingJsonSchema() },
         }, { signal: AbortSignal.timeout(CLASSIFICATION_TIMEOUT_MS) })
       );
