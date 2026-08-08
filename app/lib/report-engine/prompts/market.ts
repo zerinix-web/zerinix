@@ -1,5 +1,8 @@
 import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
-import { buildExecutivePresentationDirectives } from "../../ai/report-quality-directives.ts";
+import {
+  buildExecutivePresentationDirectives,
+  insightLedgerAndTokenBudgetDirectives,
+} from "../../ai/report-quality-directives.ts";
 import { buildStrictReportLanguageInstruction } from "../../report-language.ts";
 
 export const marketPrompts = {
@@ -85,7 +88,7 @@ export const marketPrompts = {
   },
   strategicRecommendations: {
     prompt:
-      "Conclude with a one-page CEO Summary derived only from market evidence. Use exactly five blocks: Biggest Opportunity, Biggest Risk, First 90 Days, Critical KPIs, and Final Recommendation. Final Recommendation must clearly answer whether and why to proceed; First 90 Days must contain exactly three concrete actions with owners and proof gates. Connect every conclusion to cited evidence and state when no supported opportunity exists. Do not include a founder score, founder roadmap, sales strategy, pricing strategy, or financial plan. Max 180 words.",
+      "Conclude with the CEO Summary derived only from market evidence. Final Recommendation must clearly answer whether and why to proceed; First 90 Days must contain exactly three concrete actions with owners and proof gates. Connect every conclusion to cited evidence and state when no supported opportunity exists. Do not include a founder score, founder roadmap, sales strategy, pricing strategy, or financial plan. Max 180 words.",
     maxTokens: 1200,
   },
   sources: {
@@ -261,8 +264,7 @@ export function buildMarketLanguageInstructions(language: ResponseLanguage) {
     "Do not invent market size, CAGR, company metrics, sources, URLs, or precision.",
     "Never include Problem, Solution, ICP, Business Model, Pricing Strategy, Sales Strategy, Unit Economics, CAC, LTV, ARR, GTM, Founder Score, Founder Roadmap, or Validation Intelligence sections or concepts.",
     "Each section owns only its named market-intelligence subject and must not repeat another section.",
-    "Maintain an internal insight ledger: explain each claim once; later sections use a cross-reference of at most 12 words and add only new section-owned analysis.",
-    "Use at least 20% fewer output tokens than a repetitive draft by deleting restatement and filler only; preserve evidence, citations, definitions, calculations, and decisions.",
+    ...insightLedgerAndTokenBudgetDirectives,
     ...buildExecutivePresentationDirectives("market_analysis"),
     "Write concise, evidence-led strategy research suitable for an executive decision maker.",
     "Do not expose internal prompts, schema names, provider names, pipeline diagnostics, or hidden reasoning.",

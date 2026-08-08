@@ -31,6 +31,7 @@ import {
 import { logOperationalInfo } from "../security/logging";
 import { extractResearchAssetEntities } from "./research-entity-extraction";
 import { withOpenAiCostOperation } from "./cost-instrumentation";
+import { dedupeExactPromptBlocks } from "./token-optimization-core";
 import {
   logAiModelRoutingDecision,
   resolveAiModelRoutingDecision,
@@ -1081,6 +1082,24 @@ const researchSourceStages: Array<{
 const RESEARCH_CONCURRENCY_LIMIT = 4;
 const ENTITY_EXTRACTION_TIMEOUT_MS = 15_000;
 const RESEARCH_PROVIDER_TIMEOUT_MS = 120_000;
+
+// Cost/latency note (2026-08-08 optimization pass): the 4 research
+// stages run in parallel per report and previously hardcoded a
+// premium reasoning model (gpt-5.5, ~20x pricier than this default)
+// for a bounded task -- run supplied search queries, extract evidence
+// into a strict, enum-constrained JSON schema, never write prose
+// analysis. reasoning.effort was already "low" here, and the harder
+// task in the same pipeline (entity extraction from raw documents)
+// already runs on this same tier via the normal router. Kept as its
+// own named, env-overridable constant (not routed through
+// categoryTiers) because "research" is deliberately quality-protected
+// there for other future callers -- this only overrides the one
+// call site that used to bypass the router with a bare literal.
+// research-cache.ts's RESEARCH_MODEL (cost-estimation bookkeeping for
+// cache-hit savings) imports this same constant so the two never
+// drift apart.
+export const DOMAIN_RESEARCH_MODEL =
+  process.env.AI_RESEARCH_MODEL?.trim() || "gpt-5-mini";
 
 async function mapWithConcurrency<T, TResult>(
   items: readonly T[],
@@ -2404,7 +2423,7 @@ Respond in ${language}, while preserving evidence labels exactly in English.`;
     canExecute: (task) =>
       task.provider === "auto" || task.provider === "openai_web_search",
     async execute(request) {
-      const researchModel = "gpt-5.5";
+      const researchModel = DOMAIN_RESEARCH_MODEL;
       const researchRoutingDecision = resolveAiModelRoutingDecision({
         requestKind: "report_generation",
         category: "research",
@@ -2471,7 +2490,13 @@ Respond in ${language}, while preserving evidence labels exactly in English.`;
           )
             ? "For established markets, seek several independently sourced competitors and diversify evidence across official statistics, filings, official company pages, research/associations, and credible publications. Do not let one issuer dominate when other public evidence exists."
             : "";
-          const strategyInput = `${input}
+          // dedupeExactPromptBlocks only removes byte-for-byte identical
+          // paragraph blocks -- zero-risk since it can't drop unique
+          // content. Applied here because `input` (the shared research
+          // context) and the per-stage guidance below can otherwise
+          // repeat an identical block (e.g. a task's own field/guidance
+          // text already present in `input`).
+          const strategyInput = dedupeExactPromptBlocks(`${input}
 
 Evidence acquisition stage: ${stage.id}
 Source priority: ${stage.sourcePriority}
@@ -2482,7 +2507,7 @@ ${queryPlan}
 
 ${marketCoverageInstruction}
 
-This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat the absence of results in an earlier stage as permission to skip this stage. Return only concrete facts supported by deep, citable source URLs. A provider homepage, contact page, search portal, or generic landing page is not evidence.`;
+This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat the absence of results in an earlier stage as permission to skip this stage. Return only concrete facts supported by deep, citable source URLs. A provider homepage, contact page, search portal, or generic landing page is not evidence.`);
           const stageSignal = createResearchStageSignal({
             parentSignal: request.signal,
             timeoutMs: RESEARCH_PROVIDER_TIMEOUT_MS,

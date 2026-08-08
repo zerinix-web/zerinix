@@ -2090,9 +2090,13 @@ Do not include markdown code fences, braces inside string values, or commentary 
         domainResearchContext,
         legacyDomainResearchContext
       ).replace(compactFieldContracts, verboseFieldContracts);
+      // Actually apply the dedup this metric measures -- it was previously
+      // computed here only to report a hypothetical savings figure while
+      // the raw, un-deduped fullReportInput was still what got sent below.
+      const dedupedFullReportInput = dedupeExactPromptBlocks(fullReportInput);
       const fullReportInputCostMetrics = createAiCostOptimizationMetrics({
         beforeText: `${instructions}\n${legacyFullReportInput}`,
-        afterText: `${instructions}\n${dedupeExactPromptBlocks(fullReportInput)}`,
+        afterText: `${instructions}\n${dedupedFullReportInput}`,
         model,
       });
       const queuedJob = createAiJobDescriptor({
@@ -2146,7 +2150,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
                     model,
                     instructions,
                     input: buildAnalysisProviderInput(
-                      fullReportInput,
+                      dedupedFullReportInput,
                       analysisAssets
                     ),
                     max_output_tokens: 6500,

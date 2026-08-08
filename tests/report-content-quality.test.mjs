@@ -131,10 +131,14 @@ test("report generation instructions enforce a business-specific decision spine 
   assert.match(marketPrompts, /Produce a market intelligence report, never a business plan/);
   assert.match(planRoute, /dedupeReportParagraphsAcrossSections\(normalized,/);
   assert.match(marketRoute, /dedupeReportParagraphsAcrossSections\(normalized,/);
-  assert.match(planPrompts, /internal insight ledger/i);
-  assert.match(planPrompts, /20% fewer output tokens/i);
-  assert.match(marketPrompts, /internal insight ledger/i);
-  assert.match(marketPrompts, /20% fewer output tokens/i);
+  // 2026-08-08 cost-optimization pass: the insight-ledger/token-budget
+  // rule used to be independently hand-duplicated (with drifting wording)
+  // in both plan.ts and market.ts; it's now a single shared constant in
+  // report-quality-directives.ts, imported by both.
+  assert.match(directives, /internal insight ledger/i);
+  assert.match(directives, /20% fewer output tokens/i);
+  assert.match(planPrompts, /insightLedgerAndTokenBudgetDirectives/);
+  assert.match(marketPrompts, /insightLedgerAndTokenBudgetDirectives/);
   assert.match(planRoute, /serializeRealEstateReportChunks[\s\S]*dedupeReportParagraphsAcrossSections\(report\)/);
   assert.match(planRoute, /serializeDomainAnalysisReportChunks[\s\S]*dedupeReportParagraphsAcrossSections\(report\)/);
 });

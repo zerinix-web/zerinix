@@ -471,10 +471,17 @@ export function buildMarketIntelligenceGraph(
   };
 }
 
+// Drops `version` (a static constant, identical on every call, carries zero
+// information for the model) and `null`-valued keys (a JSON `null` costs
+// tokens to encode and parse for the same "no data" meaning an omitted key
+// already conveys) before serializing. No information available to the
+// model is removed -- every non-null field/array is sent exactly as before.
 export function formatMarketIntelligenceGraphForModel(
   graph: MarketIntelligenceGraph
 ) {
-  return JSON.stringify(graph);
+  const { version, ...rest } = graph;
+  void version;
+  return JSON.stringify(rest, (_key, value) => (value === null ? undefined : value));
 }
 
 type MarketGraphLanguage = "English" | "Turkish" | "German" | "French" | "Spanish";

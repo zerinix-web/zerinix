@@ -116,7 +116,7 @@ test("every full-report family checks report cache before research execution", (
       name: "specialized",
       source: planExecutor,
       start: "reportFamily: `${domain}_decision_analysis`",
-      end: "const input = `User goal:",
+      end: "const input = dedupeExactPromptBlocks(`User goal:",
     },
     {
       name: "market",

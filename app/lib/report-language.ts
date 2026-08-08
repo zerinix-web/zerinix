@@ -159,6 +159,17 @@ export function buildStrictReportLanguageInstruction(language: ResponseLanguage 
   return `Output language is ${name}. Write every user-visible title, heading, label, paragraph, bullet, table cell, warning, placeholder, recommendation, source label, and action only in ${name}. Do not mix languages. Preserve proper nouns, registered company names, source titles, URLs, legal citations, and standard technical acronyms verbatim.`;
 }
 
+// Shared verbatim across every entry point (plan full-report generation,
+// chat) that needs to state this precedence rule -- previously
+// hand-duplicated with slightly different wording in each caller, which
+// only wastes tokens since the rule itself never varies by caller.
+export function buildLanguageOverridePrecedenceInstruction(
+  language: ResponseLanguage | ReportLanguageCode
+) {
+  const name = getResponseLanguage(getReportLanguageCode(language));
+  return `The user's latest message language is ${name}. This overrides saved profile language, persistent memory language, browser locale, and previous conversation language.`;
+}
+
 const forbiddenUiPhrases: Record<ReportLanguageCode, RegExp> = {
   en: /\b(?:Yönetici Özeti|Güven Skoru|Ana Risk|Sonraki Adım|Hukuki Değerlendirme|Doğrulama Gerekiyor|Doğrulanmadı|Zusammenfassung|Risque principal|Resumen ejecutivo)\b/i,
   tr: /\b(?:Executive Summary|Recommendation|Why|Immediate Actions?|Next Actions?|Confidence Score|Main Risk|Legal Assessment|Validation Required|Estimated|AI Analysis|Should proceed|Hold|Wait|Not verified|Verified from uploaded asset|Zusammenfassung|Synthèse exécutive|Resumen ejecutivo)\b/i,

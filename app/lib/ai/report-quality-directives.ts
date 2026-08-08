@@ -83,6 +83,15 @@ export function buildDecisionSupportDirectives(kind: ReportQualityKind) {
   ];
 }
 
+// Shared verbatim by plan.ts and market.ts (previously two independently
+// hand-written, slightly-drifting versions of the same two rules -- pure
+// prompt text has no logic to diverge, so duplication there only buys
+// drift risk and doubled maintenance, never resilience).
+export const insightLedgerAndTokenBudgetDirectives = [
+  "Maintain an internal insight ledger while drafting: explain each insight once; later fields/sections use a cross-reference of at most 12 words and contribute only their new section-owned implication.",
+  "Use at least 20% fewer output tokens than a repetitive draft by deleting restatement and filler only. Preserve evidence, citations, calculations, decisions, and unique analysis.",
+];
+
 export function buildFullReportStructureDirectives(kind: ReportQualityKind) {
   return [
     "Return JSON keys in the exact order listed above and keep every value compatible with the existing report renderer.",

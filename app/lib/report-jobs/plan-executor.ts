@@ -3693,10 +3693,14 @@ async function generateRealEstateInvestmentReport({
   }
 
   const instructions = buildRealEstateInstructions(responseLanguage);
+  // dedupeExactPromptBlocks only removes byte-for-byte identical paragraph
+  // blocks -- zero-risk since it can't drop unique content, but catches
+  // cases where the same finding appears verbatim in more than one of the
+  // sections concatenated below (asset facts, decision context, evidence).
   const buildSectionInput = (
     section: RealEstateGenerationSection,
     sectionEvidence: readonly CompressedEvidence[]
-  ) => `User goal:
+  ) => dedupeExactPromptBlocks(`User goal:
 ${promptText}
 
 ${expertiseContext}
@@ -3728,7 +3732,7 @@ Every non-empty line must begin with an approved evidence label and every extern
 Do not invent citations, values, zoning, title, infrastructure, hazard, comparable, legal, or valuation facts.
 If relevant evidence is insufficient, keep every requested key and populate it with an appropriately labeled insufficient-evidence result.
 Consolidate unresolved critical items in ${responseLanguage === "Turkish" ? "Doğrulanamayan Kritik Bilgiler" : "Unverified Critical Information"}; do not repeat the same gap across sections.
-Do not include commentary outside the JSON object.`;
+Do not include commentary outside the JSON object.`);
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -4634,7 +4638,11 @@ async function generateSpecializedDomainReport({
     }
   }
 
-  const input = `User goal:
+  // dedupeExactPromptBlocks only removes byte-for-byte identical paragraph
+  // blocks (e.g. the same finding appearing in both uploaded-asset
+  // evidence and the research context) -- it cannot drop unique content,
+  // so this is a zero-risk token reduction on top of the raw concatenation.
+  const input = dedupeExactPromptBlocks(`User goal:
 ${promptText}
 
 ${expertiseContext}
@@ -4664,7 +4672,7 @@ The research sufficiency decision is ${domainResearch.recommendedOutput}.
 Research is already complete. Synthesize it; do not replace verified facts with general knowledge.
 Every material claim must cite [R#], [Asset: filename], [User], [Method: ...], [Required: ...], or [Basis: ...].
 Never invent values, sources, professional findings, legal conclusions, accounting treatment, prices, or operational facts.
-Do not include commentary outside the JSON object.`;
+Do not include commentary outside the JSON object.`);
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -5748,9 +5756,13 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
         .replace(compactFieldContracts, verboseFieldContracts);
       const fullReportInstructions =
         buildPlanFullReportInstructions(responseLanguage);
+      // Actually apply the dedup this metric measures -- it was previously
+      // computed here only to report a hypothetical savings figure while
+      // the raw, un-deduped fullReportInput was still what got sent below.
+      const dedupedFullReportInput = dedupeExactPromptBlocks(fullReportInput);
       const fullReportInputCostMetrics = createAiCostOptimizationMetrics({
         beforeText: `${instructions}\n${legacyFullReportInput}`,
-        afterText: `${fullReportInstructions}\n${dedupeExactPromptBlocks(fullReportInput)}`,
+        afterText: `${fullReportInstructions}\n${dedupedFullReportInput}`,
         model,
       });
       const queuedJob = createAiJobDescriptor({
@@ -5815,7 +5827,7 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
                     model,
                     instructions: fullReportInstructions,
                     input: buildAnalysisProviderInput(
-                      fullReportInput,
+                      dedupedFullReportInput,
                       analysisAssets
                     ),
                     max_output_tokens: FULL_REPORT_MAX_OUTPUT_TOKENS,

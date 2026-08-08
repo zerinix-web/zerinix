@@ -124,9 +124,16 @@ test("research execution is bounded, concurrent, cached, and phase-timed", () =>
   const planRoute = read("app/lib/report-jobs/plan-executor.ts");
 
   assert.match(research, /const RESEARCH_CONCURRENCY_LIMIT = 4/);
+  // 2026-08-08 cost-optimization pass: this used to hardcode the premium
+  // gpt-5.5 tier directly; it's now a named, env-overridable constant
+  // defaulting to a cheaper tier (see DOMAIN_RESEARCH_MODEL).
   assert.match(
     research,
-    /const researchModel = "gpt-5\.5"/
+    /const researchModel = DOMAIN_RESEARCH_MODEL;/
+  );
+  assert.match(
+    research,
+    /export const DOMAIN_RESEARCH_MODEL =\s*\n?\s*process\.env\.AI_RESEARCH_MODEL\?\.trim\(\) \|\| "gpt-5-mini";/
   );
   assert.match(research, /model: researchModel/);
   assert.match(research, /await Promise\.all\(workers\)/);

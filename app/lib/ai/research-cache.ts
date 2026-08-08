@@ -8,7 +8,10 @@ import {
   storeCachedAiResponse,
   type TokenUsage,
 } from "@/app/lib/ai/governance";
-import type { DomainResearchBundle } from "@/app/lib/ai/domain-research";
+import {
+  DOMAIN_RESEARCH_MODEL,
+  type DomainResearchBundle,
+} from "@/app/lib/ai/domain-research";
 import {
   MARKET_INTELLIGENCE_GRAPH_VERSION,
   type MarketIntelligenceGraph,
@@ -20,7 +23,9 @@ import { logOperationalInfo } from "@/app/lib/security/logging";
 const RESEARCH_CACHE_VERSION = "research-result-v1";
 const REPORT_CACHE_VERSION = "pre-research-report-v1";
 const CONVERSATION_RESEARCH_VERSION = "conversation-research-v1";
-const RESEARCH_MODEL = "gpt-5.5";
+// Kept in sync with the actual research-call model in domain-research.ts
+// so cache-hit savings estimates don't drift from real pricing.
+const RESEARCH_MODEL = DOMAIN_RESEARCH_MODEL;
 
 export type ResearchCacheIdentity = {
   normalizedPrompt: string;
