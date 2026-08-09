@@ -16,6 +16,10 @@ import {
   computeFillerRatio,
 } from "../app/lib/report-engine/filler-detection.ts";
 import { buildMarketExecutiveDecisionBrief } from "../app/lib/report-engine/market-intelligence-presentation.ts";
+import {
+  normalizePdfSourceContent,
+  normalizePdfFinancialSectionContent,
+} from "../app/lib/pdf-normalization.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -63,6 +67,10 @@ const marketPromptSource = readFileSync(
 );
 const domainAnalysisPromptSource = readFileSync(
   new URL("../app/lib/report-engine/prompts/domain-analysis.ts", import.meta.url),
+  "utf8"
+);
+const reportPdfButtonSource = readFileSync(
+  new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url),
   "utf8"
 );
 
@@ -240,7 +248,13 @@ test("buildMarketExecutiveDecisionBrief maps ENTER/MONITOR/AVOID onto GO/WAIT/NO
   assert.equal(enterBrief.decision, "GO");
   assert.equal(enterBrief.topReasons.length, 2);
   assert.equal(enterBrief.topRisks.length, 2);
-  assert.match(enterBrief.shortAnswer, /ENTER this market/);
+  assert.match(enterBrief.shortAnswer, /Market confidence is \d+\/100/);
+  // shortAnswer must not collide with buildMarketExecutiveSummary's separate
+  // "Recommended Market Entry Strategy" bullet once both land in the same
+  // executiveSummary field -- an exact-duplicate line there previously got
+  // silently deleted by stripFillerAndDuplicateSentences, orphaning that
+  // heading (see market-analysis regression fix).
+  assert.doesNotMatch(enterBrief.shortAnswer, /this market, prioritizing/);
 
   const avoidBrief = buildMarketExecutiveDecisionBrief(
     marketSectionsFixture,
@@ -323,6 +337,62 @@ test("executive quality gate passes a well-formed decision-first report and fail
   );
 });
 
+test("REGRESSION: page_one_readable_in_30_seconds must judge only the opening excerpt, not the whole first field -- a long-but-decision-first field must still pass", async () => {
+  const { runExecutiveQualityGate } = await importExecutiveQualityGate();
+
+  // Reproduces the production break: a decision-first opening followed by
+  // substantial legitimate supporting content (Bottom Line, multiple Key
+  // Findings, a confidence rollup, a source reliability overview) that
+  // pushes the FULL field comfortably past 600 words -- exactly the shape
+  // Market Intelligence's executiveSummary has once the brief, the market
+  // summary, the confidence rollup, and the source overview are all
+  // concatenated into it. This must never fail the gate: the opening
+  // (Decision + Confidence + short answer + reasons/risks) is what has to
+  // be readable in 30 seconds, not everything appended after it.
+  const opening =
+    "Executive Recommendation\nDecision: GO (Confidence: 68%)\nMarket confidence is 68/100, driven mainly by structural demand growth.\n\nTop Reasons:\n1. Unaddressed demand gap in appointment-based service\n2. Favorable regulatory trajectory\n3. Fragmented, low-barrier competitive set\n\nTop Risks:\n1. Water-use restrictions may tighten\n2. New entrants could compress pricing\n3. Supply-chain cost inflation for equipment";
+  const longTail = Array.from(
+    { length: 40 },
+    (_, i) => `Supporting finding number ${i + 1} adds one additional distinct piece of market evidence to the record.`
+  ).join(" ");
+  const longFirstField = `${opening}\n\n${longTail}`;
+
+  assert.ok(
+    longFirstField.trim().split(/\s+/).length > 600,
+    "fixture must reproduce a field comfortably over 600 words to prove the whole-field measurement would have failed it"
+  );
+
+  const failures = runExecutiveQualityGate({
+    sections: { executiveSummary: longFirstField, sources: "Evidence Summary\n2 verified sources used." },
+    firstField: "executiveSummary",
+    sourceFields: ["sources"],
+  });
+
+  assert.equal(
+    failures.some((failure) => failure.check === "page_one_readable_in_30_seconds"),
+    false,
+    `expected no page_one_readable_in_30_seconds failure, got: ${JSON.stringify(failures)}`
+  );
+});
+
+test("page_one_readable_in_30_seconds still fails when the OPENING itself (not later content) is bloated", async () => {
+  const { runExecutiveQualityGate } = await importExecutiveQualityGate();
+
+  // Short, dense filler so 260 words comfortably fits inside the same
+  // ~1,100-character opening-excerpt window the gate itself inspects --
+  // otherwise the fixture wouldn't actually reproduce a bloated opening.
+  const bloatedOpeningWords = Array.from({ length: 260 }, () => "a").join(" ");
+  const bloatedOpening = `Executive Recommendation\nDecision: GO (Confidence: 68%)\n${bloatedOpeningWords}`;
+
+  const failures = runExecutiveQualityGate({
+    sections: { executiveSummary: bloatedOpening },
+    firstField: "executiveSummary",
+    sourceFields: [],
+  });
+
+  assert.ok(failures.some((failure) => failure.check === "page_one_readable_in_30_seconds"));
+});
+
 // -- Wiring: plan-executor.ts (Business Plan + Strategic Advisory) --------
 
 test("plan-executor.ts wires the Executive Decision brief, evidence summary, filler stripping, and quality gate for Business Plan", () => {
@@ -385,4 +455,44 @@ test("all three report prompt builders call buildExecutiveConsultingStyleDirecti
 
 test("domain-analysis.ts asks financialImplications to lead with figures before explanation (Financial First)", () => {
   assert.match(domainAnalysisPromptSource, /financialImplications:\s*\n?\s*"Lead with the compact supported figures/);
+});
+
+// -- REGRESSION: PDF rendering of the compressed Evidence Summary ----------
+
+test("REGRESSION: ReportPdfButton.tsx must render the Evidence Summary as-is instead of substituting a fabricated generic placeholder", () => {
+  // parseCitations never recognizes the Evidence Summary shape (no
+  // title/publisher/URL lines, no "Org — Title" dash pattern), so without
+  // a dedicated check, formatPdfCitationContent's citations.length === 0
+  // branch would silently replace every report's real, computed Evidence
+  // Summary with a hardcoded, unrelated placeholder ("Market Comparisons /
+  // Financial Comparisons / Planning Assumptions / Validation Required").
+  // This must be intercepted before that fallback runs.
+  assert.match(reportPdfButtonSource, /function isEvidenceSummaryContent/);
+  assert.match(reportPdfButtonSource, /evidence summary\|kanıt özeti\|evidenzübersicht/i);
+  assert.match(
+    reportPdfButtonSource,
+    /if \(isEvidenceSummaryContent\(sourceContent\)\) \{\s*\n\s*return sourceContent;\s*\n\s*\}\s*\n\s*\n\s*const citations = parseCitations\(sourceContent\);/
+  );
+});
+
+test("REGRESSION: an Evidence Summary's heading survives the PDF's source-content normalization pipeline intact", () => {
+  const evidenceSummary = [
+    "Evidence Summary",
+    "Verified against:",
+    "• Industry reports",
+    "• Government data",
+    "",
+    "2 verified sources used.",
+  ].join("\n");
+
+  const afterFinancial = normalizePdfFinancialSectionContent(evidenceSummary, {
+    field: "sourcesAssumptions",
+    title: "Sources / Assumptions",
+  });
+  const afterSource = normalizePdfSourceContent(afterFinancial);
+
+  assert.match(afterSource, /^Evidence Summary/);
+  assert.match(afterSource, /Industry reports/);
+  assert.match(afterSource, /Government data/);
+  assert.match(afterSource, /2 verified sources used\./);
 });

@@ -385,27 +385,42 @@ export function buildMarketExecutiveDecisionBrief(
   const { confidence, decision } = assessMarketEntryConfidence(coverage);
   const code: ExecutiveDecisionCode =
     decision === "ENTER" ? "GO" : decision === "MONITOR" ? "WAIT" : "NO_GO";
-  const localizedDecision = localizeMarketEntryDecision(decision, language);
 
+  // Distinct wording from the "Recommended Market Entry Strategy" bullet
+  // in buildMarketExecutiveSummary below (which also names topMarketDriver)
+  // so the two lines don't normalize to the same text and collide with
+  // stripFillerAndDuplicateSentences's exact-duplicate removal once both
+  // land in the same executiveSummary field.
   const shortAnswer = marketText(
     language,
-    `${localizedDecision} this market, prioritizing ${topMarketDriver(sections, language)}.`,
-    `Bu pazara ${localizedDecision.toLowerCase()} kararı verin; öncelik ${topMarketDriver(sections, language)} olsun.`,
-    `${localizedDecision} in diesen Markt, mit Priorität auf ${topMarketDriver(sections, language)}.`,
-    `${localizedDecision} sur ce marché, en priorisant ${topMarketDriver(sections, language)}.`,
-    `${localizedDecision} en este mercado, priorizando ${topMarketDriver(sections, language)}.`
+    `Market confidence is ${confidence}/100, driven mainly by ${topMarketDriver(sections, language)}.`,
+    `Pazar güveni 100 üzerinden ${confidence} olup, öncelikle ${topMarketDriver(sections, language)} tarafından yönlendirilmektedir.`,
+    `Die Marktkonfidenz liegt bei ${confidence}/100 und wird hauptsächlich durch ${topMarketDriver(sections, language)} getrieben.`,
+    `La confiance de marché est de ${confidence}/100, portée principalement par ${topMarketDriver(sections, language)}.`,
+    `La confianza de mercado es de ${confidence}/100, impulsada principalmente por ${topMarketDriver(sections, language)}.`
   );
 
-  const fallbackReason = biggestOpportunity(sections, language);
-  const fallbackRisk = biggestRisk(sections, language);
-  const topReasons = topSubstantiveLines(sections.opportunities || "", 3);
-  const topRisks = topSubstantiveLines(sections.threats || "", 3);
+  // biggestOpportunity/biggestRisk below (in buildMarketExecutiveSummary)
+  // already restate the single best opportunity/risk sentence -- reusing
+  // it here too is fine when it's the only distinct fact available, but
+  // when the field has additional distinct sentences, surfacing those
+  // instead (rather than the same sentence again) is what actually adds
+  // decision value across the two blocks instead of padding the field
+  // with a repeated line.
+  const primaryReason = biggestOpportunity(sections, language);
+  const primaryRisk = biggestRisk(sections, language);
+  const additionalReasons = topSubstantiveLines(sections.opportunities || "", 3).filter(
+    (line) => line !== primaryReason
+  );
+  const additionalRisks = topSubstantiveLines(sections.threats || "", 3).filter(
+    (line) => line !== primaryRisk
+  );
 
   return {
     shortAnswer,
     decision: code,
     confidence,
-    topReasons: topReasons.length ? topReasons : [fallbackReason],
-    topRisks: topRisks.length ? topRisks : [fallbackRisk],
+    topReasons: [primaryReason, ...additionalReasons].slice(0, 3),
+    topRisks: [primaryRisk, ...additionalRisks].slice(0, 3),
   };
 }

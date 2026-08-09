@@ -552,6 +552,21 @@ function isSourceSectionTitle(title: string) {
   );
 }
 
+// The executive-decision-first redesign compresses the sources field's raw
+// citation list into a short "Evidence Summary" (category + count) before
+// the report is returned -- deliberately named/structured so it never
+// matches parseCitations's title/publisher/URL or "Org — Title" shapes.
+// Without this check, formatPdfCitationContent would see zero parsed
+// citations for every report and silently substitute the generic
+// placeholder block below (fabricated benchmark/assumption categories,
+// unrelated to the report's real evidence), discarding the actual summary.
+const evidenceSummaryHeadingPattern =
+  /^(?:evidence summary|kanıt özeti|evidenzübersicht|synthèse des preuves|resumen de evidencia)\b/im;
+
+function isEvidenceSummaryContent(content: string) {
+  return evidenceSummaryHeadingPattern.test(content.trim());
+}
+
 function formatPdfCitationContent(content: string, realEstate = false) {
   const sourceContent = normalizePdfSourceContent(
     normalizePdfFinancialSectionContent(content, {
@@ -559,6 +574,11 @@ function formatPdfCitationContent(content: string, realEstate = false) {
       title: "Sources / Assumptions",
     })
   );
+
+  if (isEvidenceSummaryContent(sourceContent)) {
+    return sourceContent;
+  }
+
   const citations = parseCitations(sourceContent);
   const methodologyBlock = realEstate
     ? [

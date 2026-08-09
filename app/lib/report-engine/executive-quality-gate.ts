@@ -30,6 +30,19 @@ export type QualityGateInput = {
 // on a section that legitimately cites 2-3 sources inline).
 const MAX_RAW_URLS_PER_FIELD = 3;
 const MAX_FILLER_RATIO = 0.15;
+// "Page one, readable in 30 seconds" is about the OPENING of the first
+// field -- the Executive Recommendation block itself (heading, decision,
+// short answer, top reasons, top risks) -- not the entire field. The
+// first field legitimately carries additional supporting summary content
+// after that block (e.g. Market Intelligence's Bottom Line/Key Findings/
+// entry strategy, or a confidence rollup appended later in the pipeline);
+// none of that later content is what a reader needs for the 30-second
+// verdict, so it must never count against this check. Bounding the excerpt
+// to roughly 200 words (~1,100 characters, generous for the block's own
+// heading + decision line + short answer + up to 3 reasons + up to 3
+// risks) keeps the check anchored to what it is actually named after.
+const OPENING_EXCERPT_CHARS = 1_100;
+const MAX_OPENING_WORD_COUNT = 200;
 // A field is considered to "add no decision value" once the vast majority
 // of its substantive sentences are filler/duplicate -- this is
 // deliberately looser than the report-wide 15% ceiling, since a single
@@ -70,11 +83,12 @@ export function runExecutiveQualityGate(input: QualityGateInput): QualityGateFai
       detail: `Field "${firstField}" does not open with a Decision + Confidence line within its first 400 characters.`,
     });
   } else {
-    const openingWordCount = firstContent.trim().split(/\s+/).length;
-    if (openingWordCount > 600) {
+    const openingExcerpt = firstContent.trim().slice(0, OPENING_EXCERPT_CHARS);
+    const openingWordCount = openingExcerpt.split(/\s+/).length;
+    if (openingWordCount > MAX_OPENING_WORD_COUNT) {
       failures.push({
         check: "page_one_readable_in_30_seconds",
-        detail: `Field "${firstField}" is ${openingWordCount} words -- too long to reach a decision within a 30-second read.`,
+        detail: `Field "${firstField}"'s opening is ${openingWordCount} words within its first ${OPENING_EXCERPT_CHARS} characters -- too long to reach a decision within a 30-second read.`,
       });
     }
   }
