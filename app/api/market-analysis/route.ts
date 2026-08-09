@@ -57,10 +57,15 @@ import {
 import {
   buildMarketExecutiveSummary,
   buildMarketEntryRecommendation,
+  buildMarketExecutiveDecisionBrief,
   assessMarketEntryConfidence,
   localizeMarketEntryDecision,
 } from "@/app/lib/report-engine/market-intelligence-presentation";
 import { assertReportIsolation } from "@/app/lib/report-engine/report-isolation-validator";
+import { formatExecutiveDecisionBrief } from "@/app/lib/report-engine/executive-decision-brief";
+import { buildEvidenceSummary } from "@/app/lib/report-engine/evidence-summary";
+import { stripFillerAndDuplicateSentences } from "@/app/lib/report-engine/filler-detection";
+import { assertExecutiveQualityGate } from "@/app/lib/report-engine/executive-quality-gate";
 import {
   buildMarketIntelligenceGraph,
   formatMarketIntelligenceGraphForModel,
@@ -679,11 +684,25 @@ function ensureMarketReportQuality(
     // never from Business Idea Validation's founder/investment scoring
     // engine. Concatenating it with the model's own separate
     // executive-summary draft would just repeat the same verdict twice.
-    normalized.executiveSummary = buildMarketExecutiveSummary(normalized, language, coverage);
+    normalized.executiveSummary = [
+      formatExecutiveDecisionBrief(buildMarketExecutiveDecisionBrief(normalized, language, coverage), language),
+      buildMarketExecutiveSummary(normalized, language, coverage),
+    ].join("\n\n");
 
     if (!normalized.strategicRecommendations.includes(marketEntryHeading)) {
       normalized.strategicRecommendations = `${normalized.strategicRecommendations}\n\n${buildMarketEntryRecommendation(normalized, language, coverage)}`.trim();
     }
+  }
+
+  // Sources become invisible: compress the model's raw citation list to a
+  // category+count Evidence Summary before dedup/analysis. Full per-source
+  // detail is still computed below from this pre-compression snapshot, so
+  // report.metadata.sourceIntelligence keeps working unchanged.
+  const rawSources = normalized.sources;
+  normalized.sources = buildEvidenceSummary(rawSources, language);
+
+  for (const field of reportFields) {
+    normalized[field] = stripFillerAndDuplicateSentences(normalized[field]);
   }
 
   const deduped = dedupeReportParagraphsAcrossSections(normalized, {
@@ -697,12 +716,12 @@ function ensureMarketReportQuality(
     deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${confidenceRollup}`;
   }
 
-  // Read-only: analyzes the existing sources text without mutating it,
-  // so the PDF's own citation parser (which runs on that field
-  // separately) is completely unaffected. Only the trust-tier name
-  // overview goes into executiveSummary -- full per-source detail
-  // stays in report.metadata.sourceIntelligence.
-  const sourceIntelligenceRecords = analyzeReportSourceIntelligence(deduped.sources);
+  // Read-only: analyzes the PRE-compression raw sources text captured
+  // above, so full per-source detail is still computed even though the
+  // rendered sources field no longer exposes it. Only the trust-tier name
+  // overview goes into executiveSummary -- full per-source detail stays
+  // in report.metadata.sourceIntelligence.
+  const sourceIntelligenceRecords = analyzeReportSourceIntelligence(rawSources);
   const sourceReliabilityOverview = buildSourceReliabilityOverview(sourceIntelligenceRecords, language);
   if (sourceReliabilityOverview) {
     deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${sourceReliabilityOverview}`;
@@ -742,6 +761,21 @@ function ensureMarketReportQuality(
   // specific vocabulary (founder readiness, validation gate, runway,
   // EBITDA, PMF, fundraising, PASS/HOLD/VALIDATE/REJECT, ...).
   assertReportIsolation("market_intelligence", deduped);
+
+  // Quality Gate: fail generation instead of silently returning a report
+  // that dumps information rather than helping a decision-maker act. Only
+  // enforced when coverage was available -- that's what makes the
+  // Executive Recommendation opening block possible in the first place;
+  // without it (e.g. a cached/degraded report with no coverage data), the
+  // report falls back to its pre-existing, less-strict shape rather than
+  // hard-failing on a check it was never given the inputs to satisfy.
+  if (marketAssessment) {
+    assertExecutiveQualityGate({
+      sections: deduped,
+      firstField: "executiveSummary",
+      sourceFields: ["sources"],
+    });
+  }
 
   return deduped;
 }

@@ -1,6 +1,9 @@
 import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
 import type { ReportDomain } from "@/app/lib/report-engine/domain";
-import { buildExecutivePresentationDirectives } from "../../ai/report-quality-directives.ts";
+import {
+  buildExecutivePresentationDirectives,
+  buildExecutiveConsultingStyleDirectives,
+} from "../../ai/report-quality-directives.ts";
 import { buildStrictReportLanguageInstruction } from "../../report-language.ts";
 
 export type SpecializedReportDomain = Exclude<
@@ -20,7 +23,7 @@ export const domainAnalysisPrompts = {
   regulatoryCompliance:
     "Assess applicable rules, standards, regulator guidance, filing duties, and compliance gaps only from verified sources.",
   financialImplications:
-    "Explain supported financial implications, exposures, cash effects, or commercial consequences. Never invent values.",
+    "Lead with the compact supported figures (exposure, cash effect, cost, or value at stake) before any explanation of how they were derived. Explain supported financial implications, exposures, cash effects, or commercial consequences. Never invent values.",
   operationalImplications:
     "Explain supported workflow, capacity, delivery, control, implementation, or execution implications.",
   riskAnalysis:
@@ -157,6 +160,7 @@ export function buildDomainAnalysisInstructions(
     "Every material factual claim must include inline provenance: [Asset: filename], [R#], [User], [Method: ...], [Required: ...], or [Basis: ...].",
     "Never invent numeric values, sources, professional conclusions, legal status, accounting treatment, prices, or operational findings.",
     "If research could not verify a fact, write Unknown and name the exact source or document required.",
+    ...buildExecutiveConsultingStyleDirectives(),
     ...buildExecutivePresentationDirectives("specialized_analysis"),
   ].join("\n");
 }

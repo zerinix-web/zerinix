@@ -88,18 +88,23 @@ test("real historical production data confirms Market Intelligence is both the m
   //   /api/market-analysis n=24 avg 16,109 prompt / 3,574 completion tok, ~44.7s, ~$0.011175
   // Real static-instruction sizes measured offline from the same
   // functions the live pipeline calls (zero API cost to compute):
-  //   buildPlanFullReportInstructions:   ~1,090 tokens
-  //   buildMarketLanguageInstructions:   ~872 tokens
+  //   buildPlanFullReportInstructions:   ~1,090 tokens (pre executive-decision-first redesign)
+  //   buildMarketLanguageInstructions:   ~872 tokens (pre executive-decision-first redesign)
   // This test doesn't re-derive the historical numbers (that requires a
   // live DB query, out of scope for node --test) -- it pins the real,
   // already-measured static-instruction share so a future prompt change
   // that silently balloons static instructions gets caught here, and
   // documents where the historical numbers in the final report came from.
+  // Upper bounds widened once, deliberately: the executive-decision-first
+  // redesign added buildExecutiveConsultingStyleDirectives() (tone,
+  // sources-invisible, section-must-answer-a-question, financial-first
+  // rules) to both instruction builders, growing static instruction size
+  // by design -- not silent drift.
   const plan = buildPlanFullReportInstructions("English");
   const market = buildMarketLanguageInstructions("English");
 
-  assert.ok(plan.length > 3500 && plan.length < 6000, `plan instructions length drifted: ${plan.length} chars`);
-  assert.ok(market.length > 2500 && market.length < 5000, `market instructions length drifted: ${market.length} chars`);
+  assert.ok(plan.length > 3500 && plan.length < 6600, `plan instructions length drifted: ${plan.length} chars`);
+  assert.ok(market.length > 2500 && market.length < 5600, `market instructions length drifted: ${market.length} chars`);
 
   // The real historical average total prompt for market (16,109 tokens)
   // is far larger than its own static-instruction size (~872 tokens) --

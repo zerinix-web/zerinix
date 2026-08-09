@@ -138,6 +138,15 @@ import {
 import { assertReportIsolation } from "@/app/lib/report-engine/report-isolation-validator";
 import { labelModelDerivedFinancialClaims } from "@/app/lib/report-engine/financial-claim-labeling";
 import {
+  formatExecutiveDecisionBrief,
+  extractGenericDecisionSignal,
+  type ExecutiveDecisionBrief,
+  type ExecutiveDecisionCode,
+} from "@/app/lib/report-engine/executive-decision-brief";
+import { buildEvidenceSummary } from "@/app/lib/report-engine/evidence-summary";
+import { stripFillerAndDuplicateSentences } from "@/app/lib/report-engine/filler-detection";
+import { assertExecutiveQualityGate } from "@/app/lib/report-engine/executive-quality-gate";
+import {
   formatExecutiveDecisionSystemContext,
   formatExecutiveBriefSupplementaryContext,
   formatStrategicDecisionMemoReportSection,
@@ -495,7 +504,62 @@ function serializeDomainAnalysisReportChunks(
   ].join("");
 }
 
-function parseDomainAnalysisReport(value: string): DomainAnalysisReport {
+// Strategic Advisory has no numeric decision-scoring engine of its own
+// (decisionAssessment/finalRecommendation are pure LLM narrative text) --
+// this extracts the mandatory opening block from that narrative rather
+// than reusing Business Plan's investmentScore or Market Intelligence's
+// coverage-weighted confidence, which would reintroduce cross-report
+// contamination.
+function domainTopLines(content: string, max: number) {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+
+  for (const raw of (content || "").split("\n")) {
+    const line = raw
+      .replace(/^[-*•]\s*/, "")
+      .replace(/^#{1,6}\s*/, "")
+      .replace(/\*\*/g, "")
+      .trim();
+    if (line.length <= 24 || /^[A-Z0-9 /&-]{2,40}:?$/.test(line)) continue;
+
+    const key = line.toLowerCase().slice(0, 48);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(line);
+    if (lines.length >= max) break;
+  }
+
+  return lines;
+}
+
+function buildDomainAnalysisExecutiveDecisionBrief(
+  report: DomainAnalysisReport
+): ExecutiveDecisionBrief {
+  const { decision, confidence } = extractGenericDecisionSignal(
+    `${report.decisionAssessment}\n${report.finalRecommendation}`
+  );
+
+  const shortAnswer =
+    domainTopLines(report.finalRecommendation, 1)[0] ||
+    domainTopLines(report.decisionAssessment, 1)[0] ||
+    report.finalRecommendation.trim().slice(0, 280);
+
+  const topReasons = domainTopLines(report.domainFindings, 3);
+  const topRisks = domainTopLines(report.riskAnalysis, 3);
+
+  return {
+    shortAnswer,
+    decision,
+    confidence,
+    topReasons: topReasons.length ? topReasons : [report.decisionAssessment.trim().slice(0, 200)],
+    topRisks: topRisks.length ? topRisks : [report.riskAnalysis.trim().slice(0, 200)],
+  };
+}
+
+function parseDomainAnalysisReport(
+  value: string,
+  language: ResponseLanguage = "English"
+): DomainAnalysisReport {
   let parsed: Record<string, unknown>;
 
   try {
@@ -519,9 +583,40 @@ function parseDomainAnalysisReport(value: string): DomainAnalysisReport {
 
   const validated = validateDomainAnalysisReport(report);
 
+  // Executive Decision First: prepend the mandatory opening block to the
+  // first field in schema order. No dedicated executiveSummary field
+  // exists on this report type, so subjectIdentification (schema-first)
+  // carries it instead of adding a new field to the schema/PDF/dashboard.
+  validated.subjectIdentification = [
+    formatExecutiveDecisionBrief(buildDomainAnalysisExecutiveDecisionBrief(validated), language),
+    validated.subjectIdentification,
+  ].join("\n\n");
+
+  // Sources become invisible: compress the raw citation list to a
+  // category+count Evidence Summary. Detailed source text is not
+  // discarded from the report object's own memory -- only the rendered
+  // field is compressed -- but Strategic Advisory has no
+  // sourceIntelligence metadata pipeline of its own (unlike Business
+  // Plan/Market Intelligence), so full per-source detail is not preserved
+  // anywhere else once this runs; documented as a known gap, not solved
+  // here to avoid building new metadata infrastructure for one report type.
+  validated.sources = buildEvidenceSummary(validated.sources, language);
+
+  for (const field of domainAnalysisFields) {
+    validated[field] = stripFillerAndDuplicateSentences(validated[field]);
+  }
+
   // Defensive: Strategic Advisory must inherit neither Business Idea
   // Validation's nor Market Intelligence's report-specific vocabulary.
   assertReportIsolation("strategic_advisory", validated);
+
+  // Quality Gate: fail generation instead of silently returning a report
+  // that dumps information rather than helping a decision-maker act.
+  assertExecutiveQualityGate({
+    sections: validated,
+    firstField: "subjectIdentification",
+    sourceFields: ["sources"],
+  });
 
   return validated;
 }
@@ -2352,6 +2447,35 @@ function buildExecutiveSummaryConfidenceRollup(
   ].join("\n");
 }
 
+// Maps Business Plan's own numeric decision engine onto the shared,
+// report-type-agnostic Executive Recommendation vocabulary. This is a pure
+// presentation mapping -- investmentScore.recommendation stays the
+// authoritative decision everywhere else in this file (getVisibleDecision,
+// localizeDecision, consistency validation); GO/WAIT/PASS is never replaced,
+// only translated for the opening block.
+function buildPlanExecutiveDecisionBrief(
+  context: AiFinancialModelContext,
+  language: ResponseLanguage
+): ExecutiveDecisionBrief {
+  const score = context.investmentScore;
+  const decision: ExecutiveDecisionCode =
+    score.recommendation === "GO" ? "GO" : score.recommendation === "WAIT" ? "WAIT" : "NO_GO";
+
+  const shortAnswer = reportText(
+    language,
+    `This ${context.inputs.industry} ${context.inputs.businessModel} opportunity scores ${score.totalScore}/100. ${score.nextCriticalAction}`,
+    `Bu ${context.inputs.industry} ${context.inputs.businessModel} fırsatı 100 üzerinden ${score.totalScore} puan alıyor. ${score.nextCriticalAction}`
+  );
+
+  return {
+    shortAnswer,
+    decision,
+    confidence: score.confidence,
+    topReasons: score.strengths.slice(0, 3),
+    topRisks: score.topRisks.slice(0, 3),
+  };
+}
+
 function normalizeFullPlanReport(
   report: Record<PlanReportField, string>,
   context?: AiFinancialModelContext,
@@ -2368,8 +2492,11 @@ function normalizeFullPlanReport(
 
   if (!context) {
     for (const field of planFields) {
-      normalized[field] = enforcePlanReportLanguage(normalized[field], language);
+      normalized[field] = stripFillerAndDuplicateSentences(
+        enforcePlanReportLanguage(normalized[field], language)
+      );
     }
+    normalized.sourcesAssumptions = buildEvidenceSummary(normalized.sourcesAssumptions, language);
 
     const dedupedWithoutContext = dedupeReportParagraphsAcrossSections(normalized, {
       language,
@@ -2411,7 +2538,10 @@ function normalizeFullPlanReport(
       ? buildCanonicalExecutiveRecommendation(context)
       : buildCanonicalExecutiveRecommendation(context, language);
   normalized.founderScore = buildCanonicalFounderScore(context, language);
-  normalized.executiveSummary = buildExecutiveScorecard(context, language);
+  normalized.executiveSummary = [
+    formatExecutiveDecisionBrief(buildPlanExecutiveDecisionBrief(context, language), language),
+    buildExecutiveScorecard(context, language),
+  ].join("\n\n");
   normalized.swotAnalysis =
     language === "English"
       ? buildCanonicalSwot(context, parsed)
@@ -2464,8 +2594,15 @@ function normalizeFullPlanReport(
     reportLabel(language, "Validation Intelligence", "Doğrulama Zekası"),
     [formatValidationIntelligenceSummary(context, language)]
   );
+  // Sources become invisible: the model's own raw citation list is
+  // compressed to an Evidence Summary (category + count) before any
+  // intelligence block is appended. Full per-source detail is not
+  // discarded -- it still reaches analyzeReportSourceIntelligence below via
+  // the pre-compression text captured here, and remains available through
+  // report.metadata for anyone who explicitly requests source detail.
+  const rawSourcesAssumptions = cleanInternalSourceFallbacks(normalized.sourcesAssumptions, language);
   normalized.sourcesAssumptions = appendIntelligenceBlock(
-    cleanInternalSourceFallbacks(normalized.sourcesAssumptions, language),
+    buildEvidenceSummary(rawSourcesAssumptions, language),
     reportLabel(language, "Source Intelligence", "Source Intelligence"),
     [formatSourceIntelligenceSummary(context, language)]
   );
@@ -2490,6 +2627,14 @@ function normalizeFullPlanReport(
     );
   }
 
+  // Eliminate filler: strip generic AI hedge sentences and exact-duplicate
+  // sentences from every field. Runs after every content-adding pass above
+  // and before dedup, so it can't strip a sentence dedup would still want
+  // to compare against, and can't be undone by a later append.
+  for (const field of planFields) {
+    normalized[field] = stripFillerAndDuplicateSentences(normalized[field]);
+  }
+
   const deduped = dedupeReportParagraphsAcrossSections(normalized, {
     language,
     sectionLabels: planFieldLabels[language],
@@ -2501,15 +2646,16 @@ function normalizeFullPlanReport(
     deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${confidenceRollup}`;
   }
 
-  // Read-only: analyzes the existing sourcesAssumptions text without
-  // mutating it, so the PDF's own citation parser (which runs on that
-  // field separately) is completely unaffected. Only the trust-tier
-  // name overview goes into executiveSummary -- full per-source detail
-  // is never written to the client-facing report.metadata; it only
+  // Reads the PRE-compression raw source text (captured above, before
+  // buildEvidenceSummary replaced the visible field with a category+count
+  // summary) so full per-source detail is still computed even though the
+  // rendered sourcesAssumptions field no longer exposes it. Only the
+  // trust-tier name overview goes into executiveSummary -- full per-source
+  // detail is never written to the client-facing report.metadata; it only
   // reaches recordAiUsage's internal billing/usage-log metadata via
   // flattenReportMetadataForUsage (see createReportMetadataContext in
   // report-engine/metadata.ts).
-  const sourceIntelligenceRecords = analyzeReportSourceIntelligence(deduped.sourcesAssumptions);
+  const sourceIntelligenceRecords = analyzeReportSourceIntelligence(rawSourcesAssumptions);
   const sourceReliabilityOverview = buildSourceReliabilityOverview(sourceIntelligenceRecords, language);
   if (sourceReliabilityOverview) {
     deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${sourceReliabilityOverview}`;
@@ -2549,6 +2695,14 @@ function normalizeFullPlanReport(
   // report-specific templates (e.g. a "Market Overview" or "Regional
   // Analysis" section heading) leaking in the other direction.
   assertReportIsolation("business_plan", deduped);
+
+  // Quality Gate: fail generation instead of silently returning a report
+  // that dumps information rather than helping a founder/investor decide.
+  assertExecutiveQualityGate({
+    sections: deduped,
+    firstField: "executiveSummary",
+    sourceFields: ["sourcesAssumptions"],
+  });
 
   return deduped;
 }
@@ -4548,7 +4702,7 @@ async function generateSpecializedDomainReport({
       if (domain === "legal" && !cachedResearch) {
         throw new Error("Cached legal report is missing its research provenance.");
       }
-      const cachedReport = parseDomainAnalysisReport(cached.responseText);
+      const cachedReport = parseDomainAnalysisReport(cached.responseText, responseLanguage);
       if (cachedResearch) {
         validateDomainResearchQuality({
           report: cachedReport,
@@ -4632,7 +4786,7 @@ async function generateSpecializedDomainReport({
 
   if (cached && !isReportGenerationFailureText(cached.responseText)) {
     try {
-      const cachedReport = parseDomainAnalysisReport(cached.responseText);
+      const cachedReport = parseDomainAnalysisReport(cached.responseText, responseLanguage);
       validateDomainResearchQuality({
         report: cachedReport,
         bundle: domainResearch,
@@ -4752,7 +4906,7 @@ Do not include commentary outside the JSON object.`);
           `OpenAI ${domain} report generation`
         ).finally(() => reportAbort.cleanup());
         assertCompletedOpenAiResponse(response);
-        const report = parseDomainAnalysisReport(extractResponseText(response));
+        const report = parseDomainAnalysisReport(extractResponseText(response), responseLanguage);
         validateDomainResearchQualitySafely({
           report,
           bundle: domainResearch,

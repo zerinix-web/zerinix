@@ -104,7 +104,11 @@ test("scorecard and CEO summary remain embedded in existing schemas", () => {
   const planSource = readFileSync("app/lib/report-jobs/plan-executor.ts", "utf8");
   const marketSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
 
-  assert.match(planSource, /normalized\.executiveSummary = buildExecutiveScorecard/);
+  // Prepended by the executive-decision-first redesign with the shared,
+  // report-type-agnostic Executive Recommendation block; buildExecutiveScorecard
+  // remains the second element of the same assignment.
+  assert.match(planSource, /formatExecutiveDecisionBrief\(buildPlanExecutiveDecisionBrief\(context, language\), language\)/);
+  assert.match(planSource, /buildExecutiveScorecard\(context, language\),\s*\n\s*\]\.join\("\\n\\n"\);/);
   assert.match(planSource, /"CEO Summary", "CEO Özeti"/);
   // Market Intelligence's deterministic executive-summary/entry-recommendation
   // synthesis is isolated in its own module rather than living inline in

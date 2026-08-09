@@ -127,6 +127,26 @@ export const insightLedgerAndTokenBudgetDirectives = [
   "Use at least 20% fewer output tokens than a repetitive draft by deleting restatement and filler only. Preserve evidence, citations, calculations, decisions, and unique analysis.",
 ];
 
+// Genuinely universal across every report type: tone, filler elimination,
+// citation/evidence policy, and the "every section answers a question"
+// structural rule. Names no report-specific concept (no founder, no
+// Roadmap, no market-entry-specific vocabulary) -- write like a senior
+// strategy consultant, not an AI research log. A deterministic
+// post-processing pass (report-isolation-validator.ts, executive-quality-gate.ts,
+// filler-detection.ts, evidence-summary.ts) enforces the hard versions of
+// several of these as a safety net; this directive set is the first line
+// of defense so the model produces less to strip in the first place.
+export function buildExecutiveConsultingStyleDirectives() {
+  return [
+    "Write like a senior strategy consultant delivering a decision memo, not an AI answering a question. Prefer the words Recommendation, Evidence, Reasoning, Decision, Trade-offs, and Execution over hedge language.",
+    "Never open a sentence with 'According to', 'It depends', 'There are many', 'As an AI', 'It is important to note', 'In conclusion', or 'In today's market'. State the conclusion, then the evidence behind it.",
+    "Every section must exist to answer one specific executive question implied by its label (e.g. a market-attractiveness section answers 'Is this market attractive?'; a risk section answers 'What can make this fail?'; a financial section answers 'How much capital is required and when does it pay back?'). Open the section with that answer in the first sentence. If a section would only restate facts without answering its own question, compress it to the minimum that does.",
+    "Do not enumerate raw source URLs, domains, or evidence-registry IDs inside any analytical section. Reference evidence by category and confidence only (e.g. 'confirmed by two independent government filings'); the sources field is the only place a citation list belongs, and even there it must stay a categorized summary, not a page of links.",
+    "Every paragraph must change what the reader would decide or how confident they should be. Delete a paragraph instead of writing it if it only restates the section title, defines a common term, or repeats a fact already established elsewhere in the report.",
+    "Whenever a section states financial figures, lead with the compact figures themselves (Investment, Revenue, Costs, Gross Margin, ROI, Payback, and Worst/Expected/Best Case) before any prose explanation of how they were derived.",
+  ];
+}
+
 // Business Idea Validation-only, enforced at the type level (see
 // buildDecisionSupportDirectives above for the same rationale): this
 // directive set names Roadmap and "capital decision" unconditionally,

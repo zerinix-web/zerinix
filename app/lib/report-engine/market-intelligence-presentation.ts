@@ -1,6 +1,7 @@
 import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
 import type { MarketResearchCoverage } from "@/app/lib/ai/market-research-coverage";
 import type { MarketReportField } from "@/app/lib/report-engine/prompts/market";
+import type { ExecutiveDecisionBrief, ExecutiveDecisionCode } from "@/app/lib/report-engine/executive-decision-brief";
 
 // Market Intelligence's OWN executive-summary / entry-recommendation
 // synthesis. Deliberately has no dependency on AiFinancialModelContext,
@@ -147,6 +148,26 @@ function howToEnter(sections: MarketSections, language: ResponseLanguage) {
       "el enfoque de entrada detallado en las recomendaciones estratégicas"
     )
   );
+}
+
+function topSubstantiveLines(content: string, max: number) {
+  const lines = (content || "")
+    .split("\n")
+    .map((item) => item.replace(/^[-*•]\s*/, "").replace(/^#{1,6}\s*/, "").trim())
+    .filter((item) => item.length > 24 && !/^[A-Z0-9 /&-]{2,40}:?$/.test(item))
+    .map((item) => item.replace(/\*\*/g, "").trim());
+
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const line of lines) {
+    const key = line.toLowerCase().slice(0, 48);
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(line);
+    }
+  }
+
+  return deduped.slice(0, max);
 }
 
 function keyFindings(sections: MarketSections) {
@@ -349,4 +370,42 @@ export function buildMarketEntryRecommendation(
       `- Cómo: ${how}.`
     ),
   ].join("\n");
+}
+
+// Maps ENTER/MONITOR/AVOID onto the shared, report-type-agnostic Executive
+// Recommendation vocabulary for the mandatory opening block. MarketEntryDecision
+// stays the authoritative decision everywhere else in this module (the
+// scorecard-style helpers above) -- this is a pure presentation mapping for
+// the opening block only.
+export function buildMarketExecutiveDecisionBrief(
+  sections: MarketSections,
+  language: ResponseLanguage,
+  coverage: MarketResearchCoverage
+): ExecutiveDecisionBrief {
+  const { confidence, decision } = assessMarketEntryConfidence(coverage);
+  const code: ExecutiveDecisionCode =
+    decision === "ENTER" ? "GO" : decision === "MONITOR" ? "WAIT" : "NO_GO";
+  const localizedDecision = localizeMarketEntryDecision(decision, language);
+
+  const shortAnswer = marketText(
+    language,
+    `${localizedDecision} this market, prioritizing ${topMarketDriver(sections, language)}.`,
+    `Bu pazara ${localizedDecision.toLowerCase()} kararı verin; öncelik ${topMarketDriver(sections, language)} olsun.`,
+    `${localizedDecision} in diesen Markt, mit Priorität auf ${topMarketDriver(sections, language)}.`,
+    `${localizedDecision} sur ce marché, en priorisant ${topMarketDriver(sections, language)}.`,
+    `${localizedDecision} en este mercado, priorizando ${topMarketDriver(sections, language)}.`
+  );
+
+  const fallbackReason = biggestOpportunity(sections, language);
+  const fallbackRisk = biggestRisk(sections, language);
+  const topReasons = topSubstantiveLines(sections.opportunities || "", 3);
+  const topRisks = topSubstantiveLines(sections.threats || "", 3);
+
+  return {
+    shortAnswer,
+    decision: code,
+    confidence,
+    topReasons: topReasons.length ? topReasons : [fallbackReason],
+    topRisks: topRisks.length ? topRisks : [fallbackRisk],
+  };
 }

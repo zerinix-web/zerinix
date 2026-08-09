@@ -235,9 +235,14 @@ const marketSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
 const metadataSource = readFileSync("app/lib/report-engine/metadata.ts", "utf8");
 
 test("plan-executor.ts and market-analysis route.ts wire the Source Reliability Overview into Executive Summary only", () => {
-  assert.match(planSource, /analyzeReportSourceIntelligence\(deduped\.sourcesAssumptions\)/);
+  // The executive-decision-first redesign compresses the visible
+  // sourcesAssumptions/sources field to an Evidence Summary (category +
+  // count, no raw citations) before this point, so per-source detail is
+  // now read from the captured PRE-compression raw text instead -- the
+  // rendered field alone no longer carries enough detail to analyze.
+  assert.match(planSource, /analyzeReportSourceIntelligence\(rawSourcesAssumptions\)/);
   assert.match(planSource, /buildSourceReliabilityOverview/);
-  assert.match(marketSource, /analyzeReportSourceIntelligence\(deduped\.sources\)/);
+  assert.match(marketSource, /analyzeReportSourceIntelligence\(rawSources\)/);
   assert.match(marketSource, /buildSourceReliabilityOverview/);
 });
 
