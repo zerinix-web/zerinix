@@ -29,12 +29,45 @@ const fillerSentencePatterns: RegExp[] = [
   /^as we (?:can see|have seen|discussed)\b/i,
 ];
 
-function splitIntoSentences(content: string) {
-  return (content || "")
-    .split(/\n+/)
-    .flatMap((line) => line.split(/(?<=[.!?])\s+/))
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
+// The pipeline appends a per-section "Evidence & Confidence" block
+// (report-evidence-confidence.ts's formatEvidenceConfidenceBlock) after
+// EVERY major section. It is a fixed, cross-language template of short
+// field labels (Evidence Quality, Confidence Score, Primary Evidence
+// Type(s), Missing Evidence, a validation recommendation) -- when two
+// sections happen to land on the same evidence quality/confidence value,
+// their blocks are byte-for-byte identical, which is expected (the same
+// way two table rows sharing a value aren't "duplicate prose"), not
+// generic filler. Treating this narrative-quality check as blind to
+// where a line came from would otherwise flag most real, well-formed
+// multi-section reports as filler-heavy for the sole reason that they
+// consistently label their own evidence quality.
+const evidenceConfidenceBlockHeadingPattern =
+  /^(?:evidence & confidence|kanıt ve güven|evidenz & konfidenz|preuves et confiance|evidencia y confianza)$/i;
+
+// Marks every line that belongs to one of these blocks (the heading
+// itself through the following blank-line boundary, matching how
+// formatEvidenceConfidenceBlock's own lines are always joined with "\n"
+// and the block itself is appended after a blank line separator).
+function findStructuralBlockLines(content: string) {
+  const lines = (content || "").split("\n");
+  const structural = new Set<number>();
+  let inBlock = false;
+
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      inBlock = false;
+      return;
+    }
+    if (evidenceConfidenceBlockHeadingPattern.test(trimmed)) {
+      inBlock = true;
+    }
+    if (inBlock) {
+      structural.add(index);
+    }
+  });
+
+  return structural;
 }
 
 function stripBulletMarker(sentence: string) {
@@ -57,31 +90,32 @@ function normalizeForDuplicateCheck(sentence: string) {
 // filler.
 export function stripFillerAndDuplicateSentences(content: string) {
   const lines = (content || "").split("\n");
+  const structuralBlockLines = findStructuralBlockLines(content);
   const seenSentences = new Set<string>();
   const keptLines: string[] = [];
 
-  for (const line of lines) {
+  lines.forEach((line, index) => {
     const trimmed = line.trim();
     if (!trimmed) {
       keptLines.push(line);
-      continue;
+      return;
     }
 
     const normalized = normalizeForDuplicateCheck(trimmed);
-    const isShortStructuralLine = normalized.length < 20;
+    const isShortStructuralLine = normalized.length < 20 || structuralBlockLines.has(index);
 
     if (!isShortStructuralLine) {
       if (isFillerSentence(trimmed)) {
-        continue;
+        return;
       }
       if (seenSentences.has(normalized)) {
-        continue;
+        return;
       }
       seenSentences.add(normalized);
     }
 
     keptLines.push(line);
-  }
+  });
 
   return keptLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -92,9 +126,15 @@ export function stripFillerAndDuplicateSentences(content: string) {
 // stripFillerAndDuplicateSentences so the gate can measure filler even on
 // content that hasn't been through that cleanup step yet.
 export function computeFillerRatio(content: string) {
-  const sentences = splitIntoSentences(content).filter(
-    (sentence) => normalizeForDuplicateCheck(sentence).length >= 20
-  );
+  const structuralBlockLines = findStructuralBlockLines(content);
+  const sentences = (content || "")
+    .split("\n")
+    .flatMap((line, index) =>
+      structuralBlockLines.has(index)
+        ? []
+        : line.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim())
+    )
+    .filter((sentence) => sentence && normalizeForDuplicateCheck(sentence).length >= 20);
 
   if (sentences.length === 0) {
     return 0;

@@ -6,72 +6,40 @@ export type ExecutivePresentationKind =
 
 const majorSectionsByKind: Record<ExecutivePresentationKind, string> = {
   business_plan:
-    "Problem, Solution, Market Opportunity, Competitor Landscape, Business Model, Pricing Strategy, Go-to-Market, Financial Dashboard, Risks, and Executive Recommendation",
+    "Problem, Solution, Market Opportunity, Competitor Landscape, Business Model, Pricing Strategy, Go-to-Market, Financial Dashboard, and Risks",
   market_analysis:
     "Market Overview, Market Size, Industry Trends, Competitive Landscape, Opportunities, Threats, Porter's Five Forces, and Strategic Recommendations",
   real_estate:
-    "Ownership and Title, Zoning and Land Use, Comparable Market Evidence, Valuation, Legal and Environmental Risks, Development Potential, Scenarios, and Final Recommendation",
+    "Ownership and Title, Zoning and Land Use, Comparable Market Evidence, Valuation, Legal and Environmental Risks, Development Potential, and Scenarios",
   specialized_analysis:
-    "Domain Findings, Regulatory and Compliance Findings, Financial Implications, Operational Implications, Risk Analysis, Scenario Analysis, Decision Assessment, and Final Recommendation",
-};
-
-// Report-specific: the Executive Scorecard's field list must not silently
-// carry Business Idea Validation's investor/founder vocabulary
-// ("Investment Readiness", "Estimated Time to Market" -- a product-launch
-// concept) into Market Intelligence or Strategic Advisory just because they
-// share this presentation contract's placement/formatting rules. Only
-// business_plan and real_estate are genuinely investment-decision reports;
-// market_analysis and specialized_analysis get their own, report-native
-// field names.
-const scorecardFieldsByKind: Record<ExecutivePresentationKind, string> = {
-  business_plan:
-    "Overall Recommendation, Confidence Score, Opportunity Level, Risk Level, Estimated Time to Market, Investment Readiness, and Decision Summary",
-  market_analysis:
-    "Overall Recommendation, Confidence Score, Market Attractiveness, Competitive Intensity, Entry Timing, and Decision Summary",
-  real_estate:
-    "Overall Recommendation, Confidence Score, Opportunity Level, Risk Level, Estimated Time to Market, Investment Readiness, and Decision Summary",
-  specialized_analysis:
-    "Overall Recommendation, Confidence Score, Decision Readiness, Risk Level, Resolution Timeline, and Decision Summary",
-};
-
-// Same rationale: "CEO Summary" is investor/founder-executive framing.
-// Market Intelligence and Strategic Advisory get a heading that names what
-// the block actually is instead of who it's nominally addressed to.
-const summaryHeadingByKind: Record<ExecutivePresentationKind, string> = {
-  business_plan: "CEO Summary",
-  market_analysis: "Market Diligence Summary",
-  real_estate: "CEO Summary",
-  specialized_analysis: "Executive Decision Summary",
+    "Domain Findings, Regulatory and Compliance Findings, Financial Implications, Operational Implications, Risk Analysis, and Scenario Analysis",
 };
 
 /**
  * Presentation-only contract. All blocks are embedded inside existing string
  * fields, so report schemas, stream events, API contracts, and PDF inputs stay
  * unchanged.
+ *
+ * Deliberately minimal: the report's single Executive Decision layer (the
+ * first field -- Final Decision, Confidence, Why, Biggest Risks, Biggest
+ * Opportunity, First 90-Day Action Plan) is the ONLY place a decision,
+ * confidence score, or action list belongs. This used to also mandate an
+ * Executive Scorecard, a 4-part "AI Executive Insight" block plus a
+ * Confidence line plus a 3-5 item Next Actions list after EVERY major
+ * section, and a second "CEO Summary" block restating Biggest Opportunity/
+ * Biggest Risk/First 90 Days/Final Recommendation at the end of the report --
+ * three more places stating the same decision, in three more vocabularies,
+ * padding every section with a repeated structural scaffold regardless of
+ * whether that section had anything new to decide. A section earns the
+ * right to a one-line implication by actually changing the decision, not by
+ * existing.
  */
 export function buildExecutivePresentationDirectives(
   kind: ExecutivePresentationKind
 ) {
-  const scorecardPlacement =
-    kind === "business_plan" || kind === "market_analysis"
-      ? "Begin Executive Summary"
-      : "Begin the existing executive/final-recommendation presentation";
-  const summaryPlacement =
-    kind === "business_plan"
-      ? "End Sources / Assumptions"
-      : kind === "market_analysis"
-        ? "End Strategic Recommendations, immediately before Sources"
-        : "End Final Recommendation";
-  const summaryHeading = summaryHeadingByKind[kind];
-
   return [
-    `${scorecardPlacement} with an Executive Scorecard containing exactly: ${scorecardFieldsByKind[kind]}. Keep it scannable in under 30 seconds.`,
-    `Treat these as major sections: ${majorSectionsByKind[kind]}. End each with one compact AI Executive Insight block containing Key Insight, Why It Matters, Recommended Executive Action, and Expected Business Impact. The block must synthesize the section's new implication instead of repeating its prose.`,
-    "After each major-section insight, include Confidence: High, Medium, or Low plus one sentence tied to evidence coverage and unresolved gaps.",
-    "After each major section, include Next Actions with 3-5 concrete actions that name an owner or operating object, an action, and a measurable proof point or decision gate.",
-    "Classify material claims with [Verified], [Estimated], or [Assumption]. If a specialized domain requires stricter provenance labels, preserve those stricter labels and map their meaning rather than weakening them.",
-    `${summaryPlacement} with a one-page ${summaryHeading} containing exactly: Biggest Opportunity, Biggest Risk, First 90 Days, Critical KPIs, and Final Recommendation. Reuse conclusions by concise reference; do not copy earlier paragraphs.`,
-    `Keep every insight, action, confidence line, scorecard, and ${summaryHeading} inside the existing field word budgets. Replace repetitive summaries and generic advice with these decision blocks; do not increase total report length.`,
+    `Treat these as the sections that matter most for the decision: ${majorSectionsByKind[kind]}. End each with one compact sentence explaining why this section moves the decision -- no heading, no Insight block, no Confidence line, and no Next Actions list. Confidence and next actions live only in the report's single Executive Decision layer.`,
+    "Reserve [Verified]/[Estimated]/[Assumption] labels for the handful of numbers that actually drive the decision (market size, investment ask, ROI, timeline). Do not label ordinary prose, and never repeat the same label pattern on every line.",
   ];
 }
 
@@ -104,10 +72,9 @@ const businessPlanDecisionSupportDirectives = [
   "Confidence must be decomposed where relevant into Market, Competition, Financial, Execution, and Product confidence. Explain the weighted logic using report findings; do not present a single unexplained score.",
   "Competitor analysis must name only credible competitors or substitutes available from the input/model context. For each important competitor, include pricing, target customer, funding, employee size, strengths, weaknesses, positioning, and how the analyzed company can outperform when available; omit unknown fields instead of inventing them.",
   "Roadmap/action sections must be written as an AI Action Plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Every action needs expected business impact.",
-  "Maintain executive continuity without repetition: Executive Summary states the verdict and evidence gap; Executive Recommendation converts them into one decision and next action; Roadmap begins with that action and sequences new proof gates instead of restating the rationale.",
+  "Maintain executive continuity without repetition: Executive Summary states the verdict, the evidence gap, and the first 90 days of action; the Roadmap sequences new proof gates beyond that window instead of restating the rationale.",
   "Treat the business model, ICP, pricing, unit economics, roadmap, and recommendation as one linked operating plan.",
-  "Do not let Executive Summary repeat Business Model, SWOT, Roadmap, or Financial Dashboard; it should summarize the investability decision only.",
-  "End the final available report section with a board-level CEO Brief: maximum 10 concise bullets, each directly supported by findings already in the report; no new research or unsupported claims.",
+  "Executive Summary is the report's only decision layer: state the Final Decision, Confidence, Why, Biggest Risks, Biggest Opportunity, and First 90-Day Action Plan there and nowhere else. Do not let it repeat Business Model, SWOT, Roadmap, or Financial Dashboard prose.",
 ];
 
 // Business Idea Validation-only, enforced at the type level: market.ts and
@@ -140,18 +107,20 @@ export function buildExecutiveConsultingStyleDirectives() {
   return [
     "Write like a senior strategy consultant delivering a decision memo, not an AI answering a question. Prefer the words Recommendation, Evidence, Reasoning, Decision, Trade-offs, and Execution over hedge language.",
     "Never open a sentence with 'According to', 'It depends', 'There are many', 'As an AI', 'It is important to note', 'In conclusion', or 'In today's market'. State the conclusion, then the evidence behind it.",
-    "Every section must exist to answer one specific executive question implied by its label (e.g. a market-attractiveness section answers 'Is this market attractive?'; a risk section answers 'What can make this fail?'; a financial section answers 'How much capital is required and when does it pay back?'). Open the section with that answer in the first sentence. If a section would only restate facts without answering its own question, compress it to the minimum that does.",
+    "Every section must exist to answer one specific executive question implied by its label (e.g. a market-attractiveness section answers 'Is this market attractive?'; a risk section answers 'What can make this fail?'; a financial section answers 'How much capital is required and when does it pay back?'). Open the section with that answer in the first sentence. If a section would only restate facts without answering its own question, compress it to the minimum that does. If a section cannot answer a real business question, it should not exist.",
     "Do not enumerate raw source URLs, domains, or evidence-registry IDs inside any analytical section. Reference evidence by category and confidence only (e.g. 'confirmed by two independent government filings'); the sources field is the only place a citation list belongs, and even there it must stay a categorized summary, not a page of links.",
     "Every paragraph must change what the reader would decide or how confident they should be. Delete a paragraph instead of writing it if it only restates the section title, defines a common term, or repeats a fact already established elsewhere in the report.",
     "Whenever a section states financial figures, lead with the compact figures themselves (Investment, Revenue, Costs, Gross Margin, ROI, Payback, and Worst/Expected/Best Case) before any prose explanation of how they were derived.",
+    "Only one field in the entire report states a decision, a confidence score, or an action plan -- the Executive Decision layer at the start of the report. Every other section supports that decision with evidence and analysis; none of them restate the verdict, the confidence percentage, or the action list in any form. Zero internal contradiction is mandatory: if the verdict is to avoid or walk away, no other section may recommend piloting, scaling, entering, or proceeding -- rewrite or drop any sentence that would.",
+    "Write the way a senior partner opens a Monday deal-review discussion: state the call, defend it in the strongest few moves, and name what would change your mind. Never write like an AI summarizing its own research process.",
   ];
 }
 
 // Business Idea Validation-only, enforced at the type level (see
 // buildDecisionSupportDirectives above for the same rationale): this
-// directive set names Roadmap and "capital decision" unconditionally,
-// which are Business Plan-specific concepts. market.ts and
-// domain-analysis.ts build their own full-report structure directives.
+// directive set names Roadmap unconditionally, a Business Plan-specific
+// concept. market.ts and domain-analysis.ts build their own full-report
+// structure directives.
 export function buildFullReportStructureDirectives(kind: "business_plan") {
   void kind;
   return [
@@ -159,8 +128,8 @@ export function buildFullReportStructureDirectives(kind: "business_plan") {
     "Every section must add one unique business insight; if a point was made earlier, only reference the implication instead of repeating the paragraph.",
     "Silently maintain a paragraph ledger while drafting. Before returning JSON, remove any sentence or paragraph that merely restates another section without adding a section-owned implication.",
     "A recommendation is specific only when it names the analyzed business context and defines who acts, what is tested or changed, and which proof point determines the next decision.",
-    "Executive Summary, Executive Recommendation, and Roadmap must share one decision, one primary risk, and one next action, but each must express only its own layer: verdict, decision logic, and execution sequence.",
-    "SWOT, Porter, Financials, Risks, Executive Recommendation, and Roadmap must not share prose. Financial sections own numbers; Risks owns failure mechanisms; Recommendation owns the capital decision; Roadmap owns timing and proof gates.",
+    "Executive Summary and Roadmap must share one decision, one primary risk, and one next action, but each must express only its own layer: Executive Summary owns the verdict, the confidence, and the first 90 days; Roadmap sequences proof gates beyond that window without restating the rationale.",
+    "SWOT, Porter, Financials, Risks, and Roadmap must not share prose. Financial sections own numbers; Risks owns failure mechanisms; Roadmap owns timing and proof gates beyond the first 90 days. Executive Summary alone owns the capital decision.",
     "Prefer deterministic labels for structured sections: SWOT groups, Worst/Base/Best scenarios, metric names, source fields, and recommendation fields.",
     "Keep the report ordered as an investor business plan: decision, pain, product, customer, market, competition, model, sizing, strategy, economics, risks, execution, sources.",
   ];

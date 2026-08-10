@@ -264,6 +264,69 @@ test("the market fallback is honest (never a fabricated market fact) and covers 
   assert.match(marketAnalysisRouteSource, /validation gap, not a market finding/i);
 });
 
+// --- Regression, superseding the fix directly above: giving the
+// whole-generation catch-all a never-empty placeholder report ("fix" #1)
+// only swapped one bad symptom for another. It masked the real bug
+// (max_output_tokens was too low for this prompt's own directives,
+// truncating the model's JSON mid-string on ordinary runs -- see
+// FULL_REPORT_MAX_OUTPUT_TOKENS below) by making every affected report
+// come back "successful" with every section replaced by generic
+// "[Estimated] ... could not be generated..." text. A report must only be
+// returned when it was actually built from the model's real output; a
+// whole-report failure must surface as a real, fatal error (matching
+// plan-executor.ts's own serializePlanStreamError convention) instead of a
+// full placeholder report dressed up as a success. createFallbackMarketReport
+// is removed entirely -- there is no longer a code path that can silently
+// substitute a fake report for a real one. ---
+
+test("a whole-report generation failure fails loudly instead of returning a placeholder report", () => {
+  assert.doesNotMatch(marketAnalysisRouteSource, /function createFallbackMarketReport/);
+  assert.doesNotMatch(marketAnalysisRouteSource, /createFallbackMarketReport\(/);
+  assert.match(
+    marketAnalysisRouteSource,
+    /enqueue\(\s*\n\s*serializeReportStreamChunk\(\{\s*\n\s*error: errorMessage,\s*\n\s*errorStage: "market_report_generation",\s*\n\s*fatal: true,\s*\n\s*\}\)\s*\n\s*\);/
+  );
+});
+
+test("the whole-report failure path never emits the per-field placeholder copy", () => {
+  const catchAllBlock = marketAnalysisRouteSource.slice(
+    marketAnalysisRouteSource.indexOf("} catch (error) {\n            const configurationError ="),
+    marketAnalysisRouteSource.indexOf("} finally {\n            controller.close();")
+  );
+  assert.ok(catchAllBlock.length > 200, "expected to locate the full-report catch-all block");
+  assert.doesNotMatch(catchAllBlock, /\[Estimated\]/);
+  assert.doesNotMatch(catchAllBlock, /\[Tahmini\]/);
+  assert.doesNotMatch(catchAllBlock, /could not be generated with sufficient evidence/);
+  assert.doesNotMatch(catchAllBlock, /createMarketFieldFallback/);
+});
+
+// --- Regression: a real, live generation for this exact prompt/schema
+// (18 fields, 8 of them carrying a full Executive Insight + Confidence +
+// Next Actions block) completed at ~6,540-8,445 output tokens -- the old
+// 6,500-token ceiling clipped the model's JSON mid-string on a normal run,
+// producing "Unterminated string in JSON" on every subsequent request,
+// which is what fell into the placeholder-report catch-all above. ---
+
+test("the market full-report call budgets enough output tokens for its own directive-driven verbosity", () => {
+  assert.match(
+    marketAnalysisRouteSource,
+    /const FULL_REPORT_MAX_OUTPUT_TOKENS = (\d[\d_]*);/
+  );
+  const [, rawValue] = marketAnalysisRouteSource.match(
+    /const FULL_REPORT_MAX_OUTPUT_TOKENS = (\d[\d_]*);/
+  );
+  const value = Number(rawValue.replace(/_/g, ""));
+  assert.ok(
+    value >= 10_000,
+    `expected a safe margin above the ~8,445 tokens a real completed generation used, got ${value}`
+  );
+  assert.match(
+    marketAnalysisRouteSource,
+    /max_output_tokens: FULL_REPORT_MAX_OUTPUT_TOKENS,/
+  );
+  assert.doesNotMatch(marketAnalysisRouteSource, /max_output_tokens: 6500,/);
+});
+
 test("missing/invalid-field tracking used by the partial-report warning is unchanged", () => {
   // The fallback fix must not weaken or bypass isPartialReportResult's
   // input -- missingFields/invalidFields must still be pushed exactly

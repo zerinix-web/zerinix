@@ -61,6 +61,10 @@ import {
   type ExecutiveDecisionIntelligenceSummary,
 } from "@/app/lib/report-engine/executive-decision-intelligence-presentation";
 import {
+  extractExecutiveDecisionFromText,
+  localizedLabelVariants,
+} from "@/app/lib/report-engine/executive-decision-brief";
+import {
   repairReportLanguageSections,
   resolveMarketPdfLanguage,
   resolveReportLanguage,
@@ -3072,29 +3076,38 @@ export function buildStandardReportPdf({
           return 46;
         }
 
-        if (field === "executiveRecommendation" || normalizedTitle.includes("executive recommendation") || normalizedTitle.includes("yönetici tavsiyesi")) {
-          const selected = report.investmentScore?.recommendation || detectRecommendation(content) || "REVIEW";
-          const decisionLabel = formatDecisionLabel(selected);
+        if (field === "executiveSummary" || normalizedTitle.includes("executive summary") || normalizedTitle.includes("yönetici özeti")) {
+          // The single Executive Decision layer has a known, deterministic
+          // shape -- "Decision: GO (Confidence: 72%)" in English, "Karar:
+          // EVET (Güven: 72%)" in Turkish, etc. -- read via a locale-agnostic
+          // extractor rather than an English-only regex, which would
+          // silently fail on every non-English report and fall back to a
+          // placeholder the user should never see.
+          const decisionMatch = extractExecutiveDecisionFromText(content);
+          const decisionLabel =
+            decisionMatch?.token.toUpperCase() ||
+            formatDecisionLabel(report.investmentScore?.recommendation || detectRecommendation(content) || "") ||
+            "—";
           const confidence =
-            report.investmentScore?.confidence ??
             extractConfidence(content) ??
+            report.investmentScore?.confidence ??
             extractConfidence(fullReportContent) ??
             extractScore(fullReportContent, "Investment Score");
-          const investmentRecommendation =
-            extractMetricValue(content, "Investment Recommendation") ||
-            extractMetricValue(content, "Recommendation") ||
-            selected;
-          const mainRisk = extractMetricValue(content, "Main Risk");
-          const nextAction =
-            extractMetricValue(content, "Next Critical Action") ||
-            extractMetricValue(content, "Next Action");
+          const biggestOpportunityLabels = localizedLabelVariants("biggestOpportunity");
+          const biggestRisksLabels = localizedLabelVariants("biggestRisks");
+          const missingInformationLabels = localizedLabelVariants("missingInformation");
+          const first90DaysLabels = localizedLabelVariants("first90Days");
+          const biggestOpportunity = extractMetricValueFromAliases(content, biggestOpportunityLabels);
+          const biggestRisk = extractAliasedSectionSnippet(content, biggestRisksLabels, biggestOpportunityLabels);
+          const missingInformation = extractAliasedSectionSnippet(content, missingInformationLabels, first90DaysLabels);
+          const nextAction = extractAliasedSectionSnippet(content, first90DaysLabels, []);
 
           pdf.setFillColor("#ccfbf1");
           pdf.setDrawColor("#5eead4");
           pdf.roundedRect(bodyX, visualY, 52, 26, 5, 5, "FD");
           pdf.setFontSize(5.8);
           pdf.setTextColor("#134e4a");
-          pdf.text(localizePdfPresentationLabel("RECOMMENDATION", pdfLocale), bodyX + 5, visualY + 6);
+          pdf.text(localizePdfPresentationLabel("DECISION", pdfLocale), bodyX + 5, visualY + 6);
           pdf.setFontSize(13);
           pdf.setTextColor("#000000");
           drawSingleLine(decisionLabel, bodyX + 5, visualY + 16, 42, 11, 6.5);
@@ -3112,11 +3125,29 @@ export function buildStandardReportPdf({
             "F"
           );
 
+          const isTurkishPdf = pdfLocale === "tr";
           const recItems = [
             ["Confidence", confidence === null ? "—" : `${confidence}%`],
-            ["Investment Recommendation", investmentRecommendation || "—"],
-            ["Main Risk", mainRisk || extractKeywordInsight(fullReportContent, ["risk", "threat"]) || "Primary risk is detailed in the risk analysis"],
-            ["Next Action", nextAction || extractKeywordInsight(fullReportContent, ["next action", "critical action", "validate"]) || "Validate the primary investment thesis"],
+            ["Biggest Opportunity", biggestOpportunity || "—"],
+            [
+              "Biggest Risk",
+              biggestRisk ||
+                extractKeywordInsight(fullReportContent, ["risk", "threat"]) ||
+                (isTurkishPdf ? "Ana risk, risk analizi bölümünde detaylandırılmıştır" : "Primary risk is detailed in the risk analysis"),
+            ],
+            [
+              "Missing Information",
+              missingInformation ||
+                (isTurkishPdf
+                  ? "Kararı değiştirecek nitelikte bir veri eksikliği belirtilmedi"
+                  : "No decision-changing data gap was flagged"),
+            ],
+            [
+              "Next Action",
+              nextAction ||
+                extractKeywordInsight(fullReportContent, ["next action", "critical action", "validate"]) ||
+                (isTurkishPdf ? "İlk 90 günlük aksiyon planına bakın" : "See the First 90-Day Action Plan"),
+            ],
           ];
 
           recItems.forEach(([label, value], index) => {
@@ -3135,7 +3166,7 @@ export function buildStandardReportPdf({
             drawSingleLine(localizePdfPresentationText(value, pdfLocale), itemX + 2, itemY + 7.8, itemWidth - 4, 6);
           });
 
-          return 48;
+          return 65;
         }
 
         if (normalizedTitle.includes("competitor")) {
@@ -3164,7 +3195,7 @@ export function buildStandardReportPdf({
           if (rows.length === 0) {
             pdf.setFontSize(6.2);
             pdf.setTextColor("#a1a1aa");
-            pdf.text(localizePdfPresentationText("VALIDATION REQUIRED: competitor records were not structured enough for table rendering.", pdfLocale), bodyX + 3, visualY + 14, {
+            pdf.text(localizePdfPresentationText("See the Competitive Landscape section for full competitor detail.", pdfLocale), bodyX + 3, visualY + 14, {
               maxWidth: bodyWidth - 6,
             });
             return headerHeight + rowHeight + 4;

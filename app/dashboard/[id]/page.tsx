@@ -49,6 +49,7 @@ import type {
   ReportValidationIntelligence,
 } from "@/app/lib/report-investment-score";
 import { readExecutiveDecisionIntelligenceSummary } from "@/app/lib/report-engine/executive-decision-intelligence-presentation";
+import { extractExecutiveDecisionFromText } from "@/app/lib/report-engine/executive-decision-brief";
 import {
   detectPdfPresentationLocale,
   localizePdfPresentationLabel,
@@ -522,15 +523,21 @@ function getDecisionSummaryItems(
   sections: Array<{ field?: string; title: string; content: string }>
 ) {
   const fullContent = sections.map((section) => `${section.title}\n${section.content}`).join("\n\n");
-  const executiveRecommendation = getSectionContentByFieldOrTitle(sections, [
-    "executiverecommendation",
-    "executive recommendation",
-    "recommendation",
-  ]);
   const executiveSummary = getSectionContentByFieldOrTitle(sections, [
     "executivesummary",
     "executive summary",
   ]);
+  // Legacy reports (generated before the single Executive Decision layer)
+  // carried a dedicated "Executive Recommendation" field; new reports
+  // merge that content into Executive Summary. Trying the old field name
+  // first, then falling back to the merged field, renders both
+  // generations correctly from the same code path.
+  const executiveRecommendation =
+    getSectionContentByFieldOrTitle(sections, [
+      "executiverecommendation",
+      "executive recommendation",
+      "recommendation",
+    ]) || executiveSummary;
   const marketOpportunity = getSectionContentByFieldOrTitle(sections, [
     "marketopportunity",
     "market opportunity",
@@ -538,11 +545,19 @@ function getDecisionSummaryItems(
     "market overview",
   ]);
   const risks = getSectionContentByFieldOrTitle(sections, ["risk", "threat"]);
+  // The new Executive Decision layer's own deterministic "Decision: TOKEN"
+  // line is read via a locale-agnostic extractor first (it matches
+  // English GO/CONDITIONAL GO/NO-GO, Turkish EVET/KOŞULLU EVET/HAYIR, and
+  // the German/French/Spanish equivalents alike); detectRecommendation's
+  // legacy PASS/HOLD/VALIDATE/REJECT heuristic is only a fallback for
+  // reports generated before this format existed.
+  const dashboardLocale = detectPdfPresentationLocale(fullContent);
   const decisionSignal =
+    extractExecutiveDecisionFromText(executiveSummary)?.token.toUpperCase() ||
     detectRecommendation(`${executiveRecommendation}\n${executiveSummary}\n${fullContent}`) ||
     extractMetricValue(executiveRecommendation, "Decision") ||
     extractMetricValue(executiveRecommendation, "Recommendation") ||
-    "Review required";
+    "—";
   const nextStep =
     extractMetricValue(executiveRecommendation, "Next Critical Action") ||
     extractMetricValue(executiveRecommendation, "Next Action") ||
@@ -581,14 +596,16 @@ function getDecisionSummaryItems(
   return [
     {
       label: "Decision Signal",
-      value: cleanDecisionSummaryText(decisionSignal, "Review required"),
+      value: cleanDecisionSummaryText(decisionSignal, dashboardLocale === "tr" ? "Karar bekleniyor" : "Decision pending"),
       detail: cleanDecisionSummaryText(
         extractMetricValue(executiveRecommendation, "Decision Rationale") ||
           extractMetricValue(executiveRecommendation, "Recommendation") ||
           extractMetricValue(executiveRecommendation, "Summary") ||
           executiveRecommendation ||
           executiveSummary,
-        "Review the decision evidence before moving forward."
+        dashboardLocale === "tr"
+          ? "İlerlemeden önce karar gerekçesini inceleyin."
+          : "Review the decision evidence before moving forward."
       ),
       icon: Sparkles,
       evidence: getDashboardMetricEvidence("Decision Signal", decisionSignal, `${executiveRecommendation}\n${executiveSummary}`),
@@ -602,7 +619,7 @@ function getDecisionSummaryItems(
     },
     {
       label: "Decision Confidence",
-      value: cleanDecisionSummaryText(decisionConfidence, "Review required"),
+      value: cleanDecisionSummaryText(decisionConfidence, "—"),
       detail: "Confidence reflects market, model, financial, validation, and execution drivers.",
       icon: Gauge,
       evidence: getDashboardMetricEvidence("Decision Confidence", decisionConfidence, executiveRecommendation || fullContent),
@@ -644,7 +661,7 @@ function getReportIntelligenceOverview(
   const quality =
     extractMetricValue(intelligenceContent, "Report Quality") ||
     extractMetricValue(intelligenceContent, "Rapor Kalitesi") ||
-    "Review required";
+    "—";
   const qualityScore =
     extractMetricValue(intelligenceContent, "Quality Score") ||
     extractMetricValue(intelligenceContent, "Kalite Skoru") ||
@@ -661,7 +678,7 @@ function getReportIntelligenceOverview(
   ]);
 
   return {
-    quality: cleanDecisionSummaryText(quality, "Review required"),
+    quality: cleanDecisionSummaryText(quality, "—"),
     qualityScore: cleanDecisionSummaryText(qualityScore, "Quality score requires review."),
     strengths: cleanDecisionSummaryText(strengths, "Strengths require validation."),
     risks: cleanDecisionSummaryText(risks || warnings, "Risks require review."),
@@ -803,7 +820,7 @@ function ExecutiveSummaryVisual({
   content: string;
   investmentScore?: ReportInvestmentScore;
 }) {
-  if (!title.toLowerCase().includes("executive summary")) {
+  if (!title.toLowerCase().includes("executive summary") && !title.toLowerCase().includes("yönetici özeti")) {
     return null;
   }
 
@@ -811,7 +828,11 @@ function ExecutiveSummaryVisual({
     investmentScore?.totalScore ??
     extractScore(content, "AI Investment Score") ??
     extractConfidence(content);
-  const recommendation = investmentScore?.recommendation || detectRecommendation(content) || "REVIEW";
+  const recommendation =
+    extractExecutiveDecisionFromText(content)?.token.toUpperCase() ||
+    investmentScore?.recommendation ||
+    detectRecommendation(content) ||
+    "—";
   const highlights = getExecutiveHighlights(content);
   const kpis = [
     {
@@ -2745,7 +2766,7 @@ export default async function ReportDetailPage({
                   Decision Snapshot
                 </p>
                 <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
-                  {decisionSignalItem?.value || "Review required"}
+                  {decisionSignalItem?.value || "—"}
                 </h2>
                 <p className="mt-3 text-sm leading-6 text-zinc-300">
                   {decisionSignalItem?.detail || "Review the decision evidence before moving forward."}

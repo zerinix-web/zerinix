@@ -103,26 +103,28 @@ test("the block renders in all 5 supported languages with distinct, non-English 
 const planSource = readFileSync("app/lib/report-jobs/plan-executor.ts", "utf8");
 const marketSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
 
-test("plan-executor.ts wires evidence-confidence blocks into major narrative sections and the executive summary rollup", () => {
-  assert.match(planSource, /appendEvidenceConfidenceToMajorPlanSections/);
-  assert.match(planSource, /buildExecutiveSummaryConfidenceRollup/);
-  assert.match(planSource, /Overall Report Confidence/);
-  assert.match(planSource, /Biggest Unknown/);
-  assert.match(planSource, /Highest Confidence Finding/);
-  assert.match(planSource, /Lowest Confidence Finding/);
-
-  for (const field of ["problem", "solution", "targetCustomer", "marketOpportunity", "risks", "executiveRecommendation"]) {
-    assert.match(planSource, new RegExp(`"${field}"`));
-  }
+// REGRESSION/REDESIGN: the per-section "Evidence & Confidence" block and
+// the executive-summary confidence rollup used to be wired into every
+// major section plus executiveSummary. The executive-decision redesign
+// retires both from customer-facing rendering: the report's single
+// Executive Decision layer is the only place a decision or confidence
+// value belongs, and per-section evidence commentary competed with it
+// for space without adding decision value. The underlying
+// report-evidence-confidence.ts functions still exist (tested above) for
+// any future internal/metadata use; they are just no longer called from
+// the main report pipelines.
+test("plan-executor.ts no longer wires evidence-confidence blocks or a confidence rollup into report content", () => {
+  assert.doesNotMatch(planSource, /appendEvidenceConfidenceToMajorPlanSections/);
+  assert.doesNotMatch(planSource, /buildExecutiveSummaryConfidenceRollup/);
+  assert.doesNotMatch(planSource, /Overall Report Confidence/);
+  assert.doesNotMatch(planSource, /Biggest Unknown/);
 });
 
-test("market-analysis route.ts wires evidence-confidence blocks into major narrative sections and the executive summary rollup", () => {
-  assert.match(marketSource, /appendEvidenceConfidenceToMajorMarketSections/);
-  assert.match(marketSource, /buildMarketExecutiveSummaryConfidenceRollup/);
-  assert.match(marketSource, /Overall Report Confidence/);
-  assert.match(marketSource, /Biggest Unknown/);
-  assert.match(marketSource, /Highest Confidence Finding/);
-  assert.match(marketSource, /Lowest Confidence Finding/);
+test("market-analysis route.ts no longer wires evidence-confidence blocks or a confidence rollup into report content", () => {
+  assert.doesNotMatch(marketSource, /appendEvidenceConfidenceToMajorMarketSections/);
+  assert.doesNotMatch(marketSource, /buildMarketExecutiveSummaryConfidenceRollup/);
+  assert.doesNotMatch(marketSource, /Overall Report Confidence/);
+  assert.doesNotMatch(marketSource, /Biggest Unknown/);
 });
 
 test("neither plan-executor.ts nor market-analysis route.ts changed their report field schemas", () => {

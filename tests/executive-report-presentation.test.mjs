@@ -20,110 +20,70 @@ import {
   domainAnalysisFields,
 } from "../app/lib/report-engine/prompts/domain-analysis.ts";
 
-const requiredScorecardLabels = [
+// REDESIGN: this whole file used to pin down the "decision-grade block"
+// contract -- an Executive Scorecard, a 4-part AI Executive Insight block
+// plus a Confidence line plus a 3-5 item Next Actions list after every
+// major section, and a report-native CEO Summary/Market Diligence
+// Summary/Executive Decision Summary block at the end -- shared by all
+// four full-report families. That contract is retired: it was 2-3 more
+// places restating the same decision the report's single Executive
+// Decision layer (Final Decision, Confidence, Why, Biggest Risks,
+// Biggest Opportunity, First 90-Day Action Plan) already states once, at
+// the start of the report. These tests now confirm that retirement holds
+// for every report kind, not just Business Plan.
+
+const retiredLabels = [
+  "Executive Scorecard",
+  "AI Executive Insight",
   "Overall Recommendation",
-  "Confidence Score",
-  "Opportunity Level",
-  "Risk Level",
-  "Estimated Time to Market",
   "Investment Readiness",
-  "Decision Summary",
+  "CEO Summary",
+  "Market Diligence Summary",
+  "Executive Decision Summary",
 ];
 
-const requiredInsightLabels = [
-  "Key Insight",
-  "Why It Matters",
-  "Recommended Executive Action",
-  "Expected Business Impact",
-];
+test("buildExecutivePresentationDirectives is minimal for every report kind: no scorecard, no per-section Insight/Confidence/Next-Actions block, no end-of-report summary block", () => {
+  for (const kind of ["business_plan", "market_analysis", "real_estate", "specialized_analysis"]) {
+    const contract = buildExecutivePresentationDirectives(kind).join("\n");
 
-const requiredCeoSummaryLabels = [
-  "Biggest Opportunity",
-  "Biggest Risk",
-  "First 90 Days",
-  "Critical KPIs",
-  "Final Recommendation",
-];
+    for (const label of retiredLabels) {
+      assert.doesNotMatch(contract, new RegExp(label), `${kind} must not mandate "${label}"`);
+    }
+    assert.doesNotMatch(contract, /Confidence: High, Medium, or Low/i);
+    assert.doesNotMatch(contract, /3-5 concrete actions/i);
 
-test("executive presentation contract contains every decision-grade block without expanding field budgets", () => {
-  const contract = buildExecutivePresentationDirectives("business_plan").join("\n");
-
-  for (const label of [
-    ...requiredScorecardLabels,
-    ...requiredInsightLabels,
-    ...requiredCeoSummaryLabels,
-  ]) {
-    assert.match(contract, new RegExp(label, "i"));
+    // What should remain: a lightweight, per-major-section implication
+    // sentence and a narrowed evidence-labeling rule -- nothing that
+    // restates a decision, a confidence score, or an action plan.
+    assert.match(contract, /one compact sentence explaining why this section moves the decision/i);
+    assert.match(contract, /\[Verified\].*\[Estimated\].*\[Assumption\]/i);
   }
-
-  assert.match(contract, /Confidence: High, Medium, or Low/i);
-  assert.match(contract, /3-5 concrete actions/i);
-  assert.match(contract, /\[Verified\].*\[Estimated\].*\[Assumption\]/i);
-  assert.match(contract, /inside the existing field word budgets/i);
-  assert.match(contract, /do not increase total report length/i);
 });
 
-test("all full-report families consume the shared executive presentation contract, each with its own report-native summary heading", () => {
-  // CEO Summary is investor/founder-executive framing that belongs to
-  // Business Idea Validation and real estate (both genuine investment
-  // decisions) -- Market Intelligence and Strategic Advisory get their own
-  // report-native heading instead of inheriting it. See
-  // report-quality-directives.ts's summaryHeadingByKind.
-  const reportsAndHeadings = [
-    [buildPlanFullReportInstructions("English"), "CEO Summary"],
-    [buildMarketLanguageInstructions("English"), "Market Diligence Summary"],
-    [buildRealEstateInstructions("English"), "CEO Summary"],
-    [buildDomainAnalysisInstructions("finance", "English"), "Executive Decision Summary"],
+test("no full-report instruction builder mandates the retired Executive Scorecard / AI Executive Insight / end-of-report summary contract", () => {
+  const reports = [
+    buildPlanFullReportInstructions("English"),
+    buildMarketLanguageInstructions("English"),
+    buildRealEstateInstructions("English"),
+    buildDomainAnalysisInstructions("finance", "English"),
   ];
 
-  for (const [instructions, summaryHeading] of reportsAndHeadings) {
-    assert.match(instructions, /Executive Scorecard/);
-    assert.match(instructions, /AI Executive Insight/);
-    assert.match(instructions, /Next Actions/);
-    assert.match(instructions, new RegExp(summaryHeading));
-    assert.match(instructions, /new section-owned analysis|new implication/i);
+  for (const instructions of reports) {
+    for (const label of retiredLabels) {
+      assert.doesNotMatch(instructions, new RegExp(label));
+    }
   }
-
-  // Market Intelligence and Strategic Advisory must never receive the
-  // other reports' summary heading.
-  assert.doesNotMatch(buildMarketLanguageInstructions("English"), /CEO Summary/);
-  assert.doesNotMatch(buildDomainAnalysisInstructions("finance", "English"), /CEO Summary/);
 });
 
-test("scorecard and CEO summary remain embedded in existing schemas", () => {
-  for (const fields of [
-    planFields,
-    marketReportFields,
-    realEstateFields,
-    domainAnalysisFields,
-  ]) {
+test("no report schema declares a dedicated scorecard or CEO-summary field -- the single Executive Decision layer lives inside the existing first field", () => {
+  for (const fields of [planFields, marketReportFields, realEstateFields, domainAnalysisFields]) {
     assert.equal(fields.includes("executiveScorecard"), false);
     assert.equal(fields.includes("ceoSummary"), false);
+    assert.equal(fields.includes("executiveRecommendation"), false);
   }
-
-  const planSource = readFileSync("app/lib/report-jobs/plan-executor.ts", "utf8");
-  const marketSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
-
-  // Prepended by the executive-decision-first redesign with the shared,
-  // report-type-agnostic Executive Recommendation block; buildExecutiveScorecard
-  // remains the second element of the same assignment.
-  assert.match(planSource, /formatExecutiveDecisionBrief\(buildPlanExecutiveDecisionBrief\(context, language\), language\)/);
-  assert.match(planSource, /buildExecutiveScorecard\(context, language\),\s*\n\s*\]\.join\("\\n\\n"\);/);
-  assert.match(planSource, /"CEO Summary", "CEO Özeti"/);
-  // Market Intelligence's deterministic executive-summary/entry-recommendation
-  // synthesis is isolated in its own module rather than living inline in
-  // market-analysis/route.ts, and is built from market-native evidence
-  // coverage, never from Business Idea Validation's investment-score engine.
-  assert.match(marketSource, /buildMarketExecutiveSummary\(/);
-  assert.match(marketSource, /buildMarketEntryRecommendation\(/);
-  assert.match(marketSource, /from "@\/app\/lib\/report-engine\/market-intelligence-presentation"/);
-  assert.doesNotMatch(marketSource, /buildMarketExecutiveScorecard\(/);
-  assert.doesNotMatch(marketSource, /buildMarketCeoSummary\(/);
-  assert.match(planSource, /serializePlanChunk\(field, report\[field\]\)/);
-  assert.match(marketSource, /serializeNormalizedReportChunk\(field, report\[field\]\)/);
 });
 
-test("deterministic executive blocks preserve provenance and calibrated confidence language", () => {
+test("Business Plan and Market Intelligence build their single Executive Decision layer from real, already-computed data, not a per-field bracket-tagged dump", () => {
   const planSource = readFileSync("app/lib/report-jobs/plan-executor.ts", "utf8");
   const marketSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
   const presentationSource = readFileSync(
@@ -131,43 +91,32 @@ test("deterministic executive blocks preserve provenance and calibrated confiden
     "utf8"
   );
 
-  // Business Idea Validation: Bottom Line / Key Findings / Biggest
-  // Opportunity / Biggest Risk / Recommendation, synthesized from real,
-  // already-computed investment-score data rather than a per-field
-  // bracket-tagged data dump. This is the one report type where that
-  // engine is the legitimate source of truth.
-  assert.match(planSource, /Bottom Line:/);
-  assert.match(planSource, /Key Findings:/);
-  assert.match(planSource, /Biggest Opportunity:/);
-  assert.match(planSource, /Biggest Risk:/);
-  assert.match(planSource, /rankInvestmentScoreFindingsByImpact/);
+  // Business Plan: the brief is built from the real investment-score
+  // engine (strengths/topRisks/nextCriticalAction), not invented text.
+  assert.match(planSource, /function buildPlanExecutiveDecisionBrief/);
+  assert.match(planSource, /score\.strengths/);
+  assert.match(planSource, /score\.topRisks/);
+  assert.match(
+    planSource,
+    /const planExecutiveDecisionBrief = buildPlanExecutiveDecisionBrief\(context, language\);\s*\n\s*normalized\.executiveSummary = formatExecutiveDecisionBrief\(planExecutiveDecisionBrief, language\);/
+  );
 
-  // Market Intelligence: same Bottom Line / Key Findings / Biggest
-  // Opportunity / Biggest Risk shape, but isolated in its own module and
-  // synthesized from the report's own market-native sections and evidence
-  // coverage -- never from investmentScore.
-  assert.match(marketSource, /buildMarketExecutiveSummary\(/);
-  assert.doesNotMatch(marketSource, /rankInvestmentScoreFindingsByImpact/);
-  assert.match(presentationSource, /Bottom Line:/);
-  assert.match(presentationSource, /Key Findings:/);
-  assert.match(presentationSource, /Biggest Opportunity:/);
-  assert.match(presentationSource, /Biggest Risk:/);
+  // Market Intelligence: isolated in its own module, built only from the
+  // report's own market-native sections and evidence coverage, never
+  // from Business Idea Validation's investment-score engine.
+  assert.match(presentationSource, /export function buildMarketExecutiveDecisionBrief/);
   assert.doesNotMatch(presentationSource, /investmentScore/);
+  assert.match(
+    marketSource,
+    /marketExecutiveDecisionBrief = buildMarketExecutiveDecisionBrief\(normalized, language, coverage\);\s*\n\s*normalized\.executiveSummary = formatExecutiveDecisionBrief\(marketExecutiveDecisionBrief, language\);/
+  );
 
-  // The CEO Summary block (a separate, unrelated field) keeps its own
-  // existing labels untouched.
-  assert.match(planSource, /Biggest Opportunity/);
-  assert.match(planSource, /Biggest Risk/);
-  assert.match(planSource, /First 90 Days/);
-  assert.match(planSource, /Critical KPIs/);
-  assert.match(planSource, /Final Recommendation/);
-
-  // Market Intelligence's own entry-recommendation block keeps its
-  // Should-Enter/Why/Where/When/How shape instead of inheriting CEO
-  // Summary's First 90 Days / Critical KPIs / Final Recommendation labels.
-  assert.match(presentationSource, /Should this market be entered/);
-  assert.match(presentationSource, /Why:/);
-  assert.match(presentationSource, /Where:/);
-  assert.match(presentationSource, /When:/);
-  assert.match(presentationSource, /How:/);
+  // Market Intelligence's own entry-recommendation section supports the
+  // decision (why/where/when/how) but must not restate the verdict a
+  // second time -- that is now the single Executive Decision layer's job.
+  assert.doesNotMatch(presentationSource, /Should this market be entered/);
+  assert.match(presentationSource, /- Why: \$\{why\}/);
+  assert.match(presentationSource, /- Where: \$\{where\}/);
+  assert.match(presentationSource, /- When: \$\{when\}/);
+  assert.match(presentationSource, /- How: \$\{how\}/);
 });

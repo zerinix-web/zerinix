@@ -109,26 +109,26 @@ test("the precomputed strategicDecisionMemoReportSection is reused (never recomp
   // identifier).
   assert.ok(usageCount >= 4, `expected the precomputed value to be reused at multiple sites, found ${usageCount} occurrences`);
 
-  const overrideAssignments = planExecutorSource.match(/\.executiveRecommendation = strategicDecisionMemoReportSection;/g) || [];
+  const overrideAssignments = planExecutorSource.match(/\.executiveSummary = strategicDecisionMemoReportSection;/g) || [];
   assert.equal(overrideAssignments.length, 3, "expected exactly 3 override assignment sites (cache-hit, live-generation, timeout-fallback)");
 });
 
-test("backward compatibility: every override is conditionally guarded, so the legacy, freely-computed Executive Recommendation content is used verbatim whenever no real memo exists", () => {
+test("backward compatibility: every override is conditionally guarded, so the report's own deterministic Executive Decision layer is used verbatim whenever no real memo exists", () => {
   const guardedOverrides = planExecutorSource.match(
-    /if \(strategicDecisionMemoReportSection\) \{\s*\n\s*\S+\.executiveRecommendation = strategicDecisionMemoReportSection;\s*\n\s*\}/g
+    /if \(strategicDecisionMemoReportSection\) \{\s*\n\s*\S+\.executiveSummary = strategicDecisionMemoReportSection;\s*\n\s*\}/g
   ) || [];
   assert.equal(guardedOverrides.length, 3, "expected all 3 override sites to be guarded by `if (strategicDecisionMemoReportSection)`");
 
-  // The legacy builder functions themselves are untouched -- still
+  // The report's own builder functions themselves are untouched -- still
   // called, still the sole source of content, whenever no memo exists.
-  assert.match(planExecutorSource, /buildCanonicalExecutiveRecommendation\(/);
-  assert.match(planExecutorSource, /normalized\.executiveRecommendation =/);
+  assert.match(planExecutorSource, /buildPlanExecutiveDecisionBrief\(/);
+  assert.match(planExecutorSource, /normalized\.executiveSummary = formatExecutiveDecisionBrief\(/);
 });
 
 test("cache safety: the live-generation override happens strictly after cacheResponseText is captured, so the AI response cache always stores memo-agnostic content -- a future cache hit for a different request is never contaminated by this request's memo", () => {
   const cacheCaptureIndex = planExecutorSource.indexOf("const cacheResponseText = JSON.stringify(parsedReport);");
   const liveGenOverrideIndex = planExecutorSource.indexOf(
-    "if (strategicDecisionMemoReportSection) {\n              parsedReport.executiveRecommendation"
+    "if (strategicDecisionMemoReportSection) {\n              parsedReport.executiveSummary"
   );
   assert.ok(cacheCaptureIndex >= 0 && liveGenOverrideIndex > cacheCaptureIndex);
 
@@ -143,7 +143,7 @@ test("the cache-hit override happens strictly after validation, metadata extract
   const metadataIndex = planExecutorSource.indexOf("const cachedReportMetadataContext = createReportMetadataContext(");
   const usageRecordIndex = planExecutorSource.indexOf("await recordAiUsage(supabase, {", metadataIndex);
   const cacheHitOverrideIndex = planExecutorSource.indexOf(
-    "if (strategicDecisionMemoReportSection) {\n          parsedCachedReport.executiveRecommendation"
+    "if (strategicDecisionMemoReportSection) {\n          parsedCachedReport.executiveSummary"
   );
   const responseIndex = planExecutorSource.indexOf("return new Response(encoder.encode(", cacheHitOverrideIndex);
 
@@ -163,5 +163,5 @@ test("does not modify parseFullPlanReport/normalizeFullPlanReport's own internal
   assert.doesNotMatch(pdfButtonSource, /strategic-decision-memo|StrategicDecisionMemo/);
 
   const planRouteSource = await readFile(new URL("../app/api/plan/route.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(planRouteSource, /executiveRecommendation = strategicDecisionMemoReportSection/);
+  assert.doesNotMatch(planRouteSource, /executiveSummary = strategicDecisionMemoReportSection/);
 });

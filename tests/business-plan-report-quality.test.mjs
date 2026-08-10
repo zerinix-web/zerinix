@@ -56,7 +56,7 @@ test("Business Plan route normalizes critical report sections from the canonical
   assert.match(planRouteSource, /buildCanonicalScenarioAnalysis\(context\)/);
   assert.match(planRouteSource, /buildCanonicalKpiDashboard\(context\)/);
   assert.match(planRouteSource, /buildCanonicalSwot\(context, parsed\)/);
-  assert.match(planRouteSource, /buildCanonicalExecutiveRecommendation\(context\)/);
+  assert.match(planRouteSource, /buildPlanExecutiveDecisionBrief\(context, language\)/);
 });
 
 test("Business Plan API logs stage-specific failures instead of returning generic failures", () => {

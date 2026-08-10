@@ -141,11 +141,15 @@ test("buildMarketExecutiveSummary discusses only market attractiveness, demand, 
   assert.doesNotMatch(summary, /founder|EBITDA|runway|PMF|fundrais/i);
 });
 
-test("buildMarketEntryRecommendation answers should-enter/why/where/when/how and never evaluates a founder", () => {
+test("buildMarketEntryRecommendation answers why/where/when/how and never evaluates a founder", () => {
   const coverage = fixtureCoverage();
   const recommendation = buildMarketEntryRecommendation(carWashMarketSections, "English", coverage);
 
-  assert.match(recommendation, /Should this market be entered/);
+  // The should-enter verdict + confidence itself is stated exactly once,
+  // in the report's single Executive Decision layer (executiveSummary);
+  // this section only supports that decision with why/where/when/how, so
+  // it must not restate the verdict a second time.
+  assert.doesNotMatch(recommendation, /Should this market be entered/);
   assert.match(recommendation, /Why:/);
   assert.match(recommendation, /Where:/);
   assert.match(recommendation, /When:/);
@@ -270,7 +274,7 @@ test("market-analysis/route.ts no longer depends on the founder/investment scori
 
 test("market-analysis/route.ts imports and calls the isolated presentation module and the isolation validator", () => {
   assert.match(marketAnalysisSource, /from "@\/app\/lib\/report-engine\/market-intelligence-presentation"/);
-  assert.match(marketAnalysisSource, /buildMarketExecutiveSummary\(/);
+  assert.match(marketAnalysisSource, /buildMarketExecutiveDecisionBrief\(/);
   assert.match(marketAnalysisSource, /buildMarketEntryRecommendation\(/);
   assert.match(marketAnalysisSource, /assertReportIsolation\(\s*"market_intelligence"/);
 });
@@ -288,19 +292,25 @@ test("plan-executor.ts and market-analysis/route.ts both invoke assertReportIsol
 
 // --- report-quality-directives.ts: kind-specific scorecard ----------------
 
-test("buildExecutivePresentationDirectives never gives Market Intelligence or Strategic Advisory Business Plan's Investment Readiness / CEO Summary framing", () => {
-  const marketDirectives = buildExecutivePresentationDirectives("market_analysis").join("\n");
-  const domainDirectives = buildExecutivePresentationDirectives("specialized_analysis").join("\n");
-  const planDirectives = buildExecutivePresentationDirectives("business_plan").join("\n");
+// REDESIGN: the Executive Scorecard ("Investment Readiness", "CEO
+// Summary"/report-native equivalents) and the per-major-section AI
+// Executive Insight/Confidence/Next Actions scaffold were retired
+// entirely -- for every report kind, not just isolated per kind -- since
+// they were 2-3 more places restating the same decision the report's
+// single Executive Decision layer already states once. No kind should
+// carry Investment Readiness, a CEO/report-native Summary block, a
+// mandated Confidence line, or a mandated Next Actions list anymore.
+test("buildExecutivePresentationDirectives no longer mandates a second scorecard, confidence line, or Next Actions list for any report kind", () => {
+  for (const kind of ["market_analysis", "specialized_analysis", "business_plan", "real_estate"]) {
+    const directives = buildExecutivePresentationDirectives(kind).join("\n");
 
-  assert.doesNotMatch(marketDirectives, /Investment Readiness/);
-  assert.doesNotMatch(marketDirectives, /CEO Summary/);
-  assert.doesNotMatch(domainDirectives, /Investment Readiness/);
-  assert.doesNotMatch(domainDirectives, /CEO Summary/);
-
-  // Business Plan itself is untouched -- this is isolation, not deletion.
-  assert.match(planDirectives, /Investment Readiness/);
-  assert.match(planDirectives, /CEO Summary/);
+    assert.doesNotMatch(directives, /Investment Readiness/);
+    assert.doesNotMatch(directives, /CEO Summary/);
+    assert.doesNotMatch(directives, /Executive Scorecard/);
+    assert.doesNotMatch(directives, /AI Executive Insight/);
+    assert.doesNotMatch(directives, /Next Actions with/);
+    assert.doesNotMatch(directives, /Confidence: High, Medium, or Low/);
+  }
 });
 
 test("buildDecisionSupportDirectives is Business-Plan-only at the type level and its founder/CEO/Roadmap content never leaks into market.ts or domain-analysis.ts", () => {
@@ -314,7 +324,9 @@ test("buildDecisionSupportDirectives is Business-Plan-only at the type level and
   const planDirectives = buildDecisionSupportDirectives("business_plan").join("\n");
   assert.match(planDirectives, /founder/i);
   assert.match(planDirectives, /Roadmap/);
-  assert.match(planDirectives, /CEO Brief/);
+  // The single Executive Decision layer superseded the old separate
+  // "board-level CEO Brief" end-of-report block.
+  assert.match(planDirectives, /Executive Summary is the report's only decision layer/);
 });
 
 test("buildFullReportStructureDirectives is Business-Plan-only and is never called with market_analysis in practice", () => {

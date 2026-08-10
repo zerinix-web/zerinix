@@ -139,10 +139,12 @@ import {
   type EvidenceLevel,
 } from "@/app/lib/report-evidence";
 import { formatMetricCardValue } from "@/components/planner/report-utils";
+import { detectRecommendation } from "@/components/planner/decision-label";
 import {
-  detectRecommendation,
-  formatDecisionLabel,
-} from "@/components/planner/decision-label";
+  extractExecutiveDecisionFromText,
+  decisionTokensForLanguage,
+  localizedLabelVariants,
+} from "@/app/lib/report-engine/executive-decision-brief";
 import {
   SourcesCard,
   getFinalDedupePdfSources,
@@ -234,7 +236,6 @@ type PlanReport = {
   financialDashboard: string;
   scenarioAnalysis: string;
   kpiDashboard: string;
-  executiveRecommendation: string;
   risks: string;
   kpis: string;
   founderRoadmap: string;
@@ -604,7 +605,6 @@ const planReportFields: Array<{
   { field: "financialDashboard", title: "Financial Dashboard", icon: PieChart },
   { field: "scenarioAnalysis", title: "Scenario Analysis: Worst / Base / Best Case", icon: BarChart3 },
   { field: "kpiDashboard", title: "KPI Dashboard", icon: Gauge },
-  { field: "executiveRecommendation", title: "Executive Recommendation", icon: Sparkles },
   { field: "risks", title: "Risks", icon: ShieldAlert },
   { field: "kpis", title: "KPIs", icon: ListChecks },
   { field: "founderRoadmap", title: "Founder Roadmap", icon: CalendarDays },
@@ -851,7 +851,6 @@ const emptyPlanReport = Object.assign({
   financialDashboard: "",
   scenarioAnalysis: "",
   kpiDashboard: "",
-  executiveRecommendation: "",
   risks: "",
   kpis: "",
   founderRoadmap: "",
@@ -1564,7 +1563,7 @@ function getReportMarketRows(content: string) {
     {
       label: "SOM",
       name: "Serviceable Obtainable Market",
-      value: extractMarketSizeValue(content, "SOM") || "VALIDATION REQUIRED",
+      value: extractMarketSizeValue(content, "SOM") || "—",
       description: extractMarketLevelDescription(content, "SOM"),
       tone: "from-emerald-400 to-teal-300",
     },
@@ -1644,9 +1643,9 @@ function extractCompetitorRows(content: string) {
       rows.push({
         company: cleanExecutiveText(company || "Market participant", 52),
         positioning: cleanExecutiveText(positioning || line, 120),
-        strengths: cleanExecutiveText(strengths || extractKeywordInsight(line, ["strength", "advantage"]) || "VALIDATION REQUIRED", 110),
-        weaknesses: cleanExecutiveText(weaknesses || extractKeywordInsight(line, ["weakness", "gap"]) || "VALIDATION REQUIRED", 110),
-        threat: cleanExecutiveText(threat || extractKeywordInsight(line, ["threat", "risk"]) || "VALIDATION REQUIRED", 90),
+        strengths: cleanExecutiveText(strengths || extractKeywordInsight(line, ["strength", "advantage"]) || "—", 110),
+        weaknesses: cleanExecutiveText(weaknesses || extractKeywordInsight(line, ["weakness", "gap"]) || "—", 110),
+        threat: cleanExecutiveText(threat || extractKeywordInsight(line, ["threat", "risk"]) || "—", 90),
       });
     }
   });
@@ -1663,7 +1662,7 @@ function extractRoadmapAction(content: string, step: string) {
     "";
   const action = extractMeaningfulBullets(snippet, 1)[0] || cleanExecutiveText(snippet, 150);
 
-  return action || "VALIDATION REQUIRED";
+  return action || "—";
 }
 
 function compactPdfMetricValue(value: string) {
@@ -1777,7 +1776,7 @@ function getSectionEvidenceLevel(section: ReportSection): EvidenceLevel {
     return "benchmarkDerived";
   }
 
-  if (section.field === "executiveSummary" || section.field === "executiveRecommendation") {
+  if (section.field === "executiveSummary") {
     return inferEvidenceLevel({
       label: section.title,
       value: extractMetricValue(section.content, "Decision") || extractMetricValue(section.content, "Recommendation") || section.title,
@@ -2809,11 +2808,11 @@ function getDecisionClasses(decision: string) {
     return "border-emerald-300/35 bg-emerald-300/15 text-emerald-100";
   }
 
-  if (decision === "NO GO" || decision === "REJECT" || decision === "PIVOT") {
+  if (decision === "NO_GO" || decision === "NO-GO" || decision === "NO GO" || decision === "REJECT" || decision === "PIVOT") {
     return "border-red-300/30 bg-red-300/12 text-red-100";
   }
 
-  if (decision === "WAIT" || decision === "HOLD") {
+  if (decision === "CONDITIONAL_GO" || decision === "WAIT" || decision === "HOLD") {
     return "border-amber-300/35 bg-amber-300/15 text-amber-100";
   }
 
@@ -2866,7 +2865,18 @@ function ExecutiveSummaryVisual({
     investmentScore?.totalScore ??
     extractScore(section.content, "AI Investment Score") ??
     extractConfidence(section.content);
-  const recommendation = investmentScore?.recommendation || detectRecommendation(section.content) || "REVIEW";
+  // Read the new Executive Decision layer's own deterministic
+  // "Decision: GO (Confidence: 72%)" token first (GO/CONDITIONAL GO/
+  // NO-GO); fall back to the legacy free-text heuristic for reports
+  // generated before this format existed. investmentScore.recommendation
+  // is intentionally NOT used directly here -- it is GO/WAIT/PASS, a
+  // different vocabulary than what the report body now displays.
+  const decisionMatch = extractExecutiveDecisionFromText(section.content);
+  const recommendation =
+    decisionMatch?.token.toUpperCase() ||
+    detectRecommendation(section.content) ||
+    "—";
+  const decisionColorKey = decisionMatch?.code || recommendation;
   const highlights = getExecutiveHighlights(section.content);
   const kpis = [
     {
@@ -2883,7 +2893,7 @@ function ExecutiveSummaryVisual({
     },
     {
       label: "Market Signal",
-      value: extractMetricValue(section.content, "Market") || extractMetricValue(section.content, "TAM") || "Review",
+      value: extractMetricValue(section.content, "Market") || extractMetricValue(section.content, "TAM") || "—",
       accent: "from-sky-300/18 to-teal-300/5",
       evidence: "benchmarkDerived" as EvidenceLevel,
     },
@@ -2907,7 +2917,7 @@ function ExecutiveSummaryVisual({
               Investment Decision Snapshot
             </h4>
           </div>
-          <span className={`w-fit rounded-full border px-4 py-2 text-xs font-semibold tracking-[0.18em] ${getDecisionClasses(recommendation)}`}>
+          <span className={`w-fit rounded-full border px-4 py-2 text-xs font-semibold tracking-[0.18em] ${getDecisionClasses(decisionColorKey)}`}>
             {recommendation}
           </span>
         </div>
@@ -3310,7 +3320,7 @@ if (field === "swotAnalysis") {
                     className="grid grid-cols-[1fr_1.35fr_1.15fr_1.15fr_0.9fr] bg-black/35 text-sm leading-6 text-zinc-300"
                   >
                     <div className="px-4 py-4 font-semibold text-white">{row.company}</div>
-                    <div className="px-4 py-4">{row.positioning || "VALIDATION REQUIRED"}</div>
+                    <div className="px-4 py-4">{row.positioning || "—"}</div>
                     <div className="px-4 py-4">{row.strengths}</div>
                     <div className="px-4 py-4">{row.weaknesses}</div>
                     <div className="px-4 py-4">
@@ -3326,7 +3336,7 @@ if (field === "swotAnalysis") {
         ) : (
           <div className="flex min-h-36 items-center justify-center p-6 text-center">
             <p className="max-w-md text-sm leading-6 text-zinc-400">
-              VALIDATION REQUIRED: competitor records were not structured enough to render a comparison table.
+              See the Competitive Landscape section for full competitor detail.
             </p>
           </div>
         )}
@@ -3482,14 +3492,27 @@ if (field === "swotAnalysis") {
     );
   }
 
-  if (field === "executiveRecommendation") {
-    const selected = detectRecommendation(section.content);
-    const decisions = ["VALIDATE", "HOLD", "PASS", "REJECT"];
+  if (field === "executiveSummary") {
+    // The single Executive Decision layer (formatExecutiveDecisionBrief)
+    // has a known, deterministic shape -- "Decision: GO (Confidence: 72%)"
+    // in English, "Karar: EVET (Güven: 72%)" in Turkish, etc. -- read via a
+    // locale-agnostic extractor rather than an English-only regex, which
+    // silently fails and falls back to a placeholder for every non-English
+    // report.
+    const decisionMatch = extractExecutiveDecisionFromText(section.content);
+    const selected = decisionMatch?.token.toUpperCase() || "";
+    const decisions = decisionMatch
+      ? decisionTokensForLanguage(decisionMatch.language)
+      : decisionTokensForLanguage("English");
+    const biggestOpportunityLabels = localizedLabelVariants("biggestOpportunity");
+    const biggestRisksLabels = localizedLabelVariants("biggestRisks");
+    const missingInformationLabels = localizedLabelVariants("missingInformation");
+    const first90DaysLabels = localizedLabelVariants("first90Days");
     const recommendationMetrics = [
       ["Confidence", extractConfidence(section.content) ? `${extractConfidence(section.content)}%` : "—"],
-      ["Investment Needed", extractMetricValue(section.content, "Investment Needed") || "—"],
-      ["Next Action", extractMetricValue(section.content, "Next Action") || extractMetricValue(section.content, "Next Critical Action") || "—"],
-      ["Main Risk", extractMetricValue(section.content, "Main Risk") || "—"],
+      ["Biggest Opportunity", extractMetricValueFromAliases(section.content, biggestOpportunityLabels) || "—"],
+      ["Biggest Risk", extractAliasedSectionSnippet(section.content, biggestRisksLabels, biggestOpportunityLabels) || "—"],
+      ["Missing Information", extractAliasedSectionSnippet(section.content, missingInformationLabels, first90DaysLabels) || "—"],
     ];
 
     return (
@@ -3497,10 +3520,10 @@ if (field === "swotAnalysis") {
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200/80">
-              Executive Recommendation
+              Executive Decision
             </p>
             <p className="mt-2 text-5xl font-semibold tracking-tight text-white">
-              {selected || "Review"}
+              {selected || "—"}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -3522,7 +3545,7 @@ if (field === "swotAnalysis") {
             })}
           </div>
         </div>
-        <div className="mt-5 grid gap-3 md:grid-cols-4">
+        <div className="mt-5 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
           {recommendationMetrics.map(([label, value]) => (
             <div key={label} className="rounded-2xl border border-white/10 bg-black/25 p-3">
               <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</p>
@@ -3538,19 +3561,17 @@ if (field === "swotAnalysis") {
             </div>
           </div>
           <div className="rounded-3xl border border-white/10 bg-black/30 p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Next Actions Checklist</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">First 90-Day Action Plan</p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               {(extractMeaningfulBullets(
-                extractAliasedSectionSnippet(section.content, ["Next Action", "Next Critical Action", "Immediate Actions"], ["Main Risk", "Confidence", "Investment Needed"]) ||
-                  extractKeywordInsight(section.content, ["next action", "critical action", "validate"]),
+                extractAliasedSectionSnippet(section.content, first90DaysLabels, []),
                 4
               ).length > 0
                 ? extractMeaningfulBullets(
-                    extractAliasedSectionSnippet(section.content, ["Next Action", "Next Critical Action", "Immediate Actions"], ["Main Risk", "Confidence", "Investment Needed"]) ||
-                      extractKeywordInsight(section.content, ["next action", "critical action", "validate"]),
+                    extractAliasedSectionSnippet(section.content, first90DaysLabels, []),
                     4
                   )
-                : ["VALIDATION REQUIRED"]
+                : ["—"]
               ).map((action) => (
                 <div key={action} className="flex items-center gap-2 text-sm text-zinc-300">
                   <span className="h-4 w-4 rounded-full border border-teal-200/40 bg-teal-200/10" />
@@ -3705,7 +3726,6 @@ function hasPremiumSectionVisual(section: ReportSection) {
     section.field === "financialAssumptions" ||
     section.field === "founderScore" ||
     section.field === "scenarioAnalysis" ||
-    section.field === "executiveRecommendation" ||
     section.field === "founderRoadmap" ||
     section.field === "roadmap306090" ||
     section.field === "portersFiveForces" ||
@@ -3741,7 +3761,7 @@ function getReportArticleClass(section: ReportSection) {
     return `${base} border-white/10 bg-[linear-gradient(180deg,rgba(24,24,27,0.72),rgba(0,0,0,0.48))]`;
   }
 
-  if (section.field === "executiveRecommendation" || section.field === "founderScore") {
+  if (section.field === "founderScore") {
     return `${base} border-teal-200/15 bg-[linear-gradient(135deg,rgba(94,234,212,0.08),rgba(0,0,0,0.66))]`;
   }
 
@@ -4910,7 +4930,7 @@ const ReportPanel = memo(function ReportPanel({
         "founderScore",
         "scenarioAnalysis",
         "kpiDashboard",
-        "executiveRecommendation",
+        "executiveSummary",
         "founderRoadmap",
         "roadmap306090",
         "portersFiveForces",
@@ -5065,8 +5085,8 @@ const ReportPanel = memo(function ReportPanel({
           return 52;
         }
 
-        if (section.field === "executiveRecommendation") {
-          return 48;
+        if (section.field === "executiveSummary") {
+          return 65;
         }
 
         return 22;
@@ -5192,29 +5212,34 @@ const ReportPanel = memo(function ReportPanel({
           return 46;
         }
 
-        if (section.field === "executiveRecommendation") {
-          const selected = investmentScore?.recommendation || detectRecommendation(section.content) || "REVIEW";
-          const decisionLabel = formatDecisionLabel(selected);
+        if (section.field === "executiveSummary") {
+          // Same deterministic "Decision: TOKEN" shape as the on-screen
+          // card above -- read via the locale-agnostic extractor instead
+          // of an English-only regex, which silently fails for every
+          // non-English report.
+          const decisionMatch = extractExecutiveDecisionFromText(section.content);
+          const decisionLabel = decisionMatch?.token.toUpperCase() || "—";
           const confidence =
-            investmentScore?.confidence ??
             extractConfidence(section.content) ??
+            investmentScore?.confidence ??
             extractConfidence(fullReportContent) ??
             extractScore(fullReportContent, "Investment Score");
-          const investmentRecommendation =
-            extractMetricValue(section.content, "Investment Recommendation") ||
-            extractMetricValue(section.content, "Recommendation") ||
-            selected;
-          const mainRisk = extractMetricValue(section.content, "Main Risk");
-          const nextAction =
-            extractMetricValue(section.content, "Next Critical Action") ||
-            extractMetricValue(section.content, "Next Action");
+          const biggestOpportunityLabels = localizedLabelVariants("biggestOpportunity");
+          const biggestRisksLabels = localizedLabelVariants("biggestRisks");
+          const missingInformationLabels = localizedLabelVariants("missingInformation");
+          const first90DaysLabels = localizedLabelVariants("first90Days");
+          const biggestOpportunity = extractMetricValueFromAliases(section.content, biggestOpportunityLabels);
+          const biggestRisk = extractAliasedSectionSnippet(section.content, biggestRisksLabels, biggestOpportunityLabels);
+          const missingInformation = extractAliasedSectionSnippet(section.content, missingInformationLabels, first90DaysLabels);
+          const nextAction = extractAliasedSectionSnippet(section.content, first90DaysLabels, []);
+          const isTurkishPdf = pdfLocale === "tr";
 
           pdf.setFillColor("#ccfbf1");
           pdf.setDrawColor("#5eead4");
           pdf.roundedRect(bodyX, visualY, 52, 26, 5, 5, "FD");
           pdf.setFontSize(5.8);
           pdf.setTextColor("#134e4a");
-          pdf.text(localizePdfPresentationLabel("RECOMMENDATION", pdfLocale), bodyX + 5, visualY + 6);
+          pdf.text(localizePdfPresentationLabel("DECISION", pdfLocale), bodyX + 5, visualY + 6);
           pdf.setFontSize(13);
           pdf.setTextColor("#000000");
           drawSingleLine(decisionLabel, bodyX + 5, visualY + 16, 42, 11, 6.5);
@@ -5234,9 +5259,26 @@ const ReportPanel = memo(function ReportPanel({
 
           const recItems = [
             ["Confidence", confidence === null ? "—" : `${confidence}%`],
-            ["Investment Recommendation", investmentRecommendation || "—"],
-            ["Main Risk", mainRisk || extractKeywordInsight(fullReportContent, ["risk", "threat"]) || "Primary risk is detailed in the risk analysis"],
-            ["Next Action", nextAction || extractKeywordInsight(fullReportContent, ["next action", "critical action", "validate"]) || "Validate the primary investment thesis"],
+            ["Biggest Opportunity", biggestOpportunity || "—"],
+            [
+              "Biggest Risk",
+              biggestRisk ||
+                extractKeywordInsight(fullReportContent, ["risk", "threat"]) ||
+                (isTurkishPdf ? "Ana risk, risk analizi bölümünde detaylandırılmıştır" : "Primary risk is detailed in the risk analysis"),
+            ],
+            [
+              "Missing Information",
+              missingInformation ||
+                (isTurkishPdf
+                  ? "Kararı değiştirecek nitelikte bir veri eksikliği belirtilmedi"
+                  : "No decision-changing data gap was flagged"),
+            ],
+            [
+              "Next Action",
+              nextAction ||
+                extractKeywordInsight(fullReportContent, ["next action", "critical action", "validate"]) ||
+                (isTurkishPdf ? "İlk 90 günlük aksiyon planına bakın" : "See the First 90-Day Action Plan"),
+            ],
           ];
 
           recItems.forEach(([label, value], index) => {
@@ -5255,7 +5297,7 @@ const ReportPanel = memo(function ReportPanel({
             drawSingleLine(localizePdfPresentationText(value, pdfLocale), itemX + 2, itemY + 7.8, itemWidth - 4, 6);
           });
 
-          return 48;
+          return 65;
         }
 
         if (section.field === "founderRoadmap" || section.field === "roadmap306090") {

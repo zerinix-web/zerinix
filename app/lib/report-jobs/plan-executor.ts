@@ -55,12 +55,8 @@ import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 import { createAiJobDescriptor } from "@/app/lib/ai/queue";
 import {
   createCanonicalFinancialAssumptions,
-  formatDecisionConfidenceReport,
   formatCanonicalFinancialAssumptions,
   formatFinancialConsistencyReport,
-  formatReportIntelligenceSummary,
-  formatSourceIntelligenceSummary,
-  formatValidationIntelligenceSummary,
   type AiFinancialModelContext,
 } from "@/app/lib/ai/financial-assumptions";
 import { applyMarketResearchCoverageToContext } from "@/app/lib/ai/market-research-coverage";
@@ -116,15 +112,6 @@ import {
 } from "@/app/lib/ai/report-quality-directives";
 import { dedupeReportParagraphsAcrossSections } from "@/app/lib/report-content-quality.mjs";
 import {
-  appendEvidenceConfidenceBlock,
-  assessSectionEvidenceConfidence,
-  type SectionEvidenceAssessment,
-} from "@/app/lib/report-evidence-confidence";
-import {
-  analyzeReportSourceIntelligence,
-  buildSourceReliabilityOverview,
-} from "@/app/lib/report-source-intelligence";
-import {
   classifyFinancialMetricEvidenceType,
   consolidateFinancialAssumptions,
   formatKeyFinancialAssumptionsList,
@@ -143,6 +130,7 @@ import {
   type ExecutiveDecisionBrief,
   type ExecutiveDecisionCode,
 } from "@/app/lib/report-engine/executive-decision-brief";
+import { assertNoDecisionContradiction } from "@/app/lib/report-engine/decision-contradiction-gate";
 import { buildEvidenceSummary } from "@/app/lib/report-engine/evidence-summary";
 import { stripFillerAndDuplicateSentences } from "@/app/lib/report-engine/filler-detection";
 import { assertExecutiveQualityGate } from "@/app/lib/report-engine/executive-quality-gate";
@@ -539,20 +527,30 @@ function buildDomainAnalysisExecutiveDecisionBrief(
     `${report.decisionAssessment}\n${report.finalRecommendation}`
   );
 
-  const shortAnswer =
+  const domainFindingsLines = domainTopLines(report.domainFindings, 4);
+  const biggestOpportunity =
+    domainFindingsLines[0] ||
     domainTopLines(report.finalRecommendation, 1)[0] ||
-    domainTopLines(report.decisionAssessment, 1)[0] ||
-    report.finalRecommendation.trim().slice(0, 280);
+    report.finalRecommendation.trim().slice(0, 200);
+  const topReasons = domainFindingsLines.slice(1, 4);
 
-  const topReasons = domainTopLines(report.domainFindings, 3);
   const topRisks = domainTopLines(report.riskAnalysis, 3);
+  const first90Days = domainTopLines(report.recommendedActions, 3);
+  // report.missingInformation is the domain analyst's own honest gap
+  // assessment -- reused verbatim rather than re-derived, since it is
+  // already the report's real, AI-authored answer to this question.
+  const missingInformation = domainTopLines(report.missingInformation, 3);
 
   return {
-    shortAnswer,
     decision,
     confidence,
-    topReasons: topReasons.length ? topReasons : [report.decisionAssessment.trim().slice(0, 200)],
+    topReasons: topReasons.length ? topReasons : domainTopLines(report.decisionAssessment, 3),
     topRisks: topRisks.length ? topRisks : [report.riskAnalysis.trim().slice(0, 200)],
+    biggestOpportunity,
+    missingInformation: missingInformation.length
+      ? missingInformation
+      : [report.missingInformation.trim().slice(0, 200)],
+    first90Days: first90Days.length ? first90Days : [report.recommendedActions.trim().slice(0, 200)],
   };
 }
 
@@ -587,8 +585,9 @@ function parseDomainAnalysisReport(
   // first field in schema order. No dedicated executiveSummary field
   // exists on this report type, so subjectIdentification (schema-first)
   // carries it instead of adding a new field to the schema/PDF/dashboard.
+  const domainExecutiveDecisionBrief = buildDomainAnalysisExecutiveDecisionBrief(validated);
   validated.subjectIdentification = [
-    formatExecutiveDecisionBrief(buildDomainAnalysisExecutiveDecisionBrief(validated), language),
+    formatExecutiveDecisionBrief(domainExecutiveDecisionBrief, language),
     validated.subjectIdentification,
   ].join("\n\n");
 
@@ -609,6 +608,15 @@ function parseDomainAnalysisReport(
   // Defensive: Strategic Advisory must inherit neither Business Idea
   // Validation's nor Market Intelligence's report-specific vocabulary.
   assertReportIsolation("strategic_advisory", validated);
+
+  // Fail generation rather than ship a report that tells the reader to
+  // avoid the decision in one field and to proceed/pilot/scale in another.
+  assertNoDecisionContradiction(
+    domainExecutiveDecisionBrief.decision,
+    validated,
+    ["domainFindings", "recommendedActions", "finalRecommendation"],
+    language
+  );
 
   // Quality Gate: fail generation instead of silently returning a report
   // that dumps information rather than helping a decision-maker act.
@@ -1458,8 +1466,6 @@ function createPlanFieldFallback(
         return buildCanonicalScenarioAnalysis(context, language);
       case "kpiDashboard":
         return buildCanonicalKpiDashboard(context, language);
-      case "executiveRecommendation":
-        return buildCanonicalExecutiveRecommendation(context, language);
       case "financialAssumptions":
         return buildCanonicalFinancialAssumptions(context, language);
       case "founderScore":
@@ -1467,12 +1473,7 @@ function createPlanFieldFallback(
       case "kpis":
         return buildCanonicalKpiGovernance(context, language);
       case "executiveSummary":
-        return [
-          reportText(language, `Decision: ${localizeDecision(context.investmentScore.recommendation, language)}`, `Karar: ${localizeDecision(context.investmentScore.recommendation, language)}`),
-          reportText(language, `Investment Score: ${context.investmentScore.totalScore}/100 with ${context.investmentScore.confidence}% confidence.`, `Yatırım Skoru: ${context.investmentScore.totalScore}/100 ve ${context.investmentScore.confidence}% güven.`),
-          reportText(language, `Thesis: ${context.normalizedBusinessIdea} should be evaluated against beachhead demand proof, ${context.metrics.cacPayback.displayValue} payback, and ${context.metrics.runway.displayValue} runway.`, `Tez: ${context.normalizedBusinessIdea}; başlangıç pazar talebi kanıtı, ${context.metrics.cacPayback.displayValue} geri ödeme ve ${context.metrics.runway.displayValue} finansal pist ile değerlendirilmelidir.`),
-          reportText(language, `Next Critical Action: ${context.investmentScore.nextCriticalAction}`, `Sonraki Kritik Aksiyon: ${context.investmentScore.nextCriticalAction}`),
-        ].join("\n");
+        return formatExecutiveDecisionBrief(buildPlanExecutiveDecisionBrief(context, language), language);
       default:
         break;
     }
@@ -1502,7 +1503,6 @@ function createPlanFieldFallback(
     financialDashboard: `Financial dashboard: Track revenue, gross margin, CAC, LTV, payback, burn, runway, EBITDA, break-even timing, and investment needed from one consistent assumption set. Treat missing values as validation gaps.`,
     scenarioAnalysis: `Worst Case: Demand or CAC underperforms, extending payback and reducing runway.\nBase Case: The model follows current assumptions with controlled validation spend.\nBest Case: Conversion and retention improve, allowing faster capital deployment after proof points are met.`,
     kpiDashboard: `KPI dashboard: Monitor acquisition, activation, retention, pipeline quality, revenue signal, product reliability, and learning velocity. Each KPI should have a target threshold and a warning threshold.`,
-    executiveRecommendation: `Decision: HOLD\nDecision Confidence: Medium\nInvestment Recommendation: Hold for validation until the highest-risk assumptions are verified.\nMain Risk: Evidence is not complete enough for a scale decision.\nNext Action: Validate customer demand, pricing, CAC, and retention with primary data.`,
     risks: `Risks: Track demand uncertainty, CAC escalation, retention weakness, competitive response, regulatory friction, capital intensity, and execution delays. Each risk needs a leading indicator and mitigation plan.`,
     kpis: `KPI governance: Assign owners, review cadence, decision thresholds, and action triggers for the operating metrics. Missed thresholds should change spend, roadmap, or segment focus.`,
     founderRoadmap: `Founder roadmap: Tomorrow, define the riskiest assumption. This week, run direct customer validation. In 30 days, prove willingness to pay. In 90 days, validate repeatable acquisition. In 180 days, decide whether to scale or redesign.`,
@@ -1892,66 +1892,6 @@ function buildCanonicalKpiGovernance(context: AiFinancialModelContext, language:
     .join("\n");
 }
 
-function buildCanonicalExecutiveRecommendation(context: AiFinancialModelContext, language: ResponseLanguage = "English") {
-  const score = context.investmentScore;
-  const decisionConfidence = context.reportIntelligence.totalScore;
-  const confidenceLabel =
-    decisionConfidence >= 75
-      ? reportText(language, "High", "Yüksek")
-      : decisionConfidence >= 55
-        ? reportText(language, "Medium", "Orta")
-        : reportText(language, "Low", "Düşük");
-  const finalDecision =
-    score.recommendation === "GO"
-      ? "VALIDATE"
-      : score.recommendation === "PASS" && score.confidence < 35
-        ? "PASS"
-        : "HOLD";
-  const investmentRecommendation =
-    finalDecision === "VALIDATE"
-      ? reportText(language, "Validate with controlled capital after the next proof point", "Bir sonraki kanıt noktası sonrası kontrollü sermaye ile doğrula")
-      : finalDecision === "PASS"
-        ? reportText(language, "Pass until the economics or execution path is redesigned", "Ekonomi veya yürütme yolu yeniden tasarlanana kadar geç")
-        : reportText(language, "Hold for validation before scaling", "Ölçeklemeden önce doğrulama için bekle");
-  const visibleDecision = localizeDecision(finalDecision, language);
-  const reportQualityConfidence =
-    context.reportIntelligence.confidenceLevel === "High Confidence"
-      ? reportText(language, "High Confidence", "Yüksek Güven")
-      : context.reportIntelligence.confidenceLevel === "Low Confidence"
-        ? reportText(language, "Low Confidence", "Düşük Güven")
-        : reportText(language, "Medium Confidence", "Orta Güven");
-  const benchmarkActions = context.benchmarkScore.actions.slice(0, 2).join("; ");
-  const benchmarkActionsTr = [
-    context.benchmarkScore.dimensions.pricingFit < 65 ? "fiyatlandırmayı doğrula" : "",
-    context.benchmarkScore.deviations.some((deviation) => deviation.metric === "CAC" && deviation.status !== "Within Benchmark")
-      ? "edinim kanallarını test et"
-      : "",
-    context.benchmarkScore.dimensions.financialBenchmarkFit < 65 ? "ilk sermaye riskini azalt" : "",
-  ].filter(Boolean).join("; ") || "benchmark varsayımlarını operasyon verisiyle izle";
-
-  return [
-    reportText(language, `Decision: ${visibleDecision}`, `Karar: ${visibleDecision}`),
-    reportText(language, `Decision Confidence: ${decisionConfidence}% (${confidenceLabel})`, `Karar Güveni: ${decisionConfidence}% (${confidenceLabel})`),
-    reportText(language, `Report Quality Confidence: ${reportQualityConfidence} (${context.reportIntelligence.totalScore}/100)`, `Rapor Kalitesi Güveni: ${reportQualityConfidence} (${context.reportIntelligence.totalScore}/100)`),
-    reportText(
-      language,
-      `Validation Intelligence: ${context.validationIntelligenceV2.overallScore}/100 (${context.validationIntelligenceV2.confidenceLevel}). Priority: ${context.validationIntelligenceV2.recommendedSequence[0] || "Validate customer demand"}`,
-      `Doğrulama Zekası: ${context.validationIntelligenceV2.overallScore}/100 (${context.validationIntelligenceV2.confidenceLevel === "High" ? "Yüksek" : context.validationIntelligenceV2.confidenceLevel === "Medium" ? "Orta" : "Düşük"}). Öncelik: ${context.validationIntelligenceV2.recommendedSequence[0] === "Validate customer demand" ? "Müşteri talebini doğrula" : context.validationIntelligenceV2.recommendedSequence[0] || "Müşteri talebini doğrula"}`
-    ),
-    reportText(language, `Benchmark Fit: ${context.benchmarkScore.overallFit}/100 (${context.benchmarkScore.confidence}). ${benchmarkActions}`, `Benchmark Uyumu: ${context.benchmarkScore.overallFit}/100 (${context.benchmarkScore.confidence}). ${benchmarkActionsTr}`),
-    reportText(language, `Investment Recommendation: ${investmentRecommendation}`, `Yatırım Tavsiyesi: ${investmentRecommendation}`),
-    reportText(language, `Main Risk: ${score.topRisks[0] || "Primary risk requires validation."}`, `Ana Risk: ${score.topRisks[0] || "Birincil risk doğrulama gerektiriyor."}`),
-    reportText(language, `Next Action: ${score.nextCriticalAction}`, `Sonraki Aksiyon: ${score.nextCriticalAction}`),
-    reportText(
-      language,
-      `Rationale: For ${context.normalizedBusinessIdea}, ${finalDecision.toLowerCase()} is justified until ${context.inputs.targetCustomer} demand supports the ${context.inputs.pricingModel} model within ${context.metrics.cacPayback.displayValue} payback and ${context.metrics.runway.displayValue} runway.`,
-      `Gerekçe: ${context.normalizedBusinessIdea} için ${visibleDecision.toLowerCase()} kararı; ${context.inputs.targetCustomer} talebi, ${context.inputs.pricingModel} modelini ${context.metrics.cacPayback.displayValue} geri ödeme ve ${context.metrics.runway.displayValue} finansal pist içinde destekleyene kadar gerekçelidir.`
-    ),
-    formatDecisionConfidenceReport(context, language),
-    formatReportIntelligenceSummary(context, language),
-  ].join("\n");
-}
-
 function getVisibleDecision(context: AiFinancialModelContext) {
   const score = context.investmentScore;
 
@@ -2021,78 +1961,6 @@ function scorePercent(score: number, maximumScore: number) {
 // which otherwise makes the shared cross-section dedup pass collapse
 // one of them into a nonsensical self-reference ("See Executive
 // Summary for the established premise" pointing at itself).
-function textsAreTooSimilarForSummary(a: string, b: string) {
-  const toWordSet = (value: string) =>
-    new Set(
-      value
-        .toLowerCase()
-        .replace(/[^a-z0-9çğıöşü\s]/gi, "")
-        .split(/\s+/)
-        .filter((word) => word.length > 3)
-    );
-  const setA = toWordSet(a);
-  const setB = toWordSet(b);
-  if (setA.size === 0 || setB.size === 0) return false;
-  let shared = 0;
-  for (const word of setA) {
-    if (setB.has(word)) shared += 1;
-  }
-  return shared / Math.min(setA.size, setB.size) >= 0.6;
-}
-
-function rankInvestmentScoreFindingsByImpact(score: AiFinancialModelContext["investmentScore"]) {
-  return Object.values(score.categories)
-    .filter((category) => category.explanation?.trim())
-    .sort((a, b) => (b.maximumScore - b.score) - (a.maximumScore - a.score))
-    .map((category) => category.explanation.trim());
-}
-
-function buildExecutiveScorecard(
-  context: AiFinancialModelContext,
-  language: ResponseLanguage
-) {
-  const score = context.investmentScore;
-  const confidence = context.reportIntelligence.totalScore;
-  const decision = localizeDecision(getVisibleDecision(context), language);
-  const findings = rankInvestmentScoreFindingsByImpact(score).slice(0, 5);
-  const keyFindings = findings.length >= 3 ? findings : findings.concat(
-    [score.strengths[1], score.weaknesses[0]].filter((item): item is string => Boolean(item?.trim()))
-  ).slice(0, 5);
-  const biggestOpportunity = score.strengths[0]?.trim()
-    || reportText(
-      language,
-      `${context.inputs.industry} demand has not yet been validated but remains the clearest path to a defensible beachhead.`,
-      `${context.inputs.industry} talebi henüz doğrulanmadı, ancak savunulabilir bir başlangıç pazarı için en net yol olmaya devam ediyor.`
-    );
-  const fallbackBiggestRisk = reportText(language, "Primary customer, pricing, and retention evidence remain unverified.", "Birincil müşteri, fiyatlandırma ve elde tutma kanıtı doğrulanmamış durumda.");
-  const rawBiggestRisk = score.topRisks[0]?.trim() || score.weaknesses[0]?.trim();
-  const biggestRisk = rawBiggestRisk && !textsAreTooSimilarForSummary(rawBiggestRisk, biggestOpportunity)
-    ? rawBiggestRisk
-    : fallbackBiggestRisk;
-
-  const bottomLine = reportText(
-    language,
-    `Bottom Line: ${decision} on this ${context.inputs.industry} ${context.inputs.businessModel} opportunity. Confidence sits at ${confidence}/100, and the recommendation holds only if ${context.investmentScore.nextCriticalAction.replace(/\.$/, "")}. At the current evidence level, this is a founder-diligence memo, not a funding decision.`,
-    `Sonuç: bu ${context.inputs.industry} ${context.inputs.businessModel} fırsatı için karar ${decision}. Güven skoru ${confidence}/100 ve bu tavsiye yalnızca ${context.investmentScore.nextCriticalAction.replace(/\.$/, "")} koşuluyla geçerlidir. Mevcut kanıt düzeyinde bu, bir finansman kararı değil, kurucu düzeyinde bir durum tespiti notudur.`
-  );
-
-  return [
-    bottomLine,
-    "",
-    reportText(language, "Key Findings:", "Temel Bulgular:"),
-    ...keyFindings.map((finding) => `- ${finding}`),
-    "",
-    reportText(language, `Biggest Opportunity: ${biggestOpportunity}`, `En Büyük Fırsat: ${biggestOpportunity}`),
-    "",
-    reportText(language, `Biggest Risk: ${biggestRisk}`, `En Büyük Risk: ${biggestRisk}`),
-    "",
-    reportText(language, "Recommendation:", "Tavsiye:"),
-    reportText(language, `- ${decision}: ${context.investmentScore.estimatedValuation ? `proceed within a ${context.investmentScore.fundingStage} framing` : "hold additional capital"} until the primary evidence gate closes.`, `- ${decision}: birincil kanıt kapısı kapanana kadar ${context.investmentScore.estimatedValuation ? `${context.investmentScore.fundingStage} çerçevesinde ilerleyin` : "ek sermayeyi bekletin"}.`),
-    reportText(language, `- Next 90 days: ${context.investmentScore.nextCriticalAction}`, `- Sonraki 90 gün: ${context.investmentScore.nextCriticalAction}`),
-    reportText(language, "- Revisit this decision once the highest-impact finding above is closed with primary evidence.", "- Bu kararı, yukarıdaki en etkili bulgu birincil kanıtla kapatıldıktan sonra yeniden değerlendirin."),
-  ].filter((line) => line !== undefined).join("\n").replace(/\n{3,}/g, "\n\n");
-}
-
 function appendIntelligenceBlock(content: string, title: string, lines: string[]) {
   const cleanLines = lines.map((line) => line.trim()).filter(Boolean);
 
@@ -2147,24 +2015,6 @@ function buildExecutiveInsight(context: AiFinancialModelContext, focus: string, 
   );
 }
 
-function buildConfidenceBreakdown(context: AiFinancialModelContext, language: ResponseLanguage) {
-  const engine = context.investmentScore.decisionEngine;
-  const market = scorePercent(engine.marketScore.score, engine.marketScore.maximumScore);
-  const competition = scorePercent(engine.competitionScore.score, engine.competitionScore.maximumScore);
-  const financial = scorePercent(engine.financialScore.score, engine.financialScore.maximumScore);
-  const execution = scorePercent(engine.executionScore.score, engine.executionScore.maximumScore);
-  const product = scorePercent(engine.technologyScore.score, engine.technologyScore.maximumScore);
-  return [
-    reportText(language, `- Decision Confidence: ${context.reportIntelligence.totalScore}% — derived from evidence quality, source coverage, financial certainty, benchmark fit, and validation readiness.`, `- Karar Güveni: ${context.reportIntelligence.totalScore}% — kanıt kalitesi, kaynak kapsamı, finansal kesinlik, benchmark uyumu ve doğrulama hazırlığından türetilmiştir.`),
-    reportText(language, `- Market Confidence: ${market}% — ${engine.marketScore.explanation}`, `- Pazar Güveni: ${market}% — ${engine.marketScore.explanation}`),
-    reportText(language, `- Competition Confidence: ${competition}% — ${engine.competitionScore.explanation}`, `- Rekabet Güveni: ${competition}% — ${engine.competitionScore.explanation}`),
-    reportText(language, `- Financial Confidence: ${financial}% — ${engine.financialScore.explanation}`, `- Finansal Güven: ${financial}% — ${engine.financialScore.explanation}`),
-    reportText(language, `- Execution Confidence: ${execution}% — ${engine.executionScore.explanation}`, `- Yürütme Güveni: ${execution}% — ${engine.executionScore.explanation}`),
-    reportText(language, `- Product Confidence: ${product}% — ${engine.technologyScore.explanation}`, `- Ürün Güveni: ${product}% — ${engine.technologyScore.explanation}`),
-    reportText(language, "- Decision confidence is driven most by market proof, capital efficiency, execution realism, and validation evidence.", "- Karar güveni en çok pazar kanıtı, sermaye verimliliği, yürütme gerçekçiliği ve doğrulama kanıtından etkilenir."),
-  ];
-}
-
 function buildOpportunityScore(context: AiFinancialModelContext, language: ResponseLanguage) {
   const engine = context.investmentScore.decisionEngine;
   const demand = scorePercent(engine.marketScore.score, engine.marketScore.maximumScore);
@@ -2187,16 +2037,6 @@ function buildOpportunityScore(context: AiFinancialModelContext, language: Respo
     reportText(language, `- Execution Difficulty: ${executionDifficulty}/100`, `- Yürütme Zorluğu: ${executionDifficulty}/100`),
     reportText(language, `- Revenue Potential: ${revenuePotential}/100`, `- Gelir Potansiyeli: ${revenuePotential}/100`),
     reportText(language, `- Overall Opportunity Score: ${overall}/100 — strongest when demand, timing, execution feasibility, and revenue potential reinforce the same entry thesis.`, `- Genel Fırsat Skoru: ${overall}/100 — talep, zamanlama, yürütülebilirlik ve gelir potansiyeli aynı giriş tezini desteklediğinde güçlenir.`),
-  ];
-}
-
-function buildFounderDecisionEngine(context: AiFinancialModelContext, language: ResponseLanguage) {
-  return [
-    reportText(language, `- If I were the founder: I would focus first on ${context.investmentScore.nextCriticalAction.toLowerCase()}.`, `- Kurucu olsaydım: Önce ${context.investmentScore.nextCriticalAction.toLowerCase()} konusuna odaklanırdım.`),
-    reportText(language, `- Do first: test ${context.metrics.arpa.displayValue} willingness to pay with ${context.inputs.targetCustomer} through the narrowest ${context.inputs.pricingModel} offer.`, `- İlk yapılacak: ${context.inputs.targetCustomer} ile en dar ${context.inputs.pricingModel} teklif üzerinden ${context.metrics.arpa.displayValue} ödeme isteğini test et.`),
-    reportText(language, `- Postpone: broad hiring and expansion beyond the ${context.inputs.businessModel} beachhead until ${context.metrics.cacPayback.displayValue} payback is observed.`, `- Ertele: ${context.metrics.cacPayback.displayValue} geri ödeme gözlenene kadar geniş işe alımı ve ${context.inputs.businessModel} başlangıç modelinin ötesine genişlemeyi ertele.`),
-    reportText(language, `- Spend money on: ${context.inputs.targetCustomer} discovery, paid conversion proof, and the smallest ${context.inputs.industry} operating asset needed to deliver the promise.`, `- Para harcanacak alan: ${context.inputs.targetCustomer} keşfi, ücretli dönüşüm kanıtı ve vaadi sunmak için gereken en küçük ${context.inputs.industry} operasyon varlığı.`),
-    reportText(language, `- Absolutely avoid: committing ${context.metrics.investmentNeeded.displayValue} before retention and ${context.metrics.cacPayback.displayValue} payback are demonstrated.`, `- Kesinlikle kaçınılacak: elde tutma ve ${context.metrics.cacPayback.displayValue} geri ödeme gösterilmeden ${context.metrics.investmentNeeded.displayValue} sermaye taahhüt etmek.`),
   ];
 }
 
@@ -2251,17 +2091,6 @@ function buildRiskMatrix(context: AiFinancialModelContext, language: ResponseLan
       `- ${risk} | Olasılık: ${probability} | Etki: ${impact} | Şiddet: ${severity} | Azaltım: ${response.mitigation} | Erken Uyarı Sinyali: ${response.signal}.`
     );
   });
-}
-
-function buildCeoBrief(context: AiFinancialModelContext, language: ResponseLanguage) {
-  const decision = localizeDecision(getVisibleDecision(context), language);
-  return [
-    reportText(language, `- [Estimated] Biggest Opportunity: convert ${context.inputs.targetCustomer} beachhead demand into repeatable paid revenue before broad expansion.`, `- [Tahmini] En Büyük Fırsat: genişlemeden önce ${context.inputs.targetCustomer} başlangıç talebini tekrarlanabilir ücretli gelire dönüştürmek.`),
-    reportText(language, `- [Estimated] Biggest Risk: ${context.investmentScore.topRisks[0] || "demand and payback may remain unproven when capital is scaled."}`, `- [Tahmini] En Büyük Risk: ${context.investmentScore.topRisks[0] || "sermaye ölçeklendiğinde talep ve geri ödeme kanıtlanmamış kalabilir."}`),
-    reportText(language, `- [Assumption] First 90 Days: ${context.investmentScore.nextCriticalAction}; test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer}, record paid conversion, and repeat the winning motion before expansion.`, `- [Varsayım] İlk 90 Gün: ${context.investmentScore.nextCriticalAction}; ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile test edin, ücretli dönüşümü kaydedin ve genişlemeden önce kazanan hareketi tekrarlayın.`),
-    reportText(language, `- [Assumption] Critical KPIs: paid conversion, retention, ${context.metrics.grossMargin.displayValue} gross margin, and ${context.metrics.cacPayback.displayValue} CAC payback.`, `- [Varsayım] Kritik KPI'lar: ücretli dönüşüm, elde tutma, ${context.metrics.grossMargin.displayValue} brüt marj ve ${context.metrics.cacPayback.displayValue} CAC geri ödeme.`),
-    reportText(language, `- [Estimated] Final Recommendation: ${decision} with ${context.reportIntelligence.totalScore}/100 confidence; commit additional capital only after the primary evidence gate is met.`, `- [Tahmini] Nihai Tavsiye: ${context.reportIntelligence.totalScore}/100 güven ile ${decision}; ek sermayeyi yalnızca birincil kanıt kapısı karşılandıktan sonra taahhüt edin.`),
-  ];
 }
 
 function buildCanonicalSwot(
@@ -2330,57 +2159,6 @@ function buildCanonicalFinancialAssumptions(context: AiFinancialModelContext, la
   ].join("\n");
 }
 
-// "Major" report sections for the Evidence & Confidence feature:
-// substantive, AI-authored narrative fields where a content-derived
-// evidence assessment adds real signal. Deliberately excludes fields
-// already covered by their own deterministic confidence framing
-// (financialAssumptions' User-provided/Market-derived/AI-assumption
-// labels, the canonical numeric dashboards, founderScore, the
-// roadmaps) so this doesn't duplicate or contradict an existing,
-// more-precise signal with a cruder text-derived one. executiveSummary
-// gets its own rollup (see buildExecutiveSummaryConfidenceRollup)
-// instead of the generic per-section block. executiveRecommendation is
-// also excluded: it's densely packed with real, computed decision-
-// engine percentages (Decision Confidence, Market/Competition/
-// Execution/Product Confidence, etc.) that carry no bracket evidence
-// tag by convention, so the text-derived scanner below mistakes them
-// en masse for unsupported claims and scores an already well-grounded
-// section as unfairly Low -- observed on a live-generated report.
-const majorPlanFieldsForEvidenceConfidence: PlanReportField[] = [
-  "problem",
-  "solution",
-  "targetCustomer",
-  "marketOpportunity",
-  "competitorLandscape",
-  "businessModel",
-  "swotAnalysis",
-  "portersFiveForces",
-  "pricingStrategy",
-  "goToMarketPlan",
-  "salesStrategy",
-  "risks",
-];
-
-function appendEvidenceConfidenceToMajorPlanSections(
-  report: Record<PlanReportField, string>,
-  language: ResponseLanguage
-) {
-  const assessments: Array<{ field: PlanReportField; assessment: SectionEvidenceAssessment }> = [];
-
-  for (const field of majorPlanFieldsForEvidenceConfidence) {
-    const content = report[field];
-
-    if (!content?.trim()) {
-      continue;
-    }
-
-    assessments.push({ field, assessment: assessSectionEvidenceConfidence(content) });
-    report[field] = appendEvidenceConfidenceBlock(content, language);
-  }
-
-  return assessments;
-}
-
 // Requirement: TAM/CAGR/ARR/CAC/LTV/margin/timeline mentions must
 // agree everywhere they appear. Every target below reuses the exact
 // same canonical AiFinancialModelContext.metrics values every
@@ -2412,41 +2190,6 @@ function buildPlanFinancialConsistencyTargets(
   ];
 }
 
-function buildExecutiveSummaryConfidenceRollup(
-  assessments: Array<{ field: PlanReportField; assessment: SectionEvidenceAssessment }>,
-  language: ResponseLanguage
-) {
-  if (!assessments.length) {
-    return "";
-  }
-
-  const overallConfidence = Math.round(
-    assessments.reduce((sum, entry) => sum + entry.assessment.confidenceScore, 0) / assessments.length
-  );
-  const rankedByConfidence = [...assessments].sort(
-    (a, b) => b.assessment.confidenceScore - a.assessment.confidenceScore
-  );
-  const highest = rankedByConfidence[0];
-  const lowest = rankedByConfidence[rankedByConfidence.length - 1];
-  const biggestUnknown = [...assessments].sort(
-    (a, b) =>
-      b.assessment.unsupportedNumericClaimCount + b.assessment.missingEvidence.length -
-      (a.assessment.unsupportedNumericClaimCount + a.assessment.missingEvidence.length)
-  )[0];
-  const biggestUnknownDetail =
-    biggestUnknown.assessment.missingEvidence[0] ||
-    reportText(language, "no significant evidence gap was detected.", "önemli bir kanıt boşluğu tespit edilmedi.");
-  const label = (field: PlanReportField) => planFieldLabels[language][field];
-
-  return [
-    reportText(language, "Report Confidence:", "Rapor Güveni:"),
-    reportText(language, `- Overall Report Confidence: ${overallConfidence}/100`, `- Genel Rapor Güveni: ${overallConfidence}/100`),
-    reportText(language, `- Biggest Unknown: ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`, `- En Büyük Bilinmeyen: ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`),
-    reportText(language, `- Highest Confidence Finding: ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`, `- En Yüksek Güvenli Bulgu: ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`),
-    reportText(language, `- Lowest Confidence Finding: ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`, `- En Düşük Güvenli Bulgu: ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`),
-  ].join("\n");
-}
-
 // Maps Business Plan's own numeric decision engine onto the shared,
 // report-type-agnostic Executive Recommendation vocabulary. This is a pure
 // presentation mapping -- investmentScore.recommendation stays the
@@ -2459,20 +2202,74 @@ function buildPlanExecutiveDecisionBrief(
 ): ExecutiveDecisionBrief {
   const score = context.investmentScore;
   const decision: ExecutiveDecisionCode =
-    score.recommendation === "GO" ? "GO" : score.recommendation === "WAIT" ? "WAIT" : "NO_GO";
+    score.recommendation === "GO" ? "GO" : score.recommendation === "WAIT" ? "CONDITIONAL_GO" : "NO_GO";
 
-  const shortAnswer = reportText(
-    language,
-    `This ${context.inputs.industry} ${context.inputs.businessModel} opportunity scores ${score.totalScore}/100. ${score.nextCriticalAction}`,
-    `Bu ${context.inputs.industry} ${context.inputs.businessModel} fırsatı 100 üzerinden ${score.totalScore} puan alıyor. ${score.nextCriticalAction}`
+  // strengths[0] is the single biggest upside (Biggest Opportunity); the
+  // remaining strengths become the supporting reasons (Why) so the two
+  // blocks never restate the same sentence.
+  const biggestOpportunity =
+    score.strengths[0]?.trim() ||
+    reportText(
+      language,
+      `${context.inputs.industry} demand has not yet been validated but remains the clearest path to a defensible beachhead.`,
+      `${context.inputs.industry} talebi henüz doğrulanmadı, ancak savunulabilir bir başlangıç pazarı için en net yol olmaya devam ediyor.`
+    );
+  const topReasons = score.strengths.slice(1, 4);
+
+  // The two weakest scoring categories are the concrete data gaps that
+  // could most change this decision -- never a generic "more research
+  // needed" caveat, always named and tied to the engine's own evidence.
+  const weakestCategories = Object.values(score.categories)
+    .slice()
+    .sort((a, b) => a.score / a.maximumScore - b.score / b.maximumScore)
+    .slice(0, 2);
+  const missingInformation = weakestCategories.map((category) =>
+    reportText(
+      language,
+      `${category.label} evidence is limited (${category.score}/${category.maximumScore}): ${category.explanation}`,
+      `${category.label} kanıtı sınırlıdır (${category.score}/${category.maximumScore}): ${category.explanation}`
+    )
   );
 
+  // NO_GO must never contain entry/pilot/investment-commitment language
+  // -- only what would have to change before revisiting the decision.
+  const first90Days =
+    decision === "NO_GO"
+      ? [
+          reportText(
+            language,
+            `Do not commit ${context.metrics.investmentNeeded.displayValue} or further build effort to this business in its current form.`,
+            `Bu işe şu anki haliyle ${context.metrics.investmentNeeded.displayValue} veya ek geliştirme çabası ayırmayın.`
+          ),
+          reportText(
+            language,
+            `The specific blocker is "${score.topRisks[0] || score.weaknesses[0] || "the primary risk"}" -- revisit only if new, verified evidence resolves it.`,
+            `Asıl engel "${score.topRisks[0] || score.weaknesses[0] || "birincil risk"}"; yalnızca yeni ve doğrulanmış kanıtlar bunu çözerse yeniden değerlendirin.`
+          ),
+          score.nextCriticalAction,
+        ]
+      : [
+          score.nextCriticalAction,
+          reportText(
+            language,
+            `Test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer} and record paid-conversion evidence at the ${context.metrics.arpa.displayValue} planning input.`,
+            `${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile test edin ve ${context.metrics.arpa.displayValue} planlama girdisinde ücretli dönüşüm kanıtını kaydedin.`
+          ),
+          reportText(
+            language,
+            `Validate the mitigation for "${score.topRisks[0] || "the primary risk"}" before committing ${context.metrics.investmentNeeded.displayValue}.`,
+            `${context.metrics.investmentNeeded.displayValue} taahhüt etmeden önce "${score.topRisks[0] || "birincil risk"}" için azaltımı doğrulayın.`
+          ),
+        ];
+
   return {
-    shortAnswer,
     decision,
     confidence: score.confidence,
-    topReasons: score.strengths.slice(0, 3),
+    topReasons,
     topRisks: score.topRisks.slice(0, 3),
+    biggestOpportunity,
+    missingInformation,
+    first90Days,
   };
 }
 
@@ -2502,7 +2299,6 @@ function normalizeFullPlanReport(
       language,
       sectionLabels: planFieldLabels[language],
     }) as Record<PlanReportField, string>;
-    appendEvidenceConfidenceToMajorPlanSections(dedupedWithoutContext, language);
 
     return dedupedWithoutContext;
   }
@@ -2533,15 +2329,15 @@ function normalizeFullPlanReport(
       : buildCanonicalKpiDashboard(context, language)
   );
   normalized.kpis = buildCanonicalKpiGovernance(context, language);
-  normalized.executiveRecommendation =
-    language === "English"
-      ? buildCanonicalExecutiveRecommendation(context)
-      : buildCanonicalExecutiveRecommendation(context, language);
   normalized.founderScore = buildCanonicalFounderScore(context, language);
-  normalized.executiveSummary = [
-    formatExecutiveDecisionBrief(buildPlanExecutiveDecisionBrief(context, language), language),
-    buildExecutiveScorecard(context, language),
-  ].join("\n\n");
+  // Single Executive Decision layer: Final Decision, Confidence, Why,
+  // Biggest Risks, Biggest Opportunity, and the First 90-Day Action Plan --
+  // and nothing else. No second summary, no confidence rollup, and no
+  // source-reliability overview may be appended to this field; every one
+  // of those used to stack on top of this same field, restating the
+  // decision three more times before any supporting section even started.
+  const planExecutiveDecisionBrief = buildPlanExecutiveDecisionBrief(context, language);
+  normalized.executiveSummary = formatExecutiveDecisionBrief(planExecutiveDecisionBrief, language);
   normalized.swotAnalysis =
     language === "English"
       ? buildCanonicalSwot(context, parsed)
@@ -2549,7 +2345,6 @@ function normalizeFullPlanReport(
   normalized.financialAssumptions = buildCanonicalFinancialAssumptions(context, language);
   normalized.kpis = removePlaceholderKpiValues(normalized.kpis);
   normalized.marketOpportunity = removeTamSamSomOwnershipText(normalized.marketOpportunity);
-  normalized.executiveRecommendation = removeTamSamSomOwnershipText(normalized.executiveRecommendation);
   normalized.marketOpportunity = appendIntelligenceBlock(
     normalized.marketOpportunity,
     reportLabel(language, "Market Opportunity Score", "Pazar Fırsatı Skoru"),
@@ -2567,16 +2362,6 @@ function normalizeFullPlanReport(
         reportLabel(language, "Risk Matrix", "Risk Matrisi"),
         buildRiskMatrix(context, language)
       );
-  normalized.executiveRecommendation = appendIntelligenceBlock(
-    normalized.executiveRecommendation,
-    reportLabel(language, "AI Confidence Breakdown", "AI Güven Dağılımı"),
-    buildConfidenceBreakdown(context, language)
-  );
-  normalized.executiveRecommendation = appendIntelligenceBlock(
-    normalized.executiveRecommendation,
-    reportLabel(language, "Founder Decision Engine", "Kurucu Karar Motoru"),
-    buildFounderDecisionEngine(context, language)
-  );
   normalized.roadmap306090 = removeLegacyValidationIntelligenceBlock(normalized.roadmap306090);
   normalized.roadmap306090 = appendIntelligenceBlock(
     normalized.roadmap306090,
@@ -2589,27 +2374,16 @@ function normalizeFullPlanReport(
       reportText(language, `- Next 12 Months: expand the ${context.inputs.industry} model beyond the beachhead only after those proof gates hold in ${context.inputs.geography}. Expected impact: scales from verified operating evidence.`, `- Sonraki 12 Ay: ${context.inputs.industry} modelini yalnızca bu kanıt kapıları ${context.inputs.geography} içinde sağlandıktan sonra başlangıç pazarının ötesine genişlet. Beklenen etki: doğrulanmış operasyon kanıtından ölçeklenir.`),
     ]
   );
-  normalized.roadmap306090 = appendIntelligenceBlock(
-    normalized.roadmap306090,
-    reportLabel(language, "Validation Intelligence", "Doğrulama Zekası"),
-    [formatValidationIntelligenceSummary(context, language)]
-  );
-  // Sources become invisible: the model's own raw citation list is
-  // compressed to an Evidence Summary (category + count) before any
-  // intelligence block is appended. Full per-source detail is not
-  // discarded -- it still reaches analyzeReportSourceIntelligence below via
-  // the pre-compression text captured here, and remains available through
-  // report.metadata for anyone who explicitly requests source detail.
-  const rawSourcesAssumptions = cleanInternalSourceFallbacks(normalized.sourcesAssumptions, language);
-  normalized.sourcesAssumptions = appendIntelligenceBlock(
-    buildEvidenceSummary(rawSourcesAssumptions, language),
-    reportLabel(language, "Source Intelligence", "Source Intelligence"),
-    [formatSourceIntelligenceSummary(context, language)]
-  );
-  normalized.sourcesAssumptions = appendIntelligenceBlock(
-    normalized.sourcesAssumptions,
-    reportLabel(language, "CEO Summary", "CEO Özeti"),
-    buildCeoBrief(context, language)
+  // Evidence and sources stay in the background: the model's raw citation
+  // list is compressed to an Evidence Summary (category + count) and
+  // nothing else is appended here. Detailed per-source metadata still
+  // reaches report.metadata via createReportMetadataContext's own,
+  // independent analyzeReportSourceIntelligence call -- it is available
+  // for anyone who explicitly requests source detail, it just no longer
+  // renders as a second decision-adjacent summary in the report body.
+  normalized.sourcesAssumptions = buildEvidenceSummary(
+    cleanInternalSourceFallbacks(normalized.sourcesAssumptions, language),
+    language
   );
 
   for (const field of planFields) {
@@ -2640,26 +2414,13 @@ function normalizeFullPlanReport(
     sectionLabels: planFieldLabels[language],
   }) as Record<PlanReportField, string>;
 
-  const evidenceAssessments = appendEvidenceConfidenceToMajorPlanSections(deduped, language);
-  const confidenceRollup = buildExecutiveSummaryConfidenceRollup(evidenceAssessments, language);
-  if (confidenceRollup) {
-    deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${confidenceRollup}`;
-  }
-
-  // Reads the PRE-compression raw source text (captured above, before
-  // buildEvidenceSummary replaced the visible field with a category+count
-  // summary) so full per-source detail is still computed even though the
-  // rendered sourcesAssumptions field no longer exposes it. Only the
-  // trust-tier name overview goes into executiveSummary -- full per-source
-  // detail is never written to the client-facing report.metadata; it only
-  // reaches recordAiUsage's internal billing/usage-log metadata via
-  // flattenReportMetadataForUsage (see createReportMetadataContext in
-  // report-engine/metadata.ts).
-  const sourceIntelligenceRecords = analyzeReportSourceIntelligence(rawSourcesAssumptions);
-  const sourceReliabilityOverview = buildSourceReliabilityOverview(sourceIntelligenceRecords, language);
-  if (sourceReliabilityOverview) {
-    deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${sourceReliabilityOverview}`;
-  }
+  // Evidence and confidence stay in the background: no per-section
+  // "Evidence & Confidence" block is appended to the report body, and no
+  // confidence rollup or source-reliability overview is appended to
+  // executiveSummary. That field carries exactly one decision and one
+  // confidence value (see formatExecutiveDecisionBrief above) and nothing
+  // else. Detailed per-source/per-section evidence signal still reaches
+  // report.metadata independently via createReportMetadataContext.
 
   // Final consistency validation pass, run last so it sees every prior
   // addition. Silently corrects any section that contradicts the
@@ -2672,7 +2433,7 @@ function normalizeFullPlanReport(
     fields: planFields,
     language,
     authoritativeDecision: localizeDecision(getVisibleDecision(context), language),
-    decisionProtectedFields: ["executiveSummary", "executiveRecommendation"],
+    decisionProtectedFields: ["executiveSummary"],
     metricTargets: buildPlanFinancialConsistencyTargets(context),
     metricProtectedFields: ["financialDashboard", "unitEconomics", "tamSamSom"],
     riskOpportunity: {
@@ -2695,6 +2456,16 @@ function normalizeFullPlanReport(
   // report-specific templates (e.g. a "Market Overview" or "Regional
   // Analysis" section heading) leaking in the other direction.
   assertReportIsolation("business_plan", deduped);
+
+  // Fail generation rather than ship a report that tells the reader to
+  // walk away in the Executive Decision layer while still recommending a
+  // pilot/scale/proceed plan in the freeform go-to-market sections.
+  assertNoDecisionContradiction(
+    planExecutiveDecisionBrief.decision,
+    deduped,
+    ["goToMarketPlan", "salesStrategy", "roadmap306090", "founderRoadmap"],
+    language
+  );
 
   // Quality Gate: fail generation instead of silently returning a report
   // that dumps information rather than helping a founder/investor decide.
@@ -5203,10 +4974,9 @@ async function executePlanRequestInner(
     // exists for this request (the flag was off, this domain never
     // reached Business Intelligence Orchestrator, etc.), in which case
     // every code path below is byte-for-byte identical to before this
-    // integration -- the model's own, legacy, deterministically-built
-    // Executive Recommendation content (buildCanonicalExecutiveRecommendation
-    // and its appended intelligence blocks, both unmodified) is used
-    // exactly as it always has been. When real, this string REPLACES
+    // integration -- the report's own, deterministically-built Executive
+    // Summary/Decision layer (formatExecutiveDecisionBrief, unmodified)
+    // is used exactly as it always has been. When real, this string REPLACES
     // that section's content post-hoc, at the single point each
     // response path actually finalizes what it returns/streams (see
     // below) -- never by altering parseFullPlanReport/
@@ -5777,7 +5547,7 @@ Write only the content for this section. Do not write a JSON object, field name,
         // request (with its own, different memo, or none at all) is
         // never contaminated by this request's memo.
         if (strategicDecisionMemoReportSection) {
-          parsedCachedReport.executiveRecommendation = strategicDecisionMemoReportSection;
+          parsedCachedReport.executiveSummary = strategicDecisionMemoReportSection;
         }
 
         return new Response(encoder.encode(
@@ -6098,7 +5868,7 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             // parsedReport actually streamed/returned to this request
             // is overridden.
             if (strategicDecisionMemoReportSection) {
-              parsedReport.executiveRecommendation = strategicDecisionMemoReportSection;
+              parsedReport.executiveSummary = strategicDecisionMemoReportSection;
             }
 
             fullReportStage = "stream_response";
@@ -6214,7 +5984,7 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
               // fallback's content instead of leaving it purely
               // generic.
               if (strategicDecisionMemoReportSection) {
-                fallbackReport.executiveRecommendation = strategicDecisionMemoReportSection;
+                fallbackReport.executiveSummary = strategicDecisionMemoReportSection;
               }
               enqueue(serializePlanReportChunks(fallbackReport));
               logReportTimingSummary({

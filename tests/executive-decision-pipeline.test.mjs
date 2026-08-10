@@ -76,51 +76,93 @@ const reportPdfButtonSource = readFileSync(
 
 // -- executive-decision-brief.ts -------------------------------------------
 
-test("formatExecutiveDecisionBrief renders Decision + Confidence within the first line and caps reasons/risks at 3", () => {
+test("formatExecutiveDecisionBrief renders the single Executive Decision layer in order and caps reasons/risks/actions at 3", () => {
   const brief = {
-    shortAnswer: "This opportunity is worth pursuing now.",
     decision: "GO",
     confidence: 72,
     topReasons: ["Reason one", "Reason two", "Reason three", "Reason four"],
     topRisks: ["Risk one", "Risk two", "Risk three", "Risk four"],
+    biggestOpportunity: "The single biggest upside is repeat demand.",
+    missingInformation: ["Gap one", "Gap two", "Gap three", "Gap four"],
+    first90Days: ["Action one", "Action two", "Action three", "Action four"],
   };
 
   const rendered = formatExecutiveDecisionBrief(brief, "English");
-  assert.match(rendered, /^Executive Recommendation/);
+  assert.match(rendered, /^Executive Decision/);
   assert.match(rendered, /Decision: GO \(Confidence: 72%\)/);
-  assert.match(rendered, /This opportunity is worth pursuing now\./);
+  assert.match(rendered, /Biggest Opportunity: The single biggest upside is repeat demand\./);
   assert.equal(rendered.includes("Reason four"), false, "must cap reasons at 3");
   assert.equal(rendered.includes("Risk four"), false, "must cap risks at 3");
+  assert.equal(rendered.includes("Gap four"), false, "must cap missing-information items at 3");
+  assert.equal(rendered.includes("Action four"), false, "must cap first-90-day actions at 3");
   assert.match(rendered, /1\. Reason one/);
   assert.match(rendered, /3\. Reason three/);
+  assert.match(rendered, /Missing Information That Could Change This Decision:\n1\. Gap one/);
+  assert.match(rendered, /First 90-Day Action Plan:\n1\. Action one/);
+
+  // Order matters: Decision/Confidence, Why, Biggest Risks, Biggest
+  // Opportunity, Missing Information, then First 90-Day Action Plan.
+  const whyIndex = rendered.indexOf("Why:");
+  const risksIndex = rendered.indexOf("Biggest Risks:");
+  const opportunityIndex = rendered.indexOf("Biggest Opportunity:");
+  const missingInfoIndex = rendered.indexOf("Missing Information That Could Change This Decision:");
+  const actionsIndex = rendered.indexOf("First 90-Day Action Plan:");
+  assert.ok(whyIndex < risksIndex);
+  assert.ok(risksIndex < opportunityIndex);
+  assert.ok(opportunityIndex < missingInfoIndex);
+  assert.ok(missingInfoIndex < actionsIndex);
 });
 
-test("formatExecutiveDecisionBrief localizes the decision/confidence line for Turkish", () => {
+test("formatExecutiveDecisionBrief renders an honest default Missing Information line when the caller has no real gap to report", () => {
   const rendered = formatExecutiveDecisionBrief(
     {
-      shortAnswer: "Bu fırsat şimdi değerlendirilmeli.",
+      decision: "GO",
+      confidence: 80,
+      topReasons: ["Reason one"],
+      topRisks: ["Risk one"],
+      biggestOpportunity: "Upside.",
+      missingInformation: [],
+      first90Days: ["Action one"],
+    },
+    "English"
+  );
+  assert.match(rendered, /No material data gaps were identified/);
+});
+
+test("formatExecutiveDecisionBrief localizes every label for Turkish, including the 3-value decision vocabulary", () => {
+  const rendered = formatExecutiveDecisionBrief(
+    {
       decision: "NO_GO",
       confidence: 30,
       topReasons: ["Neden bir"],
       topRisks: ["Risk bir"],
+      biggestOpportunity: "En büyük fırsat budur.",
+      missingInformation: ["Eksik veri bir"],
+      first90Days: ["Aksiyon bir"],
     },
     "Turkish"
   );
-  assert.match(rendered, /Yönetici Tavsiyesi/);
+  assert.match(rendered, /Yönetici Kararı/);
   assert.match(rendered, /Karar: HAYIR \(Güven: 30%\)/);
+  assert.match(rendered, /Başlıca Fırsat: En büyük fırsat budur\./);
+  assert.match(rendered, /Kararı Değiştirebilecek Eksik Bilgiler:\n1\. Eksik veri bir/);
+  assert.match(rendered, /İlk 90 Günlük Aksiyon Planı:/);
 });
 
-test("localizeExecutiveDecision returns the correct token per language", () => {
-  assert.equal(localizeExecutiveDecision("WAIT", "German"), "WARTEN");
-  assert.equal(localizeExecutiveDecision("DEPENDS", "French"), "SOUS CONDITIONS");
+test("localizeExecutiveDecision returns the correct 3-value token per language", () => {
+  assert.equal(localizeExecutiveDecision("CONDITIONAL_GO", "German"), "BEDINGTES GO");
+  assert.equal(localizeExecutiveDecision("NO_GO", "French"), "NO-GO");
   assert.equal(localizeExecutiveDecision("GO", "Spanish"), "GO");
 });
 
-test("extractGenericDecisionSignal resolves conditional language to DEPENDS ahead of an unqualified go/no-go verb", () => {
+test("extractGenericDecisionSignal resolves conditional/hold language to CONDITIONAL_GO ahead of an unqualified go/no-go verb", () => {
   const { decision } = extractGenericDecisionSignal(
     "We recommend proceeding, but only if the regulator confirms the exemption within 30 days."
   );
-  assert.equal(decision, "DEPENDS");
+  assert.equal(decision, "CONDITIONAL_GO");
+
+  const held = extractGenericDecisionSignal("Hold until the missing filing is verified.");
+  assert.equal(held.decision, "CONDITIONAL_GO");
 });
 
 test("extractGenericDecisionSignal reads an explicit confidence percentage and defaults to 50 when absent", () => {
@@ -130,8 +172,7 @@ test("extractGenericDecisionSignal reads an explicit confidence percentage and d
   assert.equal(withConfidence.decision, "NO_GO");
   assert.equal(withConfidence.confidence, 82);
 
-  const withoutConfidence = extractGenericDecisionSignal("Hold until the missing filing is verified.");
-  assert.equal(withoutConfidence.decision, "WAIT");
+  const withoutConfidence = extractGenericDecisionSignal("This statement names no decision keyword at all.");
   assert.equal(withoutConfidence.confidence, 50);
 });
 
@@ -201,6 +242,102 @@ test("computeFillerRatio measures the fraction of filler/duplicate substantive s
   assert.equal(ratio, 2 / 5);
 });
 
+// REGRESSION: report-evidence-confidence.ts's formatEvidenceConfidenceBlock
+// appends a fixed-template "Evidence & Confidence" block (heading + short
+// field labels: Evidence Quality, Confidence Score, Primary Evidence
+// Type(s), an optional Missing Evidence line, an optional validation
+// recommendation) after EVERY major section. A real, live Market
+// Intelligence generation for the Turkish car-wash prompt showed this
+// block landing byte-for-byte identical across multiple sections whenever
+// they happened to share the same evidence quality/confidence value (the
+// same way two rows of a table sharing a value isn't "duplicate prose") --
+// but computeFillerRatio's exact-duplicate-line check had no way to tell
+// a repeated STRUCTURAL label from a repeated narrative sentence, so a
+// well-formed, non-repetitive report was rejected by the executive
+// quality gate's 15% filler ceiling for the sole reason that it
+// consistently labeled its own evidence quality. Both functions must
+// treat this specific block as structural, not filler, regardless of how
+// many sections it repeats across.
+const repeatedEvidenceConfidenceBlock = [
+  "Evidence & Confidence",
+  "- Evidence Quality: Medium",
+  "- Confidence Score: 62/100",
+  "- Primary Evidence Type(s): Benchmark Data",
+  "- This section's conclusion relies primarily on Benchmark Data.",
+].join("\n");
+
+test("computeFillerRatio never counts the repeated Evidence & Confidence template block as filler", () => {
+  const sections = Array.from(
+    { length: 6 },
+    (_, i) =>
+      `Market section ${i} makes a distinct, substantive claim about demand, pricing, or competitive dynamics that is unique to this section.\n\n${repeatedEvidenceConfidenceBlock}`
+  );
+  const combined = sections.join("\n\n");
+
+  const ratio = computeFillerRatio(combined);
+  assert.ok(
+    ratio < 0.15,
+    `expected the repeated structural block alone to stay under the 15% gate ceiling, got ${ratio}`
+  );
+});
+
+test("computeFillerRatio still flags genuine repeated PROSE outside the Evidence & Confidence block", () => {
+  const content = [
+    "The same exact narrative sentence about market demand appears twice in this report.",
+    repeatedEvidenceConfidenceBlock,
+    "",
+    "The same exact narrative sentence about market demand appears twice in this report.",
+    repeatedEvidenceConfidenceBlock,
+  ].join("\n");
+
+  const ratio = computeFillerRatio(content);
+  assert.ok(
+    ratio > 0,
+    "a genuinely duplicated narrative sentence outside the structural block must still count"
+  );
+});
+
+test("stripFillerAndDuplicateSentences preserves every line of a repeated Evidence & Confidence block", () => {
+  const content = [
+    "First section narrative with unique content about the market.",
+    repeatedEvidenceConfidenceBlock,
+    "",
+    "Second section narrative with different unique content about competition.",
+    repeatedEvidenceConfidenceBlock,
+  ].join("\n");
+
+  const stripped = stripFillerAndDuplicateSentences(content);
+  const occurrences = stripped.split("Evidence & Confidence").length - 1;
+  assert.equal(occurrences, 2, "both sections' structural blocks must survive intact, not be deduped away");
+  assert.match(stripped, /Confidence Score: 62\/100[\s\S]*Confidence Score: 62\/100/);
+});
+
+test("REGRESSION: a realistic multi-section report with the Evidence & Confidence block repeated across sections passes the executive quality gate", async () => {
+  const { runExecutiveQualityGate } = await importExecutiveQualityGate();
+
+  const sections = {
+    executiveSummary:
+      "Executive Recommendation\nDecision: WAIT (Confidence: 62%)\nMarket confidence is 62/100, driven mainly by structural demand growth.\n\nTop Reasons:\n1. Unaddressed demand gap in appointment-based service\n\nTop Risks:\n1. Water-use restrictions may tighten",
+    marketOverview: `The Turkish car wash market is structurally attractive for focused entrants with clear demand drivers.\n\n${repeatedEvidenceConfidenceBlock}`,
+    marketSize: `The market is estimated at 8 billion TL in 2024 with a fragmented competitive structure.\n\n${repeatedEvidenceConfidenceBlock}`,
+    industryTrends: `Industry trends favor convenience and compliance-focused operating models.\n\n${repeatedEvidenceConfidenceBlock}`,
+    competitiveLandscape: `Regional chains and independents dominate with no single operator above 8 percent share.\n\n${repeatedEvidenceConfidenceBlock}`,
+    sources: "Evidence Summary\nNo independently verifiable sources were available for this section.",
+  };
+
+  const failures = runExecutiveQualityGate({
+    sections,
+    firstField: "executiveSummary",
+    sourceFields: ["sources"],
+  });
+
+  assert.deepEqual(
+    failures.filter((f) => f.check === "filler_ceiling"),
+    [],
+    `expected no filler_ceiling failure from the repeated structural block, got: ${JSON.stringify(failures)}`
+  );
+});
+
 // -- market-intelligence-presentation.ts: buildMarketExecutiveDecisionBrief -
 
 function fixtureCoverage(overrides = {}) {
@@ -239,22 +376,20 @@ const marketSectionsFixture = {
   strategicRecommendations: "Pilot two locations in the highest-demand districts before scaling regionally.",
 };
 
-test("buildMarketExecutiveDecisionBrief maps ENTER/MONITOR/AVOID onto GO/WAIT/NO_GO and surfaces up to 3 reasons and risks", () => {
+test("buildMarketExecutiveDecisionBrief maps ENTER/MONITOR/AVOID onto GO/CONDITIONAL_GO/NO_GO and produces a distinct biggestOpportunity/topReasons/first90Days", () => {
   const enterBrief = buildMarketExecutiveDecisionBrief(
     marketSectionsFixture,
     "English",
     fixtureCoverage()
   );
   assert.equal(enterBrief.decision, "GO");
-  assert.equal(enterBrief.topReasons.length, 2);
+  assert.equal(enterBrief.topReasons.length, 1);
   assert.equal(enterBrief.topRisks.length, 2);
-  assert.match(enterBrief.shortAnswer, /Market confidence is \d+\/100/);
-  // shortAnswer must not collide with buildMarketExecutiveSummary's separate
-  // "Recommended Market Entry Strategy" bullet once both land in the same
-  // executiveSummary field -- an exact-duplicate line there previously got
-  // silently deleted by stripFillerAndDuplicateSentences, orphaning that
-  // heading (see market-analysis regression fix).
-  assert.doesNotMatch(enterBrief.shortAnswer, /this market, prioritizing/);
+  assert.ok(enterBrief.biggestOpportunity, "biggestOpportunity must be a non-empty single sentence");
+  // biggestOpportunity is the single best opportunity line; topReasons must
+  // be genuinely different sentences, never a repeat of it.
+  assert.equal(enterBrief.topReasons.includes(enterBrief.biggestOpportunity), false);
+  assert.equal(enterBrief.first90Days.length, 3);
 
   const avoidBrief = buildMarketExecutiveDecisionBrief(
     marketSectionsFixture,
@@ -286,7 +421,7 @@ test("buildMarketExecutiveDecisionBrief maps ENTER/MONITOR/AVOID onto GO/WAIT/NO
       },
     })
   );
-  assert.equal(monitorBrief.decision, "WAIT");
+  assert.equal(monitorBrief.decision, "CONDITIONAL_GO");
 });
 
 // -- executive-quality-gate.ts (real functional import via alias rewrite) --
@@ -395,11 +530,22 @@ test("page_one_readable_in_30_seconds still fails when the OPENING itself (not l
 
 // -- Wiring: plan-executor.ts (Business Plan + Strategic Advisory) --------
 
-test("plan-executor.ts wires the Executive Decision brief, evidence summary, filler stripping, and quality gate for Business Plan", () => {
+test("plan-executor.ts wires the single Executive Decision layer, evidence summary, filler stripping, and quality gate for Business Plan", () => {
   assert.match(planExecutorSource, /import\s*\{\s*\n?\s*formatExecutiveDecisionBrief/);
   assert.match(planExecutorSource, /buildPlanExecutiveDecisionBrief\(/);
-  assert.match(planExecutorSource, /formatExecutiveDecisionBrief\(buildPlanExecutiveDecisionBrief\(context, language\), language\)/);
-  assert.match(planExecutorSource, /buildEvidenceSummary\(rawSourcesAssumptions, language\)/);
+  assert.match(
+    planExecutorSource,
+    /const planExecutiveDecisionBrief = buildPlanExecutiveDecisionBrief\(context, language\);\s*\n\s*normalized\.executiveSummary = formatExecutiveDecisionBrief\(planExecutiveDecisionBrief, language\);/
+  );
+  // Single decision layer: no scorecard, confidence rollup, or source
+  // overview may be appended to executiveSummary after the brief.
+  assert.doesNotMatch(planExecutorSource, /buildExecutiveScorecard/);
+  assert.doesNotMatch(planExecutorSource, /buildExecutiveSummaryConfidenceRollup/);
+  assert.doesNotMatch(planExecutorSource, /buildSourceReliabilityOverview/);
+  assert.match(
+    planExecutorSource,
+    /normalized\.sourcesAssumptions = buildEvidenceSummary\(\s*\n\s*cleanInternalSourceFallbacks\(normalized\.sourcesAssumptions, language\),\s*\n\s*language\s*\n\s*\);/
+  );
   assert.match(planExecutorSource, /stripFillerAndDuplicateSentences\(normalized\[field\]\)/);
   assert.match(
     planExecutorSource,
@@ -412,7 +558,7 @@ test("plan-executor.ts wires the Executive Decision brief onto Strategic Advisor
   assert.match(planExecutorSource, /buildDomainAnalysisExecutiveDecisionBrief\(/);
   assert.match(
     planExecutorSource,
-    /validated\.subjectIdentification = \[\s*\n\s*formatExecutiveDecisionBrief\(buildDomainAnalysisExecutiveDecisionBrief\(validated\), language\)/
+    /const domainExecutiveDecisionBrief = buildDomainAnalysisExecutiveDecisionBrief\(validated\);\s*\n\s*validated\.subjectIdentification = \[\s*\n\s*formatExecutiveDecisionBrief\(domainExecutiveDecisionBrief, language\)/
   );
   assert.match(planExecutorSource, /validated\.sources = buildEvidenceSummary\(validated\.sources, language\)/);
   assert.match(
@@ -423,18 +569,47 @@ test("plan-executor.ts wires the Executive Decision brief onto Strategic Advisor
 
 // -- Wiring: market-analysis/route.ts (Market Intelligence) ----------------
 
-test("market-analysis/route.ts wires the Executive Decision brief, evidence summary, filler stripping, and quality gate", () => {
+test("market-analysis/route.ts wires the single Executive Decision layer, evidence summary, filler stripping, and quality gate", () => {
   assert.match(marketAnalysisSource, /buildMarketExecutiveDecisionBrief/);
   assert.match(
     marketAnalysisSource,
-    /formatExecutiveDecisionBrief\(buildMarketExecutiveDecisionBrief\(normalized, language, coverage\), language\)/
+    /marketExecutiveDecisionBrief = buildMarketExecutiveDecisionBrief\(normalized, language, coverage\);\s*\n\s*normalized\.executiveSummary = formatExecutiveDecisionBrief\(marketExecutiveDecisionBrief, language\);/
   );
-  assert.match(marketAnalysisSource, /normalized\.sources = buildEvidenceSummary\(rawSources, language\)/);
-  assert.match(marketAnalysisSource, /stripFillerAndDuplicateSentences\(normalized\[field\]\)/);
+  // Single decision layer: no confidence rollup or source-reliability
+  // overview may be appended to executiveSummary after the brief, and no
+  // per-section Evidence & Confidence block is appended to the report body.
+  assert.doesNotMatch(marketAnalysisSource, /buildMarketExecutiveSummaryConfidenceRollup/);
+  assert.doesNotMatch(marketAnalysisSource, /buildSourceReliabilityOverview/);
+  assert.doesNotMatch(marketAnalysisSource, /appendEvidenceConfidenceToMajorMarketSections/);
+  assert.match(marketAnalysisSource, /normalized\.sources = buildEvidenceSummary\(normalized\.sources, language\)/);
+  assert.match(marketAnalysisSource, /stripFillerAndDuplicateSentences\(deduped\[field\]\)/);
   assert.match(
     marketAnalysisSource,
     /if \(marketAssessment\) \{\s*\n\s*assertExecutiveQualityGate\(\{/
   );
+});
+
+// REGRESSION: filler-stripping used to run on `normalized` BEFORE
+// dedupeReportParagraphsAcrossSections and runConsistencyValidationPass --
+// so it only ever cleaned the model's own raw draft and never saw the
+// content those later steps append/rewrite. A real generation showed
+// exactly this: duplication introduced by the pipeline's own later stages
+// went unstripped and tripped the filler gate on good content. It must
+// run last, against `deduped`, immediately before the isolation/quality-
+// gate checks.
+test("filler-stripping in market-analysis/route.ts runs last, after dedup and consistency correction, not on the model's raw draft", () => {
+  const pipelineOrder = [
+    "dedupeReportParagraphsAcrossSections(normalized",
+    "runConsistencyValidationPass({",
+    "deduped[field] = stripFillerAndDuplicateSentences(deduped[field]);",
+    'assertReportIsolation("market_intelligence", deduped);',
+  ];
+  let searchFrom = 0;
+  for (const marker of pipelineOrder) {
+    const index = marketAnalysisSource.indexOf(marker, searchFrom);
+    assert.ok(index !== -1, `expected to find "${marker}" after position ${searchFrom}`);
+    searchFrom = index + marker.length;
+  }
 });
 
 // -- Prompt directives: executive-consultant tone / financial-first --------

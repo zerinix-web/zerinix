@@ -39,9 +39,9 @@ test("no checkAiProductionRateLimit/recordAiUsage call site lies inside normaliz
 
 test("no checkAiProductionRateLimit/recordAiUsage call site lies inside any of the three Strategic Decision Memo report-section splice blocks", () => {
   const spliceBlockMarkers = [
-    "if (strategicDecisionMemoReportSection) {\n          parsedCachedReport.executiveRecommendation = strategicDecisionMemoReportSection;",
-    "if (strategicDecisionMemoReportSection) {\n              parsedReport.executiveRecommendation = strategicDecisionMemoReportSection;",
-    "if (strategicDecisionMemoReportSection) {\n                fallbackReport.executiveRecommendation = strategicDecisionMemoReportSection;",
+    "if (strategicDecisionMemoReportSection) {\n          parsedCachedReport.executiveSummary = strategicDecisionMemoReportSection;",
+    "if (strategicDecisionMemoReportSection) {\n              parsedReport.executiveSummary = strategicDecisionMemoReportSection;",
+    "if (strategicDecisionMemoReportSection) {\n                fallbackReport.executiveSummary = strategicDecisionMemoReportSection;",
   ];
 
   for (const marker of spliceBlockMarkers) {

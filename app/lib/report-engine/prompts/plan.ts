@@ -10,7 +10,7 @@ import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
 export const planPrompts = {
   executiveSummary: {
     prompt:
-      "Write an executive consulting deliverable, not an AI response. Use exactly this structure: (1) Bottom Line -- 2-3 sentences opening with exactly one decision from PASS, HOLD, VALIDATE, or REJECT plus Decision Confidence. Early-stage ideas without validation should usually be HOLD or VALIDATE, not REJECT. (2) Key Findings -- 3 to 5 bullets ranked by business impact, most decision-relevant first. (3) Biggest Opportunity -- one sentence naming the single highest-upside factor. (4) Biggest Risk -- one sentence naming the single most decision-changing risk. (5) Recommendation -- at most 3 bullets, concrete next actions only. Keep the same decision spine later used by Executive Recommendation and Roadmap, but do not reuse their sentences or repeat findings verbatim from other sections. Do not quote the user's prompt or any analysis question. Do not explain the business model, product, market sizing, SWOT, pricing, GTM, or roadmap in full -- only what changes the decision. No filler phrases, no generic AI phrasing (\"as an AI\", \"in conclusion\", \"it is important to note\"), no repeated evidence-label tags on every line. Max 180 words.",
+      "This is the report's single Executive Decision layer -- the only place a decision, confidence, and action plan are stated. Use exactly this structure: (1) Final Decision -- exactly one of Go, Conditional Go, or No-Go. Early-stage ideas without validation should usually be Conditional Go, not No-Go. (2) Confidence -- one percentage. (3) Why -- top 3 reasons supporting the decision, ranked by business impact. (4) Biggest Risks -- up to 3, ranked, the risks that would most change this decision. (5) Biggest Opportunity -- one sentence naming the single highest-upside factor, distinct from the reasons above. (6) First 90-Day Action Plan -- exactly 3 concrete actions, each naming an owner or operating object, the action, and the proof point that gates the next decision. Do not quote the user's prompt or any analysis question. Do not explain the business model, product, market sizing, SWOT, pricing, GTM, or roadmap in full -- only what changes the decision. No filler phrases, no generic AI phrasing (\"as an AI\", \"in conclusion\", \"it is important to note\"), no evidence-label tags, no internal scoring or validation-pipeline terminology. Max 180 words.",
     maxTokens: 750,
   },
   problem: {
@@ -85,18 +85,13 @@ export const planPrompts = {
   },
   scenarioAnalysis: {
     prompt:
-      "Create only future scenarios with three distinct cases: Worst Case, Base Case, and Best Case. For each case include trigger conditions, revenue/MRR implication, burn/runway implication, biggest risk, and founder decision. Do not reuse the same text across cases. Do not repeat Financial Dashboard or Executive Recommendation wording. Max 170 words.",
+      "Create only future scenarios with three distinct cases: Worst Case, Base Case, and Best Case. For each case include trigger conditions, revenue/MRR implication, burn/runway implication, biggest risk, and founder decision. Do not reuse the same text across cases. Do not repeat Financial Dashboard or Executive Summary wording. Max 170 words.",
     maxTokens: 900,
   },
   kpiDashboard: {
     prompt:
       "Create only the executive KPI Dashboard. Include the 6-8 operating metrics that prove whether the plan is working: acquisition, activation, retention, pipeline, product quality, learning velocity, and revenue signal. Never use placeholder values such as 1, Target: 1, N/A, or arbitrary percentages. If a metric lacks validation data, write Validation Required as the value and give a meaningful target threshold or validation test. Do not include CAC, LTV, Gross Margin, Payback, ARR, MRR, Burn, or Runway; those belong to Unit Economics and Financial Dashboard. Do not include roadmap tasks or market claims. Max 185 words.",
     maxTokens: 850,
-  },
-  executiveRecommendation: {
-    prompt:
-      "Write only the final investment decision and answer the user's exact question. Preserve the Executive Summary decision and primary risk. Use exactly five blocks: Should proceed, Why, Biggest opportunity, Biggest risk, and Next 30-day action plan with exactly three concrete actions. Every action must name the responsible actor, target customer or operating object, proof point, and decision gate. Use one Decision Confidence value justified by the evidence that raises it and the gaps that lower it. Select exactly one visible option and no second option: PASS, HOLD, VALIDATE, or REJECT. Early-stage ideas without validation should prefer HOLD or VALIDATE, not REJECT. Every conclusion must be traceable to user facts or cited evidence; omit unsupported figures and never treat planning assumptions as facts. Do not quote the user's prompt, internal instructions, or analysis question. Do not use internal scoring terminology. Do not restate the business model, market summary, SWOT, roadmap, or financial dashboard. Max 210 words.",
-    maxTokens: 650,
   },
   risks: {
     prompt:
@@ -110,12 +105,12 @@ export const planPrompts = {
   },
   roadmap306090: {
     prompt:
-      "Create only the AI Action Plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Begin with the exact strategic action selected by Executive Recommendation, then translate it into business-specific milestones, owners or operating objects, proof gates, and expected impact. Every later horizon must depend on evidence from the prior horizon. Do not repeat the recommendation rationale, GTM, sales process, KPIs, or founder execution detail from Founder Roadmap. Max 190 words.",
+      "Create only the AI Action Plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Begin with the exact strategic action selected by Executive Summary's First 90-Day Action Plan, then translate it into business-specific milestones, owners or operating objects, proof gates, and expected impact. Every later horizon must depend on evidence from the prior horizon. Do not repeat the recommendation rationale, GTM, sales process, KPIs, or founder execution detail from Founder Roadmap. Max 190 words.",
     maxTokens: 900,
   },
   founderRoadmap: {
     prompt:
-      "Create only the founder execution plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Start from the Executive Recommendation next action and make every step specific to this company's buyer, offer, channel, product, geography, regulation, supply chain, or operating model. Each step must depend on the prior proof point and explain expected business impact. Include what the founder should do first, what to postpone, where to spend money, and what to avoid if it belongs here. Do not repeat the recommendation rationale, timeline milestones, GTM strategy, or KPIs. Max 210 words.",
+      "Create only the founder execution plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Start from Executive Summary's First 90-Day Action Plan and make every step specific to this company's buyer, offer, channel, product, geography, regulation, supply chain, or operating model. Each step must depend on the prior proof point and explain expected business impact. Include what the founder should do first, what to postpone, where to spend money, and what to avoid if it belongs here. Do not repeat the recommendation rationale, timeline milestones, GTM strategy, or KPIs. Max 210 words.",
     maxTokens: 950,
   },
   financialAssumptions: {
@@ -161,7 +156,6 @@ export const planFieldLabels: Record<
     financialDashboard: "Financial Dashboard",
     scenarioAnalysis: "Scenario Analysis: Worst / Base / Best Case",
     kpiDashboard: "KPI Dashboard",
-    executiveRecommendation: "Executive Recommendation",
     risks: "Risks",
     kpis: "KPIs",
     founderRoadmap: "Founder Roadmap",
@@ -188,7 +182,6 @@ export const planFieldLabels: Record<
     financialDashboard: "Finansal Panel",
     scenarioAnalysis: "Senaryo Analizi: Kötü / Baz / En İyi",
     kpiDashboard: "KPI Paneli",
-    executiveRecommendation: "Yönetici Tavsiyesi",
     risks: "Riskler",
     kpis: "KPI'lar",
     founderRoadmap: "Kurucu Yol Haritası",
@@ -198,13 +191,13 @@ export const planFieldLabels: Record<
     sourcesAssumptions: "Kaynaklar / Varsayımlar",
   },
   German: {
-    executiveSummary: "Zusammenfassung", problem: "Problem", solution: "Lösung", targetCustomer: "Zielkunde / ICP", marketOpportunity: "Marktchance", competitorLandscape: "Wettbewerbsumfeld", businessModel: "Geschäftsmodell", tamSamSom: "TAM / SAM / SOM", swotAnalysis: "SWOT-Analyse", portersFiveForces: "Porters Fünf Kräfte", pricingStrategy: "Preisstrategie", goToMarketPlan: "Markteinführungsplan", salesStrategy: "Vertriebsstrategie", unitEconomics: "Stückökonomie", financialDashboard: "Finanzübersicht", scenarioAnalysis: "Szenarioanalyse: Negativ / Basis / Positiv", kpiDashboard: "KPI-Übersicht", executiveRecommendation: "Managementempfehlung", risks: "Risiken", kpis: "KPIs", founderRoadmap: "Gründerfahrplan", roadmap306090: "30-60-90-Tage-Plan", financialAssumptions: "Finanzielle Annahmen", founderScore: "Gründerbereitschaft", sourcesAssumptions: "Quellen / Annahmen",
+    executiveSummary: "Zusammenfassung", problem: "Problem", solution: "Lösung", targetCustomer: "Zielkunde / ICP", marketOpportunity: "Marktchance", competitorLandscape: "Wettbewerbsumfeld", businessModel: "Geschäftsmodell", tamSamSom: "TAM / SAM / SOM", swotAnalysis: "SWOT-Analyse", portersFiveForces: "Porters Fünf Kräfte", pricingStrategy: "Preisstrategie", goToMarketPlan: "Markteinführungsplan", salesStrategy: "Vertriebsstrategie", unitEconomics: "Stückökonomie", financialDashboard: "Finanzübersicht", scenarioAnalysis: "Szenarioanalyse: Negativ / Basis / Positiv", kpiDashboard: "KPI-Übersicht", risks: "Risiken", kpis: "KPIs", founderRoadmap: "Gründerfahrplan", roadmap306090: "30-60-90-Tage-Plan", financialAssumptions: "Finanzielle Annahmen", founderScore: "Gründerbereitschaft", sourcesAssumptions: "Quellen / Annahmen",
   },
   French: {
-    executiveSummary: "Synthèse exécutive", problem: "Problème", solution: "Solution", targetCustomer: "Client cible / ICP", marketOpportunity: "Opportunité de marché", competitorLandscape: "Paysage concurrentiel", businessModel: "Modèle économique", tamSamSom: "TAM / SAM / SOM", swotAnalysis: "Analyse SWOT", portersFiveForces: "Cinq forces de Porter", pricingStrategy: "Stratégie tarifaire", goToMarketPlan: "Plan de mise sur le marché", salesStrategy: "Stratégie commerciale", unitEconomics: "Économie unitaire", financialDashboard: "Tableau financier", scenarioAnalysis: "Scénarios : défavorable / central / favorable", kpiDashboard: "Tableau des KPI", executiveRecommendation: "Recommandation exécutive", risks: "Risques", kpis: "KPI", founderRoadmap: "Feuille de route du fondateur", roadmap306090: "Plan à 30-60-90 jours", financialAssumptions: "Hypothèses financières", founderScore: "Préparation du fondateur", sourcesAssumptions: "Sources / Hypothèses",
+    executiveSummary: "Synthèse exécutive", problem: "Problème", solution: "Solution", targetCustomer: "Client cible / ICP", marketOpportunity: "Opportunité de marché", competitorLandscape: "Paysage concurrentiel", businessModel: "Modèle économique", tamSamSom: "TAM / SAM / SOM", swotAnalysis: "Analyse SWOT", portersFiveForces: "Cinq forces de Porter", pricingStrategy: "Stratégie tarifaire", goToMarketPlan: "Plan de mise sur le marché", salesStrategy: "Stratégie commerciale", unitEconomics: "Économie unitaire", financialDashboard: "Tableau financier", scenarioAnalysis: "Scénarios : défavorable / central / favorable", kpiDashboard: "Tableau des KPI", risks: "Risques", kpis: "KPI", founderRoadmap: "Feuille de route du fondateur", roadmap306090: "Plan à 30-60-90 jours", financialAssumptions: "Hypothèses financières", founderScore: "Préparation du fondateur", sourcesAssumptions: "Sources / Hypothèses",
   },
   Spanish: {
-    executiveSummary: "Resumen ejecutivo", problem: "Problema", solution: "Solución", targetCustomer: "Cliente objetivo / ICP", marketOpportunity: "Oportunidad de mercado", competitorLandscape: "Panorama competitivo", businessModel: "Modelo de negocio", tamSamSom: "TAM / SAM / SOM", swotAnalysis: "Análisis SWOT", portersFiveForces: "Cinco fuerzas de Porter", pricingStrategy: "Estrategia de precios", goToMarketPlan: "Plan de salida al mercado", salesStrategy: "Estrategia comercial", unitEconomics: "Economía unitaria", financialDashboard: "Panel financiero", scenarioAnalysis: "Escenarios: adverso / base / favorable", kpiDashboard: "Panel de KPI", executiveRecommendation: "Recomendación ejecutiva", risks: "Riesgos", kpis: "KPI", founderRoadmap: "Hoja de ruta del fundador", roadmap306090: "Plan de 30-60-90 días", financialAssumptions: "Supuestos financieros", founderScore: "Preparación del fundador", sourcesAssumptions: "Fuentes / Supuestos",
+    executiveSummary: "Resumen ejecutivo", problem: "Problema", solution: "Solución", targetCustomer: "Cliente objetivo / ICP", marketOpportunity: "Oportunidad de mercado", competitorLandscape: "Panorama competitivo", businessModel: "Modelo de negocio", tamSamSom: "TAM / SAM / SOM", swotAnalysis: "Análisis SWOT", portersFiveForces: "Cinco fuerzas de Porter", pricingStrategy: "Estrategia de precios", goToMarketPlan: "Plan de salida al mercado", salesStrategy: "Estrategia comercial", unitEconomics: "Economía unitaria", financialDashboard: "Panel financiero", scenarioAnalysis: "Escenarios: adverso / base / favorable", kpiDashboard: "Panel de KPI", risks: "Riesgos", kpis: "KPI", founderRoadmap: "Hoja de ruta del fundador", roadmap306090: "Plan de 30-60-90 días", financialAssumptions: "Supuestos financieros", founderScore: "Preparación del fundador", sourcesAssumptions: "Fuentes / Supuestos",
   },
 };
 
@@ -236,17 +229,17 @@ export function buildPlanLanguageInstructions(language: ResponseLanguage) {
     "Avoid repeated label patterns. Prefer concise analyst prose; use Evidence/Confidence labels sparingly and only when uncertainty is important.",
     "Do not use generic AI phrases such as 'It is important to', 'Businesses should', 'This strategy can help', 'In today's market', or 'By leveraging'.",
     "Each report section must contribute a unique analytical job. Do not restate conclusions, paragraphs, metrics, or examples assigned to another section.",
-    "Respect strict section ownership: Executive Summary = executive decision only; Problem = customer pain only; Solution = product only; Target Customer = ICP only; Market Opportunity = market attractiveness without TAM/SAM/SOM calculations; TAM/SAM/SOM = market sizing only; Competitor Landscape = competitors only; Business Model = revenue mechanics only; SWOT = internal strengths/weaknesses plus non-duplicative external bullets; Porter's Five Forces = industry forces only; Pricing = pricing logic only; Go-to-Market = customer acquisition only; Sales Strategy = enterprise sales process only; Unit Economics = financial unit metrics only; Financial Dashboard = high-level financial KPIs only; Scenario Analysis = future scenarios only; KPI Dashboard = operating metric values only; KPIs = governance cadence and decision triggers only; Executive Recommendation = final investment decision only; Risks = risks only; Founder Roadmap = founder execution plan only; 30-60-90 Roadmap = timeline only; Financial Assumptions = assumptions only; Founder Score = founder evaluation only; Sources / Assumptions = sources only.",
+    "Respect strict section ownership: Executive Summary = the report's ONLY decision layer (Final Decision, Confidence, Why, Biggest Risks, Biggest Opportunity, First 90-Day Action Plan) -- no other section may restate a decision or confidence value; Problem = customer pain only; Solution = product only; Target Customer = ICP only; Market Opportunity = market attractiveness without TAM/SAM/SOM calculations; TAM/SAM/SOM = market sizing only; Competitor Landscape = competitors only; Business Model = revenue mechanics only; SWOT = internal strengths/weaknesses plus non-duplicative external bullets; Porter's Five Forces = industry forces only; Pricing = pricing logic only; Go-to-Market = customer acquisition only; Sales Strategy = enterprise sales process only; Unit Economics = financial unit metrics only; Financial Dashboard = high-level financial KPIs only; Scenario Analysis = future scenarios only; KPI Dashboard = operating metric values only; KPIs = governance cadence and decision triggers only; Risks = risks only; Founder Roadmap = founder execution plan only; 30-60-90 Roadmap = timeline only; Financial Assumptions = assumptions only; Founder Score = founder evaluation only; Sources / Assumptions = sources only.",
     "Never repeat the same metric more than once unless necessary. If a metric appears in Unit Economics, later financial sections may summarize it but must not explain it again.",
-    "Use one internally consistent server-calculated financial model across Unit Economics, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation. Reuse exact TAM, SAM, SOM, ARPA, ARR, MRR, CAC, LTV, payback, burn, runway, EBITDA, break-even, investment-needed, ROI, and revenue forecast values unless explicitly updating a scenario.",
+    "Use one internally consistent server-calculated financial model across Unit Economics, Financial Dashboard, Scenario Analysis, and Financial Assumptions. Reuse exact TAM, SAM, SOM, ARPA, ARR, MRR, CAC, LTV, payback, burn, runway, EBITDA, break-even, investment-needed, ROI, and revenue forecast values unless explicitly updating a scenario.",
     "The Data-Driven Financial Analysis Engine block in the user input contains the calculated base-case financial model. Use those values as the source of truth.",
     "The Investment Decision Inputs block in the user input contains the calculated investment score, visible decision, estimated valuation, funding stage, decision factors, strengths, weaknesses, top risks, and next critical action. Use those values as the source of truth.",
-    "Executive Summary, Business Model, Unit Economics, KPI Dashboard, Financial Dashboard, Scenario Analysis, Financial Assumptions, and Executive Recommendation must reference the same calculated financial model whenever financial metrics appear.",
+    "Executive Summary, Business Model, Unit Economics, KPI Dashboard, Financial Dashboard, and Financial Assumptions must reference the same calculated financial model whenever financial metrics appear.",
     "For every important numeric claim, including ARR, MRR, CAC, LTV, Gross Margin, Burn, Runway, EBITDA, and Break-even, show value, formula, assumptions, evidence label, and benchmark source. Use only this evidence set: Verified, Estimated, Assumption, AI Analysis. User-provided values are Verified; benchmark-derived values are Estimated; inferred values are Assumptions; interpretive conclusions are AI Analysis.",
     "Add concise evidence metadata where it materially improves trust for market data, financial metrics, KPI assumptions, TAM/SAM/SOM, and competitor insights. Do not over-label ordinary sentences.",
     "Make reasoning deeply industry-specific for SaaS, AI, Cybersecurity, Healthcare, Logistics, Restaurant, Drone, Marketplace, FinTech, E-commerce, EV Charging, and other detected sectors. KPIs, risks, roadmap logic, and financial interpretation must reflect that sector's economics.",
     "Keep payback, LTV:CAC, CAC, and runway realistic for the sector and capital intensity. If a result looks unusually strong, label it as a sensitivity or low-confidence assumption rather than a base case.",
-    "Decision Confidence must match evidence quality and the calculated decision inputs. Use exactly one visible decision from PASS, HOLD, VALIDATE, or REJECT. Early-stage ideas with validation gaps should prefer HOLD or VALIDATE; reserve REJECT for clearly non-investable economics or execution risk.",
+    "Decision Confidence must match evidence quality and the calculated decision inputs. Use exactly one Final Decision from Go, Conditional Go, or No-Go. Early-stage ideas with validation gaps should prefer Conditional Go; reserve No-Go for clearly non-investable economics or execution risk.",
     "Do not fake source authority. If a precise source is unavailable, use assumption language such as 'Assumption based on comparable sector benchmarks', 'Needs validation with primary research', or 'Low confidence until verified'.",
     "Every section must end with a complete sentence or complete bullet. Never end mid-sentence.",
     "Distinguish facts, assumptions, and hypotheses. Never present guesses as facts.",
@@ -262,8 +255,7 @@ export function buildPlanLanguageInstructions(language: ResponseLanguage) {
     "Maintain dependency logic across the whole report: Problem changes Solution; Solution changes Pricing; Pricing changes Financial; Financial changes Runway; Runway changes Risk; Risk changes CEO Recommendation.",
     "Financial reasoning must follow this chain: Revenue -> MRR -> Gross Margin -> CAC -> LTV -> Payback -> Burn -> Runway -> EBITDA.",
     "Use real data first when available. If data is missing, create an explicit assumption, explain why it is reasonable, and assign one canonical evidence label.",
-    "When writing Executive Recommendation, select exactly one visible decision: PASS, HOLD, VALIDATE, or REJECT.",
-    "Executive Recommendation must include one Decision Confidence from the calculated decision inputs as High / Medium / Low or the calculated percentage.",
+    "Executive Summary is the report's only decision layer: select exactly one Final Decision from Go, Conditional Go, or No-Go, and state one Confidence percentage from the calculated decision inputs.",
     "Founder Score must reuse the calculated decision inputs and separate Idea Quality, Validation Confidence, and Founder Evidence without exposing formulas or internal scoring logic.",
     "Founder Roadmap must include Tomorrow, This Week, 30 Days, 90 Days, 180 Days, and 12 Months, with each step dependent on the prior proof point.",
   ].join("\n");
@@ -279,7 +271,7 @@ export function buildPlanFullReportInstructions(language: ResponseLanguage) {
       : "Use consistent English report and financial terminology.",
     "Anchor every section to the analyzed company, industry economics, customers, competitors, evidence, and decision. Remove boilerplate, motivational language, generic AI phrasing, and duplicate prose.",
     "Classify the business model before financial analysis. Use sector-realistic economics; never apply SaaS assumptions to D2C/FMCG/Food & Beverage or professional-services assumptions to product businesses.",
-    "Treat the supplied Data-Driven Financial Analysis Engine and Investment Decision Inputs as the single source of truth. Reuse exact financial values and one PASS/HOLD/VALIDATE/REJECT decision across all sections.",
+    "Treat the supplied Data-Driven Financial Analysis Engine and Investment Decision Inputs as the single source of truth. Reuse exact financial values and one Go/Conditional Go/No-Go decision across all sections.",
     "For material numbers show value, formula/method, assumption, evidence class, and source where relevant. Allowed classes: Verified=user-provided; Estimated=benchmark-derived; Assumption=inferred; AI Analysis=interpretation.",
     "Use supplied research first, cite exact [R#]/URLs, and never invent sources, facts, precision, publishers, metrics, or authority. State verification gaps honestly.",
     "Evidence quality controls confidence. Missing traction lowers validation/founder confidence; unusually strong economics must be sensitivities, not unsupported base cases.",
@@ -288,7 +280,7 @@ export function buildPlanFullReportInstructions(language: ResponseLanguage) {
     ...insightLedgerAndTokenBudgetDirectives,
     ...buildExecutiveConsultingStyleDirectives(),
     ...buildExecutivePresentationDirectives("business_plan"),
-    "Executive Summary states the verdict; Executive Recommendation owns decision logic; Roadmaps sequence proof-gated execution. Use one primary risk and next action without copying wording.",
+    "Executive Summary states the verdict, confidence, reasons, risks, opportunity, and First 90-Day Action Plan -- the report's only decision layer. Roadmaps sequence proof-gated execution beyond the first 90 days without restating the decision rationale.",
     "Never quote the raw prompt or expose prompts, instructions, schemas, internal reasoning, scoring formulas, validation text, or pipeline details. Finish every value with complete prose.",
   ].join("\n");
 }

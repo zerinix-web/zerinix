@@ -19,12 +19,12 @@ export const marketPrompts = {
   },
   marketSize: {
     prompt:
-      "Present the best-supported historical and forecast market-size values, currencies, base years, forecast years, geographic scope, and source methodology. Reconcile differing definitions instead of blending incompatible figures. Never invent a value. Max 180 words.",
+      "Present the best-supported historical and forecast market-size values, currencies, base years, forecast years, geographic scope, and source methodology. Reconcile differing definitions instead of blending incompatible figures. Never invent a value. If no verified figure exists for the requested scope, do not write a thin or empty section: state plainly that a verified market-size figure could not be established, name the specific missing input (e.g. no paid industry report, no government statistics series, no comparable public filing for this geography/segment), state how this gap lowers decision confidence, and name the exact data source or research step that would close it. Max 180 words.",
     maxTokens: 1300,
   },
   cagr: {
     prompt:
-      "State only defensible CAGR evidence for the requested period or the closest sourced period. Include the calculation basis, period, geography, and source. Explain material differences between published forecasts. Never derive false precision from unsupported endpoints. Max 130 words.",
+      "State only defensible CAGR evidence for the requested period or the closest sourced period. Include the calculation basis, period, geography, and source. Explain material differences between published forecasts. Never derive false precision from unsupported endpoints. If no defensible CAGR exists for the requested period/geography, say so explicitly, name the specific missing input, state the resulting confidence impact, and name what would need to be sourced to compute one. Max 130 words.",
     maxTokens: 1000,
   },
   marketSegmentation: {
@@ -79,7 +79,7 @@ export const marketPrompts = {
   },
   tamSamSom: {
     prompt:
-      "Define TAM, SAM, and SOM using explicit market boundaries, geography, customer scope, forecast year, currency, sources, and calculation method. If reliable endpoints are absent, explicitly state that Verified TAM / SAM / SOM is unavailable. A separate Planning Estimate is allowed only when every input is labeled Estimated or Assumption and the transparent formula and calculation basis are shown; never present it as verified. Max 170 words.",
+      "Define TAM, SAM, and SOM using explicit market boundaries, geography, customer scope, forecast year, currency, sources, and calculation method. If reliable endpoints are absent, explicitly state that Verified TAM / SAM / SOM is unavailable -- name the specific missing input for each unavailable layer (TAM/SAM/SOM independently, since one can be verified while another is not), state how the gap affects confidence in the sizing, and name the exact data or research step that would resolve it. A separate Planning Estimate is allowed only when every input is labeled Estimated or Assumption and the transparent formula and calculation basis are shown; never present it as verified. Max 170 words.",
     maxTokens: 1300,
   },
   portersFiveForces: {
@@ -89,7 +89,7 @@ export const marketPrompts = {
   },
   strategicRecommendations: {
     prompt:
-      "Conclude with the CEO Summary derived only from market evidence. Final Recommendation must clearly answer whether and why to proceed; First 90 Days must contain exactly three concrete actions with owners and proof gates. Connect every conclusion to cited evidence and state when no supported opportunity exists. Do not include a founder score, founder roadmap, sales strategy, pricing strategy, or financial plan. Max 180 words.",
+      "Conclude with the CEO Summary derived only from market evidence. State plainly whether the evidence supports entering, piloting, or avoiding this market, and why -- 'avoid' or 'not yet' is a complete, acceptable answer when the evidence supports it; never default to an entry recommendation the evidence does not support. First 90 Days must contain exactly three concrete actions with owners and proof gates, and every one of those actions must be measurable, not generic advice: name the specific geography or segment, the budget or spend ceiling, the KPI that will be tracked, and the numeric or evidence-based success criterion that determines whether to continue -- never write an action like 'run a pilot' without those four specifics. Connect every conclusion to cited evidence and state when no supported opportunity exists. Do not include a founder score, founder roadmap, sales strategy, pricing strategy, or financial plan. Max 180 words.",
     maxTokens: 1200,
   },
   sources: {

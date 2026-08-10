@@ -274,7 +274,7 @@ test("chat and Market Intelligence report can consume one lossless final researc
   );
   const fullReportSerializer = marketRoute.slice(
     marketRoute.indexOf("function serializeMarketReportChunks"),
-    marketRoute.indexOf("function createFallbackMarketReport")
+    marketRoute.indexOf("function createMockMarketReport")
   );
   assert.match(fullReportSerializer, /serializeNormalizedReportChunk/);
   assert.doesNotMatch(fullReportSerializer, /sanitizeMarketReportContent/);

@@ -234,16 +234,18 @@ const planSource = readFileSync("app/lib/report-jobs/plan-executor.ts", "utf8");
 const marketSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
 const metadataSource = readFileSync("app/lib/report-engine/metadata.ts", "utf8");
 
-test("plan-executor.ts and market-analysis route.ts wire the Source Reliability Overview into Executive Summary only", () => {
-  // The executive-decision-first redesign compresses the visible
-  // sourcesAssumptions/sources field to an Evidence Summary (category +
-  // count, no raw citations) before this point, so per-source detail is
-  // now read from the captured PRE-compression raw text instead -- the
-  // rendered field alone no longer carries enough detail to analyze.
-  assert.match(planSource, /analyzeReportSourceIntelligence\(rawSourcesAssumptions\)/);
-  assert.match(planSource, /buildSourceReliabilityOverview/);
-  assert.match(marketSource, /analyzeReportSourceIntelligence\(rawSources\)/);
-  assert.match(marketSource, /buildSourceReliabilityOverview/);
+// REGRESSION/REDESIGN: the Source Reliability Overview used to be
+// appended to executiveSummary on top of the decision brief. The
+// executive-decision redesign makes executiveSummary the report's single
+// decision layer -- Final Decision, Confidence, Why, Biggest Risks,
+// Biggest Opportunity, First 90-Day Action Plan -- and nothing else.
+// Source trust-tier commentary is background evidence detail, not a
+// decision; it no longer renders into the report body at all. Detailed
+// per-source metadata still reaches report.metadata independently (see
+// the metadata.ts test below), just not as visible report content.
+test("plan-executor.ts and market-analysis route.ts no longer append a Source Reliability Overview to Executive Summary", () => {
+  assert.doesNotMatch(planSource, /buildSourceReliabilityOverview/);
+  assert.doesNotMatch(marketSource, /buildSourceReliabilityOverview/);
 });
 
 test("report-engine/metadata.ts wires per-source detail into the existing metadata bundle, not a new report field", () => {

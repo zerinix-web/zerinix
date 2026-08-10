@@ -55,12 +55,13 @@ import {
   type MarketResearchCoverage,
 } from "@/app/lib/ai/market-research-coverage";
 import {
-  buildMarketExecutiveSummary,
   buildMarketEntryRecommendation,
   buildMarketExecutiveDecisionBrief,
+  buildMarketFinalVerdictParagraph,
   assessMarketEntryConfidence,
   localizeMarketEntryDecision,
 } from "@/app/lib/report-engine/market-intelligence-presentation";
+import { assertNoDecisionContradiction } from "@/app/lib/report-engine/decision-contradiction-gate";
 import { assertReportIsolation } from "@/app/lib/report-engine/report-isolation-validator";
 import { formatExecutiveDecisionBrief } from "@/app/lib/report-engine/executive-decision-brief";
 import { buildEvidenceSummary } from "@/app/lib/report-engine/evidence-summary";
@@ -92,15 +93,6 @@ import {
   loadUserMemoriesForUser,
 } from "@/app/lib/ai/user-memory";
 import { dedupeReportParagraphsAcrossSections } from "@/app/lib/report-content-quality.mjs";
-import {
-  appendEvidenceConfidenceBlock,
-  assessSectionEvidenceConfidence,
-  type SectionEvidenceAssessment,
-} from "@/app/lib/report-evidence-confidence";
-import {
-  analyzeReportSourceIntelligence,
-  buildSourceReliabilityOverview,
-} from "@/app/lib/report-source-intelligence";
 import { runConsistencyValidationPass } from "@/app/lib/report-consistency-validation";
 import { normalizeReportSourceSection } from "@/app/lib/report-source-normalization.mjs";
 import {
@@ -144,6 +136,15 @@ const MARKET_EVIDENCE_QUALITY_VERSION = "market_evidence_graph_v6";
 const MAX_AI_CALLS_PER_MARKET_REPORT = 1;
 const FULL_REPORT_OPENAI_TIMEOUT_MS = 180_000;
 const FULL_REPORT_POST_PROCESS_TIMEOUT_MS = 12_000;
+// REGRESSION FIX: 18 fields, 8 of them carrying a full Executive Insight +
+// Confidence + Next Actions block (buildExecutivePresentationDirectives),
+// routinely need close to the old 6,500-token ceiling just for the model's
+// own JSON text -- a real, verified generation for this exact prompt/schema
+// completed at ~6,540 output tokens, meaning 6,500 clipped it mid-string on a
+// normal run (not an outlier), producing an "Unterminated string in JSON"
+// parse failure on every subsequent request. Sized well above the observed
+// real requirement instead of right at the edge of it.
+const FULL_REPORT_MAX_OUTPUT_TOKENS = 12_000;
 
 type MarketReportChunk = Partial<Record<MarketReportField, string>>;
 type MarketReportWarningChunk = {
@@ -314,12 +315,6 @@ function serializeMarketReportChunks(report: Record<MarketReportField, string>) 
     .filter((field) => report[field]?.trim())
     .map((field) => serializeNormalizedReportChunk(field, report[field]))
     .join("");
-}
-
-function createFallbackMarketReport() {
-  return Object.fromEntries(
-    reportFields.map((field) => [field, ""])
-  ) as Record<MarketReportField, string>;
 }
 
 function createMockMarketReport(prompt: string, language: ResponseLanguage) {
@@ -560,90 +555,6 @@ function createMarketFieldFallback(field: MarketReportField, language: ResponseL
   return marketFieldFallbackTemplates[language](label);
 }
 
-// Same scoping rationale as plan-executor.ts's majorPlanFieldsForEvidenceConfidence:
-// substantive, AI-authored narrative fields only. Excludes executiveSummary
-// (own rollup below), tamSamSom (template-driven numeric section), and
-// sources (a citation list, not a claim to grade).
-const majorMarketFieldsForEvidenceConfidence: MarketReportField[] = [
-  "marketOverview",
-  "marketSize",
-  "cagr",
-  "marketSegmentation",
-  "regionalAnalysis",
-  "industryTrends",
-  "competitiveLandscape",
-  "majorPlayers",
-  "customerSegments",
-  "marketDrivers",
-  "barriers",
-  "opportunities",
-  "threats",
-  "portersFiveForces",
-  "strategicRecommendations",
-];
-
-function appendEvidenceConfidenceToMajorMarketSections(
-  report: Record<MarketReportField, string>,
-  language: ResponseLanguage
-) {
-  const assessments: Array<{ field: MarketReportField; assessment: SectionEvidenceAssessment }> = [];
-
-  for (const field of majorMarketFieldsForEvidenceConfidence) {
-    const content = report[field];
-
-    if (!content?.trim()) {
-      continue;
-    }
-
-    assessments.push({ field, assessment: assessSectionEvidenceConfidence(content) });
-    report[field] = appendEvidenceConfidenceBlock(content, language);
-  }
-
-  return assessments;
-}
-
-function buildMarketExecutiveSummaryConfidenceRollup(
-  assessments: Array<{ field: MarketReportField; assessment: SectionEvidenceAssessment }>,
-  language: ResponseLanguage
-) {
-  if (!assessments.length) {
-    return "";
-  }
-
-  const overallConfidence = Math.round(
-    assessments.reduce((sum, entry) => sum + entry.assessment.confidenceScore, 0) / assessments.length
-  );
-  const rankedByConfidence = [...assessments].sort(
-    (a, b) => b.assessment.confidenceScore - a.assessment.confidenceScore
-  );
-  const highest = rankedByConfidence[0];
-  const lowest = rankedByConfidence[rankedByConfidence.length - 1];
-  const biggestUnknown = [...assessments].sort(
-    (a, b) =>
-      b.assessment.unsupportedNumericClaimCount + b.assessment.missingEvidence.length -
-      (a.assessment.unsupportedNumericClaimCount + a.assessment.missingEvidence.length)
-  )[0];
-  const biggestUnknownDetail =
-    biggestUnknown.assessment.missingEvidence[0] ||
-    marketText(
-      language,
-      "no significant evidence gap was detected.",
-      "önemli bir kanıt boşluğu tespit edilmedi.",
-      "es wurde keine wesentliche Evidenzlücke festgestellt.",
-      "aucune lacune de preuve significative n'a été détectée.",
-      "no se detectó ninguna brecha de evidencia significativa."
-    );
-  const label = (field: MarketReportField) => marketFieldLabels[language][field];
-
-  return [
-    marketText(language, "Report Confidence:", "Rapor Güveni:", "Berichtskonfidenz:", "Confiance du rapport :", "Confianza del informe:"),
-    marketText(language, `- Overall Report Confidence: ${overallConfidence}/100`, `- Genel Rapor Güveni: ${overallConfidence}/100`, `- Gesamtberichtskonfidenz: ${overallConfidence}/100`, `- Confiance globale du rapport : ${overallConfidence}/100`, `- Confianza general del informe: ${overallConfidence}/100`),
-    marketText(language, `- Biggest Unknown: ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`, `- En Büyük Bilinmeyen: ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`, `- Größte Unbekannte: ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`, `- Plus grande inconnue : ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`, `- Mayor incógnita: ${label(biggestUnknown.field)} — ${biggestUnknownDetail}`),
-    marketText(language, `- Highest Confidence Finding: ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`, `- En Yüksek Güvenli Bulgu: ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`, `- Befund mit höchster Konfidenz: ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`, `- Constat le plus fiable : ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`, `- Hallazgo de mayor confianza: ${label(highest.field)} (${highest.assessment.confidenceScore}/100)`),
-    marketText(language, `- Lowest Confidence Finding: ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`, `- En Düşük Güvenli Bulgu: ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`, `- Befund mit niedrigster Konfidenz: ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`, `- Constat le moins fiable : ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`, `- Hallazgo de menor confianza: ${label(lowest.field)} (${lowest.assessment.confidenceScore}/100)`),
-  ].join("\n");
-}
-
 // buildMarketFinancialConfidenceAppendix / buildMarketFinancialConsistencyTargets
 // used to append CAC/LTV/ARR/Gross-Margin unit-economics metrics (computed by
 // a startup financial model, not real market research) onto tamSamSom, and
@@ -660,6 +571,10 @@ function ensureMarketReportQuality(
 ) {
   const normalized = { ...report };
   const marketAssessment = coverage ? assessMarketEntryConfidence(coverage) : undefined;
+  // Computed once inside the `if (coverage)` block below and reused for
+  // both the opening Executive Decision layer and the closing verdict
+  // paragraph, so the two can never diverge or contradict each other.
+  let marketExecutiveDecisionBrief: ReturnType<typeof buildMarketExecutiveDecisionBrief> | undefined;
 
   for (const field of reportFields) {
     const sanitized = sanitizeMarketReportContent(normalized[field] || "");
@@ -677,17 +592,12 @@ function ensureMarketReportQuality(
   if (coverage) {
     const marketEntryHeading = language === "Turkish" ? "Pazara Giriş Tavsiyesi" : "Market Entry Recommendation";
 
-    // Full replace, not prepend: the deterministic summary is now a
-    // complete Bottom Line / Key Findings / Biggest Opportunity /
-    // Biggest Risk / Recommendation synthesis on its own, built only from
-    // this report's own market-native sections and evidence coverage --
-    // never from Business Idea Validation's founder/investment scoring
-    // engine. Concatenating it with the model's own separate
-    // executive-summary draft would just repeat the same verdict twice.
-    normalized.executiveSummary = [
-      formatExecutiveDecisionBrief(buildMarketExecutiveDecisionBrief(normalized, language, coverage), language),
-      buildMarketExecutiveSummary(normalized, language, coverage),
-    ].join("\n\n");
+    // Single Executive Decision layer: Final Decision, Confidence, Why,
+    // Biggest Risks, Biggest Opportunity, and the First 90-Day Action
+    // Plan -- and nothing else. No second summary, no confidence rollup,
+    // and no source-reliability overview may be appended to this field.
+    marketExecutiveDecisionBrief = buildMarketExecutiveDecisionBrief(normalized, language, coverage);
+    normalized.executiveSummary = formatExecutiveDecisionBrief(marketExecutiveDecisionBrief, language);
 
     if (!normalized.strategicRecommendations.includes(marketEntryHeading)) {
       normalized.strategicRecommendations = `${normalized.strategicRecommendations}\n\n${buildMarketEntryRecommendation(normalized, language, coverage)}`.trim();
@@ -695,14 +605,17 @@ function ensureMarketReportQuality(
   }
 
   // Sources become invisible: compress the model's raw citation list to a
-  // category+count Evidence Summary before dedup/analysis. Full per-source
-  // detail is still computed below from this pre-compression snapshot, so
-  // report.metadata.sourceIntelligence keeps working unchanged.
-  const rawSources = normalized.sources;
-  normalized.sources = buildEvidenceSummary(rawSources, language);
+  // category+count Evidence Summary. Detailed per-source metadata still
+  // reaches report.metadata via its own, independent analysis pipeline.
+  normalized.sources = buildEvidenceSummary(normalized.sources, language);
 
-  for (const field of reportFields) {
-    normalized[field] = stripFillerAndDuplicateSentences(normalized[field]);
+  // Deterministic closing verdict, built from the exact same brief object
+  // as the opening Executive Decision layer -- appended to Sources because
+  // ReportPdfButton.tsx's mergePdfSourceSections always forces Sources to
+  // the final page regardless of schema field order, guaranteeing this is
+  // the last thing a reader sees before closing the PDF.
+  if (marketExecutiveDecisionBrief) {
+    normalized.sources = `${normalized.sources}\n\n${buildMarketFinalVerdictParagraph(marketExecutiveDecisionBrief, language)}`.trim();
   }
 
   const deduped = dedupeReportParagraphsAcrossSections(normalized, {
@@ -710,22 +623,11 @@ function ensureMarketReportQuality(
     sectionLabels: fieldLabelsByLanguage[language],
   }) as Record<MarketReportField, string>;
 
-  const evidenceAssessments = appendEvidenceConfidenceToMajorMarketSections(deduped, language);
-  const confidenceRollup = buildMarketExecutiveSummaryConfidenceRollup(evidenceAssessments, language);
-  if (confidenceRollup) {
-    deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${confidenceRollup}`;
-  }
-
-  // Read-only: analyzes the PRE-compression raw sources text captured
-  // above, so full per-source detail is still computed even though the
-  // rendered sources field no longer exposes it. Only the trust-tier name
-  // overview goes into executiveSummary -- full per-source detail stays
-  // in report.metadata.sourceIntelligence.
-  const sourceIntelligenceRecords = analyzeReportSourceIntelligence(rawSources);
-  const sourceReliabilityOverview = buildSourceReliabilityOverview(sourceIntelligenceRecords, language);
-  if (sourceReliabilityOverview) {
-    deduped.executiveSummary = `${deduped.executiveSummary.trim()}\n\n${sourceReliabilityOverview}`;
-  }
+  // Evidence and confidence stay in the background: no per-section
+  // "Evidence & Confidence" block is appended to the report body, and no
+  // confidence rollup or source-reliability overview is appended to
+  // executiveSummary. That field carries exactly one decision and one
+  // confidence value and nothing else.
 
   if (marketAssessment) {
     // Final consistency validation pass, run last so it sees every prior
@@ -741,7 +643,7 @@ function ensureMarketReportQuality(
       fields: reportFields,
       language,
       authoritativeDecision: localizeMarketEntryDecision(marketAssessment.decision, language),
-      decisionProtectedFields: ["executiveSummary", "strategicRecommendations"],
+      decisionProtectedFields: ["executiveSummary", "strategicRecommendations", "sources"],
       riskOpportunity: {
         risksField: "threats",
         opportunitiesHostField: "opportunities",
@@ -756,18 +658,38 @@ function ensureMarketReportQuality(
     }
   }
 
+  // Eliminate filler LAST, after dedup and consistency corrections have
+  // already rewritten content -- running this earlier only caught filler
+  // in the model's own raw draft and missed duplication introduced by the
+  // pipeline's own later stages.
+  for (const field of reportFields) {
+    deduped[field] = stripFillerAndDuplicateSentences(deduped[field]);
+  }
+
   // Fail fast instead of silently returning a mixed report: throws if any
   // section contains Business Idea Validation's or Strategic Advisory's
   // specific vocabulary (founder readiness, validation gate, runway,
   // EBITDA, PMF, fundraising, PASS/HOLD/VALIDATE/REJECT, ...).
   assertReportIsolation("market_intelligence", deduped);
 
+  // Fail generation rather than ship a report whose Executive Decision
+  // layer says AVOID while a freeform section still recommends piloting,
+  // scaling, or entering the market.
+  if (marketExecutiveDecisionBrief) {
+    assertNoDecisionContradiction(
+      marketExecutiveDecisionBrief.decision,
+      deduped,
+      ["strategicRecommendations", "opportunities", "marketDrivers"],
+      language
+    );
+  }
+
   // Quality Gate: fail generation instead of silently returning a report
   // that dumps information rather than helping a decision-maker act. Only
-  // enforced when coverage was available -- that's what makes the
-  // Executive Recommendation opening block possible in the first place;
-  // without it (e.g. a cached/degraded report with no coverage data), the
-  // report falls back to its pre-existing, less-strict shape rather than
+  // enforced when coverage was available -- that's what makes the single
+  // Executive Decision layer possible in the first place; without it
+  // (e.g. a cached/degraded report with no coverage data), the report
+  // falls back to its pre-existing, less-strict shape rather than
   // hard-failing on a check it was never given the inputs to satisfy.
   if (marketAssessment) {
     assertExecutiveQualityGate({
@@ -1613,7 +1535,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
                       dedupedFullReportInput,
                       analysisAssets
                     ),
-                    max_output_tokens: 6500,
+                    max_output_tokens: FULL_REPORT_MAX_OUTPUT_TOKENS,
                     reasoning: {
                       effort: "low",
                     },
@@ -1829,17 +1751,27 @@ Do not include markdown code fences, braces inside string values, or commentary 
             });
             logServerError("api:market-analysis:full-report", error);
 
-            const failedFields = [...reportFields];
-            const fallbackReport = createFallbackMarketReport();
-            const warning = serializeWarningChunk({
-              warning:
-                "Market analysis returned a partial report because the provider response could not be parsed completely. Please retry to refresh the affected areas.",
-              missingFields: failedFields,
-              invalidFields: [],
-              partial: true,
-            });
-
-            enqueue(warning + serializeMarketReportChunks(fallbackReport));
+            // REGRESSION FIX: this used to synthesize a full placeholder
+            // report (every field replaced with the same generic
+            // could-not-be-generated fallback copy used for a single
+            // missing field) and enqueue it dressed up as a normal
+            // "partial report" warning -- so a genuine failure (a provider
+            // timeout, a truncated/malformed response, or the isolation/
+            // quality gate rejecting bad content) looked to the caller
+            // like a successfully generated report, with that fallback
+            // copy standing in for every section, hiding the real failure
+            // instead of surfacing it. A report may only be returned when
+            // it was actually built from the model's real output. Fail
+            // loudly instead, matching plan-executor.ts's own
+            // serializePlanStreamError convention for the identical
+            // failure class.
+            enqueue(
+              serializeReportStreamChunk({
+                error: errorMessage,
+                errorStage: "market_report_generation",
+                fatal: true,
+              })
+            );
           } finally {
             controller.close();
           }
