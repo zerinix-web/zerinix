@@ -266,7 +266,6 @@ function getFinalDedupePdfSources(citations: CitationData[]) {
     const publisherKey =
       domainNameKey &&
       (!rawPublisherKey ||
-        rawPublisherKey === "publisher not specified" ||
         rawPublisherKey === domainNameKey ||
         rawPublisherKey.startsWith(`${domainNameKey} `) ||
         sourceNameKey === domainNameKey)
@@ -281,11 +280,14 @@ function getFinalDedupePdfSources(citations: CitationData[]) {
     const fallbackDisplayKey = `display:${domain || "no-domain"}|${displayKey}`;
 
     if (!unique.has(key) && !unique.has(fallbackDisplayKey)) {
+      // Empty string, not a placeholder phrase like "Publisher not
+      // specified" -- the renderer omits the line entirely when metadata
+      // is unavailable instead of printing a broken-looking field.
       unique.set(key, {
         sourceName,
         sourceType: getPdfCitationSourceTypeLabel(citation),
         trustLabel: getPdfCitationTrustLabel(citation),
-        publisher: citation.organization || "Publisher not specified",
+        publisher: isPlausibleCitationField(citation.organization || "") ? citation.organization! : "",
         publicationYear: citation.publicationYear || "",
         url: normalizeCitationUrl(citation.url),
       });
@@ -421,7 +423,7 @@ function parseCitations(content: string): CitationData[] {
     if (hasUsableEvidence) {
       entries.push({
         sourceTitle: current.sourceTitle || current.organization || "Untitled source",
-        organization: current.organization || "Publisher not specified",
+        organization: isPlausibleCitationField(current.organization || "") ? current.organization! : "",
         ...(current.publicationYear ? { publicationYear: current.publicationYear } : {}),
         ...(current.confidence || fallbackConfidence
           ? { confidence: current.confidence || fallbackConfidence }
@@ -636,9 +638,13 @@ function formatPdfCitationContent(content: string, realEstate = false) {
       [
         `• ${source.sourceName}`,
         `  Source type: ${source.sourceType}`,
-        `  Publisher: ${source.publisher}`,
-        `  Year: ${source.publicationYear || "Not specified"}`,
-        `  URL: ${source.url || "Not provided"}`,
+        // Metadata that isn't actually known is omitted entirely rather
+        // than printed as "Publisher: Not specified" / "URL: Not
+        // provided" -- a clean, shorter citation reads as production
+        // quality; a citation full of broken-looking fields does not.
+        ...(source.publisher ? [`  Publisher: ${source.publisher}`] : []),
+        ...(source.publicationYear ? [`  Year: ${source.publicationYear}`] : []),
+        ...(source.url ? [`  URL: ${source.url}`] : []),
         `  Confidence: ${source.trustLabel}`,
       ].join("\n")
     )
@@ -3093,14 +3099,22 @@ export function buildStandardReportPdf({
             report.investmentScore?.confidence ??
             extractConfidence(fullReportContent) ??
             extractScore(fullReportContent, "Investment Score");
-          const biggestOpportunityLabels = localizedLabelVariants("biggestOpportunity");
-          const biggestRisksLabels = localizedLabelVariants("biggestRisks");
-          const missingInformationLabels = localizedLabelVariants("missingInformation");
-          const first90DaysLabels = localizedLabelVariants("first90Days");
-          const biggestOpportunity = extractMetricValueFromAliases(content, biggestOpportunityLabels);
-          const biggestRisk = extractAliasedSectionSnippet(content, biggestRisksLabels, biggestOpportunityLabels);
-          const missingInformation = extractAliasedSectionSnippet(content, missingInformationLabels, first90DaysLabels);
-          const nextAction = extractAliasedSectionSnippet(content, first90DaysLabels, []);
+          // The Executive Decision layer's 7-part structure: Why / Top 3
+          // Reasons / Top 3 Risks / What Evidence Is Missing / What Would
+          // Change This Decision / Immediate Next Action. The card below
+          // surfaces the 5 most decision-relevant of those (space-
+          // constrained), each read via a locale-agnostic label so it
+          // works for every report language, not just English.
+          const whyLabels = localizedLabelVariants("why");
+          const topRisksLabels = localizedLabelVariants("topRisks");
+          const missingEvidenceLabels = localizedLabelVariants("missingEvidence");
+          const whatWouldChangeLabels = localizedLabelVariants("whatWouldChangeThisDecision");
+          const immediateNextActionLabels = localizedLabelVariants("immediateNextAction");
+          const why = extractMetricValueFromAliases(content, whyLabels);
+          const topRisk = extractAliasedSectionSnippet(content, topRisksLabels, missingEvidenceLabels);
+          const missingEvidence = extractAliasedSectionSnippet(content, missingEvidenceLabels, whatWouldChangeLabels);
+          const whatWouldChange = extractMetricValueFromAliases(content, whatWouldChangeLabels);
+          const nextAction = extractMetricValueFromAliases(content, immediateNextActionLabels);
 
           pdf.setFillColor("#ccfbf1");
           pdf.setDrawColor("#5eead4");
@@ -3128,16 +3142,21 @@ export function buildStandardReportPdf({
           const isTurkishPdf = pdfLocale === "tr";
           const recItems = [
             ["Confidence", confidence === null ? "—" : `${confidence}%`],
-            ["Biggest Opportunity", biggestOpportunity || "—"],
             [
-              "Biggest Risk",
-              biggestRisk ||
+              "Why",
+              why ||
+                extractKeywordInsight(fullReportContent, ["opportunity", "market"]) ||
+                (isTurkishPdf ? "Gerekçe, yönetici kararı bölümünde detaylandırılmıştır" : "Rationale is detailed in the executive decision"),
+            ],
+            [
+              "Top Risk",
+              topRisk ||
                 extractKeywordInsight(fullReportContent, ["risk", "threat"]) ||
                 (isTurkishPdf ? "Ana risk, risk analizi bölümünde detaylandırılmıştır" : "Primary risk is detailed in the risk analysis"),
             ],
             [
-              "Missing Information",
-              missingInformation ||
+              "Missing Evidence",
+              missingEvidence ||
                 (isTurkishPdf
                   ? "Kararı değiştirecek nitelikte bir veri eksikliği belirtilmedi"
                   : "No decision-changing data gap was flagged"),
@@ -3145,8 +3164,9 @@ export function buildStandardReportPdf({
             [
               "Next Action",
               nextAction ||
+                whatWouldChange ||
                 extractKeywordInsight(fullReportContent, ["next action", "critical action", "validate"]) ||
-                (isTurkishPdf ? "İlk 90 günlük aksiyon planına bakın" : "See the First 90-Day Action Plan"),
+                (isTurkishPdf ? "Acil sonraki adım için yönetici kararı bölümüne bakın" : "See the Immediate Next Action in the executive decision"),
             ],
           ];
 

@@ -498,6 +498,19 @@ function serializeDomainAnalysisReportChunks(
 // than reusing Business Plan's investmentScore or Market Intelligence's
 // coverage-weighted confidence, which would reintroduce cross-report
 // contamination.
+// Two heading/lead-in shapes that are never a genuine point worth quoting
+// as the top reason/risk/action -- the real substance is in whatever
+// follows: (1) a numbered sub-heading with no content of its own, e.g.
+// "1) Insufficient documentary evidence" (real sentences always end in
+// terminal punctuation, so a numbered-marker line that doesn't is
+// reliably a heading); (2) a lead-in sentence introducing a list (a
+// trailing colon always introduces what follows, never a complete point
+// itself, regardless of length or numbering).
+function isDomainHeadingOnlyLine(line: string): boolean {
+  if (/:$/.test(line)) return true;
+  return /^\(?\d{1,2}[).]\s+\S/.test(line) && !/[.!?…]$/.test(line);
+}
+
 function domainTopLines(content: string, max: number) {
   const seen = new Set<string>();
   const lines: string[] = [];
@@ -508,7 +521,7 @@ function domainTopLines(content: string, max: number) {
       .replace(/^#{1,6}\s*/, "")
       .replace(/\*\*/g, "")
       .trim();
-    if (line.length <= 24 || /^[A-Z0-9 /&-]{2,40}:?$/.test(line)) continue;
+    if (line.length <= 24 || /^[A-Z0-9 /&-]{2,40}:?$/.test(line) || isDomainHeadingOnlyLine(line)) continue;
 
     const key = line.toLowerCase().slice(0, 48);
     if (seen.has(key)) continue;
@@ -521,7 +534,8 @@ function domainTopLines(content: string, max: number) {
 }
 
 function buildDomainAnalysisExecutiveDecisionBrief(
-  report: DomainAnalysisReport
+  report: DomainAnalysisReport,
+  language: ResponseLanguage
 ): ExecutiveDecisionBrief {
   const { decision, confidence } = extractGenericDecisionSignal(
     `${report.decisionAssessment}\n${report.finalRecommendation}`
@@ -532,25 +546,71 @@ function buildDomainAnalysisExecutiveDecisionBrief(
     domainFindingsLines[0] ||
     domainTopLines(report.finalRecommendation, 1)[0] ||
     report.finalRecommendation.trim().slice(0, 200);
-  const topReasons = domainFindingsLines.slice(1, 4);
+  const reasonsTail = domainFindingsLines.slice(1, 4);
+  const topReasons = [biggestOpportunity, ...reasonsTail].slice(0, 3);
 
   const topRisks = domainTopLines(report.riskAnalysis, 3);
-  const first90Days = domainTopLines(report.recommendedActions, 3);
+  const resolvedTopRisks = topRisks.length ? topRisks : [report.riskAnalysis.trim().slice(0, 200)];
+  const topRisk = (resolvedTopRisks[0] || reportText(language, "the primary risk", "birincil risk"))
+    .trim()
+    .replace(/[.!?]+$/, "");
   // report.missingInformation is the domain analyst's own honest gap
   // assessment -- reused verbatim rather than re-derived, since it is
   // already the report's real, AI-authored answer to this question.
-  const missingInformation = domainTopLines(report.missingInformation, 3);
+  const missingInformationLines = domainTopLines(report.missingInformation, 3);
+  const missingEvidence = missingInformationLines.length
+    ? missingInformationLines
+    : [report.missingInformation.trim().slice(0, 200)];
+
+  const confidenceDirection: "reduced" | "supported" = confidence >= 65 ? "supported" : "reduced";
+  const confidenceFactors = confidenceDirection === "supported" ? domainFindingsLines.slice(0, 3) : missingEvidence;
+
+  const why =
+    decision === "GO"
+      ? reportText(
+          language,
+          `"${biggestOpportunity.replace(/[.!?]+$/, "")}" is well-supported by the available evidence and outweighs the identified risks at the current confidence level.`,
+          `"${biggestOpportunity.replace(/[.!?]+$/, "")}" mevcut kanıtlarla iyi desteklenmektedir ve şu anki güven seviyesinde belirlenen risklerden daha ağır basmaktadır.`
+        )
+      : decision === "CONDITIONAL_GO"
+        ? reportText(
+            language,
+            `The opportunity -- "${biggestOpportunity.replace(/[.!?]+$/, "")}" -- is plausible, but "${topRisk}" remains unresolved, so this should proceed conditionally rather than unconditionally.`,
+            `Fırsat -- "${biggestOpportunity.replace(/[.!?]+$/, "")}" -- makul görünüyor, ancak "${topRisk}" henüz çözülmemiştir; bu nedenle koşulsuz değil, koşullu olarak ilerlenmelidir.`
+          )
+        : reportText(
+            language,
+            `"${topRisk}" outweighs the identified opportunity given the evidence currently available.`,
+            `Şu anda mevcut olan kanıtlar göz önüne alındığında, "${topRisk}" belirlenen fırsattan daha ağır basmaktadır.`
+          );
+
+  const whatWouldChangeThisDecision = reportText(
+    language,
+    `Verified, independent evidence that resolves "${topRisk}" would change this decision.`,
+    `"${topRisk}" sorununu çözen doğrulanmış, bağımsız kanıtlar bu kararı değiştirir.`
+  );
+
+  const recommendedActionsLines = domainTopLines(report.recommendedActions, 3);
+  const immediateNextAction =
+    decision === "NO_GO"
+      ? reportText(
+          language,
+          `Do not proceed on the current basis; the specific blocker is "${topRisk}" -- revisit only if new, verified evidence resolves it.`,
+          `Mevcut haliyle ilerlemeyin; asıl engel "${topRisk}"; yalnızca yeni ve doğrulanmış kanıtlar bunu çözerse yeniden değerlendirin.`
+        )
+      : recommendedActionsLines[0] || report.recommendedActions.trim().slice(0, 200);
 
   return {
     decision,
     confidence,
+    confidenceDirection,
+    confidenceFactors,
+    why,
     topReasons: topReasons.length ? topReasons : domainTopLines(report.decisionAssessment, 3),
-    topRisks: topRisks.length ? topRisks : [report.riskAnalysis.trim().slice(0, 200)],
-    biggestOpportunity,
-    missingInformation: missingInformation.length
-      ? missingInformation
-      : [report.missingInformation.trim().slice(0, 200)],
-    first90Days: first90Days.length ? first90Days : [report.recommendedActions.trim().slice(0, 200)],
+    topRisks: resolvedTopRisks,
+    missingEvidence,
+    whatWouldChangeThisDecision,
+    immediateNextAction,
   };
 }
 
@@ -585,7 +645,7 @@ function parseDomainAnalysisReport(
   // first field in schema order. No dedicated executiveSummary field
   // exists on this report type, so subjectIdentification (schema-first)
   // carries it instead of adding a new field to the schema/PDF/dashboard.
-  const domainExecutiveDecisionBrief = buildDomainAnalysisExecutiveDecisionBrief(validated);
+  const domainExecutiveDecisionBrief = buildDomainAnalysisExecutiveDecisionBrief(validated, language);
   validated.subjectIdentification = [
     formatExecutiveDecisionBrief(domainExecutiveDecisionBrief, language),
     validated.subjectIdentification,
@@ -2204,9 +2264,8 @@ function buildPlanExecutiveDecisionBrief(
   const decision: ExecutiveDecisionCode =
     score.recommendation === "GO" ? "GO" : score.recommendation === "WAIT" ? "CONDITIONAL_GO" : "NO_GO";
 
-  // strengths[0] is the single biggest upside (Biggest Opportunity); the
-  // remaining strengths become the supporting reasons (Why) so the two
-  // blocks never restate the same sentence.
+  // strengths[0] is the single biggest upside; the remaining strengths
+  // become the supporting reasons so Top 3 Reasons never restates itself.
   const biggestOpportunity =
     score.strengths[0]?.trim() ||
     reportText(
@@ -2214,16 +2273,19 @@ function buildPlanExecutiveDecisionBrief(
       `${context.inputs.industry} demand has not yet been validated but remains the clearest path to a defensible beachhead.`,
       `${context.inputs.industry} talebi henüz doğrulanmadı, ancak savunulabilir bir başlangıç pazarı için en net yol olmaya devam ediyor.`
     );
-  const topReasons = score.strengths.slice(1, 4);
+  const topReasons = [biggestOpportunity, ...score.strengths.slice(1, 4)].slice(0, 3);
+  const topRisk = (score.topRisks[0] || score.weaknesses[0] || reportText(language, "the primary risk", "birincil risk"))
+    .trim()
+    .replace(/[.!?]+$/, "");
 
   // The two weakest scoring categories are the concrete data gaps that
   // could most change this decision -- never a generic "more research
   // needed" caveat, always named and tied to the engine's own evidence.
-  const weakestCategories = Object.values(score.categories)
+  const rankedCategories = Object.values(score.categories)
     .slice()
-    .sort((a, b) => a.score / a.maximumScore - b.score / b.maximumScore)
-    .slice(0, 2);
-  const missingInformation = weakestCategories.map((category) =>
+    .sort((a, b) => b.score / b.maximumScore - a.score / a.maximumScore);
+  const weakestCategories = rankedCategories.slice(-2).reverse();
+  const missingEvidence = weakestCategories.map((category) =>
     reportText(
       language,
       `${category.label} evidence is limited (${category.score}/${category.maximumScore}): ${category.explanation}`,
@@ -2231,45 +2293,77 @@ function buildPlanExecutiveDecisionBrief(
     )
   );
 
+  // Confidence must always be traceable to a reason, in either direction.
+  const confidenceDirection: "reduced" | "supported" = score.confidence >= 65 ? "supported" : "reduced";
+  const confidenceFactors =
+    confidenceDirection === "supported"
+      ? rankedCategories
+          .filter((category) => category.score / category.maximumScore >= 0.65)
+          .slice(0, 3)
+          .map((category) =>
+            reportText(
+              language,
+              `${category.label} evidence strong (${category.score}/${category.maximumScore})`,
+              `${category.label} kanıtı güçlü (${category.score}/${category.maximumScore})`
+            )
+          )
+      : weakestCategories.map((category) =>
+          reportText(
+            language,
+            `${category.label} evidence limited (${category.score}/${category.maximumScore})`,
+            `${category.label} kanıtı sınırlı (${category.score}/${category.maximumScore})`
+          )
+        );
+
+  const why =
+    decision === "GO"
+      ? reportText(
+          language,
+          `"${biggestOpportunity.replace(/[.!?]+$/, "")}" is well-supported by the available evidence and outweighs the identified risks at the current confidence level.`,
+          `"${biggestOpportunity.replace(/[.!?]+$/, "")}" mevcut kanıtlarla iyi desteklenmektedir ve şu anki güven seviyesinde belirlenen risklerden daha ağır basmaktadır.`
+        )
+      : decision === "CONDITIONAL_GO"
+        ? reportText(
+            language,
+            `The opportunity -- "${biggestOpportunity.replace(/[.!?]+$/, "")}" -- is plausible, but "${topRisk}" remains unresolved, so this should proceed conditionally rather than unconditionally.`,
+            `Fırsat -- "${biggestOpportunity.replace(/[.!?]+$/, "")}" -- makul görünüyor, ancak "${topRisk}" henüz çözülmemiştir; bu nedenle koşulsuz değil, koşullu olarak ilerlenmelidir.`
+          )
+        : reportText(
+            language,
+            `"${topRisk}" outweighs the identified opportunity given the evidence currently available.`,
+            `Şu anda mevcut olan kanıtlar göz önüne alındığında, "${topRisk}" belirlenen fırsattan daha ağır basmaktadır.`
+          );
+
+  const whatWouldChangeThisDecision = reportText(
+    language,
+    `Verified, independent evidence that resolves "${topRisk}" would change this decision.`,
+    `"${topRisk}" sorununu çözen doğrulanmış, bağımsız kanıtlar bu kararı değiştirir.`
+  );
+
   // NO_GO must never contain entry/pilot/investment-commitment language
   // -- only what would have to change before revisiting the decision.
-  const first90Days =
+  // GO/CONDITIONAL_GO reuse the decision engine's own nextCriticalAction,
+  // which is already computed to fit the recommendation it produced.
+  const immediateNextAction =
     decision === "NO_GO"
-      ? [
-          reportText(
-            language,
-            `Do not commit ${context.metrics.investmentNeeded.displayValue} or further build effort to this business in its current form.`,
-            `Bu işe şu anki haliyle ${context.metrics.investmentNeeded.displayValue} veya ek geliştirme çabası ayırmayın.`
-          ),
-          reportText(
-            language,
-            `The specific blocker is "${score.topRisks[0] || score.weaknesses[0] || "the primary risk"}" -- revisit only if new, verified evidence resolves it.`,
-            `Asıl engel "${score.topRisks[0] || score.weaknesses[0] || "birincil risk"}"; yalnızca yeni ve doğrulanmış kanıtlar bunu çözerse yeniden değerlendirin.`
-          ),
-          score.nextCriticalAction,
-        ]
-      : [
-          score.nextCriticalAction,
-          reportText(
-            language,
-            `Test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer} and record paid-conversion evidence at the ${context.metrics.arpa.displayValue} planning input.`,
-            `${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile test edin ve ${context.metrics.arpa.displayValue} planlama girdisinde ücretli dönüşüm kanıtını kaydedin.`
-          ),
-          reportText(
-            language,
-            `Validate the mitigation for "${score.topRisks[0] || "the primary risk"}" before committing ${context.metrics.investmentNeeded.displayValue}.`,
-            `${context.metrics.investmentNeeded.displayValue} taahhüt etmeden önce "${score.topRisks[0] || "birincil risk"}" için azaltımı doğrulayın.`
-          ),
-        ];
+      ? reportText(
+          language,
+          `Do not commit ${context.metrics.investmentNeeded.displayValue} or further build effort to this business in its current form; the specific blocker is "${topRisk}" -- revisit only if new, verified evidence resolves it.`,
+          `Bu işe şu anki haliyle ${context.metrics.investmentNeeded.displayValue} veya ek geliştirme çabası ayırmayın; asıl engel "${topRisk}"; yalnızca yeni ve doğrulanmış kanıtlar bunu çözerse yeniden değerlendirin.`
+        )
+      : score.nextCriticalAction;
 
   return {
     decision,
     confidence: score.confidence,
+    confidenceDirection,
+    confidenceFactors,
+    why,
     topReasons,
     topRisks: score.topRisks.slice(0, 3),
-    biggestOpportunity,
-    missingInformation,
-    first90Days,
+    missingEvidence,
+    whatWouldChangeThisDecision,
+    immediateNextAction,
   };
 }
 

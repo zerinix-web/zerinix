@@ -95,16 +95,22 @@ test("real historical production data confirms Market Intelligence is both the m
   // already-measured static-instruction share so a future prompt change
   // that silently balloons static instructions gets caught here, and
   // documents where the historical numbers in the final report came from.
-  // Upper bounds widened once, deliberately: the executive-decision-first
-  // redesign added buildExecutiveConsultingStyleDirectives() (tone,
-  // sources-invisible, section-must-answer-a-question, financial-first
-  // rules) to both instruction builders, growing static instruction size
-  // by design -- not silent drift.
+  // Upper bounds widened twice, deliberately, not silent drift:
+  // 1) the executive-decision-first redesign added
+  //    buildExecutiveConsultingStyleDirectives() (tone, sources-invisible,
+  //    section-must-answer-a-question, financial-first rules) to both
+  //    instruction builders, growing static instruction size by design.
+  // 2) the research-layer redesign (multi-stage query expansion, layered
+  //    evidence, adjacent-market benchmarking) added two directives to
+  //    buildMarketLanguageInstructions requiring the model to build a
+  //    labeled estimate from adjacentBenchmarks/regional/global evidence
+  //    instead of defaulting to "insufficient evidence" -- market only,
+  //    so only market's bound moved.
   const plan = buildPlanFullReportInstructions("English");
   const market = buildMarketLanguageInstructions("English");
 
   assert.ok(plan.length > 3500 && plan.length < 6600, `plan instructions length drifted: ${plan.length} chars`);
-  assert.ok(market.length > 2500 && market.length < 5600, `market instructions length drifted: ${market.length} chars`);
+  assert.ok(market.length > 2500 && market.length < 6300, `market instructions length drifted: ${market.length} chars`);
 
   // The real historical average total prompt for market (16,109 tokens)
   // is far larger than its own static-instruction size (~872 tokens) --

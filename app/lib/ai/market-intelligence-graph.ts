@@ -77,6 +77,21 @@ export type MarketIntelligenceGraph = {
     confidenceLevel: MarketConfidenceLevel;
   }>;
   planningEstimate: MarketPlanningEstimate | null;
+  // Regional/global market data (Europe, OECD, neighboring countries) is
+  // never the requested geography's own verified figure, so it is kept
+  // separate from verifiedMarketSize rather than blended into it -- this
+  // is the raw material the model needs to build a transparent, clearly
+  // labeled estimate (per marketPrompts.marketSize/cagr/tamSamSom) instead
+  // of defaulting to "insufficient evidence" whenever local-only data does
+  // not exist.
+  adjacentBenchmarks: Array<{
+    description: string;
+    geography: string;
+    evidenceIds: string[];
+    confidenceClassification: "Estimated";
+    confidenceScore: number;
+    confidenceLevel: MarketConfidenceLevel;
+  }>;
   cagr: Array<{
     description: string;
     evidenceIds: string[];
@@ -216,6 +231,20 @@ function formatAmount(amount: number, currency: string) {
   return `${currency}${scaled.toLocaleString("en-US", {
     maximumFractionDigits: scaled < 10 ? 2 : 1,
   })}${suffix}`;
+}
+
+const geographyLabelPatterns: Array<[RegExp, string]> = [
+  [/\boecd\b/i, "OECD"],
+  [/\beuropean union\b|\beu\b/i, "European Union"],
+  [/\beurope\b/i, "Europe"],
+  [/\bglobal\b|\bworldwide\b|\binternational\b/i, "Global"],
+];
+
+function extractGeographyLabel(text: string) {
+  for (const [pattern, label] of geographyLabelPatterns) {
+    if (pattern.test(text)) return label;
+  }
+  return "Regional";
 }
 
 function buildPlanningEstimate(
@@ -433,6 +462,26 @@ export function buildMarketIntelligenceGraph(
       };
     });
 
+  const adjacentBenchmarks = evidence
+    .filter(
+      (item) =>
+        (item.field === "global_benchmark" || item.field === "regional_benchmark") &&
+        isVerified(item) &&
+        calculateEvidenceConfidence(item) >= 40 &&
+        Boolean(extractNumber(`${item.claim} ${item.value}`))
+    )
+    .map((item) => {
+      const confidenceScore = calculateEvidenceConfidence(item);
+      return {
+        description: concise(item.value || item.claim),
+        geography: extractGeographyLabel(evidenceText(item)),
+        evidenceIds: [item.id],
+        confidenceClassification: "Estimated" as const,
+        confidenceScore,
+        confidenceLevel: classifyMarketConfidence(confidenceScore),
+      };
+    });
+
   const baseCoverage = evaluateMarketResearchCoverage(evidence, prompt);
   const competitorBreadth = competitorMap.size;
   const planningEstimate = buildPlanningEstimate(evidence);
@@ -443,7 +492,14 @@ export function buildMarketIntelligenceGraph(
   );
   const financialEvidence = Math.max(
     baseCoverage.dimensions.financialEvidence,
-    planningEstimate ? Math.min(62, 30 + planningEstimate.confidence * 0.3) : 0
+    planningEstimate ? Math.min(62, 30 + planningEstimate.confidence * 0.3) : 0,
+    // No verified local market-size figure and no source-based planning
+    // estimate is not the same as no financial signal at all -- a real
+    // Europe/OECD/regional benchmark is still concrete evidence the model
+    // can reason from, just never presented as the requested geography's
+    // own verified number (adjacentBenchmarks stays a separate array from
+    // verifiedMarketSize/planningEstimate for exactly that reason).
+    adjacentBenchmarks.length > 0 ? Math.min(40, 18 + adjacentBenchmarks.length * 6) : 0
   );
   const dimensions = {
     ...baseCoverage.dimensions,
@@ -464,6 +520,7 @@ export function buildMarketIntelligenceGraph(
     pricingModels,
     verifiedMarketSize,
     planningEstimate,
+    adjacentBenchmarks,
     cagr,
     sources,
     vendorIntelligence,
@@ -687,6 +744,52 @@ function marketTableCell(value: string) {
   return value.replace(/\|/g, "/").replace(/\s+/g, " ").trim();
 }
 
+// Natural-language, localized explanation of competitive-evidence coverage
+// -- replaces a raw internal-diagnostics dump (candidate counts, packed
+// discovery queries, "no vendor mentions passed validation") that used to
+// be spliced directly into competitiveLandscape/majorPlayers. Built here
+// (not in vendor-intelligence.ts) because this is the one place both the
+// report's target language and the raw coverage numbers are in scope.
+function describeCompetitiveCoverage(
+  language: MarketGraphLanguage,
+  coverage: { vendorCount: number; independentProviderSources: number; sufficient: boolean }
+): string {
+  const { vendorCount, independentProviderSources, sufficient } = coverage;
+
+  if (sufficient) {
+    return {
+      English: `Confirmed by independent, publicly available sources covering ${vendorCount} named competitors across ${independentProviderSources} independent sources.`,
+      Turkish: `${vendorCount} isimli rakip, ${independentProviderSources} bağımsız kaynak genelinde bağımsız ve kamuya açık kaynaklarla doğrulanmıştır.`,
+      German: `Bestätigt durch unabhängige, öffentlich verfügbare Quellen zu ${vendorCount} namentlich genannten Wettbewerbern über ${independentProviderSources} unabhängige Quellen.`,
+      French: `Confirmé par des sources indépendantes et publiquement disponibles couvrant ${vendorCount} concurrents nommés sur ${independentProviderSources} sources indépendantes.`,
+      Spanish: `Confirmado por fuentes independientes y disponibles públicamente que cubren ${vendorCount} competidores nombrados en ${independentProviderSources} fuentes independientes.`,
+    }[language];
+  }
+
+  if (vendorCount === 0) {
+    return {
+      English:
+        "Independent, publicly available information on named competitors in this market was limited during research. Competitive intensity below is inferred from category-level and structural evidence rather than confirmed vendor profiles -- this narrows confidence in company-specific claims but does not indicate an absence of competition.",
+      Turkish:
+        "Bu pazardaki isimli rakiplere ilişkin bağımsız ve kamuya açık bilgi, araştırma sırasında sınırlı kalmıştır. Aşağıdaki rekabet yoğunluğu, doğrulanmış rakip profillerinden ziyade kategori düzeyindeki yapısal kanıtlardan çıkarılmıştır; bu durum şirkete özgü iddialara olan güveni azaltır, ancak rekabetin yokluğu anlamına gelmez.",
+      German:
+        "Unabhängige, öffentlich verfügbare Informationen zu namentlich genannten Wettbewerbern in diesem Markt waren während der Recherche begrenzt. Die untenstehende Wettbewerbsintensität wird aus kategorieweiter, struktureller Evidenz abgeleitet und nicht aus bestätigten Anbieterprofilen -- dies verringert das Vertrauen in unternehmensspezifische Aussagen, bedeutet aber nicht das Fehlen von Wettbewerb.",
+      French:
+        "Les informations indépendantes et accessibles au public sur les concurrents nommés de ce marché étaient limitées durant la recherche. L'intensité concurrentielle ci-dessous est déduite de preuves structurelles au niveau de la catégorie plutôt que de profils de fournisseurs confirmés -- cela réduit la confiance dans les affirmations propres à l'entreprise sans indiquer une absence de concurrence.",
+      Spanish:
+        "La información independiente y disponible públicamente sobre competidores nombrados en este mercado fue limitada durante la investigación. La intensidad competitiva a continuación se infiere de evidencia estructural a nivel de categoría en lugar de perfiles de proveedores confirmados; esto reduce la confianza en afirmaciones específicas de la empresa, pero no indica ausencia de competencia.",
+    }[language];
+  }
+
+  return {
+    English: `Only ${vendorCount} named competitors could be independently confirmed from public sources (target: 5+), across ${independentProviderSources} independent sources. Competitive intensity is directionally reliable, but company-specific detail below should be read with that limitation in mind.`,
+    Turkish: `Kamuya açık kaynaklardan bağımsız olarak yalnızca ${vendorCount} isimli rakip doğrulanabilmiştir (hedef: 5+), ${independentProviderSources} bağımsız kaynak genelinde. Rekabet yoğunluğu yönü itibarıyla güvenilirdir, ancak aşağıdaki şirkete özgü detaylar bu sınırlama göz önünde bulundurularak okunmalıdır.`,
+    German: `Aus öffentlichen Quellen konnten unabhängig nur ${vendorCount} namentlich genannte Wettbewerber bestätigt werden (Ziel: 5+), über ${independentProviderSources} unabhängige Quellen. Die Wettbewerbsintensität ist richtungsweisend verlässlich, die unternehmensspezifischen Details unten sollten jedoch unter Berücksichtigung dieser Einschränkung gelesen werden.`,
+    French: `Seuls ${vendorCount} concurrents nommés ont pu être confirmés indépendamment à partir de sources publiques (objectif : 5+), sur ${independentProviderSources} sources indépendantes. L'intensité concurrentielle est directionnellement fiable, mais les détails spécifiques à l'entreprise ci-dessous doivent être lus en tenant compte de cette limite.`,
+    Spanish: `Solo se pudieron confirmar de forma independiente ${vendorCount} competidores nombrados a partir de fuentes públicas (objetivo: 5+), en ${independentProviderSources} fuentes independientes. La intensidad competitiva es direccionalmente confiable, pero el detalle específico de la empresa a continuación debe leerse teniendo en cuenta esa limitación.`,
+  }[language];
+}
+
 /**
  * Produces the report fields that must remain identical to the final validated
  * graph. Model prose may enrich other sections, but it cannot replace these
@@ -720,11 +823,9 @@ export function projectMarketIntelligenceGraphToReport(
       (pricing) =>
         `- ${copy.pricingEvidenceLabel}: ${pricing.description} (${classificationTag(language, pricing.confidenceClassification)}; ${copy.confidenceLabel.toLowerCase()} ${pricing.confidenceScore}/100 ${pricing.confidenceLevel}; ${pricing.evidenceIds.map((id) => `[${id}]`).join(", ")})`
     );
-    const discoveryLog = graph.vendorIntelligence.discoveryLog;
     projection.competitiveLandscape = [
       copy.competitorComparisonTitle,
-      `Competitive Coverage Score: ${vendorCoverage.competitiveCoverageScore}/100 — ${vendorCoverage.reason}`,
-      `Discovery: ${discoveryLog.candidatesDiscovered} candidate(s) found across ${discoveryLog.queriesPacked} packed discovery queries (${discoveryLog.queriesGenerated} terms considered); ${discoveryLog.vendorsValidated} validated; ${discoveryLog.sourcesAccepted} source(s) accepted, ${discoveryLog.sourcesRejected} rejected; ${discoveryLog.earlyStopReason}`,
+      describeCompetitiveCoverage(copyLanguage(language), vendorCoverage),
       copy.tableHeader,
       "| --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- |",
       ...competitorLines,
@@ -743,8 +844,9 @@ export function projectMarketIntelligenceGraphToReport(
       projection.majorPlayers = copy.insufficientMajorPlayers;
     }
   } else {
-    projection.competitiveLandscape = vendorCoverage.reason;
-    projection.majorPlayers = vendorCoverage.reason;
+    const coverageDescription = describeCompetitiveCoverage(copyLanguage(language), vendorCoverage);
+    projection.competitiveLandscape = coverageDescription;
+    projection.majorPlayers = coverageDescription;
   }
 
   if (graph.verifiedMarketSize.length > 0) {
@@ -768,7 +870,16 @@ export function projectMarketIntelligenceGraphToReport(
       ...estimate.assumptions,
       `${copy.confidenceLabel}: ${estimate.confidence}/100 (${estimate.confidenceLevel}) | ${copy.basisLabel}: ${estimate.basis} | ${copy.evidenceLabel}: ${estimate.evidenceIds.map((id) => `[${id}]`).join(", ") || copy.assumptionOnlyScenario}`,
     ].join("\n");
-  } else {
+  } else if (graph.adjacentBenchmarks.length === 0) {
+    // Only forced to the flat "unavailable" notice when there is truly
+    // nothing to reason from -- no verified local figure, no source-based
+    // planning estimate, AND no regional/global benchmark either. When a
+    // benchmark exists, the model has real, sourced material and explicit
+    // instructions (marketPrompts.tamSamSom) to build its own transparent,
+    // clearly labeled estimate from it -- overwriting that with this
+    // generic string, as this branch used to do unconditionally, is
+    // exactly the "insufficient evidence instead of the strongest
+    // available analysis" failure mode this exists to prevent.
     projection.tamSamSom = copy.tamSamSomUnavailable;
   }
 

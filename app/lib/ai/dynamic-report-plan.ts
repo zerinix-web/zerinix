@@ -273,7 +273,21 @@ export function createDynamicReportPlanFallback({
     language: reportLanguage,
   };
 
-  if (profile.domain === "legal" && profile.subdomain === "employment_law") {
+  // Market Intelligence has its own, separate report schema and field
+  // contracts (app/api/market-analysis/route.ts's marketReportFields),
+  // never read from this reportPlan. But this plan is still attached to
+  // the request body and read by other consumers (worker.ts diagnostics,
+  // logging, and any future Decision Engine / Brain Orchestrator pass),
+  // so a misclassified expertiseProfile.domain (e.g. "real_estate" for a
+  // car wash market request) must never be allowed to select a
+  // domain-specific template here -- the user-selected mode is
+  // authoritative over a possibly-wrong domain inference. Every
+  // domain-specific branch below is therefore gated on mode !== "market";
+  // market-mode requests always fall through to the generic, mode-neutral
+  // template at the end of this function regardless of domain.
+  const allowDomainSpecificTemplate = mode !== "market";
+
+  if (allowDomainSpecificTemplate && profile.domain === "legal" && profile.subdomain === "employment_law") {
     return {
       ...base,
       reportTitle: `${profile.jurisdiction || "Employment"} Claim Assessment`,
@@ -320,7 +334,7 @@ export function createDynamicReportPlanFallback({
     };
   }
 
-  if (profile.domain === "real_estate") {
+  if (allowDomainSpecificTemplate && profile.domain === "real_estate") {
     return {
       ...base,
       reportTitle: "Real Estate Investment Due-Diligence Assessment",
@@ -366,7 +380,7 @@ export function createDynamicReportPlanFallback({
     };
   }
 
-  if (profile.domain === "finance" || profile.domain === "accounting") {
+  if (allowDomainSpecificTemplate && (profile.domain === "finance" || profile.domain === "accounting")) {
     return {
       ...base,
       reportTitle: "Financial Health Assessment",
@@ -401,7 +415,7 @@ export function createDynamicReportPlanFallback({
     };
   }
 
-  if (profile.domain === "retail") {
+  if (allowDomainSpecificTemplate && profile.domain === "retail") {
     return {
       ...base,
       reportTitle: "Retail Sales and Inventory Performance Assessment",

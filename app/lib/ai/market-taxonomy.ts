@@ -177,7 +177,7 @@ const softwareTaxonomies: MarketTaxonomyProfile[] = [
 ];
 
 const excludedInstitutionPattern =
-  /(?:census|government|department|ministry|bureau|regulator|commission|sec\b|federal reserve|association|institute|council|university|journal|reuters|bloomberg|forbes|gartner|forrester|statista|grand view research|mordor intelligence|research and markets|ibisworld|fortune business insights|market research|data provider|benchmark)/i;
+  /(?:census|government|department|ministry|bureau|regulator|commission|sec\b|federal reserve|association|institute|council|university|journal|reuters|bloomberg|forbes|gartner|forrester|statista|grand ?view ?research|mordor ?intelligence|research ?and ?markets|ibisworld|fortune ?business ?insights|market research|data provider|benchmark|emergenresearch|asdreports|reportsanddata|reportsandmarkets|marketsandmarkets|alliedmarketresearch|verifiedmarketresearch|verifiedmarketreports|htfmarketreport|precedenceresearch|futuremarketinsights|coherentmarketinsights|straitsresearch|6wresearch|consultanc(?:y|ies)|messefrankfurt)/i;
 const genericPublisherPattern =
   /^(?:unknown|n\/?a|source|website|publisher|market research|industry report|research|company|validation required|not provided)$/i;
 const invalidMetadataPattern =
@@ -295,8 +295,18 @@ export function resolveMarketVendorEntities(
   }
 
   const publisher = item.publisher.trim();
+  // Note: this intentionally does NOT match the real "official company
+  // source" classifier string (unlike the equivalent check in
+  // vendor-discovery.ts). For native-fallback evidence, item.publisher is a
+  // bare hostname, not a display name -- matching sourceType here would
+  // surface raw domains as vendor names and bypass the academic/news-agency
+  // filtering that isExcludedCompetitorInstitution doesn't cover (confirmed
+  // via a live run pulling in akademik.adu.edu.tr and aa.com.tr as
+  // "vendors"). The URL-path signal below is unaffected by this and remains
+  // the real detector for this path; official-source detection for prose
+  // evidence is handled correctly downstream by vendor-discovery.ts.
   const companyOwnedSource =
-    /company_source|company website|product page|pricing page/i.test(
+    /company website|product page|pricing page/i.test(
       `${item.sourceType} ${item.sourceTitle}`
     ) || /\/products?|\/pricing|\/solutions?|\/features?/i.test(validPublicUrl(item.url)?.pathname || "");
   if (

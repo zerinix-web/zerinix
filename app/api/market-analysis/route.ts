@@ -58,6 +58,7 @@ import {
   buildMarketEntryRecommendation,
   buildMarketExecutiveDecisionBrief,
   buildMarketFinalVerdictParagraph,
+  buildPreGenerationVerdictContext,
   assessMarketEntryConfidence,
   localizeMarketEntryDecision,
 } from "@/app/lib/report-engine/market-intelligence-presentation";
@@ -1366,6 +1367,16 @@ Write only this section's content. Do not write a JSON object, field name, headi
       const marketEvidenceCoverageContext =
         formatMarketResearchCoverageForReport(marketCoverageResult.coverage);
       const reportAnalysisContext = marketCoverageResult.context;
+      // Research is already complete at this point, so the deterministic
+      // ENTER/MONITOR/AVOID verdict is fully computable before generation
+      // -- telling the model now lets every section (Strategic
+      // Recommendations, Opportunities, Market Drivers) self-condition on
+      // the real verdict instead of only being checked against it after
+      // the fact by assertNoDecisionContradiction.
+      const preGenerationVerdictContext = buildPreGenerationVerdictContext(
+        assessMarketEntryConfidence(marketCoverageResult.coverage),
+        responseLanguage
+      );
 
       if (domainResearch.recommendedOutput === "clarification") {
         // This endpoint only ever serves Market Intelligence requests (a
@@ -1433,6 +1444,8 @@ Final validated market intelligence graph (authoritative shared chat/report obje
 ${formatMarketIntelligenceGraphForModel(marketIntelligenceGraph)}
 
 ${marketEvidenceCoverageContext}
+
+${preGenerationVerdictContext}
 
 Generate the complete Market Analysis report as one structured JSON object.
 Return exactly these JSON keys and no others:

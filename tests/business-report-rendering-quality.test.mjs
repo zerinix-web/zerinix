@@ -67,7 +67,12 @@ test("Sources are structured, typed, and deduplicated before rendering", () => {
   for (const source of [plannerCitationsSource, pdfSource]) {
     assert.match(source, /sourceType/);
     assert.match(source, /normalizeSourceType/);
-    assert.match(source, /Publisher not specified/);
+    // Unknown publisher/URL/year metadata is omitted entirely rather than
+    // rendered as a placeholder phrase like "Publisher not specified" --
+    // a broken-looking field is worse for report quality than a shorter,
+    // clean citation. See isPlausibleCitationField gating the fallback.
+    assert.doesNotMatch(source, /Publisher not specified/);
+    assert.match(source, /isPlausibleCitationField/);
     assert.match(source, /publicationYear/);
     assert.match(source, /confidence/);
     assert.doesNotMatch(source, /citation\.publicationYear \|\| "",\s*\]\.join/);

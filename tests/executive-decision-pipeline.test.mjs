@@ -76,56 +76,70 @@ const reportPdfButtonSource = readFileSync(
 
 // -- executive-decision-brief.ts -------------------------------------------
 
-test("formatExecutiveDecisionBrief renders the single Executive Decision layer in order and caps reasons/risks/actions at 3", () => {
+test("formatExecutiveDecisionBrief renders the single Executive Decision layer in order and caps reasons/risks/factors/gaps at 3", () => {
   const brief = {
     decision: "GO",
     confidence: 72,
+    confidenceDirection: "supported",
+    confidenceFactors: ["Factor one", "Factor two", "Factor three", "Factor four"],
+    why: "The single biggest upside is repeat demand.",
     topReasons: ["Reason one", "Reason two", "Reason three", "Reason four"],
     topRisks: ["Risk one", "Risk two", "Risk three", "Risk four"],
-    biggestOpportunity: "The single biggest upside is repeat demand.",
-    missingInformation: ["Gap one", "Gap two", "Gap three", "Gap four"],
-    first90Days: ["Action one", "Action two", "Action three", "Action four"],
+    missingEvidence: ["Gap one", "Gap two", "Gap three", "Gap four"],
+    whatWouldChangeThisDecision: "New verified competitor data would change this.",
+    immediateNextAction: "Begin execution immediately.",
   };
 
   const rendered = formatExecutiveDecisionBrief(brief, "English");
   assert.match(rendered, /^Executive Decision/);
   assert.match(rendered, /Decision: GO \(Confidence: 72%\)/);
-  assert.match(rendered, /Biggest Opportunity: The single biggest upside is repeat demand\./);
+  assert.match(rendered, /Why: The single biggest upside is repeat demand\./);
+  assert.match(rendered, /What Would Change This Decision: New verified competitor data would change this\./);
+  assert.match(rendered, /Immediate Next Action: Begin execution immediately\./);
+  assert.equal(rendered.includes("Factor four"), false, "must cap confidence factors at 3");
   assert.equal(rendered.includes("Reason four"), false, "must cap reasons at 3");
   assert.equal(rendered.includes("Risk four"), false, "must cap risks at 3");
-  assert.equal(rendered.includes("Gap four"), false, "must cap missing-information items at 3");
-  assert.equal(rendered.includes("Action four"), false, "must cap first-90-day actions at 3");
+  assert.equal(rendered.includes("Gap four"), false, "must cap missing-evidence items at 3");
+  assert.match(rendered, /Confidence Supported By:\n- Factor one/);
   assert.match(rendered, /1\. Reason one/);
   assert.match(rendered, /3\. Reason three/);
-  assert.match(rendered, /Missing Information That Could Change This Decision:\n1\. Gap one/);
-  assert.match(rendered, /First 90-Day Action Plan:\n1\. Action one/);
+  assert.match(rendered, /What Evidence Is Missing:\n1\. Gap one/);
 
-  // Order matters: Decision/Confidence, Why, Biggest Risks, Biggest
-  // Opportunity, Missing Information, then First 90-Day Action Plan.
+  // Order matters: Decision/Confidence, Confidence Factors, Why, Top 3
+  // Reasons, Top 3 Risks, What Evidence Is Missing, What Would Change
+  // This Decision, then Immediate Next Action.
+  const confidenceFactorsIndex = rendered.indexOf("Confidence Supported By:");
   const whyIndex = rendered.indexOf("Why:");
-  const risksIndex = rendered.indexOf("Biggest Risks:");
-  const opportunityIndex = rendered.indexOf("Biggest Opportunity:");
-  const missingInfoIndex = rendered.indexOf("Missing Information That Could Change This Decision:");
-  const actionsIndex = rendered.indexOf("First 90-Day Action Plan:");
-  assert.ok(whyIndex < risksIndex);
-  assert.ok(risksIndex < opportunityIndex);
-  assert.ok(opportunityIndex < missingInfoIndex);
-  assert.ok(missingInfoIndex < actionsIndex);
+  const reasonsIndex = rendered.indexOf("Top 3 Reasons:");
+  const risksIndex = rendered.indexOf("Top 3 Risks:");
+  const missingEvidenceIndex = rendered.indexOf("What Evidence Is Missing:");
+  const whatWouldChangeIndex = rendered.indexOf("What Would Change This Decision:");
+  const nextActionIndex = rendered.indexOf("Immediate Next Action:");
+  assert.ok(confidenceFactorsIndex < whyIndex);
+  assert.ok(whyIndex < reasonsIndex);
+  assert.ok(reasonsIndex < risksIndex);
+  assert.ok(risksIndex < missingEvidenceIndex);
+  assert.ok(missingEvidenceIndex < whatWouldChangeIndex);
+  assert.ok(whatWouldChangeIndex < nextActionIndex);
 });
 
-test("formatExecutiveDecisionBrief renders an honest default Missing Information line when the caller has no real gap to report", () => {
+test("formatExecutiveDecisionBrief renders an honest default line when the caller has no real confidence factor or evidence gap to report", () => {
   const rendered = formatExecutiveDecisionBrief(
     {
       decision: "GO",
       confidence: 80,
+      confidenceDirection: "supported",
+      confidenceFactors: [],
+      why: "Upside.",
       topReasons: ["Reason one"],
       topRisks: ["Risk one"],
-      biggestOpportunity: "Upside.",
-      missingInformation: [],
-      first90Days: ["Action one"],
+      missingEvidence: [],
+      whatWouldChangeThisDecision: "Nothing material.",
+      immediateNextAction: "Proceed.",
     },
     "English"
   );
+  assert.match(rendered, /no specific factor identified/);
   assert.match(rendered, /No material data gaps were identified/);
 });
 
@@ -134,19 +148,24 @@ test("formatExecutiveDecisionBrief localizes every label for Turkish, including 
     {
       decision: "NO_GO",
       confidence: 30,
+      confidenceDirection: "reduced",
+      confidenceFactors: ["Eksik faktör bir"],
+      why: "Risk fırsattan ağır basıyor.",
       topReasons: ["Neden bir"],
       topRisks: ["Risk bir"],
-      biggestOpportunity: "En büyük fırsat budur.",
-      missingInformation: ["Eksik veri bir"],
-      first90Days: ["Aksiyon bir"],
+      missingEvidence: ["Eksik veri bir"],
+      whatWouldChangeThisDecision: "Yeni doğrulanmış kanıt bu kararı değiştirir.",
+      immediateNextAction: "Bütçe ayırmayın.",
     },
     "Turkish"
   );
   assert.match(rendered, /Yönetici Kararı/);
   assert.match(rendered, /Karar: HAYIR \(Güven: 30%\)/);
-  assert.match(rendered, /Başlıca Fırsat: En büyük fırsat budur\./);
-  assert.match(rendered, /Kararı Değiştirebilecek Eksik Bilgiler:\n1\. Eksik veri bir/);
-  assert.match(rendered, /İlk 90 Günlük Aksiyon Planı:/);
+  assert.match(rendered, /Güven Şu Nedenlerle Düşürüldü:\n- Eksik faktör bir/);
+  assert.match(rendered, /Neden: Risk fırsattan ağır basıyor\./);
+  assert.match(rendered, /Eksik Olan Kanıtlar:\n1\. Eksik veri bir/);
+  assert.match(rendered, /Bu Kararı Ne Değiştirir: Yeni doğrulanmış kanıt bu kararı değiştirir\./);
+  assert.match(rendered, /Acil Sonraki Adım: Bütçe ayırmayın\./);
 });
 
 test("localizeExecutiveDecision returns the correct 3-value token per language", () => {
@@ -376,20 +395,26 @@ const marketSectionsFixture = {
   strategicRecommendations: "Pilot two locations in the highest-demand districts before scaling regionally.",
 };
 
-test("buildMarketExecutiveDecisionBrief maps ENTER/MONITOR/AVOID onto GO/CONDITIONAL_GO/NO_GO and produces a distinct biggestOpportunity/topReasons/first90Days", () => {
+test("buildMarketExecutiveDecisionBrief maps ENTER/MONITOR/AVOID onto GO/CONDITIONAL_GO/NO_GO and produces a distinct why/topReasons/immediateNextAction", () => {
   const enterBrief = buildMarketExecutiveDecisionBrief(
     marketSectionsFixture,
     "English",
     fixtureCoverage()
   );
   assert.equal(enterBrief.decision, "GO");
-  assert.equal(enterBrief.topReasons.length, 1);
+  // topReasons[0] is the single best opportunity line; the remaining slots
+  // must be genuinely different sentences, never a repeat of it.
+  assert.equal(enterBrief.topReasons.length, 2);
+  assert.equal(new Set(enterBrief.topReasons).size, enterBrief.topReasons.length);
   assert.equal(enterBrief.topRisks.length, 2);
-  assert.ok(enterBrief.biggestOpportunity, "biggestOpportunity must be a non-empty single sentence");
-  // biggestOpportunity is the single best opportunity line; topReasons must
-  // be genuinely different sentences, never a repeat of it.
-  assert.equal(enterBrief.topReasons.includes(enterBrief.biggestOpportunity), false);
-  assert.equal(enterBrief.first90Days.length, 3);
+  assert.ok(enterBrief.why, "why must be a non-empty synthesis sentence");
+  assert.ok(enterBrief.immediateNextAction, "immediateNextAction must be a non-empty single sentence");
+  assert.ok(enterBrief.whatWouldChangeThisDecision, "whatWouldChangeThisDecision must be a non-empty sentence");
+  assert.ok(["reduced", "supported"].includes(enterBrief.confidenceDirection));
+  assert.ok(Array.isArray(enterBrief.confidenceFactors));
+  assert.ok(Array.isArray(enterBrief.missingEvidence));
+  // GO must never contain NO_GO's evidence-gathering/no-commit language.
+  assert.doesNotMatch(enterBrief.immediateNextAction, /do not commit/i);
 
   const avoidBrief = buildMarketExecutiveDecisionBrief(
     marketSectionsFixture,
@@ -406,6 +431,9 @@ test("buildMarketExecutiveDecisionBrief maps ENTER/MONITOR/AVOID onto GO/CONDITI
     })
   );
   assert.equal(avoidBrief.decision, "NO_GO");
+  // NO_GO must never recommend piloting, scaling, entering, or proceeding.
+  assert.doesNotMatch(avoidBrief.immediateNextAction, /\b(?:pilot|scale|enter|proceed|execution)\b/i);
+  assert.match(avoidBrief.immediateNextAction, /do not commit/i);
 
   const monitorBrief = buildMarketExecutiveDecisionBrief(
     marketSectionsFixture,
@@ -558,7 +586,7 @@ test("plan-executor.ts wires the Executive Decision brief onto Strategic Advisor
   assert.match(planExecutorSource, /buildDomainAnalysisExecutiveDecisionBrief\(/);
   assert.match(
     planExecutorSource,
-    /const domainExecutiveDecisionBrief = buildDomainAnalysisExecutiveDecisionBrief\(validated\);\s*\n\s*validated\.subjectIdentification = \[\s*\n\s*formatExecutiveDecisionBrief\(domainExecutiveDecisionBrief, language\)/
+    /const domainExecutiveDecisionBrief = buildDomainAnalysisExecutiveDecisionBrief\(validated, language\);\s*\n\s*validated\.subjectIdentification = \[\s*\n\s*formatExecutiveDecisionBrief\(domainExecutiveDecisionBrief, language\)/
   );
   assert.match(planExecutorSource, /validated\.sources = buildEvidenceSummary\(validated\.sources, language\)/);
   assert.match(

@@ -569,9 +569,17 @@ export function buildVendorIntelligenceGraph(
     rawCoverage.vendorCount >= 5 &&
     rawCoverage.independentProviderSources >= 2 &&
     competitiveCoverageScore >= 35;
+  // Internal-facing (English-only, used for logging/diagnostics and as a
+  // non-empty fallback) -- market-intelligence-graph.ts is the one place
+  // this reaches a report field, and it synthesizes its own localized,
+  // business-language sentence from the raw coverage numbers below rather
+  // than reusing this string, so this text itself never needs to reach an
+  // end user or be translated.
   const reason = sufficient
-    ? `${rawCoverage.vendorCount} independently evidenced vendors validated across ${rawCoverage.independentProviderSources} provider domains (of ${discoveryLog.candidatesDiscovered} candidates discovered).`
-    : `Competitive evidence is insufficient: ${rawCoverage.vendorCount} of ${discoveryLog.candidatesDiscovered} discovered vendor candidates validated (target: 5+), ${rawCoverage.independentProviderSources} independent provider domains, ${rawCoverage.vendorsWithPricingEvidence} with pricing evidence, ${rawCoverage.vendorsWithFeatureEvidence} with feature evidence, and ${rawCoverage.vendorsWithCustomerEvidence} with customer evidence. ${discoveryLog.earlyStopReason}`;
+    ? `${rawCoverage.vendorCount} named competitors independently confirmed across ${rawCoverage.independentProviderSources} independent sources.`
+    : rawCoverage.vendorCount === 0
+      ? "No named competitors could be independently confirmed from public sources for this market."
+      : `Only ${rawCoverage.vendorCount} named competitors independently confirmed across ${rawCoverage.independentProviderSources} independent sources (below the target of 5+).`;
 
   const entities = [...organizationEntities.values()].sort(
     (left, right) =>

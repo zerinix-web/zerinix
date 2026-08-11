@@ -115,7 +115,8 @@ export type VendorMentionSource =
   | "taxonomy_alias"
   | "taxonomy_domain"
   | "company_source"
-  | "heuristic_mention";
+  | "heuristic_mention"
+  | "domain_fallback";
 
 export type RawVendorMention = {
   name: string;
@@ -149,11 +150,23 @@ const vendorRelevantFields = new Set([
   "company_evidence",
 ]);
 
+// classifyMarketResearchSourceType (domain-research.ts) is the actual,
+// single source of truth for every external evidence item's .sourceType --
+// it always emits one of its own human-readable labels ("official company
+// source", "market research", "financial filing", "industry association",
+// "credible publication", "government/statistical source", or the raw
+// provider id as a last-resort fallback). This set previously listed
+// snake_case tokens ("company_source", "credible_market_data",
+// "official_filing", "professional_standard") that classifier never
+// produces, which silently disabled this whole relevance check for every
+// market -- listed here are that same intent, matched against the real
+// output vocabulary.
 const vendorRelevantSourceTypes = new Set([
-  "company_source",
-  "credible_market_data",
-  "official_filing",
-  "professional_standard",
+  "official company source",
+  "market research",
+  "credible publication",
+  "industry association",
+  "financial filing",
 ]);
 
 const genericMentionStopWords = new Set([
@@ -181,6 +194,45 @@ export function isReviewOrDirectoryDomain(domain: string) {
   );
 }
 
+const domainSuffixPattern = /\.(?:com|net|org|co|app|io|biz|info|dev|shop)(?:\.[a-z]{2})?$/i;
+
+// True when an evidence item's own descriptive text carries nothing but
+// its bare domain -- the shape produced when a web-search provider
+// returns a source URL with no real snippet/citation (common for small,
+// local, or niche businesses that a broad market query still correctly
+// surfaces). Content this thin can never match a taxonomy alias or the
+// prose-pattern heuristics below, so without a dedicated fallback, a real
+// competitor's own website is indistinguishable from noise and silently
+// disappears from vendor discovery.
+function isThinDomainOnlyEvidence(item: DomainResearchEvidence, domain: string) {
+  if (item.supportingData.length > 0) return false;
+  const domainPattern = new RegExp(domain.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+  const remainder = [item.claim, item.value, item.sourceTitle]
+    .join(" ")
+    .replace(domainPattern, "")
+    .replace(/[\s.,:;!?()[\]"'`-]+/g, "")
+    .trim();
+  return remainder.length < 5;
+}
+
+// Derives a presentable candidate name from a bare domain when no richer
+// signal exists ("kopurt.com" -> "Kopurt", "quickcarwash.com.tr" ->
+// "Quickcarwash"). Imperfect capitalization (no attempt at multi-word
+// splitting within the label) is an acceptable trade-off: the alternative
+// is the vendor never being discovered at all.
+function deriveCandidateNameFromDomain(domain: string): string | null {
+  const withoutSuffix = domain.replace(domainSuffixPattern, "");
+  const label = withoutSuffix.split(".").pop() || "";
+  const cleaned = label.replace(/[-_]+/g, " ").trim();
+  if (cleaned.length < 3) return null;
+  const name = cleaned
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+  return normalizedMentionCandidate(name, new Set());
+}
+
 function isVendorDiscoveryRelevant(item: DomainResearchEvidence, domain: string) {
   return (
     vendorRelevantFields.has(item.field) ||
@@ -204,6 +256,24 @@ const mentionPatterns = [
   /\b([A-Z][A-Za-z0-9&.+'-]{1,28}(?:\s+[A-Z][A-Za-z0-9&.+'-]{1,28}){0,2})\s+(?:offers|provides|delivers|specializes in|is an AI-powered|is a leading|is a cloud-based)/g,
   /\b[Aa]lternatives?\s+[Tt]o\s+([A-Z][A-Za-z0-9&.+'-]{1,28}(?:\s+[A-Z][A-Za-z0-9&.+'-]{1,28}){0,2})/g,
   /\b([A-Z][A-Za-z0-9&.+'-]{1,28}(?:\s+[A-Z][A-Za-z0-9&.+'-]{1,28}){0,2})\s+(?:pricing|Pricing|reviews?|Reviews?|vs\.?|Vs\.?)\b/g,
+  // Turkish equivalents of the same prose-mention shape above. Confirmed
+  // live (Türkiye car-wash market run): evidence text explicitly named
+  // real brands in Turkish sentence structure -- "ISTOBAL mümessili",
+  // "WashTec ürünlerini ... temsil ettiği" -- and the English-only
+  // patterns above matched none of it, so heuristic extraction returned
+  // empty for every Turkish-language source. That silently pushed all
+  // vendor naming onto the domain-fallback path (meant only for
+  // thin/content-less evidence), which then named "vendors" after
+  // whatever domain hosted the page -- producing entries like "Wikipedia"
+  // and "Istoc" for pages that were *about* WashTec/ISTOBAL, instead of
+  // the brand the page actually described.
+  // Turkish compound-noun phrasing routinely inserts descriptive words
+  // between the brand and the keyword ("WashTec otomatik araç yıkama
+  // makineleri" -- confirmed live), unlike the tight English adjacency
+  // above -- so this allows a short, bounded gap of lowercase words
+  // rather than requiring the keyword immediately after the brand.
+  /\b([A-Z][A-Za-z0-9&.+'-]{1,28}(?:\s+[A-Z][A-Za-z0-9&.+'-]{1,28}){0,2})(?:'[a-zışğüöçİĞÜÖÇŞ]{1,3})?\s+(?:[a-zışğüöç]{2,20}\s+){0,3}(?:mümessili|mümessilliği|temsilcisi|yetkili distribütörü|distribütörü|bayisi|ürünleri|ürünlerini|makineleri|makinelerini|sistemleri|sistemlerini|markası)\b/g,
+  /\b(?:alternatifleri|rakipleri)\s+(?:olarak\s+)?([A-Z][A-Za-z0-9&.+'-]{1,28}(?:\s+[A-Z][A-Za-z0-9&.+'-]{1,28}){0,2})/g,
 ];
 
 function extractHeuristicMentions(
@@ -280,7 +350,8 @@ export function extractVendorCandidateMentions(
     if (taxonomyResolved.length > 0) continue;
     if (!isVendorDiscoveryRelevant(item, domain)) continue;
     const text = [item.claim, item.value, item.sourceTitle].join(" ");
-    for (const name of extractHeuristicMentions(text, taxonomyWords)) {
+    const heuristicNames = extractHeuristicMentions(text, taxonomyWords);
+    for (const name of heuristicNames) {
       mentions.push({
         name,
         matchedBy: "heuristic_mention",
@@ -291,6 +362,27 @@ export function extractVendorCandidateMentions(
         publishedDate: item.publishedDate,
         lastChecked: item.lastChecked,
       });
+    }
+
+    // Path C: the item is vendor-relevant but has no descriptive prose for
+    // the heuristics above to match against (a bare-domain search result,
+    // not a taxonomy alias or a rich snippet) -- fall back to the domain
+    // itself as the only available name signal, not a taxonomy substitute
+    // to avoid, since one was never found.
+    if (heuristicNames.length === 0 && isThinDomainOnlyEvidence(item, domain)) {
+      const derivedName = deriveCandidateNameFromDomain(domain);
+      if (derivedName) {
+        mentions.push({
+          name: derivedName,
+          matchedBy: "domain_fallback",
+          evidenceId: item.id,
+          url: item.url,
+          domain,
+          searchQuery: item.searchQuery || "",
+          publishedDate: item.publishedDate,
+          lastChecked: item.lastChecked,
+        });
+      }
     }
   }
   return mentions;
@@ -432,7 +524,14 @@ const productSignalPattern = /\b(?:feature|product|integration|deployment|capabi
 const customerSignalPattern =
   /\b(?:customer|buyer|enterprise|smb|firm|hospital|contractor|security team|client)\b/i;
 const marketMentionPattern = /\b(?:market|vendor|competitor|competitive|leader|provider|platform)\b/i;
-const companyOwnedPattern = /company_source|company website|product page|pricing page/i;
+// Matches classifyMarketResearchSourceType's (domain-research.ts) actual
+// human-readable output ("official company source", not the snake_case
+// "company_source" this pattern used to look for) -- that classifier runs
+// on every external evidence item and reformats sourceType before it ever
+// reaches vendor-discovery.ts, so a pattern written against the internal
+// token instead of the real output string can never match, silently
+// disabling this whole validation path for every market.
+const companyOwnedPattern = /official company source|company website|product page|pricing page/i;
 
 /**
  * An evidence item only counts as corroboration when it independently meets

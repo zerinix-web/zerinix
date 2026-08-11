@@ -94,6 +94,21 @@ type AvailableEvidence = {
   proposition?: string;
 };
 
+// Optional, model-generated research directions (see
+// market-query-expansion.ts) that widen query construction beyond the
+// static taxonomy in market-taxonomy.ts. Only ever consumed by
+// createMarketIntelligenceSeeds; every field defaults to an empty array
+// when absent, so omitting it reproduces today's taxonomy-only behavior
+// exactly.
+type MarketQueryExpansionsInput = {
+  categoryTerms?: readonly string[];
+  adjacentCategories?: readonly string[];
+  competitorBrands?: readonly string[];
+  geographicComparators?: readonly string[];
+  methodologyTerms?: readonly string[];
+  localLanguageTerms?: readonly string[];
+};
+
 type ResearchPlanInput = {
   expertiseProfile: ExpertiseProfile;
   reportPlan: DynamicReportPlan;
@@ -102,6 +117,7 @@ type ResearchPlanInput = {
   extractedFacts?: readonly ExtractedFact[];
   clarificationAnswers?: Record<string, unknown>;
   availableEvidence?: readonly AvailableEvidence[];
+  queryExpansions?: MarketQueryExpansionsInput;
 };
 
 type TaskSeed = Omit<DynamicResearchTask, "decisionCriterion" | "jurisdiction"> & {
@@ -378,7 +394,8 @@ function createMarketIntelligenceSeeds(
   profile: ExpertiseProfile,
   reportPlan: DynamicReportPlan,
   facts: readonly ExtractedFact[],
-  prompt = ""
+  prompt = "",
+  queryExpansions?: MarketQueryExpansionsInput
 ): TaskSeed[] {
   const context = q(
     profile.jurisdiction,
@@ -386,8 +403,33 @@ function createMarketIntelligenceSeeds(
     prompt.replace(/\s+/g, " ").trim().slice(0, 150)
   );
   const taxonomyTerms = expandMarketTaxonomyTerms(prompt);
-  const categoryQuery = taxonomyTerms.slice(0, 6).join(" OR ");
-  const adjacentQuery = taxonomyTerms.slice(6, 12).join(" OR ");
+  // queryExpansions (market-query-expansion.ts) is model-generated per
+  // request and widens every term list below beyond what the static
+  // taxonomy anticipated in advance -- e.g. for "premium automatic car
+  // wash in Turkey" it can surface "tunnel wash"/"self-service car wash"
+  // as category terms, "automotive aftersales"/"fuel station services" as
+  // adjacent categories, "WashTec"/"Kärcher" as named brands, and
+  // "Europe"/"OECD" as comparator geographies -- none of which the generic
+  // taxonomy fallback (productCategory + boilerplate suffixes) could ever
+  // produce. Every array below defaults to empty, so omitting expansions
+  // (e.g. the LLM call failed) reproduces the previous taxonomy-only query
+  // set exactly.
+  const expansionCategoryTerms = queryExpansions?.categoryTerms || [];
+  const expansionAdjacentCategories = queryExpansions?.adjacentCategories || [];
+  const expansionBrands = queryExpansions?.competitorBrands || [];
+  const expansionComparators = queryExpansions?.geographicComparators || [];
+  const expansionMethodology = queryExpansions?.methodologyTerms || [];
+  const expansionLocal = queryExpansions?.localLanguageTerms || [];
+  const categoryQuery = [...taxonomyTerms.slice(0, 6), ...expansionCategoryTerms]
+    .slice(0, 10)
+    .join(" OR ");
+  const adjacentQuery = [...taxonomyTerms.slice(6, 12), ...expansionAdjacentCategories]
+    .slice(0, 10)
+    .join(" OR ");
+  const brandQuery = expansionBrands.join(" OR ");
+  const comparatorQuery = expansionComparators.join(" OR ");
+  const methodologyQuery = expansionMethodology.join(" OR ");
+  const localQuery = expansionLocal.join(" OR ");
   const vendorDiscoveryQueryPlan = buildVendorDiscoveryQueryPlan(
     prompt,
     getMarketTaxonomyProfile(prompt)
@@ -396,17 +438,18 @@ function createMarketIntelligenceSeeds(
   return [
     task({
       id: "market_vendor_discovery",
-      topic: "Multi-source vendor discovery",
+      topic: "Multi-source vendor and competitor discovery",
       purpose:
-        "Discover 10–30 evidence-supported vendors where available by reconciling independent directories, analyst coverage, industry publications, filings, and official company sources.",
+        "Discover 10–30 evidence-supported vendors/competitors where available by reconciling independent directories, analyst coverage, industry publications, filings, official company sources, review sites, and named brand/equipment-maker pages.",
       reportSectionId: sectionId(reportPlan, ["major_players", "competitive_landscape", "competition"]),
       evidenceField: "vendor_discovery",
       priority: "critical",
       preferredSourceTypes: ["credible_market_data", "professional_standard", "company_source", "official_filing"],
       queries: [
-        q(context, categoryQuery, "vendors alternatives directory market map"),
+        vendorDiscoveryQueryPlan.packedQueries[0] ||
+          q(context, categoryQuery, "vendors alternatives directory market map"),
         q(context, adjacentQuery, "software companies vendor landscape comparison"),
-        q(context, "vendor list analyst report industry publication competitors"),
+        q(context, brandQuery || categoryQuery, "named competitors brands manufacturers distributors"),
       ],
       required: true,
       criterionHints: ["competition", "market", "evidence"],
@@ -454,9 +497,14 @@ function createMarketIntelligenceSeeds(
       priority: "high",
       preferredSourceTypes: ["official_statistics", "credible_market_data", "official_filing"],
       queries: [
-        q(context, categoryQuery, "market size CAGR methodology geography year analyst report"),
+        q(context, categoryQuery, methodologyQuery, "market size CAGR methodology geography year analyst report"),
         q(context, categoryQuery, "official statistics market revenue spending adoption"),
-        q(context, "industry association public filing annual report market size"),
+        // English market-research vocabulary ("CAGR", "market size") rarely
+        // appears verbatim in a local-language market's own sources -- this
+        // query surfaces domestic statistics/news using the market's own
+        // terminology (localQuery, model-generated per request) instead of
+        // only English-phrased international analyst reports.
+        q(context, localQuery || categoryQuery, "istatistik pazar büyüklüğü"),
       ],
       required: false,
       criterionHints: ["market", "size", "evidence"],
@@ -471,7 +519,7 @@ function createMarketIntelligenceSeeds(
       priority: "high",
       preferredSourceTypes: ["credible_market_data", "professional_standard", "regulator", "official_statistics"],
       queries: [
-        q(context, "industry trends buyer behavior switching costs association research"),
+        q(context, adjacentQuery, "industry trends buyer behavior switching costs association research"),
         q(context, "regulation technology financial publication market analysis"),
       ],
       required: false,
@@ -522,24 +570,91 @@ function createMarketIntelligenceSeeds(
       queries: [
         q(context, "competitors SEC filing annual report investor relations"),
         q(context, "public company filing market competition revenue segment"),
+        // "SEC filing"/"10-K" are US-specific concepts that never apply to a
+        // local/regional market (e.g. a Turkish SMB market has no SEC
+        // filings at all) -- this query asks for the market's own
+        // equivalent (trade registry, activity report, company disclosure),
+        // phrased with localQuery (model-generated per request) instead of
+        // only a US filing regime that can never resolve there.
+        q(context, localQuery || categoryQuery, "ticaret sicili faaliyet raporu şirket bilgileri resmi kaynak"),
       ],
       required: false,
       criterionHints: ["competition", "company", "evidence"],
     }),
+    // Four evidence layers below (academic, news, regional benchmark,
+    // global benchmark) previously had no dedicated task at all, so a
+    // request for e.g. adjacent-market sizing evidence -- Europe/OECD data
+    // to infer from when the requested geography has no market-size report
+    // of its own -- was never deliberately searched for; the pipeline could
+    // only stumble onto it by accident inside a differently-scoped query.
+    // global_benchmark in particular is what buildAdjacentBenchmarkEstimate
+    // (market-intelligence-graph.ts) needs to build a transparent,
+    // clearly-labeled estimate instead of reporting sizing as simply
+    // unavailable.
     task({
-      id: "market_vendor_directory_discovery",
-      topic: "Vendor directories, reviews, and alternatives discovery",
+      id: "market_academic_evidence",
+      topic: "Academic and independent research evidence",
       purpose:
-        "Discover additional commercial vendors via review sites, software directories, buyer alternatives comparisons, and industry association listings, dynamically expanded from the market's exact name, category aliases, adjacent categories, buyer terminology, and use-case terminology.",
-      reportSectionId: sectionId(reportPlan, ["major_players", "competitive_landscape", "competition"]),
-      evidenceField: "vendor_discovery",
-      priority: "high",
-      preferredSourceTypes: ["credible_market_data", "company_source", "professional_standard"],
-      queries: vendorDiscoveryQueryPlan.packedQueries.length
-        ? vendorDiscoveryQueryPlan.packedQueries
-        : [q(context, categoryQuery, "top vendors alternatives G2 Capterra reviews pricing")],
+        "Verify structural, technological, or demand-side facts about this market from academic papers, theses, or independent research institutions where available.",
+      reportSectionId: sectionId(reportPlan, ["industry_trends", "market_overview", "market_drivers"]),
+      evidenceField: "academic_evidence",
+      priority: "standard",
+      preferredSourceTypes: ["credible_market_data", "professional_standard"],
+      queries: [
+        q(context, categoryQuery, "academic research paper study university"),
+        q(context, adjacentQuery, "thesis dissertation research institute report"),
+      ],
       required: false,
-      criterionHints: ["competition", "market", "evidence"],
+      criterionHints: ["market", "research", "evidence"],
+    }),
+    task({
+      id: "market_news_evidence",
+      topic: "Current news and market sentiment",
+      purpose:
+        "Verify recent news, price movements, demand shifts, expansion or closure signals, and independent press sentiment about this market.",
+      reportSectionId: sectionId(reportPlan, ["market_drivers", "threats", "opportunities"]),
+      evidenceField: "news_evidence",
+      priority: "standard",
+      preferredSourceTypes: ["credible_market_data", "professional_standard"],
+      queries: [
+        q(context, categoryQuery, "news press coverage recent"),
+        q(context, localQuery || categoryQuery, "industry news price change expansion closure"),
+      ],
+      required: false,
+      criterionHints: ["market", "news", "evidence"],
+    }),
+    task({
+      id: "market_regional_benchmark",
+      topic: "Regional and neighboring-market benchmarks",
+      purpose:
+        "Find comparable neighboring-country or regional market data (size, growth, structure) to benchmark against when the requested geography lacks its own public data.",
+      reportSectionId: sectionId(reportPlan, ["regional_analysis", "market_size", "market_overview"]),
+      evidenceField: "regional_benchmark",
+      priority: "high",
+      preferredSourceTypes: ["official_statistics", "credible_market_data", "professional_standard"],
+      queries: [
+        q(comparatorQuery, categoryQuery, "market size regional comparison"),
+        q(comparatorQuery || context, "neighboring market benchmark statistics"),
+      ],
+      required: false,
+      criterionHints: ["market", "regional", "evidence"],
+    }),
+    task({
+      id: "market_global_benchmark",
+      topic: "Global and continental market benchmarks",
+      purpose:
+        "Find Europe-wide, OECD, or global market-size and growth data for this category or its closest parent category, to build a transparent, clearly labeled estimate when local data does not exist.",
+      reportSectionId: sectionId(reportPlan, ["market_size", "tam_sam_som", "cagr"]),
+      evidenceField: "global_benchmark",
+      priority: "high",
+      preferredSourceTypes: ["official_statistics", "credible_market_data", "professional_standard"],
+      queries: [
+        q("Europe global", categoryQuery, methodologyQuery, "market size CAGR"),
+        q("OECD", adjacentQuery, "statistics report"),
+        q(comparatorQuery, methodologyQuery || categoryQuery, "industry report market value"),
+      ],
+      required: false,
+      criterionHints: ["market", "global", "evidence"],
     }),
   ];
 }
@@ -571,6 +686,34 @@ function createGenericSeeds(
 
 function seedTasks(input: ResearchPlanInput) {
   const { expertiseProfile, reportPlan, extractedFacts = [] } = input;
+  const selectedMode = normalizeSelectedAnalysisMode(input.selectedMode);
+  // The user-selected mode is authoritative over expertiseProfile.domain,
+  // which is only an inference and can be wrong (e.g. a Turkish "premium
+  // automatic car wash market" Market Intelligence request misclassified
+  // as domain "real_estate" because opening a car wash involves a
+  // physical site). Market Intelligence has its own dedicated seed
+  // template (createMarketIntelligenceSeeds) -- previously this was only
+  // reached after the legal/real_estate domain branches below, and even
+  // then only if the prompt happened to contain one of a fixed set of
+  // ENGLISH market keywords ("market", "competitors", "TAM/SAM/SOM/CAGR",
+  // ...), so a same-language Turkish market prompt with no English
+  // keyword match, or any market-mode request with a misclassified
+  // domain, fell through into a domain-specific (e.g. real_estate)
+  // template instead -- producing zoning/comparables/hazards/access/
+  // liquidity/regional_development research tasks for what the user
+  // explicitly selected as Market Intelligence. Checking mode first and
+  // unconditionally removes both failure modes: selecting Market
+  // Intelligence mode always uses the Market Intelligence template,
+  // regardless of prompt language or domain inference.
+  if (selectedMode === "market") {
+    return createMarketIntelligenceSeeds(
+      expertiseProfile,
+      reportPlan,
+      extractedFacts,
+      input.prompt,
+      input.queryExpansions
+    );
+  }
   if (
     expertiseProfile.domain === "legal" &&
     expertiseProfile.subdomain === "employment_law"
@@ -579,38 +722,6 @@ function seedTasks(input: ResearchPlanInput) {
   }
   if (expertiseProfile.domain === "real_estate") {
     return createRealEstateSeeds(expertiseProfile, reportPlan, extractedFacts);
-  }
-  const selectedMode = normalizeSelectedAnalysisMode(input.selectedMode);
-  // A public market-research question (e.g. "What are the top 10 AI
-  // accounting software platforms in the United States?") must route to
-  // Market Intelligence even when the domain classifier tags it
-  // "finance"/"accounting" purely from category vocabulary in the prompt --
-  // that classifier has no way to distinguish "analyze this company's
-  // accounting" from "survey the AI accounting software market", and a
-  // public survey can never produce company_financials/industry_benchmarks/
-  // macro_inputs (those describe one specific issuer's filings). Genuine
-  // company-specific analysis (an uploaded balance sheet, a named entity's
-  // financials) does not use ranking/category language like "top N" or
-  // "platforms/vendors/providers/solutions", so widening the market-intent
-  // signal below (rather than reordering domain precedence) keeps the
-  // evidence requirement fully intact for real company-specific requests.
-  const isMarketIntelligenceRequest =
-    selectedMode === "market" &&
-    (/(?:\bmarket\b|competitors?|competitive landscape|industry landscape|\bTAM\b|\bSAM\b|\bSOM\b|\bCAGR\b|\btop\s+\d+\b|\bleading\b|\bbest\b|platforms?|\bvendors?\b|\bproviders?\b|\bsolutions?\b|software\s+(?:companies|providers|vendors)|companies\s+in\b)/i.test(
-      input.prompt || ""
-    ) ||
-      reportPlan.sections.some((section) =>
-        /market|compet|industry|customer|segment|trend|tam|sam|som|cagr/i.test(
-          `${section.id} ${section.title}`
-        )
-      ));
-  if (isMarketIntelligenceRequest) {
-    return createMarketIntelligenceSeeds(
-      expertiseProfile,
-      reportPlan,
-      extractedFacts,
-      input.prompt
-    );
   }
   if (
     expertiseProfile.domain === "finance" ||

@@ -23,7 +23,7 @@ function evidence({
   field,
   company,
   url,
-  sourceType = "company_source",
+  sourceType = "official company source",
   claim = `${company} provides accounting software for business customers.`,
   publishedDate = "2025-01-15",
 }) {

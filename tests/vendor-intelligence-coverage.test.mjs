@@ -151,9 +151,13 @@ for (const prompt of markets) {
     assert.doesNotMatch(projection.competitiveLandscape, /\bSEC\b|\bFASB\b|Bureau of Economic Analysis/);
     assert.match(projection.marketInfrastructure, /SEC/);
 
-    assert.match(projection.competitiveLandscape, /Competitive Coverage Score/);
+    // Natural-language coverage explanation, not an internal-diagnostics
+    // dump (candidate counts, packed discovery queries, "no vendor
+    // mentions passed validation") -- see describeCompetitiveCoverage in
+    // market-intelligence-graph.ts.
+    assert.match(projection.competitiveLandscape, /confirmed by independent, publicly available sources/i);
     assert.match(projection.competitiveLandscape, /\| Vendor \| Parent Company \| Category \| Segment \|/);
-    assert.match(projection.competitiveLandscape, /Discovery: \d+ candidate/);
+    assert.doesNotMatch(projection.competitiveLandscape, /packed discovery queries|candidates? discovered|earlyStopReason/i);
     assert.doesNotMatch(projection.majorPlayers, /No competitive evidence/i);
     assert.equal(graph.planningEstimate, null);
     assert.match(projection.tamSamSom, /Verified TAM \/ SAM \/ SOM is unavailable/);

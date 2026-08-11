@@ -72,6 +72,55 @@ export function assessMarketEntryConfidence(coverage: MarketResearchCoverage) {
   return { confidence, decision };
 }
 
+// Injected into the generation prompt BEFORE the model writes a single
+// word of the report -- research/coverage is already complete by then, so
+// the deterministic ENTER/MONITOR/AVOID verdict is fully known in advance.
+// Without this, the model has no way to know what verdict its own
+// Strategic Recommendations/Opportunities/Market Drivers will be judged
+// against, and routinely writes full-speed growth advice (scale,
+// franchise, expand locations) even when the evidence-based verdict is
+// AVOID -- the exact contradiction assertNoDecisionContradiction exists
+// to catch after the fact. Telling the model the real verdict up front
+// lets it self-condition every section instead of relying purely on a
+// post-hoc gate.
+export function buildPreGenerationVerdictContext(
+  assessment: { confidence: number; decision: MarketEntryDecision },
+  language: ResponseLanguage
+): string {
+  const localizedDecision = localizeMarketEntryDecision(assessment.decision, language);
+
+  if (assessment.decision === "AVOID") {
+    return marketText(
+      language,
+      `Based on the evidence coverage above, the deterministic verdict for this market will be ${localizedDecision} (confidence ${assessment.confidence}/100). Every section -- especially Strategic Recommendations, Opportunities, and Market Drivers -- must be fully consistent with an AVOID verdict: do not write unconditional growth, scaling, franchising, location-expansion, or execution advice as if entry is already the plan. Frame any such content explicitly as contingent on first closing the evidence gaps identified elsewhere in this report, never as an immediate directive.`,
+      `Yukarıdaki kanıt kapsamına göre, bu pazar için belirlenecek kararın ${localizedDecision} (güven: ${assessment.confidence}/100) olacağı öngörülmektedir. Her bölüm -- özellikle Stratejik Öneriler, Fırsatlar ve Pazar İtici Güçleri -- bu HAYIR kararıyla tam olarak uyumlu olmalıdır: giriş kararı çoktan alınmış gibi koşulsuz büyüme, ölçeklendirme, franchise veya lokasyon genişletme tavsiyeleri yazma. Bu tür içerikleri, ancak raporun başka bir yerinde belirtilen kanıt boşlukları kapatıldıktan sonra geçerli olacak koşullu öneriler olarak çerçevele; asla anlık bir talimat gibi sunma.`,
+      `Basierend auf der obigen Evidenzabdeckung wird das deterministische Urteil für diesen Markt ${localizedDecision} (Konfidenz ${assessment.confidence}/100) lauten. Jeder Abschnitt -- insbesondere Strategische Empfehlungen, Chancen und Markttreiber -- muss vollständig mit einem AVOID-Urteil übereinstimmen: Schreiben Sie keine bedingungslosen Wachstums-, Skalierungs-, Franchise- oder Standorterweiterungsempfehlungen, als wäre der Markteintritt bereits der Plan. Formulieren Sie solche Inhalte ausdrücklich als abhängig von der vorherigen Schließung der an anderer Stelle im Bericht genannten Evidenzlücken, niemals als unmittelbare Anweisung.`,
+      `Sur la base de la couverture de preuves ci-dessus, le verdict déterministe pour ce marché sera ${localizedDecision} (confiance ${assessment.confidence}/100). Chaque section -- en particulier Recommandations stratégiques, Opportunités et Moteurs du marché -- doit être entièrement cohérente avec un verdict AVOID : ne rédigez pas de conseils de croissance, de mise à l'échelle, de franchise ou d'expansion géographique inconditionnels, comme si l'entrée était déjà décidée. Présentez ce type de contenu explicitement comme conditionné par la résolution préalable des lacunes de preuves mentionnées ailleurs dans le rapport, jamais comme une directive immédiate.`,
+      `Según la cobertura de evidencia anterior, el veredicto determinista para este mercado será ${localizedDecision} (confianza ${assessment.confidence}/100). Cada sección -- especialmente Recomendaciones Estratégicas, Oportunidades e Impulsores del Mercado -- debe ser totalmente coherente con un veredicto AVOID: no escriba consejos incondicionales de crecimiento, escalamiento, franquicia o expansión de ubicaciones como si la entrada ya estuviera decidida. Presente dicho contenido explícitamente como condicionado a cerrar primero las brechas de evidencia señaladas en otras partes del informe, nunca como una directiva inmediata.`
+    );
+  }
+
+  if (assessment.decision === "MONITOR") {
+    return marketText(
+      language,
+      `Based on the evidence coverage above, the deterministic verdict for this market will be ${localizedDecision} (confidence ${assessment.confidence}/100) -- a conditional stance, not a full green light. Every section must reflect that: frame growth/scale/expansion content as appropriate only for a bounded pilot gated on specific evidence improving, never as an unconditional immediate rollout.`,
+      `Yukarıdaki kanıt kapsamına göre, bu pazar için belirlenecek kararın ${localizedDecision} (güven: ${assessment.confidence}/100) olacağı öngörülmektedir -- bu tam bir onay değil, koşullu bir duruştur. Her bölüm bunu yansıtmalıdır: büyüme/ölçeklendirme/genişleme içeriğini yalnızca belirli kanıtlar iyileştiğinde geçerli olacak sınırlı bir pilot için uygun olarak çerçevele, asla koşulsuz ve anlık bir uygulama olarak sunma.`,
+      `Basierend auf der obigen Evidenzabdeckung wird das deterministische Urteil für diesen Markt ${localizedDecision} (Konfidenz ${assessment.confidence}/100) lauten -- eine bedingte Haltung, kein vollständiges grünes Licht. Jeder Abschnitt muss dies widerspiegeln: Formulieren Sie Wachstums-/Skalierungs-/Expansionsinhalte nur als geeignet für einen begrenzten, an bestimmte Evidenzverbesserungen gebundenen Piloten, niemals als bedingungslosen sofortigen Rollout.`,
+      `Sur la base de la couverture de preuves ci-dessus, le verdict déterministe pour ce marché sera ${localizedDecision} (confiance ${assessment.confidence}/100) -- une position conditionnelle, pas un feu vert complet. Chaque section doit refléter cela : présentez le contenu de croissance/mise à l'échelle/expansion comme approprié uniquement pour un pilote encadré, conditionné à l'amélioration de preuves spécifiques, jamais comme un déploiement immédiat et inconditionnel.`,
+      `Según la cobertura de evidencia anterior, el veredicto determinista para este mercado será ${localizedDecision} (confianza ${assessment.confidence}/100) -- una postura condicional, no una luz verde completa. Cada sección debe reflejar esto: presente el contenido de crecimiento/escalamiento/expansión como apropiado solo para un piloto acotado, condicionado a que mejore evidencia específica, nunca como un despliegue inmediato e incondicional.`
+    );
+  }
+
+  return marketText(
+    language,
+    `Based on the evidence coverage above, the deterministic verdict for this market will be ${localizedDecision} (confidence ${assessment.confidence}/100). Sections may write with confidence, but every claim must still stay traceable to the evidence registry -- confidence in the verdict is not license to overstate certainty on individual figures.`,
+    `Yukarıdaki kanıt kapsamına göre, bu pazar için belirlenecek kararın ${localizedDecision} (güven: ${assessment.confidence}/100) olacağı öngörülmektedir. Bölümler güvenle yazılabilir, ancak her iddia yine de kanıt kayıt defterine dayandırılabilir olmalıdır -- kararın güveni, tekil rakamlarda kesinliği abartma lisansı değildir.`,
+    `Basierend auf der obigen Evidenzabdeckung wird das deterministische Urteil für diesen Markt ${localizedDecision} (Konfidenz ${assessment.confidence}/100) lauten. Abschnitte können mit Zuversicht geschrieben werden, aber jede Behauptung muss weiterhin auf das Evidenzregister zurückführbar sein -- die Zuversicht im Urteil ist keine Lizenz, die Sicherheit einzelner Zahlen zu übertreiben.`,
+    `Sur la base de la couverture de preuves ci-dessus, le verdict déterministe pour ce marché sera ${localizedDecision} (confiance ${assessment.confidence}/100). Les sections peuvent être rédigées avec assurance, mais chaque affirmation doit rester traçable au registre de preuves -- la confiance dans le verdict n'autorise pas à exagérer la certitude de chiffres individuels.`,
+    `Según la cobertura de evidencia anterior, el veredicto determinista para este mercado será ${localizedDecision} (confianza ${assessment.confidence}/100). Las secciones pueden escribirse con confianza, pero cada afirmación debe seguir siendo trazable al registro de evidencia -- la confianza en el veredicto no es licencia para exagerar la certeza de cifras individuales.`
+  );
+}
+
 // Splits report prose into single-sentence candidates for extraction.
 // AI-generated sections sometimes write every point as its own line/bullet,
 // but just as often cram a whole ranked list into one dense paragraph like
@@ -101,18 +150,28 @@ function splitIntoCandidateSentences(content: string): string[] {
     });
 }
 
-// Extracted sentences already end in their own terminal punctuation;
-// templates that append "." after interpolating one must use this instead
-// of a raw literal period, or the result reads "...sentence..".
-function ensureSentence(text: string) {
-  const trimmed = (text || "").trim();
-  return trimmed && !/[.!?]$/.test(trimmed) ? `${trimmed}.` : trimmed;
+// Two heading/lead-in shapes that are never a genuine point worth quoting
+// as "the" risk/opportunity/driver -- the real substance is in whatever
+// follows them, not in the line itself:
+// 1) A numbered sub-heading with no content of its own, e.g. "1) Yüksek
+//    rekabet ve düşük giriş bariyerleri" -- real sentences in this
+//    codebase's report prose always end in terminal punctuation, so a
+//    numbered-marker line that doesn't is reliably a heading.
+// 2) A lead-in sentence introducing a list, e.g. "...en çok katkıda
+//    bulunan riskler ve tehditler şunlardır:" -- a trailing colon always
+//    introduces what follows; it is never itself a complete point,
+//    regardless of length or numbering.
+function isHeadingOnlyLine(item: string): boolean {
+  if (/:$/.test(item)) return true;
+  return /^\(?\d{1,2}[).]\s+\S/.test(item) && !/[.!?…]$/.test(item);
+}
+
+function isSubstantive(item: string): boolean {
+  return item.length > 24 && !/^[A-Z0-9 /&-]{2,40}:?$/.test(item) && !isHeadingOnlyLine(item);
 }
 
 function firstSubstantiveLine(content: string) {
-  const line = splitIntoCandidateSentences(content).find(
-    (item) => item.length > 24 && !/^[A-Z0-9 /&-]{2,40}:?$/.test(item)
-  );
+  const line = splitIntoCandidateSentences(content).find(isSubstantive);
 
   return line?.replace(/\*\*/g, "").trim() || "";
 }
@@ -192,7 +251,7 @@ function howToEnter(sections: MarketSections, language: ResponseLanguage) {
 
 function topSubstantiveLines(content: string, max: number) {
   const lines = splitIntoCandidateSentences(content)
-    .filter((item) => item.length > 24 && !/^[A-Z0-9 /&-]{2,40}:?$/.test(item))
+    .filter(isSubstantive)
     .map((item) => item.replace(/\*\*/g, "").trim());
 
   const seen = new Set<string>();
@@ -447,110 +506,245 @@ export function buildMarketEntryRecommendation(
   ].join("\n");
 }
 
-// Decision-code-conditioned First 90 Days. GO gets entry-oriented
-// language; CONDITIONAL_GO gets a bounded, gated pilot; NO_GO must never
-// contain entry/pilot/scale language -- only monitoring and a concrete
-// re-entry trigger. This is the fix for the contradiction bug where the
-// action plan used to say "Prioritize entry..." even when the decision
-// itself was AVOID/NO_GO.
-function buildDecisionConditionedFirst90Days(
-  code: ExecutiveDecisionCode,
-  sections: MarketSections,
-  language: ResponseLanguage,
-  primaryRisk: string
-): string[] {
+// Decision-code-conditioned single Immediate Next Action. GO gets
+// execution language; CONDITIONAL_GO gets a bounded pilot; NO_GO must
+// never contain entry/pilot/scale/execution language -- only evidence-
+// gathering and a concrete re-entry trigger. Kept as one templated
+// sentence per code (not a re-embedding of extracted market prose) so it
+// can never become grammatically broken the way substituting a full
+// AI-written sentence into a noun-phrase slot previously did.
+function buildImmediateNextAction(code: ExecutiveDecisionCode, language: ResponseLanguage): string {
   if (code === "GO") {
-    // where/topDriver come from the report's own prose and can be a full
-    // sentence rather than a bare noun phrase -- introduced as a labeled
-    // clause (colon) instead of embedded as a grammatical object, so the
-    // sentence stays valid regardless of the extracted phrase's own shape.
-    const where = ensureSentence(whereToEnter(sections, language));
-    const topDriver = ensureSentence(topMarketDriver(sections, language));
-    return [
-      marketText(
-        language,
-        `Prioritize entry now. Regional signal: ${where} Primary driver to anchor on: ${topDriver}`,
-        `Girişe şimdi öncelik verin. Bölgesel sinyal: ${where} Odaklanılacak birincil itici güç: ${topDriver}`,
-        `Priorisieren Sie den Markteintritt jetzt. Regionales Signal: ${where} Haupttreiber, auf den fokussiert wird: ${topDriver}`,
-        `Priorisez l'entrée dès maintenant. Signal régional : ${where} Principal moteur à privilégier : ${topDriver}`,
-        `Priorice la entrada ahora. Señal regional: ${where} Motor principal en el que enfocarse: ${topDriver}`
-      ),
-      marketText(
-        language,
-        `Execution approach: ${ensureSentence(howToEnter(sections, language))}`,
-        `Uygulama yaklaşımı: ${ensureSentence(howToEnter(sections, language))}`,
-        `Vorgehensweise: ${ensureSentence(howToEnter(sections, language))}`,
-        `Approche d'exécution : ${ensureSentence(howToEnter(sections, language))}`,
-        `Enfoque de ejecución: ${ensureSentence(howToEnter(sections, language))}`
-      ),
-      marketText(
-        language,
-        `Track "${primaryRisk}" as the leading indicator before committing further spend.`,
-        `Daha fazla harcama taahhüt etmeden önce "${primaryRisk}" öncü göstergesini izleyin.`,
-        `Verfolgen Sie „${primaryRisk}" als Frühindikator, bevor weitere Ausgaben zugesagt werden.`,
-        `Suivez « ${primaryRisk} » comme indicateur avancé avant d'engager d'autres dépenses.`,
-        `Monitoree "${primaryRisk}" como indicador principal antes de comprometer más gasto.`
-      ),
-    ];
+    return marketText(
+      language,
+      "Begin execution immediately, following the Strategic Recommendations below -- the current demand and competitive window will not stay open indefinitely.",
+      "Aşağıdaki Stratejik Öneriler doğrultusunda uygulamaya hemen başlayın -- mevcut talep ve rekabet penceresi süresiz açık kalmayacaktır.",
+      "Beginnen Sie sofort mit der Umsetzung gemäß den untenstehenden strategischen Empfehlungen -- das aktuelle Nachfrage- und Wettbewerbsfenster bleibt nicht unbegrenzt offen.",
+      "Commencez l'exécution immédiatement, en suivant les recommandations stratégiques ci-dessous -- la fenêtre actuelle de demande et de concurrence ne restera pas ouverte indéfiniment.",
+      "Comience la ejecución de inmediato, siguiendo las recomendaciones estratégicas a continuación -- la ventana actual de demanda y competencia no permanecerá abierta indefinidamente."
+    );
   }
 
   if (code === "CONDITIONAL_GO") {
-    const where = ensureSentence(whereToEnter(sections, language));
-    const topDriver = ensureSentence(topMarketDriver(sections, language));
-    return [
-      marketText(
-        language,
-        `Run a bounded pilot, capped to the minimum spend needed to test the primary driver. Regional signal: ${where} Primary driver to test: ${topDriver}`,
-        `Ana itici gücü test etmek için gereken en düşük bütçeyle sınırlı bir pilot uygulama yürütün. Bölgesel sinyal: ${where} Test edilecek itici güç: ${topDriver}`,
-        `Führen Sie einen begrenzten Pilotversuch durch, beschränkt auf das Mindestbudget zur Prüfung des Haupttreibers. Regionales Signal: ${where} Zu testender Haupttreiber: ${topDriver}`,
-        `Menez un pilote limité, plafonné au budget minimal nécessaire pour tester le moteur principal. Signal régional : ${where} Moteur principal à tester : ${topDriver}`,
-        `Ejecute un piloto acotado, limitado al gasto mínimo necesario para probar el motor principal. Señal regional: ${where} Motor principal a probar: ${topDriver}`
-      ),
-      marketText(
-        language,
-        `Set an explicit go/no-go checkpoint before any further commitment: continue only if "${primaryRisk}" measurably improves.`,
-        `Daha fazla taahhütten önce açık bir devam/dur kontrol noktası belirleyin: yalnızca "${primaryRisk}" ölçülebilir şekilde iyileşirse ilerleyin.`,
-        `Legen Sie vor jeder weiteren Verpflichtung einen expliziten Go/No-Go-Kontrollpunkt fest: nur fortsetzen, wenn sich „${primaryRisk}" messbar verbessert.`,
-        `Fixez un point de contrôle explicite go/no-go avant tout engagement supplémentaire : poursuivez uniquement si « ${primaryRisk} » s'améliore de manière mesurable.`,
-        `Establezca un punto de control explícito de continuar/no continuar antes de cualquier compromiso adicional: continúe solo si "${primaryRisk}" mejora de forma medible.`
-      ),
-      marketText(
-        language,
-        `Do not scale spend or team beyond the pilot until that checkpoint is passed.`,
-        `Bu kontrol noktası geçilmeden bütçe veya ekibi pilot ötesine büyütmeyin.`,
-        `Erhöhen Sie Budget oder Team nicht über den Pilotumfang hinaus, bevor dieser Kontrollpunkt erreicht ist.`,
-        `N'augmentez pas le budget ni l'équipe au-delà du pilote avant d'avoir franchi ce point de contrôle.`,
-        `No escale el gasto ni el equipo más allá del piloto hasta superar ese punto de control.`
-      ),
-    ];
+    return marketText(
+      language,
+      "Launch only the bounded pilot described in the Strategic Recommendations below before making any wider commitment.",
+      "Daha geniş bir taahhütte bulunmadan önce, aşağıdaki Stratejik Öneriler'de tanımlanan sınırlı pilotu başlatın.",
+      "Starten Sie zunächst nur den in den strategischen Empfehlungen unten beschriebenen begrenzten Piloten, bevor Sie sich weiter verpflichten.",
+      "Ne lancez que le pilote encadré décrit dans les recommandations stratégiques ci-dessous avant tout engagement plus large.",
+      "Inicie únicamente el piloto acotado descrito en las recomendaciones estratégicas a continuación antes de asumir un compromiso más amplio."
+    );
   }
 
-  return [
-    marketText(
+  return marketText(
+    language,
+    "Do not commit budget to this market; instead, gather the missing evidence above and revisit the decision once it is resolved.",
+    "Bu pazara bütçe ayırmayın; bunun yerine yukarıdaki eksik kanıtları toplayın ve bu kanıtlar netleştiğinde kararı yeniden değerlendirin.",
+    "Verpflichten Sie kein Budget für diesen Markt; sammeln Sie stattdessen die oben genannten fehlenden Belege und überprüfen Sie die Entscheidung erneut, sobald diese vorliegen.",
+    "N'engagez pas de budget sur ce marché ; recueillez plutôt les preuves manquantes ci-dessus et réexaminez la décision une fois celles-ci obtenues.",
+    "No comprometa presupuesto en este mercado; en su lugar, reúna la evidencia faltante mencionada anteriormente y reconsidere la decisión una vez que esté disponible."
+  );
+}
+
+// One sentence: the specific, falsifiable evidence that would flip this
+// decision to a different code -- distinct from missingEvidence (which
+// lists what's missing) by naming what change in that evidence would do.
+function buildWhatWouldChangeThisDecision(
+  code: ExecutiveDecisionCode,
+  primaryRisk: string,
+  language: ResponseLanguage
+): string {
+  const risk = primaryRisk.trim().replace(/[.!?]+$/, "");
+
+  if (code === "GO") {
+    return marketText(
       language,
-      `Do not commit entry, pilot, or expansion budget to this market at this time.`,
-      `Bu pazara giriş, pilot veya genişleme bütçesi ayırmayın.`,
-      `Verpflichten Sie derzeit kein Budget für Markteintritt, Pilotprojekt oder Expansion in diesem Markt.`,
-      `N'engagez pas de budget d'entrée, de pilote ou d'expansion sur ce marché pour le moment.`,
-      `No comprometa presupuesto de entrada, piloto o expansión en este mercado por ahora.`
-    ),
-    marketText(
+      `A material worsening of "${risk}", or a new, independently verified competitive threat, would be reason to revisit this decision toward a conditional stance.`,
+      `"${risk}" durumunun önemli ölçüde kötüleşmesi veya bağımsız olarak doğrulanmış yeni bir rekabet tehdidi, bu kararın koşullu bir duruşa çekilmesini gerektirir.`,
+      `Eine wesentliche Verschlechterung von „${risk}" oder eine neue, unabhängig verifizierte Wettbewerbsbedrohung wäre Grund, diese Entscheidung in Richtung einer bedingten Haltung zu überdenken.`,
+      `Une aggravation significative de « ${risk} », ou une nouvelle menace concurrentielle vérifiée de manière indépendante, justifierait de revoir cette décision vers une position conditionnelle.`,
+      `Un deterioro importante de "${risk}", o una nueva amenaza competitiva verificada de forma independiente, justificaría revisar esta decisión hacia una postura condicional.`
+    );
+  }
+
+  if (code === "CONDITIONAL_GO") {
+    return marketText(
       language,
-      `Reassign the budget that would have funded entry to a market with stronger verified demand evidence.`,
-      `Girişe ayrılacak bütçeyi, daha güçlü doğrulanmış talep kanıtına sahip bir pazara yönlendirin.`,
-      `Weisen Sie das für den Markteintritt vorgesehene Budget einem Markt mit stärkeren verifizierten Nachfragenachweisen zu.`,
-      `Réaffectez le budget destiné à l'entrée vers un marché disposant de preuves de demande vérifiées plus solides.`,
-      `Reasigne el presupuesto destinado a la entrada a un mercado con evidencia de demanda verificada más sólida.`
-    ),
-    marketText(
+      `Verified, independent evidence that resolves "${risk}" would move this to a full Go; further deterioration of the same evidence would move it to No-Go.`,
+      `"${risk}" sorununu çözen doğrulanmış, bağımsız kanıtlar bu kararı tam bir EVET'e taşır; aynı kanıtın daha da kötüleşmesi ise kararı HAYIR'a taşır.`,
+      `Verifizierte, unabhängige Belege, die „${risk}" auflösen, würden dies zu einem vollständigen Go machen; eine weitere Verschlechterung derselben Belege würde es zu einem No-Go machen.`,
+      `Des preuves indépendantes vérifiées résolvant « ${risk} » feraient passer cette décision à un Go complet ; une nouvelle détérioration de ces mêmes preuves la ferait passer à No-Go.`,
+      `Evidencia independiente y verificada que resuelva "${risk}" convertiría esto en un Go completo; un mayor deterioro de esa misma evidencia lo convertiría en No-Go.`
+    );
+  }
+
+  return marketText(
+    language,
+    `Verified, independent evidence that resolves "${risk}" -- such as a credible market-size source or independently confirmed competitor data -- would change this decision.`,
+    `"${risk}" sorununu çözen doğrulanmış, bağımsız kanıtlar -- örneğin güvenilir bir pazar büyüklüğü kaynağı veya bağımsız olarak doğrulanmış rakip verisi -- bu kararı değiştirir.`,
+    `Verifizierte, unabhängige Belege, die „${risk}" auflösen -- etwa eine glaubwürdige Marktgrößenquelle oder unabhängig bestätigte Wettbewerberdaten -- würden diese Entscheidung ändern.`,
+    `Des preuves indépendantes vérifiées résolvant « ${risk} » -- telles qu'une source fiable de taille de marché ou des données concurrentielles confirmées de manière indépendante -- changeraient cette décision.`,
+    `Evidencia independiente y verificada que resuelva "${risk}" -- como una fuente creíble de tamaño de mercado o datos de competidores confirmados de forma independiente -- cambiaría esta decisión.`
+  );
+}
+
+// One-sentence synthesis of the decision's rationale -- the "Why" line
+// directly under Confidence, distinct from the Top 3 Reasons bullets below
+// it (which support this same synthesis with additional evidence).
+function buildWhySynthesis(
+  code: ExecutiveDecisionCode,
+  primaryOpportunity: string,
+  primaryRisk: string,
+  language: ResponseLanguage
+): string {
+  const opportunity = primaryOpportunity.trim().replace(/[.!?]+$/, "");
+  const risk = primaryRisk.trim().replace(/[.!?]+$/, "");
+
+  if (code === "GO") {
+    return marketText(
       language,
-      `Revisit this market only if "${primaryRisk}" is directly resolved with new, verified evidence.`,
-      `Bu pazarı yalnızca "${primaryRisk}" doğrudan yeni ve doğrulanmış kanıtlarla çözülürse yeniden değerlendirin.`,
-      `Betrachten Sie diesen Markt nur erneut, wenn „${primaryRisk}" durch neue, verifizierte Belege direkt gelöst wird.`,
-      `Ne réexaminez ce marché que si « ${primaryRisk} » est directement résolu par de nouvelles preuves vérifiées.`,
-      `Reconsidere este mercado solo si "${primaryRisk}" se resuelve directamente con evidencia nueva y verificada.`
-    ),
-  ];
+      `"${opportunity}" is well-supported by the available evidence and outweighs the identified risks at the current confidence level.`,
+      `"${opportunity}" mevcut kanıtlarla iyi desteklenmektedir ve şu anki güven seviyesinde belirlenen risklerden daha ağır basmaktadır.`,
+      `„${opportunity}" wird durch die verfügbaren Belege gut gestützt und überwiegt die identifizierten Risiken beim aktuellen Konfidenzniveau.`,
+      `« ${opportunity} » est bien étayé par les preuves disponibles et l'emporte sur les risques identifiés au niveau de confiance actuel.`,
+      `"${opportunity}" está bien respaldado por la evidencia disponible y supera a los riesgos identificados en el nivel de confianza actual.`
+    );
+  }
+
+  if (code === "CONDITIONAL_GO") {
+    return marketText(
+      language,
+      `The opportunity -- "${opportunity}" -- is plausible, but "${risk}" remains unresolved, so entry should be conditional on closing that gap rather than unconditional.`,
+      `Fırsat -- "${opportunity}" -- makul görünüyor, ancak "${risk}" henüz çözülmemiştir; bu nedenle giriş koşulsuz değil, bu boşluğun kapatılmasına bağlı olmalıdır.`,
+      `Die Chance -- „${opportunity}" -- ist plausibel, aber „${risk}" ist noch ungelöst, daher sollte der Eintritt an die Schließung dieser Lücke gebunden sein, nicht bedingungslos.`,
+      `L'opportunité -- « ${opportunity} » -- est plausible, mais « ${risk} » reste non résolu, donc l'entrée doit être conditionnée à la résolution de cet écart plutôt qu'inconditionnelle.`,
+      `La oportunidad -- "${opportunity}" -- es plausible, pero "${risk}" sigue sin resolverse, por lo que la entrada debe ser condicional al cierre de esa brecha y no incondicional.`
+    );
+  }
+
+  return marketText(
+    language,
+    `"${risk}" outweighs the identified opportunity given the evidence currently available.`,
+    `Şu anda mevcut olan kanıtlar göz önüne alındığında, "${risk}" belirlenen fırsattan daha ağır basmaktadır.`,
+    `„${risk}" überwiegt die identifizierte Chance angesichts der derzeit verfügbaren Belege.`,
+    `« ${risk} » l'emporte sur l'opportunité identifiée compte tenu des preuves actuellement disponibles.`,
+    `"${risk}" supera a la oportunidad identificada dada la evidencia actualmente disponible.`
+  );
+}
+
+// Confidence must always be traceable: short, concrete fragments (never a
+// bare number, never generic hedging) explaining why the score is what it
+// is, in whichever direction the evidence actually points.
+function buildConfidenceExplanation(
+  coverage: MarketResearchCoverage,
+  confidence: number,
+  language: ResponseLanguage
+): { direction: "reduced" | "supported"; factors: string[] } {
+  const { marketConfidence, competitiveEvidence, productEvidence } = coverage.dimensions;
+
+  if (confidence >= 65) {
+    const factors: string[] = [];
+    if (coverage.verifiedMarketSizeAvailable) {
+      factors.push(
+        marketText(
+          language,
+          "verified market-size data available",
+          "doğrulanmış pazar büyüklüğü verisi mevcut",
+          "verifizierte Marktgrößendaten vorhanden",
+          "données de taille de marché vérifiées disponibles",
+          "datos de tamaño de mercado verificados disponibles"
+        )
+      );
+    }
+    if (competitiveEvidence >= 65) {
+      factors.push(
+        marketText(
+          language,
+          "strong, independently verified competitive evidence",
+          "güçlü, bağımsız olarak doğrulanmış rekabet kanıtı",
+          "starke, unabhängig verifizierte Wettbewerbsevidenz",
+          "preuves concurrentielles solides et vérifiées de manière indépendante",
+          "evidencia competitiva sólida y verificada de forma independiente"
+        )
+      );
+    }
+    if (productEvidence >= 65) {
+      factors.push(
+        marketText(
+          language,
+          "solid, independently verified product-market-fit evidence",
+          "sağlam, bağımsız olarak doğrulanmış ürün-pazar uyumu kanıtı",
+          "solide, unabhängig verifizierte Product-Market-Fit-Evidenz",
+          "preuves solides et vérifiées de manière indépendante d'adéquation produit-marché",
+          "evidencia sólida y verificada de forma independiente de ajuste producto-mercado"
+        )
+      );
+    }
+    if (marketConfidence >= 65) {
+      factors.push(
+        marketText(
+          language,
+          "broad overall market evidence coverage",
+          "geniş kapsamlı genel pazar kanıtı",
+          "breite Gesamtmarkt-Evidenzabdeckung",
+          "large couverture globale des preuves de marché",
+          "amplia cobertura general de evidencia de mercado"
+        )
+      );
+    }
+    return { direction: "supported", factors: factors.slice(0, 3) };
+  }
+
+  const factors: string[] = [];
+  if (!coverage.verifiedMarketSizeAvailable) {
+    factors.push(
+      marketText(
+        language,
+        "verified market size unavailable",
+        "doğrulanmış pazar büyüklüğü mevcut değil",
+        "verifizierte Marktgröße nicht verfügbar",
+        "taille de marché vérifiée indisponible",
+        "tamaño de mercado verificado no disponible"
+      )
+    );
+  }
+  if (competitiveEvidence < 50) {
+    factors.push(
+      marketText(
+        language,
+        "competitive landscape evidence incomplete",
+        "rekabet ortamı kanıtı eksik",
+        "Wettbewerbsumfeld-Evidenz unvollständig",
+        "preuves du paysage concurrentiel incomplètes",
+        "evidencia del panorama competitivo incompleta"
+      )
+    );
+  }
+  if (productEvidence < 50) {
+    factors.push(
+      marketText(
+        language,
+        "product-market fit evidence limited",
+        "ürün-pazar uyumu kanıtı sınırlı",
+        "Product-Market-Fit-Evidenz begrenzt",
+        "preuves d'adéquation produit-marché limitées",
+        "evidencia de ajuste producto-mercado limitada"
+      )
+    );
+  }
+  if (marketConfidence < 50) {
+    factors.push(
+      marketText(
+        language,
+        "overall market evidence coverage below threshold",
+        "genel pazar kanıt kapsamı eşiğin altında",
+        "Gesamtmarkt-Evidenzabdeckung unter dem Schwellenwert",
+        "couverture globale des preuves de marché sous le seuil",
+        "cobertura general de evidencia de mercado por debajo del umbral"
+      )
+    );
+  }
+  return { direction: "reduced", factors: factors.slice(0, 3) };
 }
 
 // Named, concrete data gaps that could change the decision itself -- never
@@ -638,9 +832,6 @@ export function buildMarketExecutiveDecisionBrief(
   const code: ExecutiveDecisionCode =
     decision === "ENTER" ? "GO" : decision === "MONITOR" ? "CONDITIONAL_GO" : "NO_GO";
 
-  // The single best opportunity/risk line becomes Biggest Opportunity;
-  // any additional distinct sentences become the supporting reasons (Why)
-  // so the two blocks never restate the same sentence.
   const primaryOpportunity = biggestOpportunity(sections, language);
   const primaryRisk = biggestRisk(sections, language);
   const additionalReasons = topSubstantiveLines(sections.opportunities || "", 3).filter(
@@ -649,19 +840,25 @@ export function buildMarketExecutiveDecisionBrief(
   const additionalRisks = topSubstantiveLines(sections.threats || "", 3).filter(
     (line) => line !== primaryRisk
   );
+  // The single best opportunity leads Top 3 Reasons; additional distinct
+  // sentences fill the remaining slots so the list never repeats itself.
+  const topReasons = [primaryOpportunity, ...additionalReasons]
+    .filter(Boolean)
+    .slice(0, 3);
+  const topRisks = [primaryRisk, ...additionalRisks].filter(Boolean).slice(0, 3);
+  const confidenceExplanation = buildConfidenceExplanation(coverage, confidence, language);
 
   return {
     decision: code,
     confidence,
-    // Never duplicate biggestOpportunity as a fallback reason: when the
-    // evidence only supports one distinct opportunity sentence, the
-    // structural market driver is a genuinely separate fact instead of a
-    // repeated one.
-    topReasons: additionalReasons.length ? additionalReasons : [topMarketDriver(sections, language)],
-    topRisks: [primaryRisk, ...additionalRisks].slice(0, 3),
-    biggestOpportunity: primaryOpportunity,
-    missingInformation: identifyMarketInformationGaps(coverage, language),
-    first90Days: buildDecisionConditionedFirst90Days(code, sections, language, primaryRisk),
+    confidenceDirection: confidenceExplanation.direction,
+    confidenceFactors: confidenceExplanation.factors,
+    why: buildWhySynthesis(code, primaryOpportunity, primaryRisk, language),
+    topReasons: topReasons.length ? topReasons : [topMarketDriver(sections, language)],
+    topRisks,
+    missingEvidence: identifyMarketInformationGaps(coverage, language),
+    whatWouldChangeThisDecision: buildWhatWouldChangeThisDecision(code, primaryRisk, language),
+    immediateNextAction: buildImmediateNextAction(code, language),
   };
 }
 
@@ -685,22 +882,22 @@ export function buildMarketFinalVerdictParagraph(
     "Decisión de inversión final"
   );
 
-  // biggestOpportunity/topRisks[0] can be a full sentence from the
-  // report's own prose -- quoted as a clause here (never used as a bare
+  // topReasons[0]/topRisks[0] can be a full sentence from the report's
+  // own prose -- quoted as a clause here (never used as a bare
   // grammatical subject), so the paragraph stays valid regardless of the
   // extracted sentence's own internal punctuation.
-  const opportunityClause = brief.biggestOpportunity.trim().replace(/[.!?]+$/, "");
+  const opportunityClause = (brief.topReasons[0] || "").trim().replace(/[.!?]+$/, "");
   const primaryRiskClause = (brief.topRisks[0] || "").trim().replace(/[.!?]+$/, "");
 
   const paragraph =
     brief.decision === "GO"
       ? marketText(
           language,
-          `The verdict is ${localizedDecision} at ${brief.confidence}% confidence. The deciding factor -- "${opportunityClause}" -- outweighs the identified risks, and the First 90-Day Action Plan above is the fastest safe path to capturing it, so entry should proceed on that basis.`,
-          `Karar %${brief.confidence} güvenle ${localizedDecision}: belirleyici unsur -- "${opportunityClause}" -- belirlenen risklerden daha ağır basmaktadır ve yukarıdaki İlk 90 Günlük Aksiyon Planı bunu yakalamak için en hızlı güvenli yoldur; bu nedenle girişin bu temelde ilerlemesi gerekir.`,
-          `Das Urteil lautet mit ${brief.confidence}% Konfidenz ${localizedDecision}. Der entscheidende Faktor -- „${opportunityClause}" -- überwiegt die identifizierten Risiken, und der obige Aktionsplan für die ersten 90 Tage ist der schnellste sichere Weg, sie zu nutzen, daher sollte der Markteintritt auf dieser Grundlage erfolgen.`,
-          `Le verdict est ${localizedDecision} avec ${brief.confidence}% de confiance. Le facteur déterminant -- « ${opportunityClause} » -- l'emporte sur les risques identifiés, et le plan d'action des 90 premiers jours ci-dessus est la voie sûre la plus rapide pour la saisir, donc l'entrée doit se poursuivre sur cette base.`,
-          `El veredicto es ${localizedDecision} con un ${brief.confidence}% de confianza. El factor decisivo -- "${opportunityClause}" -- supera a los riesgos identificados, y el Plan de Acción de los Primeros 90 Días anterior es la vía segura más rápida para capturarla, por lo que la entrada debe proceder sobre esta base.`
+          `The verdict is ${localizedDecision} at ${brief.confidence}% confidence. The deciding factor -- "${opportunityClause}" -- outweighs the identified risks, and the Strategic Recommendations above are the fastest safe path to capturing it, so entry should proceed on that basis.`,
+          `Karar %${brief.confidence} güvenle ${localizedDecision}: belirleyici unsur -- "${opportunityClause}" -- belirlenen risklerden daha ağır basmaktadır ve yukarıdaki Stratejik Öneriler bunu yakalamak için en hızlı güvenli yoldur; bu nedenle girişin bu temelde ilerlemesi gerekir.`,
+          `Das Urteil lautet mit ${brief.confidence}% Konfidenz ${localizedDecision}. Der entscheidende Faktor -- „${opportunityClause}" -- überwiegt die identifizierten Risiken, und die obigen strategischen Empfehlungen sind der schnellste sichere Weg, sie zu nutzen, daher sollte der Markteintritt auf dieser Grundlage erfolgen.`,
+          `Le verdict est ${localizedDecision} avec ${brief.confidence}% de confiance. Le facteur déterminant -- « ${opportunityClause} » -- l'emporte sur les risques identifiés, et les recommandations stratégiques ci-dessus sont la voie sûre la plus rapide pour la saisir, donc l'entrée doit se poursuivre sur cette base.`,
+          `El veredicto es ${localizedDecision} con un ${brief.confidence}% de confianza. El factor decisivo -- "${opportunityClause}" -- supera a los riesgos identificados, y las recomendaciones estratégicas anteriores son la vía segura más rápida para capturarla, por lo que la entrada debe proceder sobre esta base.`
         )
       : brief.decision === "CONDITIONAL_GO"
         ? marketText(

@@ -89,7 +89,7 @@ test("property plan contains due-diligence sections and no startup or claim-anal
 test("financial statement plan contains finance-specific sections", () => {
   const plan = makePlan(
     "Analyze the balance sheet, income statement, cash flow and financial health.",
-    "market",
+    "plan",
     [{ name: "statements.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }]
   );
 
@@ -105,13 +105,34 @@ test("financial statement plan contains finance-specific sections", () => {
 test("retail spreadsheet plan contains retail performance sections", () => {
   const plan = makePlan(
     "Analyze retail branch sales, product margin and inventory turnover.",
-    "market",
+    "plan",
     [{ name: "retail.csv", mimeType: "text/csv", textContent: "Branch,SKU,Sales,Cost,Inventory" }]
   );
 
   assert.equal(plan.domain, "retail");
   assert.match(plan.sections.map((item) => item.title).join(" "), /Branch Performance/);
   assert.match(plan.sections.map((item) => item.title).join(" "), /Inventory Turnover/);
+});
+
+test("Market Intelligence mode never selects the Real Estate template, even when domain is misclassified as real_estate", () => {
+  const expertiseProfile = createExpertiseProfileFallback({
+    prompt: "Türkiye'de premium otomatik araç yıkama pazarını analiz et.",
+    selectedMode: "market",
+    detectedDomain: "real_estate",
+  });
+  assert.equal(expertiseProfile.domain, "real_estate");
+
+  const plan = createDynamicReportPlanFallback({
+    expertiseProfile,
+    selectedMode: "market",
+    prompt: "Türkiye'de premium otomatik araç yıkama pazarını analiz et.",
+  });
+
+  assert.notEqual(plan.reportTitle, "Real Estate Investment Due-Diligence Assessment");
+  assert.doesNotMatch(
+    plan.sections.map((item) => `${item.id} ${item.title}`).join(" "),
+    /zoning|comparables|hazards|regional development|liquidity/i
+  );
 });
 
 test("authoritative selected mode is retained and mismatched model plan falls back", () => {

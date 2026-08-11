@@ -74,6 +74,8 @@ import {
   evaluateAggregateResearchEvidence,
   researchEvidenceThresholds,
 } from "./research-evidence-evaluation.ts";
+import { classifyOrganizationEntity } from "./commercial-vendor-intelligence.ts";
+import { generateMarketResearchQueryExpansions } from "./market-query-expansion.ts";
 
 type ProviderResearchEvidence = {
   title: string;
@@ -1101,6 +1103,47 @@ const RESEARCH_PROVIDER_TIMEOUT_MS = 120_000;
 export const DOMAIN_RESEARCH_MODEL =
   process.env.AI_RESEARCH_MODEL?.trim() || "gpt-5-mini";
 
+// Confirmed via real report_jobs failures (three in one ~25-minute window):
+// with RESEARCH_CONCURRENCY_LIMIT firing all research stages near-
+// simultaneously, and no fallback provider configured in every
+// environment (ENABLE_TAVILY_RESEARCH/TAVILY_API_KEY unset), a single
+// transient provider error (429 rate limit, 5xx, network reset) on a
+// stage previously had no retry at all -- it just contributed zero
+// evidence for that stage's tasks. Under real concurrent load, enough
+// stages hit this at once that total evidence dropped to zero, which
+// correctly (by design) triggers the "insufficient evidence" refusal
+// instead of fabricating a report -- but the refusal was firing on a
+// transient network condition, not a genuine research failure. This is
+// a minimal, single-retry-with-backoff wrapper for exactly that
+// transient class of error; it does not touch evidence quality/quantity
+// gates, does not add a new provider, and does not retry non-transient
+// errors (a stage that genuinely found nothing still fails immediately).
+function isRetryableProviderError(error: unknown) {
+  const status =
+    typeof error === "object" && error !== null && "status" in error
+      ? Number((error as { status?: unknown }).status)
+      : NaN;
+  if (status === 429 || (status >= 500 && status <= 599)) return true;
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: unknown }).code)
+      : "";
+  return code === "ECONNRESET" || code === "ETIMEDOUT" || code === "EAI_AGAIN";
+}
+
+async function withProviderRetry<T>(
+  operation: () => Promise<T>,
+  { retries = 1, delayMs = 600 }: { retries?: number; delayMs?: number } = {}
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (retries <= 0 || !isRetryableProviderError(error)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return withProviderRetry(operation, { retries: retries - 1, delayMs });
+  }
+}
+
 async function mapWithConcurrency<T, TResult>(
   items: readonly T[],
   concurrencyLimit: number,
@@ -1173,6 +1216,25 @@ function normalizeEvidenceIdentity(value: string) {
     .toLocaleLowerCase("tr")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
+}
+
+// URL slugs and domains are conventionally ASCII-only, so a Turkish word
+// with diacritics (e.g. "büyüklüğü", "sektörü") never appears in one --
+// the slug carries the ASCII-folded form instead ("buyuklugu", "sektoru").
+// A signal pattern written with proper Turkish diacritics therefore matches
+// real prose (a title or citation) but silently never matches the far more
+// common case of a bare URL/domain with no snippet. Folding both the tested
+// text and the pattern's Turkish keywords to their ASCII-equivalent form
+// (only for signal matching, not for identity/dedup use elsewhere) makes
+// matching independent of whether diacritics survived.
+function foldTurkishAsciiEquivalent(value: string) {
+  return value
+    .replace(/ü/g, "u")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/ş/g, "s")
+    .replace(/ğ/g, "g")
+    .replace(/ı/g, "i");
 }
 
 export function buildTaskStageQueries({
@@ -2187,6 +2249,24 @@ async function runDomainAwareResearchInternal({
     selectedMode,
     clarificationAnswers,
   });
+  // Multi-stage research needs research *directions*, not just more query
+  // slots: a hardcoded taxonomy only covers categories someone anticipated
+  // in advance, and degrades to generic prompt words for anything else
+  // (e.g. a car wash). This asks the model, per request, for the concrete
+  // adjacent categories/competitor brands/comparator geographies a
+  // strategy consultant would actually search -- market mode only, since
+  // it is the one path whose task templates (createMarketIntelligenceSeeds)
+  // consume it. Never allowed to block research: any failure degrades to
+  // the empty shape, which is exactly today's taxonomy-only behavior.
+  const queryExpansions =
+    selectedMode === "market"
+      ? await generateMarketResearchQueryExpansions({
+          client,
+          model,
+          prompt,
+          signal,
+        }).catch(() => undefined)
+      : undefined;
   const dynamicResearchFallback = createDynamicResearchPlanFallback({
     expertiseProfile: effectiveExpertiseProfile,
     reportPlan: effectiveReportPlan,
@@ -2198,6 +2278,7 @@ async function runDomainAwareResearchInternal({
     ],
     clarificationAnswers,
     availableEvidence,
+    queryExpansions,
   });
   const dynamicResearchPlan = resolveDynamicResearchPlan({
     value: requestedResearchPlan,
@@ -2534,7 +2615,7 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
                 operationName: `research:${stage.id}`,
                 reportType: researchPlan.domain,
               },
-              () => client.responses.create({
+              () => withProviderRetry(() => client.responses.create({
                 model: researchModel,
                 stream: false,
                 instructions:
@@ -2557,7 +2638,7 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
                   verbosity: "low",
                   format: createResearchJsonSchema(request.tasks),
                 },
-              }, { signal: stageSignal.signal })
+              }, { signal: stageSignal.signal }))
             );
             researchRequestCache.set(requestCacheKey, responsePromise);
           }
@@ -2650,6 +2731,9 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
               const sourceIdentity = normalizeEvidenceIdentity(
                 `${source.title} ${source.domain} ${source.citation} ${source.url}`
               );
+              const sourceIdentityAsciiFolded = foldTurkishAsciiEquivalent(
+                sourceIdentity
+              );
               const nativeSourceFieldSignals: Record<string, RegExp> = {
                 title_status:
                   /\b(tapu|takyidat|mülkiyet|ownership|title|encumbrance|mortgage|ipotek|haciz|irtifak)\b/i,
@@ -2677,18 +2761,50 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
                   /\b(regional development|bölgesel gelişim|nüfus|population|investment activity|yatırım faaliyeti)\b/i,
                 geospatial_context:
                   /\b(map|harita|geospatial|mekânsal|kadastro|cadastral|parsel|parcel|tkgm|satellite|uydu|topography|topografya)\b/i,
+                // Market Intelligence fields below intentionally carry both
+                // English and Turkish signals (unlike the real-estate/legal
+                // signals above, which are single-language by design for
+                // their own domains). A Turkish-language market request
+                // (e.g. "premium otomatik araç yıkama") surfaces almost
+                // entirely Turkish-language sources, and without a
+                // matching-language signal every one of them falls through
+                // to this function's final catch-all (request.tasks[0]),
+                // pileing up in a single field instead of the field its
+                // content actually supports -- confirmed live: 37 of 41
+                // sources landed under "competitors" (task[0] for this
+                // request) while market_size/pricing_models/product_evidence/
+                // company_evidence stayed at zero, even though several of
+                // those 37 sources were plainly about market size
+                // ("...pazari-buyuklugu...") or industry structure
+                // ("...sektoru-turkiye...").
+                // Turkish keywords below are written in their ASCII-folded
+                // form (ü->u, ö->o, ç->c, ş->s, ğ->g, ı->i) because they are
+                // tested against sourceIdentityAsciiFolded, not sourceIdentity
+                // -- see foldTurkishAsciiEquivalent's comment above.
+                vendor_discovery:
+                  /\b(vendor directory|product catalog|catalog\w*|manufacturer|distributor|dealer network|urunlerimiz|urun katalog\w*|katalog\w*|uretici\w*|imalatc\w*|distributor\w*|bayilik|bayi\w*|marka\w*|model\w*|makine\w*)\b/i,
                 competitors:
-                  /\b(competitors?|competition|competitive landscape|major players?|vendors?|rivals?|market share)\b/i,
+                  /\b(competitors?|competition|competitive landscape|major players?|vendors?|rivals?|market share|rakip\w*|rekabet\w*|pazar pay\w*)\b/i,
                 market_demand:
-                  /\b(market demand|adoption|customer demand|buyer demand|business population|spending|usage)\b/i,
+                  /\b(market demand|adoption|customer demand|buyer demand|business population|spending|usage|pazar talebi|musteri talebi|talep\w*|kullanim oran\w*)\b/i,
                 market_size:
-                  /\b(market size|tam|sam|som|cagr|compound annual growth|forecast|market value)\b/i,
+                  /\b(market size|tam|sam|som|cagr|compound annual growth|forecast|market value|pazar buyuklugu|pazar degeri|buyume oran\w*|ongoru\w*)\b/i,
                 industry_structure:
-                  /\b(industry structure|industry trends?|switching costs?|entry barriers?|regulation|buyer behavior)\b/i,
+                  /\b(industry structure|industry trends?|switching costs?|entry barriers?|regulation|buyer behavior|sektor\w*|mevzuat\w*|giris engeli|musteri davranis\w*|ruhsat\w*|izin\w*|yonetmelik\w*|belediye\w*)\b/i,
+                pricing_models:
+                  /\b(pricing|price list|subscription plan|package price|rate card|fee schedule|fiyat\w*|fiyatlandirma|paket\w*|tarife\w*|abonelik ucreti|zam\w*|pahali\w*|ucret\w*)\b/i,
                 product_evidence:
-                  /\b(products?|pricing|features?|integrations?|deployment|subscription plans?)\b/i,
+                  /\b(products?|features?|integrations?|deployment|subscription plans?|urun\w*|ozellik\w*|entegrasyon\w*)\b/i,
                 company_evidence:
-                  /\b(annual report|10-k|10-q|sec filing|investor relations|financial filing|company disclosure)\b/i,
+                  /\b(annual report|10-k|10-q|sec filing|investor relations|financial filing|company disclosure|faaliyet raporu|mali tablo\w*|yatirimci iliskileri|kamuyu aydinlatma)\b/i,
+                academic_evidence:
+                  /\b(academic|university|thesis|dissertation|research institute|journal article|scholarly|peer.reviewed|makale|tez|arastirma enstitusu|universite)\b/i,
+                news_evidence:
+                  /\b(news|press release|breaking|reported today|according to (?:the )?(?:report|newspaper)|haber|basin|gazete|gundem)\b/i,
+                regional_benchmark:
+                  /\b(regional|neighboring|neighbouring|comparable market|benchmark|bolgesel|komsu ulke|kiyaslama)\b/i,
+                global_benchmark:
+                  /\b(europe|european union|eu\b|oecd|global market|worldwide|international market|continent\w*|avrupa|kuresel|dunya capinda)\b/i,
                 legal_overtime: legalIssueSignals.legal_overtime,
                 legal_exempt_status: legalIssueSignals.legal_exempt_status,
                 legal_retaliation: legalIssueSignals.legal_retaliation,
@@ -2701,9 +2817,13 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
                 legal_case_law: legalIssueSignals.legal_case_law,
               };
               const task =
-                request.tasks.find((candidate) =>
-                  nativeSourceFieldSignals[candidate.field]?.test(sourceIdentity)
-                ) ||
+                request.tasks.find((candidate) => {
+                  const signal = nativeSourceFieldSignals[candidate.field];
+                  return (
+                    signal?.test(sourceIdentity) ||
+                    signal?.test(sourceIdentityAsciiFolded)
+                  );
+                }) ||
                 request.tasks.find(
                   (candidate) => candidate.field === "location"
                 ) ||
@@ -2711,6 +2831,36 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
               if (!task) return [];
               const citation = source.citation.trim();
               const sourceTitle = source.title || source.domain || source.url;
+              const isGovernmentNativeSource = isOfficialGovernmentSource(source.url);
+              // A native source the web-search provider returned no real
+              // snippet/citation for (this whole branch only runs for
+              // sources not already covered by the model's own parsed
+              // evidence) carries nothing but its bare domain as
+              // claim/title. Left as `sourceType: source.provider`
+              // ("openai_web_search"), it can never be recognized as
+              // vendor-discovery-relevant downstream, so a real, niche
+              // competitor's own website (common for local/regional
+              // markets with no rich search snippet) silently vanishes
+              // before vendor discovery ever sees it. classifyOrganizationEntity
+              // already knows how to positively identify government/
+              // academic/standards/analyst/consultancy/research-provider/
+              // community sources; when it finds none of those, an
+              // unlabeled commercial-looking domain surfaced by a market-
+              // specific search is far more likely to be a company's own
+              // site than anything else, so it's classified accordingly
+              // instead of left as an opaque provider id.
+              const nativeOrganizationClassification = isGovernmentNativeSource
+                ? null
+                : classifyOrganizationEntity({
+                    name: sourceTitle,
+                    url: source.url,
+                    sourceType: source.provider,
+                  });
+              const inferredNativeSourceType =
+                !isGovernmentNativeSource &&
+                nativeOrganizationClassification?.entityType === "unknown"
+                  ? "company_source"
+                  : source.provider;
               const sourceClassification = task.field.startsWith("legal_")
                 ? classifyLegalResearchSource({
                     url: source.url,
@@ -2731,7 +2881,7 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
                 {
                   taskId: task.id,
                   field: task.field,
-                  label: isOfficialGovernmentSource(source.url)
+                  label: isGovernmentNativeSource
                     ? "Verified from official source"
                     : "Verified from external source",
                   claim: citation || source.title,
@@ -2739,8 +2889,8 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
                   sourceTitle,
                   publisher: source.domain,
                   url: source.url,
-                  sourceType: source.provider,
-                  authorityLevel: isOfficialGovernmentSource(source.url)
+                  sourceType: inferredNativeSourceType,
+                  authorityLevel: isGovernmentNativeSource
                     ? "primary"
                     : "secondary",
                   confidence: citation ? 75 : 60,

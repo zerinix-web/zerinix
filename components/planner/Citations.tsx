@@ -190,7 +190,6 @@ export function getFinalDedupePdfSources(citations: CitationData[]) {
     const publisherKey =
       domainNameKey &&
       (!rawPublisherKey ||
-        rawPublisherKey === "publisher not specified" ||
         rawPublisherKey === domainNameKey ||
         rawPublisherKey.startsWith(`${domainNameKey} `) ||
         sourceNameKey === domainNameKey)
@@ -205,11 +204,14 @@ export function getFinalDedupePdfSources(citations: CitationData[]) {
     const fallbackDisplayKey = `display:${domain || "no-domain"}|${displayKey}`;
 
     if (!unique.has(key) && !unique.has(fallbackDisplayKey)) {
+      // Empty string, not a placeholder phrase like "Publisher not
+      // specified" -- consumers omit the field entirely when metadata is
+      // unavailable instead of rendering a broken-looking one.
       unique.set(key, {
         sourceName,
         sourceType: getPdfCitationSourceTypeLabel(citation),
         trustLabel: getPdfCitationTrustLabel(citation),
-        publisher: citation.organization || "Publisher not specified",
+        publisher: isPlausibleCitationField(citation.organization || "") ? citation.organization! : "",
         publicationYear: citation.publicationYear || "",
         url: normalizeCitationUrl(citation.url),
       });
@@ -264,7 +266,7 @@ export function parseCitations(content: string): CitationData[] {
     if (hasUsableEvidence) {
       entries.push({
         sourceTitle: current.sourceTitle || current.organization || "Untitled source",
-        organization: current.organization || "Publisher not specified",
+        organization: isPlausibleCitationField(current.organization || "") ? current.organization! : "",
         ...(current.publicationYear ? { publicationYear: current.publicationYear } : {}),
         ...(current.confidence || fallbackConfidence
           ? { confidence: current.confidence || fallbackConfidence }

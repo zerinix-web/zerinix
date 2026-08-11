@@ -117,7 +117,7 @@ test("property investment creates zoning hazard infrastructure and market tasks"
 test("financial statement creates finance-specific research tasks", () => {
   const context = makeContext(
     "Analyze the balance sheet, income statement, cash flow and financial health.",
-    "market",
+    "plan",
     [{ name: "statements.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }]
   );
   const fields = context.researchPlan.tasks.map((task) => task.evidenceField);
@@ -134,7 +134,7 @@ test("financial statement creates finance-specific research tasks", () => {
 test("retail spreadsheet creates externally relevant demand product and inventory tasks", () => {
   const context = makeContext(
     "Analyze retail branch sales, product margin, demand and inventory turnover.",
-    "market",
+    "plan",
     [{ name: "retail.csv", mimeType: "text/csv", textContent: "Branch,SKU,Sales,Cost,Inventory" }]
   );
   const fields = context.researchPlan.tasks.map((task) => task.evidenceField);
@@ -146,6 +146,40 @@ test("retail spreadsheet creates externally relevant demand product and inventor
     "company_evidence",
     "industry_benchmarks",
   ]);
+});
+
+test("Market Intelligence mode always produces Market Intelligence research tasks, even when domain is misclassified as real_estate", () => {
+  const prompt = "Türkiye'de premium otomatik araç yıkama pazarını analiz et.";
+  const expertiseProfile = createExpertiseProfileFallback({
+    prompt,
+    selectedMode: "market",
+    detectedDomain: "real_estate",
+  });
+  assert.equal(expertiseProfile.domain, "real_estate");
+
+  const reportPlan = createDynamicReportPlanFallback({
+    expertiseProfile,
+    selectedMode: "market",
+    prompt,
+  });
+  const researchPlan = createDynamicResearchPlanFallback({
+    expertiseProfile,
+    reportPlan,
+    selectedMode: "market",
+    prompt,
+  });
+  const fields = researchPlan.tasks.map((task) => task.evidenceField);
+
+  assert.ok(fields.length > 0);
+  assert.ok(
+    !fields.some((field) =>
+      ["zoning", "hazards", "access", "comparables", "liquidity", "regional_development"].includes(field)
+    )
+  );
+  assert.doesNotMatch(
+    researchPlan.tasks.map((task) => `${task.topic} ${task.purpose}`).join(" "),
+    /zoning|parcel|title deed|cadastral/i
+  );
 });
 
 test("a public market research question with no uploaded company data never requires company-specific financial evidence", () => {

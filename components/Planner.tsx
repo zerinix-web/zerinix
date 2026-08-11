@@ -3504,15 +3504,16 @@ if (field === "swotAnalysis") {
     const decisions = decisionMatch
       ? decisionTokensForLanguage(decisionMatch.language)
       : decisionTokensForLanguage("English");
-    const biggestOpportunityLabels = localizedLabelVariants("biggestOpportunity");
-    const biggestRisksLabels = localizedLabelVariants("biggestRisks");
-    const missingInformationLabels = localizedLabelVariants("missingInformation");
-    const first90DaysLabels = localizedLabelVariants("first90Days");
+    const whyLabels = localizedLabelVariants("why");
+    const topRisksLabels = localizedLabelVariants("topRisks");
+    const missingEvidenceLabels = localizedLabelVariants("missingEvidence");
+    const whatWouldChangeLabels = localizedLabelVariants("whatWouldChangeThisDecision");
+    const immediateNextActionLabels = localizedLabelVariants("immediateNextAction");
     const recommendationMetrics = [
       ["Confidence", extractConfidence(section.content) ? `${extractConfidence(section.content)}%` : "—"],
-      ["Biggest Opportunity", extractMetricValueFromAliases(section.content, biggestOpportunityLabels) || "—"],
-      ["Biggest Risk", extractAliasedSectionSnippet(section.content, biggestRisksLabels, biggestOpportunityLabels) || "—"],
-      ["Missing Information", extractAliasedSectionSnippet(section.content, missingInformationLabels, first90DaysLabels) || "—"],
+      ["Why", extractMetricValueFromAliases(section.content, whyLabels) || "—"],
+      ["Top Risk", extractAliasedSectionSnippet(section.content, topRisksLabels, missingEvidenceLabels) || "—"],
+      ["Missing Evidence", extractAliasedSectionSnippet(section.content, missingEvidenceLabels, whatWouldChangeLabels) || "—"],
     ];
 
     return (
@@ -3561,24 +3562,14 @@ if (field === "swotAnalysis") {
             </div>
           </div>
           <div className="rounded-3xl border border-white/10 bg-black/30 p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">First 90-Day Action Plan</p>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {(extractMeaningfulBullets(
-                extractAliasedSectionSnippet(section.content, first90DaysLabels, []),
-                4
-              ).length > 0
-                ? extractMeaningfulBullets(
-                    extractAliasedSectionSnippet(section.content, first90DaysLabels, []),
-                    4
-                  )
-                : ["—"]
-              ).map((action) => (
-                <div key={action} className="flex items-center gap-2 text-sm text-zinc-300">
-                  <span className="h-4 w-4 rounded-full border border-teal-200/40 bg-teal-200/10" />
-                  {action}
-                </div>
-              ))}
-            </div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Immediate Next Action</p>
+            <p className="mt-3 text-sm leading-6 text-zinc-300">
+              {extractMetricValueFromAliases(section.content, immediateNextActionLabels) || "—"}
+            </p>
+            <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">What Would Change This Decision</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-300">
+              {extractMetricValueFromAliases(section.content, whatWouldChangeLabels) || "—"}
+            </p>
           </div>
         </div>
       </div>
@@ -5224,14 +5215,16 @@ const ReportPanel = memo(function ReportPanel({
             investmentScore?.confidence ??
             extractConfidence(fullReportContent) ??
             extractScore(fullReportContent, "Investment Score");
-          const biggestOpportunityLabels = localizedLabelVariants("biggestOpportunity");
-          const biggestRisksLabels = localizedLabelVariants("biggestRisks");
-          const missingInformationLabels = localizedLabelVariants("missingInformation");
-          const first90DaysLabels = localizedLabelVariants("first90Days");
-          const biggestOpportunity = extractMetricValueFromAliases(section.content, biggestOpportunityLabels);
-          const biggestRisk = extractAliasedSectionSnippet(section.content, biggestRisksLabels, biggestOpportunityLabels);
-          const missingInformation = extractAliasedSectionSnippet(section.content, missingInformationLabels, first90DaysLabels);
-          const nextAction = extractAliasedSectionSnippet(section.content, first90DaysLabels, []);
+          const whyLabels = localizedLabelVariants("why");
+          const topRisksLabels = localizedLabelVariants("topRisks");
+          const missingEvidenceLabels = localizedLabelVariants("missingEvidence");
+          const whatWouldChangeLabels = localizedLabelVariants("whatWouldChangeThisDecision");
+          const immediateNextActionLabels = localizedLabelVariants("immediateNextAction");
+          const why = extractMetricValueFromAliases(section.content, whyLabels);
+          const topRisk = extractAliasedSectionSnippet(section.content, topRisksLabels, missingEvidenceLabels);
+          const missingEvidence = extractAliasedSectionSnippet(section.content, missingEvidenceLabels, whatWouldChangeLabels);
+          const whatWouldChange = extractMetricValueFromAliases(section.content, whatWouldChangeLabels);
+          const nextAction = extractMetricValueFromAliases(section.content, immediateNextActionLabels);
           const isTurkishPdf = pdfLocale === "tr";
 
           pdf.setFillColor("#ccfbf1");
@@ -5259,16 +5252,21 @@ const ReportPanel = memo(function ReportPanel({
 
           const recItems = [
             ["Confidence", confidence === null ? "—" : `${confidence}%`],
-            ["Biggest Opportunity", biggestOpportunity || "—"],
             [
-              "Biggest Risk",
-              biggestRisk ||
+              "Why",
+              why ||
+                extractKeywordInsight(fullReportContent, ["opportunity", "market"]) ||
+                (isTurkishPdf ? "Gerekçe, yönetici kararı bölümünde detaylandırılmıştır" : "Rationale is detailed in the executive decision"),
+            ],
+            [
+              "Top Risk",
+              topRisk ||
                 extractKeywordInsight(fullReportContent, ["risk", "threat"]) ||
                 (isTurkishPdf ? "Ana risk, risk analizi bölümünde detaylandırılmıştır" : "Primary risk is detailed in the risk analysis"),
             ],
             [
-              "Missing Information",
-              missingInformation ||
+              "Missing Evidence",
+              missingEvidence ||
                 (isTurkishPdf
                   ? "Kararı değiştirecek nitelikte bir veri eksikliği belirtilmedi"
                   : "No decision-changing data gap was flagged"),
@@ -5276,8 +5274,9 @@ const ReportPanel = memo(function ReportPanel({
             [
               "Next Action",
               nextAction ||
+                whatWouldChange ||
                 extractKeywordInsight(fullReportContent, ["next action", "critical action", "validate"]) ||
-                (isTurkishPdf ? "İlk 90 günlük aksiyon planına bakın" : "See the First 90-Day Action Plan"),
+                (isTurkishPdf ? "Acil sonraki adım için yönetici kararı bölümüne bakın" : "See the Immediate Next Action in the executive decision"),
             ],
           ];
 

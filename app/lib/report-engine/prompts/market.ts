@@ -19,13 +19,13 @@ export const marketPrompts = {
   },
   marketSize: {
     prompt:
-      "Present the best-supported historical and forecast market-size values, currencies, base years, forecast years, geographic scope, and source methodology. Reconcile differing definitions instead of blending incompatible figures. Never invent a value. If no verified figure exists for the requested scope, do not write a thin or empty section: state plainly that a verified market-size figure could not be established, name the specific missing input (e.g. no paid industry report, no government statistics series, no comparable public filing for this geography/segment), state how this gap lowers decision confidence, and name the exact data source or research step that would close it. Max 180 words.",
-    maxTokens: 1300,
+      "Present the best-supported historical and forecast market-size values, currencies, base years, forecast years, geographic scope, and source methodology. Reconcile differing definitions instead of blending incompatible figures. Never invent a value. If no verified figure exists for the exact requested scope, check the evidence registry's adjacentBenchmarks (Europe/OECD/global/regional data) before writing anything about unavailability: when at least one adjacentBenchmarks entry exists, lead the section with a labeled estimate built from it -- state the benchmark figure and its real geography, state the specific scaling logic you are using (population, GDP, vehicle-fleet, or business-count ratio -- name which and why), give the resulting range for the requested market, and mark the whole derived figure [Estimated]. Only if adjacentBenchmarks is genuinely empty may you fall back to: (1) state plainly that a verified market-size figure could not be established and name the specific missing input; (2) state what can still be inferred from vendor/demand signals already in this report, labeled as inferred; (3) state how the gap affects decision confidence; (4) name the exact data source or research step that would close it. A named, sourced benchmark with a transparent scaling assumption is always a stronger analysis than declaring the section unavailable -- an executive can act on a labeled range; they cannot act on 'insufficient evidence'. Max 200 words.",
+    maxTokens: 1400,
   },
   cagr: {
     prompt:
-      "State only defensible CAGR evidence for the requested period or the closest sourced period. Include the calculation basis, period, geography, and source. Explain material differences between published forecasts. Never derive false precision from unsupported endpoints. If no defensible CAGR exists for the requested period/geography, say so explicitly, name the specific missing input, state the resulting confidence impact, and name what would need to be sourced to compute one. Max 130 words.",
-    maxTokens: 1000,
+      "State only defensible CAGR evidence for the requested period or the closest sourced period. Include the calculation basis, period, geography, and source. Explain material differences between published forecasts. Never derive false precision from unsupported endpoints. If no defensible CAGR exists for the requested period/geography, check adjacentBenchmarks first: a parent-category or adjacent-geography (Europe/OECD/regional) growth rate is a legitimate, clearly-labeled proxy for the requested market's trajectory -- state it, label it [Estimated] as a proxy, and explain why it is a reasonable stand-in (same demand drivers, comparable maturity, or structurally linked category). Only when no such proxy exists in the evidence registry should you instead say so explicitly, name the missing input, state the confidence impact, and name what would need to be sourced. Max 150 words.",
+    maxTokens: 1100,
   },
   marketSegmentation: {
     prompt:
@@ -34,12 +34,12 @@ export const marketPrompts = {
   },
   regionalAnalysis: {
     prompt:
-      "Compare the requested regions using supported demand, adoption, regulation, investment, buyer maturity, and competitive-density evidence. Keep Europe and the United States distinct when both are requested. Max 190 words.",
+      "Compare the requested regions using supported demand, adoption, regulation, investment, buyer maturity, and competitive-density evidence. Keep Europe and the United States distinct when both are requested. When the requested geography has thin evidence of its own, use adjacentBenchmarks and any regional_benchmark/global_benchmark evidence to position it relative to comparable or neighboring markets -- name the comparator explicitly and label the read as directional, not a substitute for the requested geography's own verified figures. Max 190 words.",
     maxTokens: 1400,
   },
   industryTrends: {
     prompt:
-      "Identify the structural technology, regulatory, procurement, data, and buyer-behavior trends that materially shape the forecast period. Explain why each trend matters to market direction. Max 170 words.",
+      "Identify the structural technology, regulatory, procurement, data, and buyer-behavior trends that materially shape the forecast period. Explain why each trend matters to market direction. Draw on academic/independent-research and recent news evidence in the registry where it strengthens a trend claim beyond a generic assertion. Max 170 words.",
     maxTokens: 1200,
   },
   competitiveLandscape: {
@@ -79,7 +79,7 @@ export const marketPrompts = {
   },
   tamSamSom: {
     prompt:
-      "Define TAM, SAM, and SOM using explicit market boundaries, geography, customer scope, forecast year, currency, sources, and calculation method. If reliable endpoints are absent, explicitly state that Verified TAM / SAM / SOM is unavailable -- name the specific missing input for each unavailable layer (TAM/SAM/SOM independently, since one can be verified while another is not), state how the gap affects confidence in the sizing, and name the exact data or research step that would resolve it. A separate Planning Estimate is allowed only when every input is labeled Estimated or Assumption and the transparent formula and calculation basis are shown; never present it as verified. Max 170 words.",
+      "Define TAM, SAM, and SOM using explicit market boundaries, geography, customer scope, forecast year, currency, sources, and calculation method. When the evidence registry has no compatible local market-size endpoint, do not immediately state that Verified TAM / SAM / SOM is unavailable -- check adjacentBenchmarks (Europe/OECD/global/regional figures) first. If at least one exists, build a separate Planning Estimate from it: state the benchmark figure and its real geography, then show the transparent formula and calculation basis -- the specific, named scaling assumption you are using to derive the requested market's share of it (population share, GDP share, vehicle-fleet share, or comparable business-count ratio -- pick the one the evidence actually supports and say so), TAM derived from that, SAM as the serviceable share, and SOM as the obtainable share, each with its own stated assumption. Label every one of TAM/SAM/SOM [Estimated] and never present it as verified. Only when adjacentBenchmarks is genuinely empty as well should you fall back to stating that Verified TAM / SAM / SOM is unavailable -- name the specific missing input for each unavailable layer, state the confidence impact, and name the research step that would resolve it. A transparent, benchmark-derived estimate that a founder can act on is always the better section than an unavailability notice. Max 180 words.",
     maxTokens: 1300,
   },
   portersFiveForces: {
@@ -265,6 +265,8 @@ export function buildMarketLanguageInstructions(language: ResponseLanguage) {
     "Do not invent market size, CAGR, company metrics, sources, URLs, or precision.",
     "Never include Problem, Solution, ICP, Business Model, Pricing Strategy, Sales Strategy, Unit Economics, CAC, LTV, ARR, GTM, Founder Score, Founder Roadmap, or Validation Intelligence sections or concepts.",
     "Each section owns only its named market-intelligence subject and must not repeat another section.",
+    "The evidence registry is deliberately layered beyond direct local evidence: adjacentBenchmarks, and any regional_benchmark/global_benchmark/academic_evidence/news_evidence items, exist specifically so a thin-data market still supports a real strategic read. Before writing that a figure is unavailable or evidence is insufficient, check whether an adjacent/comparable/global data point in the registry lets you build a clearly labeled estimate or directional read instead -- a transparent, labeled inference is always the stronger section. Only declare something unavailable when the registry has nothing usable at all, direct or adjacent.",
+    "Never write a sentence whose only content is that data is missing or evidence is insufficient without immediately following it with the strongest available adjacent-evidence-based read. A founder reading this report is trying to decide whether to proceed; a bare gap notice with no compensating analysis fails that reader even when it is technically accurate.",
     ...insightLedgerAndTokenBudgetDirectives,
     ...buildExecutiveConsultingStyleDirectives(),
     ...buildExecutivePresentationDirectives("market_analysis"),

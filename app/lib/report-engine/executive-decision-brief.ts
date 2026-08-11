@@ -9,27 +9,39 @@ import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
 // market, or domain-specific content itself, so it is safe to share across
 // all three report types without reintroducing cross-report contamination
 // (see app/lib/report-engine/report-isolation-validator.ts).
+//
+// Required structure (first page must answer exactly what the user asked):
+// Final Recommendation -> Confidence (explained, not just a number) -> Why
+// -> Top 3 Reasons -> Top 3 Risks -> What Evidence Is Missing -> What Would
+// Change This Decision -> Immediate Next Action.
 
 export type ExecutiveDecisionCode = "GO" | "CONDITIONAL_GO" | "NO_GO";
 
 export type ExecutiveDecisionBrief = {
   decision: ExecutiveDecisionCode;
   confidence: number;
-  // "Why" -- top 3 reasons supporting the decision itself (distinct from
-  // biggestOpportunity, which is the single forward-looking upside case).
+  // Whether confidenceFactors reads as "Confidence reduced because" or
+  // "Confidence supported by" -- the score must always be traceable to a
+  // reason, in either direction, never shown as a bare number.
+  confidenceDirection: "reduced" | "supported";
+  // Up to 3 short, concrete fragments explaining the confidence score
+  // (e.g. "verified market size unavailable"), not generic hedging.
+  confidenceFactors: string[];
+  // One-sentence synthesis of the decision's rationale.
+  why: string;
+  // Top 3 reasons supporting the decision.
   topReasons: string[];
-  // "Biggest Risks" -- up to 3, ranked.
+  // Top 3 risks, ranked.
   topRisks: string[];
-  // "Biggest Opportunity" -- exactly one sentence, the single most
-  // compelling upside if the decision plays out.
-  biggestOpportunity: string;
-  // "Missing Information" -- up to 3 concrete, named data points that, if
-  // obtained, could change the decision itself (not generic caveats).
-  // Never empty by omission: callers that have no real gap to report must
-  // still explicitly say so rather than dropping the block.
-  missingInformation: string[];
-  // "First 90-Day Action Plan" -- up to 3 concrete, near-term actions.
-  first90Days: string[];
+  // Up to 3 concrete, named data points that are missing and would help
+  // resolve the decision -- never a generic "more research is needed".
+  missingEvidence: string[];
+  // One sentence: the specific, falsifiable evidence or threshold that
+  // would flip this decision to a different code.
+  whatWouldChangeThisDecision: string;
+  // One sentence: the single most urgent, concrete next step -- must
+  // match the decision (never "run a pilot"/"execute" under NO_GO).
+  immediateNextAction: string;
 };
 
 const decisionTranslations: Record<ResponseLanguage, Record<ExecutiveDecisionCode, string>> = {
@@ -53,62 +65,80 @@ export const executiveDecisionLabels: Record<
     heading: string;
     decision: string;
     confidence: string;
+    confidenceReducedBecause: string;
+    confidenceSupportedBy: string;
     why: string;
-    biggestRisks: string;
-    biggestOpportunity: string;
-    missingInformation: string;
-    first90Days: string;
+    topReasons: string;
+    topRisks: string;
+    missingEvidence: string;
+    whatWouldChangeThisDecision: string;
+    immediateNextAction: string;
   }
 > = {
   English: {
     heading: "Executive Decision",
     decision: "Decision",
     confidence: "Confidence",
+    confidenceReducedBecause: "Confidence Reduced Because",
+    confidenceSupportedBy: "Confidence Supported By",
     why: "Why",
-    biggestRisks: "Biggest Risks",
-    biggestOpportunity: "Biggest Opportunity",
-    missingInformation: "Missing Information That Could Change This Decision",
-    first90Days: "First 90-Day Action Plan",
+    topReasons: "Top 3 Reasons",
+    topRisks: "Top 3 Risks",
+    missingEvidence: "What Evidence Is Missing",
+    whatWouldChangeThisDecision: "What Would Change This Decision",
+    immediateNextAction: "Immediate Next Action",
   },
   Turkish: {
     heading: "Yönetici Kararı",
     decision: "Karar",
     confidence: "Güven",
+    confidenceReducedBecause: "Güven Şu Nedenlerle Düşürüldü",
+    confidenceSupportedBy: "Güven Şunlarla Desteklendi",
     why: "Neden",
-    biggestRisks: "Başlıca Riskler",
-    biggestOpportunity: "Başlıca Fırsat",
-    missingInformation: "Kararı Değiştirebilecek Eksik Bilgiler",
-    first90Days: "İlk 90 Günlük Aksiyon Planı",
+    topReasons: "En Önemli 3 Gerekçe",
+    topRisks: "En Önemli 3 Risk",
+    missingEvidence: "Eksik Olan Kanıtlar",
+    whatWouldChangeThisDecision: "Bu Kararı Ne Değiştirir",
+    immediateNextAction: "Acil Sonraki Adım",
   },
   German: {
     heading: "Managemententscheidung",
     decision: "Entscheidung",
     confidence: "Konfidenz",
+    confidenceReducedBecause: "Konfidenz verringert, weil",
+    confidenceSupportedBy: "Konfidenz gestützt durch",
     why: "Warum",
-    biggestRisks: "Größte Risiken",
-    biggestOpportunity: "Größte Chance",
-    missingInformation: "Fehlende Informationen, die diese Entscheidung ändern könnten",
-    first90Days: "Aktionsplan für die ersten 90 Tage",
+    topReasons: "Top 3 Gründe",
+    topRisks: "Top 3 Risiken",
+    missingEvidence: "Welche Belege fehlen",
+    whatWouldChangeThisDecision: "Was diese Entscheidung ändern würde",
+    immediateNextAction: "Sofortiger nächster Schritt",
   },
   French: {
     heading: "Décision exécutive",
     decision: "Décision",
     confidence: "Confiance",
+    confidenceReducedBecause: "Confiance réduite parce que",
+    confidenceSupportedBy: "Confiance soutenue par",
     why: "Pourquoi",
-    biggestRisks: "Principaux risques",
-    biggestOpportunity: "Principale opportunité",
-    missingInformation: "Informations manquantes pouvant modifier cette décision",
-    first90Days: "Plan d'action des 90 premiers jours",
+    topReasons: "Top 3 des raisons",
+    topRisks: "Top 3 des risques",
+    missingEvidence: "Quelles preuves manquent",
+    whatWouldChangeThisDecision: "Ce qui changerait cette décision",
+    immediateNextAction: "Prochaine action immédiate",
   },
   Spanish: {
     heading: "Decisión ejecutiva",
     decision: "Decisión",
     confidence: "Confianza",
+    confidenceReducedBecause: "Confianza reducida porque",
+    confidenceSupportedBy: "Confianza respaldada por",
     why: "Por qué",
-    biggestRisks: "Principales riesgos",
-    biggestOpportunity: "Principal oportunidad",
-    missingInformation: "Información faltante que podría cambiar esta decisión",
-    first90Days: "Plan de acción de los primeros 90 días",
+    topReasons: "Las 3 razones principales",
+    topRisks: "Los 3 riesgos principales",
+    missingEvidence: "Qué evidencia falta",
+    whatWouldChangeThisDecision: "Qué cambiaría esta decisión",
+    immediateNextAction: "Próxima acción inmediata",
   },
 };
 
@@ -130,7 +160,7 @@ export function localizedLabelVariants(
   return variants;
 }
 
-const noMissingInformationText: Record<ResponseLanguage, string> = {
+const noMissingEvidenceText: Record<ResponseLanguage, string> = {
   English:
     "No material data gaps were identified; the confidence score above already reflects the available evidence.",
   Turkish:
@@ -141,6 +171,14 @@ const noMissingInformationText: Record<ResponseLanguage, string> = {
     "Aucune lacune de données significative n'a été identifiée ; le score de confiance ci-dessus reflète déjà les preuves disponibles.",
   Spanish:
     "No se identificaron brechas de datos significativas; la puntuación de confianza anterior ya refleja la evidencia disponible.",
+};
+
+const noConfidenceFactorsText: Record<ResponseLanguage, string> = {
+  English: "no specific factor identified beyond the evidence already summarized above",
+  Turkish: "yukarıda özetlenen kanıtların dışında belirli bir etken tanımlanmadı",
+  German: "kein spezifischer Faktor über die oben zusammengefassten Belege hinaus identifiziert",
+  French: "aucun facteur spécifique identifié au-delà des preuves déjà résumées ci-dessus",
+  Spanish: "no se identificó ningún factor específico más allá de la evidencia ya resumida anteriormente",
 };
 
 function takeThree(items: string[]) {
@@ -162,26 +200,34 @@ export function formatExecutiveDecisionBrief(
   const localizedDecision = localizeExecutiveDecision(brief.decision, language);
   const reasons = takeThree(brief.topReasons);
   const risks = takeThree(brief.topRisks);
-  const gaps = takeThree(brief.missingInformation);
-  const actions = takeThree(brief.first90Days);
+  const gaps = takeThree(brief.missingEvidence);
+  const factors = takeThree(brief.confidenceFactors);
+  const confidenceHeading =
+    brief.confidenceDirection === "supported" ? copy.confidenceSupportedBy : copy.confidenceReducedBecause;
 
   return [
     copy.heading,
     `${copy.decision}: ${localizedDecision} (${copy.confidence}: ${brief.confidence}%)`,
     "",
-    `${copy.why}:`,
+    `${confidenceHeading}:`,
+    ...(factors.length
+      ? factors.map((factor) => `- ${factor}`)
+      : [`- ${noConfidenceFactorsText[language]}`]),
+    "",
+    `${copy.why}: ${brief.why.trim()}`,
+    "",
+    `${copy.topReasons}:`,
     ...reasons.map((reason, index) => `${index + 1}. ${reason}`),
     "",
-    `${copy.biggestRisks}:`,
+    `${copy.topRisks}:`,
     ...risks.map((risk, index) => `${index + 1}. ${risk}`),
     "",
-    `${copy.biggestOpportunity}: ${brief.biggestOpportunity.trim()}`,
+    `${copy.missingEvidence}:`,
+    ...(gaps.length ? gaps.map((gap, index) => `${index + 1}. ${gap}`) : [noMissingEvidenceText[language]]),
     "",
-    `${copy.missingInformation}:`,
-    ...(gaps.length ? gaps.map((gap, index) => `${index + 1}. ${gap}`) : [noMissingInformationText[language]]),
+    `${copy.whatWouldChangeThisDecision}: ${brief.whatWouldChangeThisDecision.trim()}`,
     "",
-    `${copy.first90Days}:`,
-    ...actions.map((action, index) => `${index + 1}. ${action}`),
+    `${copy.immediateNextAction}: ${brief.immediateNextAction.trim()}`,
   ].join("\n");
 }
 
