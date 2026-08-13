@@ -964,6 +964,67 @@ function extractMarketSizeValue(content: string, label: string) {
   );
 }
 
+// TAM/SAM/SOM values are ranges by design ("$2.1-2.8B"), so the
+// magnitude used for chart scaling is the upper bound of the range --
+// the last number+unit found in the string, not the first.
+function parseMarketSizeMagnitude(value: string): number | null {
+  const matches = [...value.matchAll(/(\d+(?:[.,]\d+)?)\s*([kKmMbBtT])?/g)];
+  const last = matches.at(-1);
+  if (!last) return null;
+
+  const numeric = Number(last[1].replace(",", "."));
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+
+  const unit = (last[2] || "").toLowerCase();
+  const multiplier =
+    unit === "t" ? 1e12 : unit === "b" ? 1e9 : unit === "m" ? 1e6 : unit === "k" ? 1e3 : 1;
+
+  return numeric * multiplier;
+}
+
+const tamCircleMaxRadius = 17;
+const tamCircleMinRadius = 4;
+const tamCircleDefaultRadii = [tamCircleMaxRadius, 12.5, tamCircleMinRadius + 4] as const;
+
+// Radius scales with sqrt(value) so *area* -- not radius -- is
+// proportional to the underlying market-size figure, matching how a real
+// concentric market-sizing chart (the standard McKinsey/VC-deck device
+// for TAM/SAM/SOM) communicates relative scale. Falls back to a fixed,
+// always-legible set of decreasing radii whenever the parsed values are
+// missing or don't make logical sense (SAM/SOM larger than their parent
+// figure) rather than drawing a distorted or inverted diagram.
+function computeTamSamSomRadii(
+  tamValue: number | null,
+  samValue: number | null,
+  somValue: number | null
+): readonly [number, number, number] {
+  if (
+    tamValue === null ||
+    samValue === null ||
+    somValue === null ||
+    samValue > tamValue * 1.5 ||
+    somValue > samValue * 1.5
+  ) {
+    return tamCircleDefaultRadii;
+  }
+
+  const scale = tamCircleMaxRadius / Math.sqrt(tamValue);
+  const samRadius = Math.max(
+    tamCircleMinRadius + 2,
+    Math.min(tamCircleMaxRadius - 2, Math.sqrt(samValue) * scale)
+  );
+  const somRadius = Math.max(
+    tamCircleMinRadius,
+    Math.min(samRadius - 2, Math.sqrt(somValue) * scale)
+  );
+
+  if (!Number.isFinite(samRadius) || !Number.isFinite(somRadius)) {
+    return tamCircleDefaultRadii;
+  }
+
+  return [tamCircleMaxRadius, samRadius, somRadius];
+}
+
 function isMobilityReportContent(content: string) {
   // "yearly revenue"/"monthly revenue" were deliberately removed from this
   // list: they are the mobility fallback labels themselves (see
@@ -2146,6 +2207,7 @@ export function buildStandardReportPdf({
       const isRealEstateReport =
         report.type === "Real Estate Investment Analysis" ||
         /real[\s-]?estate|gayrimenkul|arsa|arazi|tapu/i.test(report.title);
+      const isMarketIntelligenceReport = isMarketIntelligenceDashboardReport(report);
       const businessIdea = isLegalReport
         ? normalizePdfText(report.prompt).slice(0, 220)
         : deriveBusinessDescriptionFromSections(report, pdfSections);
@@ -2384,7 +2446,19 @@ export function buildStandardReportPdf({
         pdf.setLineWidth(0.15);
         pdf.setFontSize(24);
         pdf.setTextColor("#ffffff");
-        pdf.text(String((isLegalReport ? legalConfidence : isRealEstateReport ? overallInvestmentScore : founderScore) ?? "--"), scoreX + 20, scoreY + 31);
+        pdf.text(
+          String(
+            (isLegalReport
+              ? legalConfidence
+              : isRealEstateReport
+                ? overallInvestmentScore
+                : isMarketIntelligenceReport
+                  ? executiveSnapshot.confidenceScore
+                  : founderScore) ?? "--"
+          ),
+          scoreX + 20,
+          scoreY + 31
+        );
         pdf.setFontSize(6.5);
         pdf.setTextColor("#99f6e4");
         pdf.text(
@@ -2394,7 +2468,9 @@ export function buildStandardReportPdf({
               ? pdfLocale === "tr"
                 ? "Kanıt Gücü"
                 : "Evidence Strength"
-            : localizePdfPresentationLabel("Founder Readiness Score", pdfLocale)
+              : isMarketIntelligenceReport
+                ? localizePdfPresentationLabel("Confidence Score", pdfLocale)
+                : localizePdfPresentationLabel("Founder Readiness Score", pdfLocale)
           ).toUpperCase(),
           scoreX + 12,
           scoreY + 43
@@ -2818,10 +2894,12 @@ export function buildStandardReportPdf({
           return { label, color, value, rowHeight };
         });
 
-      const getTamVisualHeight = (content: string) =>
-        getTamRows(content).reduce((height, row, index) => {
-          return height + row.rowHeight + (index === 0 ? 0 : 3);
-        }, 0);
+      // Fixed footprint for the concentric TAM/SAM/SOM circle diagram
+      // below (2 * tamCircleMaxRadius plus top/bottom padding) --
+      // independent of content, since the diagram's size never varies
+      // with text length the way the old stacked-row layout did.
+      const tamCircleVisualHeight = tamCircleMaxRadius * 2 + 8;
+      const getTamVisualHeight = () => tamCircleVisualHeight;
 
       const getTamVisualContent = (content: string) =>
         (["TAM", "SAM", "SOM"] as const)
@@ -2997,24 +3075,41 @@ export function buildStandardReportPdf({
         };
 
         if (isTamSamSomSection) {
+          // Concentric TAM/SAM/SOM circles -- the standard consulting/VC-deck
+          // device for market sizing -- replacing the previous three stacked
+          // text rows. Radius is area-proportional (sqrt-scaled) to the
+          // parsed market-size magnitude when the values parse sensibly,
+          // and falls back to a fixed, always-legible nested silhouette
+          // otherwise, so the chart never looks broken even on an
+          // unparseable range.
           const tamVisualContent = getTamVisualContent(content);
           const rows = getTamRows(tamVisualContent, content);
-          let rowY = visualY;
+          const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value));
+          const radii = computeTamSamSomRadii(magnitudes[0], magnitudes[1], magnitudes[2]);
+          const circleCenterX = bodyX + tamCircleMaxRadius + 4;
+          const circleCenterY = visualY + tamCircleMaxRadius + 3;
 
-          rows.forEach(({ label, color, value, rowHeight }, index) => {
-            pdf.setFillColor("#101113");
-            pdf.setDrawColor(color);
-            pdf.roundedRect(bodyX, rowY, bodyWidth, rowHeight, 3, 3, "FD");
-            pdf.setFillColor(color);
-            pdf.roundedRect(bodyX + 3, rowY + 2, 13, 5, 2.5, 2.5, "F");
-            pdf.setFontSize(6.4);
-            pdf.setTextColor(index === 2 ? "#000000" : "#ccfbf1");
-            pdf.text(label, bodyX + 5, rowY + 5.4);
-            pdf.setTextColor("#ccfbf1");
-            drawSingleLine(value || "—", bodyX + 20, rowY + 5.7, bodyWidth - 24, 8.2, 4.2, false);
-            rowY += rowHeight + 3;
+          rows.forEach((row, index) => {
+            pdf.setFillColor(row.color);
+            pdf.circle(circleCenterX, circleCenterY, radii[index], "F");
           });
-          return getTamVisualHeight(tamVisualContent);
+
+          const legendX = circleCenterX + tamCircleMaxRadius + 10;
+          const legendWidth = Math.max(20, bodyX + bodyWidth - legendX);
+          const legendRowHeight = (tamCircleVisualHeight - 4) / 3;
+
+          rows.forEach(({ label, color, value }, index) => {
+            const rowY = visualY + 2 + index * legendRowHeight;
+            pdf.setFillColor(color);
+            pdf.roundedRect(legendX, rowY, 7, 4.4, 1.5, 1.5, "F");
+            pdf.setFontSize(7.2);
+            pdf.setTextColor("#a1a1aa");
+            pdf.text(label, legendX + 10, rowY + 3.8);
+            pdf.setTextColor("#ccfbf1");
+            drawSingleLine(value || "—", legendX + 10, rowY + 9.4, legendWidth - 10, 8, 5, false);
+          });
+
+          return getTamVisualHeight();
         }
 
         if (normalizedTitle.includes("swot")) {
@@ -3540,7 +3635,7 @@ export function buildStandardReportPdf({
         }
 
         if (normalizedTitle.includes("tam / sam / som")) {
-          return getTamVisualHeight(getTamVisualContent(section.content));
+          return getTamVisualHeight();
         }
 
         if (normalizedTitle.includes("scenario")) {

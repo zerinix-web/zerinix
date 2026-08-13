@@ -238,8 +238,19 @@ const FINANCE_WORKFLOW_PATTERN =
   /(?:\b(?:finance|financial|accounting|balance sheet|income statement|cash flow|trial balance|ledger|invoice|profitability|budget|forecast|audit|tax)\b|finans|finansal|muhasebe|bilanço|gelir tablosu|nakit akış|mizan|defter|fatura|kârlılık|karlılık|bütçe|tahmin|denetim|vergi)/i;
 const MARKETING_WORKFLOW_PATTERN =
   /\b(?:marketing|campaign|conversion|brand|audience|pazarlama|kampanya|dönüşüm|marka|hedef kitle)\b/i;
+// The bigram-only forms below ("kurmak istiyorum", "şirket kur") missed
+// extremely common paraphrases of the exact same venture-evaluation
+// intent -- confirmed live: "...SaaS platformu KURMAK MANTIKLI MI?" (is
+// it sensible to build...) and "...işletmesi AÇMAK istiyorum" (I want to
+// OPEN...) neither matched, because the verb ("kurmak"/"açmak") wasn't
+// immediately followed by the one exact phrase "istiyorum". This adds
+// the general grammatical pattern -- a venture-starting verb (kurmak/
+// açmak/başlatmak, "found/open/start") followed by any of the common
+// desire/evaluation endings a Turkish speaker uses after it -- which is
+// a structural sentence pattern, not a sector-vocabulary word list, so
+// it does not need updating per industry.
 const BUSINESS_WORKFLOW_PATTERN =
-  /\b(?:business idea|startup|launch|founder|build a|start a business|iş fikri|girişim|kurmak istiyorum|şirket kur)\b/i;
+  /\b(?:business idea|startup|launch|founder|build a|start a business|is it (?:worth|sensible to)\s+(?:starting|building|launching)|should i (?:start|build|launch)|does it make sense to (?:start|build|launch)|iş fikri|girişim|kurmak istiyorum|şirket kur)\b|\b(?:kurmak|açmak|başlatmak|kurmayı|açmayı|başlatmayı)\s+(?:istiyorum|düşünüyorum|planlıyorum|mantıklı\s*mı|kârlı\s*mı|karlı\s*mı|iyi\s*(?:bir\s*)?fikir\s*mi|mantıklı\s*olur\s*mu)/i;
 const LEGAL_DEADLINE_PATTERN =
   /(?:\b(?:deadline|filing date|hearing date|mediation date|limitation deadline|signing date)\b|son tarih|dava açma süresi|başvuru süresi|duruşma tarihi|arabuluculuk tarihi|zamanaşımı tarihi|imza tarihi)/i;
 const LEGAL_PERSPECTIVE_PATTERN =
@@ -272,8 +283,33 @@ export function selectAnalysisWorkflow({
     return "legal";
   }
   if (isRealEstate) return "real_estate";
+
+  // A prompt whose dominant signal is evaluating or launching a venture
+  // (any sector) is a business-evaluation request, even when it names a
+  // regulated/specialized sector as the venture's own subject matter (a
+  // "legal-tech SaaS", a "fintech platform"...) -- the sector's own name
+  // is not evidence the user has an actual legal matter, financial
+  // statement, or campaign at hand to review. Confirmed live: "Türkiye'de
+  // yapay zeka destekli hukuki belge inceleme SaaS platformu kurmak
+  // mantıklı mı?" matched LEGAL_WORKFLOW_PATTERN on the bare word
+  // "hukuki" and was routed to the legal case-review workflow, which then
+  // produced a near-empty report because the prompt has no actual legal
+  // case for that workflow to extract. Only let a specialized workflow
+  // win over a detected venture-evaluation intent when the prompt also
+  // carries a concrete in-hand-case signal (a real deadline or a stated
+  // first-person legal position) -- this guard sits ahead of every
+  // specialized check, not just legal, so a future sector keyword added
+  // to any pattern below inherits the same protection.
+  const isVentureEvaluation = BUSINESS_WORKFLOW_PATTERN.test(prompt);
+  const hasLegalCaseInHandSignal =
+    LEGAL_DEADLINE_PATTERN.test(combined) || LEGAL_PERSPECTIVE_PATTERN.test(combined);
+
+  if (isVentureEvaluation && !hasLegalCaseInHandSignal) {
+    return "business";
+  }
+
   if (LEGAL_WORKFLOW_PATTERN.test(combined)) return "legal";
-  if (BUSINESS_WORKFLOW_PATTERN.test(prompt)) return "business";
+  if (isVentureEvaluation) return "business";
   if (FINANCE_WORKFLOW_PATTERN.test(combined)) return "finance";
   if (MARKETING_WORKFLOW_PATTERN.test(combined)) return "marketing";
   return "generic";

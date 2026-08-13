@@ -47,7 +47,7 @@ export function buildExecutivePresentationDirectives(
 // that name no report-specific concept (no founder, no CEO, no Roadmap, no
 // investment terminology). Safe for any report type to reuse.
 const universalDecisionQualityDirectives = [
-  "Before drafting, silently create one Decision Spine with exactly five elements: the specific thesis, decisive evidence gap, primary risk mechanism, next concrete action, and proof-gated milestone sequence. Keep wording internal; use the facts consistently without copying sentences between sections.",
+  "Before drafting, silently create one Decision Spine with exactly five elements: the specific thesis, decisive evidence gap, primary risk mechanism, next concrete action, and a milestone sequence where each step depends on proof from the one before it. Keep wording internal; use the facts consistently without copying sentences between sections.",
   "Every recommendation or action must name a specific object such as the actual buyer, workflow, channel, pricing unit, geography, regulatory constraint, operating asset, or financial threshold. Never write generic advice when the submitted context supports a more precise action.",
   "Open the executive section with the decision or verdict in the first sentence, then explain only the highest-leverage evidence behind it.",
   "Use claim -> reason -> implication for major analytical statements; avoid descriptive paragraphs that do not change the decision.",
@@ -56,7 +56,7 @@ const universalDecisionQualityDirectives = [
   "Separate opportunities from risks: opportunities are openings to exploit; risks are obstacles with a leading indicator and mitigation path.",
   "Recommendations must be action-oriented: decision, conviction/confidence, key reason, main risk, and next concrete action.",
   "Every major analytical section must include a compact executive implication line that explains why the section changes the decision. Do not add a heading. This must be specific, not a generic summary.",
-  "Competitor or comparable analysis must name only credible entities available from the input/model context. For each important one, include pricing, target segment, scale, strengths, weaknesses, positioning, and how the analyzed subject can outperform when available; omit unknown fields instead of inventing them.",
+  "Competitor or comparable analysis must name only real commercial vendors, operators, or service providers available from the input/model context -- never an encyclopedia entry, video platform, blog, forum, or generic reference/news article; those are sources, not competitors. For each important competitor, include pricing, target segment, scale, strengths, weaknesses, positioning, and how the analyzed subject can outperform when available; omit unknown fields instead of inventing them. If verified competitors are insufficient, say so plainly instead of filling the gap with an irrelevant entity.",
   "Risk analysis must use a professional risk matrix: probability, impact, severity, mitigation, and early warning signal for each material risk.",
   "Keep SWOT, Porter, and Risks mutually exclusive: SWOT inventories internal capabilities and external openings; Porter explains structural industry economics; Risks describes subject-specific failure modes with indicators and mitigations. Never reuse the same sentence, example, or recommendation across them.",
   "Use natural analytical continuity through dependencies between sections, not filler transitions such as 'as mentioned above', 'building on the previous section', or generic concluding sentences.",
@@ -72,7 +72,7 @@ const businessPlanDecisionSupportDirectives = [
   "Confidence must be decomposed where relevant into Market, Competition, Financial, Execution, and Product confidence. Explain the weighted logic using report findings; do not present a single unexplained score.",
   "Competitor analysis must name only credible competitors or substitutes available from the input/model context. For each important competitor, include pricing, target customer, funding, employee size, strengths, weaknesses, positioning, and how the analyzed company can outperform when available; omit unknown fields instead of inventing them.",
   "Roadmap/action sections must be written as an AI Action Plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Every action needs expected business impact.",
-  "Maintain executive continuity without repetition: Executive Summary states the verdict, the evidence gap, and the first 90 days of action; the Roadmap sequences new proof gates beyond that window instead of restating the rationale.",
+  "Maintain executive continuity without repetition: Executive Summary states the verdict, the evidence gap, and the first 90 days of action; the Roadmap sequences what must be proven next beyond that window instead of restating the rationale.",
   "Treat the business model, ICP, pricing, unit economics, roadmap, and recommendation as one linked operating plan.",
   "Executive Summary is the report's only decision layer: state the Final Decision, Confidence, Why, Biggest Risks, Biggest Opportunity, and First 90-Day Action Plan there and nowhere else. Do not let it repeat Business Model, SWOT, Roadmap, or Financial Dashboard prose.",
 ];
@@ -83,6 +83,17 @@ const businessPlanDecisionSupportDirectives = [
 export function buildDecisionSupportDirectives(kind: "business_plan") {
   void kind;
   return [...universalDecisionQualityDirectives, ...businessPlanDecisionSupportDirectives];
+}
+
+// The generic half of the directive set above (Decision Spine, claim ->
+// reason -> implication, SWOT/risk-matrix structure, narrative continuity
+// without filler transitions, never reusing a paragraph across sections)
+// names no founder/CEO/Roadmap-specific concept, so it was always safe for
+// market.ts and domain-analysis.ts to reuse -- it just had no export of
+// its own before this, so those two prompt files never got the same
+// anti-filler/anti-repetition scaffolding business_plan reports have had.
+export function buildUniversalDecisionQualityDirectives() {
+  return [...universalDecisionQualityDirectives];
 }
 
 // Shared verbatim by plan.ts and market.ts (previously two independently
@@ -128,8 +139,8 @@ export function buildFullReportStructureDirectives(kind: "business_plan") {
     "Every section must add one unique business insight; if a point was made earlier, only reference the implication instead of repeating the paragraph.",
     "Silently maintain a paragraph ledger while drafting. Before returning JSON, remove any sentence or paragraph that merely restates another section without adding a section-owned implication.",
     "A recommendation is specific only when it names the analyzed business context and defines who acts, what is tested or changed, and which proof point determines the next decision.",
-    "Executive Summary and Roadmap must share one decision, one primary risk, and one next action, but each must express only its own layer: Executive Summary owns the verdict, the confidence, and the first 90 days; Roadmap sequences proof gates beyond that window without restating the rationale.",
-    "SWOT, Porter, Financials, Risks, and Roadmap must not share prose. Financial sections own numbers; Risks owns failure mechanisms; Roadmap owns timing and proof gates beyond the first 90 days. Executive Summary alone owns the capital decision.",
+    "Executive Summary and Roadmap must share one decision, one primary risk, and one next action, but each must express only its own layer: Executive Summary owns the verdict, the confidence, and the first 90 days; Roadmap sequences what must be proven next beyond that window without restating the rationale.",
+    "SWOT, Porter, Financials, Risks, and Roadmap must not share prose. Financial sections own numbers; Risks owns failure mechanisms; Roadmap owns timing and what must be proven at each step beyond the first 90 days. Executive Summary alone owns the capital decision.",
     "Prefer deterministic labels for structured sections: SWOT groups, Worst/Base/Best scenarios, metric names, source fields, and recommendation fields.",
     "Keep the report ordered as an investor business plan: decision, pain, product, customer, market, competition, model, sizing, strategy, economics, risks, execution, sources.",
   ];

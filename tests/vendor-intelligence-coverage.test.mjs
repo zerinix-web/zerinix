@@ -160,7 +160,12 @@ for (const prompt of markets) {
     assert.doesNotMatch(projection.competitiveLandscape, /packed discovery queries|candidates? discovered|earlyStopReason/i);
     assert.doesNotMatch(projection.majorPlayers, /No competitive evidence/i);
     assert.equal(graph.planningEstimate, null);
-    assert.match(projection.tamSamSom, /Verified TAM \/ SAM \/ SOM is unavailable/);
+    // Rewritten in natural executive language (no "endpoint" / "validated
+    // buyer-population input" pipeline jargon) while preserving the same
+    // behavior: a verified figure is genuinely unavailable and nothing was
+    // fabricated to fill the gap.
+    assert.match(projection.tamSamSom, /could not be established for this market/i);
+    assert.match(projection.tamSamSom, /not used on its own to fabricate a market-size figure/i);
   });
 }
 

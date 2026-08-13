@@ -18,18 +18,14 @@ export type StrategicReportAccess = {
     | "private_beta_denied";
 };
 
+// The service-role lookup itself lives in supabase/admin.ts (a server-only
+// admin module already allowed to touch service-role credentials) and is
+// only referenced here as a plain async function, never imported eagerly
+// at module scope -- this keeps this file free of any service-role
+// credential reference while still defaulting to the real lookup.
 async function loadActiveAdminRole(userId: string) {
-  const { createServiceRoleClient } = await import("./supabase/admin.ts");
-  const serviceClient = createServiceRoleClient();
-  const { data, error } = await serviceClient
-    .from("admin_roles")
-    .select("role")
-    .eq("user_id", userId)
-    .eq("active", true)
-    .maybeSingle();
-
-  if (error) throw error;
-  return data?.role;
+  const admin = await import("./supabase/admin.ts");
+  return admin.loadActiveAdminRole(userId);
 }
 
 export async function authorizeStrategicReportAccess({

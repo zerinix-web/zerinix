@@ -125,8 +125,11 @@ test("CEO Summary block spec is no longer double-specified in plan.ts/market.ts 
     marketSource,
     /Use exactly five blocks: Biggest Opportunity, Biggest Risk, First 90 Days, Critical KPIs, and Final Recommendation/
   );
-  // Field-specific residual guidance must survive the trim.
-  assert.match(marketSource, /First 90 Days must contain exactly three concrete actions with owners and proof gates/);
+  // Field-specific residual guidance must survive the trim. Wording
+  // updated from "proof gates" to "clear proof points before the next
+  // decision" -- internal pipeline jargon a customer should never see
+  // echoed literally in their own report.
+  assert.match(marketSource, /First 90 Days must contain exactly three concrete actions with owners and clear proof points/);
   assert.match(planSource, /Never reconstruct or invent citation metadata/);
 });
 

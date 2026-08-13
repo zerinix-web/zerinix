@@ -660,8 +660,41 @@ function cleanupTurkishPdfLanguageLeakage(value = "") {
     .replace(/\band\b/gi, "ve");
 }
 
+// Identifier-type fields (a URL/link) are meaningless once their value is
+// missing -- a translated "no data" badge like "URL: Veri bulunamadı" reads
+// as a broken field, not an honest one. Citation rendering already omits
+// these lines entirely when the value is unknown (see formatPdfCitationContent
+// in ReportPdfButton.tsx); this guard keeps that same "omit, don't
+// mislabel" rule from being undone by this function's generic label/value
+// translation when such a line reaches it from elsewhere in the pipeline.
+const pdfIdentifierFieldLabelKeys = new Set(
+  [
+    "url",
+    "link",
+    "source link",
+    "kaynak url",
+    "bağlantı",
+    "kaynak bağlantısı",
+    "publisher",
+    "yayıncı",
+  ].map((label) => normalizePdfLocalizationKey(label))
+);
+const pdfMissingValuePlaceholderKeys = new Set(
+  [
+    "not provided",
+    "not available",
+    "unavailable",
+    "no data",
+    "veri bulunamadı",
+    "mevcut değil",
+    "kullanılamıyor",
+    "veri yok",
+  ].map((value) => normalizePdfLocalizationKey(value))
+);
+
 export function localizePdfPresentationText(value = "", locale = "en") {
   const normalized = normalizePdfText(String(value));
+  const dropLine = Symbol("dropLine");
 
   const localized = cleanupDuplicatePdfHeadingLines(cleanupRepeatedPdfPhrasing(normalized))
     .split("\n")
@@ -691,6 +724,13 @@ export function localizePdfPresentationText(value = "", locale = "en") {
       const translatedLabel = localizePdfPresentationLabel(rawLabel.trim(), locale);
       const translatedRest = rest ? localizePdfPresentationLabel(rest.trim(), locale) : rest;
 
+      const isIdentifierField = pdfIdentifierFieldLabelKeys.has(normalizePdfLocalizationKey(translatedLabel));
+      const isMissingValue = pdfMissingValuePlaceholderKeys.has(normalizePdfLocalizationKey(translatedRest));
+
+      if (isIdentifierField && isMissingValue) {
+        return dropLine;
+      }
+
       if (translatedLabel === rawLabel.trim()) {
         if (translatedRest === rest.trim()) {
           return line;
@@ -705,6 +745,7 @@ export function localizePdfPresentationText(value = "", locale = "en") {
       const translated = boldWrapped ? `**${rebuilt}**` : rebuilt;
       return `${leadingWhitespace}${bulletPrefix}${headingMarker}${translated}`;
     })
+    .filter((line) => line !== dropLine)
     .join("\n");
 
   if (locale === "tr") {
@@ -1278,7 +1319,9 @@ function isUnverifiedPdfSourceUrl(value = "") {
   return (
     !normalized ||
     /^[-–—]+$/.test(normalized) ||
-    /^(?:not verified|url doğrulanmadı|n\/?a|not available|none|null|undefined)$/i.test(normalized)
+    /^(?:not verified|url doğrulanmadı|n\/?a|not available|not provided|none|null|undefined|veri bulunamadı|mevcut değil|kullanılamıyor|veri yok)$/i.test(
+      normalized
+    )
   );
 }
 
@@ -1286,8 +1329,12 @@ function normalizePdfSourceLine(line = "") {
   const normalized = normalizePdfText(String(line)).trim();
   const urlMatch = normalized.match(/^(url)\s*[:\-–—]\s*(.*)$/i);
 
+  // An unresolved URL conveys nothing a reader can act on, so the line is
+  // dropped entirely rather than kept with a "Not verified"-style label --
+  // the same "omit, don't mislabel" rule used for citation cards elsewhere
+  // in the PDF (see formatPdfCitationContent in ReportPdfButton.tsx).
   if (urlMatch && isUnverifiedPdfSourceUrl(urlMatch[2])) {
-    return "URL: Not verified";
+    return "";
   }
 
   return normalized;

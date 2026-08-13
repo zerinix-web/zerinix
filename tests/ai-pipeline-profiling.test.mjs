@@ -95,7 +95,7 @@ test("real historical production data confirms Market Intelligence is both the m
   // already-measured static-instruction share so a future prompt change
   // that silently balloons static instructions gets caught here, and
   // documents where the historical numbers in the final report came from.
-  // Upper bounds widened twice, deliberately, not silent drift:
+  // Upper bounds widened three times, deliberately, not silent drift:
   // 1) the executive-decision-first redesign added
   //    buildExecutiveConsultingStyleDirectives() (tone, sources-invisible,
   //    section-must-answer-a-question, financial-first rules) to both
@@ -106,21 +106,40 @@ test("real historical production data confirms Market Intelligence is both the m
   //    labeled estimate from adjacentBenchmarks/regional/global evidence
   //    instead of defaulting to "insufficient evidence" -- market only,
   //    so only market's bound moved.
+  // 3) the premium-consulting-quality pass added
+  //    buildUniversalDecisionQualityDirectives() (Decision Spine,
+  //    claim->reason->implication, SWOT/risk-matrix discipline, narrative
+  //    continuity without filler transitions, never reusing a paragraph
+  //    across sections) to market.ts, plus market-specific narrative-chain
+  //    (Market->Customer->Competition->Economics->Decision), varied
+  //    missing-evidence explanations, and a competitor-source-integrity
+  //    rule (no encyclopedia/video/blog entries as competitors) -- market
+  //    only, so only market's bound moved again.
+  // 4) the McKinsey/Bain-quality pass replaced internal-pipeline jargon
+  //    ("evidence registry", "adjacentBenchmarks", "proxy") with plain
+  //    business language and added an explicit banned-words directive,
+  //    plus a directive redirecting the model away from Business Idea
+  //    Validation's financial-model acronyms (the isolation validator's
+  //    forbidden terms) toward plain-language equivalents when citing a
+  //    vendor's own reported financial scale -- market only, so only
+  //    market's bound moved again.
   const plan = buildPlanFullReportInstructions("English");
   const market = buildMarketLanguageInstructions("English");
 
   assert.ok(plan.length > 3500 && plan.length < 6600, `plan instructions length drifted: ${plan.length} chars`);
-  assert.ok(market.length > 2500 && market.length < 6300, `market instructions length drifted: ${market.length} chars`);
+  assert.ok(market.length > 2500 && market.length < 11400, `market instructions length drifted: ${market.length} chars`);
 
   // The real historical average total prompt for market (16,109 tokens)
-  // is far larger than its own static-instruction size (~872 tokens) --
-  // i.e. dynamic context (research evidence + market-intelligence graph),
-  // not static instruction bloat, dominates market's cost. Confirms
+  // is still far larger than its own static-instruction size (~2,511
+  // tokens after widening #3 above) -- i.e. dynamic context (research
+  // evidence + market-intelligence graph), not static instruction size,
+  // still dominates market's cost, just by a smaller multiple now that
+  // the shared decision-quality directive set is included. Confirms
   // where future optimization effort belongs.
   const marketStaticTokens = Math.ceil(market.length / 4);
   const marketHistoricalAvgPromptTokens = 16109;
   assert.ok(
-    marketHistoricalAvgPromptTokens / marketStaticTokens > 10,
-    "dynamic context should dominate market's prompt size by an order of magnitude"
+    marketHistoricalAvgPromptTokens / marketStaticTokens > 5,
+    "dynamic context should still dominate market's prompt size several times over"
   );
 });

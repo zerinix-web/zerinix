@@ -603,6 +603,20 @@ export function validateVendorCandidate(
   const reviewEvidenceCount = reviewItems.length;
   const pricingEvidenceCount = pricingItems.length;
   const filingEvidenceCount = filingItems.length;
+  // Being cited from 2+ distinct hostnames only proves the *name* is
+  // corroborated, not that it is a commercial vendor -- a generic
+  // reference/encyclopedia/statistics site (Wikipedia, a government
+  // agency, a press-release aggregator) is routinely cited from several
+  // subdomains or mirrors while carrying zero descriptive content about
+  // any product or company (confirmed live: en.wikipedia.org +
+  // tr.wikipedia.org, both bare citations with no claim/value text,
+  // otherwise validated a "Wikipedia" competitor). Reusing
+  // isThinDomainOnlyEvidence here -- language-agnostic, no new keyword
+  // list -- requires at least one supporting item to carry real
+  // descriptive content before domain-count alone can validate a vendor.
+  const hasSubstantiveEvidence = qualifyingItems.some(
+    (item) => !isThinDomainOnlyEvidence(item, hostnameOf(item.url))
+  );
 
   const paths: Array<[boolean, string]> = [
     [officialEvidenceCount >= 1 && independentDomainCount >= 2, "official_product_page_plus_independent_source"],
@@ -613,7 +627,7 @@ export function validateVendorCandidate(
     // while a single third-party mention (no official page) still needs the
     // two-independent-sources path below.
     [officialEvidenceCount >= 1, "official_page_plus_product_documentation"],
-    [independentDomainCount >= 2, "two_independent_commercial_or_industry_sources"],
+    [independentDomainCount >= 2 && hasSubstantiveEvidence, "two_independent_commercial_or_industry_sources"],
     [filingEvidenceCount >= 1, "public_filing_or_investor_material"],
   ];
   const passed = paths.find(([ok]) => ok);
@@ -722,13 +736,14 @@ export function classifyMajorPlayerLabel(input: {
 export type MarketRelevanceResult = { relevant: boolean; reason: string };
 
 const nonVendorRolePattern =
-  /\b(?:implementation partner|systems? integrator|si partner|reseller partner|channel partner|app marketplace|marketplace|app store|outsourced accounting|outsourced bookkeeping|managed bookkeeping service|accounting firm|cpa firm|law firm|consulting firm|consultancy|advisory firm)\b/i;
+  /\b(?:implementation partner|systems? integrator|si partner|reseller partner|channel partner|app marketplace|marketplace|app store|outsourced accounting|outsourced bookkeeping|managed bookkeeping service|accounting firm|cpa firm|law firm|consulting firm|consultancy|advisory firm|distributor|distribution partner|wholesale distributor|media (?:company|group|outlet|network)|news (?:outlet|organization|publication|site)|trade (?:press|publication|journal)|publishing (?:company|house)|b2b media|industry (?:media|publication)|events? (?:company|organizer|producer)|conference organizer|trade show organizer|analyst firm|research and advisory firm)\b/i;
 const managedServicesAllowancePattern = /\bmanaged (?:service|services|detection|soc|security)\b/i;
 
 /**
  * Excludes implementation partners, marketplaces, systems integrators,
- * outsourced/managed-service providers, and advisory/accounting firms from
- * the vendor pool, unless the market itself is about managed services (e.g.
+ * outsourced/managed-service providers, media/publishing companies,
+ * distributors, event organizers, and advisory/accounting firms from the
+ * vendor pool, unless the market itself is about managed services (e.g.
  * Cybersecurity MDR). Always returns a human-readable reason, satisfying the
  * "clear relevance explanation" requirement for validated vendors too.
  */
@@ -744,7 +759,7 @@ export function assessMarketRelevance(
   if (!allowManagedServices && nonVendorRolePattern.test(`${candidate.canonicalName} ${evidenceText}`)) {
     return {
       relevant: false,
-      reason: `Excluded: evidence identifies ${candidate.canonicalName} as an implementation partner, marketplace, outsourced service provider, or advisory firm rather than a commercial product vendor in this market.`,
+      reason: `Excluded: evidence identifies ${candidate.canonicalName} as an implementation partner, marketplace, distributor, media/events company, outsourced service provider, or advisory firm rather than a commercial product vendor in this market.`,
     };
   }
   return {

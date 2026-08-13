@@ -111,7 +111,7 @@ function canonicalSourceUrl(value: string) {
 
 const fieldClaimPatterns: Record<string, RegExp> = {
   asset_identification: /\b(asset|property|parcel|ada|parsel|taşınmaz)\b/i,
-  location: /\b(location|province|district|neighbou?rhood|il|ilçe|mahalle|mevkii|konum)\b/i,
+  location: /\b(location|province|district|neighbou?rhood|il|ilçe|mahalle\p{L}*|mevkii|konum|köy\p{L}*)\b/iu,
   parcel_size: /\b(area|size|surface|yüzölçümü|metrekare|m²|m2|sqm|hectare|hektar)\b/i,
   title_status: /\b(title|deed|ownership|encumbrance|easement|tapu|takyidat|mülkiyet|şerh|ipotek|irtifak)\b/i,
   zoning: /\b(zoning|land use|development right|plan note|residential|agricultural|commercial|industrial|protected|forest|imar|plan notu|yapılaşma|konut|tarla|tarım|ticaret|sanayi|sit alanı|orman)\b/i,

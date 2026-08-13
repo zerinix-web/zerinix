@@ -291,8 +291,15 @@ test("sizing stays unavailable and explains the evidence gap when endpoints are 
   assert.equal(graph.planningEstimate, null);
 
   const report = projectMarketIntelligenceGraphToReport(graph);
-  assert.match(report.tamSamSom, /Verified TAM \/ SAM \/ SOM is unavailable/);
-  assert.match(report.tamSamSom, /neither a compatible market-size endpoint nor both a validated buyer-population input and validated annual-pricing input/i);
+  // Rewritten in natural executive language (no "endpoint" / "validated
+  // buyer-population input" pipeline jargon exposed to report readers) while
+  // preserving the same behavior: a verified figure is genuinely
+  // unavailable, no benchmark or estimate could be built, and vendor count
+  // alone is not used to fabricate a market-size figure.
+  assert.match(report.tamSamSom, /could not be established for this market/i);
+  assert.match(report.tamSamSom, /No comparable local, regional, or global benchmark was available/i);
+  assert.match(report.tamSamSom, /not sufficient together to construct one either/i);
+  assert.match(report.tamSamSom, /not used on its own to fabricate a market-size figure/i);
 });
 
 test("market contract keeps verified sizing separate from transparent planning estimates", async () => {

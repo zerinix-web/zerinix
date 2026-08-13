@@ -215,8 +215,24 @@ export function createExpertiseProfileFallback({
   const hasExplicitMode = selectedAnalysisModeValues.includes(
     selectedMode as SelectedAnalysisMode
   );
+  // detectedDomain is the caller's already-computed classification (from
+  // classifyReportDomain / selectAnalysisWorkflow upstream) -- gating
+  // trust in it on hasExplicitMode conflated two unrelated questions:
+  // "has the user picked a top-level mode" and "do we have a valid
+  // domain signal". Confirmed live: with a correct upstream
+  // detectedDomain of "business" but selectedMode left undefined (the
+  // normal state before/without an explicit mode selection, e.g.
+  // Strategic Advisory), this used to ignore detectedDomain entirely and
+  // fall through to the raw bare-keyword detectDomain() below, whose
+  // legalSignals pattern matches bare "contract"/"legal"/"agreement" --
+  // misrouting an AI legal-tech SaaS business-idea prompt (which
+  // legitimately contains "(contract review)" as its own product
+  // description) to the legal case-review workflow. requestedDomain is
+  // now trusted whenever it resolves to a real value, regardless of
+  // whether a top-level mode was ever selected; detectDomain() is only
+  // the fallback when the caller supplied no usable domain at all.
   const requestedDomain = normalizedDetectedDomain(detectedDomain);
-  const inferredDomain = hasExplicitMode && requestedDomain
+  const inferredDomain = requestedDomain
     ? requestedDomain
     : detectDomain(combined, assets, detectedDomain);
   const domain =

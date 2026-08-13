@@ -3,6 +3,8 @@ import type { ReportDomain } from "@/app/lib/report-engine/domain";
 import {
   buildExecutivePresentationDirectives,
   buildExecutiveConsultingStyleDirectives,
+  buildUniversalDecisionQualityDirectives,
+  insightLedgerAndTokenBudgetDirectives,
 } from "../../ai/report-quality-directives.ts";
 import { buildStrictReportLanguageInstruction } from "../../report-language.ts";
 
@@ -33,11 +35,11 @@ export const domainAnalysisPrompts = {
   decisionAssessment:
     "Assess evidence sufficiency and decision readiness. Confidence must decrease when critical evidence remains unresolved.",
   missingInformation:
-    "List unresolved critical facts, why each matters, the exact source or document required, and whether external research was attempted.",
+    "List unresolved critical facts. For each: why it specifically matters to this decision, what proxy or adjacent evidence was used in its place if any, how its absence changed confidence, and what part of the decision cannot be finalized until it is resolved. Vary the explanation to the actual fact each time -- never reuse the same sentence shape across items.",
   recommendedActions:
     "Provide prioritized, domain-specific next actions with owner, evidence target, and decision gate.",
   finalRecommendation:
-    "Give a conditional, evidence-weighted recommendation aligned with the research sufficiency decision. Never overstate certainty.",
+    "Write this as the report's single executive decision, not a research summary. Open with the call in one sentence: proceed, proceed conditionally, or do not proceed, and why, in language a CEO would use in a Monday decision meeting -- not a restatement of findings. State the confidence level and the specific evidence gap it depends on. Name the one condition that would change the call. Never overstate certainty, never pad with generic caution language, and never restate findings already established earlier in the report -- only their decision implication belongs here.",
   sources:
     "List every uploaded asset and external evidence registry entry actually used, including exact source title, publisher, and URL.",
 } as const;
@@ -153,15 +155,19 @@ export function buildDomainAnalysisInstructions(
 ) {
   return [
     `You are the ZERINIX ${domainRole[domain]}`,
-    `Respond entirely in ${language}, preserving evidence labels and evidence registry IDs exactly.`,
+    `Respond entirely in ${language}. Evidence registry reference numbers (R#) and asset filenames stay as-is; every word around them, including evidence-classification labels, must be written in ${language} -- never leave an English label or phrase inside a ${language} report.`,
     buildStrictReportLanguageInstruction(language),
     "Use the uploaded assets as primary evidence and the completed research registry as external evidence.",
-    "Every factual bullet or paragraph must begin with exactly one label: [Verified from uploaded asset], [Verified from external source], [User-provided], [Estimate], [Unknown], or [Recommendation].",
-    "Every material factual claim must include inline provenance: [Asset: filename], [R#], [User], [Method: ...], [Required: ...], or [Basis: ...].",
+    "Classify a claim only when its evidence status materially affects the decision, using one word: Verified, Estimated, Assumption, Unknown, or Recommendation, written in the report's own language. Do not decorate every sentence with a label -- a label on every line stops carrying any signal.",
+    "Give material factual claims inline provenance (an asset filename, an [R#] registry reference, or a named method) where it strengthens trust; do not force provenance onto claims that do not need it.",
     "Never invent numeric values, sources, professional conclusions, legal status, accounting treatment, prices, or operational findings.",
-    "If research could not verify a fact, write Unknown and name the exact source or document required.",
+    "Read Domain Findings, Regulatory/Compliance, Financial Implications, Operational Implications, and Risk Analysis as one continuous argument, each building on what the last one established, ending in the Recommendation. Do not write any of them as an isolated observation disconnected from that chain.",
+    "When a fact could not be verified, do not write a bare 'not verified' notice. Instead: name the exact source or document required, explain briefly why that specific gap matters to this decision, state what proxy or adjacent evidence stands in for it if any, and say what part of the decision stays open until it is resolved. Vary this explanation to the specific fact each time.",
+    ...buildUniversalDecisionQualityDirectives(),
+    ...insightLedgerAndTokenBudgetDirectives,
     ...buildExecutiveConsultingStyleDirectives(),
     ...buildExecutivePresentationDirectives("specialized_analysis"),
+    "Use short paragraphs and compact bullets for any list of three or more items; avoid walls of unbroken text.",
   ].join("\n");
 }
 

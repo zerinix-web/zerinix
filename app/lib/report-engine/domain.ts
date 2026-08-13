@@ -25,8 +25,19 @@ const operatingBusinessSignals =
 const explicitBusinessReportSignals =
   /\b(business plan|startup plan|venture plan|iş planı|girişim planı)\b/i;
 
+// The bigram-only Turkish forms below ("kurmak istiyorum", "platform kur")
+// missed common paraphrases of the same venture-evaluation intent --
+// confirmed live: "...SaaS platformu KURMAK MANTIKLI MI?" and "...sağlık
+// SaaS platformu kurmak mantıklı mı?" both failed to match, so a bare
+// sector word elsewhere in the prompt ("hastane", "sağlık") fell straight
+// through to specializedDomainSignals below and misclassified the
+// venture as "operations" instead of "business". This adds the general
+// grammatical pattern -- a venture-starting verb (kurmak/açmak/
+// başlatmak) followed by any common desire/evaluation ending -- which is
+// a structural sentence pattern, not a sector-vocabulary word list, so it
+// does not need updating per industry.
 const ventureCreationSignals =
-  /\b(startup|new venture|launch (?:a |the )?(?:business|company|app|application|platform)|build (?:a |the )?(?:business|company|app|application|platform)|founder|iş fikri|girişim|kurmak istiyorum|şirket kur|uygulama kur|platform kur)\b/i;
+  /\b(startup|new venture|launch (?:a |the )?(?:business|company|app|application|platform)|build (?:a |the )?(?:business|company|app|application|platform)|is it (?:worth|sensible to)\s+(?:starting|building|launching)|should i (?:start|build|launch)|does it make sense to (?:start|build|launch)|founder|iş fikri|girişim|kurmak istiyorum|şirket kur|uygulama kur|platform kur)\b|\b(?:kurmak|açmak|başlatmak|kurmayı|açmayı|başlatmayı)\s+(?:istiyorum|düşünüyorum|planlıyorum|mantıklı\s*mı|kârlı\s*mı|karlı\s*mı|iyi\s*(?:bir\s*)?fikir\s*mi|mantıklı\s*olur\s*mu)/i;
 
 const specializedDomainSignals: Array<[Exclude<ReportDomain, "business" | "real_estate">, RegExp]> = [
   ["legal", /\b(contract|agreement|clause|legal|compliance|liability|indemnity|termination|governing law|sözleşme|hukuk|uyum|sorumluluk|tazminat|fesih)\b/i],

@@ -49,6 +49,7 @@ import {
 import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 import { createAiJobDescriptor } from "@/app/lib/ai/queue";
 import { createCanonicalFinancialAssumptions } from "@/app/lib/ai/financial-assumptions";
+import { refreshInvestmentNarrativeFromResearchCoverage } from "@/app/lib/ai/investment-score";
 import {
   applyMarketResearchCoverageToContext,
   formatMarketResearchCoverageForReport,
@@ -212,7 +213,26 @@ function createReportAbortSignal(parentSignal: AbortSignal, timeoutMs: number) {
   };
 }
 
+// Business Idea Validation's financial-model acronyms (ARR, MRR, CAC, LTV)
+// have no place in Market Intelligence even when the model is citing a real,
+// evidence-backed fact about a market player's own reported scale (e.g. "the
+// vendor reported strong ARR growth") -- report-isolation-validator.ts
+// correctly rejects the whole report the moment any of these acronyms
+// appears anywhere in a Market Intelligence field. Rather than relaxing that
+// gate, the underlying concept is rewritten into plain market-research
+// language *before* the gate ever runs, so the acronym never reaches it:
+// the fact survives, the founder/investment-scoring vocabulary does not.
+// Order matters only in that these run first, before the generic label
+// rewrites below.
+const marketReportFinancialAcronymReplacements: Array<[RegExp, string]> = [
+  [/\bARR\b/gi, "annual revenue"],
+  [/\bMRR\b/gi, "monthly revenue"],
+  [/\bCAC\b/gi, "customer acquisition cost"],
+  [/\bLTV\b/gi, "customer lifetime value"],
+];
+
 const marketReportTermReplacements: Array<[RegExp, string]> = [
+  ...marketReportFinancialAcronymReplacements,
   [/\bLow[\s-]+Confidence\b/gi, "Directional"],
   [/\bMedium[\s-]+Confidence\b/gi, "Developing"],
   [/\bHigh[\s-]+Confidence\b/gi, "Verified"],
@@ -1167,8 +1187,18 @@ Write only this section's content. Do not write a JSON object, field name, headi
             cachedMarketGraph?.coverage
           )
         : null;
-      const cachedReportContext =
-        cachedCoverageResult?.context || canonicalFinancialAssumptions;
+      const cachedReportContext = cachedCoverageResult
+        ? {
+            ...cachedCoverageResult.context,
+            investmentScore: {
+              ...cachedCoverageResult.context.investmentScore,
+              ...refreshInvestmentNarrativeFromResearchCoverage(
+                cachedCoverageResult.context.investmentScore,
+                cachedCoverageResult.context
+              ),
+            },
+          }
+        : canonicalFinancialAssumptions;
 
       if (
         cachedFullReport &&
@@ -1213,6 +1243,18 @@ Write only this section's content. Do not write a JSON object, field name, headi
               expectedDomain: "business",
             });
           }
+          // The fresh-generation path below validates every report with
+          // assertReportIsolation before it can ever reach a client -- this
+          // cache-hit path parsed and returned cachedFullReport.responseText
+          // directly without that same check, so a report cached before an
+          // isolation-related fix (or from any other source of foreign
+          // vocabulary) could be served to users indefinitely, unvalidated,
+          // for as long as it kept getting served from cache. Running the
+          // same check here, inside this same try block, means a violation
+          // is handled exactly like a malformed cache entry below: logged,
+          // and the request falls through to a fresh, validated generation
+          // instead of ever serving the tainted cached copy again.
+          assertReportIsolation("market_intelligence", parsedCachedReport);
         } catch (error) {
           console.error("[api:market-analysis] Ignoring malformed cached full report", {
             reportRequestId: reportRequestId || null,
@@ -1220,6 +1262,13 @@ Write only this section's content. Do not write a JSON object, field name, headi
             failureReason:
               error instanceof Error && error.message ? error.message : "CacheParseFailed",
           });
+          // parseFullMarketReport already assigns parsedCachedReport before
+          // assertReportIsolation can run, so a thrown isolation violation
+          // would otherwise leave the tainted report sitting in this
+          // variable -- reset it so the "cache miss, regenerate" branch
+          // below is genuinely taken instead of silently serving what this
+          // catch block just logged as rejected.
+          parsedCachedReport = null;
         }
 
         if (!parsedCachedReport) {
@@ -1366,7 +1415,16 @@ Write only this section's content. Do not write a JSON object, field name, headi
       );
       const marketEvidenceCoverageContext =
         formatMarketResearchCoverageForReport(marketCoverageResult.coverage);
-      const reportAnalysisContext = marketCoverageResult.context;
+      const reportAnalysisContext = {
+        ...marketCoverageResult.context,
+        investmentScore: {
+          ...marketCoverageResult.context.investmentScore,
+          ...refreshInvestmentNarrativeFromResearchCoverage(
+            marketCoverageResult.context.investmentScore,
+            marketCoverageResult.context
+          ),
+        },
+      };
       // Research is already complete at this point, so the deterministic
       // ENTER/MONITOR/AVOID verdict is fully computable before generation
       // -- telling the model now lets every section (Strategic

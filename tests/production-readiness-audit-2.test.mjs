@@ -20,7 +20,14 @@ function read(relativePath) {
 test("Strategic Advisory report instructions include the shared strict-language directive, matching market.ts's coverage", () => {
   const instructions = buildDomainAnalysisInstructions("legal", "Turkish");
 
-  assert.match(instructions, /Respond entirely in Turkish, preserving evidence labels and evidence registry IDs exactly\./);
+  // "preserving evidence labels... exactly" (the original wording) told
+  // the model to keep English evidence-classification labels verbatim
+  // even in a Turkish report -- directly contradicting the full-language
+  // instruction on the next line. Fixed to require the labels themselves
+  // be written in the report's own language; only registry reference
+  // numbers and filenames are language-neutral.
+  assert.match(instructions, /Respond entirely in Turkish\./);
+  assert.match(instructions, /evidence-classification labels, must be written in Turkish/);
   assert.match(
     instructions,
     /Output language is Turkish\. Write every user-visible title, heading, label, paragraph, bullet, table cell, warning, placeholder, recommendation, source label, and action only in Turkish\./,

@@ -53,6 +53,7 @@ import {
 } from "@/app/lib/ai/research-cache";
 import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 import { createAiJobDescriptor } from "@/app/lib/ai/queue";
+import type { BenchmarkConfidence } from "@/app/lib/ai/industry-benchmarks";
 import {
   createCanonicalFinancialAssumptions,
   formatCanonicalFinancialAssumptions,
@@ -60,6 +61,7 @@ import {
   type AiFinancialModelContext,
 } from "@/app/lib/ai/financial-assumptions";
 import { applyMarketResearchCoverageToContext } from "@/app/lib/ai/market-research-coverage";
+import { refreshInvestmentNarrativeFromResearchCoverage } from "@/app/lib/ai/investment-score";
 import {
   compactReportFieldPrompt,
   createAiCostOptimizationMetrics,
@@ -1403,7 +1405,7 @@ function enforcePlanReportLanguage(
       .replace(/\bAI Confidence Breakdown\b/g, "AI Güven Dağılımı")
       .replace(/\bFounder Decision Engine\b/g, "Kurucu Karar Motoru")
       .replace(/\bRisk Matrix\b/g, "Risk Matrisi")
-      .replace(/\bCEO (?:Brief|Summary)\b/g, "CEO Özeti")
+      .replace(/\bCEO (?:Brief|Summary)\b/gi, "CEO Özeti")
       .replace(/\bCommentary\s*:/g, "Yorum:")
       .replace(/\bDecision\s*:/g, "Karar:")
       .replace(/\bInvestment Recommendation\s*:/g, "Yatırım Tavsiyesi:")
@@ -1529,7 +1531,7 @@ function createPlanFieldFallback(
       case "financialAssumptions":
         return buildCanonicalFinancialAssumptions(context, language);
       case "founderScore":
-        return buildCanonicalFounderScore(context, language);
+        return buildCanonicalFounderScore(context, parsed, language);
       case "kpis":
         return buildCanonicalKpiGovernance(context, language);
       case "executiveSummary":
@@ -1845,18 +1847,37 @@ function buildCanonicalFinancialDashboard(context: AiFinancialModelContext, lang
   ].join("\n");
 }
 
+// The worst/best multipliers used to be fixed constants (0.55/1.45,
+// runway 0.7/1.2) for every report regardless of how well-supported the
+// revenue estimate actually is. A Low-confidence estimate (thin
+// benchmark evidence) deserves a wider planning range than a
+// High-confidence one built on stronger comparables -- this ties the
+// scenario spread to the same confidence signal already computed for
+// the metric instead of one universal assumption.
+const scenarioConfidenceSpread: Record<
+  BenchmarkConfidence,
+  { worst: number; best: number; runwayWorst: number; runwayBest: number }
+> = {
+  High: { worst: 0.7, best: 1.3, runwayWorst: 0.8, runwayBest: 1.15 },
+  Medium: { worst: 0.55, best: 1.45, runwayWorst: 0.7, runwayBest: 1.2 },
+  Low: { worst: 0.4, best: 1.6, runwayWorst: 0.55, runwayBest: 1.3 },
+};
+
 function buildCanonicalScenarioAnalysis(context: AiFinancialModelContext, language: ResponseLanguage = "English") {
   const { metrics, revenueForecast, investmentScore } = context;
   const baseRevenue = metrics.arr.value;
   const baseRunway = metrics.runway.value;
-  const worstRevenue = baseRevenue * 0.55;
-  const bestRevenue = baseRevenue * 1.45;
+  const spread = scenarioConfidenceSpread[metrics.arr.confidence] ?? scenarioConfidenceSpread.Medium;
+  const worstRevenue = baseRevenue * spread.worst;
+  const bestRevenue = baseRevenue * spread.best;
+  const worstRunway = Math.max(1, Math.round(baseRunway * spread.runwayWorst));
+  const bestRunway = Math.round(baseRunway * spread.runwayBest);
 
   return [
     reportText(
       language,
-      `Planning assumption — Worst Case: Revenue ${metrics.arr.displayValue} base falls to approximately $${Math.round(worstRevenue / 1_000).toLocaleString("en-US")}k if acquisition is slower and CAC rises. Burn ${metrics.monthlyBurn.displayValue}; runway compresses to ${Math.max(1, Math.round(baseRunway * 0.7))} months. Risk: ${investmentScore.topRisks[0] || "execution risk"}. Decision: hold spend until proof points improve.`,
-      `Planlama varsayımı — Kötü Senaryo: Gelir ${metrics.arr.displayValue} bazından yaklaşık $${Math.round(worstRevenue / 1_000).toLocaleString("en-US")}k seviyesine düşer; edinim yavaşlar ve CAC yükselirse risk artar. Nakit yakımı ${metrics.monthlyBurn.displayValue}; finansal pist ${Math.max(1, Math.round(baseRunway * 0.7))} aya sıkışır. Risk: ${investmentScore.topRisks[0] || "yürütme riski"}. Karar: kanıt noktaları iyileşene kadar harcamayı sınırlayın.`
+      `Planning assumption — Worst Case: Revenue ${metrics.arr.displayValue} base falls to approximately $${Math.round(worstRevenue / 1_000).toLocaleString("en-US")}k if acquisition is slower and CAC rises. Burn ${metrics.monthlyBurn.displayValue}; runway compresses to ${worstRunway} months. Risk: ${investmentScore.topRisks[0] || "execution risk"}. Decision: hold spend until proof points improve.`,
+      `Planlama varsayımı — Kötü Senaryo: Gelir ${metrics.arr.displayValue} bazından yaklaşık $${Math.round(worstRevenue / 1_000).toLocaleString("en-US")}k seviyesine düşer; edinim yavaşlar ve CAC yükselirse risk artar. Nakit yakımı ${metrics.monthlyBurn.displayValue}; finansal pist ${worstRunway} aya sıkışır. Risk: ${investmentScore.topRisks[0] || "yürütme riski"}. Karar: kanıt noktaları iyileşene kadar harcamayı sınırlayın.`
     ),
     reportText(
       language,
@@ -1865,8 +1886,8 @@ function buildCanonicalScenarioAnalysis(context: AiFinancialModelContext, langua
     ),
     reportText(
       language,
-      `Planning assumption — Best Case: Revenue expands toward ${formatPlanUsd(bestRevenue)} with stronger conversion and retention. Year 3 revenue reaches ${revenueForecast[2] ? formatPlanUsd(revenueForecast[2].revenue) : metrics.arr.displayValue}. Burn remains tied to the model; runway extends to ${Math.round(baseRunway * 1.2)} months. Decision: accelerate only after validating the channel.`,
-      `Planlama varsayımı — En İyi Senaryo: Gelir ${formatPlanUsd(bestRevenue)} seviyesine çıkar; daha güçlü dönüşüm ve elde tutma varsayımına dayanır. 3. yıl geliri ${revenueForecast[2] ? formatPlanUsd(revenueForecast[2].revenue) : metrics.arr.displayValue} seviyesine ulaşır. Nakit yakımı modele bağlı kalır; finansal pist ${Math.round(baseRunway * 1.2)} aya uzar. Karar: kanalı yalnızca doğrulandıktan sonra hızlandırın.`
+      `Planning assumption — Best Case: Revenue expands toward ${formatPlanUsd(bestRevenue)} with stronger conversion and retention. Year 3 revenue reaches ${revenueForecast[2] ? formatPlanUsd(revenueForecast[2].revenue) : metrics.arr.displayValue}. Burn remains tied to the model; runway extends to ${bestRunway} months. Decision: accelerate only after validating the channel.`,
+      `Planlama varsayımı — En İyi Senaryo: Gelir ${formatPlanUsd(bestRevenue)} seviyesine çıkar; daha güçlü dönüşüm ve elde tutma varsayımına dayanır. 3. yıl geliri ${revenueForecast[2] ? formatPlanUsd(revenueForecast[2].revenue) : metrics.arr.displayValue} seviyesine ulaşır. Nakit yakımı modele bağlı kalır; finansal pist ${bestRunway} aya uzar. Karar: kanalı yalnızca doğrulandıktan sonra hızlandırın.`
     ),
   ].join("\n");
 }
@@ -1887,13 +1908,13 @@ function buildCanonicalKpiDashboard(context: AiFinancialModelContext, language: 
     ),
     reportText(
       language,
-      "Activation: Validation Required | Target: prove first paid activation from qualified demand before scaling | Status: Validation required",
-      "Aktivasyon: Doğrulama gerekli | Hedef: ölçeklemeden önce nitelikli talepten ilk ücretli aktivasyonu kanıtla | Durum: Doğrulama gerekli"
+      `Activation: Validation Required | Target: prove the first paid activation from ${context.inputs.targetCustomer} on the ${context.inputs.pricingModel} offer before scaling | Status: Validation required`,
+      `Aktivasyon: Doğrulama gerekli | Hedef: ölçeklemeden önce ${context.inputs.targetCustomer} için ${context.inputs.pricingModel} teklifinden ilk ücretli aktivasyonu kanıtla | Durum: Doğrulama gerekli`
     ),
     reportText(
       language,
-      "Retention: Validation Required | Target: validate repeat purchase or renewal behavior before increasing acquisition spend | Status: Validation required",
-      "Elde Tutma: Doğrulama gerekli | Hedef: edinim harcamasını artırmadan önce tekrar satın alma veya yenileme davranışını doğrula | Durum: Doğrulama gerekli"
+      `Retention: Validation Required | Target: validate repeat purchase or renewal behavior for ${context.inputs.targetCustomer} before increasing acquisition spend | Status: Validation required`,
+      `Elde Tutma: Doğrulama gerekli | Hedef: edinim harcamasını artırmadan önce ${context.inputs.targetCustomer} için tekrar satın alma veya yenileme davranışını doğrula | Durum: Doğrulama gerekli`
     ),
     reportText(
       language,
@@ -1912,13 +1933,13 @@ function buildCanonicalKpiDashboard(context: AiFinancialModelContext, language: 
     ),
     reportText(
       language,
-      "Sales cycle: Validation Required | Target: measure time from qualified lead to first paid conversion | Status: Validation required",
-      "Satış Döngüsü: Doğrulama gerekli | Hedef: nitelikli adaydan ilk ücretli dönüşüme kadar geçen süreyi ölç | Durum: Doğrulama gerekli"
+      `Sales cycle: Validation Required | Target: measure time from a qualified ${context.inputs.targetCustomer} lead to first paid conversion in the ${context.inputs.businessModel} model | Status: Validation required`,
+      `Satış Döngüsü: Doğrulama gerekli | Hedef: ${context.inputs.businessModel} modelinde nitelikli ${context.inputs.targetCustomer} adayından ilk ücretli dönüşüme kadar geçen süreyi ölç | Durum: Doğrulama gerekli`
     ),
     reportText(
       language,
-      "Conversion: Validation Required | Target: prove repeatable conversion before scaling spend | Status: Validation required",
-      "Dönüşüm: Doğrulama gerekli | Hedef: harcamayı ölçeklemeden önce tekrarlanabilir dönüşümü kanıtla | Durum: Doğrulama gerekli"
+      `Conversion: Validation Required | Target: prove repeatable conversion from ${context.inputs.targetCustomer} on the ${context.inputs.pricingModel} offer before scaling spend | Status: Validation required`,
+      `Dönüşüm: Doğrulama gerekli | Hedef: harcamayı ölçeklemeden önce ${context.inputs.targetCustomer} için ${context.inputs.pricingModel} teklifinden tekrarlanabilir dönüşümü kanıtla | Durum: Doğrulama gerekli`
     ),
   ].join("\n");
 }
@@ -1928,19 +1949,19 @@ function buildCanonicalKpiGovernance(context: AiFinancialModelContext, language:
     language === "Turkish"
       ? [
           ["Edinim", "Growth Lead", `${Math.ceil(context.revenueForecast[0].customers / 12).toLocaleString("en-US")} net yeni müşteri/ay`, "Hedef 2 hafta üst üste kaçarsa", "Kanal karmasını ve edinim harcamasını yeniden tahsis et"],
-          ["Aktivasyon", "Product Lead", "İlk ücretli aktivasyonu doğrula", "Nitelikli talep ödemeye dönüşmezse", "Onboarding, teklif ve fiyatlandırma testini daralt"],
-          ["Elde Tutma", "Founder / Ops", "Tekrar satın alma veya yenileme kanıtı", "Tekrar davranışı zayıf kalırsa", "Ürün kapsamını ve müşteri başarı ritmini gözden geçir"],
+          ["Aktivasyon", "Product Lead", `${context.inputs.targetCustomer} için ilk ücretli aktivasyonu ${context.inputs.pricingModel} teklifinde doğrula`, "Nitelikli talep ödemeye dönüşmezse", "Onboarding, teklif ve fiyatlandırma testini daralt"],
+          ["Elde Tutma", "Founder / Ops", `${context.inputs.targetCustomer} için tekrar satın alma veya yenileme kanıtı`, "Tekrar davranışı zayıf kalırsa", "Ürün kapsamını ve müşteri başarı ritmini gözden geçir"],
           ["Gelir", "Finance Lead", `${context.metrics.mrr.displayValue} aylık baz senaryo`, "Gelir modeli baz senaryonun altında kalırsa", "Fiyat, paket ve kanal varsayımlarını yeniden test et"],
           ["CAC", "Growth Lead", `${context.metrics.cac.displayValue} veya daha iyi`, "CAC geri ödeme eşiğini aşarsa", "Ücretli edinimi yavaşlat ve organik/ortak kanal testlerine kay"],
-          ["Dönüşüm", "Sales / GTM", "Tekrarlanabilir ücretli dönüşüm", "Nitelikli adaylar ödeme yapmazsa", "ICP, mesaj ve satış sürecini yeniden konumlandır"],
+          ["Dönüşüm", "Sales / GTM", `${context.inputs.targetCustomer} için tekrarlanabilir ücretli dönüşüm`, "Nitelikli adaylar ödeme yapmazsa", `${context.inputs.businessModel} modelinde ICP, mesaj ve satış sürecini yeniden konumlandır`],
         ]
       : [
           ["Acquisition", "Growth Lead", `${Math.ceil(context.revenueForecast[0].customers / 12).toLocaleString("en-US")} net new customers/month`, "Target is missed for 2 consecutive weeks", "Reallocate channel mix and acquisition spend"],
-          ["Activation", "Product Lead", "Validate first paid activation", "Qualified demand does not convert to payment", "Narrow onboarding, offer, and pricing tests"],
-          ["Retention", "Founder / Ops", "Evidence of repeat purchase or renewal", "Repeat behavior remains weak", "Review product scope and customer success cadence"],
+          ["Activation", "Product Lead", `Validate first paid activation from ${context.inputs.targetCustomer} on the ${context.inputs.pricingModel} offer`, "Qualified demand does not convert to payment", "Narrow onboarding, offer, and pricing tests"],
+          ["Retention", "Founder / Ops", `Evidence of repeat purchase or renewal from ${context.inputs.targetCustomer}`, "Repeat behavior remains weak", "Review product scope and customer success cadence"],
           ["Revenue", "Finance Lead", `${context.metrics.mrr.displayValue} monthly base case`, "Revenue model falls below base case", "Retest pricing, packaging, and channel assumptions"],
           ["CAC", "Growth Lead", `${context.metrics.cac.displayValue} or better`, "CAC exceeds payback threshold", "Slow paid acquisition and shift to organic/partner channel tests"],
-          ["Conversion", "Sales / GTM", "Repeatable paid conversion", "Qualified leads do not pay", "Reposition ICP, message, and sales process"],
+          ["Conversion", "Sales / GTM", `Repeatable paid conversion from ${context.inputs.targetCustomer}`, "Qualified leads do not pay", `Reposition ICP, message, and sales process for the ${context.inputs.businessModel} model`],
         ];
 
   return rows
@@ -1961,16 +1982,49 @@ function getVisibleDecision(context: AiFinancialModelContext) {
   return "HOLD";
 }
 
-function buildCanonicalFounderScore(context: AiFinancialModelContext, language: ResponseLanguage) {
+// The founderScore prompt (plan.ts) asks the model for a concrete,
+// company-specific explanation per dimension, but the canonical builder
+// used to ignore parsed.founderScore entirely and always print the same
+// six generic definition sentences. The numeric scores still come from
+// the deterministic scoring engine (they must stay consistent with the
+// rest of the report), but the explanation clause now prefers the
+// model's own reasoning for this business when it actually wrote one.
+function extractFounderDimensionExplanation(content: string, label: string) {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(
+    `${escapedLabel}[^\\n]*?(?:\\d{1,3}\\s*(?:/\\s*100|%))?\\s*[-–—:]\\s*([^\\n]{20,320})`,
+    "i"
+  ).exec(content);
+  const explanation = match?.[1]?.trim().replace(/[.!?]+\s*$/, "");
+
+  return explanation && explanation.length >= 20 ? `${explanation}.` : "";
+}
+
+function buildCanonicalFounderScore(
+  context: AiFinancialModelContext,
+  parsed: Record<string, unknown>,
+  language: ResponseLanguage
+) {
   const score = context.investmentScore;
   const founder = score.decisionEngine.founderScore;
   const founderReasoning = founder.reasoning.join(" | ");
+  const modelFounderScoreText =
+    typeof parsed.founderScore === "string"
+      ? sanitizeVisibleReportContent(parsed.founderScore)
+      : "";
   const extractReasoningScore = (label: string) => {
     const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const match = new RegExp(`${escapedLabel}:\\s*(\\d+)%`, "i").exec(founderReasoning);
 
     return match?.[1] || "Validation Required";
   };
+  const dimensionExplanation = (englishLabel: string, turkishLabel: string, fallback: string) =>
+    (modelFounderScoreText &&
+      extractFounderDimensionExplanation(
+        modelFounderScoreText,
+        language === "Turkish" ? turkishLabel : englishLabel
+      )) ||
+    fallback;
   const scoreValue = (value: string) => {
     const parsed = Number(value);
 
@@ -1993,15 +2047,51 @@ function buildCanonicalFounderScore(context: AiFinancialModelContext, language: 
       7
   );
 
+  const ideaQualityExplanation = dimensionExplanation(
+    "Idea Quality",
+    "Fikir Kalitesi",
+    reportText(language, "The opportunity is evaluated on market pull, model strength, and economic potential before founder evidence is considered.", "Fırsat, kurucu kanıtından önce pazar çekimi, model gücü ve ekonomik potansiyel üzerinden değerlendirilir.")
+  );
+  const marketAttractivenessExplanation = dimensionExplanation(
+    "Market Attractiveness",
+    "Pazar Çekiciliği",
+    reportText(language, "The market appears attractive if reachable demand and an obtainable beachhead can be validated.", "Erişilebilir talep ve elde edilebilir başlangıç pazarı doğrulanırsa pazar çekici görünür.")
+  );
+  const businessModelQualityExplanation = dimensionExplanation(
+    "Business Model Quality",
+    "İş Modeli Kalitesi",
+    reportText(language, "The model depends on repeat purchase, gross margin discipline, and a payback path that can survive real acquisition costs.", "Model; tekrar satın alma, brüt marj disiplini ve gerçek edinim maliyetlerine dayanabilecek geri ödeme yoluna bağlıdır.")
+  );
+  const validationConfidenceExplanation = dimensionExplanation(
+    "Validation Confidence",
+    "Doğrulama Güveni",
+    reportText(language, "Missing traction lowers confidence, not the underlying idea quality.", "Eksik çekiş, temel fikir kalitesini değil güven düzeyini düşürür.")
+  );
+  const executionComplexityExplanation = dimensionExplanation(
+    "Execution Complexity",
+    "Yürütme Karmaşıklığı",
+    reportText(language, "Execution requires disciplined launch sequencing, channel proof, and operational control.", "Yürütme disiplinli lansman sıralaması, kanal kanıtı ve operasyonel kontrol gerektirir.")
+  );
+  const evidenceConfidenceExplanation = dimensionExplanation(
+    "Evidence Confidence",
+    "Kanıt Güveni",
+    reportText(language, "Evidence remains directional until customer, pricing, retention, and acquisition data are observed.", "Müşteri, fiyatlandırma, elde tutma ve edinim verileri gözlemlenene kadar kanıtlar yön göstericidir.")
+  );
+  const founderEvidenceExplanation = dimensionExplanation(
+    "Founder Evidence",
+    "Kurucu Kanıtı",
+    reportText(language, "Founder readiness should be validated through domain experience, operating capacity, and the ability to run the first proof cycles.", "Kurucu hazırlığı alan deneyimi, operasyon kapasitesi ve ilk kanıt döngülerini yürütebilme becerisiyle doğrulanmalıdır.")
+  );
+
   return [
     reportText(language, `Founder Readiness Score: ${overallScore}/100`, `Kurucu Hazırlık Skoru: ${overallScore}/100`),
-    reportText(language, `Idea Quality: ${ideaQuality}/100 - The opportunity is evaluated on market pull, model strength, and economic potential before founder evidence is considered.`, `Fikir Kalitesi: ${ideaQuality}/100 - Fırsat, kurucu kanıtından önce pazar çekimi, model gücü ve ekonomik potansiyel üzerinden değerlendirilir.`),
-    reportText(language, `Market Attractiveness: ${marketAttractiveness}/100 - The market appears attractive if reachable demand and an obtainable beachhead can be validated.`, `Pazar Çekiciliği: ${marketAttractiveness}/100 - Erişilebilir talep ve elde edilebilir başlangıç pazarı doğrulanırsa pazar çekici görünür.`),
-    reportText(language, `Business Model Quality: ${businessModelQuality}/100 - The model depends on repeat purchase, gross margin discipline, and a payback path that can survive real acquisition costs.`, `İş Modeli Kalitesi: ${businessModelQuality}/100 - Model; tekrar satın alma, brüt marj disiplini ve gerçek edinim maliyetlerine dayanabilecek geri ödeme yoluna bağlıdır.`),
-    reportText(language, `Validation Confidence: ${validationConfidence}/100 - Missing traction lowers confidence, not the underlying idea quality.`, `Doğrulama Güveni: ${validationConfidence}/100 - Eksik çekiş, temel fikir kalitesini değil güven düzeyini düşürür.`),
-    reportText(language, `Execution Complexity: ${executionComplexity}/100 - Execution requires disciplined launch sequencing, channel proof, and operational control.`, `Yürütme Karmaşıklığı: ${executionComplexity}/100 - Yürütme disiplinli lansman sıralaması, kanal kanıtı ve operasyonel kontrol gerektirir.`),
-    reportText(language, `Evidence Confidence: ${evidenceConfidence}/100 - Evidence remains directional until customer, pricing, retention, and acquisition data are observed.`, `Kanıt Güveni: ${evidenceConfidence}/100 - Müşteri, fiyatlandırma, elde tutma ve edinim verileri gözlemlenene kadar kanıtlar yön göstericidir.`),
-    reportText(language, `Founder Evidence: ${founderEvidence}/100 - Founder readiness should be validated through domain experience, operating capacity, and the ability to run the first proof cycles.`, `Kurucu Kanıtı: ${founderEvidence}/100 - Kurucu hazırlığı alan deneyimi, operasyon kapasitesi ve ilk kanıt döngülerini yürütebilme becerisiyle doğrulanmalıdır.`),
+    reportText(language, `Idea Quality: ${ideaQuality}/100 - ${ideaQualityExplanation}`, `Fikir Kalitesi: ${ideaQuality}/100 - ${ideaQualityExplanation}`),
+    reportText(language, `Market Attractiveness: ${marketAttractiveness}/100 - ${marketAttractivenessExplanation}`, `Pazar Çekiciliği: ${marketAttractiveness}/100 - ${marketAttractivenessExplanation}`),
+    reportText(language, `Business Model Quality: ${businessModelQuality}/100 - ${businessModelQualityExplanation}`, `İş Modeli Kalitesi: ${businessModelQuality}/100 - ${businessModelQualityExplanation}`),
+    reportText(language, `Validation Confidence: ${validationConfidence}/100 - ${validationConfidenceExplanation}`, `Doğrulama Güveni: ${validationConfidence}/100 - ${validationConfidenceExplanation}`),
+    reportText(language, `Execution Complexity: ${executionComplexity}/100 - ${executionComplexityExplanation}`, `Yürütme Karmaşıklığı: ${executionComplexity}/100 - ${executionComplexityExplanation}`),
+    reportText(language, `Evidence Confidence: ${evidenceConfidence}/100 - ${evidenceConfidenceExplanation}`, `Kanıt Güveni: ${evidenceConfidence}/100 - ${evidenceConfidenceExplanation}`),
+    reportText(language, `Founder Evidence: ${founderEvidence}/100 - ${founderEvidenceExplanation}`, `Kurucu Kanıtı: ${founderEvidence}/100 - ${founderEvidenceExplanation}`),
   ].join("\n");
 }
 
@@ -2132,6 +2222,78 @@ function buildRiskResponse(
   };
 }
 
+type RiskLevel = "High" | "Medium" | "Low";
+
+function riskLevelText(level: RiskLevel, language: ResponseLanguage) {
+  if (level === "High") return reportText(language, "High", "Yüksek");
+  if (level === "Low") return reportText(language, "Low", "Düşük");
+  return reportText(language, "Medium", "Orta");
+}
+
+// Probability/Impact used to be assigned purely by array index (first
+// risk always High/High/Critical, every other risk always Medium/
+// Medium/Material) regardless of what the risk actually was or how far
+// the underlying metric missed its benchmark. This derives both from
+// the real metric gap so two reports with different severities of the
+// same risk type (e.g. payback 1.1x vs 3x over benchmark) read
+// differently, instead of identically.
+function assessRiskLevels(
+  risk: string,
+  context: AiFinancialModelContext
+): { probability: RiskLevel; impact: RiskLevel } {
+  const { metrics, benchmark, investmentScore } = context;
+
+  if (/\b(payback|geri ödeme)\b/i.test(risk)) {
+    const overBenchmarkRatio = metrics.cacPayback.value / Math.max(1, benchmark.ranges.cacPayback.high);
+    return {
+      probability: overBenchmarkRatio >= 1.5 ? "High" : overBenchmarkRatio > 1 ? "Medium" : "Low",
+      impact: "High",
+    };
+  }
+
+  if (/\b(runway|finansal pist)\b/i.test(risk)) {
+    return {
+      probability: metrics.runway.value < 6 ? "High" : metrics.runway.value < 12 ? "Medium" : "Low",
+      impact: "High",
+    };
+  }
+
+  if (/\b(capital efficiency|sermaye verimliliği)\b/i.test(risk)) {
+    const burdenRatio = metrics.investmentNeeded.value / Math.max(1, metrics.arr.value);
+    return {
+      probability: burdenRatio >= 8 ? "High" : burdenRatio >= 4 ? "Medium" : "Low",
+      impact: "High",
+    };
+  }
+
+  if (/\b(confidence|güven)\b/i.test(risk)) {
+    const lowConfidenceCount = Object.values(metrics).filter(
+      (metric) => metric.confidence === "Low"
+    ).length;
+    return {
+      probability: lowConfidenceCount >= 4 ? "High" : lowConfidenceCount >= 2 ? "Medium" : "Low",
+      impact: "Medium",
+    };
+  }
+
+  if (/\b(execution risk|yürütme riski)\b/i.test(risk)) {
+    const executionCategory = investmentScore.categories.executionRisk;
+    const ratio = executionCategory.score / Math.max(1, executionCategory.maximumScore);
+    return {
+      probability: ratio < 0.45 ? "High" : ratio < 0.65 ? "Medium" : "Low",
+      impact: "High",
+    };
+  }
+
+  return { probability: "Medium", impact: "Medium" };
+}
+
+function riskSeverityLevel(probability: RiskLevel, impact: RiskLevel): RiskLevel {
+  if (probability === "High" && impact === "High") return "High";
+  if (probability === "Low" && impact === "Low") return "Low";
+  return "Medium";
+}
+
 function buildRiskMatrix(context: AiFinancialModelContext, language: ResponseLanguage) {
   const risks = context.investmentScore.topRisks.length
     ? context.investmentScore.topRisks
@@ -2139,10 +2301,17 @@ function buildRiskMatrix(context: AiFinancialModelContext, language: ResponseLan
       ? ["Talep doğrulama riski", "CAC ve geri ödeme riski", "Yürütme sıralaması riski"]
       : ["Demand validation risk", "CAC and payback risk", "Execution sequencing risk"];
 
-  return risks.slice(0, 4).map((risk, index) => {
-    const probability = index === 0 ? reportText(language, "High", "Yüksek") : reportText(language, "Medium", "Orta");
-    const impact = index === 0 ? reportText(language, "High", "Yüksek") : reportText(language, "Medium", "Orta");
-    const severity = index === 0 ? reportText(language, "Critical", "Kritik") : reportText(language, "Material", "Önemli");
+  return risks.slice(0, 4).map((risk) => {
+    const { probability: probabilityLevel, impact: impactLevel } = assessRiskLevels(risk, context);
+    const severityLevel = riskSeverityLevel(probabilityLevel, impactLevel);
+    const probability = riskLevelText(probabilityLevel, language);
+    const impact = riskLevelText(impactLevel, language);
+    const severity =
+      severityLevel === "High"
+        ? reportText(language, "Critical", "Kritik")
+        : severityLevel === "Low"
+          ? reportText(language, "Minor", "Küçük")
+          : reportText(language, "Material", "Önemli");
     const response = buildRiskResponse(risk, context, language);
 
     return reportText(
@@ -2153,12 +2322,70 @@ function buildRiskMatrix(context: AiFinancialModelContext, language: ResponseLan
   });
 }
 
+const swotGroupHeaderKeys: Record<string, "strengths" | "weaknesses" | "opportunities" | "threats"> = {
+  strengths: "strengths",
+  "güçlü yönler": "strengths",
+  weaknesses: "weaknesses",
+  "zayıf yönler": "weaknesses",
+  opportunities: "opportunities",
+  fırsatlar: "opportunities",
+  threats: "threats",
+  tehditler: "threats",
+};
+
+// The model receives a well-anchored SWOT prompt (plan.ts's swotAnalysis
+// field: "anchor every bullet to a concrete capability... from this
+// company") and parsed.swotAnalysis carries that real answer, but
+// buildCanonicalSwot used to never read it -- it replaced the model's
+// company-specific bullets with the same ~8 fixed sentences on every
+// report. This recovers the model's own bullets per group so the canned
+// sentences below only fill gaps, not replace real analysis.
+function parseSwotGroupBullets(content: string) {
+  const groups: Record<"strengths" | "weaknesses" | "opportunities" | "threats", string[]> = {
+    strengths: [],
+    weaknesses: [],
+    opportunities: [],
+    threats: [],
+  };
+  let current: keyof typeof groups | null = null;
+
+  for (const rawLine of sanitizeVisibleReportContent(content).split("\n")) {
+    const line = rawLine.trim().replace(/^\*+|\*+$/g, "");
+    if (!line) continue;
+
+    const headerMatch = line.match(
+      /^(strengths|weaknesses|opportunities|threats|güçlü yönler|zayıf yönler|fırsatlar|tehditler)\s*:?\s*$/i
+    );
+    if (headerMatch) {
+      current = swotGroupHeaderKeys[headerMatch[1].toLowerCase()] ?? current;
+      continue;
+    }
+
+    const bulletMatch = line.match(/^[-*•]\s*(.+)$/);
+    if (current && bulletMatch) {
+      const bullet = bulletMatch[1].trim();
+      if (bullet.length >= 15) groups[current].push(bullet);
+    }
+  }
+
+  return groups;
+}
+
+function pickSwotBullets(modelBullets: string[], fallbackBullets: string[]) {
+  if (modelBullets.length >= 2) return modelBullets.slice(0, 4);
+  return [...modelBullets, ...fallbackBullets].slice(0, 3);
+}
+
 function buildCanonicalSwot(
   context: AiFinancialModelContext,
   parsed: Record<string, unknown>,
   language: ResponseLanguage = "English"
 ) {
   const score = context.investmentScore;
+  const modelSwot =
+    typeof parsed.swotAnalysis === "string"
+      ? parseSwotGroupBullets(parsed.swotAnalysis)
+      : { strengths: [], weaknesses: [], opportunities: [], threats: [] };
   const opportunity =
     typeof parsed.marketOpportunity === "string"
       ? sanitizeVisibleReportContent(parsed.marketOpportunity).split(/[.\n]/)[0]
@@ -2168,21 +2395,34 @@ function buildCanonicalSwot(
       ? sanitizeVisibleReportContent(parsed.risks).split(/[.\n]/)[0]
       : "";
 
+  const strengths = pickSwotBullets(modelSwot.strengths, [
+    reportText(language, `${context.inputs.industry} focus gives the founder a clearer beachhead than a broad generic launch.`, `${context.inputs.industry} odağı, kurucuya geniş ve jenerik bir lansmandan daha net bir başlangıç pazarı sağlar.`),
+    reportText(language, `${context.inputs.businessModel} creates a testable revenue path if pricing and repeat demand are validated.`, `${context.inputs.businessModel}, fiyatlandırma ve tekrar talep doğrulanırsa test edilebilir bir gelir yolu oluşturur.`),
+    reportText(language, `${context.metrics.grossMargin.displayValue} gross margin can support reinvestment if actual COGS confirms the benchmark.`, `Gerçek COGS referansı doğrularsa ${context.metrics.grossMargin.displayValue} brüt marj yeniden yatırımı destekleyebilir.`),
+  ]);
+  const weaknesses = pickSwotBullets(modelSwot.weaknesses, [
+    reportText(language, "Customer demand, willingness to pay, and retention remain unproven until primary validation is completed.", "Birincil doğrulama tamamlanana kadar müşteri talebi, ödeme isteği ve elde tutma kanıtlanmamış kalır."),
+    reportText(language, `${context.metrics.cacPayback.displayValue} payback is still a planning assumption until acquisition channels are tested.`, `Edinim kanalları test edilene kadar ${context.metrics.cacPayback.displayValue} geri ödeme hâlâ bir planlama varsayımıdır.`),
+    reportText(language, "Founder capacity and operating proof need evidence before scaling capital.", "Sermaye ölçeklenmeden önce kurucu kapasitesi ve operasyon kanıtı gereklidir."),
+  ]);
+  const opportunities = pickSwotBullets(modelSwot.opportunities, [
+    opportunity || reportText(language, "Market opportunity depends on validating reachable demand before expansion.", "Pazar fırsatı, genişlemeden önce erişilebilir talebin doğrulanmasına bağlıdır."),
+    reportText(language, "The beachhead ICP provides a focused near-term capture target if conversion evidence is proven.", "Dönüşüm kanıtı oluşursa başlangıç ICP'si odaklı yakın vadeli kazanım hedefi sağlar."),
+  ]);
+  const threats = pickSwotBullets(modelSwot.threats, [
+    threat || score.topRisks[0] || reportText(language, "Execution and validation risk remain the primary threats.", "Yürütme ve doğrulama riski temel tehdit olmaya devam eder."),
+    score.topRisks[1] || reportText(language, "Capital efficiency can deteriorate if CAC or payback misses the model.", "CAC veya geri ödeme modeli kaçırırsa sermaye verimliliği bozulabilir."),
+  ]);
+
   return [
     reportLabel(language, "Strengths:", "Güçlü Yönler:"),
-    reportText(language, `- ${context.inputs.industry} focus gives the founder a clearer beachhead than a broad generic launch.`, `- ${context.inputs.industry} odağı, kurucuya geniş ve jenerik bir lansmandan daha net bir başlangıç pazarı sağlar.`),
-    reportText(language, `- ${context.inputs.businessModel} creates a testable revenue path if pricing and repeat demand are validated.`, `- ${context.inputs.businessModel}, fiyatlandırma ve tekrar talep doğrulanırsa test edilebilir bir gelir yolu oluşturur.`),
-    reportText(language, `- ${context.metrics.grossMargin.displayValue} gross margin can support reinvestment if actual COGS confirms the benchmark.`, `- Gerçek COGS referansı doğrularsa ${context.metrics.grossMargin.displayValue} brüt marj yeniden yatırımı destekleyebilir.`),
+    ...strengths.map((bullet) => `- ${bullet}`),
     reportLabel(language, "Weaknesses:", "Zayıf Yönler:"),
-    reportText(language, "- Customer demand, willingness to pay, and retention remain unproven until primary validation is completed.", "- Birincil doğrulama tamamlanana kadar müşteri talebi, ödeme isteği ve elde tutma kanıtlanmamış kalır."),
-    reportText(language, `- ${context.metrics.cacPayback.displayValue} payback is still a planning assumption until acquisition channels are tested.`, `- Edinim kanalları test edilene kadar ${context.metrics.cacPayback.displayValue} geri ödeme hâlâ bir planlama varsayımıdır.`),
-    reportText(language, "- Founder capacity and operating proof need evidence before scaling capital.", "- Sermaye ölçeklenmeden önce kurucu kapasitesi ve operasyon kanıtı gereklidir."),
+    ...weaknesses.map((bullet) => `- ${bullet}`),
     reportLabel(language, "Opportunities:", "Fırsatlar:"),
-    `- ${opportunity || reportText(language, "Market opportunity depends on validating reachable demand before expansion.", "Pazar fırsatı, genişlemeden önce erişilebilir talebin doğrulanmasına bağlıdır.")}`,
-    reportText(language, "- The beachhead ICP provides a focused near-term capture target if conversion evidence is proven.", "- Dönüşüm kanıtı oluşursa başlangıç ICP'si odaklı yakın vadeli kazanım hedefi sağlar."),
+    ...opportunities.map((bullet) => `- ${bullet}`),
     reportLabel(language, "Threats:", "Tehditler:"),
-    `- ${threat || score.topRisks[0] || reportText(language, "Execution and validation risk remain the primary threats.", "Yürütme ve doğrulama riski temel tehdit olmaya devam eder.")}`,
-    `- ${score.topRisks[1] || reportText(language, "Capital efficiency can deteriorate if CAC or payback misses the model.", "CAC veya geri ödeme modeli kaçırırsa sermaye verimliliği bozulabilir.")}`,
+    ...threats.map((bullet) => `- ${bullet}`),
   ].join("\n");
 }
 
@@ -2423,7 +2663,7 @@ function normalizeFullPlanReport(
       : buildCanonicalKpiDashboard(context, language)
   );
   normalized.kpis = buildCanonicalKpiGovernance(context, language);
-  normalized.founderScore = buildCanonicalFounderScore(context, language);
+  normalized.founderScore = buildCanonicalFounderScore(context, parsed, language);
   // Single Executive Decision layer: Final Decision, Confidence, Why,
   // Biggest Risks, Biggest Opportunity, and the First 90-Day Action Plan --
   // and nothing else. No second summary, no confidence rollup, and no
@@ -5558,12 +5798,24 @@ Write only the content for this section. Do not write a JSON object, field name,
         const cachedBusinessResearch = getCachedResearchFromReportData(
           cachedFullReport.responseData
         );
-        const cachedUnifiedFinancialContext = cachedBusinessResearch
+        const cachedMarketResearchCoverageResult = cachedBusinessResearch
           ? applyMarketResearchCoverageToContext(
               canonicalFinancialAssumptions,
               cachedBusinessResearch,
               promptText
-            ).context
+            )
+          : null;
+        const cachedUnifiedFinancialContext = cachedMarketResearchCoverageResult
+          ? {
+              ...cachedMarketResearchCoverageResult.context,
+              investmentScore: {
+                ...cachedMarketResearchCoverageResult.context.investmentScore,
+                ...refreshInvestmentNarrativeFromResearchCoverage(
+                  cachedMarketResearchCoverageResult.context.investmentScore,
+                  cachedMarketResearchCoverageResult.context
+                ),
+              },
+            }
           : canonicalFinancialAssumptions;
         const parsedCachedReport = parseFullPlanReport(
           cachedFullReport.responseText,
@@ -5685,8 +5937,24 @@ Write only the content for this section. Do not write a JSON object, field name,
         businessResearch,
         promptText
       ).context;
+      // Recovers score.categories/strengths/weaknesses/topRisks -- the
+      // Executive Summary decision layer's actual source -- from the same
+      // real evidence that applyMarketResearchCoverageToContext already
+      // used to rescore decisionEngine and confidence above, so the
+      // narrative and the confidence number are no longer computed from
+      // two different (one evidence-aware, one not) inputs.
+      const researchAwareFinancialContext = {
+        ...unifiedFinancialContext,
+        investmentScore: {
+          ...unifiedFinancialContext.investmentScore,
+          ...refreshInvestmentNarrativeFromResearchCoverage(
+            unifiedFinancialContext.investmentScore,
+            unifiedFinancialContext
+          ),
+        },
+      };
       const unifiedFinancialAssumptionsContext =
-        formatCanonicalFinancialAssumptions(unifiedFinancialContext);
+        formatCanonicalFinancialAssumptions(researchAwareFinancialContext);
       const adaptiveWriterPlan = createAdaptiveReportWriterPlan({
           expertiseProfile: dynamicResearchPlanningInput.expertiseProfile,
           reportPlan: dynamicResearchPlanningInput.reportPlan,
@@ -5840,7 +6108,7 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             controller.enqueue(encoder.encode(chunk));
           };
 
-          enqueue(serializePlanReportMetadataChunk(unifiedFinancialContext));
+          enqueue(serializePlanReportMetadataChunk(researchAwareFinancialContext));
 
           try {
             fullReportStage = "provider_call";
@@ -5937,7 +6205,7 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             fullReportStage = "json_parse";
             const parsedReport = parseFullPlanReport(
               responseText,
-              unifiedFinancialContext,
+              researchAwareFinancialContext,
               responseLanguage,
               promptText
             );
@@ -5949,7 +6217,7 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             const reportMetadataContext = createReportMetadataContext({
               prompt: promptText,
               report: parsedReport,
-              context: unifiedFinancialContext,
+              context: researchAwareFinancialContext,
               operationType: "plan_report",
               estimatedCostUsd,
             });
@@ -6061,7 +6329,7 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
 
             if (providerTimedOut) {
               const fallbackReport = createGroundedBusinessTimeoutFallback({
-                context: unifiedFinancialContext,
+                context: researchAwareFinancialContext,
                 research: businessResearch,
                 language: responseLanguage,
               });

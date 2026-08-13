@@ -599,6 +599,63 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
   };
 }
 
+const categoryKeyByDecisionEngineKey = {
+  marketScore: "marketOpportunity",
+  competitionScore: "competitiveAdvantage",
+  financialScore: "financialHealth",
+  executionScore: "executionRisk",
+  founderScore: "teamFounder",
+} as const satisfies Partial<
+  Record<keyof InvestmentScore["decisionEngine"], InvestmentScoreCategoryKey>
+>;
+
+// applyMarketResearchCoverageToContext (market-research-coverage.ts) already
+// rescores decisionEngine's 5 research-backed categories with real evidence
+// (coverage %, competitor breadth, verified market-size, etc.) once domain
+// research resolves -- but score.categories/strengths/weaknesses/topRisks,
+// which is what the Executive Summary decision layer and the SWOT fallback
+// bullets actually read, stayed frozen at the pre-research, keyword-matched
+// version. This propagates the same real evidence into categories and
+// re-derives strengths/weaknesses/topRisks from it, so the report's
+// decision narrative reflects the same evidence that already updated its
+// own confidence number.
+export function refreshInvestmentNarrativeFromResearchCoverage(
+  score: InvestmentScore,
+  model: FinancialModel
+): Pick<InvestmentScore, "categories" | "strengths" | "weaknesses" | "topRisks"> {
+  const categories = { ...score.categories };
+
+  for (const [decisionEngineKey, categoryKey] of Object.entries(categoryKeyByDecisionEngineKey) as [
+    keyof typeof categoryKeyByDecisionEngineKey,
+    InvestmentScoreCategoryKey,
+  ][]) {
+    const decisionCategory = score.decisionEngine[decisionEngineKey];
+    const baseCategory = categories[categoryKey];
+
+    if (!decisionCategory || !baseCategory) continue;
+
+    categories[categoryKey] = {
+      ...baseCategory,
+      score: Math.round(
+        (decisionCategory.score / decisionCategory.maximumScore) * baseCategory.maximumScore
+      ),
+      explanation: decisionCategory.reasoning.length
+        ? decisionCategory.reasoning.join("; ")
+        : baseCategory.explanation,
+      reasoning: decisionCategory.reasoning,
+    };
+  }
+
+  const categoryList = Object.values(categories);
+
+  return {
+    categories,
+    strengths: createStrengths(categoryList, model),
+    weaknesses: createWeaknesses(categoryList, model),
+    topRisks: createTopRisks(model, categoryList),
+  };
+}
+
 export function formatInvestmentScore(score: InvestmentScore) {
   const categoryRows = Object.values(score.categories)
     .map(

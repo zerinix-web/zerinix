@@ -231,14 +231,39 @@ export function resolveMarketTaxonomy(
   return softwareTaxonomies.find((taxonomy) => taxonomy.signals.test(text)) || null;
 }
 
+// No hardcoded taxonomy matched this prompt's market, so a short category
+// label has to be derived from the raw text instead. Stripping a handful
+// of English words and slicing to 120 chars assumed the prompt already
+// read like a category name ("Analyze the AI legal software market") --
+// for any non-software market, and for any non-English prompt (the
+// stopwords are English-only), that left almost the entire raw prompt --
+// budget, location, target-customer detail included -- sitting in the
+// "Category" column of every competitor row (confirmed live: a Turkish
+// car-wash business-idea prompt produced its own investment budget and
+// target customer as the category). This instead keeps only the text
+// before the first clause break, where narrative elaboration (budget,
+// location, target customer) almost always starts, strips embedded
+// currency amounts by pattern rather than by language, and caps the
+// result far shorter -- a category is a few words, not a paragraph.
+function extractDynamicProductCategory(prompt: string) {
+  const firstClause =
+    prompt.split(/[,;:.!?\n]/)[0]?.replace(/\s+/g, " ").trim() || "";
+  const withoutAmounts = firstClause
+    .replace(/[$€₺£]\s*\d[\d.,]*\s*[a-z]*\b/gi, "")
+    .replace(/\b\d[\d.,]*\s*(?:tl|try|usd|eur|gbp|k|bin|milyon|million|thousand)\b/gi, "")
+    .replace(/\b(?:analyze|analyse|market|industry|landscape|platforms?|software)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const candidate = withoutAmounts || firstClause;
+  return candidate.length <= 60
+    ? candidate
+    : candidate.slice(0, 60).replace(/\s+\S*$/, "").trim();
+}
+
 export function getMarketTaxonomyProfile(prompt: string) {
   const known = softwareTaxonomies.find((taxonomy) => taxonomy.signals.test(prompt));
   if (known) return known;
-  const productCategory = prompt
-    .replace(/\b(?:analyze|analyse|market|industry|landscape|platforms?|software)\b/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 120) || "requested market";
+  const productCategory = extractDynamicProductCategory(prompt) || "requested market";
   return {
     id: "dynamic_market",
     productCategory,

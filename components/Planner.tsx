@@ -1804,6 +1804,67 @@ function extractMarketSizeValue(content: string, label: string) {
   return compactPdfMetricValue(direct || extractMetricValue(content, label));
 }
 
+// TAM/SAM/SOM values are ranges by design ("$2.1-2.8B"), so the
+// magnitude used for chart scaling is the upper bound of the range --
+// the last number+unit found in the string, not the first.
+function parseMarketSizeMagnitude(value: string): number | null {
+  const matches = [...value.matchAll(/(\d+(?:[.,]\d+)?)\s*([kKmMbBtT])?/g)];
+  const last = matches.at(-1);
+  if (!last) return null;
+
+  const numeric = Number(last[1].replace(",", "."));
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+
+  const unit = (last[2] || "").toLowerCase();
+  const multiplier =
+    unit === "t" ? 1e12 : unit === "b" ? 1e9 : unit === "m" ? 1e6 : unit === "k" ? 1e3 : 1;
+
+  return numeric * multiplier;
+}
+
+const tamCircleMaxRadius = 17;
+const tamCircleMinRadius = 4;
+const tamCircleDefaultRadii = [tamCircleMaxRadius, 12.5, tamCircleMinRadius + 4] as const;
+
+// Radius scales with sqrt(value) so *area* -- not radius -- is
+// proportional to the underlying market-size figure, matching how a real
+// concentric market-sizing chart (the standard McKinsey/VC-deck device
+// for TAM/SAM/SOM) communicates relative scale. Falls back to a fixed,
+// always-legible set of decreasing radii whenever the parsed values are
+// missing or don't make logical sense (SAM/SOM larger than their parent
+// figure) rather than drawing a distorted or inverted diagram.
+function computeTamSamSomRadii(
+  tamValue: number | null,
+  samValue: number | null,
+  somValue: number | null
+): readonly [number, number, number] {
+  if (
+    tamValue === null ||
+    samValue === null ||
+    somValue === null ||
+    samValue > tamValue * 1.5 ||
+    somValue > samValue * 1.5
+  ) {
+    return tamCircleDefaultRadii;
+  }
+
+  const scale = tamCircleMaxRadius / Math.sqrt(tamValue);
+  const samRadius = Math.max(
+    tamCircleMinRadius + 2,
+    Math.min(tamCircleMaxRadius - 2, Math.sqrt(samValue) * scale)
+  );
+  const somRadius = Math.max(
+    tamCircleMinRadius,
+    Math.min(samRadius - 2, Math.sqrt(somValue) * scale)
+  );
+
+  if (!Number.isFinite(samRadius) || !Number.isFinite(somRadius)) {
+    return tamCircleDefaultRadii;
+  }
+
+  return [tamCircleMaxRadius, samRadius, somRadius];
+}
+
 function looksLikePromptOrInstruction(value: string) {
   return /\b(based on the entire report|would you invest|should i invest|what do you think|section to generate|report quality rules|write only|business idea\s*\/\s*goal|system prompt|internal instruction|validation prompt)\b/i.test(
     value
@@ -5116,26 +5177,38 @@ const ReportPanel = memo(function ReportPanel({
         };
 
         if (section.field === "tamSamSom") {
+          // Concentric TAM/SAM/SOM circles -- the standard consulting/
+          // VC-deck device for market sizing -- replacing the previous
+          // three stacked text rows, mirrored from ReportPdfButton.tsx so
+          // the in-app preview matches the exported PDF.
           const rows = getTamRows(section.content, visualWidth);
-          let rowY = visualY;
+          const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value));
+          const radii = computeTamSamSomRadii(magnitudes[0], magnitudes[1], magnitudes[2]);
+          const circleCenterX = bodyX + tamCircleMaxRadius + 4;
+          const circleCenterY = visualY + tamCircleMaxRadius + 3;
+
+          rows.forEach((row, index) => {
+            pdf.setFillColor(row.color);
+            pdf.circle(circleCenterX, circleCenterY, radii[index], "F");
+          });
+
+          const legendX = circleCenterX + tamCircleMaxRadius + 10;
+          const legendWidth = Math.max(20, bodyX + visualWidth - legendX);
+          const tamCircleVisualHeight = tamCircleMaxRadius * 2 + 8;
+          const legendRowHeight = (tamCircleVisualHeight - 4) / 3;
 
           rows.forEach(({ label, color, value }, index) => {
-            const rowHeight = 15;
-
-            pdf.setFillColor("#101113");
-            pdf.setDrawColor(color);
-            pdf.roundedRect(bodyX, rowY, visualWidth, rowHeight, 3, 3, "FD");
+            const rowY = visualY + 2 + index * legendRowHeight;
             pdf.setFillColor(color);
-            pdf.roundedRect(bodyX + 3, rowY + 2, 13, 5, 2.5, 2.5, "F");
-            pdf.setFontSize(6.4);
-            pdf.setTextColor(index === 2 ? "#000000" : "#ccfbf1");
-            pdf.text(label, bodyX + 5, rowY + 5.4);
+            pdf.roundedRect(legendX, rowY, 7, 4.4, 1.5, 1.5, "F");
+            pdf.setFontSize(7.2);
+            pdf.setTextColor("#a1a1aa");
+            pdf.text(label, legendX + 10, rowY + 3.8);
             pdf.setTextColor("#ccfbf1");
-            drawSingleLine(value || "—", bodyX + 20, rowY + 5.7, visualWidth - 24, 8.2, 4.2, false);
-
-            rowY += rowHeight + 3;
+            drawSingleLine(value || "—", legendX + 10, rowY + 9.4, legendWidth - 10, 8, 5, false);
           });
-          return 51;
+
+          return tamCircleVisualHeight;
         }
 
         if (section.field === "swotAnalysis") {

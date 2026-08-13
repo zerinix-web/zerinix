@@ -3554,6 +3554,12 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
   let evidenceCollection: EvidenceCollection | undefined;
   const researchRequestStartedAt = new Date().toISOString();
 
+  // The Research Execution phase itself: executeResearchPlan below drives
+  // the adapter created by createDecisionResearchProviderAdapter, which
+  // calls decision-intelligence/research-execution.ts's
+  // executeDecisionResearch per task/provider. This is the real
+  // prepareDecisionIntelligence -> executeDecisionResearch ->
+  // finalizeDecisionIntelligence call chain for this report path.
   try {
     const execution = await executeResearchPlan({
       tasks: researchPlan.plan,

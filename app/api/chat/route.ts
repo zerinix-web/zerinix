@@ -1464,6 +1464,10 @@ async function handleChatPost(req: Request) {
     })
       ? buildProfileContext(chatProfile)
       : "";
+    // Persistent user memory context: durable facts/preferences the user
+    // has explicitly asked to remember, attached to instructionsText below
+    // whenever shouldAttachUserMemoryContext determines this turn should
+    // carry them.
     const userMemoryContext = shouldAttachUserMemoryContext({
       prompt,
       messages,
@@ -1912,6 +1916,13 @@ async function handleChatPost(req: Request) {
       () => client.responses.create(
         {
           model,
+          // Equivalent to createChatResponseCapabilities(webResearch) once
+          // chatResearchContext is empty (the common case); the
+          // "&& !chatResearchContext" guard below additionally skips the
+          // live web_search tool when a validated prior research snapshot
+          // was already injected into the prompt, avoiding a redundant
+          // Responses-API web search on top of it -- so this is really
+          // createChatResponseCapabilities(webResearch && !chatResearchContext).
           ...createChatResponseCapabilities(webResearch && !chatResearchContext),
           text: { verbosity: "low" },
           instructions: instructionsText,

@@ -351,3 +351,34 @@ test("market.ts's own field prompts still explicitly forbid founder/business-pla
   assert.match(marketPromptSource, /Do not introduce business-plan, founder, product, pricing-strategy, sales-strategy, or unit-economics content/);
   assert.match(planPromptSource, /founder|Founder/); // sanity: plan.ts legitimately keeps founder content
 });
+
+// --- market-analysis/route.ts: the cache-hit path must be isolation-checked too --
+
+// Root-cause finding: plan-executor.ts's parseFullPlanReport (business_plan)
+// and parseDomainAnalysisReport (strategic_advisory) both call
+// assertReportIsolation INSIDE the shared parsing function itself, so every
+// caller -- fresh generation and cache-hit alike -- is automatically
+// covered. market-analysis/route.ts instead called assertReportIsolation as
+// a separate step bolted onto the fresh-generation flow only; its cache-hit
+// branch parsed cachedFullReport.responseText with parseFullMarketReport
+// and served it directly, with no isolation check ever run on that content
+// -- so a report cached before an isolation-related fix (or containing any
+// other foreign-report vocabulary) could be served indefinitely, unvalidated,
+// even though the validator itself was always correct. Fixed by running the
+// same check inside the cache-hit path's own try block, so a violation is
+// handled exactly like a malformed cache entry: logged, and the request
+// falls through to a fresh, validated generation.
+test("market-analysis/route.ts's cache-hit path validates isolation before ever serving a cached report", () => {
+  assert.match(
+    marketAnalysisSource,
+    /parsedCachedReport = parsedCachePayload\.report;[\s\S]{0,1400}assertReportIsolation\("market_intelligence", parsedCachedReport\)/
+  );
+  // The violation must actually be treated as a cache miss, not silently
+  // swallowed while still serving the tainted report: the catch block that
+  // logs the failure must also reset parsedCachedReport so the existing
+  // "if (!parsedCachedReport)" fallback below it is genuinely taken.
+  assert.match(
+    marketAnalysisSource,
+    /Ignoring malformed cached full report"[\s\S]{0,800}parsedCachedReport = null;/
+  );
+});

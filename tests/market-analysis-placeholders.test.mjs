@@ -98,8 +98,12 @@ test("Market Analysis visuals protect TAM cards, citations, and metric number wr
   assert.doesNotMatch(detailSource, /<span>\{bar\.label\}<\/span>/);
   assert.match(plannerSource, /getTamRows/);
   assert.match(pdfSource, /getTamRows/);
-  assert.match(plannerSource, /rowY \+= rowHeight \+ 3/);
-  assert.match(pdfSource, /rowY \+= rowHeight \+ 3/);
+  // TAM/SAM/SOM renders as concentric, area-proportional circles (the
+  // standard consulting/VC-deck market-sizing device) instead of three
+  // stacked text rows -- kept in sync between the in-app preview and the
+  // exported PDF the same way the row-based layout was.
+  assert.match(plannerSource, /computeTamSamSomRadii\(magnitudes\[0\], magnitudes\[1\], magnitudes\[2\]\)/);
+  assert.match(pdfSource, /computeTamSamSomRadii\(magnitudes\[0\], magnitudes\[1\], magnitudes\[2\]\)/);
   assert.match(plannerSource, /getSwotLayout/);
   assert.match(pdfSource, /getSwotLayout/);
   assert.match(plannerSource, /getFinancialLayout/);

@@ -569,7 +569,18 @@ type MarketGraphCopyKey =
   | "assumptionOnlyScenario"
   | "verifiedTag"
   | "estimatedTag"
-  | "assumptionTag";
+  | "assumptionTag"
+  | "noValidatedPricingEvidence"
+  | "noValidatedStrengthEvidence"
+  | "noValidatedWeaknessEvidence"
+  | "commercialVendorReasonTemplate"
+  | "excludedVendorReasonTemplate"
+  | "entityTypeGovernment"
+  | "entityTypeRegulator"
+  | "entityTypeStandardsBody"
+  | "reasonRegulator"
+  | "reasonGovernment"
+  | "reasonStandardsBody";
 
 const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, string>> = {
   English: {
@@ -584,12 +595,12 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     formulaLabel: "Formula",
     confidenceLabel: "Confidence",
     tamSamSomUnavailable:
-      "Verified TAM / SAM / SOM is unavailable. A planning estimate was not produced because the validated graph contains neither a compatible market-size endpoint nor both a validated buyer-population input and validated annual-pricing input. Vendor breadth alone is not used to fabricate market sizing.",
+      "A verified market-size figure (TAM / SAM / SOM) could not be established for this market. No comparable local, regional, or global benchmark was available to build a labeled estimate from, and the available data on buyer population and pricing was not sufficient together to construct one either. This gap reflects a lack of published data for this specific scope, not the size of the opportunity. The number of vendors identified was not used on its own to fabricate a market-size figure.",
     tableHeader:
       "| Vendor | Parent Company | Category | Segment | AI Capability | Key Use Cases | Pricing Model | Strengths | Weaknesses | Evidence Count | Confidence | Market Relevance |",
-    notEstablished: "Not established by validated evidence",
-    notPubliclyValidated: "Not publicly validated",
-    notProvided: "Not provided",
+    notEstablished: "Not disclosed in public sources",
+    notPubliclyValidated: "Not independently confirmed",
+    notProvided: "Not disclosed",
     publisherLabel: "Publisher",
     publishedLabel: "Published",
     accessedLabel: "Accessed",
@@ -602,6 +613,17 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     verifiedTag: "Verified",
     estimatedTag: "Estimated",
     assumptionTag: "Assumption",
+    noValidatedPricingEvidence: "Pricing not publicly disclosed",
+    noValidatedStrengthEvidence: "No distinct strength identified in public sources",
+    noValidatedWeaknessEvidence: "No distinct weakness identified in public sources",
+    commercialVendorReasonTemplate: "%NAME% is a commercial product vendor with evidence directly tied to %CATEGORY%.",
+    excludedVendorReasonTemplate: "%NAME% is identified by the evidence as an implementation partner, marketplace, outsourced service provider, or advisory firm rather than a commercial product vendor in this market.",
+    entityTypeGovernment: "government",
+    entityTypeRegulator: "regulator",
+    entityTypeStandardsBody: "standards body",
+    reasonRegulator: "Regulatory authority, filing platform, or disclosure system.",
+    reasonGovernment: "Government entity or official government domain.",
+    reasonStandardsBody: "Trade association, exhibition organizer, or professional/technical standards body.",
   },
   Turkish: {
     marketInfrastructureTitle: "Pazar Altyapısı",
@@ -615,12 +637,12 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     formulaLabel: "Formül",
     confidenceLabel: "Güven",
     tamSamSomUnavailable:
-      "Doğrulanmış TAM / SAM / SOM mevcut değil. Doğrulanmış grafikte uyumlu bir pazar büyüklüğü uç noktası veya birlikte doğrulanmış alıcı nüfusu ile yıllık fiyatlandırma girdileri bulunmadığı için planlama tahmini üretilmedi. Tedarikçi genişliği tek başına pazar büyüklüğü uydurmak için kullanılmaz.",
+      "Bu pazar için doğrulanmış bir TAM / SAM / SOM rakamı belirlenemedi. Etiketli bir tahmin oluşturmak için karşılaştırılabilir yerel, bölgesel veya küresel bir referans veri bulunamadı; alıcı nüfusu ve fiyatlandırmaya dair mevcut veriler de birlikte yeterli değildi. Bu boşluk, fırsatın büyüklüğünü değil, bu kapsam için yayımlanmış veri eksikliğini yansıtır. Tespit edilen tedarikçi sayısı tek başına bir pazar büyüklüğü rakamı üretmek için kullanılmamıştır.",
     tableHeader:
       "| Tedarikçi | Ana Şirket | Kategori | Segment | Yapay Zeka Yeteneği | Temel Kullanım Alanları | Fiyatlandırma Modeli | Güçlü Yönler | Zayıf Yönler | Kanıt Sayısı | Güven | Pazar Uygunluğu |",
-    notEstablished: "Doğrulanmış kanıtla belirlenmemiştir",
-    notPubliclyValidated: "Kamuya açık olarak doğrulanmamış",
-    notProvided: "Sağlanmadı",
+    notEstablished: "Kamuya açık kaynaklarda belirtilmemiş",
+    notPubliclyValidated: "Bağımsız olarak teyit edilmemiş",
+    notProvided: "Belirtilmemiş",
     publisherLabel: "Yayıncı",
     publishedLabel: "Yayın tarihi",
     accessedLabel: "Erişim tarihi",
@@ -633,6 +655,17 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     verifiedTag: "Doğrulanmış",
     estimatedTag: "Tahmini",
     assumptionTag: "Varsayım",
+    noValidatedPricingEvidence: "Fiyatlandırma bilgisi kamuya açık değil",
+    noValidatedStrengthEvidence: "Kamuya açık kaynaklarda belirgin bir güçlü yön bulunmuyor",
+    noValidatedWeaknessEvidence: "Kamuya açık kaynaklarda belirgin bir zayıf yön bulunmuyor",
+    commercialVendorReasonTemplate: "%NAME%, %CATEGORY% ile doğrudan ilişkili kanıtlara sahip ticari bir ürün tedarikçisidir.",
+    excludedVendorReasonTemplate: "Kanıtlar %NAME%'i bu pazarda ticari bir ürün tedarikçisi değil; bir uygulama ortağı, pazaryeri, dış kaynaklı hizmet sağlayıcısı veya danışmanlık firması olarak tanımlıyor.",
+    entityTypeGovernment: "kamu kurumu",
+    entityTypeRegulator: "düzenleyici kurum",
+    entityTypeStandardsBody: "standart/birlik kuruluşu",
+    reasonRegulator: "Düzenleyici kurum, başvuru platformu veya kamuyu aydınlatma sistemi.",
+    reasonGovernment: "Kamu kurumu veya resmi devlet alan adı.",
+    reasonStandardsBody: "Ticaret birliği, fuar organizatörü veya mesleki/teknik standart kuruluşu.",
   },
   German: {
     marketInfrastructureTitle: "Marktinfrastruktur",
@@ -646,11 +679,11 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     formulaLabel: "Formel",
     confidenceLabel: "Konfidenz",
     tamSamSomUnavailable:
-      "Verifizierte TAM-/SAM-/SOM-Werte sind nicht verfügbar. Es wurde keine Planungsschätzung erstellt, da der validierte Datensatz weder einen kompatiblen Marktgrößen-Endpunkt noch gleichzeitig einen validierten Käuferpopulations- und einen validierten Jahrespreis-Eingabewert enthält. Die Anbieterbreite allein wird nicht verwendet, um eine Marktgröße zu erfinden.",
+      "Für diesen Markt konnte kein verifizierter TAM-/SAM-/SOM-Wert ermittelt werden. Es lag weder ein vergleichbarer lokaler, regionaler oder globaler Referenzwert vor, um daraus eine gekennzeichnete Schätzung abzuleiten, noch reichten die verfügbaren Daten zu Käuferpopulation und Preisgestaltung gemeinsam aus, um eine eigene Schätzung zu erstellen. Diese Lücke spiegelt das Fehlen veröffentlichter Daten für diesen konkreten Rahmen wider, nicht die Größe der Chance. Die Anzahl der identifizierten Anbieter allein wurde nicht verwendet, um eine Marktgröße zu erfinden.",
     tableHeader:
       "| Anbieter | Muttergesellschaft | Kategorie | Segment | KI-Fähigkeit | Wichtigste Anwendungsfälle | Preismodell | Stärken | Schwächen | Anzahl Nachweise | Konfidenz | Marktrelevanz |",
-    notEstablished: "Durch validierte Nachweise nicht ermittelt",
-    notPubliclyValidated: "Nicht öffentlich validiert",
+    notEstablished: "In öffentlichen Quellen nicht angegeben",
+    notPubliclyValidated: "Nicht unabhängig bestätigt",
     notProvided: "Nicht angegeben",
     publisherLabel: "Herausgeber",
     publishedLabel: "Veröffentlicht",
@@ -664,6 +697,17 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     verifiedTag: "Verifiziert",
     estimatedTag: "Geschätzt",
     assumptionTag: "Annahme",
+    noValidatedPricingEvidence: "Preisinformationen nicht öffentlich verfügbar",
+    noValidatedStrengthEvidence: "Keine erkennbare Stärke in öffentlichen Quellen",
+    noValidatedWeaknessEvidence: "Keine erkennbare Schwäche in öffentlichen Quellen",
+    commercialVendorReasonTemplate: "%NAME% ist ein kommerzieller Produktanbieter mit Nachweisen, die direkt mit %CATEGORY% verbunden sind.",
+    excludedVendorReasonTemplate: "%NAME% wird durch die Nachweise als Implementierungspartner, Marktplatz, ausgelagerter Dienstleister oder Beratungsunternehmen identifiziert, nicht als kommerzieller Produktanbieter in diesem Markt.",
+    entityTypeGovernment: "Regierungsbehörde",
+    entityTypeRegulator: "Aufsichtsbehörde",
+    entityTypeStandardsBody: "Normungsorganisation",
+    reasonRegulator: "Aufsichtsbehörde, Meldeplattform oder Offenlegungssystem.",
+    reasonGovernment: "Regierungsbehörde oder offizielle Regierungsdomain.",
+    reasonStandardsBody: "Handelsverband, Messeveranstalter oder fachliche/technische Normungsorganisation.",
   },
   French: {
     marketInfrastructureTitle: "Infrastructure du marché",
@@ -677,12 +721,12 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     formulaLabel: "Formule",
     confidenceLabel: "Confiance",
     tamSamSomUnavailable:
-      "Le TAM / SAM / SOM vérifié n'est pas disponible. Aucune estimation de planification n'a été produite car le graphe validé ne contient ni un point de référence de taille de marché compatible, ni à la fois une entrée validée de population d'acheteurs et une entrée validée de tarification annuelle. L'étendue des fournisseurs seule n'est pas utilisée pour fabriquer une taille de marché.",
+      "Aucun chiffre TAM / SAM / SOM vérifié n'a pu être établi pour ce marché. Aucune référence locale, régionale ou mondiale comparable n'était disponible pour construire une estimation clairement indiquée, et les données disponibles sur la population d'acheteurs et la tarification n'étaient pas non plus suffisantes ensemble pour en construire une. Cet écart reflète l'absence de données publiées pour ce périmètre précis, et non la taille de l'opportunité. Le nombre de fournisseurs identifiés seul n'a pas été utilisé pour fabriquer un chiffre de taille de marché.",
     tableHeader:
       "| Fournisseur | Société mère | Catégorie | Segment | Capacité IA | Cas d'usage clés | Modèle tarifaire | Forces | Faiblesses | Nombre de preuves | Confiance | Pertinence pour le marché |",
-    notEstablished: "Non établi par des preuves validées",
-    notPubliclyValidated: "Non validé publiquement",
-    notProvided: "Non fourni",
+    notEstablished: "Non indiqué dans les sources publiques",
+    notPubliclyValidated: "Non confirmé de manière indépendante",
+    notProvided: "Non indiqué",
     publisherLabel: "Éditeur",
     publishedLabel: "Publié",
     accessedLabel: "Consulté",
@@ -695,6 +739,17 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     verifiedTag: "Vérifié",
     estimatedTag: "Estimé",
     assumptionTag: "Hypothèse",
+    noValidatedPricingEvidence: "Tarification non communiquée publiquement",
+    noValidatedStrengthEvidence: "Aucun point fort identifiable dans les sources publiques",
+    noValidatedWeaknessEvidence: "Aucun point faible identifiable dans les sources publiques",
+    commercialVendorReasonTemplate: "%NAME% est un fournisseur de produits commerciaux avec des preuves directement liées à %CATEGORY%.",
+    excludedVendorReasonTemplate: "%NAME% est identifié par les preuves comme un partenaire de mise en œuvre, une place de marché, un prestataire de services externalisé ou un cabinet de conseil plutôt qu'un fournisseur de produits commerciaux sur ce marché.",
+    entityTypeGovernment: "organisme public",
+    entityTypeRegulator: "organisme de régulation",
+    entityTypeStandardsBody: "organisme de normalisation",
+    reasonRegulator: "Autorité de régulation, plateforme de dépôt ou système de divulgation.",
+    reasonGovernment: "Entité gouvernementale ou domaine gouvernemental officiel.",
+    reasonStandardsBody: "Association professionnelle, organisateur de salons ou organisme de normalisation technique.",
   },
   Spanish: {
     marketInfrastructureTitle: "Infraestructura del mercado",
@@ -708,12 +763,12 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     formulaLabel: "Fórmula",
     confidenceLabel: "Confianza",
     tamSamSomUnavailable:
-      "El TAM / SAM / SOM verificado no está disponible. No se generó una estimación de planificación porque el gráfico validado no contiene ni un punto de referencia de tamaño de mercado compatible ni, a la vez, una entrada validada de población de compradores y una entrada validada de precios anuales. La amplitud de proveedores por sí sola no se utiliza para fabricar el tamaño del mercado.",
+      "No se pudo establecer una cifra verificada de TAM / SAM / SOM para este mercado. No había una referencia local, regional o global comparable para construir una estimación claramente etiquetada, y los datos disponibles sobre población de compradores y precios tampoco fueron suficientes en conjunto para construir una. Esta brecha refleja la falta de datos publicados para este alcance específico, no el tamaño de la oportunidad. El número de proveedores identificados por sí solo no se utilizó para fabricar una cifra de tamaño de mercado.",
     tableHeader:
       "| Proveedor | Empresa matriz | Categoría | Segmento | Capacidad de IA | Casos de uso clave | Modelo de precios | Fortalezas | Debilidades | Cantidad de evidencia | Confianza | Relevancia para el mercado |",
-    notEstablished: "No establecido por evidencia validada",
-    notPubliclyValidated: "No validado públicamente",
-    notProvided: "No proporcionado",
+    notEstablished: "No indicado en fuentes públicas",
+    notPubliclyValidated: "No confirmado de forma independiente",
+    notProvided: "No indicado",
     publisherLabel: "Editor",
     publishedLabel: "Publicado",
     accessedLabel: "Consultado",
@@ -726,6 +781,17 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     verifiedTag: "Verificado",
     estimatedTag: "Estimado",
     assumptionTag: "Suposición",
+    noValidatedPricingEvidence: "Precios no disponibles públicamente",
+    noValidatedStrengthEvidence: "Sin fortaleza distintiva identificada en fuentes públicas",
+    noValidatedWeaknessEvidence: "Sin debilidad distintiva identificada en fuentes públicas",
+    commercialVendorReasonTemplate: "%NAME% es un proveedor de productos comerciales con evidencia directamente vinculada a %CATEGORY%.",
+    excludedVendorReasonTemplate: "La evidencia identifica a %NAME% como un socio de implementación, mercado, proveedor de servicios subcontratado o firma consultora, no como un proveedor de productos comerciales en este mercado.",
+    entityTypeGovernment: "entidad gubernamental",
+    entityTypeRegulator: "organismo regulador",
+    entityTypeStandardsBody: "organismo de normalización",
+    reasonRegulator: "Autoridad reguladora, plataforma de presentación o sistema de divulgación.",
+    reasonGovernment: "Entidad gubernamental o dominio gubernamental oficial.",
+    reasonStandardsBody: "Asociación comercial, organizador de ferias u organismo de normalización profesional/técnica.",
   },
 };
 
@@ -790,6 +856,90 @@ function describeCompetitiveCoverage(
   }[language];
 }
 
+// vendor-intelligence.ts's field builders have no concept of report
+// language (they run before language is known) and fall back to fixed
+// English sentinel strings when evidence is missing -- confirmed live in
+// a Turkish report as "Not established by validated evidence" and "No
+// validated weakness evidence" rendered verbatim inside an otherwise
+// Turkish competitor table. Translating the known sentinel values here,
+// at the one place the target language and the raw graph are both in
+// scope, is cheaper and lower-risk than threading a language parameter
+// through the whole vendor-discovery pipeline for values that never
+// carry real information beyond "this wasn't found."
+function localizeVendorFallbackText(
+  value: string,
+  copy: Record<MarketGraphCopyKey, string>
+): string {
+  if (value === "Not established by validated evidence") return copy.notEstablished;
+  if (value === "No validated public pricing evidence") return copy.noValidatedPricingEvidence;
+  if (value === "No validated strength evidence") return copy.noValidatedStrengthEvidence;
+  if (value === "No validated weakness evidence") return copy.noValidatedWeaknessEvidence;
+  return value;
+}
+
+const commercialVendorReasonPattern =
+  /^(.+?) is a commercial product vendor with evidence directly tied to (.+?)\.$/;
+const excludedVendorReasonPattern =
+  /^Excluded: evidence identifies (.+?) as an implementation partner, marketplace, outsourced service provider, or advisory firm rather than a commercial product vendor in this market\.$/;
+
+// assessMarketRelevance (vendor-discovery.ts) builds vendor.marketRelevance
+// as an English sentence with the vendor name and category interpolated,
+// for the same no-language-context reason as above -- confirmed live as
+// the literal phrase "commercial product vendor" appearing in a Turkish
+// competitor table's last column. Both known sentence shapes are
+// reconstructed here from their own interpolated pieces rather than
+// translated word-for-word, since the vendor name and category must stay
+// exactly as evidence identified them.
+function localizeMarketRelevanceReason(
+  reason: string,
+  copy: Record<MarketGraphCopyKey, string>
+): string {
+  const relevantMatch = reason.match(commercialVendorReasonPattern);
+  if (relevantMatch) {
+    return copy.commercialVendorReasonTemplate
+      .replace("%NAME%", relevantMatch[1])
+      .replace("%CATEGORY%", relevantMatch[2]);
+  }
+
+  const excludedMatch = reason.match(excludedVendorReasonPattern);
+  if (excludedMatch) {
+    return copy.excludedVendorReasonTemplate.replace("%NAME%", excludedMatch[1]);
+  }
+
+  return reason;
+}
+
+const institutionalEntityLabels: Record<string, MarketGraphCopyKey> = {
+  government: "entityTypeGovernment",
+  regulator: "entityTypeRegulator",
+  standards_body: "entityTypeStandardsBody",
+};
+
+const institutionalEntityReasons: Record<string, MarketGraphCopyKey> = {
+  "Regulatory authority, filing platform, or disclosure system.": "reasonRegulator",
+  "Government entity or official government domain.": "reasonGovernment",
+  "Trade association, exhibition organizer, or professional/technical standards body.":
+    "reasonStandardsBody",
+};
+
+// Market Infrastructure only ever holds government/regulator/standards_body
+// entities (commercial-vendor-intelligence.ts), each with one of exactly
+// three fixed reason sentences -- a plain lookup, not a template, since
+// none of them interpolate the entity's own name.
+function localizeInstitutionalEntity(
+  entityType: string,
+  reason: string,
+  copy: Record<MarketGraphCopyKey, string>
+): { label: string; reason: string } {
+  const labelKey = institutionalEntityLabels[entityType];
+  const reasonKey = institutionalEntityReasons[reason];
+
+  return {
+    label: labelKey ? copy[labelKey] : entityType.replace(/_/g, " "),
+    reason: reasonKey ? copy[reasonKey] : reason,
+  };
+}
+
 /**
  * Produces the report fields that must remain identical to the final validated
  * graph. Model prose may enrich other sections, but it cannot replace these
@@ -807,17 +957,18 @@ export function projectMarketIntelligenceGraphToReport(
   if (graph.vendorIntelligence.marketInfrastructure.length > 0) {
     projection.marketInfrastructure = [
       copy.marketInfrastructureTitle,
-      ...graph.vendorIntelligence.marketInfrastructure.map(
-        (entity) =>
-          `- ${entity.name} — ${entity.entityType.replace(/_/g, " ")} (${entity.reason}; ${entity.evidenceIds.map((id) => `[${id}]`).join(", ")})`
-      ),
+      ...graph.vendorIntelligence.marketInfrastructure.map((entity) => {
+        const localized = localizeInstitutionalEntity(entity.entityType, entity.reason, copy);
+
+        return `- ${entity.name} — ${localized.label} (${localized.reason}; ${entity.evidenceIds.map((id) => `[${id}]`).join(", ")})`;
+      }),
     ].join("\n");
   }
 
   if (graph.competitors.length > 0) {
     const competitorLines = graph.vendorIntelligence.vendors.map(
       (vendor) =>
-        `| ${marketTableCell(vendor.name)} | ${marketTableCell(vendor.parentCompany)} | ${marketTableCell(vendor.category)} | ${marketTableCell(vendor.segment)} | ${marketTableCell(vendor.aiCapability)} | ${marketTableCell(vendor.keyUseCases.join("; ") || copy.notEstablished)} | ${marketTableCell(vendor.pricingModels.join(", ") || copy.notPubliclyValidated)} | ${marketTableCell(vendor.strength)} | ${marketTableCell(vendor.weakness)} | ${vendor.evidenceCount} | ${vendor.confidence}/100 (${vendor.confidenceLevel}) | ${marketTableCell(vendor.marketRelevance)} |`
+        `| ${marketTableCell(vendor.name)} | ${marketTableCell(vendor.parentCompany)} | ${marketTableCell(vendor.category)} | ${marketTableCell(vendor.segment)} | ${marketTableCell(vendor.aiCapability)} | ${marketTableCell(vendor.keyUseCases.join("; ") || copy.notEstablished)} | ${marketTableCell(vendor.pricingModels.join(", ") || copy.notPubliclyValidated)} | ${marketTableCell(localizeVendorFallbackText(vendor.strength, copy))} | ${marketTableCell(localizeVendorFallbackText(vendor.weakness, copy))} | ${vendor.evidenceCount} | ${vendor.confidence}/100 (${vendor.confidenceLevel}) | ${marketTableCell(localizeMarketRelevanceReason(vendor.marketRelevance, copy))} |`
     );
     const pricingLines = graph.pricingModels.map(
       (pricing) =>
