@@ -196,6 +196,30 @@ export function isReviewOrDirectoryDomain(domain: string) {
 
 const domainSuffixPattern = /\.(?:com|net|org|co|app|io|biz|info|dev|shop)(?:\.[a-z]{2})?$/i;
 
+// Domain shapes that can never represent the organization actually being
+// discussed -- a CDN edge node, a documentation subdomain, a GitHub
+// repository, a blog platform, a recruiting site, or a support portal is
+// never itself the vendor, regardless of which real company's content it
+// happens to host. This only gates the domain-fallback name-derivation
+// path below (deriveCandidateNameFromDomain, used when there is no
+// descriptive text at all to name a vendor from) -- it never touches
+// Path A (taxonomy) or Path B (heuristic text-mention extraction) above,
+// so a genuine mention of one of these same platforms as an actual
+// competitor (e.g. a claim that literally says "Zendesk offers...") is
+// completely unaffected. Only inventing a vendor purely from a bare,
+// content-less URL on one of these domain shapes is excluded.
+const nonCompetitorDomainPattern =
+  /(?:^|\.)(?:jsdelivr\.net|unpkg\.com|cloudflare\.com|cloudflareinsights\.com|cloudfront\.net|akamaized\.net|akamai\.net|fastly\.net|amazonaws\.com|imgur\.com|unsplash\.com|cloudinary\.com|imgix\.net|staticflickr\.com|flickr\.com|readthedocs\.(?:io|org)|gitbook\.io|github\.com|githubusercontent\.com|github\.io|gitlab\.io|gitlab\.com|bitbucket\.org|medium\.com|substack\.com|blogspot\.com|wordpress\.com|hashnode\.dev|dev\.to|tumblr\.com|indeed\.com|linkedin\.com|glassdoor\.com|ziprecruiter\.com|greenhouse\.io|lever\.co|workable\.com|ashbyhq\.com|zendesk\.com|freshdesk\.com|helpscout\.com|helpscout\.net|intercom\.help|atlassian\.net|crunchbase\.com)$/i;
+const nonCompetitorSubdomainPattern =
+  /^(?:docs?|documentation|developer|developers|api-?docs|support|helpdesk|help|jobs|careers|blog|cdn|static|assets|img|images|media)\./i;
+
+function isNonCompetitorSourceDomain(domain: string) {
+  return (
+    nonCompetitorDomainPattern.test(domain) ||
+    nonCompetitorSubdomainPattern.test(domain)
+  );
+}
+
 // True when an evidence item's own descriptive text carries nothing but
 // its bare domain -- the shape produced when a web-search provider
 // returns a source URL with no real snippet/citation (common for small,
@@ -369,7 +393,11 @@ export function extractVendorCandidateMentions(
     // not a taxonomy alias or a rich snippet) -- fall back to the domain
     // itself as the only available name signal, not a taxonomy substitute
     // to avoid, since one was never found.
-    if (heuristicNames.length === 0 && isThinDomainOnlyEvidence(item, domain)) {
+    if (
+      heuristicNames.length === 0 &&
+      isThinDomainOnlyEvidence(item, domain) &&
+      !isNonCompetitorSourceDomain(domain)
+    ) {
       const derivedName = deriveCandidateNameFromDomain(domain);
       if (derivedName) {
         mentions.push({

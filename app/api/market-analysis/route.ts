@@ -414,21 +414,33 @@ function cleanInternalMarketSourceFallbacks(content: string, language: ResponseL
     "Categoría de fuente: suposición de planificación. No se proporcionaron metadatos de citación externos."
   );
 
+  // Raw programmer-artifact placeholders (a stringified object, a stray
+  // build marker) can never be a legitimate report sentence in any
+  // language, unlike "Unknown"/"Not available"/"N/A" -- those are
+  // ordinary words that appear correctly inside many well-formed
+  // sentences, so they are deliberately left alone here to avoid mangling
+  // real prose. This runs for every field (enforceMarketReportLanguage
+  // calls this function first), not just Sources.
+  const notVerifiedReplacement = marketText(
+    language,
+    "Not verified",
+    "Doğrulanmadı",
+    "Nicht verifiziert",
+    "Non vérifié",
+    "No verificado"
+  );
+
   return normalizeReportSourceSection(content
     .replace(/\bsources(?:\.[a-z0-9_-]+)+\b/gi, cleanReplacement)
     .replace(/\bdeduplicated\.none\.provided\.by\.user\b/gi, cleanReplacement)
     .replace(/\bnone\.provided\.by\.user\b/gi, cleanReplacement)
-    .replace(
-      /\bundefined\b/gi,
-      marketText(
-        language,
-        "Not verified",
-        "Doğrulanmadı",
-        "Nicht verifiziert",
-        "Non vérifié",
-        "No verificado"
-      )
-    )
+    .replace(/\[object Object\]/gi, notVerifiedReplacement)
+    .replace(/\bundefined\b/gi, notVerifiedReplacement)
+    // Bare "null" is deliberately not replaced here -- "null hypothesis"
+    // is a legitimate term that can appear in academic/statistical
+    // evidence text, and a blind \bnull\b match would corrupt it.
+    .replace(/\bTBD\b/g, notVerifiedReplacement)
+    .replace(/\bTODO\b/g, notVerifiedReplacement)
     .replace(/\n{3,}/g, "\n\n")
     .trim(), { language, allowExternalCitations: true });
 }
@@ -518,6 +530,17 @@ function enforceMarketReportLanguage(
       .replace(/\bAVOID\b/g, "KAÇIN")
       .replace(/\bEvidence\b/g, "Kanıt")
       .replace(/\bevidence\b/g, "kanıt")
+      // Additional stray English fragments confirmed live in otherwise-
+      // Turkish reports -- same backstop philosophy as the block above:
+      // fixed upstream in prompt wording where practical, and never
+      // trusted to actually disappear from the model's own output.
+      .replace(/\bsupported estimate\b/gi, "desteklenen tahmin")
+      .replace(/\brequested market\b/gi, "talep edilen pazar")
+      .replace(/\bconfidence level\b/gi, "güven seviyesi")
+      .replace(/\bexecutive recommendation\b/gi, "yönetici tavsiyesi")
+      .replace(/\bmarket opportunity\b/gi, "pazar fırsatı")
+      .replace(/\bhowever\b/gi, "ancak")
+      .replace(/\bnot established\b/gi, "bağımsız olarak doğrulanmamış")
       .trim();
   }
 
@@ -548,6 +571,12 @@ function enforceMarketReportLanguage(
     .replace(/\bGİR\b/g, "ENTER")
     .replace(/\bİZLE\b/g, "MONITOR")
     .replace(/\bKAÇIN\b/g, "AVOID")
+    .replace(/\bdesteklenen tahmin\b/gi, "supported estimate")
+    .replace(/\btalep edilen pazar\b/gi, "requested market")
+    .replace(/\bgüven seviyesi\b/gi, "confidence level")
+    .replace(/\byönetici tavsiyesi\b/gi, "executive recommendation")
+    .replace(/\bpazar fırsatı\b/gi, "market opportunity")
+    .replace(/\bbağımsız olarak doğrulanmamış\b/gi, "not established")
     .trim();
 }
 
