@@ -73,6 +73,7 @@ import {
   assertExecutiveQualityGate,
   runExecutiveQualityGate,
 } from "@/app/lib/report-engine/executive-quality-gate";
+import { enforceInlineRawUrlLimitAcrossSections } from "@/app/lib/report-engine/inline-source-url-limit";
 import {
   buildMarketIntelligenceGraph,
   formatMarketIntelligenceGraphForModel,
@@ -893,6 +894,22 @@ function ensureMarketReportQuality(
       }
     }
   }
+
+  // Enforce the same one-inline-URL ceiling assertExecutiveQualityGate's
+  // no_long_source_lists check is about to require, rather than letting a
+  // section that wrote several raw citation URLs inline fail generation
+  // outright. Only rewrites additional URLs into bracketed references and
+  // moves any without a known record into Sources -- see
+  // inline-source-url-limit.ts for exactly what is (and isn't) done.
+  Object.assign(
+    deduped,
+    enforceInlineRawUrlLimitAcrossSections({
+      sections: deduped,
+      sourceFields: ["sources"],
+      maxInlineUrls: 1,
+      knownSources: graph?.sources,
+    })
+  );
 
   // Fail fast instead of silently returning a mixed report: throws if any
   // section contains Business Idea Validation's or Strategic Advisory's
