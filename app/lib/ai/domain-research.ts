@@ -62,6 +62,11 @@ import {
   resolveDynamicResearchPlan,
   type DynamicResearchPlan,
 } from "./dynamic-research-plan.ts";
+import { buildMarketResearchTasks } from "./market-research-planner.ts";
+import {
+  isMarketResearchV2Enabled,
+  runMarketIntelligenceResearchV2,
+} from "./market-research-v2/index.ts";
 import {
   createDecisionResearchProviderAdapter,
   executeResearchPlan,
@@ -520,14 +525,35 @@ export function createDomainResearchPlan(
   prompt: string,
   assets: readonly AnalysisAsset[] = [],
   onPhase?: DecisionIntelligencePhaseLogger,
-  seedFacts: ExtractedFact[] = []
+  seedFacts: ExtractedFact[] = [],
+  selectedMode?: unknown
 ) {
   const factContext = seedFacts
     .map((fact) => `${fact.field}: ${fact.value}`)
     .join("\n");
   const domainPrompt = factContext ? `${prompt}\n${factContext}` : prompt;
-  const domain = classifyResearchDomain(domainPrompt, assets);
-  const decisionType = classifyResearchDecision(prompt, domain);
+  // classifyResearchDomain/classifyResearchDecision are pure prompt-text
+  // keyword classifiers with no knowledge of selectedMode -- Market
+  // Intelligence is a user-selected mode, not something to infer from
+  // prompt wording, so a Market Intelligence prompt (e.g. "LegalTech
+  // market intelligence") could be misclassified into an unrelated domain
+  // (confirmed live: "real_estate") whenever its text happened to match
+  // that domain's signal regex before "business" is ever considered.
+  // Every domain-scoped evidence-quality check downstream
+  // (decision-intelligence/evidence-engine.ts's assessEvidenceQuality,
+  // via its recognizedFields set) keys off this domain and silently
+  // discards evidence whose field doesn't belong to the wrong domain's
+  // profile -- this is what was reducing normalized evidence to zero.
+  // "business" is also the domain Market Intelligence bundles have
+  // always been validated against (validateDomainResearchQuality's
+  // expectedDomain: "business" in market-analysis/route.ts).
+  const isMarketIntelligence = selectedMode === "market";
+  const domain: ResearchDomain = isMarketIntelligence
+    ? "business"
+    : classifyResearchDomain(domainPrompt, assets);
+  const decisionType: ResearchDecisionType = isMarketIntelligence
+    ? "market_entry"
+    : classifyResearchDecision(prompt, domain);
   const identifiers = [
     ...extractResearchIdentifiers(domainPrompt, assets),
     ...seedFacts
@@ -2218,7 +2244,8 @@ async function runDomainAwareResearchInternal({
     prompt,
     assets,
     onPhase,
-    entityExtraction.facts
+    entityExtraction.facts,
+    selectedMode
   );
   const effectiveExpertiseProfile = resolveExpertiseProfile(
     requestedExpertiseProfile,
@@ -2267,41 +2294,66 @@ async function runDomainAwareResearchInternal({
           signal,
         }).catch(() => undefined)
       : undefined;
-  const dynamicResearchFallback = createDynamicResearchPlanFallback({
-    expertiseProfile: effectiveExpertiseProfile,
-    reportPlan: effectiveReportPlan,
-    selectedMode,
-    prompt,
-    extractedFacts: [
-      ...providedExtractedFacts,
-      ...entityExtraction.facts,
-    ],
-    clarificationAnswers,
-    availableEvidence,
-    queryExpansions,
-  });
-  const dynamicResearchPlan = resolveDynamicResearchPlan({
-    value: requestedResearchPlan,
-    fallback: dynamicResearchFallback,
-    expertiseProfile: effectiveExpertiseProfile,
-    reportPlan: effectiveReportPlan,
-    selectedMode,
-    prompt,
-    extractedFacts: [
-      ...providedExtractedFacts,
-      ...entityExtraction.facts,
-    ],
-    clarificationAnswers,
-    availableEvidence,
-  });
-  // A generic Market Intelligence request never has forbidden
-  // company-specific fields injected, whether they came from the
-  // deterministic fallback or a validated AI-generated plan (see
-  // filterMarketOnlyForbiddenTasks in dynamic-research-plan.ts).
-  const dynamicTasks = filterMarketOnlyForbiddenTasks(
-    dynamicResearchPlanToDecisionTasks(dynamicResearchPlan),
-    selectedMode
-  );
+  // Market Intelligence uses its own small, deterministic planner
+  // (market-research-planner.ts) instead of the generic dynamic planner's
+  // priority-sort-and-budget-slice, which could silently drop tasks --
+  // including the regional/global benchmark tasks -- before research ever
+  // ran for them. Every other mode/domain is unaffected: it keeps using
+  // createDynamicResearchPlanFallback/resolveDynamicResearchPlan exactly
+  // as before, which other callers (plan-executor.ts, understanding.ts,
+  // app/api/plan/route.ts) also still rely on unchanged.
+  let dynamicResearchPlan: DynamicResearchPlan | undefined;
+  let dynamicTasks: ResearchTask[];
+  if (selectedMode === "market") {
+    dynamicTasks = buildMarketResearchTasks({
+      expertiseProfile: effectiveExpertiseProfile,
+      reportPlan: effectiveReportPlan,
+      prompt,
+      extractedFacts: [
+        ...providedExtractedFacts,
+        ...entityExtraction.facts,
+      ],
+      queryExpansions,
+    });
+  } else {
+    dynamicResearchPlan = resolveDynamicResearchPlan({
+      value: requestedResearchPlan,
+      fallback: createDynamicResearchPlanFallback({
+        expertiseProfile: effectiveExpertiseProfile,
+        reportPlan: effectiveReportPlan,
+        selectedMode,
+        prompt,
+        extractedFacts: [
+          ...providedExtractedFacts,
+          ...entityExtraction.facts,
+        ],
+        clarificationAnswers,
+        availableEvidence,
+        queryExpansions,
+      }),
+      expertiseProfile: effectiveExpertiseProfile,
+      reportPlan: effectiveReportPlan,
+      selectedMode,
+      prompt,
+      extractedFacts: [
+        ...providedExtractedFacts,
+        ...entityExtraction.facts,
+      ],
+      clarificationAnswers,
+      availableEvidence,
+    });
+    // A generic Market Intelligence request never has forbidden
+    // company-specific fields injected, whether they came from the
+    // deterministic fallback or a validated AI-generated plan (see
+    // filterMarketOnlyForbiddenTasks in dynamic-research-plan.ts). Market
+    // mode itself no longer reaches this branch at all -- see the new,
+    // dedicated market-research-planner.ts above, whose fixed capability
+    // list never includes those finance-only fields in the first place.
+    dynamicTasks = filterMarketOnlyForbiddenTasks(
+      dynamicResearchPlanToDecisionTasks(dynamicResearchPlan),
+      selectedMode
+    );
+  }
   const researchPlan = {
     ...legacyResearchPlan,
     plan: dynamicTasks.map((task) => ({
@@ -2340,8 +2392,8 @@ async function runDomainAwareResearchInternal({
       confidence: fact.confidence,
     })),
     totalTasksPlanned: researchPlan.plan.length,
-    dynamicPlannerConfidence: dynamicResearchPlan.confidence,
-    skippedTopics: dynamicResearchPlan.skippedTopics,
+    dynamicPlannerConfidence: dynamicResearchPlan?.confidence ?? null,
+    skippedTopics: dynamicResearchPlan?.skippedTopics ?? [],
     tasks: researchPlan.plan.map((task) => ({
       taskId: task.id,
       domain: researchPlan.domain,
@@ -4167,6 +4219,39 @@ function createEmergencyResearchFallback(
 export async function runDomainAwareResearch(
   input: Parameters<typeof runDomainAwareResearchInternal>[0]
 ): Promise<DomainResearchBundle> {
+  // Market Intelligence Research V2 (app/lib/ai/market-research-v2/) is an
+  // isolated replacement for the research -> evidence layer only, gated
+  // behind a temporary flag so it is reachable exclusively for Market
+  // Intelligence and only once explicitly enabled. runDomainAwareResearchInternal
+  // (the pre-V2 pipeline) is left completely untouched below and remains
+  // what every other selectedMode/domain -- and Market Intelligence itself
+  // when the flag is off -- continues to use.
+  if (input.selectedMode === "market" && isMarketResearchV2Enabled()) {
+    try {
+      return await withOpenAiCostOperation(
+        { operationName: "market_research_v2", reportType: "market_v2" },
+        () =>
+          runMarketIntelligenceResearchV2({
+            client: input.client,
+            model: input.model,
+            prompt: input.prompt,
+            assets: input.assets,
+            language: input.language,
+            signal: input.signal,
+            expertiseProfile: input.expertiseProfile,
+            reportPlan: input.reportPlan,
+          })
+      );
+    } catch (error) {
+      console.error("[market-research-v2] orchestration fallback", {
+        phase: "Research Execution",
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : null,
+      });
+      return createEmergencyResearchFallback(error);
+    }
+  }
+
   const hardTimeoutMs = 120_000;
   const timeoutController = new AbortController();
   const abortFromParent = () =>
@@ -4224,16 +4309,16 @@ Extracted facts:
 ${context.extractedFacts
   .map(
     (fact) =>
-      `- [${fact.category}] ${fact.field}: ${fact.value} | confidence ${fact.confidence}/100 | source ${fact.source}`
+      `- [${fact.category}] ${humanizeEvidenceFieldName(fact.field)}: ${fact.value} | confidence ${fact.confidence}/100 | source ${fact.source}`
   )
   .join("\n") || "- None"}
 
 Evidence validation:
 - Coverage: ${context.evidenceValidation.coverage}/100
 - Confidence: ${context.evidenceValidation.confidence}/100
-- Corroborated fields: ${context.evidenceValidation.corroboratedFields.join(", ") || "none"}
-- Unresolved fields: ${context.evidenceValidation.unresolvedFields.join(", ") || "none"}
-- Contradictions: ${context.evidenceValidation.conflicts.map((item) => `${item.field}: ${item.explanation}`).join(" | ") || "none"}
+- Corroborated fields: ${humanizeEvidenceFieldList(context.evidenceValidation.corroboratedFields) || "none"}
+- Unresolved fields: ${humanizeEvidenceFieldList(context.evidenceValidation.unresolvedFields) || "none"}
+- Contradictions: ${context.evidenceValidation.conflicts.map((item) => `${humanizeEvidenceFieldName(item.field)}: ${item.explanation}`).join(" | ") || "none"}
 
 Decision:
 - Final decision: ${context.decision.finalDecision}
@@ -4254,6 +4339,55 @@ Report contract:
 - When evidence is incomplete, request the authoritative record needed for verification without exposing technical diagnostics.`;
 }
 
+// Raw evidence-field identifiers (dynamic-research-plan.ts's task.evidenceField
+// values, e.g. "regional_benchmark") are internal wiring, not vocabulary a
+// reader should ever see. Left as bare snake_case in the model's own prompt
+// context, a model instructed elsewhere to "name the specific missing
+// input" for a gap has nothing else to name it with -- it reproduces the
+// literal identifier in its output (confirmed live: "regional_benchmark"
+// and "global_benchmark" appearing verbatim inside a Market Intelligence
+// report's own text). This is the single point both formatters below route
+// every field name through, so a report can never expose the internal name
+// regardless of which evidence category is unresolved or which report
+// domain (market, real estate, legal, retail, finance) is running. Falls
+// back to a snake_case-to-Title-Case conversion for any evidenceField not
+// in this list, so a newly added task can never regress this by omission.
+const evidenceFieldLabels: Record<string, string> = {
+  regional_benchmark: "regional market benchmark data",
+  global_benchmark: "global or regional market benchmark data",
+  vendor_discovery: "vendor and competitor discovery",
+  competitors: "named competitor evidence",
+  market_demand: "market demand and adoption evidence",
+  market_size: "verifiable market-size data",
+  industry_structure: "industry structure and trend evidence",
+  pricing_models: "vendor pricing evidence",
+  product_evidence: "product and feature evidence",
+  company_evidence: "company filing and disclosure evidence",
+  academic_evidence: "academic or independent research evidence",
+  news_evidence: "recent news and market-sentiment evidence",
+  company_financials: "audited financial disclosures",
+  industry_benchmarks: "recognized financial benchmarks",
+  macro_inputs: "official macroeconomic inputs",
+  location: "administrative and cadastral location evidence",
+  zoning: "zoning and land-use records",
+  regional_development: "regional development plans",
+  hazards: "environmental and geological hazard data",
+  access: "legal access and infrastructure evidence",
+  comparables: "comparable market evidence",
+  liquidity: "local liquidity and demand evidence",
+};
+
+export function humanizeEvidenceFieldName(field: string): string {
+  return (
+    evidenceFieldLabels[field] ||
+    field.replace(/_/g, " ").replace(/^legal /, "").trim()
+  );
+}
+
+export function humanizeEvidenceFieldList(fields: readonly string[]): string {
+  return fields.map(humanizeEvidenceFieldName).join(", ");
+}
+
 export function formatDomainResearchBundle(bundle: DomainResearchBundle) {
   if (bundle.fallbackUsed && bundle.evidence.length === 0) {
     return `Domain-aware research fallback
@@ -4267,11 +4401,11 @@ Do not claim that external research was completed.`;
     : bundle.evidence
         .map(
           (item) =>
-            `Evidence ID: ${item.id}\nField: ${item.field}\nClaim: ${item.claim}\nValue: ${item.value}\nSource title: ${item.sourceTitle || "Unverified source"}\nPublisher: ${item.publisher || sourcePublisherFromUrl(item.url) || "Not independently verified"}\nSource URL: ${item.url || "No external URL"}\nPublished: ${item.publishedDate || "not available"}\nAccess date: ${item.lastChecked || "not available"}\nOfficial: ${item.authorityLevel === "primary" ? "yes" : "no"}\nSource classification: ${item.sourceClassification || item.sourceType || "external source"}\nConfidence classification: ${item.confidence >= 75 ? "Verified" : item.confidence >= 55 ? "Estimated confidence" : item.url ? "Preliminary external evidence" : "Unverified"} (${item.confidence}/100)\nEvidence quality: ${item.qualityScore ?? item.confidence}/100`
+            `Evidence ID: ${item.id}\nField: ${humanizeEvidenceFieldName(item.field)}\nClaim: ${item.claim}\nValue: ${item.value}\nSource title: ${item.sourceTitle || "Unverified source"}\nPublisher: ${item.publisher || sourcePublisherFromUrl(item.url) || "Not independently verified"}\nSource URL: ${item.url || "No external URL"}\nPublished: ${item.publishedDate || "not available"}\nAccess date: ${item.lastChecked || "not available"}\nOfficial: ${item.authorityLevel === "primary" ? "yes" : "no"}\nSource classification: ${item.sourceClassification || item.sourceType || "external source"}\nConfidence classification: ${item.confidence >= 75 ? "Verified" : item.confidence >= 55 ? "Estimated confidence" : item.url ? "Preliminary external evidence" : "Unverified"} (${item.confidence}/100)\nEvidence quality: ${item.qualityScore ?? item.confidence}/100`
         )
         .join("\n\n");
   const unresolvedSummary = bundle.unresolvedFields.length
-    ? `External verification remains incomplete for: ${bundle.unresolvedFields.join(", ")}. State only the authoritative document or source needed to resolve each item.`
+    ? `External verification remains incomplete for: ${humanizeEvidenceFieldList(bundle.unresolvedFields)}. State only the authoritative document or source needed to resolve each item.`
     : "All critical research fields with usable evidence are represented in the evidence registry.";
 
   return `Domain-aware research result
@@ -4281,8 +4415,8 @@ Research attempted: ${bundle.researchAttempted ? "yes" : "no"}
 All required research completed with evidence: ${bundle.researchCompleted ? "yes" : "no"}
 Required research completion: ${bundle.requiredResearchCompletion}%
 Recommended output: ${bundle.recommendedOutput}
-Attempted fields: ${bundle.attemptedFields.join(", ") || "none"}
-Unresolved fields: ${bundle.unresolvedFields.join(", ") || "none"}
+Attempted fields: ${humanizeEvidenceFieldList(bundle.attemptedFields) || "none"}
+Unresolved fields: ${humanizeEvidenceFieldList(bundle.unresolvedFields) || "none"}
 Summary: ${bundle.summary || "No research summary returned."}
 
 Research completion summary:
@@ -4332,14 +4466,14 @@ export function formatDomainResearchForReportGeneration(
     : bundle.evidence
         .map(
           (item) =>
-            `Field: ${item.field}\nClaim: ${item.claim}\nValue: ${item.value}\nSource title: ${item.sourceTitle || "Unknown"}\nSource URL: ${item.url || "No external URL"}\nEvidence quality: ${item.qualityScore ?? item.confidence}/100`
+            `Field: ${humanizeEvidenceFieldName(item.field)}\nClaim: ${item.claim}\nValue: ${item.value}\nSource title: ${item.sourceTitle || "Unknown"}\nSource URL: ${item.url || "No external URL"}\nEvidence quality: ${item.qualityScore ?? item.confidence}/100`
         )
         .join("\n\n");
 
   return `Closed research evidence registry
 Domain: ${bundle.domain}
 Sufficiency: ${bundle.recommendedOutput}; completion ${bundle.requiredResearchCompletion}%
-Unresolved: ${bundle.unresolvedFields.join(", ") || "none"}
+Unresolved: ${humanizeEvidenceFieldList(bundle.unresolvedFields) || "none"}
 <untrusted_research_evidence>
 ${evidence || "No verified evidence returned."}
 </untrusted_research_evidence>
@@ -4413,8 +4547,16 @@ export function validateDomainResearchQuality({
     );
   }
 
+  // Only a required task's incomplete outcome must be visible in the report
+  // text. A non-required, supplementary task (e.g. company filings on a
+  // multi-vendor market survey) can legitimately end without evidence for
+  // many different reasons across many different prompts; requiring the
+  // model to individually narrate every one of a fixed evidence checklist's
+  // optional entries ties report prose to internal task bookkeeping far
+  // more tightly than the gate's real intent -- never silently hide a gap
+  // in evidence the report depends on.
   const incompleteTasks = bundle.plan.filter(
-    (task) => task.status !== "completed_with_evidence"
+    (task) => task.status !== "completed_with_evidence" && task.required
   );
   const localizedStatusDisclosure: Record<ResearchTaskResult["status"], RegExp> = {
     completed_with_evidence:

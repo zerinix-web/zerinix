@@ -568,6 +568,24 @@ function cleanupTurkishPdfLanguageLeakage(value = "") {
     .replace(/\bEstimated\b/gi, "Tahmini")
     .replace(/\bHold for validation\b/gi, "Doğrulama Tamamlanana Kadar Bekle")
     .replace(/\b(?:Hold|Wait)\b/gi, "Bekle")
+    // Porter's Five Forces and other stray English fragments that survive
+    // as inline prose (not a clean "Label: value" line, so the label-map
+    // lookup above never sees them) even in an otherwise-Turkish section --
+    // same root cause and same fix pattern as the rules above, catching
+    // reports generated before the upstream prompt fix (market.ts) as well.
+    .replace(/\bThreat of Entry\b/gi, "Giriş Tehdidi")
+    .replace(/\bThreat of Substitutes\b/gi, "İkame Tehdidi")
+    .replace(/\bRivalry\b/gi, "Rekabet Yoğunluğu")
+    .replace(/\bBuyer [Pp]ower\b/g, "Alıcı Gücü")
+    .replace(/\bSupplier [Pp]ower\b/g, "Tedarikçi Gücü")
+    .replace(/\bSubstitutes\b/gi, "İkameler")
+    .replace(/\bPlanning Estimate\b/g, "Planlama Tahmini")
+    .replace(/\bbuyer context\b/gi, "alıcı bağlamı")
+    .replace(/\breasonable stand-in\b/gi, "makul bir karşılaştırma referansı")
+    .replace(/\bstand-in\b/gi, "karşılaştırma referansı")
+    .replace(/\bMarket sources\b/g, "Pazar kaynakları")
+    .replace(/\bEvidence\b/g, "Kanıt")
+    .replace(/\bevidence\b/g, "kanıt")
     .replace(
       /(^|\n)(\s*(?:[-*•]\s*)?)(TAM|SAM|SOM)\s*[:=]\s*(?:[0-3](?:[.,]0+)?|[-–—]|N\/?A)(?=\s*(?:$|\n|[.;,]))/gi,
       "$1$2$3: Hesaplanamadı"

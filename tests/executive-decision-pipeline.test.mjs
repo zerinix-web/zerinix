@@ -611,10 +611,40 @@ test("market-analysis/route.ts wires the single Executive Decision layer, eviden
   assert.doesNotMatch(marketAnalysisSource, /appendEvidenceConfidenceToMajorMarketSections/);
   assert.match(marketAnalysisSource, /normalized\.sources = buildEvidenceSummary\(normalized\.sources, language\)/);
   assert.match(marketAnalysisSource, /stripFillerAndDuplicateSentences\(deduped\[field\]\)/);
+  // The quality gate no longer runs as a single all-or-nothing assertion:
+  // a preliminary, non-throwing read (runExecutiveQualityGate) first lets
+  // one weak/thin section (typically an honest "evidence unavailable"
+  // explanation, which reads as short and formulaic) degrade to a clearly
+  // labeled "Insufficient verified evidence" fallback instead of aborting
+  // every other, independently-evidenced section along with it. The real,
+  // still-strict assertExecutiveQualityGate call runs last, against the
+  // corrected report, so the report still fails outright whenever there
+  // genuinely isn't enough evidence to support the overall decision.
   assert.match(
     marketAnalysisSource,
-    /if \(marketAssessment\) \{\s*\n\s*assertExecutiveQualityGate\(\{/
+    /if \(marketAssessment\) \{\s*\n\s*const preliminaryFailures = runExecutiveQualityGate\(\{/
   );
+  assert.match(
+    marketAnalysisSource,
+    /check === "every_section_adds_decision_value"/
+  );
+  assert.match(marketAnalysisSource, /createInsufficientEvidenceFallback\(/);
+  assert.match(marketAnalysisSource, /assertExecutiveQualityGate\(\{\s*\n\s*sections: deduped,\s*\n\s*firstField: "executiveSummary",\s*\n\s*sourceFields: \["sources"\],\s*\n\s*\}\);\s*\n\s*\}/);
+  // REGRESSION: the preliminary degrade-weak-sections pass must run BEFORE
+  // assertReportIsolation/assertNoDecisionContradiction, not after. Those
+  // two checks scan whatever raw text the model wrote, including its own
+  // attempt to explain an evidence gap -- if either one throws on that raw
+  // text first, the degradation logic below it never runs at all, and one
+  // missing evidence type can still take down the whole report through a
+  // gate other than the quality gate. Asserting the source order (not just
+  // that both pieces exist somewhere) is what actually protects against
+  // that regression.
+  const preliminaryGateIndex = marketAnalysisSource.indexOf("const preliminaryFailures = runExecutiveQualityGate(");
+  const isolationCallIndex = marketAnalysisSource.indexOf('assertReportIsolation("market_intelligence", deduped)');
+  const contradictionCallIndex = marketAnalysisSource.indexOf("assertNoDecisionContradiction(");
+  assert.ok(preliminaryGateIndex > -1 && isolationCallIndex > -1 && contradictionCallIndex > -1);
+  assert.ok(preliminaryGateIndex < isolationCallIndex);
+  assert.ok(preliminaryGateIndex < contradictionCallIndex);
 });
 
 // REGRESSION: filler-stripping used to run on `normalized` BEFORE

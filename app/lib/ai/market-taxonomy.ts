@@ -177,7 +177,7 @@ const softwareTaxonomies: MarketTaxonomyProfile[] = [
 ];
 
 const excludedInstitutionPattern =
-  /(?:census|government|department|ministry|bureau|regulator|commission|sec\b|federal reserve|association|institute|council|university|journal|reuters|bloomberg|forbes|gartner|forrester|statista|grand ?view ?research|mordor ?intelligence|research ?and ?markets|ibisworld|fortune ?business ?insights|market research|data provider|benchmark|emergenresearch|asdreports|reportsanddata|reportsandmarkets|marketsandmarkets|alliedmarketresearch|verifiedmarketresearch|verifiedmarketreports|htfmarketreport|precedenceresearch|futuremarketinsights|coherentmarketinsights|straitsresearch|6wresearch|consultanc(?:y|ies)|messefrankfurt)/i;
+  /(?:census|government|department|ministry|bureau|regulator|commission|sec\b|federal reserve|association|institute|council|university|journal|reuters|bloomberg|forbes|gartner|forrester|statista|grand ?view ?research|mordor ?intelligence|research ?and ?markets|ibisworld|fortune ?business ?insights|market research|data provider|benchmark|emergenresearch|asdreports|reportsanddata|reportsandmarkets|marketsandmarkets|alliedmarketresearch|verifiedmarketresearch|verifiedmarketreports|htfmarketreport|precedenceresearch|futuremarketinsights|coherentmarketinsights|straitsresearch|6wresearch|consultanc(?:y|ies)|messefrankfurt|wikipedia|wikimedia|encyclopedia|britannica|\brand corporation\b|\brand\b|techtarget|computerworld|computerweekly|informationweek|zdnet)/i;
 const genericPublisherPattern =
   /^(?:unknown|n\/?a|source|website|publisher|market research|industry report|research|company|validation required|not provided)$/i;
 const invalidMetadataPattern =

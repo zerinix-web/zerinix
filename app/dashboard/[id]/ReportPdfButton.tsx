@@ -957,11 +957,29 @@ function extractMarketSizeVisualValue(content: string, label: string) {
   return value ? value.replace(/\s+/g, " ").trim() : "";
 }
 
-function extractMarketSizeValue(content: string, label: string) {
-  return (
-    extractMarketSizeVisualValue(content, label) ||
-    compactPdfMetricValue(extractMetricValue(content, label))
+// compactPdfMetricValue's fallback pattern deliberately allows a bare
+// number (no currency symbol, no unit, no percent sign) because it is
+// shared by general metric cards where a plain count can be a real,
+// meaningful value (e.g. "Employees: 24"). A TAM/SAM/SOM legend value has
+// no such case -- a market-size figure with no currency, unit, or percent
+// attached is not a real figure a reader can act on, it is noise that
+// survived the regex (e.g. a stray number from an unrelated sentence). This
+// gate is intentionally scoped to just the chart legend rather than
+// tightening compactPdfMetricValue itself, which stays correct for its
+// other, non-market-size callers.
+function isMarketSizeValueMeaningful(value: string) {
+  if (!value.trim()) return false;
+  return /[$€₺%]|\d\s*[kKmMbBtT]\b|\b(?:milyon|milyar|bin|thousand|million|billion|trillion)\b/i.test(
+    value
   );
+}
+
+function extractMarketSizeValue(content: string, label: string) {
+  const value =
+    extractMarketSizeVisualValue(content, label) ||
+    compactPdfMetricValue(extractMetricValue(content, label));
+
+  return isMarketSizeValueMeaningful(value) ? value : "";
 }
 
 // TAM/SAM/SOM values are ranges by design ("$2.1-2.8B"), so the
@@ -3085,6 +3103,43 @@ export function buildStandardReportPdf({
           const tamVisualContent = getTamVisualContent(content);
           const rows = getTamRows(tamVisualContent, content);
           const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value));
+          // A concentric TAM/SAM/SOM chart visually asserts that SAM sits
+          // inside TAM and SOM sits inside SAM -- drawing it from values
+          // that are missing, or that don't actually nest that way (e.g. a
+          // SAM larger than its own TAM), doesn't just look odd, it
+          // actively misleads the reader about the market's real shape.
+          // computeTamSamSomRadii's own fallback still draws *a* chart
+          // (fixed silhouette) whenever the numbers don't parse -- that
+          // fallback exists for a different purpose, cosmetic legibility
+          // when the model's phrasing merely doesn't parse cleanly, not for
+          // this correctness gate. Here, the chart itself is replaced with
+          // a plain, honest explanatory state whenever the three figures
+          // are not all present and logically nested (TAM >= SAM >= SOM).
+          const [tamMagnitude, samMagnitude, somMagnitude] = magnitudes;
+          const isCoherentlyNested =
+            tamMagnitude !== null &&
+            samMagnitude !== null &&
+            somMagnitude !== null &&
+            tamMagnitude >= samMagnitude &&
+            samMagnitude >= somMagnitude;
+
+          if (!isCoherentlyNested) {
+            const explanationText =
+              pdfLocale === "tr"
+                ? "Hesaplanamadı — gerekli veri eksik. TAM / SAM / SOM için doğrulanmış veya tutarlı bir şekilde iç içe geçmiş (TAM ≥ SAM ≥ SOM) rakamlar bulunamadığından yanıltıcı bir grafik yerine bu açıklama gösterilmektedir."
+                : "Could not be calculated — required data is missing. No verified or logically nested (TAM ≥ SAM ≥ SOM) figures were available for TAM / SAM / SOM, so this explanation is shown instead of a misleading chart.";
+            pdf.setFontSize(7.6);
+            pdf.setTextColor("#a1a1aa");
+            pdf.text(
+              wrapPdfText(explanationText, bodyWidth - 6),
+              bodyX + 3,
+              visualY + 10,
+              { lineHeightFactor: 1.3, maxWidth: bodyWidth - 6 }
+            );
+
+            return getTamVisualHeight();
+          }
+
           const radii = computeTamSamSomRadii(magnitudes[0], magnitudes[1], magnitudes[2]);
           const circleCenterX = bodyX + tamCircleMaxRadius + 4;
           const circleCenterY = visualY + tamCircleMaxRadius + 3;

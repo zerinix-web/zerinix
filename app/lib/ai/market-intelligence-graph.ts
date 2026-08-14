@@ -580,7 +580,10 @@ type MarketGraphCopyKey =
   | "entityTypeStandardsBody"
   | "reasonRegulator"
   | "reasonGovernment"
-  | "reasonStandardsBody";
+  | "reasonStandardsBody"
+  | "targetCustomerLabel"
+  | "rankingLabel"
+  | "overallScoreLabel";
 
 const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, string>> = {
   English: {
@@ -624,6 +627,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     reasonRegulator: "Regulatory authority, filing platform, or disclosure system.",
     reasonGovernment: "Government entity or official government domain.",
     reasonStandardsBody: "Trade association, exhibition organizer, or professional/technical standards body.",
+    targetCustomerLabel: "Target",
+    rankingLabel: "Ranking",
+    overallScoreLabel: "Overall score",
   },
   Turkish: {
     marketInfrastructureTitle: "Pazar Altyapısı",
@@ -666,6 +672,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     reasonRegulator: "Düzenleyici kurum, başvuru platformu veya kamuyu aydınlatma sistemi.",
     reasonGovernment: "Kamu kurumu veya resmi devlet alan adı.",
     reasonStandardsBody: "Ticaret birliği, fuar organizatörü veya mesleki/teknik standart kuruluşu.",
+    targetCustomerLabel: "Hedef müşteri",
+    rankingLabel: "Sıralama",
+    overallScoreLabel: "Genel skor",
   },
   German: {
     marketInfrastructureTitle: "Marktinfrastruktur",
@@ -708,6 +717,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     reasonRegulator: "Aufsichtsbehörde, Meldeplattform oder Offenlegungssystem.",
     reasonGovernment: "Regierungsbehörde oder offizielle Regierungsdomain.",
     reasonStandardsBody: "Handelsverband, Messeveranstalter oder fachliche/technische Normungsorganisation.",
+    targetCustomerLabel: "Zielkunde",
+    rankingLabel: "Rang",
+    overallScoreLabel: "Gesamtbewertung",
   },
   French: {
     marketInfrastructureTitle: "Infrastructure du marché",
@@ -750,6 +762,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     reasonRegulator: "Autorité de régulation, plateforme de dépôt ou système de divulgation.",
     reasonGovernment: "Entité gouvernementale ou domaine gouvernemental officiel.",
     reasonStandardsBody: "Association professionnelle, organisateur de salons ou organisme de normalisation technique.",
+    targetCustomerLabel: "Cible",
+    rankingLabel: "Classement",
+    overallScoreLabel: "Score global",
   },
   Spanish: {
     marketInfrastructureTitle: "Infraestructura del mercado",
@@ -792,6 +807,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     reasonRegulator: "Autoridad reguladora, plataforma de presentación o sistema de divulgación.",
     reasonGovernment: "Entidad gubernamental o dominio gubernamental oficial.",
     reasonStandardsBody: "Asociación comercial, organizador de ferias u organismo de normalización profesional/técnica.",
+    targetCustomerLabel: "Cliente objetivo",
+    rankingLabel: "Clasificación",
+    overallScoreLabel: "Puntuación general",
   },
 };
 
@@ -837,7 +855,7 @@ function describeCompetitiveCoverage(
       English:
         "Independent, publicly available information on named competitors in this market was limited during research. Competitive intensity below is inferred from category-level and structural evidence rather than confirmed vendor profiles -- this narrows confidence in company-specific claims but does not indicate an absence of competition.",
       Turkish:
-        "Bu pazardaki isimli rakiplere ilişkin bağımsız ve kamuya açık bilgi, araştırma sırasında sınırlı kalmıştır. Aşağıdaki rekabet yoğunluğu, doğrulanmış rakip profillerinden ziyade kategori düzeyindeki yapısal kanıtlardan çıkarılmıştır; bu durum şirkete özgü iddialara olan güveni azaltır, ancak rekabetin yokluğu anlamına gelmez.",
+        "Yeterli doğrulanmış ticari rakip bulunamadı. Bu pazardaki isimli rakiplere ilişkin bağımsız ve kamuya açık bilgi, araştırma sırasında sınırlı kalmıştır. Aşağıdaki rekabet yoğunluğu, doğrulanmış rakip profillerinden ziyade kategori düzeyindeki yapısal kanıtlardan çıkarılmıştır; bu durum şirkete özgü iddialara olan güveni azaltır, ancak rekabetin yokluğu anlamına gelmez.",
       German:
         "Unabhängige, öffentlich verfügbare Informationen zu namentlich genannten Wettbewerbern in diesem Markt waren während der Recherche begrenzt. Die untenstehende Wettbewerbsintensität wird aus kategorieweiter, struktureller Evidenz abgeleitet und nicht aus bestätigten Anbieterprofilen -- dies verringert das Vertrauen in unternehmensspezifische Aussagen, bedeutet aber nicht das Fehlen von Wettbewerb.",
       French:
@@ -909,6 +927,124 @@ function localizeMarketRelevanceReason(
   return reason;
 }
 
+// vendor-intelligence.ts's pricing-model classifier (extractPricingModels)
+// and its AI-capability tag are, like its other field builders, computed
+// with no concept of report language and hardcode fixed English labels
+// (VendorPricingModel's 13 literal values, plus the AI-capability tag) --
+// rendered verbatim into the competitor table (vendor.pricingModels.join,
+// vendor.aiCapability) with no localization call at all, unlike
+// strength/weakness/marketRelevance which already route through
+// localizeVendorFallbackText/localizeMarketRelevanceReason. A standalone
+// per-language lookup, not routed through MarketGraphCopyKey, since these
+// ~13 short tags are a closed set specific to this one rendering site.
+const vendorPricingModelLabels: Record<MarketGraphLanguage, Record<string, string>> = {
+  English: {
+    Subscription: "Subscription",
+    "Seat pricing": "Seat pricing",
+    "Usage pricing": "Usage-based pricing",
+    Enterprise: "Enterprise pricing",
+    Transaction: "Transaction-based pricing",
+    "Success fee": "Success fee",
+    Hybrid: "Hybrid pricing",
+    "Public list price": "Public list price",
+    "Quote-based": "Quote-based pricing",
+    "Per user": "Per-user pricing",
+    "Per company": "Per-company pricing",
+    "Per document": "Per-document pricing",
+    "Services included": "Services included",
+  },
+  Turkish: {
+    Subscription: "Abonelik",
+    "Seat pricing": "Kullanıcı başına fiyatlandırma",
+    "Usage pricing": "Kullanım bazlı fiyatlandırma",
+    Enterprise: "Kurumsal fiyatlandırma",
+    Transaction: "İşlem bazlı fiyatlandırma",
+    "Success fee": "Başarı ücreti",
+    Hybrid: "Hibrit fiyatlandırma",
+    "Public list price": "Kamuya açık liste fiyatı",
+    "Quote-based": "Teklife dayalı fiyatlandırma",
+    "Per user": "Kullanıcı başına",
+    "Per company": "Şirket başına",
+    "Per document": "Belge başına",
+    "Services included": "Hizmetler dahil",
+  },
+  German: {
+    Subscription: "Abonnement",
+    "Seat pricing": "Preise pro Nutzer",
+    "Usage pricing": "Nutzungsbasierte Preise",
+    Enterprise: "Unternehmenspreise",
+    Transaction: "Transaktionsbasierte Preise",
+    "Success fee": "Erfolgshonorar",
+    Hybrid: "Hybride Preisgestaltung",
+    "Public list price": "Öffentlicher Listenpreis",
+    "Quote-based": "Angebotsbasierte Preise",
+    "Per user": "Pro Nutzer",
+    "Per company": "Pro Unternehmen",
+    "Per document": "Pro Dokument",
+    "Services included": "Leistungen inbegriffen",
+  },
+  French: {
+    Subscription: "Abonnement",
+    "Seat pricing": "Tarification par utilisateur",
+    "Usage pricing": "Tarification à l'usage",
+    Enterprise: "Tarification entreprise",
+    Transaction: "Tarification par transaction",
+    "Success fee": "Commission au succès",
+    Hybrid: "Tarification hybride",
+    "Public list price": "Prix catalogue public",
+    "Quote-based": "Tarification sur devis",
+    "Per user": "Par utilisateur",
+    "Per company": "Par entreprise",
+    "Per document": "Par document",
+    "Services included": "Services inclus",
+  },
+  Spanish: {
+    Subscription: "Suscripción",
+    "Seat pricing": "Precio por usuario",
+    "Usage pricing": "Precio basado en el uso",
+    Enterprise: "Precio empresarial",
+    Transaction: "Precio por transacción",
+    "Success fee": "Tarifa de éxito",
+    Hybrid: "Precio híbrido",
+    "Public list price": "Precio de lista público",
+    "Quote-based": "Precio bajo cotización",
+    "Per user": "Por usuario",
+    "Per company": "Por empresa",
+    "Per document": "Por documento",
+    "Services included": "Servicios incluidos",
+  },
+};
+
+function localizeVendorPricingModel(model: string, language: MarketGraphLanguage): string {
+  return vendorPricingModelLabels[language][model] || model;
+}
+
+function localizeVendorPricingModelList(
+  models: readonly string[],
+  language: MarketGraphLanguage
+): string {
+  return models.map((model) => localizeVendorPricingModel(model, language)).join(", ");
+}
+
+const vendorAiCapabilityEnabledLabel: Record<MarketGraphLanguage, string> = {
+  English: "AI-enabled (evidence-supported)",
+  Turkish: "Yapay zeka destekli (kanıtla desteklenmiş)",
+  German: "KI-gestützt (evidenzbasiert)",
+  French: "Doté d'IA (étayé par des preuves)",
+  Spanish: "Con IA (respaldado por evidencia)",
+};
+
+function localizeVendorAiCapability(
+  value: string,
+  language: MarketGraphLanguage,
+  copy: Record<MarketGraphCopyKey, string>
+): string {
+  if (value === "AI-enabled (evidence-supported)") {
+    return vendorAiCapabilityEnabledLabel[language];
+  }
+  return localizeVendorFallbackText(value, copy);
+}
+
 const institutionalEntityLabels: Record<string, MarketGraphCopyKey> = {
   government: "entityTypeGovernment",
   regulator: "entityTypeRegulator",
@@ -968,7 +1104,7 @@ export function projectMarketIntelligenceGraphToReport(
   if (graph.competitors.length > 0) {
     const competitorLines = graph.vendorIntelligence.vendors.map(
       (vendor) =>
-        `| ${marketTableCell(vendor.name)} | ${marketTableCell(vendor.parentCompany)} | ${marketTableCell(vendor.category)} | ${marketTableCell(vendor.segment)} | ${marketTableCell(vendor.aiCapability)} | ${marketTableCell(vendor.keyUseCases.join("; ") || copy.notEstablished)} | ${marketTableCell(vendor.pricingModels.join(", ") || copy.notPubliclyValidated)} | ${marketTableCell(localizeVendorFallbackText(vendor.strength, copy))} | ${marketTableCell(localizeVendorFallbackText(vendor.weakness, copy))} | ${vendor.evidenceCount} | ${vendor.confidence}/100 (${vendor.confidenceLevel}) | ${marketTableCell(localizeMarketRelevanceReason(vendor.marketRelevance, copy))} |`
+        `| ${marketTableCell(vendor.name)} | ${marketTableCell(vendor.parentCompany === vendor.name ? "-" : vendor.parentCompany)} | ${marketTableCell(vendor.category)} | ${marketTableCell(vendor.segment)} | ${marketTableCell(localizeVendorAiCapability(vendor.aiCapability, copyLanguage(language), copy))} | ${marketTableCell(vendor.keyUseCases.join("; ") || copy.notEstablished)} | ${marketTableCell(vendor.pricingModels.length ? localizeVendorPricingModelList(vendor.pricingModels, copyLanguage(language)) : copy.notPubliclyValidated)} | ${marketTableCell(localizeVendorFallbackText(vendor.strength, copy))} | ${marketTableCell(localizeVendorFallbackText(vendor.weakness, copy))} | ${vendor.evidenceCount} | ${vendor.confidence}/100 (${vendor.confidenceLevel}) | ${marketTableCell(localizeMarketRelevanceReason(vendor.marketRelevance, copy))} |`
     );
     const pricingLines = graph.pricingModels.map(
       (pricing) =>
@@ -988,7 +1124,7 @@ export function projectMarketIntelligenceGraphToReport(
         .filter((vendor) => vendor.eligibleForMajorPlayers)
         .map(
           (vendor) =>
-            `- ${vendor.name} (${vendor.majorPlayerLabel}): ${vendor.classifications.join(", ")}; target: ${vendor.targetCustomer} (ranking ${vendor.rankingScore}/100; overall score ${vendor.overallVendorScore}/100; confidence ${vendor.confidence}/100 ${vendor.confidenceLevel}; ${vendor.evidenceSources.map((id) => `[${id}]`).join(", ")})`
+            `- ${vendor.name} (${vendor.majorPlayerLabel}): ${vendor.classifications.join(", ")}; ${copy.targetCustomerLabel.toLowerCase()}: ${localizeVendorFallbackText(vendor.targetCustomer, copy)} (${copy.rankingLabel.toLowerCase()} ${vendor.rankingScore}/100; ${copy.overallScoreLabel.toLowerCase()} ${vendor.overallVendorScore}/100; ${copy.confidenceLabel.toLowerCase()} ${vendor.confidence}/100 ${vendor.confidenceLevel}; ${vendor.evidenceSources.map((id) => `[${id}]`).join(", ")})`
       ),
     ].join("\n");
     if (!graph.vendorIntelligence.vendors.some((vendor) => vendor.eligibleForMajorPlayers)) {

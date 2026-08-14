@@ -1795,13 +1795,27 @@ function EvidenceBadge({ level }: { level: EvidenceLevel }) {
   );
 }
 
+// A TAM/SAM/SOM value with no currency symbol, unit, or percent sign
+// attached is not a real figure a reader can act on -- see the matching
+// guard and its rationale in ReportPdfButton.tsx's extractMarketSizeValue,
+// which this on-screen renderer mirrors so the dashboard chart and the PDF
+// chart never disagree on what counts as a meaningful value.
+function isMarketSizeValueMeaningful(value: string) {
+  if (!value.trim()) return false;
+  return /[$€₺%]|\d\s*[kKmMbBtT]\b|\b(?:milyon|milyar|bin|thousand|million|billion|trillion)\b/i.test(
+    value
+  );
+}
+
 function extractMarketSizeValue(content: string, label: string) {
   const escapedLabel = escapeRegExp(label);
   const direct = normalizePdfText(content).match(
     new RegExp(`\\b${escapedLabel}\\b\\s*[:\\-–—]?\\s*((?:[<>~≈]?\\s*)?[€$₺]?\\s*\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT%])?)`, "i")
   )?.[1];
 
-  return compactPdfMetricValue(direct || extractMetricValue(content, label));
+  const value = compactPdfMetricValue(direct || extractMetricValue(content, label));
+
+  return isMarketSizeValueMeaningful(value) ? value : "";
 }
 
 // TAM/SAM/SOM values are ranges by design ("$2.1-2.8B"), so the
@@ -5183,6 +5197,36 @@ const ReportPanel = memo(function ReportPanel({
           // the in-app preview matches the exported PDF.
           const rows = getTamRows(section.content, visualWidth);
           const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value));
+          const tamCircleVisualHeight = tamCircleMaxRadius * 2 + 8;
+          // Mirrors ReportPdfButton.tsx's own gate: a chart drawn from
+          // missing or non-nested (TAM >= SAM >= SOM) figures asserts a
+          // market shape that isn't real, so it is replaced with a plain
+          // explanatory state instead.
+          const [tamMagnitude, samMagnitude, somMagnitude] = magnitudes;
+          const isCoherentlyNested =
+            tamMagnitude !== null &&
+            samMagnitude !== null &&
+            somMagnitude !== null &&
+            tamMagnitude >= samMagnitude &&
+            samMagnitude >= somMagnitude;
+
+          if (!isCoherentlyNested) {
+            const explanationText =
+              pdfLocale === "tr"
+                ? "Hesaplanamadı — gerekli veri eksik. TAM / SAM / SOM için doğrulanmış veya tutarlı bir şekilde iç içe geçmiş (TAM ≥ SAM ≥ SOM) rakamlar bulunamadığından yanıltıcı bir grafik yerine bu açıklama gösterilmektedir."
+                : "Could not be calculated — required data is missing. No verified or logically nested (TAM ≥ SAM ≥ SOM) figures were available for TAM / SAM / SOM, so this explanation is shown instead of a misleading chart.";
+            pdf.setFontSize(7.6);
+            pdf.setTextColor("#a1a1aa");
+            pdf.text(
+              pdf.splitTextToSize(explanationText, visualWidth - 6) as string[],
+              bodyX + 3,
+              visualY + 10,
+              { lineHeightFactor: 1.3, maxWidth: visualWidth - 6 }
+            );
+
+            return tamCircleVisualHeight;
+          }
+
           const radii = computeTamSamSomRadii(magnitudes[0], magnitudes[1], magnitudes[2]);
           const circleCenterX = bodyX + tamCircleMaxRadius + 4;
           const circleCenterY = visualY + tamCircleMaxRadius + 3;
@@ -5194,7 +5238,6 @@ const ReportPanel = memo(function ReportPanel({
 
           const legendX = circleCenterX + tamCircleMaxRadius + 10;
           const legendWidth = Math.max(20, bodyX + visualWidth - legendX);
-          const tamCircleVisualHeight = tamCircleMaxRadius * 2 + 8;
           const legendRowHeight = (tamCircleVisualHeight - 4) / 3;
 
           rows.forEach(({ label, color, value }, index) => {

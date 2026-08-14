@@ -30,6 +30,7 @@ import {
 import {
   formatDomainResearchBundle,
   formatDomainResearchForReportGeneration,
+  humanizeEvidenceFieldList,
   runDomainAwareResearch,
   validateDomainResearchQuality,
   validateDomainResearchQualitySafely,
@@ -68,7 +69,10 @@ import { assertReportIsolation } from "@/app/lib/report-engine/report-isolation-
 import { formatExecutiveDecisionBrief } from "@/app/lib/report-engine/executive-decision-brief";
 import { buildEvidenceSummary } from "@/app/lib/report-engine/evidence-summary";
 import { stripFillerAndDuplicateSentences } from "@/app/lib/report-engine/filler-detection";
-import { assertExecutiveQualityGate } from "@/app/lib/report-engine/executive-quality-gate";
+import {
+  assertExecutiveQualityGate,
+  runExecutiveQualityGate,
+} from "@/app/lib/report-engine/executive-quality-gate";
 import {
   buildMarketIntelligenceGraph,
   formatMarketIntelligenceGraphForModel,
@@ -461,6 +465,36 @@ function enforceMarketReportLanguage(
       .replace(/\bRisk Matrix\b/g, "Risk Matrisi")
       .replace(/\bCEO (?:Brief|Summary)\b/g, "CEO Özeti")
       .replace(/\bMarket Entry Recommendation\b/g, "Pazara Giriş Tavsiyesi")
+      // Porter's Five Forces and other stray English label/prose fragments
+      // that survive even in an otherwise-Turkish section, because the
+      // model's own instructions name them in English (e.g. the CAGR and
+      // TAM/SAM/SOM prompts describe an adjacent-benchmark figure as a
+      // "stand-in" and a "Planning Estimate") -- fixed upstream in the
+      // prompt wording where practical, and backstopped here so a report
+      // can never actually ship the English fragment regardless of what
+      // the model does with that wording.
+      .replace(/\bThreat of Entry\b/gi, "Giriş Tehdidi")
+      .replace(/\bThreat of Substitutes\b/gi, "İkame Tehdidi")
+      .replace(/\bBuyer [Pp]ower\b/g, "Alıcı Gücü")
+      .replace(/\bSupplier [Pp]ower\b/g, "Tedarikçi Gücü")
+      .replace(/\bRivalry\b/gi, "Rekabet Yoğunluğu")
+      .replace(/\bSubstitutes\b/gi, "İkameler")
+      .replace(/\bPlanning Estimate\b/g, "Planlama Tahmini")
+      .replace(/\bbuyer context\b/gi, "alıcı bağlamı")
+      .replace(/\breasonable stand-in\b/gi, "makul bir karşılaştırma referansı")
+      .replace(/\bstand-in\b/gi, "karşılaştırma referansı")
+      .replace(/\bMarket sources\b/g, "Pazar kaynakları")
+      // The market-safe rewrites of Business Idea Validation's forbidden
+      // financial acronyms (marketReportFinancialAcronymReplacements
+      // above) intentionally land in English first, since that rewrite
+      // has to run before the isolation validator regardless of report
+      // language -- these translate that English phrase onward for a
+      // Turkish report, the same way every other stray English fragment
+      // above is backstopped.
+      .replace(/\bcustomer acquisition cost\b/gi, "müşteri edinme maliyeti")
+      .replace(/\bcustomer lifetime value\b/gi, "müşteri yaşam boyu değeri")
+      .replace(/\bmonthly revenue\b/gi, "aylık gelir")
+      .replace(/\bannual revenue\b/gi, "yıllık gelir")
       .replace(/\bCommentary\s*:/g, "Yorum:")
       .replace(/\bDecision\s*:/g, "Karar:")
       .replace(/\bMain Risk\s*:/g, "Ana Risk:")
@@ -482,6 +516,8 @@ function enforceMarketReportLanguage(
       .replace(/\bENTER\b/g, "GİR")
       .replace(/\bMONITOR\b/g, "İZLE")
       .replace(/\bAVOID\b/g, "KAÇIN")
+      .replace(/\bEvidence\b/g, "Kanıt")
+      .replace(/\bevidence\b/g, "kanıt")
       .trim();
   }
 
@@ -574,6 +610,108 @@ const marketFieldFallbackTemplates: Record<ResponseLanguage, (label: string) => 
 function createMarketFieldFallback(field: MarketReportField, language: ResponseLanguage) {
   const label = marketFieldLabels[language][field];
   return marketFieldFallbackTemplates[language](label);
+}
+
+// Used only when the executive quality gate (below) flags one specific
+// section as too thin/filler-heavy to add decision value -- which is
+// exactly the shape an honest "this evidence type was unavailable"
+// explanation naturally takes (short, and structurally similar across
+// sections). Previously that gate treated any such section as a reason to
+// abort the *entire* report; this fallback is what lets that one section
+// degrade to a clearly labeled, honest gap instead, while every
+// independently evidenced section keeps rendering. Never fabricates a
+// number or a source -- it only names, from evidence already gathered,
+// which category of evidence this section specifically depends on and
+// did not have.
+const insufficientEvidenceFallbackTemplates: Record<
+  ResponseLanguage,
+  (label: string, reason: string) => string
+> = {
+  English: (label, reason) =>
+    `${label}: Insufficient verified evidence. ${reason} The rest of this report remains based on independently verified evidence -- this section alone could not be completed to that standard and should not be treated as a market finding.`,
+  Turkish: (label, reason) =>
+    `${label}: Yeterli doğrulanmış kanıt bulunamadı. ${reason} Raporun geri kalanı bağımsız olarak doğrulanmış kanıtlara dayanmaya devam ediyor; yalnızca bu bölüm aynı standartta tamamlanamadı ve bir pazar bulgusu olarak değerlendirilmemelidir.`,
+  German: (label, reason) =>
+    `${label}: Unzureichende validierte Evidenz. ${reason} Der Rest dieses Berichts basiert weiterhin auf unabhängig validierter Evidenz -- nur dieser Abschnitt konnte nicht auf demselben Niveau fertiggestellt werden und sollte nicht als Marktbefund gewertet werden.`,
+  French: (label, reason) =>
+    `${label} : preuves validées insuffisantes. ${reason} Le reste de ce rapport continue de reposer sur des preuves validées de manière indépendante -- seule cette section n'a pas pu être complétée selon cette norme et ne doit pas être considérée comme un constat de marché.`,
+  Spanish: (label, reason) =>
+    `${label}: evidencia validada insuficiente. ${reason} El resto de este informe sigue basándose en evidencia validada de forma independiente -- solo esta sección no pudo completarse con ese estándar y no debe considerarse un hallazgo de mercado.`,
+};
+
+const missingMarketSizeBenchmarkReason: Record<ResponseLanguage, string> = {
+  English:
+    "No verified local market-size figure and no adjacent regional or global benchmark data were found in this run.",
+  Turkish:
+    "Bu çalıştırmada ne doğrulanmış bir yerel pazar büyüklüğü rakamı ne de bölgesel veya küresel bir referans veri bulunabildi.",
+  German:
+    "In diesem Durchlauf wurde weder eine verifizierte lokale Marktgrößenangabe noch ein regionaler oder globaler Vergleichswert gefunden.",
+  French:
+    "Aucun chiffre de taille de marché local vérifié ni aucune donnée de référence régionale ou mondiale n'a été trouvé lors de cette exécution.",
+  Spanish:
+    "En esta ejecución no se encontró ninguna cifra de tamaño de mercado local verificada ni datos de referencia regionales o globales.",
+};
+
+const missingCompetitorEvidenceReason: Record<ResponseLanguage, string> = {
+  English:
+    "Independent, publicly available evidence naming and describing commercial competitors in this market was insufficient in this run.",
+  Turkish:
+    "Bu pazardaki ticari rakipleri bağımsız ve kamuya açık kaynaklarla adlandıran ve tanımlayan kanıtlar bu çalıştırmada yetersiz kaldı.",
+  German:
+    "Unabhängige, öffentlich verfügbare Belege, die kommerzielle Wettbewerber in diesem Markt benennen und beschreiben, waren in diesem Durchlauf unzureichend.",
+  French:
+    "Les preuves indépendantes et accessibles au public nommant et décrivant des concurrents commerciaux sur ce marché étaient insuffisantes lors de cette exécution.",
+  Spanish:
+    "La evidencia independiente y disponible públicamente que nombra y describe a los competidores comerciales en este mercado fue insuficiente en esta ejecución.",
+};
+
+const generalInsufficientEvidenceReason: Record<ResponseLanguage, string> = {
+  English: "Independent, publicly available evidence for this specific section was insufficient in this run.",
+  Turkish: "Bu bölüme özgü bağımsız ve kamuya açık kanıtlar bu çalıştırmada yetersiz kaldı.",
+  German: "Unabhängige, öffentlich verfügbare Belege für diesen spezifischen Abschnitt waren in diesem Durchlauf unzureichend.",
+  French: "Les preuves indépendantes et accessibles au public pour cette section spécifique étaient insuffisantes lors de cette exécution.",
+  Spanish: "La evidencia independiente y disponible públicamente para esta sección específica fue insuficiente en esta ejecución.",
+};
+
+const marketSizeBenchmarkDependentFields = new Set<MarketReportField>([
+  "marketSize",
+  "cagr",
+  "tamSamSom",
+  "regionalAnalysis",
+]);
+const competitorEvidenceDependentFields = new Set<MarketReportField>([
+  "competitiveLandscape",
+  "majorPlayers",
+]);
+
+function describeMissingMarketEvidence(
+  field: MarketReportField,
+  language: ResponseLanguage,
+  coverage?: MarketResearchCoverage,
+  graph?: MarketIntelligenceGraph
+): string {
+  if (marketSizeBenchmarkDependentFields.has(field)) {
+    const hasVerifiedSize = Boolean(coverage?.verifiedMarketSizeAvailable);
+    const hasBenchmark = Boolean(graph?.adjacentBenchmarks?.length);
+    if (!hasVerifiedSize && !hasBenchmark) {
+      return missingMarketSizeBenchmarkReason[language];
+    }
+  }
+  if (competitorEvidenceDependentFields.has(field) && !graph?.competitors?.length) {
+    return missingCompetitorEvidenceReason[language];
+  }
+  return generalInsufficientEvidenceReason[language];
+}
+
+function createInsufficientEvidenceFallback(
+  field: MarketReportField,
+  language: ResponseLanguage,
+  coverage?: MarketResearchCoverage,
+  graph?: MarketIntelligenceGraph
+) {
+  const label = marketFieldLabels[language][field];
+  const reason = describeMissingMarketEvidence(field, language, coverage, graph);
+  return insufficientEvidenceFallbackTemplates[language](label, reason);
 }
 
 // buildMarketFinancialConfidenceAppendix / buildMarketFinancialConsistencyTargets
@@ -687,6 +825,46 @@ function ensureMarketReportQuality(
     deduped[field] = stripFillerAndDuplicateSentences(deduped[field]);
   }
 
+  // Degrade weak sections to an honest "Insufficient verified evidence"
+  // fallback BEFORE assertReportIsolation/assertNoDecisionContradiction
+  // run below, not after. Those two checks scan whatever raw text the
+  // model wrote for a section -- including its own attempt to explain an
+  // evidence gap, which this session's own prompt work (market.ts) pushes
+  // toward being longer and more elaborate ("never write a bare gap
+  // notice", "always build a labeled estimate") specifically so that text
+  // gives the reader something to act on. That same elaboration is more
+  // surface area for the model to trip an unrelated downstream check while
+  // explaining a gap. Running degradation first means isolation and
+  // contradiction only ever see this function's own controlled fallback
+  // text for a weak section, not the model's raw, unbounded attempt --
+  // closing the exact gap where "one missing evidence type aborts the
+  // whole report" could still happen through a gate other than the
+  // quality gate itself. See the quality-gate block right below (now
+  // running twice: once here as a read-only pre-check, once again in its
+  // normal position after isolation/contradiction, for real) for why a
+  // short/filler-heavy section is exactly the shape an honest gap
+  // explanation takes.
+  if (marketAssessment) {
+    const preliminaryFailures = runExecutiveQualityGate({
+      sections: deduped,
+      firstField: "executiveSummary",
+      sourceFields: ["sources"],
+    });
+    const degradableFields = new Set(
+      preliminaryFailures
+        .filter((failure) => failure.check === "every_section_adds_decision_value" && failure.field)
+        .map((failure) => failure.field as string)
+    );
+    for (const field of degradableFields) {
+      if (isMarketReportField(field)) {
+        deduped[field] = createInsufficientEvidenceFallback(field, language, coverage, graph);
+        logOperationalInfo("[api:market-analysis] section degraded to insufficient-evidence fallback", {
+          field,
+        });
+      }
+    }
+  }
+
   // Fail fast instead of silently returning a mixed report: throws if any
   // section contains Business Idea Validation's or Strategic Advisory's
   // specific vocabulary (founder readiness, validation gate, runway,
@@ -705,13 +883,20 @@ function ensureMarketReportQuality(
     );
   }
 
-  // Quality Gate: fail generation instead of silently returning a report
-  // that dumps information rather than helping a decision-maker act. Only
-  // enforced when coverage was available -- that's what makes the single
-  // Executive Decision layer possible in the first place; without it
-  // (e.g. a cached/degraded report with no coverage data), the report
-  // falls back to its pre-existing, less-strict shape rather than
+  // Quality Gate, for real: fail generation instead of silently returning
+  // a report that dumps information rather than helping a decision-maker
+  // act. Only enforced when coverage was available -- that's what makes
+  // the single Executive Decision layer possible in the first place;
+  // without it (e.g. a cached/degraded report with no coverage data), the
+  // report falls back to its pre-existing, less-strict shape rather than
   // hard-failing on a check it was never given the inputs to satisfy.
+  // Weak sections were already degraded to an honest fallback above, so
+  // this is the strict, final check: report-wide problems (opening
+  // decision quality, page-one readability, overall filler ceiling) and
+  // any section still bad even after the honest rewrite still fail the
+  // report for real -- those cases mean there genuinely isn't enough
+  // evidence to support the overall decision, the only condition under
+  // which this report should still fail outright.
   if (marketAssessment) {
     assertExecutiveQualityGate({
       sections: deduped,
@@ -806,6 +991,32 @@ const TEXT_LIKE_RESPONSE_FIELD_PATTERN =
 const NON_CONTENT_RESPONSE_FIELD_PATTERN =
   /^(id|object|type|status|role|model|created|created_at|updated_at|usage|metadata|annotations|finish_reason|index|incomplete_details)$/i;
 
+// The Responses API can split one continuous answer across multiple
+// output/content array entries (e.g. text broken around a citation
+// annotation, or multiple message items in `output`). Concatenating those
+// pieces with no separator is only safe when the API itself left the
+// necessary whitespace at the boundary; when a boundary falls between two
+// ordinary words with neither piece contributing a space, joining with ""
+// silently fuses them into one broken compound (confirmed live in Turkish
+// market reports as words like "pazarbüyüklüğü"). A plain space-joined
+// concatenation is just as wrong the other way, since it would add a
+// stray space before punctuation or a citation marker that is meant to sit
+// flush against the preceding text. Inserting a space only when both sides
+// of the boundary are alphanumeric -- the one case where no separator can
+// ever be correct -- fixes the merge without touching any boundary that
+// was already correct.
+function joinExtractedTextSegments(segments: string[]): string {
+  return segments.reduce((joined, segment) => {
+    if (!joined) return segment;
+    if (!segment) return joined;
+
+    const boundaryNeedsSpace =
+      /[\p{L}\p{N}]$/u.test(joined) && /^[\p{L}\p{N}]/u.test(segment);
+
+    return boundaryNeedsSpace ? `${joined} ${segment}` : `${joined}${segment}`;
+  }, "");
+}
+
 function extractTextFromValue(
   value: unknown,
   parentKey = "",
@@ -826,10 +1037,9 @@ function extractTextFromValue(
   seen.add(value);
 
   if (Array.isArray(value)) {
-    return value
-      .map((item) => extractTextFromValue(item, parentKey, seen))
-      .filter(Boolean)
-      .join("");
+    return joinExtractedTextSegments(
+      value.map((item) => extractTextFromValue(item, parentKey, seen)).filter(Boolean)
+    );
   }
 
   const record = value as Record<string, unknown>;
@@ -1449,13 +1659,20 @@ Write only this section's content. Do not write a JSON object, field name, headi
           domainResearch.unresolvedFields.filter(
             (field) => !MARKET_ONLY_FORBIDDEN_EVIDENCE_FIELDS.has(field)
           );
+        // This response reaches the client directly (an HTTP 422 body, not
+        // a private prompt-context block) -- the raw evidenceField
+        // identifiers (e.g. "regional_benchmark") must never appear here
+        // unhumanized, for the same reason they must never appear in the
+        // model's own prompt context (see humanizeEvidenceFieldName in
+        // domain-research.ts).
+        const clarificationUnresolvedLabel =
+          humanizeEvidenceFieldList(clarificationUnresolvedFields);
+        const clarificationErrorText =
+          responseLanguage === "Turkish"
+            ? `Araştırma tamamlandı, ancak karar raporu için doğrulanabilir temel kanıt bulunamadı. Gerekli bilgi veya belge: ${clarificationUnresolvedLabel || "karar bağlamı"}.`
+            : `Research completed, but no verifiable core evidence was found for a decision report. Required information or document: ${clarificationUnresolvedLabel || "decision context"}.`;
         return NextResponse.json(
-          {
-            error:
-              responseLanguage === "Turkish"
-                ? `Araştırma tamamlandı, ancak karar raporu için doğrulanabilir temel kanıt bulunamadı. Gerekli bilgi veya belge: ${clarificationUnresolvedFields.join(", ") || "karar bağlamı"}.`
-                : `Research completed, but no verifiable core evidence was found for a decision report. Required information or document: ${clarificationUnresolvedFields.join(", ") || "decision context"}.`,
-          },
+          { error: clarificationErrorText },
           { status: 422 }
         );
       }

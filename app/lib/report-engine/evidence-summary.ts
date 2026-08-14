@@ -65,7 +65,7 @@ function classifySourceLine(line: string): EvidenceCategory {
 // "Kaynak:"/"Publisher:"-style citation label. Plain narrative lines never
 // count, so this never over-counts prose as evidence.
 const citationLinePattern =
-  /https?:\/\/\S+|\[(?:Verified from (?:official|external) source|Estimate|Unknown|Assumption)\]|^(?:[-*•]\s*)?(?:Title|Publisher|Kaynak(?:\s+türü)?|Source(?:\s+type)?|Confidence|Güven)\s*[:\-–—]/im;
+  /https?:\/\/\S+|\[(?:Verified from (?:official|external) source|Estimate|Unknown|Assumption)\]|^(?:[-*•]\s*)?(?:Title|Publisher|Kaynak(?:\s+türü)?|Source(?:\s+type)?|Confidence|Güven|Year|Published|Publication date|Publication Year|Yayın tarihi|Yıl)\s*[:\-–—]/im;
 
 function isCitationLine(line: string) {
   return citationLinePattern.test(line.trim());
@@ -173,12 +173,28 @@ export function buildEvidenceSummary(rawContent: string, language: ResponseLangu
     })
   ).size;
 
+  // Per-source detail: publisher, document/report title, year (when
+  // available), and confidence -- the actual validated references, not
+  // just a category count. Deduplicated by the same URL/title key used for
+  // distinctCitationCount above, so this list and that count always agree.
+  const seenDetailKeys = new Set<string>();
+  const sourceDetails: CitationDetail[] = [];
+  for (const group of citationGroups) {
+    const detail = extractCitationDetail(group, language);
+    if (!detail || seenDetailKeys.has(detail.urlKey)) continue;
+    seenDetailKeys.add(detail.urlKey);
+    sourceDetails.push(detail);
+  }
+
   return [
     copy.heading,
     copy.verifiedAgainst,
     ...categoriesPresent.map((category) => `• ${localizeCategory(category, language)}`),
     "",
     copy.sourcesUsed(distinctCitationCount),
+    ...(sourceDetails.length
+      ? ["", sourcesUsedHeading[language], ...sourceDetails.map(formatCitationDetail)]
+      : []),
   ].join("\n");
 }
 
@@ -243,4 +259,103 @@ const categoryTranslations: Record<EvidenceCategory, Record<ResponseLanguage, st
 
 function localizeCategory(category: EvidenceCategory, language: ResponseLanguage) {
   return categoryTranslations[category][language];
+}
+
+const sourcesUsedHeading: Record<ResponseLanguage, string> = {
+  English: "Sources used:",
+  Turkish: "Kullanılan kaynaklar:",
+  German: "Verwendete Quellen:",
+  French: "Sources utilisées :",
+  Spanish: "Fuentes utilizadas:",
+};
+
+// The bracketed evidence-classification tag every citation already carries
+// (e.g. "[Verified from official source]") is the confidence signal used
+// everywhere else in the pipeline -- reused here rather than inventing a
+// second confidence vocabulary just for display.
+const confidenceTagLabels: Record<ResponseLanguage, Record<string, string>> = {
+  English: {
+    "verified from official source": "Verified",
+    "verified from external source": "Verified",
+    estimate: "Estimated",
+    unknown: "Unverified",
+    assumption: "Assumption",
+  },
+  Turkish: {
+    "verified from official source": "Doğrulanmış",
+    "verified from external source": "Doğrulanmış",
+    estimate: "Tahmini",
+    unknown: "Doğrulanmamış",
+    assumption: "Varsayım",
+  },
+  German: {
+    "verified from official source": "Verifiziert",
+    "verified from external source": "Verifiziert",
+    estimate: "Geschätzt",
+    unknown: "Nicht verifiziert",
+    assumption: "Annahme",
+  },
+  French: {
+    "verified from official source": "Vérifié",
+    "verified from external source": "Vérifié",
+    estimate: "Estimé",
+    unknown: "Non vérifié",
+    assumption: "Hypothèse",
+  },
+  Spanish: {
+    "verified from official source": "Verificado",
+    "verified from external source": "Verificado",
+    estimate: "Estimado",
+    unknown: "No verificado",
+    assumption: "Supuesto",
+  },
+};
+
+type CitationDetail = {
+  title: string;
+  publisher: string;
+  year: string;
+  confidence: string;
+  urlKey: string;
+};
+
+// Extracts only fields that are actually present in the model's own
+// citation lines -- a field that isn't there is omitted from the rendered
+// bullet entirely (never a fabricated "Publisher: Unknown"-style filler),
+// matching the same "omit, don't invent" convention already used for the
+// PDF's own per-citation cards (ReportPdfButton.tsx's formatPdfCitationContent).
+function extractCitationDetail(group: string[], language: ResponseLanguage): CitationDetail | null {
+  const joined = group.join("\n");
+  const tagMatch = joined.match(
+    /\[(Verified from official source|Verified from external source|Estimate|Unknown|Assumption)\]/i
+  );
+  const titleMatch = joined.match(/(?:^|\n)\s*(?:\[[^\]]+\]\s*)?Title\s*[:\-–—]\s*([^\n]+)/i);
+  const publisherMatch = joined.match(/(?:^|\n)\s*Publisher\s*[:\-–—]\s*([^\n]+)/i);
+  const yearMatch = joined
+    .match(/(?:^|\n)\s*(?:Year|Published|Publication date|Publication Year)\s*[:\-–—]\s*([^\n]+)/i)?.[1]
+    ?.match(/\b(19|20)\d{2}\b/)?.[0];
+  const urlMatch = joined.match(/https?:\/\/\S+/)?.[0]?.replace(/[)\].,;]+$/, "").toLowerCase();
+
+  const title = titleMatch?.[1]?.trim() || "";
+  if (!title) return null;
+
+  const confidence = tagMatch
+    ? confidenceTagLabels[language][tagMatch[1].toLowerCase()] || ""
+    : "";
+
+  return {
+    title,
+    publisher: publisherMatch?.[1]?.trim() || "",
+    year: yearMatch || "",
+    confidence,
+    urlKey: urlMatch || title.toLowerCase(),
+  };
+}
+
+function formatCitationDetail(detail: CitationDetail) {
+  const parts = [detail.title];
+  const attribution = [detail.publisher, detail.year].filter(Boolean).join(", ");
+  if (attribution) parts.push(attribution);
+  const line = `• ${parts.join(" — ")}`;
+  return detail.confidence ? `${line} (${detail.confidence})` : line;
 }

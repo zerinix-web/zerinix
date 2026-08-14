@@ -8,6 +8,11 @@ import { computeFillerRatio } from "@/app/lib/report-engine/filler-detection";
 export type QualityGateFailure = {
   check: string;
   detail: string;
+  // Present only for checks scoped to one section (#3 and #5 below), so a
+  // caller can react to a single section's evidence gap without having to
+  // parse the field name back out of `detail`. Report-wide checks (#1, #2,
+  // #4) have no single field to name and omit this.
+  field?: string;
 };
 
 export type QualityGateInput = {
@@ -104,6 +109,7 @@ export function runExecutiveQualityGate(input: QualityGateInput): QualityGateFai
       failures.push({
         check: "no_long_source_lists",
         detail: `Field "${field}" exposes ${urlCount} raw URLs directly in the report body (limit ${limit}); use an Evidence Summary instead.`,
+        field,
       });
     }
   }
@@ -129,6 +135,7 @@ export function runExecutiveQualityGate(input: QualityGateInput): QualityGateFai
       failures.push({
         check: "every_section_adds_decision_value",
         detail: `Field "${field}" is too short (${trimmed.length} chars) to add decision value.`,
+        field,
       });
       continue;
     }
@@ -138,6 +145,7 @@ export function runExecutiveQualityGate(input: QualityGateInput): QualityGateFai
       failures.push({
         check: "every_section_adds_decision_value",
         detail: `Field "${field}" is ${Math.round(sectionFillerRatio * 100)}% filler/duplicate content.`,
+        field,
       });
     }
   }

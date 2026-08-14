@@ -27,6 +27,29 @@ const fillerSentencePatterns: RegExp[] = [
   /^as (?:previously|mentioned above|noted above)\b/i,
   /^building on the previous section\b/i,
   /^as we (?:can see|have seen|discussed)\b/i,
+  // Turkish equivalents of the same hedge/throat-clearing constructions.
+  // The detector above was English-only, so a Turkish-language report (the
+  // majority of this product's real traffic) had zero filler-opening
+  // coverage -- this is the same class of gap as an untranslated string,
+  // just in the quality gate instead of the output text.
+  /^şuna göre\b/i,
+  /^duruma göre değişir\b/i,
+  /^bu duruma bağlıdır\b/i,
+  /^yapay zeka olarak\b/i,
+  /^şunu belirtmek önemlidir ki\b/i,
+  /^unutulmamalıdır ki\b/i,
+  /^göz önünde bulundurulmalıdır ki\b/i,
+  /^sonuç olarak\b/i,
+  /^günümüz (?:pazarında|iş dünyasında|dünyasında|ekonomisinde)\b/i,
+  /^genel olarak konuşursak\b/i,
+  /^söylemeye gerek yok\b/i,
+  /^günün sonunda\b/i,
+  /^daha önce belirtildiği gibi\b/i,
+  /^yukarıda belirtildiği gibi\b/i,
+  /^gördüğümüz gibi\b/i,
+  /^görebileceğimiz gibi\b/i,
+  /^bir önceki bölümden yola çıkarak\b/i,
+  /^önceki bölüme dayanarak\b/i,
 ];
 
 // The pipeline appends a per-section "Evidence & Confidence" block
