@@ -734,15 +734,22 @@ export async function getCachedAiResponse(
     logServerError("ai-governance:cache-read", error);
   } else if (data?.response_text) {
     const hitCount = typeof data.hit_count === "number" ? data.hit_count : 0;
-    const { error: updateError } = await supabase
+    // Fire-and-forget: hit_count is a write-only analytics counter (never
+    // read back anywhere in this codebase -- confirmed). Blocking the
+    // cache-hit response on this UPDATE completing added a full extra DB
+    // round-trip to the one path that's supposed to skip expensive work;
+    // nothing downstream depends on the counter being updated before the
+    // cached response is returned.
+    supabase
       .from("ai_response_cache")
       .update({ hit_count: hitCount + 1 })
       .eq("user_id", userId)
-      .eq("cache_key", cacheKey);
-
-    if (updateError) {
-      logServerError("ai-governance:cache-hit-update", updateError);
-    }
+      .eq("cache_key", cacheKey)
+      .then(({ error: updateError }) => {
+        if (updateError) {
+          logServerError("ai-governance:cache-hit-update", updateError);
+        }
+      });
 
     recordOpenAiApplicationCache({
       operationName: "application_cache",
