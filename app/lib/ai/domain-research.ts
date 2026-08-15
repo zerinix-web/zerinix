@@ -1473,12 +1473,6 @@ function collectProviderNativeSources(value: unknown) {
   return [...sources.values()];
 }
 
-function collectProviderSourceUrls(value: unknown) {
-  return new Set(
-    collectProviderNativeSources(value).map((source) => source.url)
-  );
-}
-
 function collectProviderSearchQueries(value: unknown) {
   const queries = new Set<string>();
   const visit = (candidate: unknown, depth: number) => {
@@ -2705,12 +2699,17 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
             "[research-evidence-runtime] response.output.length",
             response.output.length
           );
-          console.info(
-            "[research-evidence-runtime] nativeSources.length",
-            collectProviderNativeSources(response.output).length
-          );
+          // collectProviderNativeSources does a recursive tree-walk over the
+          // full response.output structure -- computed once here and reused
+          // below (for this log line, and for providerSourceUrls further
+          // down) instead of re-running that same walk on the same input
+          // three times per research stage.
           const nativeProviderSources = collectProviderNativeSources(
             response.output
+          );
+          console.info(
+            "[research-evidence-runtime] nativeSources.length",
+            nativeProviderSources.length
           );
           logLegalPipelineDiagnostics("legal-pipeline-raw-provider-result", {
             traceId,
@@ -2967,7 +2966,11 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
             "[research-evidence-runtime] parsed.evidence.length",
             parsedEvidence.length
           );
-          const providerSourceUrls = collectProviderSourceUrls(response.output);
+          // Reuses nativeProviderSources computed once above instead of a
+          // third recursive re-walk of the identical response.output.
+          const providerSourceUrls = new Set(
+            nativeProviderSources.map((source) => source.url)
+          );
           const executedQueries = collectProviderSearchQueries(response.output);
           const normalizedEvidence = normalizeResearchEvidence(
             parsedEvidence,

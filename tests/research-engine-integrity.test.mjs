@@ -293,7 +293,7 @@ test("research provider evidence is restricted to provider-returned source URLs"
   const research = read("app/lib/ai/domain-research.ts");
   const extraction = read("app/lib/ai/research-entity-extraction.ts");
 
-  assert.match(research, /collectProviderSourceUrls/);
+  assert.match(research, /new Set\(\s*\n?\s*nativeProviderSources\.map\(\(source\) => source\.url\)/);
   assert.match(research, /collectProviderSearchQueries/);
   assert.match(research, /providerSourceUrls\.has/);
   assert.match(research, /isGenericSourceHomepage/);
