@@ -27,6 +27,20 @@ export type QualityGateInput = {
   // Evidence Summary) -- but they are still checked for raw over-exposure
   // (a literal wall of URLs is still wrong even in a sources field).
   sourceFields?: string[];
+  // Fields whose Sources content is entirely server-constructed -- a
+  // deterministic bibliography built directly from the verified evidence
+  // registry (one real entry per cited reference), never raw model
+  // output. Exempt from the raw-URL ceiling and the report-wide filler/
+  // duplicate-sentence ceiling entirely: both checks exist to catch a
+  // MODEL writing unstructured, repetitive prose, a failure mode that
+  // cannot occur here by construction -- every line comes from an
+  // already-validated source record in a controlled, structured format,
+  // and two unrelated entries legitimately sharing a short field value
+  // (e.g. "Type: market research") is correct content, not duplication.
+  // Distinct from sourceFields, which still caps at
+  // MAX_RAW_URLS_PER_FIELD for source fields whose content the model
+  // still writes freely (e.g. Business Plan's Sources / Assumptions).
+  unboundedSourceFields?: string[];
 };
 
 // A field is a "long source dump" if it contains more raw URLs than a short
@@ -75,7 +89,7 @@ function firstFieldHasExecutiveRecommendation(content: string) {
 }
 
 export function runExecutiveQualityGate(input: QualityGateInput): QualityGateFailure[] {
-  const { sections, firstField, sourceFields = [] } = input;
+  const { sections, firstField, sourceFields = [], unboundedSourceFields = [] } = input;
   const failures: QualityGateFailure[] = [];
   const firstContent = sections[firstField] || "";
 
@@ -101,6 +115,7 @@ export function runExecutiveQualityGate(input: QualityGateInput): QualityGateFai
   // 3: no field may read as a raw source dump.
   for (const [field, content] of Object.entries(sections)) {
     if (!content) continue;
+    if (unboundedSourceFields.includes(field)) continue;
     const urlCount = countRawUrls(content);
     const isSourceField = sourceFields.includes(field);
     const limit = isSourceField ? MAX_RAW_URLS_PER_FIELD : 1;
@@ -114,8 +129,18 @@ export function runExecutiveQualityGate(input: QualityGateInput): QualityGateFai
     }
   }
 
-  // 4: report-wide filler ceiling.
-  const combinedContent = Object.values(sections).filter(Boolean).join("\n\n");
+  // 4: report-wide filler ceiling. Fields in unboundedSourceFields are
+  // excluded from this scan too: a deterministic bibliography legitimately
+  // repeats short structural labels across entries (e.g. several sources
+  // all classified "Type: market research", or several all "Confidence:
+  // High") -- real, correct, non-redundant content that computeFillerRatio
+  // (designed to catch duplicated NARRATIVE prose) would otherwise
+  // misread as filler/duplication purely because two unrelated entries
+  // share a field value.
+  const combinedContent = Object.entries(sections)
+    .filter(([field, content]) => Boolean(content) && !unboundedSourceFields.includes(field))
+    .map(([, content]) => content)
+    .join("\n\n");
   const overallFillerRatio = computeFillerRatio(combinedContent);
   if (overallFillerRatio > MAX_FILLER_RATIO) {
     failures.push({

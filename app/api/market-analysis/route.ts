@@ -76,6 +76,7 @@ import {
 } from "@/app/lib/report-engine/executive-quality-gate";
 import { enforceInlineRawUrlLimitAcrossSections } from "@/app/lib/report-engine/inline-source-url-limit";
 import {
+  buildMarketIntelligenceBibliography,
   buildMarketIntelligenceGraph,
   formatMarketIntelligenceGraphForModel,
   projectMarketIntelligenceGraphToReport,
@@ -813,19 +814,13 @@ function ensureMarketReportQuality(
     }
   }
 
-  // Sources become invisible: compress the model's raw citation list to a
-  // category+count Evidence Summary. Detailed per-source metadata still
-  // reaches report.metadata via its own, independent analysis pipeline.
-  normalized.sources = buildEvidenceSummary(normalized.sources, language);
-
-  // Deterministic closing verdict, built from the exact same brief object
-  // as the opening Executive Decision layer -- appended to Sources because
-  // ReportPdfButton.tsx's mergePdfSourceSections always forces Sources to
-  // the final page regardless of schema field order, guaranteeing this is
-  // the last thing a reader sees before closing the PDF.
-  if (marketExecutiveDecisionBrief) {
-    normalized.sources = `${normalized.sources}\n\n${buildMarketFinalVerdictParagraph(marketExecutiveDecisionBrief, language)}`.trim();
-  }
+  // The final Sources bibliography is built deterministically later in
+  // this function (see buildMarketIntelligenceBibliography below), once
+  // every other field has gone through its final normalization pass --
+  // that is what guarantees it reflects exactly the [R#] citations that
+  // survived into the truly-final report body, not an intermediate draft.
+  // normalized.sources still holds the model's own raw text here; it is
+  // unconditionally replaced before this function returns.
 
   const deduped = dedupeReportParagraphsAcrossSections(normalized, {
     language,
@@ -902,8 +897,15 @@ function ensureMarketReportQuality(
   // to this pass for the identical reason: a field with a fixed, complete
   // item count must never be silently pruned by a generic text-quality
   // pass that has no awareness of that guarantee.
+  // sources is also skipped here: it is about to be entirely replaced by
+  // the deterministic bibliography below, so running a generic
+  // duplicate-line remover on the model's old raw text first is wasted
+  // work at best -- and at worst, a false-positive duplicate match
+  // between two DIFFERENT bibliography entries that happen to share a
+  // short line (e.g. two sources both "Confidence: High") would corrupt
+  // the bibliography's field alignment if this ran on it afterward.
   for (const field of reportFields) {
-    if (field === "strategicRecommendations") {
+    if (field === "strategicRecommendations" || field === "sources") {
       continue;
     }
     deduped[field] = stripFillerAndDuplicateSentences(deduped[field]);
@@ -933,6 +935,7 @@ function ensureMarketReportQuality(
       sections: deduped,
       firstField: "executiveSummary",
       sourceFields: ["sources"],
+      unboundedSourceFields: ["sources"],
     });
     const degradableFields = new Set(
       preliminaryFailures
@@ -947,6 +950,30 @@ function ensureMarketReportQuality(
         });
       }
     }
+  }
+
+  // The final, deterministic Sources bibliography: every [R#] reference
+  // actually cited anywhere in the now-fully-normalized report body,
+  // resolved to its real record in the verified evidence registry --
+  // never the model's own free-form citation prose, never a category+
+  // count compression. Built here (after dedup/consistency/filler/
+  // degradation have all finished mutating the other fields) so it
+  // reflects exactly the citations that survived into the truly-final
+  // report, not an intermediate draft. Falls back to the previous
+  // category+count Evidence Summary only when there is no graph at all
+  // (a cached/degraded report with nothing to build a bibliography from),
+  // preserving prior behavior for that one edge case.
+  deduped.sources = graph
+    ? buildMarketIntelligenceBibliography(deduped, graph, language)
+    : buildEvidenceSummary(deduped.sources, language);
+
+  // Deterministic closing verdict, built from the exact same brief object
+  // as the opening Executive Decision layer -- appended to Sources because
+  // ReportPdfButton.tsx's mergePdfSourceSections always forces Sources to
+  // the final page regardless of schema field order, guaranteeing this is
+  // the last thing a reader sees before closing the PDF.
+  if (marketExecutiveDecisionBrief) {
+    deduped.sources = `${deduped.sources}\n\n${buildMarketFinalVerdictParagraph(marketExecutiveDecisionBrief, language)}`.trim();
   }
 
   // Enforce the same one-inline-URL ceiling assertExecutiveQualityGate's
@@ -1013,6 +1040,7 @@ function ensureMarketReportQuality(
       sections: deduped,
       firstField: "executiveSummary",
       sourceFields: ["sources"],
+      unboundedSourceFields: ["sources"],
     });
   }
 

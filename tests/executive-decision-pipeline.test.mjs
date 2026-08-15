@@ -609,7 +609,15 @@ test("market-analysis/route.ts wires the single Executive Decision layer, eviden
   assert.doesNotMatch(marketAnalysisSource, /buildMarketExecutiveSummaryConfidenceRollup/);
   assert.doesNotMatch(marketAnalysisSource, /buildSourceReliabilityOverview/);
   assert.doesNotMatch(marketAnalysisSource, /appendEvidenceConfidenceToMajorMarketSections/);
-  assert.match(marketAnalysisSource, /normalized\.sources = buildEvidenceSummary\(normalized\.sources, language\)/);
+  // Sources is now a deterministic bibliography built from the verified
+  // evidence registry (buildMarketIntelligenceBibliography), not the
+  // model's own free-form text -- buildEvidenceSummary is kept only as
+  // the fallback for the one case with no graph to build a bibliography
+  // from (a cached/degraded report).
+  assert.match(
+    marketAnalysisSource,
+    /deduped\.sources = graph\s*\n\s*\? buildMarketIntelligenceBibliography\(deduped, graph, language\)\s*\n\s*: buildEvidenceSummary\(deduped\.sources, language\);/
+  );
   assert.match(marketAnalysisSource, /stripFillerAndDuplicateSentences\(deduped\[field\]\)/);
   // The quality gate no longer runs as a single all-or-nothing assertion:
   // a preliminary, non-throwing read (runExecutiveQualityGate) first lets
@@ -629,7 +637,10 @@ test("market-analysis/route.ts wires the single Executive Decision layer, eviden
     /check === "every_section_adds_decision_value"/
   );
   assert.match(marketAnalysisSource, /createInsufficientEvidenceFallback\(/);
-  assert.match(marketAnalysisSource, /assertExecutiveQualityGate\(\{\s*\n\s*sections: deduped,\s*\n\s*firstField: "executiveSummary",\s*\n\s*sourceFields: \["sources"\],\s*\n\s*\}\);\s*\n\s*\}/);
+  // unboundedSourceFields joined sourceFields here once sources became a
+  // deterministic, server-built bibliography exempt from the raw-URL
+  // ceiling (see the Sources-bibliography regression tests).
+  assert.match(marketAnalysisSource, /assertExecutiveQualityGate\(\{\s*\n\s*sections: deduped,\s*\n\s*firstField: "executiveSummary",\s*\n\s*sourceFields: \["sources"\],\s*\n\s*unboundedSourceFields: \["sources"\],\s*\n\s*\}\);\s*\n\s*\}/);
   // REGRESSION: the preliminary degrade-weak-sections pass must run BEFORE
   // assertReportIsolation/assertNoDecisionContradiction, not after. Those
   // two checks scan whatever raw text the model wrote, including its own

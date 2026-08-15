@@ -222,10 +222,14 @@ test("failure 4 (fix): strategicRecommendations is excluded from both the cross-
     /excludedFields:\s*\["strategicRecommendations"\]/
   );
   const fillerLoopStart = marketRouteSource.indexOf("Eliminate filler LAST");
-  const fillerLoopBlock = marketRouteSource.slice(fillerLoopStart, fillerLoopStart + 2200);
+  const fillerLoopBlock = marketRouteSource.slice(fillerLoopStart, fillerLoopStart + 2500);
+  // sources joined this skip condition once its content became a
+  // deterministic bibliography built after this loop runs (see the
+  // Sources-bibliography regression tests) -- strategicRecommendations's
+  // original protection is unchanged.
   assert.match(
     fillerLoopBlock,
-    /if \(field === "strategicRecommendations"\) \{\s*\n\s*continue;\s*\n\s*\}/
+    /if \(field === "strategicRecommendations" \|\| field === "sources"\) \{\s*\n\s*continue;\s*\n\s*\}/
   );
 });
 

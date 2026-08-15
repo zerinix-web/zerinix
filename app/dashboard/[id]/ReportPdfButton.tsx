@@ -137,6 +137,16 @@ type CitationData = {
   confidence?: "High" | "Medium" | "Low";
   url?: string;
   sourceType?: "Verified source" | "Company reference" | "Industry reference" | "Planning assumption";
+  // In-text [R#] citation tag(s) this source resolves, e.g. "[R3][R12]"
+  // when two evidence IDs pointing at the same document were merged into
+  // one entry. Only ever populated by the Market Intelligence
+  // deterministic bibliography (buildMarketIntelligenceBibliography);
+  // other report types never emit a "Reference:" line, so this stays
+  // undefined for them exactly as before.
+  referenceTag?: string;
+  // Access date, distinct from publicationYear (when the source's own
+  // content was published vs. when it was retrieved/verified).
+  accessDate?: string;
 };
 
 function normalizeCitationConfidence(value: string): CitationData["confidence"] | undefined {
@@ -222,6 +232,10 @@ function dedupePdfCitations(citations: CitationData[]) {
       sourceNameKey || "unknown-source",
     ].join("|");
     const existing = unique.get(key);
+    const mergedReferenceTag =
+      existing?.referenceTag && citation.referenceTag && existing.referenceTag !== citation.referenceTag
+        ? `${existing.referenceTag}${citation.referenceTag}`
+        : citation.referenceTag || existing?.referenceTag;
 
     unique.set(key, {
       ...existing,
@@ -230,6 +244,7 @@ function dedupePdfCitations(citations: CitationData[]) {
       ...(existing?.url && !citation.url ? { url: existing.url } : {}),
       ...(existing?.sourceType && !citation.sourceType ? { sourceType: existing.sourceType } : {}),
       ...(existing?.confidence && !citation.confidence ? { confidence: existing.confidence } : {}),
+      ...(mergedReferenceTag ? { referenceTag: mergedReferenceTag } : {}),
     });
   });
 
@@ -246,6 +261,8 @@ function getFinalDedupePdfSources(citations: CitationData[]) {
       publisher: string;
       publicationYear: string;
       url: string;
+      referenceTag: string;
+      accessDate: string;
     }
   >();
 
@@ -279,20 +296,34 @@ function getFinalDedupePdfSources(citations: CitationData[]) {
     ].join("|");
     const fallbackDisplayKey = `display:${domain || "no-domain"}|${displayKey}`;
 
-    if (!unique.has(key) && !unique.has(fallbackDisplayKey)) {
-      // Empty string, not a placeholder phrase like "Publisher not
-      // specified" -- the renderer omits the line entirely when metadata
-      // is unavailable instead of printing a broken-looking field.
-      unique.set(key, {
-        sourceName,
-        sourceType: getPdfCitationSourceTypeLabel(citation),
-        trustLabel: getPdfCitationTrustLabel(citation),
-        publisher: isPlausibleCitationField(citation.organization || "") ? citation.organization! : "",
-        publicationYear: citation.publicationYear || "",
-        url: normalizeCitationUrl(citation.url),
-      });
-      unique.set(fallbackDisplayKey, unique.get(key)!);
+    const existing = unique.get(key) || unique.get(fallbackDisplayKey);
+    if (existing) {
+      // Same displayed source cited under a second reference tag (e.g. a
+      // duplicate URL the server-side bibliography didn't already merge,
+      // or a report type whose citations aren't pre-merged) -- append the
+      // tag instead of silently dropping it, so every [R#] that resolves
+      // to this entry stays visible.
+      if (citation.referenceTag && !existing.referenceTag.includes(citation.referenceTag)) {
+        existing.referenceTag = `${existing.referenceTag}${citation.referenceTag}`;
+      }
+      return;
     }
+
+    // Empty string, not a placeholder phrase like "Publisher not
+    // specified" -- the renderer omits the line entirely when metadata
+    // is unavailable instead of printing a broken-looking field.
+    const entry = {
+      sourceName,
+      sourceType: getPdfCitationSourceTypeLabel(citation),
+      trustLabel: getPdfCitationTrustLabel(citation),
+      publisher: isPlausibleCitationField(citation.organization || "") ? citation.organization! : "",
+      publicationYear: citation.publicationYear || "",
+      url: normalizeCitationUrl(citation.url),
+      referenceTag: citation.referenceTag || "",
+      accessDate: isPlausibleCitationField(citation.accessDate || "") ? citation.accessDate! : "",
+    };
+    unique.set(key, entry);
+    unique.set(fallbackDisplayKey, entry);
   });
 
   return Array.from(new Set(unique.values()));
@@ -473,6 +504,8 @@ function parseCitations(content: string): CitationData[] {
           : {}),
         ...(current.url ? { url: current.url } : {}),
         ...(current.sourceType ? { sourceType: current.sourceType } : { sourceType: "Verified source" }),
+        ...(current.referenceTag ? { referenceTag: current.referenceTag } : {}),
+        ...(current.accessDate ? { accessDate: current.accessDate } : {}),
       });
     }
     current = {};
@@ -504,7 +537,7 @@ function parseCitations(content: string): CitationData[] {
       }
 
       const metadataMatch = line.match(
-        /^(title|source|publisher|organization|year|publication year|url|confidence|source type|type)\s*[:\-–—]\s*(.+)$/i
+        /^(title|source|publisher|organization|year|publication year|url|confidence|source type|type|reference|accessed|access date)\s*[:\-–—]\s*(.+)$/i
       );
       if (metadataMatch) {
         const key = metadataMatch[1].toLowerCase();
@@ -526,6 +559,13 @@ function parseCitations(content: string): CitationData[] {
           if (normalizedUrl) current.url = normalizedUrl;
         } else if (key === "confidence") {
           current.confidence = normalizeCitationConfidence(value);
+        } else if (key === "reference") {
+          // The Market Intelligence deterministic bibliography's own
+          // in-text tag(s), e.g. "[R3][R12]" -- pure bracket syntax, never
+          // free-form prose, so no shape guard is needed here.
+          if (value) current.referenceTag = value;
+        } else if (key === "accessed" || key === "access date") {
+          if (looksLikeCitationMetadataValue(value)) current.accessDate = value;
         } else if (looksLikeCitationMetadataValue(value)) {
           current.sourceType = normalizeSourceType(value);
         }
@@ -679,7 +719,11 @@ function formatPdfCitationContent(content: string, realEstate = false) {
   const sourceLines = finalDedupeSources
     .map((source) =>
       [
-        `• ${source.sourceName}`,
+        // The in-text [R#] tag(s) this entry resolves, when present (only
+        // Market Intelligence's deterministic bibliography emits these),
+        // so a reader can trace a citation seen earlier in the report
+        // straight back to its exact Sources entry.
+        `• ${source.referenceTag ? `${source.referenceTag} ` : ""}${source.sourceName}`,
         `  Source type: ${source.sourceType}`,
         // Metadata that isn't actually known is omitted entirely rather
         // than printed as "Publisher: Not specified" / "URL: Not
@@ -688,6 +732,7 @@ function formatPdfCitationContent(content: string, realEstate = false) {
         ...(source.publisher ? [`  Publisher: ${source.publisher}`] : []),
         ...(source.publicationYear ? [`  Year: ${source.publicationYear}`] : []),
         ...(source.url ? [`  URL: ${source.url}`] : []),
+        ...(source.accessDate ? [`  Accessed: ${source.accessDate}`] : []),
         `  Confidence: ${source.trustLabel}`,
       ].join("\n")
     )

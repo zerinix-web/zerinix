@@ -107,6 +107,12 @@ export type MarketIntelligenceGraph = {
   // away by the display-level canonical-URL dedup but are still real,
   // citable evidence.
   citableEvidenceIds: Set<string>;
+  // Every citable evidence ID mapped to its representative (post-dedup)
+  // source record -- see the build-time comment in
+  // buildMarketIntelligenceGraph. Used to build the deterministic Sources
+  // bibliography from the exact [R#] references actually used in the
+  // final report.
+  sourceRecordByEvidenceId: Record<string, MarketIntelligenceSource>;
   vendorIntelligence: VendorIntelligenceGraph;
   coverage: MarketResearchCoverage;
 };
@@ -401,6 +407,23 @@ export function buildMarketIntelligenceGraph(
       ) === index
   );
 
+  // Maps EVERY citable evidence ID -- not just the ones that survived the
+  // canonical-URL dedup above as their own row -- to the one representative
+  // MarketIntelligenceSource record a reader should see for it. Two
+  // evidence IDs pointing at the same canonical URL both resolve to the
+  // SAME record here, which is what lets the bibliography merge them into
+  // a single reference entry (tagged with every ID that cites it) instead
+  // of either duplicating the entry or losing the citation. Plain object,
+  // not a Map, so this survives a JSON round-trip (report-cache snapshots
+  // store this graph as JSON).
+  const sourceRecordByEvidenceId: Record<string, MarketIntelligenceSource> = {};
+  for (const item of sanitizedSources) {
+    const representative =
+      sources.find((candidate) => canonicalUrl(candidate.url) === canonicalUrl(item.url)) ||
+      item;
+    sourceRecordByEvidenceId[item.evidenceId] = representative;
+  }
+
   const competitorMap = new Map<string, MarketIntelligenceCompetitor>();
   for (const vendor of vendorIntelligence.vendors) {
     competitorMap.set(vendor.name.toLocaleLowerCase("en"), {
@@ -547,6 +570,7 @@ export function buildMarketIntelligenceGraph(
     cagr,
     sources,
     citableEvidenceIds,
+    sourceRecordByEvidenceId,
     vendorIntelligence,
     coverage,
   };
@@ -607,7 +631,9 @@ type MarketGraphCopyKey =
   | "reasonStandardsBody"
   | "targetCustomerLabel"
   | "rankingLabel"
-  | "overallScoreLabel";
+  | "overallScoreLabel"
+  | "sourcesTitle"
+  | "noVerifiableSourcesText";
 
 const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, string>> = {
   English: {
@@ -634,6 +660,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     sourceTypeLabel: "Source type",
     classificationLabel: "Classification",
     claimLinkageLabel: "Claim linkage",
+    sourcesTitle: "Sources",
+    noVerifiableSourcesText:
+      "No independently verifiable sources were used in this report.",
     basisLabel: "Basis",
     evidenceLabel: "Evidence",
     assumptionOnlyScenario: "assumption-only scenario",
@@ -679,6 +708,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     sourceTypeLabel: "Kaynak türü",
     classificationLabel: "Sınıflandırma",
     claimLinkageLabel: "İddia bağlantısı",
+    sourcesTitle: "Kaynaklar",
+    noVerifiableSourcesText:
+      "Bu raporda bağımsız olarak doğrulanabilir bir kaynak kullanılmadı.",
     basisLabel: "Temel",
     evidenceLabel: "Kanıt",
     assumptionOnlyScenario: "sadece varsayıma dayalı senaryo",
@@ -724,6 +756,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     sourceTypeLabel: "Quellentyp",
     classificationLabel: "Klassifizierung",
     claimLinkageLabel: "Aussagenbezug",
+    sourcesTitle: "Quellen",
+    noVerifiableSourcesText:
+      "In diesem Bericht wurden keine unabhängig überprüfbaren Quellen verwendet.",
     basisLabel: "Grundlage",
     evidenceLabel: "Nachweis",
     assumptionOnlyScenario: "reines Annahmenszenario",
@@ -769,6 +804,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     sourceTypeLabel: "Type de source",
     classificationLabel: "Classification",
     claimLinkageLabel: "Lien avec l'affirmation",
+    sourcesTitle: "Sources",
+    noVerifiableSourcesText:
+      "Aucune source vérifiable de manière indépendante n'a été utilisée dans ce rapport.",
     basisLabel: "Base",
     evidenceLabel: "Preuve",
     assumptionOnlyScenario: "scénario basé uniquement sur des hypothèses",
@@ -814,6 +852,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     sourceTypeLabel: "Tipo de fuente",
     classificationLabel: "Clasificación",
     claimLinkageLabel: "Vínculo con la afirmación",
+    sourcesTitle: "Fuentes",
+    noVerifiableSourcesText:
+      "No se utilizaron fuentes verificables de forma independiente en este informe.",
     basisLabel: "Base",
     evidenceLabel: "Evidencia",
     assumptionOnlyScenario: "escenario basado únicamente en suposiciones",
@@ -1225,4 +1266,85 @@ export function projectMarketIntelligenceGraphToReport(
   }
 
   return projection;
+}
+
+const bibliographyReferencePattern = /\[R(\d+)\]/g;
+
+/**
+ * Builds the final, deterministic Sources bibliography: every [R#]
+ * reference actually cited anywhere in the report body (never the model's
+ * own free-form sources text, never a category+count compression), each
+ * resolved to its real verified evidence record. Order matches first
+ * citation appearance across sections; two IDs that resolve to the same
+ * canonical document merge into one entry tagged with every ID that cites
+ * it. The per-entry field labels below ("Title:", "Publisher:", ...) are
+ * intentionally hardcoded in English regardless of `language` -- they are
+ * parsing keys for ReportPdfButton.tsx's parseCitations, not user-facing
+ * prose (matching that renderer's own existing English-only field labels,
+ * e.g. "Source type:"/"Confidence:", which are not localized either).
+ */
+export function buildMarketIntelligenceBibliography(
+  sections: Record<string, string | undefined>,
+  graph: MarketIntelligenceGraph,
+  language: string = "English"
+): string {
+  const copy = marketGraphCopy[copyLanguage(language)];
+
+  const orderedIds: string[] = [];
+  const seenIds = new Set<string>();
+  for (const [field, content] of Object.entries(sections)) {
+    if (field === "sources" || !content) continue;
+    bibliographyReferencePattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = bibliographyReferencePattern.exec(content))) {
+      const id = `R${match[1]}`;
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
+      orderedIds.push(id);
+    }
+  }
+
+  if (orderedIds.length === 0) {
+    return [copy.sourcesTitle, copy.noVerifiableSourcesText].join("\n");
+  }
+
+  const entryOrder: MarketIntelligenceSource[] = [];
+  const tagsByRecord = new Map<MarketIntelligenceSource, string[]>();
+  for (const id of orderedIds) {
+    const record = graph.sourceRecordByEvidenceId[id];
+    // Defensive only: assertNoOrphanEvidenceReferences already fails
+    // generation before this function is ever reached if any cited ID
+    // has no record, so this branch should be unreachable in practice.
+    if (!record) continue;
+    if (!tagsByRecord.has(record)) {
+      tagsByRecord.set(record, []);
+      entryOrder.push(record);
+    }
+    tagsByRecord.get(record)!.push(id);
+  }
+
+  const entries = entryOrder.map((record) => {
+    const tags = (tagsByRecord.get(record) || []).map((id) => `[${id}]`).join("");
+    const year = record.publishedDate.match(/\b(19|20)\d{2}\b/)?.[0];
+    // A full ISO timestamp ("2026-08-15T00:00:00.000Z") reads worse than
+    // a plain date in a citation card, and its "." trips the PDF
+    // parser's own prose-rejection guard (built to reject a value like
+    // "the gap in verified evidence." -- a real timestamp's decimal
+    // point is an unrelated false positive against that same check), so
+    // the field silently disappeared even when accessedAt was present.
+    // Reducing to the plain YYYY-MM-DD date fixes both at once.
+    const accessDate = record.accessedAt.match(/^\d{4}-\d{2}-\d{2}/)?.[0] || record.accessedAt;
+    return [
+      `Reference: ${tags}`,
+      `Title: ${record.title}`,
+      `Publisher: ${record.publisher}`,
+      `URL: ${record.url}`,
+      ...(year ? [`Year: ${year}`] : []),
+      ...(accessDate ? [`Accessed: ${accessDate}`] : []),
+      `Type: ${record.sourceType}`,
+      `Confidence: ${record.confidenceLevel}`,
+    ].join("\n");
+  });
+
+  return [copy.sourcesTitle, "", ...entries].join("\n\n").trim();
 }
