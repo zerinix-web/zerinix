@@ -689,7 +689,13 @@ function createResearchJsonSchema(tasks: readonly ResearchTask[]) {
             properties: {
               id: { type: "string", enum: taskIds },
               field: { type: "string", enum: taskFields },
-              provider: { type: "string" },
+              // provider intentionally omitted: this provider is always
+              // "openai_web_search" at this call site, and the caller
+              // unconditionally overwrites whatever the model returns here
+              // (see the .map((task) => ({..., provider: "openai_web_search" }))
+              // right after normalizeResearchTaskResults is called) --
+              // asking the model to generate a value that is always
+              // discarded only costs output tokens.
               status: {
                 type: "string",
                 enum: [
@@ -707,7 +713,6 @@ function createResearchJsonSchema(tasks: readonly ResearchTask[]) {
             required: [
               "id",
               "field",
-              "provider",
               "status",
               "reason",
               "confidence",
@@ -720,7 +725,12 @@ function createResearchJsonSchema(tasks: readonly ResearchTask[]) {
             type: "object",
             additionalProperties: false,
             properties: {
-              taskId: { type: "string", enum: taskIds },
+              // taskId intentionally omitted: normalizeExtractedFacts only
+              // ever reads record.field to associate a fact with its task
+              // (confirmed -- record.taskId is not referenced anywhere in
+              // that function or elsewhere for extractedFacts); field alone
+              // is required and sufficient, so a taskId value here is
+              // generated and then never read.
               field: { type: "string", enum: taskFields },
               value: { type: "string" },
               confidence: { type: "number", minimum: 0, maximum: 100 },
@@ -741,7 +751,6 @@ function createResearchJsonSchema(tasks: readonly ResearchTask[]) {
               missing: { type: "boolean" },
             },
             required: [
-              "taskId",
               "field",
               "value",
               "confidence",
