@@ -5,6 +5,7 @@ import {
   type MarketTaxonomyProfile,
 } from "./market-taxonomy.ts";
 import { calculateEvidenceConfidence } from "./market-research-coverage.ts";
+import { academicPublisherHostPattern } from "./commercial-vendor-intelligence.ts";
 
 // ---------------------------------------------------------------------------
 // 1. Dynamic vendor-discovery query expansion
@@ -209,14 +210,22 @@ const domainSuffixPattern = /\.(?:com|net|org|co|app|io|biz|info|dev|shop)(?:\.[
 // completely unaffected. Only inventing a vendor purely from a bare,
 // content-less URL on one of these domain shapes is excluded.
 const nonCompetitorDomainPattern =
-  /(?:^|\.)(?:jsdelivr\.net|unpkg\.com|cloudflare\.com|cloudflareinsights\.com|cloudfront\.net|akamaized\.net|akamai\.net|fastly\.net|amazonaws\.com|imgur\.com|unsplash\.com|cloudinary\.com|imgix\.net|staticflickr\.com|flickr\.com|readthedocs\.(?:io|org)|gitbook\.io|github\.com|githubusercontent\.com|github\.io|gitlab\.io|gitlab\.com|bitbucket\.org|medium\.com|substack\.com|blogspot\.com|wordpress\.com|hashnode\.dev|dev\.to|tumblr\.com|indeed\.com|linkedin\.com|glassdoor\.com|ziprecruiter\.com|greenhouse\.io|lever\.co|workable\.com|ashbyhq\.com|zendesk\.com|freshdesk\.com|helpscout\.com|helpscout\.net|intercom\.help|atlassian\.net|crunchbase\.com)$/i;
+  /(?:^|\.)(?:jsdelivr\.net|unpkg\.com|cloudflare\.com|cloudflareinsights\.com|cloudfront\.net|akamaized\.net|akamai\.net|fastly\.net|amazonaws\.com|imgur\.com|unsplash\.com|cloudinary\.com|imgix\.net|staticflickr\.com|flickr\.com|readthedocs\.(?:io|org)|gitbook\.io|github\.com|githubusercontent\.com|github\.io|gitlab\.io|gitlab\.com|bitbucket\.org|medium\.com|substack\.com|blogspot\.com|wordpress\.com|hashnode\.dev|dev\.to|tumblr\.com|indeed\.com|linkedin\.com|glassdoor\.com|ziprecruiter\.com|greenhouse\.io|lever\.co|workable\.com|ashbyhq\.com|zendesk\.com|freshdesk\.com|helpscout\.com|helpscout\.net|intercom\.help|atlassian\.net|crunchbase\.com|youtube\.com|youtu\.be|vimeo\.com|facebook\.com|instagram\.com|tiktok\.com|twitter\.com|x\.com|pinterest\.com|soundcloud\.com|twitch\.tv|threads\.net)$/i;
 const nonCompetitorSubdomainPattern =
   /^(?:docs?|documentation|developer|developers|api-?docs|support|helpdesk|help|jobs|careers|blog|cdn|static|assets|img|images|media)\./i;
 
 function isNonCompetitorSourceDomain(domain: string) {
   return (
     nonCompetitorDomainPattern.test(domain) ||
-    nonCompetitorSubdomainPattern.test(domain)
+    nonCompetitorSubdomainPattern.test(domain) ||
+    // Confirmed live: bare citations to academic-paper publishers (e.g.
+    // mdpi.com, sciencedirect.com) were reaching deriveCandidateNameFromDomain
+    // below and being rendered as "competitors" (e.g. "Mdpi",
+    // "Sciencedirect") -- these domains carry evidence *about* a market,
+    // never a commercial vendor *in* it. Reusing the same hostname pattern
+    // classifyOrganizationEntity uses for its "academic" entity type keeps
+    // this single list authoritative instead of maintaining two.
+    academicPublisherHostPattern.test(domain)
   );
 }
 
@@ -255,6 +264,63 @@ function deriveCandidateNameFromDomain(domain: string): string | null {
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
   return normalizedMentionCandidate(name, new Set());
+}
+
+function compactAlnum(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+// A domain-fallback name is only ever a last-resort guess at a real
+// company's identity from a bare URL with no descriptive text at all. When
+// the domain's own label is essentially the market's own category
+// description with the spaces removed -- a common shape for programmatic/
+// content-mill market-report domains (e.g. "tradecompliancesoftware.com"
+// for a "trade compliance software" market) -- it names the CATEGORY, not
+// a specific company. Confirmed live as the shape behind
+// "Tradecompliancesoftware" reaching the competitor table. Compared with
+// separators stripped from both sides since a domain label has no word
+// boundaries for a normal token-set comparison.
+function isGenericMarketCategoryDomainLabel(
+  domainLabel: string,
+  taxonomy: MarketTaxonomyProfile | null
+): boolean {
+  if (!taxonomy) return false;
+  const compactLabel = compactAlnum(domainLabel);
+  if (compactLabel.length < 6) return false;
+  const categoryTerms = [taxonomy.productCategory, ...taxonomy.aliases, ...taxonomy.adjacentCategories]
+    .filter(Boolean)
+    .map(compactAlnum)
+    .filter((term) => term.length >= 6);
+  return categoryTerms.some(
+    (term) => term === compactLabel || compactLabel.includes(term)
+  );
+}
+
+// Last-line-of-defense shape check, applied independently of *why* a string
+// became a candidate (domain fallback, heuristic mention, or any future
+// extraction path) and independent of domain classification -- confirmed
+// live, a Market Intelligence competitor table showed prompt/instruction
+// fragments ("Conduct a comprehensive Intelligence analysis for...") and
+// concatenated evidence-provider domain labels ("viewpointanalysis",
+// "iaiest") alongside real competitors. A real company/product name is
+// short, has no sentence punctuation, and never carries markdown, URL, or
+// object-literal syntax -- this rejects anything that fails that shape
+// instead of trying to enumerate every bad source, so it also covers
+// domains not yet known to isNonCompetitorSourceDomain/
+// classifyOrganizationEntity.
+const instructionLeadingVerbPattern =
+  /^(?:conduct|analyz[e]?|generate|write|provide|summarize|summarise|explain|list|identify|assess|evaluate|create|perform|produce|research|describe|compare|review|investigate|determine|prepare|draft|compile|outline)\b/i;
+const markdownOrParserArtifactPattern = /[[\]{}`|]|https?:\/\/|www\.|\.(?:com|org|net|edu|gov|io)\b/i;
+
+export function isImplausibleCompetitorName(name: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed) return true;
+  if (trimmed.length > 60) return true;
+  if (trimmed.includes("...") || trimmed.includes("…")) return true;
+  if (markdownOrParserArtifactPattern.test(trimmed)) return true;
+  if (instructionLeadingVerbPattern.test(trimmed)) return true;
+  if (trimmed.split(/\s+/).length > 6) return true;
+  return false;
 }
 
 function isVendorDiscoveryRelevant(item: DomainResearchEvidence, domain: string) {
@@ -374,7 +440,9 @@ export function extractVendorCandidateMentions(
     if (taxonomyResolved.length > 0) continue;
     if (!isVendorDiscoveryRelevant(item, domain)) continue;
     const text = [item.claim, item.value, item.sourceTitle].join(" ");
-    const heuristicNames = extractHeuristicMentions(text, taxonomyWords);
+    const heuristicNames = extractHeuristicMentions(text, taxonomyWords).filter(
+      (name) => !isImplausibleCompetitorName(name)
+    );
     for (const name of heuristicNames) {
       mentions.push({
         name,
@@ -399,7 +467,11 @@ export function extractVendorCandidateMentions(
       !isNonCompetitorSourceDomain(domain)
     ) {
       const derivedName = deriveCandidateNameFromDomain(domain);
-      if (derivedName) {
+      if (
+        derivedName &&
+        !isImplausibleCompetitorName(derivedName) &&
+        !isGenericMarketCategoryDomainLabel(domain, taxonomy)
+      ) {
         mentions.push({
           name: derivedName,
           matchedBy: "domain_fallback",
@@ -431,6 +503,15 @@ export type AggregatedVendorCandidate = {
   lastSeen: string;
   evidenceIds: string[];
   matchedByTaxonomy: boolean;
+  // True only when every single mention that built this candidate came from
+  // the domain-fallback path (Path C) -- i.e. no real descriptive text ever
+  // backed this name, only a capitalized URL label. Confirmed live as the
+  // shape behind unrecognized evidence-provider/academic domains reaching
+  // the competitor table ("Viewpointanalysis", "Iaiest") that a fixed
+  // domain list can't fully enumerate. Used to require independent,
+  // official-page corroboration before such a name can ever be trusted as a
+  // real vendor, since "we capitalized a bare URL" is not itself evidence.
+  matchedByDomainFallbackOnly: boolean;
 };
 
 const legalSuffixPattern =
@@ -499,10 +580,13 @@ export function resolveVendorIdentity(
         lastSeen: "",
         evidenceIds: [],
         matchedByTaxonomy: false,
+        matchedByDomainFallbackOnly: true,
       };
 
     if (isTaxonomyMatch) current.canonicalName = mention.name;
     current.matchedByTaxonomy = current.matchedByTaxonomy || isTaxonomyMatch;
+    current.matchedByDomainFallbackOnly =
+      current.matchedByDomainFallbackOnly && mention.matchedBy === "domain_fallback";
     if (!current.aliases.some((alias) => alias.toLowerCase() === mention.name.toLowerCase())) {
       current.aliases.push(mention.name);
     }
@@ -602,8 +686,25 @@ export function validateVendorCandidate(
   candidate: AggregatedVendorCandidate,
   qualifyingItems: readonly DomainResearchEvidence[]
 ): VendorValidationResult {
-  const officialItems = qualifyingItems.filter((item) =>
-    isOfficialVendorEvidence(item, candidate.sourceDomains)
+  // isOfficialVendorEvidence alone only checks the URL's domain/path shape
+  // and the classifier's sourceType label -- neither requires the item to
+  // carry any actual descriptive content. Confirmed live: a bare citation
+  // to a candidate's own domain, with an empty/near-empty claim (the exact
+  // shape isThinDomainOnlyEvidence exists to catch), was auto-labeled
+  // "official company source" by the upstream classifier purely because
+  // the evidence's URL happened to be on that same domain -- and that one
+  // content-less item alone was then sufficient, on its own, to validate a
+  // full "commercial vendor" table row (review sites, a training
+  // institute, and marketing agencies all reached the competitor table
+  // this way, each backed by exactly one bare-domain citation). Domain
+  // existence must never be sufficient evidence by itself -- requiring the
+  // "official" item to carry real descriptive content is what makes that
+  // guarantee actually hold for the single-official-page validation path
+  // below, not just the multi-source paths.
+  const officialItems = qualifyingItems.filter(
+    (item) =>
+      isOfficialVendorEvidence(item, candidate.sourceDomains) &&
+      !isThinDomainOnlyEvidence(item, hostnameOf(item.url))
   );
   const reviewItems = qualifyingItems.filter((item) =>
     isReviewOrDirectoryDomain(hostnameOf(item.url))
@@ -646,18 +747,67 @@ export function validateVendorCandidate(
     (item) => !isThinDomainOnlyEvidence(item, hostnameOf(item.url))
   );
 
-  const paths: Array<[boolean, string]> = [
-    [officialEvidenceCount >= 1 && independentDomainCount >= 2, "official_product_page_plus_independent_source"],
-    [officialEvidenceCount >= 1 && reviewEvidenceCount >= 1, "official_page_plus_customer_review_evidence"],
-    // A verified, company-owned product/pricing page is itself the "product
-    // documentation" the spec refers to, so it is sufficient alone -- this
-    // is what lets a single well-formed official page validate a vendor,
-    // while a single third-party mention (no official page) still needs the
-    // two-independent-sources path below.
-    [officialEvidenceCount >= 1, "official_page_plus_product_documentation"],
-    [independentDomainCount >= 2 && hasSubstantiveEvidence, "two_independent_commercial_or_industry_sources"],
-    [filingEvidenceCount >= 1, "public_filing_or_investor_material"],
-  ];
+  // "Substantive" text alone (real prose, not a bare domain-only citation)
+  // still proves nothing about whether the candidate SELLS anything --
+  // being cited by name across multiple articles as the SOURCE of a market
+  // statistic ("According to Dataintelo, the market will reach $X by...")
+  // produces exactly this shape: real prose, 2+ independent domains, no
+  // explicit vendor-role designation anywhere in the text. Confirmed live
+  // as the mechanism behind market-research/data firms ("Dataintelo",
+  // "Gingercontrol") reaching the competitor table purely by citation
+  // frequency. Product/pricing/customer detail is one way a source
+  // establishes that -- but a legitimate directory/analyst listing that
+  // simply NAMES a real company as a "vendor"/"provider"/"competitor" in
+  // the market (e.g. "Gartner names QuickBooks, Xero, Sage, and NetSuite
+  // as accounting software vendors") is an equally valid, and common,
+  // shape for real vendor corroboration that carries no product-feature or
+  // pricing detail of its own. Requiring either keeps the
+  // two-independent-sources path scoped to what it was meant to validate
+  // (a real vendor independently described as participating in the
+  // market) without narrowing it to only product/pricing-detailed
+  // mentions.
+  const vendorRoleDesignationPattern =
+    /\b(?:vendor|vendors|provider|providers|solution provider|software provider|competitor|competitors|company|companies|player|players)\b/i;
+  const vendorRoleItems = qualifyingItems.filter((item) =>
+    vendorRoleDesignationPattern.test(`${item.claim} ${item.value}`)
+  );
+  const hasCommercialProductSignal =
+    productItems.length > 0 ||
+    pricingItems.length > 0 ||
+    customerItems.length > 0 ||
+    vendorRoleItems.length > 0;
+
+  // A name that only ever came from the domain-fallback path (Path C -- a
+  // capitalized URL label, never real descriptive text) is not itself
+  // evidence of anything: it needs an actual official product/pricing page
+  // to be trusted as a real vendor. Without this guard, an evidence-provider
+  // or academic domain that a fixed exclusion list doesn't yet recognize can
+  // still validate purely by being cited as a bare URL from two mirrors, or
+  // by incidentally sharing a candidate merge with unrelated filing
+  // evidence -- confirmed live as the shape behind unrecognized domains
+  // ("Viewpointanalysis", "Iaiest") reaching the competitor table.
+  const paths: Array<[boolean, string]> = candidate.matchedByDomainFallbackOnly
+    ? [
+        [officialEvidenceCount >= 1 && independentDomainCount >= 2, "official_product_page_plus_independent_source"],
+        [officialEvidenceCount >= 1 && reviewEvidenceCount >= 1, "official_page_plus_customer_review_evidence"],
+        [officialEvidenceCount >= 1, "official_page_plus_product_documentation"],
+      ]
+    : [
+        [officialEvidenceCount >= 1 && independentDomainCount >= 2, "official_product_page_plus_independent_source"],
+        [officialEvidenceCount >= 1 && reviewEvidenceCount >= 1, "official_page_plus_customer_review_evidence"],
+        // A verified, company-owned product/pricing page is itself the
+        // "product documentation" the spec refers to, so it is sufficient
+        // alone -- this is what lets a single well-formed official page
+        // validate a vendor, while a single third-party mention (no
+        // official page) still needs the two-independent-sources path
+        // below.
+        [officialEvidenceCount >= 1, "official_page_plus_product_documentation"],
+        [
+          independentDomainCount >= 2 && hasSubstantiveEvidence && hasCommercialProductSignal,
+          "two_independent_commercial_or_industry_sources",
+        ],
+        [filingEvidenceCount >= 1, "public_filing_or_investor_material"],
+      ];
   const passed = paths.find(([ok]) => ok);
 
   return {
@@ -764,7 +914,7 @@ export function classifyMajorPlayerLabel(input: {
 export type MarketRelevanceResult = { relevant: boolean; reason: string };
 
 const nonVendorRolePattern =
-  /\b(?:implementation partner|systems? integrator|si partner|reseller partner|channel partner|app marketplace|marketplace|app store|outsourced accounting|outsourced bookkeeping|managed bookkeeping service|accounting firm|cpa firm|law firm|consulting firm|consultancy|advisory firm|distributor|distribution partner|wholesale distributor|media (?:company|group|outlet|network)|news (?:outlet|organization|publication|site)|trade (?:press|publication|journal)|publishing (?:company|house)|b2b media|industry (?:media|publication)|events? (?:company|organizer|producer)|conference organizer|trade show organizer|analyst firm|research and advisory firm)\b/i;
+  /\b(?:implementation partner|systems? integrator|si partner|reseller partner|channel partner|app marketplace|marketplace|app store|outsourced accounting|outsourced bookkeeping|managed bookkeeping service|accounting firm|cpa firm|law firm|consulting firm|consultancy|advisory firm|distributor|distribution partner|wholesale distributor|media (?:company|group|outlet|network)|news (?:outlet|organization|publication|site)|trade (?:press|publication|journal)|publishing (?:company|house)|b2b media|industry (?:media|publication)|events? (?:company|organizer|producer)|conference organizer|trade show organizer|analyst firm|research and advisory firm|market research (?:firm|company|provider|group|agency|publisher)|market intelligence (?:firm|provider|company)|industry research (?:firm|company|provider)|data (?:and|&) analytics (?:firm|company|provider))\b/i;
 const managedServicesAllowancePattern = /\bmanaged (?:service|services|detection|soc|security)\b/i;
 
 /**

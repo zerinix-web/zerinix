@@ -127,6 +127,21 @@ function splitSourcesAndMethodology(content: string) {
 
 export function isLegalRenderableReport(report: LegalRenderableReport) {
   if (report.type === "Real Estate Investment Analysis") return false;
+  // Market Intelligence gets the same explicit, unconditional exemption as
+  // Real Estate above. Without it, this function's report.type !== "Strategic
+  // Report" gate is the ONLY thing standing between a correctly-generated,
+  // correctly-typed Market Analysis report and misclassification as legal:
+  // the broad legalSignalPattern below matches the bare word "contract",
+  // which any market report about a contract-management/CLM/legal-tech
+  // *product* will legitimately use throughout. Confirmed live: a Market
+  // Intelligence report on an AI-native contract lifecycle management
+  // platform was exported as a "Legal Assessment Report" containing only a
+  // Material Facts section. report.type should always be "Market Analysis"
+  // for a correctly-routed Market Intelligence report, but this check makes
+  // that guarantee explicit and type-based -- identical in spirit to the
+  // Real Estate line above -- rather than depending on the "Strategic
+  // Report" gate alone to indirectly exclude it.
+  if (report.type === "Market Analysis") return false;
   const fieldText = report.sections
     .filter((section) =>
       [

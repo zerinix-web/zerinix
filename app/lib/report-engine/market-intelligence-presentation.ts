@@ -83,11 +83,41 @@ export function assessMarketEntryConfidence(coverage: MarketResearchCoverage) {
 // to catch after the fact. Telling the model the real verdict up front
 // lets it self-condition every section instead of relying purely on a
 // post-hoc gate.
-export function buildPreGenerationVerdictContext(
-  assessment: { confidence: number; decision: MarketEntryDecision },
+// Named per-dimension breakdown of the blended verdict confidence above --
+// injected into the same prompt context so a section discussing a
+// specific topic (competitive intensity, market sizing, product fit) has
+// its own real number to cite instead of only ever having access to the
+// one blended figure. Confirmed live: without this, sections independently
+// discussing different topics (market attractiveness, competitive
+// intensity, product-market fit) all echoed the SAME confidence number --
+// not because the underlying dimensions collapsed (evaluateMarketResearchCoverage
+// computes each from genuinely distinct evidence and a distinct formula),
+// but because the blended figure was the only number ever given to the
+// model, so every section that wanted to cite "confidence" for its own
+// topic had nothing else to reuse.
+function buildDimensionBreakdownContext(
+  dimensions: { marketConfidence: number; competitiveEvidence: number; financialEvidence: number; productEvidence: number },
   language: ResponseLanguage
 ): string {
+  return marketText(
+    language,
+    ` These are four distinct evidence dimensions, each with its own score -- market evidence coverage ${dimensions.marketConfidence}/100, competitive evidence ${dimensions.competitiveEvidence}/100, financial/market-sizing evidence ${dimensions.financialEvidence}/100, product/market-fit evidence ${dimensions.productEvidence}/100. When a section discusses one of these specific topics, cite that topic's own number, never the blended verdict confidence above relabeled as if it were the dimension-specific score.`,
+    ` Bunlar birbirinden farklı dört kanıt boyutudur, her birinin kendi puanı vardır -- pazar kanıt kapsamı ${dimensions.marketConfidence}/100, rekabet kanıtı ${dimensions.competitiveEvidence}/100, finansal/pazar büyüklüğü kanıtı ${dimensions.financialEvidence}/100, ürün/pazar uyumu kanıtı ${dimensions.productEvidence}/100. Bir bölüm bu konulardan birini ele alırken, o konunun kendi sayısını kullan; yukarıdaki karma karar güvenini boyuta özel bir puanmış gibi yeniden etiketleme.`,
+    ` Dies sind vier unterschiedliche Evidenzdimensionen mit jeweils eigenem Wert -- Marktevidenzabdeckung ${dimensions.marketConfidence}/100, Wettbewerbsevidenz ${dimensions.competitiveEvidence}/100, Finanz-/Marktgrößenevidenz ${dimensions.financialEvidence}/100, Produkt-/Markttauglichkeitsevidenz ${dimensions.productEvidence}/100. Wenn ein Abschnitt eines dieser Themen behandelt, verwenden Sie dessen eigenen Wert -- nicht die obige gemischte Urteilskonfidenz, als wäre sie ein dimensionsspezifischer Wert.`,
+    ` Ce sont quatre dimensions de preuves distinctes, chacune avec son propre score -- couverture des preuves de marché ${dimensions.marketConfidence}/100, preuves concurrentielles ${dimensions.competitiveEvidence}/100, preuves financières/de taille de marché ${dimensions.financialEvidence}/100, preuves d'adéquation produit-marché ${dimensions.productEvidence}/100. Lorsqu'une section traite l'un de ces sujets spécifiques, citez le score propre à ce sujet, jamais la confiance du verdict global ci-dessus reformulée comme si elle était ce score spécifique.`,
+    ` Estas son cuatro dimensiones de evidencia distintas, cada una con su propia puntuación -- cobertura de evidencia de mercado ${dimensions.marketConfidence}/100, evidencia competitiva ${dimensions.competitiveEvidence}/100, evidencia financiera/de tamaño de mercado ${dimensions.financialEvidence}/100, evidencia de ajuste producto-mercado ${dimensions.productEvidence}/100. Cuando una sección trate uno de estos temas específicos, cite la puntuación propia de ese tema, nunca la confianza del veredicto global anterior reetiquetada como si fuera ese puntaje específico.`
+  );
+}
+
+export function buildPreGenerationVerdictContext(
+  assessment: { confidence: number; decision: MarketEntryDecision },
+  language: ResponseLanguage,
+  dimensions?: { marketConfidence: number; competitiveEvidence: number; financialEvidence: number; productEvidence: number }
+): string {
   const localizedDecision = localizeMarketEntryDecision(assessment.decision, language);
+  const dimensionSuffix = dimensions
+    ? buildDimensionBreakdownContext(dimensions, language)
+    : "";
 
   if (assessment.decision === "AVOID") {
     return marketText(
@@ -97,7 +127,7 @@ export function buildPreGenerationVerdictContext(
       `Basierend auf der obigen Evidenzabdeckung wird das deterministische Urteil für diesen Markt ${localizedDecision} (Konfidenz ${assessment.confidence}/100) lauten. Jeder Abschnitt -- insbesondere Strategische Empfehlungen, Chancen und Markttreiber -- muss vollständig mit einem AVOID-Urteil übereinstimmen: Schreiben Sie keine bedingungslosen Wachstums-, Skalierungs-, Franchise- oder Standorterweiterungsempfehlungen, als wäre der Markteintritt bereits der Plan. Formulieren Sie solche Inhalte ausdrücklich als abhängig von der vorherigen Schließung der an anderer Stelle im Bericht genannten Evidenzlücken, niemals als unmittelbare Anweisung.`,
       `Sur la base de la couverture de preuves ci-dessus, le verdict déterministe pour ce marché sera ${localizedDecision} (confiance ${assessment.confidence}/100). Chaque section -- en particulier Recommandations stratégiques, Opportunités et Moteurs du marché -- doit être entièrement cohérente avec un verdict AVOID : ne rédigez pas de conseils de croissance, de mise à l'échelle, de franchise ou d'expansion géographique inconditionnels, comme si l'entrée était déjà décidée. Présentez ce type de contenu explicitement comme conditionné par la résolution préalable des lacunes de preuves mentionnées ailleurs dans le rapport, jamais comme une directive immédiate.`,
       `Según la cobertura de evidencia anterior, el veredicto determinista para este mercado será ${localizedDecision} (confianza ${assessment.confidence}/100). Cada sección -- especialmente Recomendaciones Estratégicas, Oportunidades e Impulsores del Mercado -- debe ser totalmente coherente con un veredicto AVOID: no escriba consejos incondicionales de crecimiento, escalamiento, franquicia o expansión de ubicaciones como si la entrada ya estuviera decidida. Presente dicho contenido explícitamente como condicionado a cerrar primero las brechas de evidencia señaladas en otras partes del informe, nunca como una directiva inmediata.`
-    );
+    ) + dimensionSuffix;
   }
 
   if (assessment.decision === "MONITOR") {
@@ -108,7 +138,7 @@ export function buildPreGenerationVerdictContext(
       `Basierend auf der obigen Evidenzabdeckung wird das deterministische Urteil für diesen Markt ${localizedDecision} (Konfidenz ${assessment.confidence}/100) lauten -- eine bedingte Haltung, kein vollständiges grünes Licht. Jeder Abschnitt muss dies widerspiegeln: Formulieren Sie Wachstums-/Skalierungs-/Expansionsinhalte nur als geeignet für einen begrenzten, an bestimmte Evidenzverbesserungen gebundenen Piloten, niemals als bedingungslosen sofortigen Rollout.`,
       `Sur la base de la couverture de preuves ci-dessus, le verdict déterministe pour ce marché sera ${localizedDecision} (confiance ${assessment.confidence}/100) -- une position conditionnelle, pas un feu vert complet. Chaque section doit refléter cela : présentez le contenu de croissance/mise à l'échelle/expansion comme approprié uniquement pour un pilote encadré, conditionné à l'amélioration de preuves spécifiques, jamais comme un déploiement immédiat et inconditionnel.`,
       `Según la cobertura de evidencia anterior, el veredicto determinista para este mercado será ${localizedDecision} (confianza ${assessment.confidence}/100) -- una postura condicional, no una luz verde completa. Cada sección debe reflejar esto: presente el contenido de crecimiento/escalamiento/expansión como apropiado solo para un piloto acotado, condicionado a que mejore evidencia específica, nunca como un despliegue inmediato e incondicional.`
-    );
+    ) + dimensionSuffix;
   }
 
   return marketText(
@@ -118,7 +148,7 @@ export function buildPreGenerationVerdictContext(
     `Basierend auf der obigen Evidenzabdeckung wird das deterministische Urteil für diesen Markt ${localizedDecision} (Konfidenz ${assessment.confidence}/100) lauten. Abschnitte können mit Zuversicht geschrieben werden, aber jede Behauptung muss weiterhin auf das Evidenzregister zurückführbar sein -- die Zuversicht im Urteil ist keine Lizenz, die Sicherheit einzelner Zahlen zu übertreiben.`,
     `Sur la base de la couverture de preuves ci-dessus, le verdict déterministe pour ce marché sera ${localizedDecision} (confiance ${assessment.confidence}/100). Les sections peuvent être rédigées avec assurance, mais chaque affirmation doit rester traçable au registre de preuves -- la confiance dans le verdict n'autorise pas à exagérer la certitude de chiffres individuels.`,
     `Según la cobertura de evidencia anterior, el veredicto determinista para este mercado será ${localizedDecision} (confianza ${assessment.confidence}/100). Las secciones pueden escribirse con confianza, pero cada afirmación debe seguir siendo trazable al registro de evidencia -- la confianza en el veredicto no es licencia para exagerar la certeza de cifras individuales.`
-  );
+  ) + dimensionSuffix;
 }
 
 // Splits report prose into single-sentence candidates for extraction.

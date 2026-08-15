@@ -319,6 +319,27 @@ type CitationDetail = {
   urlKey: string;
 };
 
+// A "Title:"/"Publisher:" label immediately followed by the model's own
+// narrative prose (a evidence-gap explanation, a recommendation fragment,
+// a decision-verdict sentence) rather than a real citation value is a real,
+// observed model failure mode -- confirmed live, a Sources block rendered
+// "Publisher: The opportunity is real, but the gap ..." as a fabricated
+// source because this extraction accepted whatever text followed the label
+// with no shape check at all. A real title or publisher name is short and
+// does not read as a full sentence -- this rejects anything that does,
+// independent of which specific words appear in it, so it generalizes to
+// any narrative fragment that happens to follow one of these labels.
+const citationProseVerbPattern =
+  /\b(?:is|are|was|were|outweighs|remains|requires|means|shows|reflects|confidence)\b/i;
+function looksLikeCitationMetadataValue(value: string, maxWords = 12): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 100) return false;
+  if (trimmed.split(/\s+/).length > maxWords) return false;
+  if (/[.!?]/.test(trimmed)) return false;
+  if (citationProseVerbPattern.test(trimmed)) return false;
+  return true;
+}
+
 // Extracts only fields that are actually present in the model's own
 // citation lines -- a field that isn't there is omitted from the rendered
 // bullet entirely (never a fabricated "Publisher: Unknown"-style filler),
@@ -336,8 +357,12 @@ function extractCitationDetail(group: string[], language: ResponseLanguage): Cit
     ?.match(/\b(19|20)\d{2}\b/)?.[0];
   const urlMatch = joined.match(/https?:\/\/\S+/)?.[0]?.replace(/[)\].,;]+$/, "").toLowerCase();
 
-  const title = titleMatch?.[1]?.trim() || "";
+  const rawTitle = titleMatch?.[1]?.trim() || "";
+  const title = looksLikeCitationMetadataValue(rawTitle, 20) ? rawTitle : "";
   if (!title) return null;
+
+  const rawPublisher = publisherMatch?.[1]?.trim() || "";
+  const publisher = looksLikeCitationMetadataValue(rawPublisher) ? rawPublisher : "";
 
   const confidence = tagMatch
     ? confidenceTagLabels[language][tagMatch[1].toLowerCase()] || ""
@@ -345,7 +370,7 @@ function extractCitationDetail(group: string[], language: ResponseLanguage): Cit
 
   return {
     title,
-    publisher: publisherMatch?.[1]?.trim() || "",
+    publisher,
     year: yearMatch || "",
     confidence,
     urlKey: urlMatch || title.toLowerCase(),

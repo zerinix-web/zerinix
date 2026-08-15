@@ -123,11 +123,22 @@ test("real historical production data confirms Market Intelligence is both the m
   //    forbidden terms) toward plain-language equivalents when citing a
   //    vendor's own reported financial scale -- market only, so only
   //    market's bound moved again.
+  // 5) the Runway/EBITDA isolation-vocabulary fix: a live Market
+  //    Intelligence report used the word "Runway" (a Business Idea
+  //    Validation-only term) and correctly failed
+  //    report-isolation-validator.ts. Root cause: the prompt's own "never
+  //    generate X" exclusion sentence never named "Runway"/"EBITDA"/etc,
+  //    so nothing told the model to avoid them even though the validator
+  //    has always rejected them. Fixed by generating an explicit
+  //    forbidden-vocabulary directive FROM the validator's own term list
+  //    (getForbiddenTermLabels) instead of a separately hand-maintained
+  //    copy that can drift -- market only, so only market's bound moved
+  //    again.
   const plan = buildPlanFullReportInstructions("English");
   const market = buildMarketLanguageInstructions("English");
 
   assert.ok(plan.length > 3500 && plan.length < 6600, `plan instructions length drifted: ${plan.length} chars`);
-  assert.ok(market.length > 2500 && market.length < 11400, `market instructions length drifted: ${market.length} chars`);
+  assert.ok(market.length > 2500 && market.length < 12200, `market instructions length drifted: ${market.length} chars`);
 
   // The real historical average total prompt for market (16,109 tokens)
   // is still far larger than its own static-instruction size (~2,511

@@ -246,12 +246,43 @@ export function resolveMarketTaxonomy(
 // currency amounts by pattern rather than by language, and caps the
 // result far shorter -- a category is a few words, not a paragraph.
 function extractDynamicProductCategory(prompt: string) {
-  const firstClause =
-    prompt.split(/[,;:.!?\n]/)[0]?.replace(/\s+/g, " ").trim() || "";
+  // Prefer directly isolating the noun phrase between "the" and
+  // "market/industry/sector" -- the standard Market Intelligence prompt
+  // shape ("Market Intelligence report on the cybersecurity SaaS market")
+  // -- over the word-blacklist fallback below. Confirmed live: for any
+  // market without a curated taxonomy entry, the blacklist only strips a
+  // handful of specific words, so report-framing text ("Intelligence
+  // report on") survived into what should be a clean category label and
+  // was rendered verbatim in every row of the competitor table's Category
+  // column. This positive pattern sidesteps needing to enumerate every
+  // possible framing phrase.
+  //
+  // The capture group disallows "the"/"market"/"industry"/"sector" as
+  // whole words inside itself. Without that, a non-greedy match still
+  // anchors at the FIRST "the" in the prompt and is free to span PAST a
+  // second "the" to reach the first later "market" token -- confirmed
+  // live on a business-idea-style prompt ("...the commercial opportunity
+  // of launching an AI-powered X in the banking market"), where the
+  // captured span was "commercial opportunity of launching an AI-powered
+  // X in the banking" instead of just "banking". Disallowing those words
+  // inside the capture forces the match to fail and retry at the LAST
+  // "the" before "market/industry/sector" -- the one actually naming the
+  // category -- with no need to enumerate every possible framing clause.
+  const marketPhraseMatch = prompt.match(
+    /\bthe\s+((?:(?!\bthe\b|\bmarket\b|\bindustry\b|\bsector\b)[^.!?\n])+?)\s+(?:market|industry|sector)\b/i
+  );
+  const firstClause = (
+    marketPhraseMatch?.[1] ||
+    prompt.split(/[,;:.!?\n]/)[0] ||
+    ""
+  )
+    .replace(/\s+/g, " ")
+    .trim();
   const withoutAmounts = firstClause
     .replace(/[$€₺£]\s*\d[\d.,]*\s*[a-z]*\b/gi, "")
     .replace(/\b\d[\d.,]*\s*(?:tl|try|usd|eur|gbp|k|bin|milyon|million|thousand)\b/gi, "")
-    .replace(/\b(?:analyze|analyse|market|industry|landscape|platforms?|software)\b/gi, "")
+    .replace(/\b(?:analyze|analyse|generate|create|provide|write|conduct|comprehensive|intelligence|report|market|industry|landscape|platforms?|software)\b/gi, "")
+    .replace(/^\s*(?:on|for|about|regarding|into|of)\s+/i, "")
     .replace(/\s+/g, " ")
     .trim();
   const candidate = withoutAmounts || firstClause;
@@ -358,12 +389,10 @@ export function sanitizeResearchPublisher(input: {
 }) {
   const url = validPublicUrl(input.url);
   if (!url) return null;
-  const title = input.title.replace(/\s+/g, " ").trim();
-  if (
-    !title ||
-    genericPublisherPattern.test(title) ||
-    invalidMetadataPattern.test(title)
-  ) return null;
+
+  const domainParts = url.hostname.replace(/^www\./i, "").split(".");
+  const domainLabel = (domainParts.at(-2) || domainParts[0]).replace(/[-_]+/g, " ");
+  const domainDerivedName = domainLabel.replace(/\b\w/g, (letter) => letter.toUpperCase());
 
   let publisher = input.publisher.replace(/\s+/g, " ").trim();
   if (
@@ -371,16 +400,32 @@ export function sanitizeResearchPublisher(input: {
     genericPublisherPattern.test(publisher) ||
     invalidMetadataPattern.test(publisher)
   ) {
-    const domainParts = url.hostname.replace(/^www\./i, "").split(".");
-    const domainLabel = (domainParts.at(-2) || domainParts[0])
-      .replace(/[-_]+/g, " ");
-    publisher = domainLabel.replace(/\b\w/g, (letter) => letter.toUpperCase());
+    publisher = domainDerivedName;
   }
   if (
     !publisher ||
     genericPublisherPattern.test(publisher) ||
     invalidMetadataPattern.test(publisher)
   ) return null;
+
+  // A missing/generic/placeholder title -- common for secondary web-search
+  // evidence that returns no extractable page title -- previously dropped
+  // the entry from the verified Sources registry entirely, even though the
+  // evidence itself (a real, valid URL and publisher) may still be cited
+  // by [R#] elsewhere in the report. Confirmed live: this produced a
+  // citation the model correctly used from real gathered evidence that
+  // then had no entry to resolve to in the rendered Sources section.
+  // Falling back to a title derived from the same publisher name already
+  // resolved above keeps a real, valid-URL source visible instead of
+  // silently discarding it.
+  let title = input.title.replace(/\s+/g, " ").trim();
+  if (
+    !title ||
+    genericPublisherPattern.test(title) ||
+    invalidMetadataPattern.test(title)
+  ) {
+    title = `${publisher} source`;
+  }
 
   return {
     publisher,

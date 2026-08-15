@@ -18,6 +18,7 @@ import {
   buildVendorIntelligenceGraph,
   type VendorIntelligenceGraph,
 } from "./vendor-intelligence.ts";
+import { isImplausibleCompetitorName } from "./vendor-discovery.ts";
 
 export const MARKET_INTELLIGENCE_GRAPH_VERSION =
   "market-intelligence-graph-v4" as const;
@@ -100,6 +101,12 @@ export type MarketIntelligenceGraph = {
     confidenceLevel: MarketConfidenceLevel;
   }>;
   sources: MarketIntelligenceSource[];
+  // Every evidence ID backed by a real, valid-URL source -- see the
+  // build-time comment in buildMarketIntelligenceGraph. A superset of
+  // `sources.map(s => s.evidenceId)`: also includes IDs that were merged
+  // away by the display-level canonical-URL dedup but are still real,
+  // citable evidence.
+  citableEvidenceIds: Set<string>;
   vendorIntelligence: VendorIntelligenceGraph;
   coverage: MarketResearchCoverage;
 };
@@ -347,7 +354,7 @@ export function buildMarketIntelligenceGraph(
 ): MarketIntelligenceGraph {
   const evidence = bundle.evidence;
   const vendorIntelligence = buildVendorIntelligenceGraph(evidence, prompt);
-  const sources = evidence
+  const sanitizedSources = evidence
     .map((item) => {
       const sanitized = sanitizeResearchPublisher({
         publisher: item.publisher,
@@ -370,13 +377,29 @@ export function buildMarketIntelligenceGraph(
         claim: concise(item.claim),
       } satisfies MarketIntelligenceSource;
     })
-    .filter((item): item is MarketIntelligenceSource => Boolean(item))
-    .filter(
-      (item, index, items) =>
-        items.findIndex(
-          (candidate) => canonicalUrl(candidate.url) === canonicalUrl(item.url)
-        ) === index
-    );
+    .filter((item): item is MarketIntelligenceSource => Boolean(item));
+
+  // Every evidence ID that produced a real, valid-URL sanitized source --
+  // BEFORE the canonical-URL dedup below collapses same-URL duplicates
+  // down to one representative row. Two evidence items can legitimately
+  // point at the same canonical URL (re-fetched, or discovered via two
+  // different search queries); the dedup keeps only one row to display,
+  // but the model was given every original ID and may correctly cite
+  // whichever one it saw. Confirmed live: a citation to a real, gathered
+  // source (not a hallucination) was rejected as an "orphan" purely
+  // because its specific ID lost the dedup coin-flip to another ID
+  // pointing at the same URL. This is the authoritative "was this ID ever
+  // a real, gathered, valid-URL source" set -- the rendered `sources`
+  // list below is a presentation dedup on top of it, not a narrower
+  // definition of what counts as real.
+  const citableEvidenceIds = new Set(sanitizedSources.map((item) => item.evidenceId));
+
+  const sources = sanitizedSources.filter(
+    (item, index, items) =>
+      items.findIndex(
+        (candidate) => canonicalUrl(candidate.url) === canonicalUrl(item.url)
+      ) === index
+  );
 
   const competitorMap = new Map<string, MarketIntelligenceCompetitor>();
   for (const vendor of vendorIntelligence.vendors) {
@@ -523,6 +546,7 @@ export function buildMarketIntelligenceGraph(
     adjacentBenchmarks,
     cagr,
     sources,
+    citableEvidenceIds,
     vendorIntelligence,
     coverage,
   };
@@ -1101,8 +1125,20 @@ export function projectMarketIntelligenceGraphToReport(
     ].join("\n");
   }
 
-  if (graph.competitors.length > 0) {
-    const competitorLines = graph.vendorIntelligence.vendors.map(
+  // Final, rendering-time gate: independent of every upstream discovery/
+  // validation step above, no vendor whose name fails a basic real-company-
+  // name shape check is ever allowed into the table or Major Players list --
+  // confirmed live, this is what previously let prompt/instruction
+  // fragments and evidence-provider domain labels reach the PDF even though
+  // they had already passed discovery. If filtering drops every candidate,
+  // this falls through to the same honest "insufficient evidence" copy as
+  // having found zero competitors at all -- never a fabricated stand-in.
+  const renderableVendors = graph.vendorIntelligence.vendors.filter(
+    (vendor) => !isImplausibleCompetitorName(vendor.name)
+  );
+
+  if (renderableVendors.length > 0) {
+    const competitorLines = renderableVendors.map(
       (vendor) =>
         `| ${marketTableCell(vendor.name)} | ${marketTableCell(vendor.parentCompany === vendor.name ? "-" : vendor.parentCompany)} | ${marketTableCell(vendor.category)} | ${marketTableCell(vendor.segment)} | ${marketTableCell(localizeVendorAiCapability(vendor.aiCapability, copyLanguage(language), copy))} | ${marketTableCell(vendor.keyUseCases.join("; ") || copy.notEstablished)} | ${marketTableCell(vendor.pricingModels.length ? localizeVendorPricingModelList(vendor.pricingModels, copyLanguage(language)) : copy.notPubliclyValidated)} | ${marketTableCell(localizeVendorFallbackText(vendor.strength, copy))} | ${marketTableCell(localizeVendorFallbackText(vendor.weakness, copy))} | ${vendor.evidenceCount} | ${vendor.confidence}/100 (${vendor.confidenceLevel}) | ${marketTableCell(localizeMarketRelevanceReason(vendor.marketRelevance, copy))} |`
     );
@@ -1120,14 +1156,14 @@ export function projectMarketIntelligenceGraphToReport(
     ].join("\n");
     projection.majorPlayers = [
       copy.majorPlayersTitle,
-      ...graph.vendorIntelligence.vendors
+      ...renderableVendors
         .filter((vendor) => vendor.eligibleForMajorPlayers)
         .map(
           (vendor) =>
             `- ${vendor.name} (${vendor.majorPlayerLabel}): ${vendor.classifications.join(", ")}; ${copy.targetCustomerLabel.toLowerCase()}: ${localizeVendorFallbackText(vendor.targetCustomer, copy)} (${copy.rankingLabel.toLowerCase()} ${vendor.rankingScore}/100; ${copy.overallScoreLabel.toLowerCase()} ${vendor.overallVendorScore}/100; ${copy.confidenceLabel.toLowerCase()} ${vendor.confidence}/100 ${vendor.confidenceLevel}; ${vendor.evidenceSources.map((id) => `[${id}]`).join(", ")})`
       ),
     ].join("\n");
-    if (!graph.vendorIntelligence.vendors.some((vendor) => vendor.eligibleForMajorPlayers)) {
+    if (!renderableVendors.some((vendor) => vendor.eligibleForMajorPlayers)) {
       projection.majorPlayers = copy.insufficientMajorPlayers;
     }
   } else {

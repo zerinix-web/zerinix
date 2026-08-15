@@ -6,6 +6,7 @@ import {
   insightLedgerAndTokenBudgetDirectives,
 } from "../../ai/report-quality-directives.ts";
 import { buildStrictReportLanguageInstruction } from "../../report-language.ts";
+import { getForbiddenTermLabels } from "../report-isolation-validator.ts";
 
 export const marketPrompts = {
   executiveSummary: {
@@ -265,6 +266,19 @@ export function buildMarketLanguageInstructions(language: ResponseLanguage) {
     "Reconcile conflicting market definitions, dates, currencies, and geographic scopes before comparing values.",
     "Do not invent market size, CAGR, company metrics, sources, URLs, or precision.",
     "Never include Problem, Solution, ICP, Business Model, Pricing Strategy, Sales Strategy, Unit Economics, GTM, Founder Score, Founder Roadmap, or Validation Intelligence sections or concepts. This is a Business Idea Validation report structure and has no place here.",
+    // Generated FROM report-isolation-validator.ts's own forbidden-term
+    // list for "market_intelligence" (never a separately hand-maintained
+    // copy) so this instruction always tells the model to avoid exactly
+    // what that validator rejects after the fact. Confirmed live: the
+    // sentence above named Unit Economics/GTM/Founder Score but never
+    // named "Runway" or "EBITDA" specifically -- nothing told the model to
+    // avoid that word, even though the isolation validator has always
+    // rejected it, so ordinary business prose (e.g. describing a
+    // well-capitalized competitor's advantage) could use it and only fail
+    // the report after generation instead of the word never being written.
+    `Never use founder/startup-investment vocabulary anywhere in this report, including: ${getForbiddenTermLabels(
+      "market_intelligence"
+    ).join(", ")}. When discussing a competitor's or market participant's financial position, use ordinary market-research language instead (e.g. "capital position", "funding history", "financial strength", "cash position") -- never the Business Idea Validation terms listed above.`,
     "When citing a vendor's own reported financial scale as market evidence (e.g. its revenue or spend on acquiring customers), always write the plain business term -- 'reported annual revenue', 'reported monthly revenue', 'customer acquisition cost', 'customer lifetime value' -- and never the Business Idea Validation shorthand acronyms for these (the four-letter and three-letter forms built from Annual/Monthly Recurring Revenue and Customer Acquisition Cost/Lifetime Value). The fact belongs in a market report; the acronym does not.",
     "Each section owns only its named market-intelligence subject and must not repeat another section.",
     "The available research evidence is deliberately layered beyond direct local evidence: adjacent-market benchmark data, and any regional, global, academic, or news evidence, exist specifically so a thin-data market still supports a real strategic read. Before writing that a figure is unavailable or evidence is insufficient, check whether an adjacent, comparable, or global data point lets you build a clearly labeled estimate or directional read instead -- a transparent, labeled inference is always the stronger section. Only declare something unavailable when there is nothing usable at all, direct or adjacent.",

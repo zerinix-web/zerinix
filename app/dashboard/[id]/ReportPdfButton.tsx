@@ -405,6 +405,49 @@ function isPlausibleCitationField(value = "", minLength = 3) {
   return trimmed.length >= minLength && !STRAY_CITATION_FIELD_VALUES.test(trimmed);
 }
 
+// parseCitations's "ORG — TITLE" shape below exists to catch the model's
+// own citation prose (e.g. "TechCrunch — Series B funding announcement"),
+// but the same em-dash/hyphen shape also appears in ordinary rhetorical
+// prose ("The deciding factor -- X -- outweighs the risks..."). Confirmed
+// live: the deterministic closing verdict paragraph appended to the
+// Sources field (never meant to be parsed as a citation, only positioned
+// there so it renders on the report's final page) matched this same
+// pattern and was rendered as a fabricated source with "The deciding
+// factor" as its publisher/organization. A real publisher/organization
+// name is short and does not contain sentence structure -- this rejects
+// anything that reads as prose instead of enumerating every phrase that
+// could precede a dash in generated text.
+const organizationVerbPattern = /\b(?:is|are|was|were|outweighs|confidence)\b/i;
+function looksLikeOrganizationName(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 60) return false;
+  if (trimmed.split(/\s+/).length > 7) return false;
+  if (/[.!?]/.test(trimmed)) return false;
+  if (organizationVerbPattern.test(trimmed)) return false;
+  return true;
+}
+
+// Same class of guard as looksLikeOrganizationName above, applied to the
+// explicit "Title:"/"Publisher:"/"Source type:" metadata-line parsing path
+// below, which previously captured whatever text followed the label with
+// no shape validation at all. Confirmed live: a Sources block rendered
+// "Publisher: The opportunity is real, but the gap ..." as a fabricated
+// source's publisher because a malformed model line put narrative prose
+// (an evidence-gap explanation) directly after a "Publisher:" label, and
+// this path accepted it unconditionally. A real title is allowed to be
+// longer than a real organization name, so this takes a word-count ceiling
+// rather than reusing looksLikeOrganizationName's tighter one, but the
+// same sentence-shape rejections (terminal punctuation, narrative verbs)
+// apply either way.
+function looksLikeCitationMetadataValue(value: string, maxWords = 18): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 140) return false;
+  if (trimmed.split(/\s+/).length > maxWords) return false;
+  if (/[.!?]/.test(trimmed)) return false;
+  if (organizationVerbPattern.test(trimmed)) return false;
+  return true;
+}
+
 function parseCitations(content: string): CitationData[] {
   if (/\bsource\s+unavailable\b/i.test(content)) {
     return [];
@@ -473,9 +516,9 @@ function parseCitations(content: string): CitationData[] {
         }
 
         if (key === "title" || key === "source") {
-          current.sourceTitle = value;
+          if (looksLikeCitationMetadataValue(value, 24)) current.sourceTitle = value;
         } else if (key === "publisher" || key === "organization") {
-          current.organization = value;
+          if (looksLikeCitationMetadataValue(value)) current.organization = value;
         } else if (key === "year" || key === "publication year") {
           current.publicationYear = value.match(/\b(19|20)\d{2}\b/)?.[0];
         } else if (key === "url") {
@@ -483,7 +526,7 @@ function parseCitations(content: string): CitationData[] {
           if (normalizedUrl) current.url = normalizedUrl;
         } else if (key === "confidence") {
           current.confidence = normalizeCitationConfidence(value);
-        } else {
+        } else if (looksLikeCitationMetadataValue(value)) {
           current.sourceType = normalizeSourceType(value);
         }
         if (url) current.url = url;
@@ -498,7 +541,7 @@ function parseCitations(content: string): CitationData[] {
         /^([^—–|-]{2,80})\s*[—–-]\s*(.+?)(?:\s*\((\d{4})\))?(?:\s*[.;:]?\s*)?$/
       );
 
-      if (!citationMatch) {
+      if (!citationMatch || !looksLikeOrganizationName(citationMatch[1])) {
         return;
       }
 

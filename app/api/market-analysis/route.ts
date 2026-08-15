@@ -66,6 +66,7 @@ import {
 } from "@/app/lib/report-engine/market-intelligence-presentation";
 import { assertNoDecisionContradiction } from "@/app/lib/report-engine/decision-contradiction-gate";
 import { assertReportIsolation } from "@/app/lib/report-engine/report-isolation-validator";
+import { assertNoOrphanEvidenceReferences } from "@/app/lib/report-engine/evidence-reference-integrity";
 import { formatExecutiveDecisionBrief } from "@/app/lib/report-engine/executive-decision-brief";
 import { buildEvidenceSummary } from "@/app/lib/report-engine/evidence-summary";
 import { stripFillerAndDuplicateSentences } from "@/app/lib/report-engine/filler-detection";
@@ -829,6 +830,21 @@ function ensureMarketReportQuality(
   const deduped = dedupeReportParagraphsAcrossSections(normalized, {
     language,
     sectionLabels: fieldLabelsByLanguage[language],
+    // strategicRecommendations is a fixed-count numbered action list (the
+    // model is instructed to write an exact number of distinct actions),
+    // with the numbering baked into the model's own text ("1. ...", "2.
+    // ...") rather than rendered from an array length. Cross-section dedup
+    // treats each numbered item as an independent "insight" eligible for
+    // removal if it's similar enough to content elsewhere in the report,
+    // and a removed item is replaced with a "See <field>" reference
+    // appended at the END of the section, not in its original position --
+    // confirmed live, this is what turned "1. ... 2. ... 3. ..." into
+    // "1. ... 3. ..." with item 2 silently missing from its numbered slot.
+    // Same protection this function already gives evidenceFieldPattern
+    // (sources/citations/references/evidence), extended here because this
+    // field carries the identical guarantee: a fixed, complete set of
+    // items that must never be silently pruned.
+    excludedFields: ["strategicRecommendations"],
   }) as Record<MarketReportField, string>;
 
   // Evidence and confidence stay in the background: no per-section
@@ -870,7 +886,26 @@ function ensureMarketReportQuality(
   // already rewritten content -- running this earlier only caught filler
   // in the model's own raw draft and missed duplication introduced by the
   // pipeline's own later stages.
+  //
+  // strategicRecommendations is skipped: it is a fixed-count numbered
+  // action list with the numbering baked into the model's own text ("1.
+  // ...", "2. ...") rather than rendered from an array length.
+  // stripFillerAndDuplicateSentences's exact-duplicate-line removal below
+  // operates within a single field and, unlike the cross-section dedup
+  // above, deletes a matching line outright with no replacement --
+  // confirmed live and reproduced directly: when the model restates one
+  // action nearly or fully verbatim as a second item (a real, observed
+  // model failure mode, not a hypothetical), the second occurrence is
+  // silently deleted, turning "1. ... 2. ... 3. ..." into "1. ... 3. ..."
+  // with item 2 missing and no trace it ever existed. Same guarantee this
+  // field already gets from the cross-section dedup call above, extended
+  // to this pass for the identical reason: a field with a fixed, complete
+  // item count must never be silently pruned by a generic text-quality
+  // pass that has no awareness of that guarantee.
   for (const field of reportFields) {
+    if (field === "strategicRecommendations") {
+      continue;
+    }
     deduped[field] = stripFillerAndDuplicateSentences(deduped[field]);
   }
 
@@ -935,6 +970,17 @@ function ensureMarketReportQuality(
   // specific vocabulary (founder readiness, validation gate, runway,
   // EBITDA, PMF, fundraising, PASS/HOLD/VALIDATE/REJECT, ...).
   assertReportIsolation("market_intelligence", deduped);
+
+  // Fail fast instead of shipping a report with an unresolvable [R#]
+  // marker: every evidence reference actually rendered anywhere in the
+  // report must resolve to a real entry in the verified source registry
+  // (graph.sources, built directly from research evidence). Guarded by
+  // `graph` for the same reason the other graph-dependent checks are --
+  // a cached/degraded report with no graph has nothing to validate
+  // references against.
+  if (graph) {
+    assertNoOrphanEvidenceReferences(deduped, graph.citableEvidenceIds);
+  }
 
   // Fail generation rather than ship a report whose Executive Decision
   // layer says AVOID while a freeform section still recommends piloting,
@@ -1708,7 +1754,8 @@ Write only this section's content. Do not write a JSON object, field name, headi
       // the fact by assertNoDecisionContradiction.
       const preGenerationVerdictContext = buildPreGenerationVerdictContext(
         assessMarketEntryConfidence(marketCoverageResult.coverage),
-        responseLanguage
+        responseLanguage,
+        marketCoverageResult.coverage.dimensions
       );
 
       if (domainResearch.recommendedOutput === "clarification") {

@@ -79,6 +79,21 @@ const FORBIDDEN_TERMS: Record<ReportProductType, ForbiddenPattern[]> = {
   strategic_advisory: [...founderInvestmentTerms, ...marketIntelligenceTemplateTerms],
 };
 
+// Single source of truth for "what must this report type never contain,"
+// reusable by generation prompts so the model is instructed to avoid
+// exactly what this validator will reject after the fact -- not a second,
+// separately hand-maintained list that can silently drift from the real
+// forbidden-term patterns above (confirmed live: the Market Intelligence
+// prompt's own "never generate ..." exclusion sentence listed Unit
+// Economics/CAC/LTV/ARR/Founder Score but never named "Runway"/"EBITDA",
+// so nothing told the model to avoid that word even though this validator
+// has always rejected it -- the model was free to write ordinary business
+// prose using it, which then failed generation after the fact instead of
+// never being written in the first place).
+export function getForbiddenTermLabels(reportType: ReportProductType): string[] {
+  return FORBIDDEN_TERMS[reportType].map((entry) => entry.term);
+}
+
 function snippetAround(content: string, match: RegExpMatchArray) {
   const index = match.index ?? 0;
   const start = Math.max(0, index - 40);

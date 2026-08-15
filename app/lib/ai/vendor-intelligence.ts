@@ -17,6 +17,7 @@ import {
   classifyMajorPlayerLabel,
   computeVendorDiscoveryScores,
   extractVendorCandidateMentions,
+  isImplausibleCompetitorName,
   isOfficialVendorEvidence,
   isQualifyingVendorEvidence,
   resolveVendorIdentity,
@@ -24,6 +25,28 @@ import {
   type MajorPlayerLabel,
   type VendorDiscoveryLog,
 } from "./vendor-discovery.ts";
+
+// Hard, structural fallback for the vendor Category column -- confirmed
+// live, a business-idea-style prompt ("...the commercial opportunity of
+// launching an AI-powered X...") produced a Category value containing
+// that exact prompt fragment even for real, correctly-discovered
+// competitors (ServiceNow, IBM). profile.productCategory is a best-effort
+// derivation from free-text prompt input for markets with no curated
+// taxonomy entry; a smarter regex only shrinks the failure surface, it
+// cannot eliminate it for every possible prompt phrasing. This is the
+// guarantee: whatever profile.productCategory resolves to, it is validated
+// with the same shape check applied to vendor names (rejects
+// instruction-verb-led text, "...", markdown/URL artifacts, overly long or
+// multi-clause spans) before it is ever allowed into a rendered field, so
+// prompt/query text can never reach the report through this column
+// regardless of how the extraction upstream behaves.
+const uncategorizedVendorLabel = "Not independently classified";
+
+function safeVendorCategory(candidate: string): string {
+  return candidate && !isImplausibleCompetitorName(candidate)
+    ? candidate
+    : uncategorizedVendorLabel;
+}
 
 export type VendorMarketPosition =
   | "Market Leader"
@@ -482,7 +505,7 @@ export function buildVendorIntelligenceGraph(
           productName,
           companyName: parentCompany,
           parentCompany,
-          category: profile.productCategory,
+          category: safeVendorCategory(profile.productCategory),
           segment: targetCustomer,
           aiCapability: aiSignal
             ? "AI-enabled (evidence-supported)"
