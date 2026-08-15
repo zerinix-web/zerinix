@@ -64,14 +64,33 @@ export function logOperationalInfo(scope: string, metadata: LogMetadata = {}) {
   console.info(scope, sanitizeMetadata(metadata));
 }
 
+function extractErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  // Supabase/Postgrest errors (and similar library error shapes) are plain
+  // objects with a string `message` field, not `Error` instances -- without
+  // this check, `String(error)` falls through to
+  // `Object.prototype.toString`, logging the useless literal
+  // "[object Object]" instead of the actual failure reason.
+  if (
+    error &&
+    typeof error === "object" &&
+    typeof (error as { message?: unknown }).message === "string"
+  ) {
+    return (error as { message: string }).message;
+  }
+
+  return String(error || "Unknown error");
+}
+
 export function logOperationalError(
   scope: string,
   error: unknown,
   metadata: LogMetadata = {}
 ) {
-  const message = sanitizeString(
-    error instanceof Error ? error.message : String(error || "Unknown error")
-  );
+  const message = sanitizeString(extractErrorMessage(error));
 
   console.error(scope, sanitizeMetadata({ ...metadata, message }));
 }

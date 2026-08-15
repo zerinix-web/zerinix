@@ -153,7 +153,7 @@ test("cached reports retain their exact output and research citation provenance"
   );
   assert.match(
     marketRoute,
-    /responseText: cacheResponseText,\s*responseData: createReportCacheData\(\s*domainResearch,\s*marketIntelligenceGraph\s*\)/
+    /responseText,\s*responseData: createReportCacheData\(\s*domainResearch,\s*marketIntelligenceGraph\s*\)/
   );
   assert.match(researchCache, /return isDomainResearchBundle\(research\) \? research : null/);
 });

@@ -236,8 +236,27 @@ const marketReportFinancialAcronymReplacements: Array<[RegExp, string]> = [
   [/\bLTV\b/gi, "customer lifetime value"],
 ];
 
+// Same rationale and mechanism as the financial acronyms above: confirmed
+// live (4 of 5 real report generations in one QA pass), the model writes
+// "Product-Market Fit"/"PMF" -- Business Idea Validation's own vocabulary
+// for whether a hypothetical founder's product has real demand -- inside
+// a Market Intelligence executive summary discussing a market's general
+// demand/adoption evidence. report-isolation-validator.ts's exact
+// detection pattern (/\bpmf\b|\bproduct[\s-]market\s+fit\b/i) then
+// correctly aborts the entire report. The underlying fact (is there real,
+// evidence-backed demand for this category) is legitimate market-research
+// content; only the founder/investment-scoring label is forbidden, so it
+// is rewritten to plain market-research language before the gate runs,
+// exactly like the acronyms above -- "market fit" does not match the
+// isolation pattern (no "product" token precedes it).
+const marketReportProductMarketFitReplacement: [RegExp, string] = [
+  /\bpmf\b|\bproduct[\s-]market\s+fit\b/gi,
+  "market fit",
+];
+
 const marketReportTermReplacements: Array<[RegExp, string]> = [
   ...marketReportFinancialAcronymReplacements,
+  marketReportProductMarketFitReplacement,
   [/\bLow[\s-]+Confidence\b/gi, "Directional"],
   [/\bMedium[\s-]+Confidence\b/gi, "Developing"],
   [/\bHigh[\s-]+Confidence\b/gi, "Verified"],
@@ -1933,7 +1952,6 @@ Do not include markdown code fences, braces inside string values, or commentary 
               operationType: "market_report",
               estimatedCostUsd,
             });
-            const cacheResponseText = JSON.stringify(parsedReport);
             const isPartialReport = isPartialReportResult(missingFields, invalidFields);
 
             logOperationalInfo("[api:market-analysis] full report section validation", {
@@ -1974,7 +1992,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
 
             await withReportTimeout(
               (async () => {
-                if (!isPartialReport && !isReportGenerationFailureText(cacheResponseText)) {
+                if (!isPartialReport && !isReportGenerationFailureText(responseText)) {
                   await storeCachedAiResponse(supabase, {
                     userId: user.id,
                     cacheKey: fullReportCacheKey,
@@ -1983,7 +2001,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
                     reportField: FULL_REPORT_FIELD,
                     language: responseLanguage,
                     model,
-                    responseText: cacheResponseText,
+                    responseText,
                     responseData: createReportCacheData(
                       domainResearch,
                       marketIntelligenceGraph

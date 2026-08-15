@@ -724,11 +724,11 @@ function buildConfidenceExplanation(
     factors.push(
       marketText(
         language,
-        "product-market fit evidence limited",
-        "ürün-pazar uyumu kanıtı sınırlı",
-        "Product-Market-Fit-Evidenz begrenzt",
-        "preuves d'adéquation produit-marché limitées",
-        "evidencia de ajuste producto-mercado limitada"
+        "market fit evidence limited",
+        "pazar uyumu kanıtı sınırlı",
+        "Marktanpassungs-Evidenz begrenzt",
+        "preuves d'adéquation au marché limitées",
+        "evidencia de ajuste al mercado limitada"
       )
     );
   }
@@ -789,11 +789,11 @@ function identifyMarketInformationGaps(
       weight: coverage.dimensions.productEvidence,
       text: marketText(
         language,
-        "Independent evidence of real product-market fit (customer usage, retention, or third-party reviews) is limited.",
-        "Gerçek ürün-pazar uyumuna ilişkin bağımsız kanıt (müşteri kullanımı, elde tutma oranı veya üçüncü taraf incelemeleri) sınırlıdır.",
-        "Unabhängige Belege für eine tatsächliche Produkt-Markt-Passung (Kundennutzung, Kundenbindung oder Bewertungen Dritter) sind begrenzt.",
-        "Les preuves indépendantes d'une réelle adéquation produit-marché (utilisation client, rétention ou avis de tiers) sont limitées.",
-        "La evidencia independiente de un ajuste real de producto-mercado (uso del cliente, retención o reseñas de terceros) es limitada."
+        "Independent evidence of real market fit (customer usage, retention, or third-party reviews) is limited.",
+        "Gerçek pazar uyumuna ilişkin bağımsız kanıt (müşteri kullanımı, elde tutma oranı veya üçüncü taraf incelemeleri) sınırlıdır.",
+        "Unabhängige Belege für eine tatsächliche Marktanpassung (Kundennutzung, Kundenbindung oder Bewertungen Dritter) sind begrenzt.",
+        "Les preuves indépendantes d'une réelle adéquation au marché (utilisation client, rétention ou avis de tiers) sont limitées.",
+        "La evidencia independiente de un ajuste real al mercado (uso del cliente, retención o reseñas de terceros) es limitada."
       ),
     });
   }
