@@ -218,9 +218,64 @@ function getRecommendedDashboardAction({
   };
 }
 
+// TEMPORARY PROFILING INSTRUMENTATION -- added to diagnose the ~2.4s SSR
+// response time, not permanent. Safe to delete this block and every
+// `ssrTimings`/`markStart`/`markEnd`/`timed(...)` call site below without
+// touching any business logic, UI, or API response shape: every wrapped
+// call still does exactly what it did before, in the exact same order/
+// concurrency, this only measures how long it takes and prints the result
+// to the server console after the page has finished preparing its data.
+type SsrTimings = Record<string, number>;
+
+function markStart() {
+  return performance.now();
+}
+
+function markEnd(timings: SsrTimings, label: string, start: number) {
+  timings[label] = performance.now() - start;
+}
+
+async function timed<T>(
+  timings: SsrTimings,
+  label: string,
+  promise: Promise<T>
+): Promise<T> {
+  const start = performance.now();
+  const result = await promise;
+  markEnd(timings, label, start);
+  return result;
+}
+
+function printSsrTimings(timings: SsrTimings, totalMs: number) {
+  const order = [
+    "auth",
+    "latest report summary",
+    "latest report lookup",
+    "reports",
+    "workspaces",
+    "usage",
+    "billing",
+    "render data",
+  ];
+  const rows = order.filter((label) => label in timings);
+  const labelWidth = Math.max(...rows.map((label) => label.length), "TOTAL".length);
+  const lines = rows.map((label) => {
+    const dots = ".".repeat(Math.max(3, labelWidth - label.length + 3));
+    return `${label} ${dots} ${timings[label].toFixed(1)} ms`;
+  });
+  const totalDots = ".".repeat(Math.max(3, labelWidth - "TOTAL".length + 3));
+  lines.push(`TOTAL ${totalDots} ${totalMs.toFixed(1)} ms`);
+  console.log(["Dashboard SSR timings", ...lines].join("\n"));
+}
+
 export default async function DashboardPage() {
+  const ssrStart = markStart();
+  const timings: SsrTimings = {};
+
   const supabase = await createClient();
+  const authStart = markStart();
   const user = await getAuthenticatedUser(supabase);
+  markEnd(timings, "auth", authStart);
 
   if (!user) {
     redirect("/login");
@@ -235,11 +290,12 @@ export default async function DashboardPage() {
   // know which report it is -- see latestCompletedReport below.
   const [{ workspaces, error }, { reports, error: reportsError }, planTier, usage] =
     await Promise.all([
-      loadUserWorkspaces(supabase, user),
-      loadUserReportSummaries(supabase, user),
-      getUserPlanTier(supabase, user.id),
-      loadUserUsageSummary(supabase, user.id),
+      timed(timings, "workspaces", loadUserWorkspaces(supabase, user)),
+      timed(timings, "reports", loadUserReportSummaries(supabase, user)),
+      timed(timings, "billing", getUserPlanTier(supabase, user.id)),
+      timed(timings, "usage", loadUserUsageSummary(supabase, user.id)),
     ]);
+  const renderDataStart = markStart();
   const totalReports = workspaces.reduce(
     (total, workspace) => total + workspace.reportCount,
     0
@@ -265,13 +321,21 @@ export default async function DashboardPage() {
   // latest-completed; its real section content (for the decision-signal
   // card just below) is fetched with a single targeted query for that one
   // report, not carried along for the whole list.
+  const latestReportSummaryStart = markStart();
   const latestCompletedReportSummary = reports.find(
     (report) => report.status.toLowerCase() === "completed"
   );
+  markEnd(timings, "latest report summary", latestReportSummaryStart);
   const latestCompletedReport = latestCompletedReportSummary
-    ? (await loadUserReport(supabase, user, latestCompletedReportSummary.id)) ||
-      undefined
+    ? (await timed(
+        timings,
+        "latest report lookup",
+        loadUserReport(supabase, user, latestCompletedReportSummary.id)
+      )) || undefined
     : undefined;
+  if (!latestCompletedReportSummary) {
+    timings["latest report lookup"] = 0;
+  }
   const firstName = getFirstName(user);
   const decisionSignal = getDecisionSignal(latestCompletedReport);
   const recommendedAction = getRecommendedDashboardAction({
@@ -324,6 +388,18 @@ export default async function DashboardPage() {
       href: "/dashboard#workspaces",
     },
   ];
+  // "render data" is the pure synchronous derivation work between the
+  // parallel data fetches finishing and JSX being returned (array
+  // filters/maps, string formatting, etc.) -- everything measured above
+  // since renderDataStart, minus the two latest-report steps that are
+  // timed separately (they overlap the same span but aren't "rendering").
+  const renderDataElapsed =
+    markStart() -
+    renderDataStart -
+    (timings["latest report summary"] || 0) -
+    (timings["latest report lookup"] || 0);
+  timings["render data"] = renderDataElapsed;
+  printSsrTimings(timings, markStart() - ssrStart);
   return (
     <main className={dashboardTheme.page}>
       <div className={dashboardTheme.atmosphere} />
