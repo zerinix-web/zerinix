@@ -2261,7 +2261,38 @@ function normalizeCitationUrl(value = "") {
   return /^https?:\/\//i.test(normalized) ? normalized : "";
 }
 
-function parseCitations(content: string): CitationData[] {
+// Mirrors ReportPdfButton.tsx's own guard: market-analysis/route.ts
+// appends buildMarketFinalVerdictParagraph's closing narrative ("Final
+// Investment Decision" / "The verdict is GO at 66% confidence. The
+// deciding factor -- '...' -- outweighs the identified risks...") to the
+// Sources field. Its own "X -- Y -- Z" dash structure matches the
+// citationMatch fallback below and mints a fabricated source card
+// (Publisher: "The deciding factor") on the on-screen report -- the same
+// generated-prose-as-source defect confirmed live in the exported PDF,
+// on this on-screen path too since it has no shape guard on the
+// "organization" capture group at all. Cut the paragraph off before
+// citation parsing ever sees it, in every language it's written in.
+const marketVerdictParagraphHeadings = [
+  "Final Investment Decision",
+  "Nihai Yatırım Kararı",
+  "Endgültige Investitionsentscheidung",
+  "Décision d'investissement finale",
+  "Decisión de inversión final",
+];
+
+function stripMarketVerdictParagraph(content: string): string {
+  let cutIndex = content.length;
+  for (const heading of marketVerdictParagraphHeadings) {
+    const index = content.indexOf(heading);
+    if (index !== -1 && index < cutIndex) {
+      cutIndex = index;
+    }
+  }
+  return content.slice(0, cutIndex).trimEnd();
+}
+
+function parseCitations(rawContent: string): CitationData[] {
+  const content = stripMarketVerdictParagraph(rawContent);
   if (/\bsource\s+unavailable\b/i.test(content)) {
     return [];
   }

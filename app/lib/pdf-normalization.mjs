@@ -182,6 +182,8 @@ const pdfPresentationLabelPairs = [
     ["Top 3 Risks", "İlk 3 Risk"],
     ["AI Ready", "AI Hazır"],
     ["Investor Ready", "Yatırımcıya Hazır"],
+    ["Evidence-Based", "Kanıta Dayalı"],
+    ["Confidence Factors", "Güven Faktörleri"],
     ["Executive Decision Snapshot", "Yönetici Karar Özeti"],
     ["Sections", "Bölüm"],
     ["No date", "Tarih yok"],

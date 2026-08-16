@@ -216,10 +216,10 @@ test("failure 4 (reproduction): stripFillerAndDuplicateSentences silently delete
 
 const marketRouteSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
 
-test("failure 4 (fix): strategicRecommendations is excluded from both the cross-section dedup and the per-field filler/duplicate-sentence pass", () => {
+test("failure 4 (fix): strategicRecommendations and tamSamSom are excluded from both the cross-section dedup and the per-field filler/duplicate-sentence pass", () => {
   assert.match(
     marketRouteSource,
-    /excludedFields:\s*\["strategicRecommendations"\]/
+    /excludedFields:\s*\["strategicRecommendations",\s*"tamSamSom"\]/
   );
   const fillerLoopStart = marketRouteSource.indexOf("Eliminate filler LAST");
   const fillerLoopBlock = marketRouteSource.slice(fillerLoopStart, fillerLoopStart + 2500);

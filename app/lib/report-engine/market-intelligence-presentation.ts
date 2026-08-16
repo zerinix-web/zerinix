@@ -782,7 +782,8 @@ function buildConfidenceExplanation(
 // first so the single most decision-relevant gap leads.
 function identifyMarketInformationGaps(
   coverage: MarketResearchCoverage,
-  language: ResponseLanguage
+  language: ResponseLanguage,
+  decisionCode: ExecutiveDecisionCode
 ): string[] {
   const gaps: Array<{ weight: number; text: string }> = [];
 
@@ -842,6 +843,30 @@ function identifyMarketInformationGaps(
     });
   }
 
+  // Every per-dimension check above is a ">= 50 passes" gate, but the
+  // blended confidence that actually drives the decision can still land
+  // below the full-GO threshold even when no single dimension is
+  // individually weak (e.g. four dimensions each at 55-60 blend to a
+  // MONITOR-band confidence with zero named gaps). Without this, a
+  // non-GO report could render "no material data gaps were identified"
+  // -- actively misleading for a decision that is explicitly not a clean
+  // Enter. Only fires when the per-dimension checks above found nothing
+  // AND the decision isn't a clean GO, so a genuine high-confidence GO
+  // still correctly reports zero gaps.
+  if (gaps.length === 0 && decisionCode !== "GO") {
+    gaps.push({
+      weight: 0,
+      text: marketText(
+        language,
+        "No single evidence dimension is critically weak, but the blended confidence score falls short of a full Enter decision -- the shortfall is in overall evidence strength rather than one specific missing input. Treat this as a monitor-stage read pending stronger evidence across the board.",
+        "Tek başına kritik derecede zayıf bir kanıt boyutu yok, ancak karma güven puanı tam bir Gir kararı için yeterli değil; eksiklik tek bir belirli girdide değil, genel kanıt gücündedir. Bunu, genel olarak daha güçlü kanıt beklenen bir izleme aşaması değerlendirmesi olarak ele alın.",
+        "Keine einzelne Evidenzdimension ist kritisch schwach, aber der gemischte Konfidenzwert reicht nicht für eine vollständige Enter-Entscheidung aus -- das Defizit liegt in der Gesamtevidenzstärke, nicht in einem einzelnen fehlenden Input. Betrachten Sie dies als Einschätzung auf Beobachtungsstufe, bis insgesamt stärkere Evidenz vorliegt.",
+        "Aucune dimension de preuve n'est individuellement critique, mais le score de confiance combiné n'atteint pas le seuil d'une décision Enter complète -- le déficit porte sur la solidité globale des preuves, pas sur un input manquant précis. Considérez ceci comme une lecture de stade de surveillance en attendant des preuves globalement plus solides.",
+        "Ninguna dimensión de evidencia es críticamente débil por sí sola, pero la puntuación de confianza combinada no alcanza el umbral de una decisión Enter completa; el déficit está en la solidez general de la evidencia, no en un dato faltante específico. Trate esto como una lectura en etapa de monitoreo hasta contar con evidencia global más sólida."
+      ),
+    });
+  }
+
   return gaps
     .sort((a, b) => a.weight - b.weight)
     .map((gap) => gap.text)
@@ -886,7 +911,7 @@ export function buildMarketExecutiveDecisionBrief(
     why: buildWhySynthesis(code, primaryOpportunity, primaryRisk, language),
     topReasons: topReasons.length ? topReasons : [topMarketDriver(sections, language)],
     topRisks,
-    missingEvidence: identifyMarketInformationGaps(coverage, language),
+    missingEvidence: identifyMarketInformationGaps(coverage, language, code),
     whatWouldChangeThisDecision: buildWhatWouldChangeThisDecision(code, primaryRisk, language),
     immediateNextAction: buildImmediateNextAction(code, language),
   };

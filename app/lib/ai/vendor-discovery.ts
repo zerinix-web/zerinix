@@ -456,15 +456,39 @@ export function extractVendorCandidateMentions(
       });
     }
 
-    // Path C: the item is vendor-relevant but has no descriptive prose for
-    // the heuristics above to match against (a bare-domain search result,
-    // not a taxonomy alias or a rich snippet) -- fall back to the domain
-    // itself as the only available name signal, not a taxonomy substitute
-    // to avoid, since one was never found.
+    // Path C: the item is vendor-relevant but the heuristics above found no
+    // name in it -- fall back to the domain itself as the only available
+    // name signal, not a taxonomy substitute to avoid, since one was never
+    // found. Originally gated to isThinDomainOnlyEvidence (bare-domain
+    // search results only), on the assumption that any evidence with real
+    // prose would already be caught by the heuristic patterns above.
+    // Confirmed live: that assumption doesn't hold for a company's own
+    // press release or product brochure ("Autonomous drones meet LEA
+    // Reply: Real-time inventory at LogiMAT 2026 | Reply", a full page
+    // hosted on reply.com) -- substantial, not thin, but its phrasing
+    // doesn't match any of mentionPatterns' narrow sentence shapes ("X
+    // offers...", "X is a leading...", "Alternatives to X", "X
+    // pricing/reviews"), so it produced zero candidates.
+    //
+    // Widening this to every non-thin, vendor-relevant item went too far,
+    // though: also confirmed live, it let a third-party trade-publication
+    // domain merely reporting on the market (an article on
+    // inboundlogistics.com mentioning several companies) and a customer
+    // company named only as an adopter/pilot site (a 3PL's own domain,
+    // cited for adopting drones, not selling them) both through as
+    // "vendors". Neither is thin, and both are otherwise vendor-relevant
+    // evidence -- the missing distinction is whether the evidence is the
+    // domain's OWN self-published content (a real corroboration signal)
+    // versus third-party coverage that merely mentions other companies (no
+    // signal about the domain itself). looksLikeSelfPublishedVendorContent
+    // requires that distinction; every downstream step
+    // (isImplausibleCompetitorName, isGenericMarketCategoryDomainLabel,
+    // and validateVendorCandidate's full corroboration check) still
+    // applies unchanged on top of it.
     if (
       heuristicNames.length === 0 &&
-      isThinDomainOnlyEvidence(item, domain) &&
-      !isNonCompetitorSourceDomain(domain)
+      !isNonCompetitorSourceDomain(domain) &&
+      (isThinDomainOnlyEvidence(item, domain) || looksLikeSelfPublishedVendorContent(item))
     ) {
       const derivedName = deriveCandidateNameFromDomain(domain);
       if (
@@ -645,6 +669,25 @@ const marketMentionPattern = /\b(?:market|vendor|competitor|competitive|leader|p
 // disabling this whole validation path for every market.
 const companyOwnedPattern = /official company source|company website|product page|pricing page/i;
 
+// Distinguishes a domain's own self-published content (a real signal that
+// THIS domain belongs to a vendor) from third-party coverage that merely
+// mentions other companies, or a customer/adopter's own domain (neither is
+// a signal about the domain being a vendor). Used only by Path C's
+// domain-fallback naming above -- reuses companyOwnedPattern's sourceType/
+// title check, plus a narrow, specifically self-referential URL-path
+// signal ("newsroom"/"press release", the shape a company's own PR page
+// takes -- confirmed live as Reply's own evidence shape -- deliberately
+// not the generic "/news/" or "/about/" many third-party media sites also
+// use for their own unrelated content).
+function looksLikeSelfPublishedVendorContent(item: DomainResearchEvidence) {
+  if (companyOwnedPattern.test(`${item.sourceType} ${item.sourceTitle}`)) return true;
+  try {
+    return /\/(?:newsroom|press-release|press-releases)\//i.test(new URL(item.url).pathname);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * An evidence item only counts as corroboration when it independently meets
  * the existing evidence-quality bar (verified label + confidence >= 48).
@@ -667,7 +710,16 @@ export function isOfficialVendorEvidence(
   if (!candidateDomains.includes(domain)) return false;
   let pathSignal = false;
   try {
-    pathSignal = /\/products?|\/pricing|\/solutions?|\/features?/i.test(new URL(item.url).pathname);
+    // Also recognizes a company's own newsroom/press-release page, the
+    // same signal looksLikeSelfPublishedVendorContent uses above --
+    // without it, a vendor whose only corroborating evidence is its own
+    // press release (confirmed live: Reply's LogiMAT 2026 announcement,
+    // hosted at reply.com/en/newsroom/...) could be discovered by Path C
+    // but then fail validation here for the same reason it was missed
+    // upstream, since neither check recognized the page as official.
+    pathSignal = /\/products?|\/pricing|\/solutions?|\/features?|\/newsroom|\/press-releases?/i.test(
+      new URL(item.url).pathname
+    );
   } catch {
     pathSignal = false;
   }

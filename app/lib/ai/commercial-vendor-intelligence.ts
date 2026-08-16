@@ -2,6 +2,8 @@ import type { DomainResearchEvidence } from "./domain-research.ts";
 
 export type OrganizationEntityType =
   | "commercial_vendor"
+  | "customer_adopter"
+  | "channel_partner"
   | "government"
   | "regulator"
   | "standards_body"
@@ -12,6 +14,58 @@ export type OrganizationEntityType =
   | "open_source"
   | "community"
   | "unknown";
+
+// The 7 explicit roles Competitive Landscape eligibility is judged
+// against. OrganizationEntityType stays more granular (it distinguishes,
+// e.g., a regulator from a standards body) for everything else that reads
+// it; this is a presentation-layer grouping onto exactly the categories a
+// competitor-role review needs, used for reporting/testing and by the
+// eligibility gate below -- it does not change classifyOrganizationEntity's
+// own detection logic.
+export type CompetitorRoleCategory =
+  | "commercial_vendor"
+  | "customer_adopter"
+  | "channel_partner"
+  | "research_publication_source"
+  | "government_regulator"
+  | "industry_association"
+  | "unknown_insufficient_evidence";
+
+export function toCompetitorRoleCategory(
+  entityType: OrganizationEntityType
+): CompetitorRoleCategory {
+  switch (entityType) {
+    case "commercial_vendor":
+      return "commercial_vendor";
+    case "customer_adopter":
+      return "customer_adopter";
+    case "channel_partner":
+      return "channel_partner";
+    case "government":
+    case "regulator":
+      return "government_regulator";
+    case "standards_body":
+      return "industry_association";
+    case "research_provider":
+    case "analyst_firm":
+    case "consultancy":
+    case "academic":
+    case "open_source":
+    case "community":
+      return "research_publication_source";
+    default:
+      return "unknown_insufficient_evidence";
+  }
+}
+
+// Only a confirmed commercial vendor may enter Competitive Landscape or
+// Major Players. Every other role -- including "unknown_insufficient_evidence"
+// -- is excluded: role must be affirmatively confirmed, not merely
+// unproven-otherwise, matching the same "never fabricate, default to
+// insufficient evidence" posture already used throughout this pipeline.
+export function isEligibleCompetitorRole(role: CompetitorRoleCategory): boolean {
+  return role === "commercial_vendor";
+}
 
 export type ClassifiedOrganizationEntity = {
   name: string;
@@ -214,11 +268,79 @@ export function classifyOrganizationEntity(
   ) {
     return { entityType: "community", confidence: 90, reason: "Community-maintained resource." };
   }
+  // Checked before the weak generic commercial_vendor fallback below so a
+  // customer/adopter or channel-partner signal always wins over a nearby,
+  // weaker vendor-shaped phrase (e.g. a case study that also happens to
+  // mention "software" or "platform"). Confirmed live: a 3PL logistics
+  // company (DSV) cited only for adopting inventory drones as a customer
+  // reached the competitor table -- classifyOrganizationEntity had no
+  // category for "real company, but not the seller of this product" and it
+  // fell through to the unexcluded "unknown" default. Deliberately excludes
+  // bare "pilot"/"piloting" alone: that word is directionally ambiguous (a
+  // VENDOR routinely runs its own pilot program WITH customers), so only
+  // the phrases below that name the subject as the technology's user/
+  // deployer are matched. A broader "improves/enhances its own operations
+  // with X" shape was deliberately NOT added here: it cannot distinguish a
+  // customer describing its own deployment from a vendor's own marketing
+  // copy describing what its product does for customers (both use the same
+  // "improves warehouse operations with drones" phrasing), so it would
+  // misclassify real vendors. That gap in this pattern is covered instead
+  // by vendor-intelligence.ts's domain-fallback role gate, which requires
+  // an affirmative commercial_vendor signal for domain-derived candidates
+  // and rejects "unknown" rather than defaulting it to allowed.
+  if (
+    matches(
+      text,
+      /\b(?:adopts?|adopting|adopted|adoption of|early adopter of|case stud(?:y|ies)|deployed by|customer of|client of|end[\s-]?user of|uses? (?:the|this|a|an)? ?(?:technology|solution|system|platform|service|drones?) (?:to|for|in)|using (?:the|this|a|an)? ?(?:technology|solution|system|platform|service|drones?) (?:to|for|in)|relies on|utilizes|implements? (?:the|this|a|an)? ?(?:technology|solution|system) for its own|for internal use|in-house use|testimonial)\b/i
+    )
+  ) {
+    return { entityType: "customer_adopter", confidence: 80, reason: "Evidence describes this entity using, piloting, or adopting the technology as a customer, not selling it." };
+  }
+  if (
+    matches(
+      text,
+      /\b(?:implementation partner|systems? integrator|si partner|reseller(?:\s+partner)?|channel partner|distribution partner|distributor|value[\s-]added reseller|\bvar\b|managed service provider|\bmsp\b|integration partner)\b/i
+    )
+  ) {
+    return { entityType: "channel_partner", confidence: 78, reason: "Evidence describes this entity as an implementation, integration, reseller, or channel partner rather than the vendor selling its own competing product." };
+  }
+  if (
+    matches(
+      text,
+      /\b(?:trade (?:press|publication|journal)|news (?:outlet|organization|publication|site)|media (?:company|group|outlet|network)|magazine|editorial|according to|reports? that|article (?:by|from|in)|published (?:by|in)|industry publication|credible publication)\b/i
+    )
+  ) {
+    return { entityType: "research_provider", confidence: 75, reason: "Evidence identifies this entity as a media/trade-publication source reporting on the market, not a commercial participant in it." };
+  }
+  // A URL path shape (its own /products, /pricing, /solutions, /features,
+  // /newsroom, or /press-release page) is treated as an equally valid
+  // affirmative signal alongside the text-phrase check below -- mirrors
+  // isOfficialVendorEvidence's pathSignal in vendor-discovery.ts so a
+  // vendor whose only evidence is its own newsroom/press-release page
+  // (confirmed live: Reply's LogiMAT 2026 announcement) is not classified
+  // "unknown" here only to be excluded by the domain-fallback role gate in
+  // vendor-intelligence.ts. Deliberately narrower than that mirrored
+  // regex's sourceType-label check: the raw sourceType classifyMarketResearchSourceType
+  // produces, "official company source", is assigned purely from which
+  // domain a citation happens to be on -- confirmed live, a customer's
+  // press release (DSV) and a trade publication's article (Inbound
+  // Logistics) both carry that exact label despite selling nothing, so
+  // label text alone must never be sufficient here even though it is
+  // allowed to count elsewhere as one signal among several.
+  let officialPathSignal = false;
+  try {
+    officialPathSignal = /\/products?|\/pricing|\/solutions?|\/features?|\/newsroom|\/press-releases?/i.test(
+      new URL(input.url || "").pathname
+    );
+  } catch {
+    officialPathSignal = false;
+  }
   if (
     hostname &&
-    matches(text, /\b(?:company_source|company website|product page|pricing page|commercial software|software vendor)\b/i)
+    (matches(text, /\b(?:company website|product page|pricing page|commercial software|software vendor)\b/i) ||
+      officialPathSignal)
   ) {
-    return { entityType: "commercial_vendor", confidence: 82, reason: "Validated company-owned product or pricing source." };
+    return { entityType: "commercial_vendor", confidence: 82, reason: "Validated company-owned product, pricing, or newsroom/press-release source." };
   }
   return { entityType: "unknown", confidence: 35, reason: "Insufficient evidence to assign a commercial or institutional role." };
 }

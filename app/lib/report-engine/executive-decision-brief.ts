@@ -185,6 +185,19 @@ function takeThree(items: string[]) {
   return (items || []).filter((item) => item?.trim()).slice(0, 3);
 }
 
+// topReasons/topRisks/missingEvidence entries are often extracted verbatim
+// from a source section that is itself a numbered list (e.g. Opportunities
+// written by the model as "1) ...", "2) ...") -- the extraction upstream
+// (market-intelligence-presentation.ts's splitIntoCandidateSentences) has
+// no reason to know it's feeding a second, independently-numbered list, so
+// without this the deterministic "${index + 1}. " prefix below stacks on
+// top of the source's own marker instead of replacing it. Confirmed live:
+// an item's own "1) " survived through extraction and rendered as "1. 1)
+// Compliance-packaged offerings..." in a real generated report.
+function stripLeadingListMarker(text: string): string {
+  return text.replace(/^\(?\d{1,2}[.)]\)?\s*/, "").trim();
+}
+
 // Renders the mandatory, SINGLE opening block. Callers must prepend this
 // to whichever field renders first in their report's own field order
 // (executiveSummary for Business Plan/Market Intelligence; the first
@@ -217,13 +230,15 @@ export function formatExecutiveDecisionBrief(
     `${copy.why}: ${brief.why.trim()}`,
     "",
     `${copy.topReasons}:`,
-    ...reasons.map((reason, index) => `${index + 1}. ${reason}`),
+    ...reasons.map((reason, index) => `${index + 1}. ${stripLeadingListMarker(reason)}`),
     "",
     `${copy.topRisks}:`,
-    ...risks.map((risk, index) => `${index + 1}. ${risk}`),
+    ...risks.map((risk, index) => `${index + 1}. ${stripLeadingListMarker(risk)}`),
     "",
     `${copy.missingEvidence}:`,
-    ...(gaps.length ? gaps.map((gap, index) => `${index + 1}. ${gap}`) : [noMissingEvidenceText[language]]),
+    ...(gaps.length
+      ? gaps.map((gap, index) => `${index + 1}. ${stripLeadingListMarker(gap)}`)
+      : [noMissingEvidenceText[language]]),
     "",
     `${copy.whatWouldChangeThisDecision}: ${brief.whatWouldChangeThisDecision.trim()}`,
     "",

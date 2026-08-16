@@ -536,18 +536,54 @@ function buildRiskHeatmap(content: string, isTurkish: boolean) {
   }));
 }
 
-function buildConfidenceRadar(content: string, fallbackScore: number | null, isTurkish: boolean) {
+function buildConfidenceRadar(
+  content: string,
+  investmentScore: ReportInvestmentScore | undefined,
+  isTurkish: boolean
+) {
+  // Each dimension first tries the report's own labeled text (the AI
+  // occasionally writes a real per-dimension score inline); when that
+  // isn't present, it now falls back to a genuinely distinct, independently
+  // computed score from investmentScore.decisionEngine/categories --
+  // never to one shared blended number. Confirmed live: every dimension
+  // previously fell back to the SAME investmentScore.confidence value
+  // whenever the AI's prose didn't happen to contain a literal
+  // "Market Confidence:"/"Execution Readiness:"-style label (which none of
+  // the generation prompts ever ask it to write), collapsing all five
+  // boxes to one identical number (e.g. 54/54/54/54/54). A dimension with
+  // no real, distinct signal available now shows null (rendered as
+  // "Validation Required" by every caller) instead of a fabricated match.
   const dimensions = [
-    { label: isTurkish ? "Pazar" : "Market", aliases: ["Market Confidence", "Market Readiness", "Pazar Güveni", "Pazar Hazırlığı"] },
-    { label: isTurkish ? "Finansal" : "Financial", aliases: ["Financial Confidence", "Financial Quality", "Finansal Güven", "Finansal Kalite"] },
-    { label: isTurkish ? "Uygulama" : "Execution", aliases: ["Execution Confidence", "Execution Readiness", "Yürütme Güveni", "Yürütme Hazırlığı"] },
-    { label: isTurkish ? "Ürün" : "Product", aliases: ["Product Confidence", "Product Readiness", "Ürün Güveni", "Ürün Hazırlığı"] },
-    { label: isTurkish ? "Kanıt" : "Evidence", aliases: ["Competitive Evidence", "Evidence Confidence", "Evidence Strength", "Rekabet Kanıtı", "Kanıt Güveni", "Kanıt Gücü"] },
+    {
+      label: isTurkish ? "Pazar" : "Market",
+      aliases: ["Market Confidence", "Market Readiness", "Pazar Güveni", "Pazar Hazırlığı"],
+      score: investmentScore?.decisionEngine?.marketScore?.score,
+    },
+    {
+      label: isTurkish ? "Finansal" : "Financial",
+      aliases: ["Financial Confidence", "Financial Quality", "Finansal Güven", "Finansal Kalite"],
+      score: investmentScore?.decisionEngine?.financialScore?.score,
+    },
+    {
+      label: isTurkish ? "Uygulama" : "Execution",
+      aliases: ["Execution Confidence", "Execution Readiness", "Yürütme Güveni", "Yürütme Hazırlığı"],
+      score: investmentScore?.decisionEngine?.executionScore?.score,
+    },
+    {
+      label: isTurkish ? "Ürün" : "Product",
+      aliases: ["Product Confidence", "Product Readiness", "Ürün Güveni", "Ürün Hazırlığı"],
+      score: investmentScore?.decisionEngine?.technologyScore?.score,
+    },
+    {
+      label: isTurkish ? "Kanıt" : "Evidence",
+      aliases: ["Competitive Evidence", "Evidence Confidence", "Evidence Strength", "Rekabet Kanıtı", "Kanıt Güveni", "Kanıt Gücü"],
+      score: investmentScore?.decisionEngine?.competitionScore?.score,
+    },
   ];
 
   return dimensions.map((dimension) => ({
     label: dimension.label,
-    score: extractPercentScore(content, dimension.aliases) ?? fallbackScore,
+    score: extractPercentScore(content, dimension.aliases) ?? dimension.score ?? null,
   }));
 }
 
@@ -659,7 +695,7 @@ export function buildExecutiveSnapshot(
     nextAction: investmentScore?.nextCriticalAction || actionBullets[0],
     riskLevel: inferRiskLevel(normalized, ["risk", "validation", "cac", "funding", "execution", "rekabet", "sermaye"]),
     riskHeatmap: buildRiskHeatmap(normalized, isTurkish),
-    confidenceRadar: buildConfidenceRadar(normalized, confidenceScore, isTurkish),
+    confidenceRadar: buildConfidenceRadar(normalized, investmentScore, isTurkish),
     why: collectBullets(
       normalized,
       ["market", "pazar", "opportunity", "fırsat", "model", "margin", "marj", "revenue", "gelir"],

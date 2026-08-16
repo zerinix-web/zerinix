@@ -479,7 +479,43 @@ function looksLikeCitationMetadataValue(value: string, maxWords = 18): boolean {
   return true;
 }
 
-function parseCitations(content: string): CitationData[] {
+// market-analysis/route.ts appends buildMarketFinalVerdictParagraph's
+// closing narrative ("Final Investment Decision" / "The verdict is GO at
+// 66% confidence. The deciding factor -- '...' -- outweighs the identified
+// risks...") to the Sources field after the real bibliography, since
+// mergePdfSourceSections always forces Sources to the report's final page.
+// Confirmed live: parseCitations' last-resort "Organization — Title (Year)"
+// fallback pattern below matches that paragraph's own "X -- Y -- Z" dash
+// structure and mints a fabricated source entry -- Publisher: "The
+// deciding factor", Confidence: "Validation Required" -- exactly the
+// generated-prose-as-source failure mode this file's own citation guards
+// exist to prevent, just reached through a path (a narrative paragraph,
+// not a malformed citation line) those guards were never meant to see in
+// the first place. This is deterministic, not occasional: every GO-decision
+// Market Intelligence report appends this exact paragraph shape. Cut it
+// off before citation parsing ever sees it, in every language the
+// paragraph is written in.
+const marketVerdictParagraphHeadings = [
+  "Final Investment Decision",
+  "Nihai Yatırım Kararı",
+  "Endgültige Investitionsentscheidung",
+  "Décision d'investissement finale",
+  "Decisión de inversión final",
+];
+
+function stripMarketVerdictParagraph(content: string): string {
+  let cutIndex = content.length;
+  for (const heading of marketVerdictParagraphHeadings) {
+    const index = content.indexOf(heading);
+    if (index !== -1 && index < cutIndex) {
+      cutIndex = index;
+    }
+  }
+  return content.slice(0, cutIndex).trimEnd();
+}
+
+function parseCitations(rawContent: string): CitationData[] {
+  const content = stripMarketVerdictParagraph(rawContent);
   if (/\bsource\s+unavailable\b/i.test(content)) {
     return [];
   }
@@ -1025,24 +1061,49 @@ function compactPdfMetricValue(value: string) {
 
 function extractMarketSizeVisualValue(content: string, label: string) {
   const escapedLabel = escapeRegExp(label);
-  const line = normalizePdfText(content)
-    .split("\n")
-    .find((item) => new RegExp(`^\\s*${escapedLabel}\\s*[:\\-–—]`, "i").test(item.trim()));
+  const normalized = normalizePdfText(content);
   // The tamSamSom prompt explicitly instructs "use ranges" instead of
   // inventing false precision, so a value like "$2.1-2.8B" is the expected
   // shape, not an edge case -- capture an optional second bound instead of
   // stopping at the first number and silently dropping the rest of the
-  // range.
-  const singleBound = `(?:[<>~≈]?\\s*)?[€$₺]?\\s*\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT%])?`;
-  const value = line?.match(
-    new RegExp(`^\\s*${escapedLabel}\\s*[:\\-–—]\\s*(${singleBound}(?:\\s*[-–—]\\s*${singleBound})?)`, "i")
+  // range. Also accepts a spelled-out unit ("200 million"), not just the
+  // abbreviated K/M/B/T -- confirmed live, a real Planning Estimate paragraph
+  // routinely writes units out in full.
+  const unitWord = "(?:thousand|million|billion|trillion|milyon|milyar|bin)";
+  const singleBound = `(?:[<>~≈]?\\s*)?[€$₺]?\\s*\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT%]\\b|\\s+${unitWord}\\b)?`;
+  const valuePattern = `(${singleBound}(?:\\s*[-–—]\\s*(?:[€$₺]\\s*)?${singleBound})?)`;
+
+  const line = normalized
+    .split("\n")
+    .find((item) => new RegExp(`^\\s*${escapedLabel}\\s*[:\\-–—]`, "i").test(item.trim()));
+  const lineValue = line?.match(
+    new RegExp(`^\\s*${escapedLabel}\\s*[:\\-–—]\\s*${valuePattern}`, "i")
+  )?.[1];
+
+  if (lineValue) {
+    return lineValue.replace(/\s+/g, " ").trim();
+  }
+
+  // Fallback: the label embedded in prose rather than as its own
+  // dedicated line -- the shape a Planning Estimate paragraph naturally
+  // takes ("...Resulting Planning Estimate: TAM (Germany, 2026) ~=
+  // EUR200-800 million [Estimated]; SAM (...) ~= ..."). Confirmed live:
+  // the line-start pattern above never matches this, silently discarding
+  // a genuine, correctly nested TAM/SAM/SOM estimate and falling back to
+  // "Could not be calculated" even though the model had produced exactly
+  // what its prompt asked for. Still requires the label immediately
+  // followed by a real value (only an optional short parenthetical and a
+  // separator in between), so a bare mention of the label with no value
+  // attached (e.g. a "TAM / SAM / SOM" heading) still cannot match.
+  const proseValue = normalized.match(
+    new RegExp(`\\b${escapedLabel}\\b\\s*(?:\\([^)]{0,80}\\))?\\s*[:\\-–—≈~]+\\s*${valuePattern}`, "i")
   )?.[1];
 
   // Already exactly the compact number(s)+unit shape by construction --
   // running it through compactPdfMetricValue would re-truncate a captured
   // range (e.g. "$2.1-2.8B") down to its first bound, undoing the match
   // above.
-  return value ? value.replace(/\s+/g, " ").trim() : "";
+  return proseValue ? proseValue.replace(/\s+/g, " ").trim() : "";
 }
 
 // compactPdfMetricValue's fallback pattern deliberately allows a bare
@@ -1278,6 +1339,74 @@ function extractConfidence(content: string) {
   }
 
   return null;
+}
+
+// Reads a bullet/numbered list directly out of Market Intelligence's own
+// deterministic executive-decision block (formatExecutiveDecisionBrief),
+// e.g. everything between "Top 3 Risks:" and the next blank line. Tries
+// each candidate heading (the block's language varies with the report's
+// own language) and returns the first that matches.
+function extractMarketBriefListLines(content: string, headings: string[]): string[] {
+  for (const heading of headings) {
+    const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = content.match(new RegExp(`${escaped}\\s*:\\s*\\n([\\s\\S]*?)(?:\\n\\s*\\n|$)`, "i"));
+    if (!match) continue;
+
+    const lines = match[1]
+      .split("\n")
+      .map((line) => line.replace(/^\s*(?:\d+\.|[-*•])\s*/, "").trim())
+      .filter(Boolean)
+      .slice(0, 3);
+
+    if (lines.length > 0) {
+      return lines;
+    }
+  }
+
+  return [];
+}
+
+// Market Intelligence's deterministic executive-decision block always
+// writes its decision as the SECOND line of the field (right after the
+// "Executive Decision" heading), in the exact shape
+// "Decision: GO (Confidence: 66%)" / "Karar: KOŞULLU EVET (Güven: 40%)" --
+// the same localized decision word (GO/CONDITIONAL GO/NO-GO/EVET/KOŞULLU
+// EVET/HAYIR/etc.) that assertNoDecisionContradiction and the rest of the
+// report were built against. Reading it verbatim from that one line (never
+// re-deriving it from a separate, generic full-report keyword scan) is
+// what guarantees the cover page can never disagree with the Executive
+// Summary -- confirmed live: the previous cover implementation used
+// buildExecutiveSnapshot's generic extractDecision/detectRecommendation,
+// an entirely independent text-mining pass over the whole report that had
+// no structural guarantee of matching this field's own real decision.
+function extractMarketDecisionText(content: string): string {
+  // Not anchored to a fixed line index: the report's own downstream
+  // pipeline (unrelated to this file, confirmed unchanged/pre-existing)
+  // renders formatExecutiveDecisionBrief's heading and decision line as
+  // one combined line ("Executive Decision: CONDITIONAL GO (Confidence:
+  // 62%)"), not as two separate lines the way the raw function output
+  // alone would suggest -- searching only the first ~200 characters for
+  // "<label>: <DECISION TEXT> (<label>: NN%)" is robust to either shape.
+  const opening = content.slice(0, 200);
+  const match = opening.match(/:\s*([^():\n]+?)\s*\([^)]*\d{1,3}\s*%\)/);
+  return match?.[1]?.trim() || "";
+}
+
+// Buckets the exact, verbatim decision text extracted above into a color
+// category -- checked NO_GO/CONDITIONAL first since "GO" is itself a
+// substring of "CONDITIONAL GO"/"BEDINGTES GO"/etc.
+function marketDecisionColorCategory(decisionText: string): "GO" | "CONDITIONAL" | "NO_GO" {
+  const normalized = decisionText.trim().toUpperCase();
+
+  if (/HAYIR|NO[\s-]?GO/.test(normalized)) {
+    return "NO_GO";
+  }
+
+  if (/CONDITIONAL|KOŞULLU|BEDINGTES|CONDITIONNEL|CONDICIONAL/.test(normalized)) {
+    return "CONDITIONAL";
+  }
+
+  return "GO";
 }
 
 function extractSectionSnippet(content: string, title: string) {
@@ -2132,11 +2261,39 @@ function mergePdfSourceSections<T extends { field?: string; title: string; conte
     .map((section) => section.content.trim())
     .filter(Boolean)
     .join("\n");
-  const normalizedSourceContent = normalizePdfSourceContent(mergedSourceContent);
+  // Must happen before normalizePdfSourceContent, not just before
+  // parseCitations later: normalizePdfSourceContent's own block-splitting
+  // treats a bare "X -- Y -- Z" line (the closing verdict paragraph's own
+  // shape) as the start of a new source block, drops the paragraph's
+  // heading (no Title:/Publisher:/URL: pattern, so getPdfSourceBlockKey
+  // returns nothing to key it by) but leaves the "The deciding factor --
+  // ..." fragment behind as a lone survivor with just enough shape to
+  // pass the block-dedup filter -- confirmed live: by the time content
+  // reached parseCitations, "Final Investment Decision" was already gone
+  // but "The deciding factor" remained, so cutting it there was too late.
+  const mergedSourceContentWithoutVerdict = stripMarketVerdictParagraph(mergedSourceContent);
+  const normalizedSourceContent = normalizePdfSourceContent(mergedSourceContentWithoutVerdict);
 
   if (!normalizedSourceContent) {
     return nonSourceSections;
   }
+
+  // removeDuplicatePdfExecutiveInsightText's line-level dedup is built for
+  // prose (repeated AI-written insight sentences) and drops any exact-
+  // repeated line over 24 chars -- which corrupts Market Intelligence's
+  // deterministic bibliography, where a line like "Type: government/
+  // statistical source" or "Type: company" is EXPECTED to repeat
+  // correctly across many distinct, unrelated entries. Confirmed live:
+  // this silently deleted the "Type:" line from most bibliography
+  // entries and, worse, ate enough surrounding structure that a
+  // downstream citation-boundary heuristic (parseCitations) lost track
+  // of where the bibliography ended and the appended closing verdict
+  // paragraph began, letting that paragraph's own prose get parsed as a
+  // fabricated source entry. Recognized by its own unmistakable, code-
+  // generated "Reference: [R#]" tag format -- skip the prose dedup pass
+  // entirely for this shape; every other report type's Sources content
+  // (which has no such tags) still gets it, unchanged.
+  const isDeterministicBibliography = /(?:^|\n)Reference:\s*\[R\d+/.test(normalizedSourceContent);
 
   return [
     ...nonSourceSections,
@@ -2144,7 +2301,9 @@ function mergePdfSourceSections<T extends { field?: string; title: string; conte
       ...sourceSections[0],
       field: "sources",
       title: "Sources",
-      content: removeDuplicatePdfExecutiveInsightText(normalizedSourceContent),
+      content: isDeterministicBibliography
+        ? normalizedSourceContent
+        : removeDuplicatePdfExecutiveInsightText(normalizedSourceContent),
     },
   ];
 }
@@ -2420,15 +2579,40 @@ export function buildStandardReportPdf({
           extractScore(fullReportContent, "Total Investment Score") ??
           extractScore(fullReportContent, "Investment Score") ??
           extractScore(fullReportContent, "AI Investment Score");
+        // Read straight from the same deterministic executive-decision block
+        // the Executive Summary itself was written from (see
+        // extractMarketDecisionText's own comment) -- computed here, before
+        // recommendation/recommendationFill below, so the cover badge's
+        // color can never disagree with the Executive Summary's real
+        // decision the way the old generic detectRecommendation() scan
+        // could.
+        const marketExecutiveSummaryContent =
+          report.sections.find((section) => section.field === "executiveSummary")?.content || "";
+        const marketDecisionText = isMarketIntelligenceReport
+          ? extractMarketDecisionText(marketExecutiveSummaryContent)
+          : "";
+        const marketDecisionCategory = isMarketIntelligenceReport
+          ? marketDecisionColorCategory(marketDecisionText)
+          : null;
         const recommendation = report.investmentScore?.recommendation || detectRecommendation(fullReportContent) || "WAIT";
-        const recommendationFill =
-          recommendation === "GO"
+        const recommendationFill = isMarketIntelligenceReport
+          ? marketDecisionCategory === "GO"
+            ? "#064e3b"
+            : marketDecisionCategory === "NO_GO"
+              ? "#7f1d1d"
+              : "#713f12"
+          : recommendation === "GO"
             ? "#064e3b"
             : recommendation === "PASS"
               ? "#7f1d1d"
               : "#713f12";
-        const recommendationText =
-          recommendation === "GO"
+        const recommendationText = isMarketIntelligenceReport
+          ? marketDecisionCategory === "GO"
+            ? "#bbf7d0"
+            : marketDecisionCategory === "NO_GO"
+              ? "#fecaca"
+              : "#fde68a"
+          : recommendation === "GO"
             ? "#bbf7d0"
             : recommendation === "PASS"
               ? "#fecaca"
@@ -2442,6 +2626,60 @@ export function buildStandardReportPdf({
           report.metadata?.reportQuality,
           pdfLocale === "tr"
         );
+        // buildExecutiveSnapshot/getReportQualityBreakdown are shared,
+        // Business-Idea-Validation-shaped heuristics (they text-mine for
+        // CAC/founder score/financial consistency and read report.investmentScore/
+        // report.metadata.reportQuality, neither of which a Market Intelligence
+        // report ever populates). Confirmed live: reusing them for a Market
+        // Intelligence PDF put "Investor Ready" and a Risk Heatmap reading
+        // "CAC: Low / Capital efficiency: Low" on the cover of a market
+        // research report, and left the confidence gauge blank because
+        // extractLabelValue only matches a label at the start of a line,
+        // never the mid-line "(Confidence: 66%)" shape this report type's
+        // own deterministic executive-decision block actually uses. Market
+        // Intelligence gets its own extraction straight from that block's
+        // known, deterministic structure instead of reusing founder-report
+        // text-mining.
+        const marketConfidenceScore = isMarketIntelligenceReport
+          ? extractConfidence(marketExecutiveSummaryContent)
+          : null;
+        const marketTopRisks = isMarketIntelligenceReport
+          ? extractMarketBriefListLines(marketExecutiveSummaryContent, [
+              "Top 3 Risks",
+              "En Önemli 3 Risk",
+              "Top 3 Risiken",
+              "Top 3 des risques",
+              "Los 3 riesgos principales",
+            ])
+          : [];
+        const marketConfidenceFactors = isMarketIntelligenceReport
+          ? [
+              ...extractMarketBriefListLines(marketExecutiveSummaryContent, [
+                "Confidence Supported By",
+                "Confidence Reduced Because",
+                "Güven Şunlarla Desteklendi",
+                "Güven Şu Nedenlerle Düşürüldü",
+                "Konfidenz gestützt durch",
+                "Konfidenz verringert, weil",
+                "Confiance soutenue par",
+                "Confiance réduite parce que",
+                "Confianza respaldada por",
+                "Confianza reducida porque",
+              ]),
+            ]
+          : [];
+        const marketNextAction = isMarketIntelligenceReport
+          ? extractMetricValue(marketExecutiveSummaryContent, "Immediate Next Action")
+          : "";
+        const marketReportQualityLabel = isMarketIntelligenceReport
+          ? marketConfidenceScore === null
+            ? localizePdfPresentationLabel("Validation Required", pdfLocale)
+            : marketConfidenceScore >= 65
+              ? localizePdfPresentationLabel("High Confidence", pdfLocale)
+              : marketConfidenceScore >= 40
+                ? localizePdfPresentationLabel("Medium Confidence", pdfLocale)
+                : localizePdfPresentationLabel("Low Confidence", pdfLocale)
+          : "";
         const founderScore = executiveSnapshot.founderScoreValue ?? investmentScore;
         const legalConfidence =
           extractScore(fullReportContent, pdfLocale === "tr" ? "Güven" : "Confidence") ??
@@ -2452,7 +2690,9 @@ export function buildStandardReportPdf({
               ?.trim()
               .toLocaleUpperCase(pdfLocale === "tr" ? "tr-TR" : "en-US") ||
             (pdfLocale === "tr" ? "KOŞULLU DEĞERLENDİRME" : "CONDITIONAL ASSESSMENT")
-          : executiveSnapshot.decision;
+          : isMarketIntelligenceReport
+            ? marketDecisionText || executiveSnapshot.decision
+            : executiveSnapshot.decision;
         const legalSourceCount = new Set(
           (pdfSections.find((section) => section.field === "legalSources")?.content.match(/https?:\/\/[^\s)]+/g) || [])
         ).size;
@@ -2495,7 +2735,9 @@ export function buildStandardReportPdf({
         const previewLines = wrapPdfText(
           isLegalReport
             ? `${pdfLocale === "tr" ? "Hukuki değerlendirme" : "Legal assessment"}: ${legalDecision}. ${pdfLocale === "tr" ? "Temel risk" : "Primary risk"}: ${executiveSnapshot.mainRisk}`
-            : `${localizePdfPresentationLabel("Decision", pdfLocale)}: ${executiveSnapshot.decision}. ${localizePdfPresentationLabel("Main Risk", pdfLocale)}: ${executiveSnapshot.mainRisk}`,
+            : isMarketIntelligenceReport
+              ? `${localizePdfPresentationLabel("Decision", pdfLocale)}: ${marketDecisionText || legalDecision}. ${localizePdfPresentationLabel("Main Risk", pdfLocale)}: ${marketTopRisks[0] || executiveSnapshot.mainRisk}`
+              : `${localizePdfPresentationLabel("Decision", pdfLocale)}: ${executiveSnapshot.decision}. ${localizePdfPresentationLabel("Main Risk", pdfLocale)}: ${executiveSnapshot.mainRisk}`,
           contentWidth - 38
         ).slice(0, 2);
         const previewHeight = Math.max(21, 13 + previewLines.length * 4.1);
@@ -2522,7 +2764,9 @@ export function buildStandardReportPdf({
               ? pdfLocale === "tr"
                 ? "Hukuki Analiz"
                 : "Legal Analysis"
-              : localizePdfPresentationLabel("Investor Ready", pdfLocale),
+              : isMarketIntelligenceReport
+                ? localizePdfPresentationLabel("Evidence-Based", pdfLocale)
+                : localizePdfPresentationLabel("Investor Ready", pdfLocale),
           margin + 12,
           tagY,
           isLegalReport ? 42 : 36
@@ -2559,7 +2803,7 @@ export function buildStandardReportPdf({
               : isRealEstateReport
                 ? overallInvestmentScore
                 : isMarketIntelligenceReport
-                  ? executiveSnapshot.confidenceScore
+                  ? marketConfidenceScore
                   : founderScore) ?? "--"
           ),
           scoreX + 20,
@@ -2631,6 +2875,17 @@ export function buildStandardReportPdf({
                   ? "Not verified"
                   : `${extractScore(fullReportContent, "Zoning Risk")}/100`,
               ],
+            ]
+          : isMarketIntelligenceReport
+          ? [
+              [
+                localizePdfPresentationLabel("Confidence Score", pdfLocale),
+                marketConfidenceScore === null ? "—" : `${marketConfidenceScore}%`,
+              ],
+              [localizePdfPresentationLabel("Report Quality", pdfLocale), marketReportQualityLabel],
+              [localizePdfPresentationLabel("Main Risk", pdfLocale), marketTopRisks[0] || executiveSnapshot.mainRisk],
+              [localizePdfPresentationLabel("Next Action", pdfLocale), marketNextAction || executiveSnapshot.nextAction],
+              [localizePdfPresentationLabel("Report Type", pdfLocale), localizePdfPresentationLabel(report.type, pdfLocale)],
             ]
           : [
               [localizePdfPresentationLabel("Confidence Score", pdfLocale), executiveSnapshot.confidence],
@@ -2757,11 +3012,15 @@ export function buildStandardReportPdf({
                 const value = extractScore(fullReportContent, metric);
                 return `${label}: ${value === null ? "Not verified" : `${value}/100`}`;
               })
-            : executiveSnapshot.riskHeatmap.map((risk) => `${risk.label}: ${risk.level}`),
+            : isMarketIntelligenceReport
+              ? marketTopRisks
+              : executiveSnapshot.riskHeatmap.map((risk) => `${risk.label}: ${risk.level}`),
           insightWidth
         );
         const confidenceOrQualityItems = isLegalReport
           ? legalActionItems
+          : isMarketIntelligenceReport
+          ? marketConfidenceFactors
           : reportQualityBreakdown.length
           ? reportQualityBreakdown.map((item) => `${item.label}: ${item.value}`)
           : executiveSnapshot.confidenceRadar.map((dimension) =>
@@ -2782,7 +3041,9 @@ export function buildStandardReportPdf({
               : "Key Legal Risks"
           : isRealEstateReport
             ? "Real Estate Decision Factors"
-            : localizePdfPresentationLabel("Risk Heatmap", pdfLocale),
+            : isMarketIntelligenceReport
+              ? localizePdfPresentationLabel("Top Risks", pdfLocale)
+              : localizePdfPresentationLabel("Risk Heatmap", pdfLocale),
           strengthsLayout.lineBlocks,
           margin + 12,
           insightY,
@@ -2795,6 +3056,8 @@ export function buildStandardReportPdf({
             ? pdfLocale === "tr"
               ? "Hemen Atılacak Adımlar"
               : "Immediate Actions"
+          : isMarketIntelligenceReport
+            ? localizePdfPresentationLabel("Confidence Factors", pdfLocale)
           : reportQualityBreakdown.length
             ? localizePdfPresentationLabel("Report Quality", pdfLocale)
             : localizePdfPresentationLabel("Confidence Radar", pdfLocale),
@@ -2953,7 +3216,9 @@ export function buildStandardReportPdf({
             ? pdfLocale === "tr"
               ? "Karar Desteği"
               : "Decision Support"
-            : localizePdfPresentationLabel("Investor Ready", pdfLocale),
+            : isMarketIntelligenceReport
+              ? localizePdfPresentationLabel("Evidence-Based", pdfLocale)
+              : localizePdfPresentationLabel("Investor Ready", pdfLocale),
       ].map((label) => wrapPdfText(label, (contentWidth - 8) / 3 - 8).slice(0, 2));
       const summaryCardHeight = Math.max(
         12,

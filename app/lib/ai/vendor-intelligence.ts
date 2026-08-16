@@ -312,6 +312,13 @@ function mergeEntity(
     consultancy: 5,
     open_source: 4,
     community: 3,
+    // Ranked above commercial_vendor for the same reason every other
+    // non-vendor institutional role above outranks it: if one evidence
+    // item calls an entity a customer/adopter or channel partner and
+    // another (more weakly) suggests it's a vendor, the disqualifying
+    // classification wins the merge, not the vendor one.
+    customer_adopter: 3,
+    channel_partner: 3,
     commercial_vendor: 2,
     unknown: 1,
   } as const;
@@ -339,6 +346,14 @@ const nonVendorInstitutionalTypes = new Set([
   "academic",
   "open_source",
   "community",
+  // customer_adopter/channel_partner: a real, cited company that the
+  // evidence describes as using/piloting/adopting the technology, or as
+  // an implementation/channel partner -- neither sells a competing
+  // product in this market, so neither may reach Competitive Landscape
+  // or Major Players, the same as any other non-vendor institutional
+  // role above.
+  "customer_adopter",
+  "channel_partner",
 ]);
 
 export function buildVendorIntelligenceGraph(
@@ -405,6 +420,30 @@ export function buildVendorIntelligenceGraph(
           evidenceIds: candidate.evidenceIds,
           confidence: preliminaryClassification.confidence,
           reason: preliminaryClassification.reason,
+        });
+        return [];
+      }
+
+      // Candidates derived only from domain-fallback (a name/domain lifted
+      // straight from a citation's own hostname, with no explicit vendor
+      // mention pattern ever matching) carry no positive evidence that the
+      // named entity actually sells anything -- validateVendorCandidate's
+      // corroboration paths were built to size evidence *volume*, not to
+      // confirm commercial *role*, so a domain-fallback candidate whose text
+      // never affirmatively reads as a seller (classifyOrganizationEntity
+      // fell through to the generic "unknown" default rather than matching
+      // the commercial_vendor fallback) must not reach the table on volume
+      // alone. This is scoped to domain-fallback specifically: taxonomy and
+      // heuristic-mention candidates have a stronger underlying discovery
+      // signal already and are left untouched.
+      if (candidate.matchedByDomainFallbackOnly && preliminaryClassification.entityType !== "commercial_vendor") {
+        mergeEntity(organizationEntities, {
+          name: candidate.canonicalName,
+          entityType: "unknown",
+          url: candidate.sourceUrls[0] || "",
+          evidenceIds: candidate.evidenceIds,
+          confidence: preliminaryClassification.confidence,
+          reason: "Domain-derived candidate with no affirmative evidence that the entity itself sells a competing product or service.",
         });
         return [];
       }

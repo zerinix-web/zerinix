@@ -1222,7 +1222,22 @@ export function projectMarketIntelligenceGraphToReport(
       ),
     ].join("\n");
     projection.marketSize = sizing;
-    projection.tamSamSom = sizing;
+    // tamSamSom is deliberately left untouched here, not overwritten with
+    // this same raw sizing line -- a verified market-size figure is a
+    // single headline number, not a TAM/SAM/SOM breakdown (TAM/SAM/SOM
+    // must still be nested, TAM >= SAM >= SOM, with an explicit
+    // serviceable/obtainable derivation). marketPrompts.tamSamSom already
+    // instructs the model to build exactly that breakdown FROM whichever
+    // verified or benchmark figure is available. Confirmed live:
+    // overwriting tamSamSom here discarded the model's own real
+    // TAM/SAM/SOM derivation and replaced it with a bare copy of the
+    // marketSize line, which the PDF's TAM/SAM/SOM chart then correctly
+    // couldn't parse as three nested figures -- rendering "Could not be
+    // calculated" despite the model having verified evidence to derive
+    // from. Same principle already applied to the adjacentBenchmarks
+    // branch below (see its own comment): never replace the model's real,
+    // evidence-grounded analysis with a deterministic stand-in when it had
+    // real material to build from.
   } else if (graph.planningEstimate) {
     const estimate = graph.planningEstimate;
     projection.tamSamSom = [

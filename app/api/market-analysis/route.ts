@@ -67,6 +67,11 @@ import {
 import { assertNoDecisionContradiction } from "@/app/lib/report-engine/decision-contradiction-gate";
 import { assertReportIsolation } from "@/app/lib/report-engine/report-isolation-validator";
 import { assertNoOrphanEvidenceReferences } from "@/app/lib/report-engine/evidence-reference-integrity";
+import {
+  assertStrategicRecommendationsNumbering,
+  findStrategicRecommendationsStructureIssues,
+} from "@/app/lib/report-engine/strategic-recommendations-integrity";
+import { flattenMarkdownTables } from "@/app/lib/report-engine/markdown-table-flattening";
 import { formatExecutiveDecisionBrief } from "@/app/lib/report-engine/executive-decision-brief";
 import { buildEvidenceSummary } from "@/app/lib/report-engine/evidence-summary";
 import { stripFillerAndDuplicateSentences } from "@/app/lib/report-engine/filler-detection";
@@ -787,7 +792,13 @@ function ensureMarketReportQuality(
   let marketExecutiveDecisionBrief: ReturnType<typeof buildMarketExecutiveDecisionBrief> | undefined;
 
   for (const field of reportFields) {
-    const sanitized = sanitizeMarketReportContent(normalized[field] || "");
+    // Confirmed live: competitiveLandscape (never told to, but a common
+    // LLM habit when comparing several vendors) sometimes writes a raw
+    // markdown table -- there is no table-drawing code anywhere in the
+    // PDF/browser renderer, so it would otherwise render as unreadable
+    // "| a | b | c |" pipe text. Flatten before any other cleanup runs,
+    // since it's a no-op on content with no real table in it.
+    const sanitized = sanitizeMarketReportContent(flattenMarkdownTables(normalized[field] || ""));
     normalized[field] = field === "sources"
       ? cleanInternalMarketSourceFallbacks(sanitized, language)
       : enforceMarketReportLanguage(sanitized, language, marketAssessment?.confidence);
@@ -839,7 +850,20 @@ function ensureMarketReportQuality(
     // (sources/citations/references/evidence), extended here because this
     // field carries the identical guarantee: a fixed, complete set of
     // items that must never be silently pruned.
-    excludedFields: ["strategicRecommendations"],
+    //
+    // tamSamSom carries the same risk for a different reason: its own
+    // prompt requires it to build TAM/SAM/SOM from the same verified
+    // market-size figure marketSize already states (a Planning Estimate
+    // must cite that figure's benchmark and geography before deriving
+    // TAM/SAM/SOM from it), so its opening sentence routinely restates the
+    // same underlying number. Confirmed live: cross-section dedup judged
+    // that restatement a duplicate "insight" of marketSize's own sentence
+    // and replaced the entire section with a bare "See Market Size for the
+    // established premise" cross-reference -- discarding the section's
+    // real SAM/SOM breakdown and assumptions, and leaving nothing for the
+    // PDF's TAM/SAM/SOM chart to parse even when the model had produced a
+    // genuine, correctly-labeled estimate.
+    excludedFields: ["strategicRecommendations", "tamSamSom"],
   }) as Record<MarketReportField, string>;
 
   // Evidence and confidence stay in the background: no per-section
@@ -1019,6 +1043,23 @@ function ensureMarketReportQuality(
       ["strategicRecommendations", "opportunities", "marketDrivers"],
       language
     );
+  }
+
+  // Fail fast on a broken numbered action plan (skipped/duplicated
+  // numbering, or a numbered item with no substantive body) -- these are
+  // unambiguous regardless of language or market, unlike per-item
+  // owner/budget/KPI field presence, which is fuzzy free-text matching
+  // and only ever logged, never used to fail generation.
+  if (deduped.strategicRecommendations) {
+    assertStrategicRecommendationsNumbering(deduped.strategicRecommendations);
+    const softIssues = findStrategicRecommendationsStructureIssues(
+      deduped.strategicRecommendations
+    ).filter((issue) => issue.type === "missing_field");
+    if (softIssues.length > 0) {
+      console.error("[api:market-analysis] Strategic Recommendations may be missing required fields", {
+        issues: softIssues.map((issue) => issue.detail),
+      });
+    }
   }
 
   // Quality Gate, for real: fail generation instead of silently returning
