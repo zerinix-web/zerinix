@@ -498,12 +498,28 @@ function normalizeReportSummary(row: ReportRow): DashboardReport {
   };
 }
 
+// The dashboard only ever displays the 4 most recent reports
+// (recentReports.slice(0, 4)) and, for the mobile "active workspace"
+// preview card, the most recent report within whichever single workspace
+// is currently most active. 50 gives that second lookup a wide safety
+// margin (a workspace would need 50+ MORE-recently-created reports in
+// every OTHER workspace before its own latest report could fall outside
+// this window) while still cutting a full, unbounded history scan down to
+// a small, constant-size page for every account regardless of how many
+// reports it has. The two account-wide totals the page also displays
+// (total report count, completed count) are sourced independently --
+// see totalReports (already computed from loadUserWorkspaces' own
+// per-workspace counts) and countUserCompletedReports below -- so neither
+// depends on this list being complete.
+const DASHBOARD_RECENT_REPORTS_LIMIT = 50;
+
 export async function loadUserReportSummaries(supabase: SupabaseClient, user: User) {
   const { data, error } = await supabase
     .from("reports")
     .select("id,user_id,workspace_id,title,prompt,report_type,status,created_at,metadata")
     .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(DASHBOARD_RECENT_REPORTS_LIMIT);
 
   if (error) {
     return { reports: [] as DashboardReport[], error: error.message };
@@ -513,6 +529,30 @@ export async function loadUserReportSummaries(supabase: SupabaseClient, user: Us
     reports: (data || []).map((row) => normalizeReportSummary(row as ReportRow)),
     error: "",
   };
+}
+
+// Same "completed" semantics as normalizeReportSummary above (case
+// -insensitive; a missing/blank status defaults to completed), computed
+// from a single `status`-only column fetch across the user's whole report
+// history -- an accurate account-wide count without paying to fetch
+// title/prompt/metadata/etc. for every row just to derive one number.
+export async function countUserCompletedReports(
+  supabase: SupabaseClient,
+  user: User
+): Promise<number> {
+  const { data, error } = await supabase
+    .from("reports")
+    .select("status")
+    .eq("user_id", user.id);
+
+  if (error || !data) {
+    return 0;
+  }
+
+  return data.reduce((count, row) => {
+    const status = readString(row as ReportRow, ["status", "state"], "completed");
+    return status.toLowerCase() === "completed" ? count + 1 : count;
+  }, 0);
 }
 
 export async function loadUserReportPreviews(

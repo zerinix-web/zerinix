@@ -24,6 +24,7 @@ import {
 import DashboardSidebar from "./DashboardSidebar";
 import WorkspaceManager from "./WorkspaceManager";
 import {
+  countUserCompletedReports,
   getAuthenticatedUser,
   loadUserReport,
   loadUserReportSummaries,
@@ -252,6 +253,7 @@ function printSsrTimings(timings: SsrTimings, totalMs: number) {
     "latest report summary",
     "latest report lookup",
     "reports",
+    "completed count",
     "workspaces",
     "usage",
     "billing",
@@ -287,14 +289,25 @@ export default async function DashboardPage() {
   // dashboard load even though only one report's content (the latest
   // completed one, for the decision-signal card below) is ever read from
   // it. That report's real content is fetched separately, by id, once we
-  // know which report it is -- see latestCompletedReport below.
-  const [{ workspaces, error }, { reports, error: reportsError }, planTier, usage] =
-    await Promise.all([
-      timed(timings, "workspaces", loadUserWorkspaces(supabase, user)),
-      timed(timings, "reports", loadUserReportSummaries(supabase, user)),
-      timed(timings, "billing", getUserPlanTier(supabase, user.id)),
-      timed(timings, "usage", loadUserUsageSummary(supabase, user.id)),
-    ]);
+  // know which report it is -- see latestCompletedReport below. The list
+  // itself is also now bounded (DASHBOARD_RECENT_REPORTS_LIMIT, see
+  // report-utils.ts) instead of scanning a user's entire report history
+  // on every load; the two account-wide totals the page displays (total
+  // report count, completed count) are sourced independently below so
+  // neither depends on the bounded list being complete.
+  const [
+    { workspaces, error },
+    { reports, error: reportsError },
+    planTier,
+    usage,
+    completedReportsCount,
+  ] = await Promise.all([
+    timed(timings, "workspaces", loadUserWorkspaces(supabase, user)),
+    timed(timings, "reports", loadUserReportSummaries(supabase, user)),
+    timed(timings, "billing", getUserPlanTier(supabase, user.id)),
+    timed(timings, "usage", loadUserUsageSummary(supabase, user.id)),
+    timed(timings, "completed count", countUserCompletedReports(supabase, user)),
+  ]);
   const renderDataStart = markStart();
   const totalReports = workspaces.reduce(
     (total, workspace) => total + workspace.reportCount,
@@ -304,9 +317,7 @@ export default async function DashboardPage() {
     (workspace) => workspace.reportCount > 0
   ).length;
   const recentReports = reports.slice(0, 4);
-  const completedReports = reports.filter(
-    (report) => report.status.toLowerCase() === "completed"
-  ).length;
+  const completedReports = completedReportsCount;
   const activeWorkspace = getActiveWorkspace(workspaces);
   const activeWorkspaceReports = activeWorkspace
     ? reports.filter((report) => report.workspaceId === activeWorkspace.id)
@@ -344,7 +355,7 @@ export default async function DashboardPage() {
     latestReport,
   });
   const mobileMetrics = [
-    { label: "Reports", value: String(reports.length || totalReports) },
+    { label: "Reports", value: String(totalReports || reports.length) },
     { label: "Workspaces", value: String(workspaces.length) },
     { label: "Completed", value: String(completedReports) },
     { label: "Runs", value: formatCompactNumber(usage.totalRequests) },
@@ -365,7 +376,7 @@ export default async function DashboardPage() {
     },
     {
       label: "Total Reports",
-      value: String(reports.length || totalReports),
+      value: String(totalReports || reports.length),
       detail: `${completedReports} completed`,
       icon: FileText,
       tone: "white",
