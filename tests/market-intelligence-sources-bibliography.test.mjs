@@ -356,3 +356,42 @@ test("9. the quality gate's report-wide filler ceiling never flags a bibliograph
     "unboundedSourceFields must exclude the bibliography from the report-wide filler/duplicate-sentence scan"
   );
 });
+
+test("10. an evidence publisher containing an embedded line break never splits a bibliography entry's Publisher: line across two lines", () => {
+  // Reproduces a real, confirmed defect: a live report's raw evidence had
+  // publisher "U.S.\nCensus Bureau" (an embedded newline, likely carried
+  // through from the model's own structured output). Because
+  // buildMarketIntelligenceBibliography's format is strictly line-based
+  // ("Label: value" per line, one field per line), the orphaned second
+  // line ("Census Bureau", no recognizable "Label:" prefix) corrupted
+  // ReportPdfButton.tsx's line-based parseCitations: it read the orphan as
+  // the start of a new, fabricated citation card with no URL/type/
+  // confidence of its own (rendered with "Validation Required" filled in
+  // for the missing fields), and shifted every subsequent entry's own
+  // field associations out of alignment with it.
+  const evidence = [
+    {
+      ...evidenceItem({ id: "R2", name: "U.S.\nCensus Bureau", domain: "census.gov" }),
+      sourceTitle: "County Business Patterns: 2022",
+    },
+  ];
+  const graph = buildMarketIntelligenceGraph({ evidence }, "market report");
+  const bibliography = buildMarketIntelligenceBibliography(
+    { executiveSummary: "A finding [R2]." },
+    graph,
+    "English"
+  );
+
+  for (const line of bibliography.split("\n")) {
+    assert.ok(
+      /^(Sources|Reference:|Title:|Publisher:|URL:|Year:|Accessed:|Type:|Confidence:)/.test(line) || line === "",
+      `every non-blank line must start with a recognized "Label:" prefix, got an orphaned continuation line: ${JSON.stringify(line)}`
+    );
+  }
+
+  const publisherLine = bibliography.split("\n").find((line) => line.startsWith("Publisher:"));
+  assert.equal(publisherLine, "Publisher: U.S. Census Bureau");
+
+  const referenceLines = bibliography.split("\n").filter((line) => line.startsWith("Reference:"));
+  assert.equal(referenceLines.length, 1, "one evidence item must produce exactly one bibliography entry, never a real entry plus a fabricated ghost entry");
+});

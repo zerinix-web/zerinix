@@ -1338,6 +1338,21 @@ export function buildMarketIntelligenceBibliography(
     tagsByRecord.get(record)!.push(id);
   }
 
+  // Every interpolated field is forced to a single line here, defensively,
+  // regardless of whether sanitizeResearchPublisher already cleaned it
+  // upstream. Confirmed live: a publisher string reached this function
+  // still carrying an embedded line break ("U.S.\nCensus Bureau"), which
+  // split one "Publisher:" line's value into two lines with no
+  // recognizable "Label:" prefix on the second -- ReportPdfButton.tsx's
+  // line-based parseCitations then read the orphaned second line as the
+  // start of a new, fabricated citation card with no URL/type/confidence
+  // of its own, AND shifted every subsequent entry's field associations
+  // out of alignment. This single-line guarantee is what parseCitations'
+  // whole "Label: value" line format depends on, so it belongs here, at
+  // the one place that builds every line of the bibliography, rather than
+  // trusting every upstream field to already be clean.
+  const singleLine = (value: string) => value.replace(/\s+/g, " ").trim();
+
   const entries = entryOrder.map((record) => {
     const tags = (tagsByRecord.get(record) || []).map((id) => `[${id}]`).join("");
     const year = record.publishedDate.match(/\b(19|20)\d{2}\b/)?.[0];
@@ -1351,13 +1366,13 @@ export function buildMarketIntelligenceBibliography(
     const accessDate = record.accessedAt.match(/^\d{4}-\d{2}-\d{2}/)?.[0] || record.accessedAt;
     return [
       `Reference: ${tags}`,
-      `Title: ${record.title}`,
-      `Publisher: ${record.publisher}`,
-      `URL: ${record.url}`,
+      `Title: ${singleLine(record.title)}`,
+      `Publisher: ${singleLine(record.publisher)}`,
+      `URL: ${singleLine(record.url)}`,
       ...(year ? [`Year: ${year}`] : []),
       ...(accessDate ? [`Accessed: ${accessDate}`] : []),
-      `Type: ${record.sourceType}`,
-      `Confidence: ${record.confidenceLevel}`,
+      `Type: ${singleLine(record.sourceType)}`,
+      `Confidence: ${singleLine(record.confidenceLevel)}`,
     ].join("\n");
   });
 

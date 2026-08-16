@@ -104,8 +104,14 @@ const TURKISH_REPLACEMENTS: Array<[RegExp, string]> = [
   [/\bFrom report model\b/g, "Rapor modelinden"],
 ];
 
+// ö/ü/Ö/Ü are deliberately excluded from this character class -- see the
+// matching fix and comment on isTurkishReportText in
+// report-output-sanitization.ts: they are ordinary German letters, not
+// Turkish-exclusive ones, and this function previously false-triggered on
+// any English report whose Sources section cited a German-language
+// publisher/title, wrongly relabeling it into Turkish on-screen.
 function isTurkishContent(content: string) {
-  return /[çğıöşüÇĞİÖŞÜ]|\b(?:Karar|Güven|Yönetici|Pazar|Finansal|Kurucu|Kaynaklar|Doğrulama)\b/i.test(
+  return /[çğışÇĞİŞ]|\b(?:Karar|Güven|Yönetici|Pazar|Finansal|Kurucu|Kaynaklar|Doğrulama)\b/i.test(
     content
   );
 }

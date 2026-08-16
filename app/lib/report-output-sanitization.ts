@@ -15,9 +15,21 @@ export function sanitizeInternalRoutingMetadata(content: string) {
     .trim();
 }
 
+// ö/ü/Ö/Ü are deliberately excluded from this character class -- they are
+// ordinary German letters (für, Bereichsübergreifende, Warentransport),
+// not Turkish-exclusive ones. Confirmed live: an English-language Market
+// Intelligence report analyzing the German market cites German-language
+// source titles/publishers in its Sources bibliography, and that alone
+// (no Turkish text anywhere in the report) made this function return
+// true -- forcibly relabeling the deterministic, hardcoded-English
+// bibliography's own "Sources"/"Confidence:" field labels into
+// "Kaynaklar"/"Güven:", corrupting every citation's structure. ç/ğ/ı/ş/İ
+// (and their uppercase forms) are Turkish-exclusive among this app's
+// supported report languages (en/tr/de/fr/es) and remain a reliable
+// signal on their own.
 export function isTurkishReportText(value: string) {
   return (
-    /[çğıöşüÇĞİÖŞÜ]/.test(value) ||
+    /[çğışÇĞİŞ]/.test(value) ||
     /\b(?:gayrimenkul|arsa|parsel|tapu|imar|doğrulan|yatırım|bilgi|belge)\b/i.test(
       value
     )
