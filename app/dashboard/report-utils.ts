@@ -456,6 +456,65 @@ export async function loadUserReports(supabase: SupabaseClient, user: User) {
   };
 }
 
+// Same DashboardReport shape as loadUserReports/normalizeReport, but never
+// selects or normalizes `sections` -- for callers that only need
+// list-level fields (title, type, status, createdAt, prompt, id) across a
+// user's whole report history and must not pay to fetch and normalize
+// every report's full section content just to render a list. `sections`
+// is always `[]` and `investmentScore` is always `undefined` here; a
+// caller that needs one specific report's real content/score should
+// fetch it separately with loadUserReport(supabase, user, reportId) --
+// see app/dashboard/page.tsx's decision-signal card for the pattern
+// (find the right report id from this summary list first, then fetch
+// only that one report's real content).
+function normalizeReportSummary(row: ReportRow): DashboardReport {
+  const createdAt = readString(row, ["created_at", "createdAt", "inserted_at"], "");
+  const reportType = inferReportType(row);
+  const titleFallback =
+    reportType === "Market Analysis"
+      ? "Market Analysis Report"
+      : reportType === "Real Estate Investment Analysis"
+        ? "Real Estate Investment Analysis"
+        : reportType === "Strategic Report"
+          ? "Strategic Decision Report"
+          : "Business Plan Report";
+  const rowStatus = readString(row, ["status", "state"], "completed");
+  const failedReport = rowStatus.toLowerCase() !== "completed";
+
+  return {
+    id: readString(row, ["id", "report_id"], crypto.randomUUID()),
+    workspaceId: readString(row, ["workspace_id", "workspaceId"], ""),
+    title: readString(row, ["title", "name"], titleFallback),
+    prompt: readString(row, ["prompt", "business_idea", "idea", "input", "user_input", "original_prompt"], ""),
+    createdAt,
+    type: reportType,
+    status: failedReport ? "failed" : rowStatus,
+    metadata:
+      row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+        ? (row.metadata as ReportMetadata)
+        : undefined,
+    investmentScore: undefined,
+    sections: [],
+  };
+}
+
+export async function loadUserReportSummaries(supabase: SupabaseClient, user: User) {
+  const { data, error } = await supabase
+    .from("reports")
+    .select("id,user_id,workspace_id,title,prompt,report_type,status,created_at,metadata")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return { reports: [] as DashboardReport[], error: error.message };
+  }
+
+  return {
+    reports: (data || []).map((row) => normalizeReportSummary(row as ReportRow)),
+    error: "",
+  };
+}
+
 export async function loadUserReportPreviews(
   supabase: SupabaseClient,
   user: User

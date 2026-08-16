@@ -25,7 +25,8 @@ import DashboardSidebar from "./DashboardSidebar";
 import WorkspaceManager from "./WorkspaceManager";
 import {
   getAuthenticatedUser,
-  loadUserReports,
+  loadUserReport,
+  loadUserReportSummaries,
   loadUserWorkspaces,
   type DashboardReport,
   type DashboardWorkspace,
@@ -225,10 +226,17 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
+  // loadUserReportSummaries fetches every field the dashboard list/stats
+  // views need EXCEPT `sections` -- the full section content for a user's
+  // entire report history was being fetched and normalized on every
+  // dashboard load even though only one report's content (the latest
+  // completed one, for the decision-signal card below) is ever read from
+  // it. That report's real content is fetched separately, by id, once we
+  // know which report it is -- see latestCompletedReport below.
   const [{ workspaces, error }, { reports, error: reportsError }, planTier, usage] =
     await Promise.all([
       loadUserWorkspaces(supabase, user),
-      loadUserReports(supabase, user),
+      loadUserReportSummaries(supabase, user),
       getUserPlanTier(supabase, user.id),
       loadUserUsageSummary(supabase, user.id),
     ]);
@@ -253,9 +261,17 @@ export default async function DashboardPage() {
     "Create a strategic report to establish this workspace context.";
   const latestReport = recentReports[0];
   const lastReportTime = latestReport?.createdAt || "";
-  const latestCompletedReport = reports.find(
+  // Only the id is needed from the summary list to know WHICH report is
+  // latest-completed; its real section content (for the decision-signal
+  // card just below) is fetched with a single targeted query for that one
+  // report, not carried along for the whole list.
+  const latestCompletedReportSummary = reports.find(
     (report) => report.status.toLowerCase() === "completed"
   );
+  const latestCompletedReport = latestCompletedReportSummary
+    ? (await loadUserReport(supabase, user, latestCompletedReportSummary.id)) ||
+      undefined
+    : undefined;
   const firstName = getFirstName(user);
   const decisionSignal = getDecisionSignal(latestCompletedReport);
   const recommendedAction = getRecommendedDashboardAction({
