@@ -88,8 +88,53 @@ test("missing financial metrics use metric-specific Turkish explanations", () =>
   });
 
   assert.doesNotMatch(output, /sağlanmadı; mevcut kanıtlardan hesaplanamaz/i);
-  assert.match(output, /ARR: Gerçekleşmiş gelir verisi bulunmadığı için hesaplanamadı/);
-  assert.match(output, /CAC: Gerçek müşteri edinimi ve gelir verisi gerekli/);
-  assert.match(output, /TAM: Doğrulanmış pazar verisi olmadan hesaplanamaz/);
-  assert.match(output, /Brüt marj: Gelir ve maliyet verisi olmadan hesaplanamaz/);
+  // Each explanation states why the metric is missing, what evidence
+  // is absent, and what the founder should collect next -- not a bare
+  // one-line placeholder repeated identically across metrics.
+  assert.match(output, /ARR: gerçekleşmiş gelir verisi bulunmadığı için hesaplanamıyor; kurucunun fatura\/ödeme kayıtlarından gerçekleşmiş gelir verisini paylaşması gerekir/);
+  assert.match(output, /CAC: gerçek müşteri edinimi ve elde tutma verisi bulunmadığı için hesaplanamıyor; kurucunun kanal başına edinim maliyeti ve kohort elde tutma kayıtlarını toplaması gerekir/);
+  assert.match(output, /TAM: doğrulanmış pazar büyüklüğü verisi bulunmadığı için hesaplanamıyor; sektör raporu veya resmi istatistik gibi doğrulanmış kaynaklar gerekir/);
+  assert.match(output, /Brüt marj: gerçekleşmiş gelir ve maliyet verisi bulunmadığı için hesaplanamıyor; kurucunun birim maliyet ve satış fiyatı verisini paylaşması gerekir/);
+});
+
+test("unrelated lines that only coincidentally share the same trailing value are never merged", () => {
+  // Reproduces a real bug: businessModel and benchmark.label can fall
+  // back to the exact same generic string when nothing in the prompt
+  // matches a specific industry, so "Industry benchmark: X" and
+  // "Business model: X" ended up with an identical line ending -- the
+  // consolidation pass must never merge these, since they are two
+  // completely different, legitimate assumption entries that were
+  // never generated as an unavailable-data explanation.
+  const output = labelModelDerivedFinancialClaims({
+    content: [
+      "• Industry benchmark: Genel Hizmetler",
+      "• İş modeli: Genel Hizmetler",
+      "• Hedef müşteri: öngörülen ilk kullanıcılar",
+    ].join("\n"),
+    metricValues: [],
+    language: "Turkish",
+    sourceContext: "Yeni bir iş fikrini değerlendiriyorum.",
+  });
+
+  assert.match(output, /• Industry benchmark: Genel Hizmetler/);
+  assert.match(output, /• İş modeli: Genel Hizmetler/);
+  assert.doesNotMatch(output, /Industry benchmark, /);
+  assert.doesNotMatch(output, /,\s*İş modeli:/);
+});
+
+test("identical missing-data explanations within one section are consolidated instead of repeated", () => {
+  const output = labelModelDerivedFinancialClaims({
+    content: [
+      "CAC: 5.000 dolar",
+      "LTV: 12.000 dolar",
+      "Geri ödeme süresi: 4 ay",
+    ].join("\n"),
+    metricValues: ["CAC", "LTV", "Geri ödeme süresi"],
+    language: "Turkish",
+    sourceContext: "Yeni bir iş fikrini değerlendiriyorum.",
+  });
+
+  const occurrences = output.match(/kurucunun kanal başına edinim maliyeti/g) || [];
+  assert.equal(occurrences.length, 1, "the shared explanation must appear once, not once per metric");
+  assert.match(output, /^CAC, LTV, Geri ödeme süresi: /m);
 });

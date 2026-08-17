@@ -136,7 +136,10 @@ import {
 import { assertNoDecisionContradiction } from "@/app/lib/report-engine/decision-contradiction-gate";
 import { buildEvidenceSummary } from "@/app/lib/report-engine/evidence-summary";
 import { stripFillerAndDuplicateSentences } from "@/app/lib/report-engine/filler-detection";
-import { assertExecutiveQualityGate } from "@/app/lib/report-engine/executive-quality-gate";
+import {
+  assertExecutiveQualityGate,
+  ExecutiveQualityGateError,
+} from "@/app/lib/report-engine/executive-quality-gate";
 import {
   formatExecutiveDecisionSystemContext,
   formatExecutiveBriefSupplementaryContext,
@@ -235,6 +238,25 @@ const FULL_REPORT_MAX_OUTPUT_TOKENS = 8_000;
 const FULL_REPORT_OPENAI_TIMEOUT_MS = 24_000;
 const REAL_ESTATE_REPORT_TIMEOUT_MS = 60_000;
 const REAL_ESTATE_PIPELINE_BUDGET_MS = 58_000;
+// Business Plan's domain-aware research phase (parallel official_government /
+// authoritative_public / commercial_market / regional_local queries) alone
+// regularly takes 45-90s+, which used to leave the report-writing call
+// (REAL_ESTATE_PIPELINE_BUDGET_MS - elapsed) only a few seconds before abort,
+// so every narrative field fell back to createGroundedBusinessTimeoutFallback's
+// parseFullPlanReport("{}", ...) skeleton. This gives the Business Plan
+// pipeline its own budget, sized independently of Real Estate's, with enough
+// headroom for research plus a full BUSINESS_PLAN_REPORT_OPENAI_TIMEOUT_MS
+// report call, well inside the route's 300s maxDuration.
+const BUSINESS_PLAN_PIPELINE_BUDGET_MS = 200_000;
+// The Business Plan report call asks for up to FULL_REPORT_MAX_OUTPUT_TOKENS
+// (8,000) tokens across 24 required JSON fields under a strict schema --
+// confirmed live (5 distinct prompts, dev-server-verify.log) that gpt-5-mini
+// never once finished this inside the shared FULL_REPORT_OPENAI_TIMEOUT_MS
+// (24s) budget used by the lighter-weight specialized-domain report path;
+// every run aborted at exactly 24s with 0 output tokens. This gives the
+// Business Plan report call its own, larger ceiling instead of racing the
+// smaller specialized-domain budget.
+const BUSINESS_PLAN_REPORT_OPENAI_TIMEOUT_MS = 90_000;
 const FULL_REPORT_POST_PROCESS_TIMEOUT_MS = 2_000;
 const REAL_ESTATE_SECTION_CONCURRENCY = 4;
 
@@ -1545,6 +1567,264 @@ function cleanInternalSourceFallbacks(content: string, language: ResponseLanguag
     .trim(), { language, allowExternalCitations: false });
 }
 
+// Business Plan's shared scoring/financial-modeling data layer
+// (investment-score.ts, financial-model.ts) is also used by Market
+// Analysis and is deliberately language-agnostic -- it only ever
+// produces English sentences (category explanations, strengths/
+// weaknesses/topRisks, formulas, benchmark comparisons, assumptions).
+// Business Plan is the only caller that must present these values as
+// pure Turkish prose, so this is a Business-Plan-only presentation
+// translator for that fixed, enumerable vocabulary -- not a change to
+// any score, formula, or decision. Order matters: longer/more-specific
+// patterns are listed before shorter ones they would otherwise
+// partially shadow.
+const englishFinancialFragmentTranslations: Array<[RegExp, string | ((...args: string[]) => string)]> = [
+  // Category explanations (investment-score.ts makeCategory calls)
+  [/\bBusiness-model quality reflects the pricing model, gross margin discipline, payback path, and repeat purchase or retention potential\.?/gi,
+    "İş modeli kalitesi; fiyatlandırma modelini, brüt marj disiplinini, geri ödeme sürecini ve tekrar satın alma ya da elde tutma potansiyelini yansıtır."],
+  [/\b([\w\s/&-]+?) opportunity is supported by reachable demand, obtainable market wedge, and benchmark growth potential\.?/gi,
+    (_m, industry) => `${industry} fırsatı, ulaşılabilir talep, elde edilebilir pazar payı ve sektör ortalaması büyüme potansiyeliyle desteklenmektedir.`],
+  [/\bThe idea includes defensibility signals, but the advantage still depends on margin quality and proof of a durable wedge\.?/gi,
+    "Fikir savunulabilirlik sinyalleri içeriyor; ancak avantaj hâlâ marj kalitesine ve kalıcı bir farkın kanıtlanmasına bağlı."],
+  [/\bDefensibility is only partially evidenced; competitive advantage needs stronger moat proof\.?/gi,
+    "Savunulabilirlik yalnızca kısmen kanıtlanmıştır; rekabet avantajı için daha güçlü koruma kanıtı gerekir."],
+  [/\bFinancial health is based on margin, EBITDA profile, runway \(([^)]+)\), and break-even timing \(([^)]+)\)\.?/gi,
+    (_m, runway, breakeven) => `Finansal sağlık; marj, FAVÖK profili, finansal pist (${runway}) ve başabaş noktası zamanlamasına (${breakeven}) dayanır.`],
+  [/\bScalability reflects growth potential, margin structure, Year-1 revenue potential, and capital intensity\.?/gi,
+    "Ölçeklenebilirlik; büyüme potansiyelini, marj yapısını, 1. yıl gelir potansiyelini ve sermaye yoğunluğunu yansıtır."],
+  [/\bFounder readiness separates the quality of the opportunity from the current level of validation and founder-specific evidence\.?/gi,
+    "Kurucu hazırlığı, fırsatın kalitesini mevcut doğrulama seviyesinden ve kurucuya özgü kanıtlardan ayırt eder."],
+  [/\bCapital efficiency reflects investment need, payback discipline, three-year return potential, and capital intensity\.?/gi,
+    "Sermaye verimliliği; yatırım ihtiyacını, geri ödeme disiplinini, üç yıllık getiri potansiyelini ve sermaye yoğunluğunu yansıtır."],
+  [/\bExecution risk is healthier when payback and break-even timing are realistic, confidence is stronger, validation evidence exists, and the model is less operationally complex\.?/gi,
+    "Yürütme riski; geri ödeme ve başabaş zamanlaması gerçekçi, güven daha güçlü, doğrulama kanıtı mevcut ve model operasyonel olarak daha az karmaşık olduğunda daha sağlıklıdır."],
+  [/\bTechnology leverage reflects technical intensity, defensibility signals, and margin expansion potential\.?/gi,
+    "Teknoloji kaldıracı; teknik yoğunluğu, savunulabilirlik sinyallerini ve marj genişleme potansiyelini yansıtır."],
+  // Category labels
+  [/\bMarket Opportunity\b/g, "Pazar Fırsatı"],
+  [/\bCompetitive Advantage\b/g, "Rekabet Avantajı"],
+  [/\bBusiness Model\b/g, "İş Modeli"],
+  [/\bFinancial Health\b/g, "Finansal Sağlık"],
+  [/\bScalability\b/g, "Ölçeklenebilirlik"],
+  [/\bTeam \/ Founder\b/g, "Ekip / Kurucu"],
+  [/\bCapital Efficiency\b/g, "Sermaye Verimliliği"],
+  [/\bExecution Risk\b/g, "Yürütme Riski"],
+  [/\bTechnology Score\b/g, "Teknoloji Skoru"],
+  // Strengths/weaknesses bonus lines (createStrengths/createWeaknesses)
+  [/\bGross margin discipline: ([^\s]+) sits (below|above|within) benchmark range \(([^)]+)\)\.?/gi,
+    (_m, value, position, range) => `Brüt marj disiplini: ${value}, referans aralığının ${position === "below" ? "altında" : position === "above" ? "üzerinde" : "içinde"} (${range}).`],
+  [/\bCAC payback risk: ([^\s]+) is above the benchmark range\.?/gi,
+    (_m, value) => `CAC geri ödeme riski: ${value}, referans aralığının üzerinde.`],
+  // Top risks (createTopRisks)
+  [/\bCapital efficiency: investment need is ([^\s]+) against ([^\s]+) Year-1 ARR\.?/gi,
+    (_m, need, arr) => `Sermaye verimliliği: yatırım ihtiyacı, 1. yıl ARR değeri ${arr} karşısında ${need}.`],
+  [/\bConfidence: ([\w\s/&-]+?) assumptions require primary validation where confidence is Low\.?/gi,
+    (_m, benchmarkLabel) => `Güven: ${benchmarkLabel} varsayımları, güvenin düşük olduğu alanlarda birincil doğrulama gerektirir.`],
+  [/\bPayback risk: ([^\s]+) exceeds the benchmark range\.?/gi,
+    (_m, value) => `Geri ödeme riski: ${value}, referans aralığını aşıyor.`],
+  [/\bRunway risk: ([^\s]+) gives limited iteration time\.?/gi,
+    (_m, value) => `Finansal pist riski: ${value}, sınırlı iterasyon süresi bırakıyor.`],
+  [/\bExecution risk: /g, "Yürütme riski: "],
+  // Next critical action (createNextCriticalAction)
+  [/\bDo not scale spend until the weakest economics are redesigned and validated\.?/gi,
+    "En zayıf ekonomik göstergeler yeniden tasarlanıp doğrulanana kadar harcamayı artırmayın."],
+  [/\bValidate a lower-CAC acquisition motion before increasing budget\.?/gi,
+    "Bütçeyi artırmadan önce daha düşük CAC'li bir edinim yöntemini doğrulayın."],
+  [/\bRun primary research to validate market size and contribution margin assumptions\.?/gi,
+    "Pazar büyüklüğü ve katkı marjı varsayımlarını doğrulamak için birincil araştırma yapın."],
+  [/\bConvert the strongest ICP into paid pilots using the calculated pricing and payback targets\.?/gi,
+    "Hesaplanan fiyatlandırma ve geri ödeme hedeflerini kullanarak en güçlü ideal müşteri profilini ücretli pilot uygulamalara dönüştürün."],
+  [/\bValidate pricing, buyer urgency, and repeatable acquisition before committing full funding\.?/gi,
+    "Tam fonlama taahhüdünden önce fiyatlandırmayı, alıcı aciliyetini ve tekrarlanabilir edinimi doğrulayın."],
+  // Benchmark comparisons (financial-model.ts compareToBenchmark + statics)
+  [/\bBelow benchmark range \(([^)]+)\)/gi, (_m, range) => `Referans aralığının altında (${range})`],
+  [/\bAbove benchmark range \(([^)]+)\)/gi, (_m, range) => `Referans aralığının üzerinde (${range})`],
+  [/\bWithin benchmark range \(([^)]+)\)/gi, (_m, range) => `Referans aralığı içinde (${range})`],
+  [/\bDerived from benchmark market scope rather than compared to operating range\.?/gi,
+    "İşletme aralığıyla karşılaştırılmak yerine sektör pazar kapsamından türetilmiştir."],
+  [/\bDerived from benchmark serviceable-market rate\.?/gi, "Sektör referansı hizmet verilebilir pazar oranından türetilmiştir."],
+  [/\bDerived from benchmark obtainable-share rate\.?/gi, "Sektör referansı elde edilebilir pazar payı oranından türetilmiştir."],
+  [/\bUses mobility revenue-per-active-rider benchmark as the base case\.?/gi,
+    "Temel senaryo olarak aktif sürücü başına gelir sektör referansı kullanılmıştır."],
+  [/\bUses industry benchmark ARPA as the base case\.?/gi, "Temel senaryo olarak sektör referansı ARPA değeri kullanılmıştır."],
+  [/\bOperating-burn benchmark is industry-specific and adjusted for idea scope\.?/gi,
+    "Operasyonel nakit yakımı referansı sektöre özgüdür ve fikir kapsamına göre ayarlanmıştır."],
+  [/\bRunway is calculated from financing need and monthly burn\.?/gi, "Finansal pist, finansman ihtiyacı ve aylık nakit yakımından hesaplanır."],
+  [/\bBreak-even is derived from contribution margin and burn, not a standalone benchmark\.?/gi,
+    "Başabaş noktası bağımsız bir referans değildir; katkı marjı ve nakit yakımından türetilmiştir."],
+  [/\bInvestment need is calculated from runway and capex assumptions\.?/gi, "Yatırım ihtiyacı, finansal pist ve sermaye harcaması varsayımlarından hesaplanır."],
+  [/\bROI is calculated from the same forecast, margin, burn, and investment assumptions\.?/gi,
+    "Yatırım getirisi (ROI), aynı projeksiyon, marj, nakit yakımı ve yatırım varsayımlarından hesaplanır."],
+  [/\b([\w\s/-]+?) is calculated from ([\w\s-]+?) and pricing assumptions\.?/gi,
+    (_m, label, unit) => `${label}, ${unit === "active riders" ? "aktif sürücüler" : unit === "customers" ? "müşteriler" : unit} ve fiyatlandırma varsayımlarından hesaplanır.`],
+  // Formulas (financial-model.ts metric() calls)
+  [/\bindustry TAM x geography multiplier x idea scope multiplier\b/gi, "sektör TAM değeri x coğrafya çarpanı x fikir kapsam çarpanı"],
+  [/\bTAM x serviceable market rate\b/gi, "TAM x hizmet verilebilir pazar oranı"],
+  [/\bSAM x obtainable share rate\b/gi, "SAM x elde edilebilir pazar payı oranı"],
+  [/\bmonthly ride revenue per active rider x idea scope multiplier\b/gi, "aktif sürücü başına aylık gelir x fikir kapsam çarpanı"],
+  [/\bbenchmark monthly ARPA x idea scope multiplier\b/gi, "sektör referansı aylık ARPA x fikir kapsam çarpanı"],
+  [/\bbenchmark CAC x complexity multiplier\b/gi, "sektör referansı CAC x karmaşıklık çarpanı"],
+  [/\b([\w\s]+?) x Gross Margin x lifetime months\b/gi, (_m, label) => `${label} x Brüt Marj x yaşam süresi (ay)`],
+  [/\bindustry gross margin benchmark\b/gi, "sektör brüt marj referansı"],
+  [/\bCAC \/ monthly gross profit per customer\b/gi, "CAC / müşteri başına aylık brüt kâr"],
+  [/\bbenchmark monthly burn x idea scope multiplier\b/gi, "sektör referansı aylık nakit yakımı x fikir kapsam çarpanı"],
+  [/\bInvestment Needed \/ Monthly Burn\b/gi, "Gereken Yatırım / Aylık Nakit Yakımı"],
+  [/\bindustry customer growth benchmark\b/gi, "sektör müşteri büyüme referansı"],
+  [/\bMonth-12 active riders x monthly revenue per active rider\b/gi, "12. ay aktif sürücüler x aktif sürücü başına aylık gelir"],
+  [/\bMonth-12 customers x ARPA\b/gi, "12. ay müşteriler x ARPA"],
+  [/\bMonthly Revenue x 12\b/gi, "Aylık Gelir x 12"],
+  [/\b([\w\s]+?) x Gross Margin - annualized operating expense\b/gi, (_m, label) => `${label} x Brüt Marj - yıllıklandırılmış operasyonel gider`],
+  [/\bStartup capex \/ monthly contribution above burn\b/gi, "Başlangıç sermaye harcaması / nakit yakımı üstü aylık katkı"],
+  [/\bMonthly Burn x target runway \+ startup capex\b/gi, "Aylık Nakit Yakımı x hedef finansal pist + başlangıç sermaye harcaması"],
+  [/\(Year-3 EBITDA - Investment Needed\) \/ Investment Needed/gi, "(3. Yıl FAVÖK - Gereken Yatırım) / Gereken Yatırım"],
+  // Shared assumption lines (financial-model.ts sharedAssumptions + per-metric extras)
+  [/\bIndustry benchmark: /gi, "Sektör referansı: "],
+  [/\bBusiness model: subscription software\b/gi, "İş modeli: abonelik yazılımı"],
+  [/\bBusiness model: D2C Brand \/ E-commerce\b/gi, "İş modeli: D2C Marka / E-ticaret"],
+  [/\bBusiness model: marketplace\b/gi, "İş modeli: pazar yeri"],
+  [/\bBusiness model: asset-heavy rental \/ utilization model\b/gi, "İş modeli: varlık yoğun kiralama / kullanım modeli"],
+  [/\bBusiness model: multi-location \/ franchise\b/gi, "İş modeli: çoklu lokasyon / bayilik"],
+  [/\bBusiness model: location-based food service\b/gi, "İş modeli: lokasyon bazlı yiyecek hizmeti"],
+  [/\bBusiness model: hardware plus service contracts\b/gi, "İş modeli: donanım artı hizmet sözleşmeleri"],
+  [/\bBusiness model: asset-heavy manufacturing\b/gi, "İş modeli: varlık yoğun üretim"],
+  [/\bBusiness model: asset-heavy operating company\b/gi, "İş modeli: varlık yoğun işletme"],
+  [/\bBusiness model: services\b/gi, "İş modeli: hizmetler"],
+  [/\bBusiness model: /gi, "İş modeli: "],
+  [/\bTarget customer: inferred early adopters\b/gi, "Hedef müşteri: öngörülen ilk kullanıcılar"],
+  [/\bTarget customer: healthcare buyers \/ operators\b/gi, "Hedef müşteri: sağlık hizmeti alıcıları / işletmecileri"],
+  [/\bTarget customer: B2B \/ enterprise customers\b/gi, "Hedef müşteri: B2B / kurumsal müşteriler"],
+  [/\bTarget customer: premium consumer \/ high-net-worth customers\b/gi, "Hedef müşteri: premium tüketici / yüksek gelirli müşteriler"],
+  [/\bTarget customer: startups and SMBs\b/gi, "Hedef müşteri: girişimler ve KOBİ'ler"],
+  [/\bTarget customer: public-sector buyers\b/gi, "Hedef müşteri: kamu sektörü alıcıları"],
+  [/\bTarget customer: urban riders \/ commuters\b/gi, "Hedef müşteri: şehir içi sürücüler / işe gidip gelenler"],
+  [/\bTarget customer: /gi, "Hedef müşteri: "],
+  [/\bGeography: global \/ unspecified\b/gi, "Coğrafya: küresel / belirtilmemiş"],
+  [/\bGeography: United States\b/gi, "Coğrafya: Amerika Birleşik Devletleri"],
+  [/\bGeography: United Kingdom\b/gi, "Coğrafya: Birleşik Krallık"],
+  [/\bGeography: Europe\b/gi, "Coğrafya: Avrupa"],
+  [/\bGeography: Turkey\b/gi, "Coğrafya: Türkiye"],
+  [/\bGeography: GCC \/ Middle East\b/gi, "Coğrafya: Körfez İşbirliği Konseyi / Orta Doğu"],
+  [/\bGeography: global\b/gi, "Coğrafya: küresel"],
+  [/\bGeography: /gi, "Coğrafya: "],
+  [/\bPricing model: inferred pricing model\b/gi, "Fiyatlandırma modeli: öngörülen fiyatlandırma modeli"],
+  [/\bPricing model: D2C unit sales, recurring subscriptions, and B2B wholesale accounts\b/gi,
+    "Fiyatlandırma modeli: D2C birim satışlar, tekrarlayan abonelikler ve B2B toptan satış hesapları"],
+  [/\bPricing model: subscription\b/gi, "Fiyatlandırma modeli: abonelik"],
+  [/\bPricing model: online unit sales plus repeat purchase frequency\b/gi, "Fiyatlandırma modeli: çevrimiçi birim satışlar artı tekrar satın alma sıklığı"],
+  [/\bPricing model: usage-based\b/gi, "Fiyatlandırma modeli: kullanım bazlı"],
+  [/\bPricing model: per-ride rental plus passes\b/gi, "Fiyatlandırma modeli: yolculuk başına kiralama artı paketler"],
+  [/\bPricing model: take-rate \/ commission\b/gi, "Fiyatlandırma modeli: komisyon oranı"],
+  [/\bPricing model: franchise fee plus royalties\b/gi, "Fiyatlandırma modeli: bayilik ücreti artı telif payları"],
+  [/\bPricing model: premium ticket \/ membership \/ service package\b/gi, "Fiyatlandırma modeli: premium bilet / üyelik / hizmet paketi"],
+  [/\bPricing model: ticket size plus repeat purchase frequency\b/gi, "Fiyatlandırma modeli: işlem tutarı artı tekrar satın alma sıklığı"],
+  [/\bPricing model: hardware sale plus recurring software\/service\b/gi, "Fiyatlandırma modeli: donanım satışı artı tekrarlayan yazılım/hizmet"],
+  [/\bPricing model: unit sales plus service contracts\b/gi, "Fiyatlandırma modeli: birim satışlar artı hizmet sözleşmeleri"],
+  [/\bPricing model: /gi, "Fiyatlandırma modeli: "],
+  [/\bValidation evidence: present in prompt\b/gi, "Doğrulama kanıtı: talepte belirtilmiş"],
+  [/\bValidation evidence: not provided; planning assumptions require validation\b/gi,
+    "Doğrulama kanıtı: belirtilmemiş; planlama varsayımları doğrulama gerektirir"],
+  [/\bValidation evidence: /gi, "Doğrulama kanıtı: "],
+  // The same inputs.geography/businessModel/pricingModel/targetCustomer
+  // values also get interpolated directly into other sentences
+  // elsewhere (e.g. the roadmap/GTM narrative), without their "Label: "
+  // prefix, so the value itself needs a standalone match too, not just
+  // the labeled assumption-line form above.
+  [/\bglobal \/ unspecified\b/gi, "küresel / belirtilmemiş"],
+  [/\binferred pricing model\b/gi, "öngörülen fiyatlandırma modeli"],
+  [/\binferred early adopters\b/gi, "öngörülen ilk kullanıcılar"],
+  [/\bsubscription software\b/gi, "abonelik yazılımı"],
+  [/\bD2C Brand \/ E-commerce\b/gi, "D2C Marka / E-ticaret"],
+  [/\basset-heavy rental \/ utilization model\b/gi, "varlık yoğun kiralama / kullanım modeli"],
+  [/\bmulti-location \/ franchise\b/gi, "çoklu lokasyon / bayilik"],
+  [/\blocation-based food service\b/gi, "lokasyon bazlı yiyecek hizmeti"],
+  [/\bhardware plus service contracts\b/gi, "donanım artı hizmet sözleşmeleri"],
+  [/\basset-heavy manufacturing\b/gi, "varlık yoğun üretim"],
+  [/\basset-heavy operating company\b/gi, "varlık yoğun işletme"],
+  [/\bhealthcare buyers \/ operators\b/gi, "sağlık hizmeti alıcıları / işletmecileri"],
+  [/\bB2B \/ enterprise customers\b/gi, "B2B / kurumsal müşteriler"],
+  [/\bpremium consumer \/ high-net-worth customers\b/gi, "premium tüketici / yüksek gelirli müşteriler"],
+  [/\bstartups and SMBs\b/gi, "girişimler ve KOBİ'ler"],
+  [/\bpublic-sector buyers\b/gi, "kamu sektörü alıcıları"],
+  [/\burban riders \/ commuters\b/gi, "şehir içi sürücüler / işe gidip gelenler"],
+  [/\bD2C unit sales, recurring subscriptions, and B2B wholesale accounts\b/gi,
+    "D2C birim satışlar, tekrarlayan abonelikler ve B2B toptan satış hesapları"],
+  [/\bonline unit sales plus repeat purchase frequency\b/gi, "çevrimiçi birim satışlar artı tekrar satın alma sıklığı"],
+  [/\bper-ride rental plus passes\b/gi, "yolculuk başına kiralama artı paketler"],
+  [/\btake-rate \/ commission\b/gi, "komisyon oranı"],
+  [/\bfranchise fee plus royalties\b/gi, "bayilik ücreti artı telif payları"],
+  [/\bpremium ticket \/ membership \/ service package\b/gi, "premium bilet / üyelik / hizmet paketi"],
+  [/\bticket size plus repeat purchase frequency\b/gi, "işlem tutarı artı tekrar satın alma sıklığı"],
+  [/\bhardware sale plus recurring software\/service\b/gi, "donanım satışı artı tekrarlayan yazılım/hizmet"],
+  [/\bunit sales plus service contracts\b/gi, "birim satışlar artı hizmet sözleşmeleri"],
+  [/\bCustomer ramp multiplier: /gi, "Müşteri artış çarpanı: "],
+  [/\bGeography multiplier: /gi, "Coğrafya çarpanı: "],
+  [/\bIdea scope multiplier: /gi, "Fikir kapsam çarpanı: "],
+  [/\bServiceable market rate: /gi, "Hizmet verilebilir pazar oranı: "],
+  [/\bObtainable share rate: /gi, "Elde edilebilir pazar payı oranı: "],
+  [/\bMonth-12 active riders: /gi, "12. ay aktif sürücüler: "],
+  [/\bMonth-12 customers: /gi, "12. ay müşteriler: "],
+  [/\bComplexity multiplier: /gi, "Karmaşıklık çarpanı: "],
+  [/\bAcquisition uncertainty multiplier: /gi, "Edinim belirsizliği çarpanı: "],
+  [/\bLifetime: (\d+) months\b/gi, (_m, n) => `Yaşam süresi: ${n} ay`],
+  [/\bGross margin is benchmark-derived until validated by actual COGS\.?/gi,
+    "Brüt marj, gerçek maliyet verisiyle doğrulanana kadar sektör referansından alınmıştır."],
+  [/\bMonthly gross profit per customer: /gi, "Müşteri başına aylık brüt kâr: "],
+  [/\bIncludes team, operating overhead, infrastructure, and go-to-market load\.?/gi,
+    "Ekip, operasyonel giderler, altyapı ve pazara giriş maliyetlerini içerir."],
+  [/\bInvestment needed: /gi, "Gereken yatırım: "],
+  [/\bGrowth rate is applied to customer count in the 3-year forecast\.?/gi,
+    "Büyüme oranı, 3 yıllık projeksiyonda müşteri sayısına uygulanır."],
+  [/\bAnnualized operating expense: /gi, "Yıllıklandırılmış operasyonel gider: "],
+  [/\bStartup capex: /gi, "Başlangıç sermaye harcaması: "],
+  [/\bTarget runway: (\d+) months\b/gi, (_m, n) => `Hedef finansal pist: ${n} ay`],
+  [/\bYear-3 revenue: /gi, "3. yıl geliri: "],
+  // Metric labels that only appear via investment-score.ts/financial-model.ts
+  // (turkishMetricLabels below covers the rest, keyed by exact label text)
+  [/\bMonthly Revenue per Active Rider\b/g, "Aktif Sürücü Başına Aylık Gelir"],
+  [/\bMonthly Revenue\b/g, "Aylık Gelir"],
+  [/\bYearly Revenue\b/g, "Yıllık Gelir"],
+  [/\bRider CAC\b/g, "Sürücü CAC"],
+  [/\bRider LTV\b/g, "Sürücü LTV"],
+  // market-research-coverage.ts's applyMarketResearchCoverageToContext
+  // re-scores the decision engine once domain research resolves, and
+  // refreshInvestmentNarrativeFromResearchCoverage (investment-score.ts)
+  // then rebuilds category.explanation/strengths/weaknesses/topRisks
+  // from THESE reasoning strings instead of makeCategory's static
+  // English templates above -- this is the live production path for
+  // most reports, and the direct source of "Execution readiness" and
+  // "Derived from" leaking into Turkish reports.
+  [/\bMarket evidence coverage: /gi, "Pazar kanıt kapsamı: "],
+  [/\bIndependent domains: /gi, "Bağımsız kaynak sayısı: "],
+  [/\bClaim coverage: /gi, "İddia kapsamı: "],
+  [/\bCompetitive evidence: /gi, "Rekabet kanıtı: "],
+  [/\bDistinct competitor organizations represented: /gi, "Temsil edilen farklı rakip sayısı: "],
+  [/\bFinancial evidence: /gi, "Finansal kanıt: "],
+  [/\bVerified market-size endpoint detected: yes\b/gi, "Doğrulanmış pazar büyüklüğü verisi: mevcut"],
+  [/\bVerified market-size endpoint detected: no; planning estimates must remain separate\b/gi,
+    "Doğrulanmış pazar büyüklüğü verisi: mevcut değil; planlama tahminleri ayrı tutulmalıdır"],
+  [/\bExecution readiness: /gi, "Yürütme hazırlığı: "],
+  [/\bDerived from validation, capital, team, and execution inputs[—-]not missing market-size data\.?/gi,
+    "Doğrulama, sermaye, ekip ve yürütme girdilerinden türetilmiştir; eksik pazar büyüklüğü verisinden değil."],
+  [/\bMarket attractiveness: /gi, "Pazar çekiciliği: "],
+  [/\bBusiness model quality: /gi, "İş modeli kalitesi: "],
+  [/\bValidation confidence: /gi, "Doğrulama güveni: "],
+  [/\bExecution complexity: /gi, "Yürütme karmaşıklığı: "],
+  [/\bEvidence confidence: /gi, "Kanıt güveni: "],
+  [/\bFounder evidence: /gi, "Kurucu kanıtı: "],
+  [/\bMarket confidence reflects aggregate source, competitor, product, and financial coverage\.?/gi,
+    "Pazar güveni; toplam kaynak, rakip, ürün ve finansal kapsamı yansıtır."],
+  [/\bMarket and competitive findings are decision-useful; verified market sizing remains unavailable and financial confidence is lower\.?/gi,
+    "Pazar ve rekabet bulguları karar için kullanılabilir; doğrulanmış pazar büyüklüğü henüz mevcut değil ve finansal güven daha düşüktür."],
+];
+
+function translateEnglishFinancialFragment(text: string): string {
+  return englishFinancialFragmentTranslations.reduce((value, [pattern, replacement]) => {
+    return typeof replacement === "string"
+      ? value.replace(pattern, replacement)
+      : value.replace(pattern, replacement as (...args: string[]) => string);
+  }, text);
+}
+
 function enforcePlanReportLanguage(
   content: string,
   language: ResponseLanguage,
@@ -1570,7 +1850,17 @@ function enforcePlanReportLanguage(
   }
 
   if (language === "Turkish") {
-    return localizeDeterministicReportText(normalizeTurkishReportSourcePhrases(normalized), language)
+    // translateEnglishFinancialFragment must run before
+    // localizeDeterministicReportText: the latter (pdf-normalization.mjs)
+    // does generic word-by-word swaps (and -> ve, payback -> geri ödeme,
+    // etc.) that, applied first, break the full-sentence English phrases
+    // this needs to match verbatim, leaving mixed-language fragments like
+    // "...team, ve execution inputs—not missing market-size data" instead
+    // of a clean Turkish sentence.
+    return localizeDeterministicReportText(
+      normalizeTurkishReportSourcePhrases(translateEnglishFinancialFragment(normalized)),
+      language
+    )
       .replace(/\bAI Executive Insight\b/g, "AI Yönetici İçgörüsü")
       .replace(/\bMarket Opportunity Score\b/g, "Pazar Fırsatı Skoru")
       .replace(/\bAI Confidence Breakdown\b/g, "AI Güven Dağılımı")
@@ -1587,10 +1877,66 @@ function enforcePlanReportLanguage(
       .replace(/\bTrigger\s*:/g, "Tetikleyici:")
       .replace(/\bAction\s*:/g, "Aksiyon:")
       .replace(/\bStatus\s*:/g, "Durum:")
-      .replace(/\bAI Analysis\b/g, "AI Analizi")
-      .replace(/\bEstimated\b/g, "Tahmini")
-      .replace(/\bAssumption\b/g, "Varsayım")
-      .replace(/\bVerified\b/g, "Doğrulanmış")
+      // Not from any prompt instruction -- gpt-5-mini spontaneously
+      // organizes pricingStrategy/goToMarketPlan/salesStrategy around
+      // these English startup-jargon labels even while writing the
+      // surrounding sentence in Turkish (confirmed live across 10
+      // distinct Business Plan reports). Best-effort coverage of the
+      // labels actually observed; genuinely open-ended model wording
+      // can't be fully enumerated without changing the prompt.
+      .replace(/\bBeachhead\s*:/gi, "Başlangıç Pazarı:")
+      .replace(/\bValue metric\s*:/gi, "Değer metriği:")
+      .replace(/\bPackaging\s*:/gi, "Paketleme:")
+      .replace(/\bEntry price(?: logic)?\s*:/gi, "Giriş fiyatı:")
+      .replace(/\bPilot economics\s*:/gi, "Pilot ekonomisi:")
+      .replace(/\bValidation test\s*:/gi, "Doğrulama testi:")
+      .replace(/\bLaunch sequence\s*:/gi, "Lansman sırası:")
+      .replace(/\bLaunch sırası\s*:/gi, "Lansman sırası:")
+      .replace(/\bProof assets\s*:/gi, "Kanıt varlıkları:")
+      .replace(/\bChannel\s*:/gi, "Kanal:")
+      .replace(/\bMessage\s*:/gi, "Mesaj:")
+      .replace(/\bAccount targets?\s*:/gi, "Hedef müşteri hesapları:")
+      .replace(/\bOutreach angle\s*:/gi, "Erişim yaklaşımı:")
+      .replace(/\bOutreach\s*:/gi, "Erişim:")
+      .replace(/\bLaunch\s*:/gi, "Lansman:")
+      .replace(/\bObjections?\s*:/gi, "İtirazlar:")
+      .replace(/\bRepeatable signal\s*:/gi, "Tekrarlanabilir sinyal:")
+      .replace(/\bClosing\s*:/gi, "Kapanış:")
+      // "AI Analizi"/"Tahmini"/"Varsayım" read as raw internal
+      // classification tags when the model emits its required
+      // Verified/Estimated/Assumption/AI Analysis claim labels (see the
+      // field prompt's evidence-labeling instruction, which this
+      // function cannot change) -- these compound, natural phrases
+      // carry the same evidence-provenance meaning without reading as
+      // an internal tag. Catches both the English source tag AND the
+      // model's own direct Turkish translation of it (since the model
+      // is separately instructed to write in Turkish, it sometimes
+      // Turkifies the tag itself before this ever runs), plus
+      // pdf-normalization.mjs's own "AI Analysis" -> "Analitik
+      // Değerlendirme" conversion inside localizeDeterministicReportText
+      // above, which would otherwise pre-empt this replacement.
+      .replace(/\bAI Analysis\b/gi, "Model çıkarımı")
+      // JS's \b is ASCII-only and treats ı/ş/ğ/ü/ö/ç as non-word
+      // characters, so a plain \bTahmini\b would also match inside a
+      // longer, correctly-inflected word like "tahminine" or "varsayımı"
+      // (the suffix starts right where \b sees a false boundary) and
+      // corrupt it. The negative lookahead requires the match not be
+      // immediately followed by another letter, so only the bare tag
+      // (not a real word carrying a Turkish suffix) is replaced.
+      .replace(/\bAI Analizi\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "Model çıkarımı")
+      .replace(/\bAnalitik Değerlendirme\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "Model çıkarımı")
+      .replace(/\bEstimated\b/gi, "Yaklaşık")
+      // Bare "Tahmini" is only ever the internal tag in a tag-like
+      // position (right after a delimiter/line start) -- financial-
+      // evidence-labeling.ts's legitimate "Model tahmini" ("the
+      // model's estimate") is the exact same surface word preceded by
+      // a normal word instead, which \b alone can't distinguish, so
+      // this only fires immediately after :, |, (, a dash, or a line
+      // start.
+      .replace(/(^|[:|(\-–—]\s*)Tahmini\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gim, "$1Yaklaşık")
+      .replace(/\bAssumption\b/gi, "Planlama varsayımı")
+      .replace(/\bVarsayım\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "Planlama varsayımı")
+      .replace(/\bVerified\b/gi, "Doğrulanmış")
       .replace(/\bValidation Required\b/g, "Doğrulama gerekli")
       .replace(/\bModel target\b/g, "Model hedefi")
       .replace(/\bWatch\b/g, "İzleme")
@@ -1621,10 +1967,14 @@ function enforcePlanReportLanguage(
     .replace(/\bTetikleyici\s*:/g, "Trigger:")
     .replace(/\bAksiyon\s*:/g, "Action:")
     .replace(/\bDurum\s*:/g, "Status:")
-    .replace(/\bAI Analizi\b/g, "AI Analysis")
-    .replace(/\bTahmini\b/g, "Estimated")
-    .replace(/\bVarsayım\b/g, "Assumption")
-    .replace(/\bDoğrulanmış\b/g, "Verified")
+    .replace(/\bModel çıkarımı\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "AI Analysis")
+    // "Yaklaşık" ("approximately") is ordinary, extremely common Turkish
+    // vocabulary far beyond this tag's use -- unlike the other three
+    // phrases here, it can't be safely reverse-mapped by a blind regex
+    // without corrupting unrelated sentences, so it's intentionally not
+    // included in this defensive (English-report) cleanup direction.
+    .replace(/\bPlanlama varsayımı\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "Assumption")
+    .replace(/\bDoğrulanmış\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "Verified")
     .replace(/\bDoğrulama gerekli\b/gi, "Validation Required")
     .replace(/\bModel hedefi\b/gi, "Model target")
     .replace(/\bİzleme\b/g, "Watch")
@@ -1870,7 +2220,39 @@ const turkishMetricLabels: Record<string, string> = {
   Runway: "Finansal Pist",
   "Break-even Month": "Başabaş Ayı",
   "Investment Needed": "Gerekli Yatırım",
+  "CAC Payback": "CAC Geri Ödeme Süresi",
+  "Monthly Burn": "Aylık Nakit Yakımı",
+  "Revenue Growth": "Gelir Büyümesi",
+  "Rider CAC": "Sürücü CAC",
+  "Rider LTV": "Sürücü LTV",
+  "Monthly Revenue per Active Rider": "Aktif Sürücü Başına Aylık Gelir",
+  "Monthly Revenue": "Aylık Gelir",
+  "Yearly Revenue": "Yıllık Gelir",
 };
+
+// The 7 lines every metric's assumptions array always starts with
+// (financial-model.ts's sharedAssumptions) -- identical across every
+// one of the ~16 metrics in Unit Economics/Financial Dashboard, so
+// repeating them in full on every single metric line produced the
+// same handful of sentences dozens of times in one section. Each
+// metric line now shows only what's actually specific to that metric;
+// the full shared list still appears exactly once, consolidated, in
+// the Financial Assumptions section via consolidateFinancialAssumptions.
+const sharedAssumptionPrefixes = [
+  /^Industry benchmark:/i,
+  /^Business model:/i,
+  /^Target customer:/i,
+  /^Geography:/i,
+  /^Pricing model:/i,
+  /^Validation evidence:/i,
+  /^Customer ramp multiplier:/i,
+];
+
+function metricSpecificAssumptions(assumptions: readonly string[]) {
+  return assumptions.filter(
+    (assumption) => !sharedAssumptionPrefixes.some((prefix) => prefix.test(assumption.trim()))
+  );
+}
 
 function localizeMetricLabel(label: string, language: ResponseLanguage) {
   return language === "Turkish" ? turkishMetricLabels[label] || label : label;
@@ -1917,13 +2299,15 @@ function metricLine(
     language
   );
 
+  const specificAssumptions = metricSpecificAssumptions(metric.assumptions);
+
   return [
     `${localizeMetricLabel(metric.label, language)}: ${metric.displayValue}`,
     `${labels.evidence}=${evidenceType}`,
     `${labels.formula}=${metric.formula}`,
-    `${labels.assumptions}=${metric.assumptions.join("; ")}`,
+    ...(specificAssumptions.length ? [`${labels.assumptions}=${specificAssumptions.join("; ")}`] : []),
     `${labels.benchmark}=${metric.benchmarkComparison}`,
-    `${labels.confidence}=${metric.confidence}`,
+    `${labels.confidence}=${riskLevelText(metric.confidence, language)}`,
   ].join(" | ");
 }
 
@@ -1940,7 +2324,7 @@ function marketSizeLine(
   const evidenceLabel = language === "Turkish" ? "kanıt" : "evidence";
   const confidenceLabel = language === "Turkish" ? "güven" : "confidence";
 
-  return `${label}: ${metric.displayValue} | ${evidenceLabel}=${evidenceType} | ${confidenceLabel}=${metric.confidence}`;
+  return `${label}: ${metric.displayValue} | ${evidenceLabel}=${evidenceType} | ${confidenceLabel}=${riskLevelText(metric.confidence, language)}`;
 }
 
 function formatPlanUsd(value: number) {
@@ -2303,6 +2687,47 @@ function scorePercent(score: number, maximumScore: number) {
 // which otherwise makes the shared cross-section dedup pass collapse
 // one of them into a nonsensical self-reference ("See Executive
 // Summary for the established premise" pointing at itself).
+// The marketOpportunity field prompt (plan.ts) asks the model to include
+// its own free-form "Opportunity Score 0-100" narrative estimate.
+// buildOpportunityScore() below then appends the single authoritative
+// score, deterministically derived from the same decision engine that
+// drives the report's GO/WAIT/PASS recommendation everywhere else --
+// but appendIntelligenceBlock's old dedup guard only skipped appending
+// if the exact heading "Market Opportunity Score"/"Pazar Fırsatı Skoru"
+// was already present, which the model's own narrative estimate rarely
+// matches verbatim (e.g. "Fırsat Skoru: 58/100" or "an opportunity
+// score of roughly 58"). That let both numbers survive in the same
+// section. This removes any sentence/line containing the model's own
+// opportunity-score mention (in either language) before the canonical
+// one is appended, without touching the rest of its narrative text.
+function stripAiGeneratedOpportunityScoreMention(content: string) {
+  const opportunityScorePattern = /\b(?:overall\s+)?opportunity score\b|\b(?:genel\s+)?f[ıi]rsat skoru\b/i;
+
+  return content
+    .split(/\n/)
+    .map((line) => {
+      if (!opportunityScorePattern.test(line)) {
+        return line;
+      }
+
+      // A bullet/heading line dedicated to the score is dropped
+      // entirely; a score mention inside a larger paragraph only
+      // has its own sentence removed, keeping the rest of the
+      // model's narrative intact.
+      const isDedicatedLine = /^\s*(?:[-*•]\s*)?(?:overall\s+)?(?:opportunity score|f[ıi]rsat skoru)\b/i.test(line);
+      if (isDedicatedLine) {
+        return "";
+      }
+
+      return line
+        .split(/(?<=[.!?])\s+/)
+        .filter((sentence) => !opportunityScorePattern.test(sentence))
+        .join(" ");
+    })
+    .filter((line) => line.trim().length > 0)
+    .join("\n");
+}
+
 function appendIntelligenceBlock(content: string, title: string, lines: string[]) {
   const cleanLines = lines.map((line) => line.trim()).filter(Boolean);
 
@@ -2870,7 +3295,9 @@ function normalizeFullPlanReport(
       : buildCanonicalSwot(context, parsed, language);
   normalized.financialAssumptions = buildCanonicalFinancialAssumptions(context, language);
   normalized.kpis = removePlaceholderKpiValues(normalized.kpis);
-  normalized.marketOpportunity = removeTamSamSomOwnershipText(normalized.marketOpportunity);
+  normalized.marketOpportunity = stripAiGeneratedOpportunityScoreMention(
+    removeTamSamSomOwnershipText(normalized.marketOpportunity)
+  );
   normalized.marketOpportunity = appendIntelligenceBlock(
     normalized.marketOpportunity,
     reportLabel(language, "Market Opportunity Score", "Pazar Fırsatı Skoru"),
@@ -6350,8 +6777,8 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             const providerTimeoutMs = Math.max(
               1_000,
               Math.min(
-                FULL_REPORT_OPENAI_TIMEOUT_MS,
-                REAL_ESTATE_PIPELINE_BUDGET_MS -
+                BUSINESS_PLAN_REPORT_OPENAI_TIMEOUT_MS,
+                BUSINESS_PLAN_PIPELINE_BUDGET_MS -
                   (Date.now() - pipelineStartedAt)
               )
             );
@@ -6552,8 +6979,20 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
                 : "GenerationFailed");
             const providerTimedOut =
               /timed out|timeout|aborted|abort/i.test(errorMessage);
+            // A quality-gate rejection means the model DID respond in time
+            // with real content -- it just didn't clear a content-quality
+            // bar (e.g. too much filler/duplicate text). That is not a
+            // transient/retryable failure (see worker.ts's
+            // isTransientFailure), so without this the job hard-fails with
+            // no report at all, which is strictly worse for the user than
+            // the evidence-grounded fallback already used for timeouts. The
+            // quality gate itself, and its threshold, are untouched -- a
+            // report that fails it still never reaches the user as its own
+            // (rejected) text.
+            const shouldUseGroundedFallback =
+              providerTimedOut || error instanceof ExecutiveQualityGateError;
 
-            if (providerTimedOut) {
+            if (shouldUseGroundedFallback) {
               const fallbackReport = createGroundedBusinessTimeoutFallback({
                 context: researchAwareFinancialContext,
                 research: businessResearch,
@@ -6589,11 +7028,12 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
                 totalMs: Date.now() - pipelineStartedAt,
               });
               logOperationalInfo(
-                "[api:plan] report provider deadline used grounded fallback",
+                "[api:plan] report provider deadline or quality gate used grounded fallback",
                 {
                   reportRequestId: reportRequestId || null,
                   evidenceCount: businessResearch.evidence.length,
                   elapsedMs: Date.now() - pipelineStartedAt,
+                  reason: providerTimedOut ? "timeout" : "quality_gate",
                 }
               );
               return;
