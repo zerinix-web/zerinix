@@ -102,6 +102,7 @@ import {
   isAiTestMode,
   logAiExecution,
 } from "@/app/lib/ai/runtime";
+import { resolveAiModelForRequestKind } from "@/app/lib/ai/model-router";
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 import {
   applyUserMemoryOperations,
@@ -1097,6 +1098,176 @@ function createReportBusinessDescription(value: string) {
   return cleanValue.slice(0, 160);
 }
 
+// Decision Engine intent gate: distinguishes "the user already described one
+// concrete business" (the common case -- pass the prompt through unchanged,
+// as this pipeline has always done) from "the user has not given me a
+// business to analyze" (either they are explicitly asking the system to
+// invent one, or the request is too thin to be a specific business at all).
+// Confirmed live: "I have 1 million USD to invest. Instead of giving me one
+// recommendation, propose three completely different business ideas from
+// completely different industries. Then generate a full business idea
+// validation report for each idea and finally compare them." was fed
+// straight into inferFinancialModelingInputs/createReportBusinessDescription
+// as if it WERE a business description -- no industry/product keyword in it
+// matches anything, so the financial model fell back to its generic
+// "services" bucket (later relabeled "Unspecified business model"), the
+// mechanical description extractor collapsed to a placeholder (it contains
+// the word "report"), and the model itself was asked to write a report
+// about a placeholder, correctly returning nothing for most narrative
+// fields -- which is what actually produced the wall of "not provided"
+// fallback text, not a report-writing failure.
+const businessIdeaGenerationRequestPattern =
+  /\b(propose|suggest|generate|come up with|recommend|give me)\b[\s\S]{0,80}\b(business |startup |venture |company )?ideas?\b/i;
+// A narrower, separate pattern for the same intent phrased without the word
+// "idea" at all -- "Suggest a good business to start in the fitness
+// industry." Deliberately requires the indefinite article plus a
+// start/launch/build verb so it does not also match "Recommend improvements
+// to my existing business", where "business" refers to something the user
+// already has, not something being proposed.
+const newVentureProposalPattern =
+  /\b(?:suggest|propose|recommend|give me)\b\s+(?:a |an |some )?(?:good |great |strong |profitable |new |viable )*(?:business|startup|venture|company)\b\s+(?:to (?:start|launch|build|create|run)|(?:i|we) (?:could|should|can) start)/i;
+const multipleDistinctIdeasPattern =
+  /\b(three|3|multiple|several|a few|different)\b[\s\S]{0,60}\b(different )?(business |startup |venture |industr(?:y|ies) )?ideas?\b/i;
+// Stripped before the word-count check below, not treated as evidence of
+// vagueness on its own -- "Should I invest 2 million dollars into a
+// 3D-printed metal aerospace parts manufacturing startup based in Ohio?" is
+// a fully concrete idea that merely happens to open with a question phrase;
+// createReportBusinessDescription's own older check flagged that exact
+// prompt as needing a placeholder purely because it contains "should i
+// invest", discarding a real, specific business description.
+const businessQuestionPreamblePattern =
+  /\b(would you invest|should i invest|should i start|is it worth|is it sensible to|does it make sense to|what do you think about|what do you think of)\b/gi;
+
+function promptRequestsBusinessIdeaGeneration(prompt: string): boolean {
+  return (
+    businessIdeaGenerationRequestPattern.test(prompt) ||
+    newVentureProposalPattern.test(prompt) ||
+    multipleDistinctIdeasPattern.test(prompt)
+  );
+}
+
+function promptLacksConcreteBusinessIdea(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (!trimmed) return true;
+  if (promptRequestsBusinessIdeaGeneration(trimmed)) return true;
+
+  const withoutPreamble = trimmed
+    .replace(businessQuestionPreamblePattern, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const substantiveWordCount = withoutPreamble.split(/\s+/).filter(Boolean).length;
+
+  return substantiveWordCount < 8;
+}
+
+type ResolvedPlanBusinessIdea = {
+  resolvedPrompt: string;
+  wasGenerated: boolean;
+};
+
+// Runs only when promptLacksConcreteBusinessIdea is true -- the common case
+// (a prompt that already names a specific business) never pays for this
+// call and is returned unchanged. When it does run, this is the "generate a
+// real Business Idea first" step the rest of the pipeline was missing:
+// createCanonicalFinancialAssumptions, createReportBusinessDescription, and
+// the main report-generation prompt all read whatever this returns as if
+// it were the user's own submitted business description, so a concrete,
+// specific idea here is what makes the financial model, competitor
+// landscape, ICP, SWOT, and roadmap downstream actually be about something.
+// Never throws: any failure (provider error, malformed output, empty
+// fields) falls back to the original prompt, which is exactly today's
+// existing behavior -- this can only make the thin/ideation case better,
+// never make an already-working request worse.
+async function resolveConcreteBusinessIdeaForPlan({
+  prompt,
+  language,
+  signal,
+}: {
+  prompt: string;
+  language: ResponseLanguage;
+  signal?: AbortSignal;
+}): Promise<ResolvedPlanBusinessIdea> {
+  if (!promptLacksConcreteBusinessIdea(prompt)) {
+    return { resolvedPrompt: prompt, wasGenerated: false };
+  }
+
+  try {
+    const client = createOpenAiClient();
+    const model = resolveAiModelForRequestKind("business_advice");
+    const response = await withOpenAiCostOperation(
+      { operationName: "plan_business_idea_resolution" },
+      () =>
+        client.responses.create(
+          {
+            model,
+            instructions: `The user has not described one concrete business to analyze -- either they are explicitly asking you to propose a business idea (or several), or their request is too vague to analyze as a specific business. Invent exactly ONE strong, specific, realistic business idea that fits any constraints the user did state (capital available, industry preferences, geography, target customer, etc.). It must name a real product or service, a real target customer, and a real industry -- never a placeholder, never a generic category description. If the user asked for multiple ideas across different industries, pick the single strongest one from among the directions their constraints best support, and say so in the rationale. This idea feeds a Business Idea Validation report, not a real-estate/property investment report -- do not propose a business whose core concept is acquiring, developing, leasing, or operating out of a specific physical property or structure (e.g. rooftop farms, warehouse conversions, real-estate-centric ventures); pick an operating company (software, services, product, retail, manufacturing, etc.) instead. Respond in ${language}.`,
+            input: `User's request: ${prompt}`,
+            max_output_tokens: 700,
+            reasoning: { effort: "low" },
+            text: {
+              verbosity: "low",
+              format: {
+                type: "json_schema" as const,
+                name: "zerinix_resolved_plan_business_idea",
+                strict: true,
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    ideaName: { type: "string" },
+                    ideaDescription: { type: "string" },
+                    industry: { type: "string" },
+                    targetCustomer: { type: "string" },
+                    rationale: { type: "string" },
+                  },
+                  required: ["ideaName", "ideaDescription", "industry", "targetCustomer", "rationale"],
+                },
+              },
+            },
+          },
+          signal ? { signal } : undefined
+        )
+    );
+
+    if (response.status !== "completed" || !response.output_text?.trim()) {
+      return { resolvedPrompt: prompt, wasGenerated: false };
+    }
+
+    const parsed = JSON.parse(response.output_text) as {
+      ideaName?: unknown;
+      ideaDescription?: unknown;
+      industry?: unknown;
+      targetCustomer?: unknown;
+      rationale?: unknown;
+    };
+    const ideaName = String(parsed.ideaName || "").trim();
+    const ideaDescription = String(parsed.ideaDescription || "").trim();
+    const industry = String(parsed.industry || "").trim();
+    const targetCustomer = String(parsed.targetCustomer || "").trim();
+    const rationale = String(parsed.rationale || "").trim();
+
+    if (!ideaName || !ideaDescription) {
+      return { resolvedPrompt: prompt, wasGenerated: false };
+    }
+
+    const resolvedPrompt = [
+      `${ideaName}: ${ideaDescription}`,
+      industry ? `Industry: ${industry}.` : "",
+      targetCustomer ? `Target customer: ${targetCustomer}.` : "",
+      rationale,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    return { resolvedPrompt, wasGenerated: true };
+  } catch (error) {
+    logOperationalInfo("[api:plan] business idea resolution failed, continuing with the original prompt", {
+      reason: error instanceof Error ? error.message : "Unknown error",
+    });
+    return { resolvedPrompt: prompt, wasGenerated: false };
+  }
+}
+
 export function sanitizeVisibleReportContent(content: string, promptText = "") {
   const internalLinePatterns = [
     /\bbased on the entire report\b/i,
@@ -1546,29 +1717,50 @@ function createPlanFieldFallback(
     context?.normalizedBusinessIdea ||
     (typeof parsed.businessIdea === "string" && parsed.businessIdea.trim()) ||
     "the analyzed business model";
+  // A short, single-clause label for fields whose fallback text is a
+  // generic how-to-think-about-this instruction rather than a business
+  // description in its own right (unlike problem/executiveSummary, which
+  // already build a full sentence around businessContext). Without this,
+  // every one of these fields fell back to byte-identical text regardless
+  // of the business being analyzed -- confirmed live across seven
+  // unrelated ideas -- because none of them referenced the business at
+  // all. Cut at the first name/description separator (an em dash or colon,
+  // the shape resolveConcreteBusinessIdeaForPlan's "Name: description"
+  // format produces) or a sentence boundary, whichever is shorter, then
+  // trimmed back to the last full word within a short cap -- confirmed
+  // live that a flat character-count slice alone produced a label
+  // truncated mid-word ("...delivering on-demand and scheduled tel") when
+  // repeated as a prefix across nine different sections.
+  const shortBusinessLabelSource = businessContext
+    .split(/\s+[—–-]\s+|:\s|[.\n]/)[0]
+    .trim();
+  const shortBusinessLabel =
+    shortBusinessLabelSource.length <= 60
+      ? shortBusinessLabelSource
+      : `${shortBusinessLabelSource.slice(0, 60).replace(/\s+\S*$/, "")}…`;
 
   const fallbackByField: Record<PlanReportField, string> = {
     executiveSummary: `Decision summary: ${businessContext} requires focused validation before scaling capital. The report should be read as a directional founder diligence memo until primary customer, pricing, and cost evidence is verified.`,
     problem: `Customer pain: ${businessContext} should focus on the most expensive workflow, budget pressure, or adoption friction faced by the target buyer. Validate urgency through direct customer interviews before committing growth spend.`,
-    solution: `Product thesis: The solution must address the core buyer pain with a narrow initial scope, measurable outcome, and a defensible wedge. Validate that users prefer this workflow over current alternatives.`,
-    targetCustomer: `Target customer: Prioritize the beachhead ICP with the clearest pain, budget ownership, short adoption path, and measurable willingness to pay. Exclude segments with weak urgency or long procurement cycles.`,
-    marketOpportunity: `Market opportunity: The opportunity depends on reachable demand, competitive gaps, timing, and expansion potential. Validate market pull before assuming broad category growth converts into obtainable revenue.`,
-    competitorLandscape: `Competitor landscape: Compare direct competitors, substitutes, incumbents, and do-nothing alternatives. The investable gap must be a specific buyer outcome or distribution wedge, not a generic feature difference.`,
-    businessModel: `Business model: Revenue should map directly to the buyer value metric, expected usage, retention loop, and delivery cost. Validate that pricing, gross margin, and payback can compound at the chosen scale.`,
+    solution: `Product thesis for ${shortBusinessLabel}: the solution must address the core buyer pain with a narrow initial scope, measurable outcome, and a defensible wedge. Validate that users prefer this workflow over current alternatives.`,
+    targetCustomer: `Target customer for ${shortBusinessLabel}: prioritize the beachhead ICP with the clearest pain, budget ownership, short adoption path, and measurable willingness to pay. Exclude segments with weak urgency or long procurement cycles.`,
+    marketOpportunity: `Market opportunity for ${shortBusinessLabel}: the opportunity depends on reachable demand, competitive gaps, timing, and expansion potential. Validate market pull before assuming broad category growth converts into obtainable revenue.`,
+    competitorLandscape: `Competitor landscape for ${shortBusinessLabel}: compare direct competitors, substitutes, incumbents, and do-nothing alternatives. The investable gap must be a specific buyer outcome or distribution wedge, not a generic feature difference.`,
+    businessModel: `Business model for ${shortBusinessLabel}: revenue should map directly to the buyer value metric, expected usage, retention loop, and delivery cost. Validate that pricing, gross margin, and payback can compound at the chosen scale.`,
     tamSamSom: `TAM / SAM / SOM: Market sizing requires verified category boundaries, reachable customer segments, and a defensible near-term obtainable share. Treat any missing sizing input as a validation requirement before investment.`,
     swotAnalysis: `Strengths:\n- Focused business context and founder-controlled validation path.\nWeaknesses:\n- Evidence quality is incomplete until customer and pricing proof is collected.\nOpportunities:\n- Narrow beachhead execution can reveal a repeatable wedge.\nThreats:\n- Competitive response, CAC inflation, or weak retention can reduce investability.`,
-    portersFiveForces: `Porter's Five Forces: Assess rivalry, new entrants, buyer power, supplier power, and substitutes through the lens of founder execution. The key implication is whether the company can build a protected wedge before CAC or switching friction rises.`,
-    pricingStrategy: `Pricing strategy: Anchor pricing to measurable buyer value, willingness to pay, and delivery cost. Test entry packaging, expansion triggers, and discount discipline before locking the model.`,
-    goToMarketPlan: `Go-to-market plan: Start with the beachhead segment, one primary channel, a clear proof asset, and a measurable first-customer target. Scale only after CAC, conversion, and retention signals are repeatable.`,
-    salesStrategy: `Sales strategy: Use founder-led discovery to identify budget owner, trigger event, buying objections, pilot scope, and close criteria. A repeatable sales signal requires consistent conversion from qualified conversations to paid commitments.`,
+    portersFiveForces: `Porter's Five Forces for ${shortBusinessLabel}: assess rivalry, new entrants, buyer power, supplier power, and substitutes through the lens of founder execution. The key implication is whether the company can build a protected wedge before CAC or switching friction rises.`,
+    pricingStrategy: `Pricing strategy for ${shortBusinessLabel}: anchor pricing to measurable buyer value, willingness to pay, and delivery cost. Test entry packaging, expansion triggers, and discount discipline before locking the model.`,
+    goToMarketPlan: `Go-to-market plan for ${shortBusinessLabel}: start with the beachhead segment, one primary channel, a clear proof asset, and a measurable first-customer target. Scale only after CAC, conversion, and retention signals are repeatable.`,
+    salesStrategy: `Sales strategy for ${shortBusinessLabel}: use founder-led discovery to identify budget owner, trigger event, buying objections, pilot scope, and close criteria. A repeatable sales signal requires consistent conversion from qualified conversations to paid commitments.`,
     unitEconomics: `Unit economics: Validate ARPA or ACV, gross margin, CAC, LTV, payback, and retention before scaling. The most important assumption is whether acquisition cost and payback remain viable as the channel expands.`,
     financialDashboard: `Financial dashboard: Track revenue, gross margin, CAC, LTV, payback, burn, runway, EBITDA, break-even timing, and investment needed from one consistent assumption set. Treat missing values as validation gaps.`,
     scenarioAnalysis: `Worst Case: Demand or CAC underperforms, extending payback and reducing runway.\nBase Case: The model follows current assumptions with controlled validation spend.\nBest Case: Conversion and retention improve, allowing faster capital deployment after proof points are met.`,
     kpiDashboard: `KPI dashboard: Monitor acquisition, activation, retention, pipeline quality, revenue signal, product reliability, and learning velocity. Each KPI should have a target threshold and a warning threshold.`,
-    risks: `Risks: Track demand uncertainty, CAC escalation, retention weakness, competitive response, regulatory friction, capital intensity, and execution delays. Each risk needs a leading indicator and mitigation plan.`,
+    risks: `Risks for ${shortBusinessLabel}: track demand uncertainty, CAC escalation, retention weakness, competitive response, regulatory friction, capital intensity, and execution delays. Each risk needs a leading indicator and mitigation plan.`,
     kpis: `KPI governance: Assign owners, review cadence, decision thresholds, and action triggers for the operating metrics. Missed thresholds should change spend, roadmap, or segment focus.`,
-    founderRoadmap: `Founder roadmap: Tomorrow, define the riskiest assumption. This week, run direct customer validation. In 30 days, prove willingness to pay. In 90 days, validate repeatable acquisition. In 180 days, decide whether to scale or redesign.`,
-    roadmap306090: `30 Days: Validate pain, ICP, and pricing signal.\n90 Days: Secure repeatable early acquisition and delivery proof.\n180 Days: Confirm retention, payback, and operating cadence.\n12 Months: Scale only if decision thresholds are met.`,
+    founderRoadmap: `Founder roadmap for ${shortBusinessLabel}: tomorrow, define the riskiest assumption. This week, run direct customer validation. In 30 days, prove willingness to pay. In 90 days, validate repeatable acquisition. In 180 days, decide whether to scale or redesign.`,
+    roadmap306090: `30 Days (${shortBusinessLabel}): Validate pain, ICP, and pricing signal.\n90 Days: Secure repeatable early acquisition and delivery proof.\n180 Days: Confirm retention, payback, and operating cadence.\n12 Months: Scale only if decision thresholds are met.`,
     financialAssumptions: `Key assumptions: Revenue, gross margin, CAC, LTV, payback, burn, runway, EBITDA, break-even timing, and investment needed must come from one assumption set. Missing values require validation with primary data.`,
     founderScore: `Founder Readiness Score: Use the decision engine to evaluate market opportunity, financial health, execution difficulty, competitive pressure, capital efficiency, technology leverage, and founder readiness. Missing evidence lowers confidence.`,
     sourcesAssumptions: `Sources and Assumptions: Verified external citations were not returned in a complete structured form. No source URLs or publisher metadata have been fabricated. Planning inputs require validation before investment decisions.`,
@@ -5645,8 +5837,28 @@ async function executePlanRequestInner(
     const analysisPrompt = assetContext
       ? `${promptText}\n\nUploaded asset evidence:\n${assetContext}`
       : promptText;
-    const canonicalFinancialAssumptions = createCanonicalFinancialAssumptions({
+    // Decision Engine intent gate: if analysisPrompt does not itself
+    // describe one concrete business (the user asked the system to invent
+    // one, or gave too little to analyze), resolve a real, specific idea
+    // via a dedicated small AI call before anything else runs. Every
+    // downstream consumer of analysisPrompt -- the financial model's
+    // keyword-driven industry/business-model inference, the mechanical
+    // business-description extractor, and the main report-generation
+    // prompt below -- reads whatever this resolves to as if it were the
+    // user's own submitted business, so resolving it here (once, before
+    // the financial model is built) is what lets Business Model, Financial
+    // Assumptions, Competitor Landscape, ICP, SWOT, and the roadmap all end
+    // up grounded in the same real idea instead of independently falling
+    // back to "unspecified"/empty. No-ops (zero added latency or cost) for
+    // the ordinary case where the prompt already names a specific business.
+    const resolvedBusinessIdea = await resolveConcreteBusinessIdeaForPlan({
       prompt: analysisPrompt,
+      language: responseLanguage,
+      signal: req.signal,
+    });
+    const resolvedAnalysisPrompt = resolvedBusinessIdea.resolvedPrompt;
+    const canonicalFinancialAssumptions = createCanonicalFinancialAssumptions({
+      prompt: resolvedAnalysisPrompt,
       reportKind: "business_plan",
     });
     const financialAssumptionsContext = formatCanonicalFinancialAssumptions(
@@ -5674,12 +5886,12 @@ async function executePlanRequestInner(
       ? `Persistent user memories for stable context. Use them only as durable user facts/preferences and never expose this block as report text:\n${userMemoryContext}`
       : "";
     const analyzedBusinessDescription =
-      createReportBusinessDescription(analysisPrompt);
+      createReportBusinessDescription(resolvedAnalysisPrompt);
     const input = `Latest user request language: ${responseLanguage}
 Output language hard requirement: ${responseLanguage}. Ignore saved profile language, persistent memory language, browser locale, and previous conversation language.
 
 Submitted business context for private analysis only: ${promptText}
-Analyzed business/company description to use in the report: ${analyzedBusinessDescription}
+Analyzed business/company description to use in the report: ${analyzedBusinessDescription}${resolvedBusinessIdea.wasGenerated ? "\nThe user did not submit one concrete business -- the description above was generated to satisfy their request and is the authoritative business to analyze in every section." : ""}
 ${expertiseContext}
 ${assetContext ? `\nUploaded asset evidence:\n${assetContext}\n` : ""}
 ${assetEvidenceInstructions ? `\nAsset evidence rules:\n${assetEvidenceInstructions}\n` : ""}
@@ -5757,7 +5969,15 @@ Write only the content for this section. Do not write a JSON object, field name,
 
     if (isFullReportRequest) {
       const researchIdentity: ResearchCacheIdentity = {
-        normalizedPrompt: productionLimit.normalizedPrompt,
+        // Research is executed against resolvedAnalysisPrompt (see below),
+        // not the raw prompt -- when an idea was generated, the cache
+        // identity must reflect that specific resolved idea too, otherwise
+        // two requests sharing the same vague/ideation prompt but resolving
+        // to two different AI-generated ideas could incorrectly reuse each
+        // other's cached research.
+        normalizedPrompt: resolvedBusinessIdea.wasGenerated
+          ? `${productionLimit.normalizedPrompt}::resolved-idea::${resolvedAnalysisPrompt}`
+          : productionLimit.normalizedPrompt,
         uploadedAssetHash: assetFingerprint,
         analysisMode: dynamicResearchPlanningInput.selectedMode,
         language: responseLanguage,
@@ -5920,7 +6140,13 @@ Write only the content for this section. Do not write a JSON object, field name,
           execute: () => runDomainAwareResearch({
             client: businessResearchClient,
             model,
-            prompt: promptText,
+            // Research queries must target the resolved, concrete idea, not
+            // the raw request -- otherwise the evidence-gathering phase
+            // searches the web for e.g. "propose three completely different
+            // business ideas" instead of for anything about the actual
+            // resolved business, and Competitor Landscape/ICP end up
+            // ungrounded even after the report-writing prompt is fixed.
+            prompt: resolvedAnalysisPrompt,
             assets: analysisAssets,
             language: responseLanguage,
             signal: req.signal,
@@ -6013,7 +6239,7 @@ Write only the content for this section. Do not write a JSON object, field name,
 Output language hard requirement: ${responseLanguage}. Ignore saved profile language, persistent memory language, browser locale, and previous conversation language.
 
 Submitted business context for private analysis only: ${promptText}
-Analyzed business/company description to use in the report: ${analyzedBusinessDescription}
+Analyzed business/company description to use in the report: ${analyzedBusinessDescription}${resolvedBusinessIdea.wasGenerated ? "\nThe user did not submit one concrete business -- the description above was generated to satisfy their request and is the authoritative business to analyze in every section." : ""}
 ${expertiseContext}
 ${assetContext ? `\nUploaded asset evidence:\n${assetContext}\n` : ""}
 ${assetEvidenceInstructions ? `\nAsset evidence rules:\n${assetEvidenceInstructions}\n` : ""}

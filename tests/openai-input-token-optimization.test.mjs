@@ -183,7 +183,14 @@ test("the repository OpenAI call inventory remains explicit and bounded", () => 
     return count + (source.match(/\.responses\.create\(/g) || []).length;
   }, 0);
 
-  assert.equal(callCount, 11);
+  // 12th call: plan-executor.ts's resolveConcreteBusinessIdeaForPlan --
+  // a small, schema-constrained pre-step that generates one concrete
+  // business idea when the user's own prompt doesn't describe one (either
+  // they explicitly asked the system to propose idea(s), or the request is
+  // too vague to analyze as a specific business). Everything downstream
+  // (financial model, competitor research, report writing) reads its
+  // output the same way it reads a user-submitted business description.
+  assert.equal(callCount, 12);
 });
 
 test("every instrumented OpenAI request logs safe estimated and actual input tokens", () => {
