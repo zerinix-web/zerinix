@@ -158,9 +158,13 @@ test("failure 3: parseCitations rejects the ORG - TITLE match when the captured 
     pdfButtonSource,
     /function looksLikeOrganizationName\(value: string\): boolean/
   );
+  // The body of this guard now also handles the embedded-newline
+  // continuation-line fix (a short orphaned fragment gets appended back
+  // to whichever field it continues) before returning, rather than
+  // returning immediately.
   assert.match(
     pdfButtonSource,
-    /if \(!citationMatch \|\| !looksLikeOrganizationName\(citationMatch\[1\]\)\) \{\s*\n\s*return;/
+    /if \(!citationMatch \|\| !looksLikeOrganizationName\(citationMatch\[1\]\)\) \{\s*\n/
   );
 });
 

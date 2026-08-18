@@ -249,18 +249,41 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
     pricingModel: firstMatching(
       [
         [/\b(kahve|coffee|espresso|roastery|specialty coffee|speciality coffee|premium kahve)\b/, "D2C unit sales, recurring subscriptions, and B2B wholesale accounts"],
+        // Confirmed live: "we take a percentage commission from each
+        // booking instead of charging a monthly fee" matched "monthly"
+        // below (checked next) before ever reaching this pattern, purely
+        // because "monthly"/"annual" are generic time-period words that
+        // can appear anywhere, including inside the exact clause
+        // explaining what the business does NOT charge. "take rate" and
+        // "commission" are the internal industry TERMS for a revenue-
+        // share model, but a founder describing it in plain language
+        // says "percentage of", "cut of", "share of", "revenue share",
+        // or "royalty" instead of ever using those terms literally.
+        // Checked first -- these are direct, specific descriptions of
+        // the pricing mechanism itself, not incidental words that can
+        // show up while describing a different or explicitly-rejected
+        // model.
+        [/\b(take rate|commission|marketplace|revenue share|revenue-share|royalty|royalties|percentage of (?:revenue|sales|royalties|funds)|take a (?:cut|percentage|share)|share of (?:funds|revenue|sales))\b/, "take-rate / commission"],
         [/\b(subscription|monthly|annual|saas|software|cybersecurity)\b/, "subscription"],
         [/\b(dtc|d2c|direct to consumer|direct-to-consumer|consumer brand|ecommerce|e-commerce|e-ticaret|online satış)\b/, "online unit sales plus repeat purchase frequency"],
         [/\b(usage|per use|consumption)\b/, "usage-based"],
         [/\b(scooter|scooters|micromobility|bike sharing|bikeshare|ride sharing|rental)\b/, "per-ride rental plus passes"],
-        [/\b(take rate|commission|marketplace)\b/, "take-rate / commission"],
         [/\b(franchise)\b/, "franchise fee plus royalties"],
         [/\b(coffee|cafe|hotel|yacht|hospital|clinic|gym|luxury|premium)\b/, "premium ticket / membership / service package"],
         [/\b(restaurant|food service|foodservice|fast casual|fine dining|qsr)\b/, "ticket size plus repeat purchase frequency"],
         [/\b(drone|drones|uav|autonomous aerial|aerial robotics)\b/, "hardware sale plus recurring software/service"],
         [/\b(manufacturer|manufacturing|battery|factory)\b/, "unit sales plus service contracts"],
       ],
-      "inferred pricing model",
+      // "inferred pricing model" read as a raw internal placeholder
+      // wherever it was interpolated -- as a labeled "Pricing model:
+      // inferred pricing model" bullet, and, un-labeled, directly inside
+      // narrative sentences ("test the inferred pricing model offer with
+      // inferred early adopters"). Same fix as UNSPECIFIED_GEOGRAPHY
+      // above: "not-yet-validated" is the same honest default (no
+      // specific pricing structure was named or inferable) phrased as a
+      // plain adjective, so it reads naturally in both places without
+      // needing a separate rewrite at every interpolation site.
+      "not-yet-validated",
       normalized
     ),
   };

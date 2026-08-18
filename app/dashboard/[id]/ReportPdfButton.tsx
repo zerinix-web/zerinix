@@ -495,7 +495,16 @@ function looksLikeCitationMetadataValue(value: string, maxWords = 18): boolean {
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > 140) return false;
   if (trimmed.split(/\s+/).length > maxWords) return false;
-  if (/[.!?]/.test(trimmed)) return false;
+  // Confirmed live: a real title continuation ("Contractors Spent $4.2B
+  // on Software in 2025 · Clockwork") was rejected here because "$4.2B"
+  // contains a literal period as a decimal point, not a sentence-ending
+  // one -- indistinguishable from real prose punctuation by a bare
+  // /[.!?]/ test. Stripping digit.digit sequences first (a decimal
+  // point can never itself end a sentence) before checking for genuine
+  // terminal punctuation keeps this guard's real purpose (reject
+  // full-sentence prose) without misfiring on a dollar figure, version
+  // number, or percentage.
+  if (/[.!?]/.test(trimmed.replace(/\d\.\d/g, "0"))) return false;
   if (organizationVerbPattern.test(trimmed)) return false;
   return true;
 }
@@ -546,6 +555,11 @@ function parseCitations(rawContent: string): CitationData[] {
   );
   const entries: CitationData[] = [];
   let current: Partial<CitationData> = {};
+  // Tracks which field a continuation line (see below) should extend --
+  // the field most recently set by a real Title:/Source:/Publisher:/
+  // Organization: line, cleared once a later field (Year:/URL:/...) is
+  // reached so a stray fragment after that point is never misattributed.
+  let lastContinuableField: "sourceTitle" | "organization" | null = null;
   const flushCurrent = () => {
     const hasUsableEvidence =
       Boolean(current.url) ||
@@ -566,6 +580,7 @@ function parseCitations(rawContent: string): CitationData[] {
       });
     }
     current = {};
+    lastContinuableField = null;
   };
 
   content
@@ -606,25 +621,56 @@ function parseCitations(rawContent: string): CitationData[] {
         }
 
         if (key === "title" || key === "source") {
-          if (looksLikeCitationMetadataValue(value, 24)) current.sourceTitle = value;
+          lastContinuableField = null;
+          if (looksLikeCitationMetadataValue(value, 24)) {
+            current.sourceTitle = value;
+            lastContinuableField = "sourceTitle";
+          } else if (looksTruncated(value)) {
+            // Confirmed live: "Title: U.S." (a genuine title's own
+            // embedded newline splitting it right after an abbreviation
+            // like "U.S.") never even reached the continuation-merge
+            // logic below, because looksLikeCitationMetadataValue itself
+            // rejects a bare "U.S." on its own two periods, so
+            // current.sourceTitle was never set for the continuation
+            // line to extend. Held here as a tentative, unconfirmed
+            // fragment instead -- flushCurrent's own isPlausibleCitationField
+            // check still gates whether the eventually-completed title
+            // is ever shown, so this only ever gives an abbreviation a
+            // chance to be completed, never bypasses validation for it.
+            current.sourceTitle = value;
+            lastContinuableField = "sourceTitle";
+          }
         } else if (key === "publisher" || key === "organization") {
-          if (looksLikeCitationMetadataValue(value)) current.organization = value;
+          lastContinuableField = null;
+          if (looksLikeCitationMetadataValue(value)) {
+            current.organization = value;
+            lastContinuableField = "organization";
+          } else if (looksTruncated(value)) {
+            current.organization = value;
+            lastContinuableField = "organization";
+          }
         } else if (key === "year" || key === "publication year") {
           current.publicationYear = value.match(/\b(19|20)\d{2}\b/)?.[0];
+          lastContinuableField = null;
         } else if (key === "url") {
           const normalizedUrl = normalizeCitationUrl(url || value);
           if (normalizedUrl) current.url = normalizedUrl;
+          lastContinuableField = null;
         } else if (key === "confidence") {
           current.confidence = normalizeCitationConfidence(value);
+          lastContinuableField = null;
         } else if (key === "reference") {
           // The Market Intelligence deterministic bibliography's own
           // in-text tag(s), e.g. "[R3][R12]" -- pure bracket syntax, never
           // free-form prose, so no shape guard is needed here.
           if (value) current.referenceTag = value;
+          lastContinuableField = null;
         } else if (key === "accessed" || key === "access date") {
           if (looksLikeCitationMetadataValue(value)) current.accessDate = value;
+          lastContinuableField = null;
         } else if (looksLikeCitationMetadataValue(value)) {
           current.sourceType = normalizeSourceType(value);
+          lastContinuableField = null;
         }
         if (url) current.url = url;
         return;
@@ -639,8 +685,29 @@ function parseCitations(rawContent: string): CitationData[] {
       );
 
       if (!citationMatch || !looksLikeOrganizationName(citationMatch[1])) {
+        // Confirmed live: a citation's own raw sourceTitle/publisher text
+        // (extracted from a live webpage) sometimes carries an embedded
+        // newline where the source page's own text wrapped (e.g. "U.S.
+        // Copyright Office" split across two lines) -- that orphaned
+        // continuation fragment matches neither the metadata-line pattern
+        // above nor a new citation's own "Organization — Title" shape, so
+        // it was silently dropped, leaving a truncated title/publisher
+        // ("U.S.") behind. A short, plain fragment seen immediately after
+        // the exact field it continues (tracked via lastContinuableField,
+        // cleared the moment any other field line arrives) is that
+        // field's own continuation, not unrelated content -- appended
+        // back rather than discarded. looksLikeCitationMetadataValue's
+        // existing shape guard (short, no sentence punctuation, not
+        // prose) keeps this from ever swallowing an unrelated paragraph
+        // that happens to follow the citations block.
+        if (lastContinuableField && looksLikeCitationMetadataValue(strippedLine, 18)) {
+          current[lastContinuableField] = `${current[lastContinuableField]} ${strippedLine}`.trim();
+        } else {
+          lastContinuableField = null;
+        }
         return;
       }
+      lastContinuableField = null;
 
       flushCurrent();
       const organization = citationMatch[1].trim();

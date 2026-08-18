@@ -1769,7 +1769,7 @@ const englishFinancialFragmentTranslations: Array<[RegExp, string | ((...args: s
   [/\bGeography: GCC \/ Middle East\b/gi, "Coğrafya: Körfez İşbirliği Konseyi / Orta Doğu"],
   [/\bGeography: global\b/gi, "Coğrafya: küresel"],
   [/\bGeography: /gi, "Coğrafya: "],
-  [/\bPricing model: inferred pricing model\b/gi, "Fiyatlandırma modeli: öngörülen fiyatlandırma modeli"],
+  [/\bPricing model: not-yet-validated\b/gi, "Fiyatlandırma modeli: henüz doğrulanmamış"],
   [/\bPricing model: D2C unit sales, recurring subscriptions, and B2B wholesale accounts\b/gi,
     "Fiyatlandırma modeli: D2C birim satışlar, tekrarlayan abonelikler ve B2B toptan satış hesapları"],
   [/\bPricing model: subscription\b/gi, "Fiyatlandırma modeli: abonelik"],
@@ -1811,7 +1811,7 @@ const englishFinancialFragmentTranslations: Array<[RegExp, string | ((...args: s
   // prefix, so the value itself needs a standalone match too, not just
   // the labeled assumption-line form above.
   [/\bglobal markets\b/gi, "küresel pazarlar"],
-  [/\binferred pricing model\b/gi, "öngörülen fiyatlandırma modeli"],
+  [/\bnot-yet-validated\b/gi, "henüz doğrulanmamış"],
   [/\binferred early adopters\b/gi, "öngörülen ilk kullanıcılar"],
   [/\bsubscription software\b/gi, "abonelik yazılımı"],
   [/\bD2C Brand \/ E-commerce\b/gi, "D2C Marka / E-ticaret"],

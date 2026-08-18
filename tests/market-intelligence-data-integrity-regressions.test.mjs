@@ -306,8 +306,11 @@ test("8b. evidence-summary.ts's prose-rejection logic rejects a real corruption 
 test("8c. ReportPdfButton.tsx's metadata-line citation parsing (Publisher:/Title:/Type:) is guarded by the same prose-rejection check", () => {
   const pdfButtonSource = readFileSync("app/dashboard/[id]/ReportPdfButton.tsx", "utf8");
   assert.match(pdfButtonSource, /function looksLikeCitationMetadataValue/);
-  assert.match(pdfButtonSource, /if \(looksLikeCitationMetadataValue\(value\)\) current\.organization = value;/);
-  assert.match(pdfButtonSource, /if \(looksLikeCitationMetadataValue\(value, 24\)\) current\.sourceTitle = value;/);
+  // lastContinuableField tracking (added for the embedded-newline
+  // continuation-line fix) sits alongside the prose-rejection guard now,
+  // rather than a single bare if-statement.
+  assert.match(pdfButtonSource, /if \(looksLikeCitationMetadataValue\(value\)\) \{\s*\n\s*current\.organization = value;/);
+  assert.match(pdfButtonSource, /if \(looksLikeCitationMetadataValue\(value, 24\)\) \{\s*\n\s*current\.sourceTitle = value;/);
 });
 
 // -----------------------------------------------------------------------

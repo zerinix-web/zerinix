@@ -1725,10 +1725,6 @@ function getFinancialMetricConfidenceBadge(
   return inferEvidenceLevel({ label, value, context: metricContext });
 }
 
-function getPdfFinancialMetricConfidenceBadge(badge: FinancialMetricConfidenceBadge) {
-  return getEvidenceLabel(badge);
-}
-
 function cleanPdfEvidenceMetadataText(value: string) {
   return normalizePdfText(value)
     .split("\n")
@@ -5573,32 +5569,35 @@ const ReportPanel = memo(function ReportPanel({
           const compactValue = isFinancialDashboard
             ? dedupePdfFinancialMetricValue(value)
             : compactPdfMetricValue(value);
-          const confidenceBadge = isFinancialDashboard || isUnitEconomics || isKpiDashboard
-            ? getFinancialMetricConfidenceBadge(label, aliases, metricContent, value)
-            : null;
-          const pdfConfidenceBadge = confidenceBadge
-            ? getPdfFinancialMetricConfidenceBadge(confidenceBadge)
-            : null;
-
           pdf.setFillColor("#18181b");
           pdf.setDrawColor("#27272a");
           pdf.roundedRect(x, itemY, itemWidth, itemHeight, 2.5, 2.5, "FD");
           pdf.setFontSize(6.2);
           pdf.setTextColor("#a1a1aa");
           pdf.text(displayLabel, x + 2, itemY + 3.2, { maxWidth: itemWidth - 4 });
+          // Confirmed live (music royalty distribution platform report,
+          // downloaded from this page's own PDF export -- a separate
+          // generation path from the dashboard's ReportPdfButton.tsx,
+          // which never draws this line at all): drawing the evidence-
+          // classification badge ("Assumption"/"Estimated"/"AI Analysis")
+          // as its own line directly beneath a tiny Financial Dashboard/
+          // Unit Economics/KPI Dashboard card's value reads, once
+          // extracted or transcribed as plain text, exactly like the raw
+          // "CAC $4k Assumption" concatenation this was already fixed for
+          // once -- the badge itself is correctly classified now, but
+          // showing it at all inside these compact cards reproduces the
+          // same visible defect. ReportPdfButton.tsx already omits this
+          // badge for all three card types; this brings the PDF export
+          // in this page in line with that same, already-correct design
+          // instead of drawing a second copy of the confidence label the
+          // dashboard PDF deliberately does not show.
           if (isFinancialDashboard && value) {
             pdf.setTextColor("#f4f4f5");
             drawSingleLine(compactValue || "—", x + 2, itemY + 11.7, itemWidth - 4, 8.8, 4.2, false);
-            pdf.setFontSize(4.8);
-            pdf.setTextColor("#5eead4");
-            drawSingleLine(localizePdfPresentationLabel(pdfConfidenceBadge || "Validation Required", pdfLocale), x + itemWidth - 32, itemY + 16, 30, 4.8, 3.8);
             return;
           }
           if (isUnitEconomics) {
             drawSingleLine(compactValue || "—", x + 2, itemY + 8.8, itemWidth - 4, 7.2, 4.2, false);
-            pdf.setFontSize(3.7);
-            pdf.setTextColor("#5eead4");
-            drawSingleLine(localizePdfPresentationLabel(pdfConfidenceBadge || "Validation Required", pdfLocale), x + 2, itemY + 12.2, itemWidth - 4, 3.8, 3.2);
             return;
           }
           if (isKpiDashboard) {
@@ -5611,9 +5610,6 @@ const ReportPanel = memo(function ReportPanel({
             pdf.setFontSize(5.3);
             pdf.setTextColor("#a1a1aa");
             pdf.text(`${localizePdfPresentationLabel("Status", pdfLocale)}: ${localizePdfPresentationLabel(status, pdfLocale)}`, x + 2, itemY + 12.6, { maxWidth: itemWidth - 4 });
-            pdf.setFontSize(4);
-            pdf.setTextColor("#5eead4");
-            drawSingleLine(localizePdfPresentationLabel(pdfConfidenceBadge || "Validation Required", pdfLocale), x + 2, itemY + 16.6, itemWidth - 4, 4, 3.4);
             pdf.setFillColor("#27272a");
             pdf.roundedRect(x + 2, itemY + 20.1, itemWidth - 4, 1.5, 0.7, 0.7, "F");
             pdf.setFillColor("#5eead4");

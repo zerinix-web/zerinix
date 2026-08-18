@@ -242,9 +242,29 @@ export function normalizeCitationUrl(value = "") {
 const STRAY_CITATION_FIELD_VALUES =
   /^(?:user|assistant|system|yes|no|n\/a|na|none|unknown|null|undefined)$/i;
 
+// Kept in sync with ReportPdfButton.tsx's identical looksTruncated (this
+// file was extracted from an older copy of that same parsing logic and
+// had drifted out of sync -- confirmed live: a music-royalty report's
+// Sources page showed a bare "U.S." source name and a title truncated
+// mid-abbreviation, "Code of Federal Regulations, Title 37: Part 210:
+// U.S.", neither of which this guard was catching). A real title/
+// publisher never has more open than closed parens, and never ends
+// mid-abbreviation on a bare single uppercase letter followed by a
+// period (an initial that was clearly cut off before the next word).
+function looksTruncated(value: string) {
+  const openParens = (value.match(/\(/g) || []).length;
+  const closeParens = (value.match(/\)/g) || []).length;
+  if (openParens > closeParens) return true;
+  return /\b[A-Z]\.\s*$/.test(value.trim());
+}
+
 function isPlausibleCitationField(value = "", minLength = 3) {
   const trimmed = value.trim();
-  return trimmed.length >= minLength && !STRAY_CITATION_FIELD_VALUES.test(trimmed);
+  return (
+    trimmed.length >= minLength &&
+    !STRAY_CITATION_FIELD_VALUES.test(trimmed) &&
+    !looksTruncated(trimmed)
+  );
 }
 
 export function parseCitations(content: string): CitationData[] {
@@ -258,6 +278,12 @@ export function parseCitations(content: string): CitationData[] {
 
   const entries: CitationData[] = [];
   let current: Partial<CitationData> = {};
+  // Tracks which field a continuation line (see below) should extend --
+  // the field most recently set by a real Title:/Source:/Publisher:/
+  // Organization: line, cleared once a later field is reached so a stray
+  // fragment past that point is never misattributed. Kept in sync with
+  // ReportPdfButton.tsx's identical fix.
+  let lastContinuableField: "sourceTitle" | "organization" | null = null;
   const flushCurrent = () => {
     const hasUsableEvidence =
       Boolean(current.url) ||
@@ -276,6 +302,7 @@ export function parseCitations(content: string): CitationData[] {
       });
     }
     current = {};
+    lastContinuableField = null;
   };
 
   content
@@ -310,17 +337,23 @@ export function parseCitations(content: string): CitationData[] {
 
         if (key === "title" || key === "source") {
           current.sourceTitle = value;
+          lastContinuableField = "sourceTitle";
         } else if (key === "publisher" || key === "organization") {
           current.organization = value;
+          lastContinuableField = "organization";
         } else if (key === "year" || key === "publication year") {
           current.publicationYear = value.match(/\b(19|20)\d{2}\b/)?.[0];
+          lastContinuableField = null;
         } else if (key === "url") {
           const normalizedUrl = normalizeCitationUrl(url || value);
           if (normalizedUrl) current.url = normalizedUrl;
+          lastContinuableField = null;
         } else if (key === "confidence") {
           current.confidence = normalizeCitationConfidence(value);
+          lastContinuableField = null;
         } else {
           current.sourceType = normalizeSourceType(value);
+          lastContinuableField = null;
         }
         if (url) current.url = url;
         return;
@@ -331,8 +364,36 @@ export function parseCitations(content: string): CitationData[] {
       );
 
       if (!citationMatch) {
+        // Confirmed live: a citation's own raw sourceTitle/publisher text
+        // sometimes carries an embedded newline where the source page's
+        // own text wrapped (e.g. "U.S. Copyright Office" split across two
+        // lines) -- that orphaned continuation fragment matches neither
+        // the metadata-line pattern above nor a new citation's own
+        // "Organization — Title" shape, so it was silently dropped,
+        // leaving a truncated title/publisher ("U.S.") behind. A short,
+        // plain fragment seen immediately after the exact field it
+        // continues is that field's own continuation, not unrelated
+        // content -- appended back rather than discarded. Capped at a
+        // handful of short words so this can never absorb an unrelated
+        // paragraph that happens to follow the citations block.
+        if (
+          lastContinuableField &&
+          line.length <= 140 &&
+          line.split(/\s+/).length <= 18 &&
+          // A decimal point (e.g. "$4.2B") is not a sentence-ending
+          // period -- stripped first so a real title continuation
+          // carrying a dollar figure or statistic isn't rejected as
+          // "prose". Kept in sync with ReportPdfButton.tsx's identical
+          // looksLikeCitationMetadataValue fix.
+          !/[.!?]/.test(line.replace(/\d\.\d/g, "0"))
+        ) {
+          current[lastContinuableField] = `${current[lastContinuableField]} ${line}`.trim();
+        } else {
+          lastContinuableField = null;
+        }
         return;
       }
+      lastContinuableField = null;
 
       flushCurrent();
       const organization = citationMatch[1].trim();
