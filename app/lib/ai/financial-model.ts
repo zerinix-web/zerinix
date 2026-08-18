@@ -172,6 +172,16 @@ function looksLikeTurkishPrompt(prompt: string) {
   return /[çğıöşüÇĞİÖŞÜ]/.test(prompt);
 }
 
+// "global / unspecified" reads as a raw internal placeholder wherever it
+// gets interpolated -- as a labeled "Geography: global / unspecified"
+// bullet in Financial Assumptions, and, un-labeled, directly inside
+// narrative sentences ("...scale beyond the beachhead only after those
+// proof gates hold in global / unspecified."). "global markets" is the
+// same honest default (no specific region was named) phrased as a plain
+// noun phrase, so it reads naturally in both places without needing a
+// separate rewrite at every interpolation site.
+const UNSPECIFIED_GEOGRAPHY = "global markets";
+
 export function inferFinancialModelingInputs(prompt: string): FinancialModelingInputs {
   const normalized = normalizePrompt(prompt);
   const industryKey = inferIndustryKey(prompt);
@@ -219,7 +229,7 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
         [/\b(gcc|uae|dubai|saudi|qatar)\b/, "GCC / Middle East"],
         [/\b(global|worldwide|international)\b/, "global"],
       ],
-      looksLikeTurkishPrompt(prompt) ? "Turkey" : "global / unspecified",
+      looksLikeTurkishPrompt(prompt) ? "Turkey" : UNSPECIFIED_GEOGRAPHY,
       normalized
     ),
     pricingModel: firstMatching(

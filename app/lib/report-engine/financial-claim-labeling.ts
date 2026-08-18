@@ -4,6 +4,7 @@ export function labelModelDerivedFinancialClaims({
   metricDisplayValues,
   knownFacts,
   fieldName,
+  detectedBusinessModelLabel,
   language,
   sourceContext,
 }: {
@@ -36,6 +37,13 @@ export function labelModelDerivedFinancialClaims({
   // *field* (not the model's chosen label text) is what ties the line to
   // an already-known concept.
   fieldName?: string;
+  // The already-detected canonical business-model classification (e.g.
+  // "subscription software", "D2C Brand / E-commerce") -- reused in
+  // place of the generic "Unspecified business model" placeholder
+  // whenever a flagged clause's own "Professional Services" misdetection
+  // is replaced, since this report already has a real, specific answer
+  // for what the business model is.
+  detectedBusinessModelLabel?: string;
   language: "English" | "Turkish" | "German" | "French" | "Spanish";
   sourceContext: string;
 }) {
@@ -128,6 +136,15 @@ export function labelModelDerivedFinancialClaims({
     "monthly recurring revenue": "mrr",
     "cac payback": "cac payback",
     "cac payback period": "cac payback",
+    // Bare/shortened Turkish forms the model uses even when the full
+    // localized label (already added to metricDisplayValues at the call
+    // site, e.g. "Başabaş Ayı") is a longer phrase -- confirmed live,
+    // "Başabaş" alone (without "Ayı") is a common shortened form.
+    "başabaş": "break-even month",
+    "geri ödeme": "cac payback",
+    "geri ödeme süresi": "cac payback",
+    "brüt marj": "gross margin",
+    "nakit yakımı": "monthly burn",
   };
   const knownMetricValueForLabel = (fieldLabel: string) => {
     if (!metricDisplayValues) return "";
@@ -161,11 +178,11 @@ export function labelModelDerivedFinancialClaims({
   // buyer/beachhead reuse meant for genuinely unclassified clauses.
   const specificCategoryUnavailableCopy = (fieldLabel: string): string | null => {
     if (language === "Turkish") {
-      if (/\b(?:CAC|LTV|edinim|dönüşüm|geri ödeme|payback)\b/i.test(fieldLabel)) {
+      if (/\b(?:CAC|LTV|edinim|dönüşüm|geri ödeme|payback|ödeme isteği|wtp)\b/i.test(fieldLabel)) {
         return "gerçek müşteri edinimi ve elde tutma verisi bulunmadığı için hesaplanamıyor; kurucunun kanal başına edinim maliyeti ve kohort elde tutma kayıtlarını toplaması gerekir";
       }
       if (
-        /\bARR\b|\bMRR\b/i.test(fieldLabel) ||
+        /\bARR\b|\bMRR\b|\bARPA\b/i.test(fieldLabel) ||
         (!revenueOnlyWordIsAmbiguous && /\b(?:gelir|ciro|revenue)\b/i.test(fieldLabel))
       ) {
         return "gerçekleşmiş gelir verisi bulunmadığı için hesaplanamıyor; kurucunun fatura/ödeme kayıtlarından gerçekleşmiş gelir verisini paylaşması gerekir";
@@ -173,7 +190,11 @@ export function labelModelDerivedFinancialClaims({
       if (/\b(?:TAM|SAM|SOM|pazar|market size)\b/i.test(fieldLabel)) {
         return "doğrulanmış pazar büyüklüğü verisi bulunmadığı için hesaplanamıyor; sektör raporu veya resmi istatistik gibi doğrulanmış kaynaklar gerekir";
       }
-      if (/\b(?:runway|burn|funding|fonlama|finansman|gider|maliyet)\b/i.test(fieldLabel)) {
+      if (
+        /\b(?:runway|burn|funding|fonlama|finansman|gider|maliyet|nakit\s*yak[ıi]m[ıi]?|finansal\s*pist|başabaş|breakeven|break-even|yatırım|ebitda)\b/i.test(
+          fieldLabel
+        )
+      ) {
         return "güncel gider ve finansman verisi bulunmadığı için hesaplanamıyor; kurucunun güncel nakit pozisyonu ve aylık giderlerini paylaşması gerekir";
       }
       if (/\b(?:margin|marj|kârlılık|profit)\b/i.test(fieldLabel)) {
@@ -184,11 +205,11 @@ export function labelModelDerivedFinancialClaims({
     }
 
     if (language === "English") {
-      if (/\b(?:CAC|LTV|acquisition|conversion|payback)\b/i.test(fieldLabel)) {
+      if (/\b(?:CAC|LTV|acquisition|conversion|payback|willingness\s*to\s*pay|wtp)\b/i.test(fieldLabel)) {
         return "requires real customer acquisition and retention data; the founder should collect channel-level acquisition cost and cohort retention records to calculate this";
       }
       if (
-        /\bARR\b|\bMRR\b/i.test(fieldLabel) ||
+        /\bARR\b|\bMRR\b|\bARPA\b/i.test(fieldLabel) ||
         (!revenueOnlyWordIsAmbiguous && /\brevenue\b/i.test(fieldLabel))
       ) {
         return "requires realized revenue data; the founder should share actual invoicing or payment records to calculate this";
@@ -196,7 +217,9 @@ export function labelModelDerivedFinancialClaims({
       if (/\b(?:TAM|SAM|SOM|market size)\b/i.test(fieldLabel)) {
         return "requires verified market-sizing data; independent industry reports or official statistics are needed to calculate this";
       }
-      if (/\b(?:runway|burn|funding)\b/i.test(fieldLabel)) {
+      if (
+        /\b(?:runway|burn|funding|monthly\s*burn|break-?even|investment\s*needed|ebitda)\b/i.test(fieldLabel)
+      ) {
         return "requires current expense and financing data; the founder should share current cash position and monthly spend to calculate this";
       }
       if (/\b(?:margin|profit)\b/i.test(fieldLabel)) {
@@ -207,6 +230,27 @@ export function labelModelDerivedFinancialClaims({
     }
 
     return null;
+  };
+
+  // Last-resort fallback for a field label that names no known metric
+  // category at all (e.g. "WTP" is covered above, but scenario labels
+  // like "Worst Case"/"Best Case" or roadmap labels like "Next 30 Days"
+  // never will be, since they are open-ended, not a fixed vocabulary).
+  // Confirmed live: the previous bare copy.unavailable fallback produced
+  // the exact same sentence, verbatim, for every unmatched label across
+  // an entire report -- 6+ times in one real PDF (Scenario Analysis,
+  // WTP, Revenue, Next 30 Days, Next 6 months all identical). This
+  // returns the complete line (the label embedded once, not a bare
+  // message meant to be prefixed again by the caller), guaranteeing two
+  // different fields can never produce byte-identical unavailable text
+  // again, without having to enumerate every possible label a model or
+  // canonical builder might ever use.
+  const genericUnavailableCopyForLabel = (fieldLabel: string) => {
+    const subject = fieldLabel.trim();
+
+    return language === "Turkish"
+      ? `${subject} için doğrulanmış veri bulunmadığından hesaplanamıyor; kurucunun bu değerin dayandığı kanıtları paylaşması gerekir`
+      : `${subject} requires verified supporting data before this can be shown; the founder should share the evidence behind this figure to calculate it`;
   };
 
   // Tracks which output lines are actually a generated unavailable-data
@@ -235,12 +279,57 @@ export function labelModelDerivedFinancialClaims({
     return clauses.length > 1 ? clauses : [line];
   };
 
+  // "Unspecified business model" (and its Turkish equivalent) was itself
+  // a raw-sounding placeholder leaking into user-facing prose --
+  // "Recurring logic: Unspecified business model" reads like a broken
+  // field, not a sentence. This report's own already-detected business
+  // model classification (e.g. "subscription software") is a real,
+  // specific answer to the exact same question, so it is used whenever
+  // available; the generic phrase remains only as a last-resort default.
+  const businessModelReplacement =
+    (detectedBusinessModelLabel || "").trim() || copy.unspecifiedModel;
+  // The model is separately instructed (a prompt requirement this
+  // function cannot change) to tag its own claims with an evidence-
+  // classification word (Verified/Estimated/Assumption/AI Analysis, or
+  // their Turkish equivalents). Confirmed live: it sometimes writes that
+  // tag AS IF it were a content label directly followed by a separator
+  // ("Planlama varsayımı: Gelir $842k'a çıkar...") instead of an inline
+  // annotation -- fieldLabel extraction below would then treat the tag
+  // word itself as "the field name" and generate a nonsensical
+  // "Planlama varsayımı: [unavailable message]" line, a duplicate,
+  // meaningless entry with zero relation to any real metric. These tag
+  // words are never valid field labels, so a clause whose extracted
+  // label IS one is left untouched here and deferred entirely to
+  // enforcePlanReportLanguage's later tag-cleanup pass.
+  const evidenceTagWordPattern =
+    /^(?:Verified|Estimated|Assumption|Planning assumption|AI Analysis|Model estimate|Model-derived estimate|Approximate|Doğrulanmış|Tahmini|Yaklaşık|Varsayım|Planlama varsayımı|AI Analizi|Model çıkarımı|Model tahmini)$/i;
+  // knownFactForField is meant as a true last resort for the ONE clause
+  // in a field that most plausibly needed the buyer/beachhead fact
+  // restated -- not for every later, unrelated clause that also happens
+  // to get flagged. Confirmed live: a businessModel field whose first
+  // clause already correctly stated "Kim öder: Otel işletmesi (B2B)."
+  // still had a much LATER, unrelated clause ("Tekrarlayan mantık:"/
+  // Recurring logic) overwritten with the same buyer fact, producing
+  // "Tekrarlayan mantık: öngörülen ilk kullanıcılar" -- a fallback
+  // placeholder value substituted into a sentence it has nothing to do
+  // with. Tracked once per labelModelDerivedFinancialClaims call (i.e.
+  // once per field's content) via this closure flag -- seeded to true
+  // up front whenever the content already has an explicit "Kim öder:"/
+  // "Who pays:"-labeled clause SOMEWHERE, even one that was never itself
+  // flagged (no dollar figure in it, so it never passes through
+  // knownFactForLabel below): the concept is already established in
+  // this field's own text, so no later clause should ever restate it
+  // again via the field-level fallback.
+  let knownFactAlreadyUsedForField =
+    (fieldName === "businessModel" && buyerLabelPattern.test(content)) ||
+    (fieldName === "goToMarketPlan" && beachheadLabelPattern.test(content));
+
   const labelClause = (rawClause: string) => {
     let normalizedClause = rawClause;
     if (!hasExplicitServiceModel) {
       normalizedClause = normalizedClause.replace(
         /\bProfessional Services\b/gi,
-        copy.unspecifiedModel
+        businessModelReplacement
       );
     }
     if (!metricPattern?.test(normalizedClause)) {
@@ -289,8 +378,13 @@ export function labelModelDerivedFinancialClaims({
       return copy.unavailable;
     }
 
+    if (evidenceTagWordPattern.test(fieldLabel)) {
+      return normalizedClause;
+    }
+
     const knownFact = knownFactForLabel(fieldLabel);
     if (knownFact) {
+      knownFactAlreadyUsedForField = true;
       return `${fieldLabel}: ${knownFact}`;
     }
 
@@ -306,13 +400,14 @@ export function labelModelDerivedFinancialClaims({
       return result;
     }
 
-    if (knownFactForField) {
+    if (knownFactForField && !knownFactAlreadyUsedForField) {
+      knownFactAlreadyUsedForField = true;
       const result = `${fieldLabel}: ${knownFactForField}`;
       generatedUnavailableLines.add(result);
       return result;
     }
 
-    const result = `${fieldLabel}: ${copy.unavailable}`;
+    const result = genericUnavailableCopyForLabel(fieldLabel);
     generatedUnavailableLines.add(result);
     return result;
   };

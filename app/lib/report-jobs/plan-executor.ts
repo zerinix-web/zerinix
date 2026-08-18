@@ -1595,6 +1595,41 @@ function cleanInternalSourceFallbacks(content: string, language: ResponseLanguag
   );
 }
 
+// industry-benchmarks.ts's 19 benchmark categories are their own fixed,
+// enumerable vocabulary, separate from financial-model.ts's businessModel/
+// pricingModel/targetCustomer/geography inputs translated below. Confirmed
+// live: investment-score.ts's createTopRisks interpolates
+// `${model.benchmark.label}` directly into "Confidence: X assumptions
+// require primary validation..." with no translation entry for any of the
+// 19 possible labels, so whichever one this report's business matched
+// (e.g. "Professional services" for a hotel-SaaS idea that fell through to
+// the generic default) always rendered as raw English inside otherwise
+// pure Turkish prose. Keyed by the exact label strings industry-
+// benchmarks.ts uses.
+const industryBenchmarkLabelTranslations: Record<string, string> = {
+  "B2B SaaS": "B2B SaaS",
+  "AI software / automation": "Yapay zekâ yazılımı / otomasyon",
+  Cybersecurity: "Siber güvenlik",
+  "Healthcare services / healthtech": "Sağlık hizmetleri / sağlık teknolojisi",
+  Marketplace: "Pazar yeri",
+  FinTech: "FinTech",
+  "E-commerce": "E-ticaret",
+  "Food & Beverage / Specialty Coffee": "Yiyecek & İçecek / Özel Kahve",
+  "Logistics / supply chain": "Lojistik / tedarik zinciri",
+  "EV Charging": "Elektrikli araç şarjı",
+  "Mobility / scooter rental": "Mobilite / scooter kiralama",
+  "Advanced manufacturing": "İleri üretim",
+  "Hospitality / hotels": "Ağırlama / otelcilik",
+  "Luxury goods / marine": "Lüks ürünler / denizcilik",
+  "Fitness / gym franchise": "Fitness / spor salonu bayiliği",
+  "Agriculture / vertical farming": "Tarım / dikey tarım",
+  "Restaurant / food service": "Restoran / yemek hizmeti",
+  "Drone technology / autonomous systems": "Drone teknolojisi / otonom sistemler",
+  "Professional services": "Profesyonel hizmetler",
+};
+const translateIndustryBenchmarkLabel = (label: string) =>
+  industryBenchmarkLabelTranslations[label] || label;
+
 // Business Plan's shared scoring/financial-modeling data layer
 // (investment-score.ts, financial-model.ts) is also used by Market
 // Analysis and is deliberately language-agnostic -- it only ever
@@ -1647,7 +1682,7 @@ const englishFinancialFragmentTranslations: Array<[RegExp, string | ((...args: s
   [/\bCapital efficiency: investment need is ([^\s]+) against ([^\s]+) Year-1 ARR\.?/gi,
     (_m, need, arr) => `Sermaye verimliliği: yatırım ihtiyacı, 1. yıl ARR değeri ${arr} karşısında ${need}.`],
   [/\bConfidence: ([\w\s/&-]+?) assumptions require primary validation where confidence is Low\.?/gi,
-    (_m, benchmarkLabel) => `Güven: ${benchmarkLabel} varsayımları, güvenin düşük olduğu alanlarda birincil doğrulama gerektirir.`],
+    (_m, benchmarkLabel) => `Güven: ${translateIndustryBenchmarkLabel(benchmarkLabel)} varsayımları, güvenin düşük olduğu alanlarda birincil doğrulama gerektirir.`],
   [/\bPayback risk: ([^\s]+) exceeds the benchmark range\.?/gi,
     (_m, value) => `Geri ödeme riski: ${value}, referans aralığını aşıyor.`],
   [/\bRunway risk: ([^\s]+) gives limited iteration time\.?/gi,
@@ -1726,7 +1761,7 @@ const englishFinancialFragmentTranslations: Array<[RegExp, string | ((...args: s
   [/\bTarget customer: public-sector buyers\b/gi, "Hedef müşteri: kamu sektörü alıcıları"],
   [/\bTarget customer: urban riders \/ commuters\b/gi, "Hedef müşteri: şehir içi sürücüler / işe gidip gelenler"],
   [/\bTarget customer: /gi, "Hedef müşteri: "],
-  [/\bGeography: global \/ unspecified\b/gi, "Coğrafya: küresel / belirtilmemiş"],
+  [/\bGeography: global markets\b/gi, "Coğrafya: küresel pazarlar"],
   [/\bGeography: United States\b/gi, "Coğrafya: Amerika Birleşik Devletleri"],
   [/\bGeography: United Kingdom\b/gi, "Coğrafya: Birleşik Krallık"],
   [/\bGeography: Europe\b/gi, "Coğrafya: Avrupa"],
@@ -1752,12 +1787,30 @@ const englishFinancialFragmentTranslations: Array<[RegExp, string | ((...args: s
   [/\bValidation evidence: not yet supplied; planning assumptions require validation\b/gi,
     "Doğrulama kanıtı: belirtilmemiş; planlama varsayımları doğrulama gerektirir"],
   [/\bValidation evidence: /gi, "Doğrulama kanıtı: "],
+  // industry-benchmarks.ts's 19 labels are their own separate standalone
+  // vocabulary (see industryBenchmarkLabelTranslations above): businessModel
+  // falls back to the same raw benchmark.label whenever none of its own
+  // keyword patterns match (confirmed live for a Turkish-language hotel-
+  // SaaS prompt -- the English-only businessModel/industryKey patterns
+  // never matched, so both industry AND businessModel resolved to
+  // "Professional services", and the untranslated label then surfaced
+  // through every "Business model: X" line and every other place
+  // businessModel is interpolated raw). Spread here as standalone matches
+  // for the exact same reason the geography/businessModel/pricingModel
+  // values below need one: whichever field a raw label leaks through,
+  // this single source of translations catches it.
+  ...Object.entries(industryBenchmarkLabelTranslations).map(
+    ([english, turkish]): [RegExp, string] => [
+      new RegExp(`\\b${english.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi"),
+      turkish,
+    ]
+  ),
   // The same inputs.geography/businessModel/pricingModel/targetCustomer
   // values also get interpolated directly into other sentences
   // elsewhere (e.g. the roadmap/GTM narrative), without their "Label: "
   // prefix, so the value itself needs a standalone match too, not just
   // the labeled assumption-line form above.
-  [/\bglobal \/ unspecified\b/gi, "küresel / belirtilmemiş"],
+  [/\bglobal markets\b/gi, "küresel pazarlar"],
   [/\binferred pricing model\b/gi, "öngörülen fiyatlandırma modeli"],
   [/\binferred early adopters\b/gi, "öngörülen ilk kullanıcılar"],
   [/\bsubscription software\b/gi, "abonelik yazılımı"],
@@ -2979,7 +3032,7 @@ function buildRiskResponse(
 
   if (/\b(regulat|compliance|legal|license|privacy|regül|uyum|yasal|lisans|gizlilik)\b/i.test(risk)) {
     return {
-      mitigation: reportText(language, `complete a ${context.inputs.geography} compliance review before the first scaled ${context.inputs.industry} launch`, `ilk ölçekli ${context.inputs.industry} lansmanından önce ${context.inputs.geography} uyum incelemesini tamamla`),
+      mitigation: reportText(language, `complete a ${context.inputs.geography} compliance review before the first scaled ${context.inputs.industry} launch`, `ilk ölçekli ${translateIndustryBenchmarkLabel(context.inputs.industry)} lansmanından önce ${context.inputs.geography} uyum incelemesini tamamla`),
       signal: reportText(language, "a required approval, data right, or operating permission remains unresolved at launch gate", "lansman kapısında gerekli onay, veri hakkı veya işletme izni çözümsüz kalır"),
     };
   }
@@ -3171,7 +3224,7 @@ function buildCanonicalSwot(
       : "";
 
   const strengths = pickSwotBullets(modelSwot.strengths, [
-    reportText(language, `${context.inputs.industry} focus gives the founder a clearer beachhead than a broad generic launch.`, `${context.inputs.industry} odağı, kurucuya geniş ve jenerik bir lansmandan daha net bir başlangıç pazarı sağlar.`),
+    reportText(language, `${context.inputs.industry} focus gives the founder a clearer beachhead than a broad generic launch.`, `${translateIndustryBenchmarkLabel(context.inputs.industry)} odağı, kurucuya geniş ve jenerik bir lansmandan daha net bir başlangıç pazarı sağlar.`),
     reportText(language, `${context.inputs.businessModel} creates a testable revenue path if pricing and repeat demand are validated.`, `${context.inputs.businessModel}, fiyatlandırma ve tekrar talep doğrulanırsa test edilebilir bir gelir yolu oluşturur.`),
     reportText(language, `${context.metrics.grossMargin.displayValue} gross margin can support reinvestment if actual COGS confirms the benchmark.`, `Gerçek COGS referansı doğrularsa ${context.metrics.grossMargin.displayValue} brüt marj yeniden yatırımı destekleyebilir.`),
   ]);
@@ -3286,7 +3339,7 @@ function buildPlanExecutiveDecisionBrief(
     reportText(
       language,
       `${context.inputs.industry} demand has not yet been validated but remains the clearest path to a defensible beachhead.`,
-      `${context.inputs.industry} talebi henüz doğrulanmadı, ancak savunulabilir bir başlangıç pazarı için en net yol olmaya devam ediyor.`
+      `${translateIndustryBenchmarkLabel(context.inputs.industry)} talebi henüz doğrulanmadı, ancak savunulabilir bir başlangıç pazarı için en net yol olmaya devam ediyor.`
     );
   const topReasons = [biggestOpportunity, ...score.strengths.slice(1, 4)].slice(0, 3);
   const topRisk = (score.topRisks[0] || score.weaknesses[0] || reportText(language, "the primary risk", "birincil risk"))
@@ -3482,7 +3535,7 @@ function normalizeFullPlanReport(
       reportText(language, `- Next 30 Days: test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer} and record paid-conversion evidence at the ${context.metrics.arpa.displayValue} planning input. Expected impact: establishes a credible demand gate.`, `- Sonraki 30 Gün: ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile test et ve ${context.metrics.arpa.displayValue} planlama girdisinde ücretli dönüşüm kanıtını kaydet. Beklenen etki: güvenilir bir talep kapısı oluşturur.`),
       reportText(language, `- Next 90 Days: repeat the winning acquisition and delivery motion for the ${context.inputs.businessModel} model. Expected impact: tests whether the operating loop is repeatable.`, `- Sonraki 90 Gün: ${context.inputs.businessModel} modeli için kazanan edinim ve teslimat hareketini tekrarla. Beklenen etki: operasyon döngüsünün tekrarlanabilirliğini test eder.`),
       reportText(language, `- Next 6 Months: hold ${context.metrics.grossMargin.displayValue} gross margin while demonstrating ${context.metrics.cacPayback.displayValue} payback and repeat behavior. Expected impact: proves capital efficiency.`, `- Sonraki 6 Ay: ${context.metrics.cacPayback.displayValue} geri ödeme ve tekrar davranışını gösterirken ${context.metrics.grossMargin.displayValue} brüt marjı koru. Beklenen etki: sermaye verimliliğini kanıtlar.`),
-      reportText(language, `- Next 12 Months: expand the ${context.inputs.industry} model beyond the beachhead only after those proof gates hold in ${context.inputs.geography}. Expected impact: scales from verified operating evidence.`, `- Sonraki 12 Ay: ${context.inputs.industry} modelini yalnızca bu kanıt kapıları ${context.inputs.geography} içinde sağlandıktan sonra başlangıç pazarının ötesine genişlet. Beklenen etki: doğrulanmış operasyon kanıtından ölçeklenir.`),
+      reportText(language, `- Next 12 Months: expand the ${context.inputs.industry} model beyond the beachhead only after those proof gates hold in ${context.inputs.geography}. Expected impact: scales from verified operating evidence.`, `- Sonraki 12 Ay: ${translateIndustryBenchmarkLabel(context.inputs.industry)} modelini yalnızca bu kanıt kapıları ${context.inputs.geography} içinde sağlandıktan sonra başlangıç pazarının ötesine genişlet. Beklenen etki: doğrulanmış operasyon kanıtından ölçeklenir.`),
     ]
   );
   // Evidence and sources stay in the background: the model's raw citation
@@ -3506,6 +3559,20 @@ function normalizeFullPlanReport(
   const metricDisplayValues: Record<string, string> = {};
   for (const metric of Object.values(context.metrics)) {
     metricDisplayValues[metric.label.toLowerCase()] = metric.displayValue;
+    // A Turkish report's own model-generated prose names each metric by
+    // its Turkish label (e.g. "Aylık Nakit Yakımı", "Finansal Pist",
+    // "Başabaş Ayı") -- the same translation this report already uses
+    // everywhere else (metricLine/localizeMetricLabel). Without this key
+    // too, a flagged Turkish metric line could never match its own
+    // already-computed value (only the English label was ever a lookup
+    // key), so it fell through to a generic "unavailable" message while
+    // the Financial Dashboard, built from the exact same metric object,
+    // showed a concrete number for the same field -- the availability
+    // contradiction between sections.
+    const localizedLabel = localizeMetricLabel(metric.label, language).toLowerCase();
+    if (localizedLabel !== metric.label.toLowerCase()) {
+      metricDisplayValues[localizedLabel] = metric.displayValue;
+    }
   }
   // context.inputs.targetCustomer is the same single source of truth the
   // rest of this report already treats as known (Financial Assumptions,
@@ -3546,6 +3613,7 @@ function normalizeFullPlanReport(
         metricDisplayValues,
         knownFacts,
         fieldName: field,
+        detectedBusinessModelLabel: context.inputs.businessModel,
         language,
         sourceContext: context.normalizedBusinessIdea,
       }),
@@ -3709,26 +3777,19 @@ function parseFullPlanReport(
   return normalizeFullPlanReport(report, context, parsed, language);
 }
 
-function createGroundedBusinessTimeoutFallback({
-  context,
-  research,
-  language,
-}: {
-  context: AiFinancialModelContext;
-  research: DomainResearchBundle;
-  language: ResponseLanguage;
-}) {
-  const report = parseFullPlanReport("{}", context, language);
-  // Title:/Publisher:/URL: (one field per line) is the one citation shape
-  // both this report's own evidence-summary renderer (evidence-summary.ts's
-  // extractCitationDetail) and the PDF's citation parser (ReportPdfButton.tsx's
-  // parseCitations) already recognize. The previous "- [R#] Title: claim url"
-  // single-line shape matched neither -- every real, verified evidence item
-  // (with a real title, publisher, and URL) was silently unparseable, so the
-  // PDF fell through to its generic "no citations found" placeholder
-  // (Market Comparisons / Financial Comparisons / Planning Assumptions)
-  // instead of showing the actual sources. No data changes, only the shape.
-  const evidenceLines = research.evidence.map((item) => {
+// Title:/Publisher:/URL: (one field per line) is the one citation shape
+// both this report's own evidence-summary renderer (evidence-summary.ts's
+// extractCitationDetail) and the PDF's citation parser (ReportPdfButton.tsx's
+// parseCitations) already recognize. Shared by both the timeout-fallback
+// path below and the normal happy-path sources builder: the model's own
+// "sourcesAssumptions" field text is an unreliable second-hand summary of
+// the SAME evidence it already cited inline as [R#] elsewhere in the
+// report -- rebuilding it directly from research.evidence (the actual
+// registry those [R#] identifiers resolve against) guarantees the Sources
+// page always lists real, resolvable titles/publishers/URLs instead of
+// whatever the model separately wrote (or failed to write) for that field.
+function buildResearchEvidenceLines(research: DomainResearchBundle) {
+  return research.evidence.map((item) => {
     const title = [item.sourceTitle || item.field, item.claim || item.value]
       .filter(Boolean)
       .join(": ");
@@ -3739,6 +3800,49 @@ function createGroundedBusinessTimeoutFallback({
     if (item.url) lines.push(`URL: ${item.url}`);
     return lines.join("\n");
   });
+}
+
+// Builds the full sourcesAssumptions field content directly from the
+// research evidence registry -- the same registry the model's own inline
+// [R#] citations (in Market Opportunity, Problem, etc.) resolve against --
+// rather than compressing or reinterpreting whatever the model separately
+// wrote for the dedicated sourcesAssumptions field. Used for every report,
+// not just the timeout-fallback path, so the Sources page always resolves
+// real titles instead of falling through to a generic placeholder.
+function buildRealSourcesAssumptionsField(
+  research: DomainResearchBundle,
+  language: ResponseLanguage
+) {
+  const evidenceLines = buildResearchEvidenceLines(research);
+
+  return [
+    language === "Turkish"
+      ? "Doğrulanmış dış araştırma kanıtları:"
+      : "Verified external research evidence:",
+    evidenceLines.join("\n\n") ||
+      (language === "Turkish"
+        ? "- Bu rapor için kullanılabilir dış kanıt dönmedi."
+        : "- No usable external evidence was returned for this report."),
+    research.unresolvedFields.length
+      ? language === "Turkish"
+        ? "Bazı dış kaynaklar doğrulanamadığı için ilgili bölümler kesin sonuç içermiyor."
+        : "Some external sources could not be verified, so the affected sections are not definitive."
+      : language === "Turkish"
+        ? "Kritik araştırma alanları kullanılabilir kanıtla tamamlandı."
+        : "Critical research fields were completed with usable evidence.",
+  ].join("\n\n");
+}
+
+function createGroundedBusinessTimeoutFallback({
+  context,
+  research,
+  language,
+}: {
+  context: AiFinancialModelContext;
+  research: DomainResearchBundle;
+  language: ResponseLanguage;
+}) {
+  const report = parseFullPlanReport("{}", context, language);
   const timeoutDisclosure =
     language === "Turkish"
       ? "Rapor sentez sağlayıcısı süre bütçesine ulaştı. Aşağıdaki karar analizi; doğrulanmış araştırma kanıtları, tutarlı finansal model ve mevcut kalite kapıları kullanılarak tamamlandı."
@@ -3747,20 +3851,7 @@ function createGroundedBusinessTimeoutFallback({
   report.executiveSummary = `${report.executiveSummary}\n\n${timeoutDisclosure}`;
   report.sourcesAssumptions = [
     report.sourcesAssumptions,
-    language === "Turkish"
-      ? "Doğrulanmış dış araştırma kanıtları:"
-      : "Verified external research evidence:",
-    evidenceLines.join("\n\n") ||
-      (language === "Turkish"
-        ? "- Süre bütçesi içinde kullanılabilir dış kanıt dönmedi."
-        : "- No usable external evidence returned within the time budget."),
-    research.unresolvedFields.length
-      ? language === "Turkish"
-        ? "Bazı dış kaynaklar doğrulanamadığı için ilgili bölümler kesin sonuç içermiyor."
-        : "Some external sources could not be verified, so the affected sections are not definitive."
-      : language === "Turkish"
-        ? "Kritik araştırma alanları kullanılabilir kanıtla tamamlandı."
-        : "Critical research fields were completed with usable evidence.",
+    buildRealSourcesAssumptionsField(research, language),
   ].join("\n\n");
 
   return report;
@@ -6693,6 +6784,24 @@ Write only the content for this section. Do not write a JSON object, field name,
             bundle: cachedBusinessResearch,
             expectedDomain: "business",
           });
+          // Same fix as the live-generation and timeout-fallback paths:
+          // parseFullPlanReport's own normalizeFullPlanReport always
+          // rebuilds sourcesAssumptions via buildEvidenceSummary first
+          // (a generic category+count compression of whatever the model
+          // wrote for that one field), which would silently overwrite a
+          // cached response's already-correct, evidence-registry-derived
+          // sourcesAssumptions the moment it replays from cache. Confirmed
+          // live: a cache-hit report showed the old generic "Kanıt Özeti"
+          // summary even though the ORIGINAL, freshly-generated report
+          // that seeded this exact cache entry had the real Title/
+          // Publisher/Reference/URL entries -- the cache-hit path was the
+          // one remaining call site never rebuilding sourcesAssumptions
+          // from cachedBusinessResearch.evidence after parseFullPlanReport
+          // ran.
+          parsedCachedReport.sourcesAssumptions = buildRealSourcesAssumptionsField(
+            cachedBusinessResearch,
+            responseLanguage
+          );
         }
         logSkippedResearchForReportCache({
           identity: researchIdentity,
@@ -7083,6 +7192,22 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
               bundle: businessResearch,
               expectedDomain: "business",
             });
+            // The Sources page must resolve the SAME [R#] citations the
+            // model already cited inline elsewhere in the report (Market
+            // Opportunity, Problem, etc.) -- not whatever the model
+            // separately wrote (or failed to write) for its own
+            // sourcesAssumptions field, which was frequently too sparse
+            // for buildEvidenceSummary to find any citation-shaped lines
+            // in, falling through to a generic "no sources" placeholder
+            // even when real, resolvable evidence existed. Rebuilding it
+            // directly from businessResearch.evidence (the actual
+            // registry those [R#] identifiers resolve against) guarantees
+            // real titles/publishers/URLs every time, for every report,
+            // not just the timeout-fallback path.
+            parsedReport.sourcesAssumptions = buildRealSourcesAssumptionsField(
+              businessResearch,
+              responseLanguage
+            );
             const reportMetadataContext = createReportMetadataContext({
               prompt: promptText,
               report: parsedReport,

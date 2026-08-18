@@ -392,6 +392,29 @@ export function readFounderReadinessMetricValue(
   investmentScore?: ReportInvestmentScore,
   content?: string
 ) {
+  // Reproduces a real, confirmed production bug: this used to read
+  // investmentScore.decisionEngine.founderScore FIRST (via
+  // readFounderReadinessMetrics, an anchored per-array-item regex over
+  // founder.reasoning) and only fell back to the report's own rendered
+  // text when that lookup came up empty. The report's founderScore
+  // section (buildCanonicalFounderScore in plan-executor.ts) is built
+  // from that SAME founder.reasoning data but with a different, more
+  // permissive extraction (a non-anchored search across the whole joined
+  // reasoning string) and a different overall-score formula entirely (a
+  // weighted average of the per-dimension scores, not the engine's own
+  // top-level founderScore.score) -- so the two paths could, and did,
+  // disagree on the exact same dimension for the exact same report. The
+  // rendered text is the single, already-consistent, authoritative
+  // source every other part of the report (and the reader) sees, so it
+  // must win whenever it has a parseable value; investmentScore is now
+  // only a defensive fallback for the rare case where no report text is
+  // available at all (e.g. a still-loading preview).
+  const textValue = readFounderReadinessTextMetric(content, label);
+
+  if (textValue !== null) {
+    return textValue;
+  }
+
   const metrics = readFounderReadinessMetrics(investmentScore);
   const values: Record<string, number | null> = {
     "Founder Readiness Score": metrics.founderReadinessScore,
@@ -404,7 +427,7 @@ export function readFounderReadinessMetricValue(
     "Founder Evidence": metrics.founderEvidence,
   };
 
-  return values[label] ?? readFounderReadinessTextMetric(content, label);
+  return values[label] ?? null;
 }
 
 export function normalizeFounderReadinessScoreText(

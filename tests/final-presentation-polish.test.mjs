@@ -185,7 +185,39 @@ test("English default unavailable copy never leaks the raw 'not provided' / 'can
 
   assert.doesNotMatch(output, /not provided/i);
   assert.doesNotMatch(output, /cannot be calculated from available evidence/i);
-  assert.match(output, /requires additional verified data before this can be shown/i);
+  // The generic fallback now embeds the field's own label so two
+  // different unmatched fields never produce byte-identical text (see
+  // the dedicated "no verbatim-repeated fallback sentence" test below).
+  assert.match(output, /Some Unlabeled Figure requires verified supporting data before this can be shown/i);
+});
+
+test("two different fields that both fall through to the generic fallback never produce byte-identical unavailable text", () => {
+  // Reproduces a real production bug found via live report generation:
+  // the same bare fallback sentence ("requires additional verified data
+  // before this can be shown") appeared verbatim 6+ times across one
+  // real PDF (Scenario Analysis, WTP, Revenue, Next 30 Days, Next 6
+  // months), because every field label that didn't match one of the
+  // narrow financial-metric categories fell through to one shared,
+  // generic constant with no per-field variation at all.
+  const wtpOutput = labelModelDerivedFinancialClaims({
+    content: "WTP: $500k",
+    metricValues: ["$500k"],
+    language: "English",
+    sourceContext: "AI decision platform for SMEs",
+  });
+  const nextStepsOutput = labelModelDerivedFinancialClaims({
+    content: "Next 30 Days: $500k",
+    metricValues: ["$500k"],
+    language: "English",
+    sourceContext: "AI decision platform for SMEs",
+  });
+
+  assert.notEqual(wtpOutput, nextStepsOutput);
+  // WTP is a known category (willingness to pay is grouped with CAC/LTV
+  // as a customer-acquisition-evidence concept); "Next 30 Days" matches
+  // no category and hits the generic, label-embedding fallback.
+  assert.match(wtpOutput, /requires real customer acquisition and retention data/i);
+  assert.match(nextStepsOutput, /Next 30 Days requires verified supporting data/i);
 });
 
 test("a line about the already-established buyer/beachhead reuses the known fact instead of claiming it is unavailable", () => {
@@ -396,5 +428,117 @@ test("plan-executor.ts passes metricValues: [] specifically for the founderScore
     src,
     /metricValues: field === "founderScore" \? \[\] : Object\.values\(context\.metrics\)\.map\(/,
     "founderScore's metricValues exclusion has diverged from plan-executor.ts"
+  );
+});
+
+test("a bare evidence-classification tag the model mistakenly wrote as a content label is never turned into a nonsensical fallback line", () => {
+  // Reproduces a real production bug found via live report generation:
+  // the model wrote its own required evidence-classification tag
+  // ("Planlama varsayımı:"/"Planning assumption:") as if it were a
+  // content label directly followed by a value, instead of an inline
+  // annotation. fieldLabel extraction then treated the tag word itself
+  // as "the field name" and generated a meaningless duplicate line:
+  // "Planlama varsayımı: mevcut kanıtlarla hesaplanamıyor; doğrulanmış ek
+  // veri gerekir" -- an explanation for a "metric" called "Planning
+  // assumption", which doesn't exist.
+  const output = labelModelDerivedFinancialClaims({
+    content: "Planlama varsayımı: Gelir $842k'a çıkar. Risk: Yürütme riski: Yürütme hazırlığı: 30%.",
+    metricValues: ["$842k", "30%"],
+    language: "Turkish",
+    sourceContext: "otel SaaS platformu",
+  });
+
+  assert.doesNotMatch(output, /Planlama varsayımı: mevcut kanıtlarla/);
+  // The clause is left untouched (deferred to enforcePlanReportLanguage's
+  // later tag-cleanup pass), so the model's own sentence survives.
+  assert.match(output, /^Planlama varsayımı: Gelir \$842k'a çıkar\./m);
+});
+
+test("a known buyer/beachhead fact used once for an already-labeled clause is never reused again for a later, unrelated clause in the same field", () => {
+  // Reproduces a real production bug found via live report generation: a
+  // businessModel field whose first clause already correctly stated
+  // "Kim öder: Otel işletmesi (B2B)." (matched via knownFactForLabel, the
+  // label-text path) still had a much LATER, unrelated flagged clause
+  // ("Tekrarlayan mantık:"/Recurring logic) overwritten with the SAME
+  // buyer fact via the field-level fallback, producing "Tekrarlayan
+  // mantık: öngörülen ilk kullanıcılar" -- a fallback placeholder
+  // substituted into a sentence that has nothing to do with who pays.
+  const output = labelModelDerivedFinancialClaims({
+    content:
+      "Kim öder: Otel işletmesi (B2B). Ne için öder: abonelik. " +
+      "Tekrarlayan mantık: pilotten gelir artışı $842k'a çıkar.",
+    metricValues: ["$842k"],
+    knownFacts: { buyer: "öngörülen ilk kullanıcılar", beachhead: "öngörülen ilk kullanıcılar" },
+    fieldName: "businessModel",
+    language: "Turkish",
+    sourceContext: "otel SaaS platformu",
+  });
+
+  assert.match(output, /^Kim öder: Otel işletmesi \(B2B\)\./m);
+  assert.doesNotMatch(output, /Tekrarlayan mantık: öngörülen ilk kullanıcılar/);
+});
+
+test("a Turkish metric label (e.g. 'Aylık Nakit Yakımı') resolves to the same computed value the Financial Dashboard already shows, instead of a contradictory 'unavailable' message", () => {
+  // Reproduces a real production bug found via live report generation:
+  // knownMetricValueForLabel's alias map only had English metric names,
+  // so a Turkish report's own model-generated prose (which names metrics
+  // by their Turkish label, e.g. "Aylık Nakit Yakımı", "Finansal Pist",
+  // "Başabaş") could never match its own already-computed value -- it
+  // fell through to a generic "unavailable" message while the Financial
+  // Dashboard, built from the exact same metric object, showed a
+  // concrete number for the same field. Financial-claim-labeling.ts's
+  // metricLabelAliases now covers the common bare Turkish forms;
+  // plan-executor.ts's call site also adds each metric's own localized
+  // label (localizeMetricLabel) as a key into metricDisplayValues.
+  const output = labelModelDerivedFinancialClaims({
+    content: "Aylık Nakit Yakımı: $248k/ay seviyesinde. Finansal Pist: 22.4 ay sürer. Başabaş: 45. ayda gerçekleşir.",
+    metricValues: ["$248k", "22.4", "45"],
+    metricDisplayValues: {
+      "monthly burn": "$248k/month",
+      "aylık nakit yakımı": "$248k/month",
+      "runway": "22.4 months",
+      "finansal pist": "22.4 months",
+      "break-even month": "Month 45",
+      "başabaş ayı": "Month 45",
+    },
+    language: "Turkish",
+    sourceContext: "otel SaaS platformu",
+  });
+
+  assert.doesNotMatch(output, /mevcut kanıtlarla hesaplanamıyor/);
+  assert.match(output, /Aylık Nakit Yakımı: \$248k\/month \(Planlama varsayımı\)/);
+  assert.match(output, /Finansal Pist: 22\.4 months \(Planlama varsayımı\)/);
+  assert.match(output, /Başabaş: Month 45 \(Planlama varsayımı\)/);
+});
+
+test("the generic 'Unspecified business model' placeholder is replaced by the report's own already-detected business model classification when available", () => {
+  // Reproduces a real production bug found via live report generation:
+  // "Unspecified business model" appeared in the Business Model section
+  // under "Recurrence" -- a raw-sounding placeholder leaking into user-
+  // facing prose ("Recurring logic: Unspecified business model") instead
+  // of the report's own real, specific, already-detected classification.
+  const output = labelModelDerivedFinancialClaims({
+    content: "Recurring logic: Professional Services renewal cadence.",
+    metricValues: [],
+    detectedBusinessModelLabel: "subscription software",
+    language: "English",
+    sourceContext: "AI decision platform for SMEs",
+  });
+
+  assert.doesNotMatch(output, /Unspecified business model/);
+  assert.match(output, /Recurring logic: subscription software renewal cadence\./);
+});
+
+test("plan-executor.ts adds each metric's own localized label as an extra metricDisplayValues key (drift check)", () => {
+  const src = readFileSync("app/lib/report-jobs/plan-executor.ts", "utf8");
+  assert.match(
+    src,
+    /const localizedLabel = localizeMetricLabel\(metric\.label, language\)\.toLowerCase\(\);/,
+    "the localized-label metricDisplayValues key has diverged from plan-executor.ts"
+  );
+  assert.match(
+    src,
+    /detectedBusinessModelLabel: context\.inputs\.businessModel,/,
+    "the detectedBusinessModelLabel wiring has diverged from plan-executor.ts"
   );
 });
