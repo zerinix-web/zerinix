@@ -2230,21 +2230,36 @@ function createPlanFieldFallback(
     shortBusinessLabelSource.length <= 60
       ? shortBusinessLabelSource
       : `${shortBusinessLabelSource.slice(0, 60).replace(/\s+\S*$/, "")}…`;
+  // Confirmed live: the narrative fallback fields below used a rigid
+  // "[Section] for [name]:" template regardless of what was actually
+  // known about the business -- read as generic placeholder text even
+  // though shortBusinessLabel varied. These already-detected, real
+  // classification values (the same ones the financial model and
+  // Financial Assumptions section use) let the fallback state an actual,
+  // business-specific fact instead of a fill-in-the-blank instruction
+  // when a section falls back at all. Defaults only apply when context
+  // itself is unavailable (e.g. a section fallback requested before the
+  // financial model was built).
+  const industryLabel = context?.inputs.industry || "the detected industry";
+  const targetCustomerLabel = context?.inputs.targetCustomer || "the primary target buyer";
+  const businessModelLabel = context?.inputs.businessModel || "the detected business model";
+  const geographyLabel = context?.inputs.geography || "the target market";
+  const pricingModelLabel = context?.inputs.pricingModel || "the detected pricing approach";
 
   const fallbackByField: Record<PlanReportField, string> = {
     executiveSummary: `Decision summary: ${businessContext} requires focused validation before scaling capital. The report should be read as a directional founder diligence memo until primary customer, pricing, and cost evidence is verified.`,
-    problem: `Customer pain: ${businessContext} should focus on the most expensive workflow, budget pressure, or adoption friction faced by the target buyer. Validate urgency through direct customer interviews before committing growth spend.`,
-    solution: `Product thesis for ${shortBusinessLabel}: the solution must address the core buyer pain with a narrow initial scope, measurable outcome, and a defensible wedge. Validate that users prefer this workflow over current alternatives.`,
-    targetCustomer: `Target customer for ${shortBusinessLabel}: prioritize the beachhead ICP with the clearest pain, budget ownership, short adoption path, and measurable willingness to pay. Exclude segments with weak urgency or long procurement cycles.`,
-    marketOpportunity: `Market opportunity for ${shortBusinessLabel}: the opportunity depends on reachable demand, competitive gaps, timing, and expansion potential. Validate market pull before assuming broad category growth converts into obtainable revenue.`,
-    competitorLandscape: `Competitor landscape for ${shortBusinessLabel}: compare direct competitors, substitutes, incumbents, and do-nothing alternatives. The investable gap must be a specific buyer outcome or distribution wedge, not a generic feature difference.`,
-    businessModel: `Business model for ${shortBusinessLabel}: revenue should map directly to the buyer value metric, expected usage, retention loop, and delivery cost. Validate that pricing, gross margin, and payback can compound at the chosen scale.`,
+    problem: `Based on the detected context, the buyers most affected are ${targetCustomerLabel} within ${industryLabel}; the priority is validating which single workflow costs them the most time, money, or risk today, since that determines urgency and willingness to pay. Confirm this directly through customer interviews before committing growth spend.`,
+    solution: `Given the ${businessModelLabel} model detected for this business, the solution should map directly to removing the highest-cost step in the current workflow of ${targetCustomerLabel}. The near-term validation task is confirming that users prefer this approach over their existing alternative.`,
+    targetCustomer: `The most likely beachhead, based on the detected business context, is ${targetCustomerLabel}. Prioritizing this segment over broader ones keeps adoption friction low and buyer budget ownership clear, and should be confirmed through direct outreach before expanding scope.`,
+    marketOpportunity: `Within ${industryLabel} in ${geographyLabel}, the addressable opportunity depends on how much of the reachable demand this business can convert given competitive gaps and timing. The detected context points to a narrower, more specific opportunity than the broad category, which should be sized directly rather than assumed.`,
+    competitorLandscape: `Direct competitors, substitutes, and status-quo alternatives within ${industryLabel} should be mapped against this business's specific wedge. The detected ${businessModelLabel} model suggests differentiation is more likely to come from execution and distribution than from a generic feature gap.`,
+    businessModel: `The detected pricing approach (${pricingModelLabel}) should map directly to the value realized by ${targetCustomerLabel}, with revenue tied to actual usage or outcomes rather than a flat assumption. Gross margin and payback need validation against this specific model before it is scaled.`,
     tamSamSom: `TAM / SAM / SOM: Market sizing requires verified category boundaries, reachable customer segments, and a defensible near-term obtainable share. Treat any missing sizing input as a validation requirement before investment.`,
     swotAnalysis: `Strengths:\n- Focused business context and founder-controlled validation path.\nWeaknesses:\n- Evidence quality is incomplete until customer and pricing proof is collected.\nOpportunities:\n- Narrow beachhead execution can reveal a repeatable wedge.\nThreats:\n- Competitive response, CAC inflation, or weak retention can reduce investability.`,
-    portersFiveForces: `Porter's Five Forces for ${shortBusinessLabel}: assess rivalry, new entrants, buyer power, supplier power, and substitutes through the lens of founder execution. The key implication is whether the company can build a protected wedge before CAC or switching friction rises.`,
-    pricingStrategy: `Pricing strategy for ${shortBusinessLabel}: anchor pricing to measurable buyer value, willingness to pay, and delivery cost. Test entry packaging, expansion triggers, and discount discipline before locking the model.`,
-    goToMarketPlan: `Go-to-market plan for ${shortBusinessLabel}: start with the beachhead segment, one primary channel, a clear proof asset, and a measurable first-customer target. Scale only after CAC, conversion, and retention signals are repeatable.`,
-    salesStrategy: `Sales strategy for ${shortBusinessLabel}: use founder-led discovery to identify budget owner, trigger event, buying objections, pilot scope, and close criteria. A repeatable sales signal requires consistent conversion from qualified conversations to paid commitments.`,
+    portersFiveForces: `Within ${industryLabel}, the forces most likely to shape this business are buyer power (given the alternatives available to ${targetCustomerLabel}) and the ease of new entrants given the detected ${businessModelLabel} model. The key question is whether a defensible wedge can be built before competitive or switching pressure rises.`,
+    pricingStrategy: `Pricing should anchor to the value realized by ${targetCustomerLabel} under a ${pricingModelLabel} approach, not to cost-plus assumptions. Entry packaging and expansion triggers should be tested directly with this segment before the model is locked in.`,
+    goToMarketPlan: `The most efficient path to first revenue is likely a single channel reaching ${targetCustomerLabel} directly, validated with a concrete proof asset before any spend is scaled. Conditions in ${geographyLabel} should inform channel choice rather than a generic multi-channel plan.`,
+    salesStrategy: `For ${targetCustomerLabel}, the sales process should be founder-led at this stage, focused on identifying the real budget owner and the event that triggers a purchase decision. A repeatable motion requires consistent conversion from qualified conversations to paid commitments before hiring a sales team.`,
     unitEconomics: `Unit economics: Validate ARPA or ACV, gross margin, CAC, LTV, payback, and retention before scaling. The most important assumption is whether acquisition cost and payback remain viable as the channel expands.`,
     financialDashboard: `Financial dashboard: Track revenue, gross margin, CAC, LTV, payback, burn, runway, EBITDA, break-even timing, and investment needed from one consistent assumption set. Treat missing values as validation gaps.`,
     scenarioAnalysis: `Worst Case: Demand or CAC underperforms, extending payback and reducing runway.\nBase Case: The model follows current assumptions with controlled validation spend.\nBest Case: Conversion and retention improve, allowing faster capital deployment after proof points are met.`,
@@ -3911,12 +3926,13 @@ function createGroundedBusinessTimeoutFallback({
   language: ResponseLanguage;
 }) {
   const report = parseFullPlanReport("{}", context, language);
-  const timeoutDisclosure =
-    language === "Turkish"
-      ? "Rapor sentez sağlayıcısı süre bütçesine ulaştı. Aşağıdaki karar analizi; doğrulanmış araştırma kanıtları, tutarlı finansal model ve mevcut kalite kapıları kullanılarak tamamlandı."
-      : "The report synthesis provider reached its time budget. The decision analysis was completed from verified research evidence, the consistent financial model, and the existing quality gates.";
-
-  report.executiveSummary = `${report.executiveSummary}\n\n${timeoutDisclosure}`;
+  // Internal timeout/debug disclosure text used to be appended directly
+  // onto the user-facing executiveSummary here -- confirmed live, this
+  // leaked internal synthesis-provider timing information ("The report
+  // synthesis provider reached its time budget...") into the final
+  // report. The report itself is still built entirely from verified
+  // research evidence and the consistent financial model regardless, so
+  // no user-facing disclosure is needed.
   report.sourcesAssumptions = [
     report.sourcesAssumptions,
     buildRealSourcesAssumptionsField(research, language),
@@ -7388,18 +7404,28 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
                 : "GenerationFailed");
             const providerTimedOut =
               /timed out|timeout|aborted|abort/i.test(errorMessage);
-            // A quality-gate rejection means the model DID respond in time
-            // with real content -- it just didn't clear a content-quality
-            // bar (e.g. too much filler/duplicate text). That is not a
-            // transient/retryable failure (see worker.ts's
-            // isTransientFailure), so without this the job hard-fails with
-            // no report at all, which is strictly worse for the user than
-            // the evidence-grounded fallback already used for timeouts. The
-            // quality gate itself, and its threshold, are untouched -- a
-            // report that fails it still never reaches the user as its own
-            // (rejected) text.
-            const shouldUseGroundedFallback =
-              providerTimedOut || error instanceof ExecutiveQualityGateError;
+            // CRITICAL PRODUCTION FIX: any failure at this stage -- timeout,
+            // quality-gate rejection, or the full-report JSON failing parse/
+            // schema/isolation/contradiction validation inside
+            // parseFullPlanReport/normalizeFullPlanReport -- means the raw
+            // model output for this request cannot be trusted as-is. The
+            // narrow version of this check (timeout or quality-gate only)
+            // let every OTHER failure reason (a JSON parse error, a field
+            // matching isReportGenerationFailureText, an isolation/decision-
+            // contradiction violation) fall through to the single-field
+            // "Plan report generation failed at ..." stub below instead --
+            // which enqueues ONLY executiveSummary and leaves every other
+            // required field absent from the stream, so worker.ts's schema
+            // check always throws "Report payload is missing required
+            // sections" for the other 23 fields. The evidence-grounded
+            // fallback is the ONLY path that guarantees every required
+            // field is populated (see parseFullPlanReport("{}", ...) inside
+            // createGroundedBusinessTimeoutFallback), so it must be used for
+            // every failure here, not just the two previously recognized
+            // reasons. The quality gate itself, and its threshold, are
+            // untouched -- a report that fails it still never reaches the
+            // user as its own (rejected) text.
+            const shouldUseGroundedFallback = true;
 
             if (shouldUseGroundedFallback) {
               const fallbackReport = createGroundedBusinessTimeoutFallback({
@@ -7437,12 +7463,16 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
                 totalMs: Date.now() - pipelineStartedAt,
               });
               logOperationalInfo(
-                "[api:plan] report provider deadline or quality gate used grounded fallback",
+                "[api:plan] full report generation failed, used grounded fallback",
                 {
                   reportRequestId: reportRequestId || null,
                   evidenceCount: businessResearch.evidence.length,
                   elapsedMs: Date.now() - pipelineStartedAt,
-                  reason: providerTimedOut ? "timeout" : "quality_gate",
+                  reason: providerTimedOut
+                    ? "timeout"
+                    : error instanceof ExecutiveQualityGateError
+                      ? "quality_gate"
+                      : "generation_error",
                 }
               );
               return;

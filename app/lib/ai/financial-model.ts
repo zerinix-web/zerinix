@@ -234,18 +234,42 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
       "inferred early adopters",
       normalized
     ),
-    geography: firstMatching(
-      [
-        [/\b(us|usa|united states|america)\b/, "United States"],
+    // Confirmed live: a prompt naming "North America + Europe" was
+    // silently collapsed to just "United States" -- firstMatching only
+    // ever returns its first match, and the bare "america" alternative
+    // below matched inside "North America" before the "europe" pattern
+    // was ever considered, discarding the region the user actually
+    // named (and the second region entirely). Every distinct region
+    // mentioned is now collected and joined, instead of picking exactly
+    // one and dropping the rest.
+    geography: (() => {
+      const hasNorthAmerica = /\bnorth america\b/.test(normalized);
+      const regionPatterns: Array<[RegExp, string]> = [
+        [/\b(us|usa|united states)\b/, "United States"],
         [/\b(uk|united kingdom|london)\b/, "United Kingdom"],
         [/\b(europe|eu|germany|france|italy|spain)\b/, "Europe"],
         [/\b(turkey|turkiye|tuerkiye|istanbul|türkiye)\b/, "Turkey"],
         [/\b(gcc|uae|dubai|saudi|qatar)\b/, "GCC / Middle East"],
         [/\b(global|worldwide|international)\b/, "global"],
-      ],
-      looksLikeTurkishPrompt(prompt) ? "Turkey" : UNSPECIFIED_GEOGRAPHY,
-      normalized
-    ),
+      ];
+      const matchedRegions = new Set(
+        regionPatterns
+          .filter(([pattern]) => pattern.test(normalized))
+          .map(([, value]) => value)
+      );
+
+      if (hasNorthAmerica) {
+        matchedRegions.add("North America");
+      } else if (/\bamerica\b/.test(normalized)) {
+        matchedRegions.add("United States");
+      }
+
+      if (matchedRegions.size > 0) {
+        return [...matchedRegions].join(" + ");
+      }
+
+      return looksLikeTurkishPrompt(prompt) ? "Turkey" : UNSPECIFIED_GEOGRAPHY;
+    })(),
     pricingModel: firstMatching(
       [
         [/\b(kahve|coffee|espresso|roastery|specialty coffee|speciality coffee|premium kahve)\b/, "D2C unit sales, recurring subscriptions, and B2B wholesale accounts"],
