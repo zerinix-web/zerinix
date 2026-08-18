@@ -431,9 +431,30 @@ function deriveBusinessDescriptionFromSections(
 const STRAY_CITATION_FIELD_VALUES =
   /^(?:user|assistant|system|yes|no|n\/a|na|none|unknown|null|undefined)$/i;
 
+// Confirmed live: a Sources page entry titled "FPDS (U.S." -- an opening
+// paren with no matching close, and ending on an abbreviation dot rather
+// than a real word -- reads as a genuinely truncated title, not a short
+// but complete one. A real title/publisher never has more open than
+// closed parens, and never ends mid-abbreviation on a bare single
+// uppercase letter followed by a period (an initial that was clearly cut
+// off before the next word). Catching this shape here (shared by both
+// the title and organization/publisher checks) means a broken entry like
+// this is excluded from the Sources page entirely rather than displayed
+// with a dangling, unfinished-looking name.
+function looksTruncated(value: string) {
+  const openParens = (value.match(/\(/g) || []).length;
+  const closeParens = (value.match(/\)/g) || []).length;
+  if (openParens > closeParens) return true;
+  return /\b[A-Z]\.\s*$/.test(value.trim());
+}
+
 function isPlausibleCitationField(value = "", minLength = 3) {
   const trimmed = value.trim();
-  return trimmed.length >= minLength && !STRAY_CITATION_FIELD_VALUES.test(trimmed);
+  return (
+    trimmed.length >= minLength &&
+    !STRAY_CITATION_FIELD_VALUES.test(trimmed) &&
+    !looksTruncated(trimmed)
+  );
 }
 
 // parseCitations's "ORG — TITLE" shape below exists to catch the model's
@@ -819,15 +840,30 @@ const founderScorePdfDimensionMetrics = [
   { label: "Founder Evidence", aliases: ["Founder Evidence", "Kurucu Kanıtı"] },
 ];
 
+// CAC deliberately removed: the kpiDashboard prompt (plan.ts) explicitly
+// instructs the model "Do not include CAC, LTV, Gross Margin, Payback,
+// ARR, MRR, Burn, or Runway; those belong to Unit Economics and Financial
+// Dashboard" -- so a CAC card here was always structurally wrong, and
+// with no proper "CAC: $X" line ever written for this section, its value
+// extraction fell through to the bare-score fallback below, which
+// (confirmed live, e-commerce inventory SaaS report) rendered CAC's
+// dollar figure with a nonsensical "%" suffix ("CAC 51%"). CAC already
+// has its correct home -- Unit Economics/Financial Dashboard -- with
+// correct currency formatting.
+// isPercentage marks which of these are genuinely 0-100% completion/
+// funnel metrics (Acquisition/Activation/Retention/Conversion) -- only
+// those may fall back to a bare extracted number with a "%" suffix.
+// Revenue/WTP/Sales cycle have no fixed unit (could be currency, a
+// count, or a duration), so guessing "%" for them is exactly the same
+// class of bug CAC had; see extractKpiValueFromSnippet below.
 const kpiDashboardMetrics = [
-  { label: "Acquisition", aliases: ["Acquisition", "acquisition", "Edinim"] },
-  { label: "Activation", aliases: ["Activation", "activation", "Aktivasyon"] },
-  { label: "Retention", aliases: ["Retention", "retention", "Elde Tutma"] },
-  { label: "Revenue", aliases: ["Revenue", "revenue", "Gelir"] },
-  { label: "CAC", aliases: ["CAC"] },
-  { label: "WTP", aliases: ["WTP", "Ödeme İsteği"] },
-  { label: "Sales cycle", aliases: ["Sales cycle", "Satış Döngüsü"] },
-  { label: "Conversion", aliases: ["Conversion", "Dönüşüm"] },
+  { label: "Acquisition", aliases: ["Acquisition", "acquisition", "Edinim"], isPercentage: true },
+  { label: "Activation", aliases: ["Activation", "activation", "Aktivasyon"], isPercentage: true },
+  { label: "Retention", aliases: ["Retention", "retention", "Elde Tutma"], isPercentage: true },
+  { label: "Revenue", aliases: ["Revenue", "revenue", "Gelir"], isPercentage: false },
+  { label: "WTP", aliases: ["WTP", "Ödeme İsteği"], isPercentage: false },
+  { label: "Sales cycle", aliases: ["Sales cycle", "Satış Döngüsü"], isPercentage: false },
+  { label: "Conversion", aliases: ["Conversion", "Dönüşüm"], isPercentage: true },
 ];
 
 const unitEconomicsMetrics = [
@@ -1015,6 +1051,20 @@ function extractCanonicalFinancialMetricValue(
   return compactPdfMetricValue(rawValue);
 }
 
+// The report's own generation prompt requires every numeric claim to be
+// tagged Verified/Estimated/Assumption/AI Analysis (or the Turkish
+// equivalent) -- the model sometimes writes that tag directly after the
+// value with no colon/dash/pipe separator at all ("CAC: $51 AI Analysis",
+// "Gross Margin: 46% Assumption"), which none of the delimiter-based
+// splits above catch (they all require a punctuation separator before
+// the matched word). Confirmed live (e-commerce inventory SaaS report):
+// this left the raw tag word concatenated straight onto the card's
+// value. Stripped as a trailing suffix, with or without parens/a leading
+// dash, since the tag only ever appears at the end of an otherwise-clean
+// value here.
+const evidenceTagSuffixPattern =
+  /\s*[-–—]?\s*\(?\b(?:Verified|Estimated|Assumption|Planning assumption|AI Analysis|Model estimate|Model-derived estimate|Approximate|Doğrulanmış|Tahmini|Yaklaşık|Varsayım|Planlama varsayımı|AI Analizi|Model çıkarımı|Model tahmini)\b\)?\s*$/i;
+
 function formatMetricCardValue(value: string) {
   const cleanValue = value.trim().replace(/\*\*/g, "");
 
@@ -1026,6 +1076,7 @@ function formatMetricCardValue(value: string) {
     .split(/\b(?:formula|assumptions?|confidence|benchmark(?: source| comparison)?|explanation|justification|source)\b\s*[:\-–—]/i)[0]
     .split(/\s+(?:based on|using|assuming|calculated from|derived from)\s+/i)[0]
     .split(/\s*[;|]\s*/)[0]
+    .replace(evidenceTagSuffixPattern, "")
     .replace(/^["'`]+|["'`]+$/g, "")
     .replace(/(\d)\.\s+(\d)(\s*[kKmMbB%])?/g, "$1.$2$3")
     .replace(/(\d),\s+(\d{3})/g, "$1,$2")
@@ -1193,14 +1244,24 @@ function computeTamSamSomRadii(
 }
 
 function isMobilityReportContent(content: string) {
-  // "yearly revenue"/"monthly revenue" were deliberately removed from this
-  // list: they are the mobility fallback labels themselves (see
-  // mobilityFinancialDashboardMetrics above), not a mobility signal --
-  // financialAssumptions' own prompt instructs every report, regardless
-  // of vertical, to write "MRR/Monthly Revenue", so keeping them here
-  // caused ordinary non-mobility reports to be mislabeled with
-  // rideshare-specific metric names.
-  return /\b(scooter|micromobility|micro mobility|shared mobility|bike sharing|bikeshare|per-ride|urban riders|commuters|fleet utilization|rental|rider cac|rider ltv|active riders)\b/i.test(
+  // Confirmed live (e-commerce inventory SaaS report): the previous
+  // loose keyword list (scooter/rental/commuters/fleet utilization/...)
+  // false-positived on ordinary, unrelated mentions of those same common
+  // words elsewhere in a non-mobility report (e.g. "equipment rental" or
+  // "delivery fleet" used only as an illustrative example), mislabeling
+  // that report's Financial Dashboard with "Rider CAC"/"Rider LTV".
+  // financial-model.ts's own server-side isMobility flag (the ONE thing
+  // that actually decides whether "Rider CAC"/"Rider LTV" get used in
+  // the first place) is `inputs.industryKey === "mobility"`, and every
+  // report's Financial Assumptions section always includes
+  // `Industry benchmark: ${benchmark.label}` verbatim (sharedAssumptions
+  // in financial-model.ts) -- benchmark.label is "Mobility / scooter
+  // rental" exactly when industryKey is "mobility". Matching that one
+  // deterministic line (its Turkish translation too) instead of loose
+  // topic words ties this client-side check to the same signal the
+  // server already used, eliminating false positives from incidental
+  // word mentions anywhere else in the report.
+  return /\bIndustry benchmark:\s*Mobility \/ scooter rental\b|\bSektör referansı:\s*Mobilite \/ scooter kiralama\b/i.test(
     content
   );
 }
@@ -1802,22 +1863,45 @@ function extractCanonicalKpiSnippet(content: string, aliases: string[] | readonl
   return "";
 }
 
-function extractKpiValueFromSnippet(snippet: string, aliases: string[] | readonly string[]) {
+function extractKpiValueFromSnippet(
+  snippet: string,
+  aliases: string[] | readonly string[],
+  isPercentage: boolean
+) {
   const explicitValue = extractKpiObjectField(snippet, ["value", "değer", "current", "mevcut", "baseline", "metric"]);
   const targetValue = extractKpiObjectField(snippet, ["target", "hedef"]);
   const quantityValue = extractKpiQuantityValue(snippet);
-  const score = extractScoreFromAliases(snippet, aliases);
+  // A bare 1-3 digit number with no unit word attached (extractScore) is
+  // only safe to render as "N%" for metrics that are genuinely 0-100%
+  // completion/funnel figures. For everything else (Revenue, WTP, Sales
+  // cycle -- currency, counts, or durations with no fixed unit) guessing
+  // "%" produces exactly the CAC bug this was fixed for ("$51" rendered
+  // as "51%"); "Validation Required" is the honest fallback the
+  // kpiDashboard prompt itself already specifies for an unresolved
+  // metric, not a wrong unit slapped on a bare digit.
+  const score = isPercentage ? extractScoreFromAliases(snippet, aliases) : null;
   const value = explicitValue ||
     targetValue ||
     quantityValue ||
     (score === null ? "" : `${score}%`) ||
     "";
 
-  return isMissingKpiText(value) ? "Validation Required" : value;
+  // Also guards a genuinely empty value (nothing at all was resolved,
+  // e.g. a non-percentage metric like Revenue/WTP/Sales cycle with no
+  // score fallback available): the drawing code's own fallback for a
+  // falsy card value independently recomputes a bare score and appends
+  // "%" with no isPercentage awareness at all, so leaving `value` as ""
+  // here would let that same wrong-unit bug resurface downstream for
+  // every non-percentage metric, not just CAC.
+  return !value || isMissingKpiText(value) ? "Validation Required" : value;
 }
 
-function extractKpiValueFromAliases(content: string, aliases: string[] | readonly string[]) {
-  return extractKpiValueFromSnippet(extractKpiSnippet(content, aliases), aliases);
+function extractKpiValueFromAliases(
+  content: string,
+  aliases: string[] | readonly string[],
+  isPercentage: boolean
+) {
+  return extractKpiValueFromSnippet(extractKpiSnippet(content, aliases), aliases, isPercentage);
 }
 
 function isMissingKpiText(value: string) {
@@ -1913,7 +1997,7 @@ function extractKpiActionFromAliases(content: string, aliases: string[] | readon
 
 function normalizePdfKpiMetrics(content: string) {
   return kpiDashboardMetrics.map((metric) => {
-    const value = extractKpiValueFromAliases(content, metric.aliases);
+    const value = extractKpiValueFromAliases(content, metric.aliases, metric.isPercentage);
     const target = extractKpiTargetFromAliases(content, metric.aliases);
     const status = extractKpiStatusFromAliases(content, metric.aliases);
     const owner = extractKpiOwnerFromAliases(content, metric.aliases);

@@ -65,10 +65,20 @@ export function inferEvidenceLevel(input: {
     return "verified";
   }
 
-  if (/\b(cac|customer acquisition cost|ltv|lifetime value|payback)\b/i.test(evidenceContext)) {
-    return "validationRequired";
-  }
-
+  // Confirmed live (freelance graphic-design marketplace report): this
+  // used to unconditionally return "validationRequired" (displayed as
+  // "AI Analysis") for ANY metric whose label or context mentioned "cac"/
+  // "ltv"/"payback" -- but `evidenceContext` always includes the metric's
+  // own label, so a CAC card ALWAYS matched this on its label alone,
+  // regardless of what its own evidence text actually said (e.g. "CAC:
+  // $9k (Planning assumption), confidence=High" was still forced to "AI
+  // Analysis", contradicting the report's own Financial Assumptions
+  // section, which correctly showed the same metric as a planning
+  // assumption). CAC/LTV/Payback are computed metrics like any other in
+  // this engine, not inherently less trustworthy -- they now fall
+  // through to the same assumption/benchmark classification every other
+  // metric already uses, based on their own actual evidence text instead
+  // of their label.
   if (/\b(burn|runway|break[\s-]?even|investment needed|planning input|assumption|manual input|founder input|target|threshold|warning)\b/i.test(evidenceContext)) {
     return "planningAssumption";
   }

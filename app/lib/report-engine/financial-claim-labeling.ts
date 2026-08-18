@@ -232,25 +232,138 @@ export function labelModelDerivedFinancialClaims({
     return null;
   };
 
-  // Last-resort fallback for a field label that names no known metric
-  // category at all (e.g. "WTP" is covered above, but scenario labels
-  // like "Worst Case"/"Best Case" or roadmap labels like "Next 30 Days"
-  // never will be, since they are open-ended, not a fixed vocabulary).
-  // Confirmed live: the previous bare copy.unavailable fallback produced
-  // the exact same sentence, verbatim, for every unmatched label across
-  // an entire report -- 6+ times in one real PDF (Scenario Analysis,
-  // WTP, Revenue, Next 30 Days, Next 6 months all identical). This
-  // returns the complete line (the label embedded once, not a bare
-  // message meant to be prefixed again by the caller), guaranteeing two
-  // different fields can never produce byte-identical unavailable text
-  // again, without having to enumerate every possible label a model or
-  // canonical builder might ever use.
+  // Embedding the field label as the subject (below) stopped two DIFFERENT
+  // labels from ever colliding, but confirmed live (e-commerce inventory
+  // SaaS report): the explanatory clause after the subject was still one
+  // single fixed sentence for every field, so whenever the model produced
+  // an unlabeled/subjectless flagged line (or several fields' flagged
+  // lines shared a generic label), the same verbatim explanation still
+  // showed up 4+ times across otherwise-unrelated sections (Competitor
+  // Landscape, Scenario Analysis, both 30-60-90 roadmap lines). Each
+  // report field has a different KIND of evidence that would actually
+  // resolve its own gap -- a missing competitor claim needs named
+  // competitor data, a missing roadmap milestone needs execution/pilot
+  // evidence, a missing scenario needs the specific assumption it
+  // depends on -- so the explanation is now keyed by fieldName instead
+  // of being one generic sentence, on top of the existing per-label
+  // subject variation. Fields not listed here (executive summary,
+  // problem/solution, market sizing, unit economics, ...) keep the
+  // original generic evidence clause; those already get their own
+  // precise wording from specificCategoryUnavailableCopy above whenever
+  // the label names a known metric.
+  const fieldEvidenceContext: Partial<Record<string, { en: string; tr: string }>> = {
+    competitorLandscape: {
+      en: "the founder should share named competitor pricing, feature, or market-share data",
+      tr: "kurucunun isimlendirilmiş rakiplerin fiyatlandırma, özellik veya pazar payı verisini paylaşması gerekir",
+    },
+    scenarioAnalysis: {
+      en: "the founder should share the specific pricing, churn, or acquisition assumption this scenario depends on",
+      tr: "kurucunun bu senaryonun dayandığı fiyatlandırma, kayıp oranı veya edinim varsayımını paylaşması gerekir",
+    },
+    roadmap306090: {
+      en: "the founder should share the execution evidence (pilot results, signed LOIs, or channel test data) behind this milestone",
+      tr: "kurucunun bu kilometre taşının dayandığı yürütme kanıtını (pilot sonuçları, imzalı niyet mektupları veya kanal test verisi) paylaşması gerekir",
+    },
+    founderRoadmap: {
+      en: "the founder should share the execution or capability evidence behind this milestone",
+      tr: "kurucunun bu kilometre taşının dayandığı yürütme veya yetkinlik kanıtını paylaşması gerekir",
+    },
+    swotAnalysis: {
+      en: "the founder should share the customer, cost, or competitive evidence behind this claim",
+      tr: "kurucunun bu iddianın dayandığı müşteri, maliyet veya rekabet kanıtını paylaşması gerekir",
+    },
+    portersFiveForces: {
+      en: "the founder should share supplier, buyer, or competitive-intensity data specific to this force",
+      tr: "kurucunun bu güce özgü tedarikçi, alıcı veya rekabet yoğunluğu verisini paylaşması gerekir",
+    },
+    risks: {
+      en: "the founder should share the probability, impact, or mitigation evidence behind this risk",
+      tr: "kurucunun bu riskin dayandığı olasılık, etki veya azaltma kanıtını paylaşması gerekir",
+    },
+    kpis: {
+      en: "the founder should share the historical or pilot data this threshold depends on",
+      tr: "kurucunun bu eşiğin dayandığı geçmiş veya pilot verisini paylaşması gerekir",
+    },
+    kpiDashboard: {
+      en: "the founder should share the historical or pilot data this metric depends on",
+      tr: "kurucunun bu metriğin dayandığı geçmiş veya pilot verisini paylaşması gerekir",
+    },
+    pricingStrategy: {
+      en: "the founder should share willingness-to-pay or competitor pricing data behind this figure",
+      tr: "kurucunun bu değerin dayandığı ödeme isteği veya rakip fiyatlandırma verisini paylaşması gerekir",
+    },
+    goToMarketPlan: {
+      en: "the founder should share channel-test or early-traction data behind this figure",
+      tr: "kurucunun bu değerin dayandığı kanal testi veya erken çekiş verisini paylaşması gerekir",
+    },
+    salesStrategy: {
+      en: "the founder should share sales-cycle or pipeline-conversion data behind this figure",
+      tr: "kurucunun bu değerin dayandığı satış döngüsü veya boru hattı dönüşüm verisini paylaşması gerekir",
+    },
+    businessModel: {
+      en: "the founder should share the pricing or margin evidence behind this figure",
+      tr: "kurucunun bu değerin dayandığı fiyatlandırma veya marj kanıtını paylaşması gerekir",
+    },
+    // Confirmed live: a deterministic "AI Executive Insight" heading is
+    // reused for BOTH competitorLandscape's own insight AND tamSamSom's
+    // market-sizing insight (buildExecutiveInsight, called once per
+    // field with a different focus argument) -- if either flags with no
+    // field-specific context, it would fall back to the exact same
+    // subject AND the exact same generic suffix as a completely
+    // unrelated field's own fallback line. tamSamSom (and the other
+    // remaining fields below) get their own evidence clause so no two
+    // fields can ever produce a byte-identical full unavailable line.
+    tamSamSom: {
+      en: "the founder should share verified market-sizing data (industry reports or official statistics) behind this figure",
+      tr: "kurucunun bu değerin dayandığı doğrulanmış pazar büyüklüğü verisini (sektör raporu veya resmi istatistik) paylaşması gerekir",
+    },
+    executiveSummary: {
+      en: "the founder should share the primary evidence behind this decision-critical figure",
+      tr: "kurucunun bu karara etki eden değerin dayandığı birincil kanıtı paylaşması gerekir",
+    },
+    problem: {
+      en: "the founder should share customer-interview or support-ticket evidence behind this claim",
+      tr: "kurucunun bu iddianın dayandığı müşteri görüşmesi veya destek talebi kanıtını paylaşması gerekir",
+    },
+    solution: {
+      en: "the founder should share product usage or pilot-outcome evidence behind this claim",
+      tr: "kurucunun bu iddianın dayandığı ürün kullanım veya pilot sonucu kanıtını paylaşması gerekir",
+    },
+    targetCustomer: {
+      en: "the founder should share ICP interview or segment-sizing evidence behind this figure",
+      tr: "kurucunun bu değerin dayandığı ideal müşteri profili görüşmesi veya segment büyüklüğü kanıtını paylaşması gerekir",
+    },
+    marketOpportunity: {
+      en: "the founder should share independently sourced market-demand evidence behind this figure",
+      tr: "kurucunun bu değerin dayandığı bağımsız kaynaklı pazar talebi kanıtını paylaşması gerekir",
+    },
+    unitEconomics: {
+      en: "the founder should share the realized cost or revenue data behind this unit metric",
+      tr: "kurucunun bu birim metriğin dayandığı gerçekleşmiş maliyet veya gelir verisini paylaşması gerekir",
+    },
+    financialDashboard: {
+      en: "the founder should share the realized financial data behind this figure",
+      tr: "kurucunun bu değerin dayandığı gerçekleşmiş finansal veriyi paylaşması gerekir",
+    },
+    financialAssumptions: {
+      en: "the founder should share the planning input this assumption depends on",
+      tr: "kurucunun bu varsayımın dayandığı planlama girdisini paylaşması gerekir",
+    },
+  };
   const genericUnavailableCopyForLabel = (fieldLabel: string) => {
     const subject = fieldLabel.trim();
+    const fieldContext = fieldName ? fieldEvidenceContext[fieldName] : undefined;
+    const evidenceClause = fieldContext
+      ? language === "Turkish"
+        ? fieldContext.tr
+        : fieldContext.en
+      : language === "Turkish"
+        ? "kurucunun bu değerin dayandığı kanıtları paylaşması gerekir"
+        : "the founder should share the evidence behind this figure to calculate it";
 
     return language === "Turkish"
-      ? `${subject} için doğrulanmış veri bulunmadığından hesaplanamıyor; kurucunun bu değerin dayandığı kanıtları paylaşması gerekir`
-      : `${subject} requires verified supporting data before this can be shown; the founder should share the evidence behind this figure to calculate it`;
+      ? `${subject} için doğrulanmış veri bulunmadığından hesaplanamıyor; ${evidenceClause}`
+      : `${subject} requires verified supporting data before this can be shown; ${evidenceClause}`;
   };
 
   // Tracks which output lines are actually a generated unavailable-data
@@ -323,6 +436,20 @@ export function labelModelDerivedFinancialClaims({
   let knownFactAlreadyUsedForField =
     (fieldName === "businessModel" && buyerLabelPattern.test(content)) ||
     (fieldName === "goToMarketPlan" && beachheadLabelPattern.test(content));
+  // consolidateRepeatedUnavailableLines (below) only ever sees whole
+  // LINES, but a flagged clause is frequently one of several clauses on
+  // the same line, rejoined with the others via labeledClauses.join(" ")
+  // before consolidation ever runs -- so the exact fragment this
+  // generates is never actually present as a standalone entry in
+  // `lines`, and that later dedup pass can't recognize or merge it.
+  // Confirmed live: a roadmap bullet's own "Next 6 months: ...; Proof:
+  // [flagged]" and a later, different bullet's "Next 12 months: ...;
+  // Proof: [flagged]" produced the exact same "Proof: <explanation>"
+  // fragment twice in one field, invisible to the line-level dedup since
+  // neither whole line matched the other. Tracking every generated
+  // fragment directly at the point it's produced (not the line it ends
+  // up embedded in) catches this regardless of what else is on the line.
+  const seenGeneratedFragments = new Set<string>();
 
   const labelClause = (rawClause: string) => {
     let normalizedClause = rawClause;
@@ -396,6 +523,10 @@ export function labelModelDerivedFinancialClaims({
     const specificCopy = specificCategoryUnavailableCopy(fieldLabel);
     if (specificCopy) {
       const result = `${fieldLabel}: ${specificCopy}`;
+      if (seenGeneratedFragments.has(result)) {
+        return "";
+      }
+      seenGeneratedFragments.add(result);
       generatedUnavailableLines.add(result);
       return result;
     }
@@ -403,20 +534,33 @@ export function labelModelDerivedFinancialClaims({
     if (knownFactForField && !knownFactAlreadyUsedForField) {
       knownFactAlreadyUsedForField = true;
       const result = `${fieldLabel}: ${knownFactForField}`;
+      if (seenGeneratedFragments.has(result)) {
+        return "";
+      }
+      seenGeneratedFragments.add(result);
       generatedUnavailableLines.add(result);
       return result;
     }
 
     const result = genericUnavailableCopyForLabel(fieldLabel);
+    if (seenGeneratedFragments.has(result)) {
+      return "";
+    }
+    seenGeneratedFragments.add(result);
     generatedUnavailableLines.add(result);
     return result;
   };
 
   const labeled = content.split("\n").map((line) => {
     const clauses = splitIntoClauses(line);
-    const labeledClauses = clauses.map(labelClause);
+    // A clause dropped for repeating an already-shown explanation (see
+    // seenGeneratedFragments above) comes back as "" here -- filtered
+    // out before rejoining so the surviving clauses read as a clean
+    // sentence instead of leaving a double space or dangling label
+    // behind where the duplicate used to be.
+    const labeledClauses = clauses.map(labelClause).filter(Boolean);
 
-    return labeledClauses.length > 1 ? labeledClauses.join(" ") : labeledClauses[0];
+    return labeledClauses.length > 1 ? labeledClauses.join(" ") : labeledClauses[0] || "";
   });
 
   return consolidateRepeatedUnavailableLines(labeled, generatedUnavailableLines).join("\n");
@@ -438,6 +582,18 @@ function consolidateRepeatedUnavailableLines(
   generatedUnavailableLines: Set<string>
 ): string[] {
   const result: string[] = [];
+  // Confirmed live: the model sometimes repeats the same milestone label
+  // (e.g. "Next 30 Days") twice within one field -- once as the
+  // structured bullet, once again in a later summary sentence -- and if
+  // BOTH mentions independently flag as unverifiable, they each generate
+  // the exact same "label: reason" line. The lookahead merge below only
+  // ever catches CONSECUTIVE repeats; a second occurrence separated by
+  // other content (a different bullet, other prose) sailed straight
+  // through as a second, verbatim-identical line. This tracks every
+  // generated line already emitted anywhere earlier in the field (not
+  // just the immediately preceding one) and drops a later exact repeat
+  // instead of showing the same boilerplate explanation twice.
+  const seenGeneratedLines = new Set<string>();
   let index = 0;
 
   while (index < lines.length) {
@@ -448,6 +604,11 @@ function consolidateRepeatedUnavailableLines(
 
     if (!match) {
       result.push(line);
+      index += 1;
+      continue;
+    }
+
+    if (seenGeneratedLines.has(line)) {
       index += 1;
       continue;
     }
@@ -465,6 +626,7 @@ function consolidateRepeatedUnavailableLines(
       lookahead += 1;
     }
 
+    seenGeneratedLines.add(line);
     result.push(labels.length > 1 ? `${labels.join(", ")}: ${reason}` : line);
     index = lookahead > index + 1 ? lookahead : index + 1;
   }

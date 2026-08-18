@@ -402,8 +402,11 @@ const domainDefinitions: Record<
     ],
   },
   procurement: {
+    // Kept consistent with report-engine/domain.ts's own procurement
+    // signal (the one actually used for domain classification) -- see
+    // its comment for why bare "vendor"/"supplier" were removed.
     signals:
-      /\b(procurement|supplier|vendor|tender|rfp|sourcing|purchase order|tedarik|tedarikçi|ihale|satın alma)\b/i,
+      /\b(procurement|e-procurement|vendor management|vendor sourcing|vendor onboarding|supplier management|supplier onboarding|supplier sourcing|rfp management|request for proposal|purchase order (?:system|management|platform)|tender process|sourcing platform|tedarik zinciri|tedarikçi yönetimi|ihale süreci|satın alma platformu)\b/i,
     criticalFields: [
       "specification",
       "supplier_identity",
@@ -1115,6 +1118,57 @@ const researchSourceStages: Array<{
       "Search regional authorities, local chambers, local project documents, infrastructure operators, and credible local publications. Clearly label geographic scope.",
   },
 ];
+
+// Confirmed live: a Business Plan report for an e-commerce inventory SaaS
+// pulled its Sources page from World Health Organization, OECD, and a
+// U.S. federal procurement dataset (FPDS) -- researchSourceStages above
+// was written for real_estate/legal/procurement research (cadastral,
+// planning, court, registry are real-estate/legal vocabulary; central-
+// bank/multilateral institutions suit finance/procurement) and was being
+// applied unconditionally to every domain, including ordinary consumer/
+// SaaS/retail business ideas that have no legitimate government or
+// multilateral-institution evidence to find. A generic "business" idea
+// is actually best served by industry research firms, trade
+// publications, named competitor/product evidence, and review
+// platforms -- government and multilateral sources are still allowed
+// (e.g. census data for market sizing) but are no longer the FIRST,
+// dominant priority the model is steered toward.
+const businessResearchSourceStages: Array<{
+  id: ResearchSourceStage;
+  sourcePriority: string;
+  guidance: string;
+}> = [
+  {
+    id: "official_government",
+    sourcePriority: "industry and market research sources",
+    guidance:
+      "Search recognized market-research firms, industry associations, trade publications, and national statistical/census agencies for market size, growth rate, and industry-structure data specific to this exact product category. Do not search government procurement, cadastral, court, planning, or land-registry sources -- they do not apply to an ordinary consumer, retail, or software business.",
+  },
+  {
+    id: "authoritative_public",
+    sourcePriority: "competitor and product evidence",
+    guidance:
+      "Search named competitor company sites, product review platforms (e.g. G2, Capterra, TrustRadius, Trustpilot), app/marketplace listings, and funding or press coverage for real, named companies actively operating in this exact category or a closely adjacent one.",
+  },
+  {
+    id: "commercial_market",
+    sourcePriority: "commercial market sources",
+    guidance:
+      "Search established commercial databases, dated market listings, transaction platforms, company disclosures, and recognized industry research. Preserve dates, units, currency, and methodology.",
+  },
+  {
+    id: "regional_local",
+    sourcePriority: "regional and local sources",
+    guidance:
+      "Search regional business publications, local industry chambers, local market reports, and credible local news covering this exact category. Clearly label geographic scope.",
+  },
+];
+
+function getResearchSourceStages(domain: ResearchDomain) {
+  return domain === "business" || domain === "general"
+    ? businessResearchSourceStages
+    : researchSourceStages;
+}
 
 const RESEARCH_CONCURRENCY_LIMIT = 4;
 const ENTITY_EXTRACTION_TIMEOUT_MS = 15_000;
@@ -2569,6 +2623,13 @@ Respond in ${language}, while preserving evidence labels exactly in English.`;
         endpoint: "domain-research",
         operation: "openai_web_search",
       });
+      // See businessResearchSourceStages above: an ordinary business idea
+      // (e-commerce, SaaS, consumer/retail, ...) gets industry/competitor-
+      // appropriate source guidance instead of the real-estate/legal/
+      // procurement-oriented government-and-multilateral-institution
+      // waterfall, which was surfacing irrelevant sources like WHO/OECD/
+      // federal-procurement datasets on its Sources page.
+      const selectedStages = getResearchSourceStages(researchPlan.domain);
       const allEvidence: DomainResearchEvidence[] = [];
       const allFacts: ExtractedFact[] = [];
       const allTaskResults: ResearchTaskResult[] = [];
@@ -2584,7 +2645,7 @@ Respond in ${language}, while preserving evidence labels exactly in English.`;
       const researchRequestCache = new Map<string, Promise<OpenAIResponse>>();
 
       await mapWithConcurrency(
-        researchSourceStages,
+        selectedStages,
         RESEARCH_CONCURRENCY_LIMIT,
         async (stage, stageIndex) => {
         const requestStartedAt = new Date().toISOString();
@@ -2643,7 +2704,7 @@ ${queryPlan}
 
 ${marketCoverageInstruction}
 
-This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat the absence of results in an earlier stage as permission to skip this stage. Return only concrete facts supported by deep, citable source URLs. A provider homepage, contact page, search portal, or generic landing page is not evidence.`);
+This is stage ${stageIndex + 1} of ${selectedStages.length}. Do not treat the absence of results in an earlier stage as permission to skip this stage. Return only concrete facts supported by deep, citable source URLs. A provider homepage, contact page, search portal, or generic landing page is not evidence.`);
           const stageSignal = createResearchStageSignal({
             parentSignal: request.signal,
             timeoutMs: RESEARCH_PROVIDER_TIMEOUT_MS,
@@ -3093,8 +3154,8 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
               requestStartedAt,
               requestEndedAt,
               nextProvider:
-                stageIndex < researchSourceStages.length - 1
-                  ? `openai_web_search:${researchSourceStages[stageIndex + 1]?.id}`
+                stageIndex < selectedStages.length - 1
+                  ? `openai_web_search:${selectedStages[stageIndex + 1]?.id}`
                   : "tavily-search",
             });
             attemptsByTask.set(task.id, attempts);
@@ -3137,8 +3198,8 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
               requestStartedAt,
               requestEndedAt,
               nextProvider:
-                stageIndex < researchSourceStages.length - 1
-                  ? `openai_web_search:${researchSourceStages[stageIndex + 1]?.id}`
+                stageIndex < selectedStages.length - 1
+                  ? `openai_web_search:${selectedStages[stageIndex + 1]?.id}`
                   : "tavily-search",
             });
             attemptsByTask.set(task.id, attempts);
@@ -3190,9 +3251,9 @@ This is stage ${stageIndex + 1} of ${researchSourceStages.length}. Do not treat 
             unresolvedTasks,
             3,
             async (task) => {
-            const alternativeStage = researchSourceStages.find(
+            const alternativeStage = selectedStages.find(
               (stage) => stage.id === "regional_local"
-            ) || researchSourceStages[researchSourceStages.length - 1]!;
+            ) || selectedStages[selectedStages.length - 1]!;
             const alternativeQuery =
               buildTaskStageQueries({
                 task,

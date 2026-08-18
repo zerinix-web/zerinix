@@ -2110,7 +2110,15 @@ function enforcePlanReportLanguage(
         return `${convertTagWord(first)}/${convertTagWord(second)}`;
       }
     )
-    .replace(/\b(Estimated|Assumption)\b(?=\s*\))/gi, (_match, word) =>
+    // Confirmed live: the model sometimes already writes the full
+    // "Planning assumption" phrase itself (not the bare tag word this
+    // was written to catch), e.g. "$3k (Planning assumption)" -- and
+    // since "assumption" alone still matches \bAssumption\b right
+    // before the closing paren, this replaced it a second time,
+    // producing "$3k (Planning Planning assumption)". The negative
+    // lookbehind skips a match that's already the second word of
+    // "Planning assumption", so an already-correct phrase is left as-is.
+    .replace(/(?<!Planning\s)\b(Estimated|Assumption)\b(?=\s*\))/gi, (_match, word) =>
       word.toLowerCase() === "estimated" ? "Approximate" : "Planning assumption"
     )
     .replace(/\bAI Analysis\b(?=\s*[:).|\n]|$)/gim, "model-derived estimate")
@@ -2899,20 +2907,29 @@ function scorePercent(score: number, maximumScore: number) {
 // one of them into a nonsensical self-reference ("See Executive
 // Summary for the established premise" pointing at itself).
 // The marketOpportunity field prompt (plan.ts) asks the model to include
-// its own free-form "Opportunity Score 0-100" narrative estimate.
-// buildOpportunityScore() below then appends the single authoritative
-// score, deterministically derived from the same decision engine that
-// drives the report's GO/WAIT/PASS recommendation everywhere else --
-// but appendIntelligenceBlock's old dedup guard only skipped appending
-// if the exact heading "Market Opportunity Score"/"Pazar Fırsatı Skoru"
-// was already present, which the model's own narrative estimate rarely
-// matches verbatim (e.g. "Fırsat Skoru: 58/100" or "an opportunity
-// score of roughly 58"). That let both numbers survive in the same
-// section. This removes any sentence/line containing the model's own
-// opportunity-score mention (in either language) before the canonical
-// one is appended, without touching the rest of its narrative text.
+// its own free-form "Demand Score, Competition Score, Timing Score,
+// Execution Difficulty, Revenue Potential, overall Opportunity Score"
+// narrative estimate. buildOpportunityScore() below then appends the
+// single authoritative set of scores, deterministically derived from the
+// same decision engine that drives the report's GO/WAIT/PASS
+// recommendation everywhere else -- but appendIntelligenceBlock's old
+// dedup guard only skipped appending if the exact heading "Market
+// Opportunity Score"/"Pazar Fırsatı Skoru" was already present, which the
+// model's own narrative estimate rarely matches verbatim. That let both
+// sets of numbers survive in the same section. Confirmed live: the
+// original version of this function only stripped the model's own
+// "overall opportunity score" mention -- it never touched the model's own
+// Demand/Competition/Timing/Execution Difficulty/Revenue Potential
+// SUB-score lines, so a report still showed two different sets of these
+// five sub-scores side by side (the model's own narrative estimate and
+// the canonical appended block), even though the "overall" line itself
+// was correctly deduplicated. This removes any sentence/line containing
+// ANY of the six score mentions (the overall score plus all five
+// sub-scores, in either language) before the canonical block is
+// appended, without touching the rest of the model's narrative text.
 function stripAiGeneratedOpportunityScoreMention(content: string) {
-  const opportunityScorePattern = /\b(?:overall\s+)?opportunity score\b|\b(?:genel\s+)?f[ıi]rsat skoru\b/i;
+  const opportunityScorePattern =
+    /\b(?:overall\s+)?opportunity score\b|\bdemand score\b|\bcompetition score\b|\btiming score\b|\bexecution difficulty\b|\brevenue potential\b|\b(?:genel\s+)?f[ıi]rsat skoru\b|\btalep skoru\b|\brekabet skoru\b|\bzamanlama skoru\b|\byürütme zorluğu\b|\bgelir potansiyeli\b/i;
 
   return content
     .split(/\n/)
@@ -2921,11 +2938,14 @@ function stripAiGeneratedOpportunityScoreMention(content: string) {
         return line;
       }
 
-      // A bullet/heading line dedicated to the score is dropped
-      // entirely; a score mention inside a larger paragraph only
-      // has its own sentence removed, keeping the rest of the
+      // A bullet/heading line dedicated to one of these scores is
+      // dropped entirely; a score mention inside a larger paragraph
+      // only has its own sentence removed, keeping the rest of the
       // model's narrative intact.
-      const isDedicatedLine = /^\s*(?:[-*•]\s*)?(?:overall\s+)?(?:opportunity score|f[ıi]rsat skoru)\b/i.test(line);
+      const isDedicatedLine =
+        /^\s*(?:[-*•]\s*)?(?:overall\s+)?(?:opportunity score|demand score|competition score|timing score|execution difficulty|revenue potential|f[ıi]rsat skoru|talep skoru|rekabet skoru|zamanlama skoru|yürütme zorluğu|gelir potansiyeli)\b/i.test(
+          line
+        );
       if (isDedicatedLine) {
         return "";
       }
@@ -3509,35 +3529,29 @@ function normalizeFullPlanReport(
   normalized.marketOpportunity = stripAiGeneratedOpportunityScoreMention(
     removeTamSamSomOwnershipText(normalized.marketOpportunity)
   );
-  normalized.marketOpportunity = appendIntelligenceBlock(
-    normalized.marketOpportunity,
-    reportLabel(language, "Market Opportunity Score", "Pazar Fırsatı Skoru"),
-    buildOpportunityScore(context, language)
-  );
-  normalized.competitorLandscape = appendIntelligenceBlock(
-    normalized.competitorLandscape,
-    reportLabel(language, "AI Executive Insight", "AI Yönetici İçgörüsü"),
-    [buildExecutiveInsight(context, reportText(language, "Competitive positioning", "Rekabet konumlandırması"), language)]
-  );
-  normalized.risks = risksAlreadyIncludeRiskMatrix(normalized.risks)
-    ? normalized.risks
-    : appendIntelligenceBlock(
-        normalized.risks,
-        reportLabel(language, "Risk Matrix", "Risk Matrisi"),
-        buildRiskMatrix(context, language)
-      );
+  // Confirmed live (freelance graphic-design marketplace report): the
+  // deterministic "AI Action Plan" block below interpolates this
+  // report's own real, already-computed metric values (arpa, grossMargin,
+  // cacPayback, ...) directly into its Next 30 Days/Next 6 Months
+  // sentences -- but appending it here, BEFORE the labelModelDerivedFinancialClaims
+  // loop below runs, exposed those exact canonical sentences to the SAME
+  // "is this an unverifiable AI-written claim" check meant only for the
+  // model's own free-form prose. sourceContext is the raw submitted
+  // business idea, which obviously never contains a derived figure like
+  // "$248/month" -- so every one of these deterministic sentences failed
+  // that check and got wholesale replaced with the generic "requires
+  // verified supporting data" fallback, corrupting a correct, trustworthy
+  // sentence into a nonsense one (and, since the model's own narrative
+  // covers the same milestone labels, this produced verbatim-duplicate
+  // boilerplate within the same field). marketOpportunity's own
+  // buildOpportunityScore block never hit this because its scores are
+  // bare "N/100" numbers that don't match any metric display value --
+  // pure coincidence, not a structural guarantee, so every
+  // appendIntelligenceBlock call below is deferred until after the
+  // labeling loop finishes, the same fix applied uniformly rather than
+  // relying on which blocks happen not to contain a real metric value.
+  const shouldAppendRiskMatrix = !risksAlreadyIncludeRiskMatrix(normalized.risks);
   normalized.roadmap306090 = removeLegacyValidationIntelligenceBlock(normalized.roadmap306090);
-  normalized.roadmap306090 = appendIntelligenceBlock(
-    normalized.roadmap306090,
-    reportLabel(language, "AI Action Plan", "AI Aksiyon Planı"),
-    [
-      reportText(language, `- Immediate Actions: ${context.investmentScore.nextCriticalAction}. Expected impact: resolves the highest-risk decision gate.`, `- Acil Aksiyonlar: ${context.investmentScore.nextCriticalAction}. Beklenen etki: en riskli karar kapısını çözer.`),
-      reportText(language, `- Next 30 Days: test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer} and record paid-conversion evidence at the ${context.metrics.arpa.displayValue} planning input. Expected impact: establishes a credible demand gate.`, `- Sonraki 30 Gün: ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile test et ve ${context.metrics.arpa.displayValue} planlama girdisinde ücretli dönüşüm kanıtını kaydet. Beklenen etki: güvenilir bir talep kapısı oluşturur.`),
-      reportText(language, `- Next 90 Days: repeat the winning acquisition and delivery motion for the ${context.inputs.businessModel} model. Expected impact: tests whether the operating loop is repeatable.`, `- Sonraki 90 Gün: ${context.inputs.businessModel} modeli için kazanan edinim ve teslimat hareketini tekrarla. Beklenen etki: operasyon döngüsünün tekrarlanabilirliğini test eder.`),
-      reportText(language, `- Next 6 Months: hold ${context.metrics.grossMargin.displayValue} gross margin while demonstrating ${context.metrics.cacPayback.displayValue} payback and repeat behavior. Expected impact: proves capital efficiency.`, `- Sonraki 6 Ay: ${context.metrics.cacPayback.displayValue} geri ödeme ve tekrar davranışını gösterirken ${context.metrics.grossMargin.displayValue} brüt marjı koru. Beklenen etki: sermaye verimliliğini kanıtlar.`),
-      reportText(language, `- Next 12 Months: expand the ${context.inputs.industry} model beyond the beachhead only after those proof gates hold in ${context.inputs.geography}. Expected impact: scales from verified operating evidence.`, `- Sonraki 12 Ay: ${translateIndustryBenchmarkLabel(context.inputs.industry)} modelini yalnızca bu kanıt kapıları ${context.inputs.geography} içinde sağlandıktan sonra başlangıç pazarının ötesine genişlet. Beklenen etki: doğrulanmış operasyon kanıtından ölçeklenir.`),
-    ]
-  );
   // Evidence and sources stay in the background: the model's raw citation
   // list is compressed to an Evidence Summary (category + count) and
   // nothing else is appended here. Detailed per-source metadata still
@@ -3621,6 +3635,41 @@ function normalizeFullPlanReport(
       context
     );
   }
+
+  // Deferred from before the labeling loop above (see the comment at
+  // shouldAppendRiskMatrix): each of these blocks is deterministic,
+  // already-computed canonical content -- appending it only now, after
+  // labelModelDerivedFinancialClaims has already run, guarantees none of
+  // it is ever mistaken for unverifiable AI-written prose and replaced
+  // with a generic fallback message.
+  normalized.marketOpportunity = appendIntelligenceBlock(
+    normalized.marketOpportunity,
+    reportLabel(language, "Market Opportunity Score", "Pazar Fırsatı Skoru"),
+    buildOpportunityScore(context, language)
+  );
+  normalized.competitorLandscape = appendIntelligenceBlock(
+    normalized.competitorLandscape,
+    reportLabel(language, "AI Executive Insight", "AI Yönetici İçgörüsü"),
+    [buildExecutiveInsight(context, reportText(language, "Competitive positioning", "Rekabet konumlandırması"), language)]
+  );
+  normalized.risks = shouldAppendRiskMatrix
+    ? appendIntelligenceBlock(
+        normalized.risks,
+        reportLabel(language, "Risk Matrix", "Risk Matrisi"),
+        buildRiskMatrix(context, language)
+      )
+    : normalized.risks;
+  normalized.roadmap306090 = appendIntelligenceBlock(
+    normalized.roadmap306090,
+    reportLabel(language, "AI Action Plan", "AI Aksiyon Planı"),
+    [
+      reportText(language, `- Immediate Actions: ${context.investmentScore.nextCriticalAction}. Expected impact: resolves the highest-risk decision gate.`, `- Acil Aksiyonlar: ${context.investmentScore.nextCriticalAction}. Beklenen etki: en riskli karar kapısını çözer.`),
+      reportText(language, `- Next 30 Days: test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer} and record paid-conversion evidence at the ${context.metrics.arpa.displayValue} planning input. Expected impact: establishes a credible demand gate.`, `- Sonraki 30 Gün: ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile test et ve ${context.metrics.arpa.displayValue} planlama girdisinde ücretli dönüşüm kanıtını kaydet. Beklenen etki: güvenilir bir talep kapısı oluşturur.`),
+      reportText(language, `- Next 90 Days: repeat the winning acquisition and delivery motion for the ${context.inputs.businessModel} model. Expected impact: tests whether the operating loop is repeatable.`, `- Sonraki 90 Gün: ${context.inputs.businessModel} modeli için kazanan edinim ve teslimat hareketini tekrarla. Beklenen etki: operasyon döngüsünün tekrarlanabilirliğini test eder.`),
+      reportText(language, `- Next 6 Months: hold ${context.metrics.grossMargin.displayValue} gross margin while demonstrating ${context.metrics.cacPayback.displayValue} payback and repeat behavior. Expected impact: proves capital efficiency.`, `- Sonraki 6 Ay: ${context.metrics.cacPayback.displayValue} geri ödeme ve tekrar davranışını gösterirken ${context.metrics.grossMargin.displayValue} brüt marjı koru. Beklenen etki: sermaye verimliliğini kanıtlar.`),
+      reportText(language, `- Next 12 Months: expand the ${context.inputs.industry} model beyond the beachhead only after those proof gates hold in ${context.inputs.geography}. Expected impact: scales from verified operating evidence.`, `- Sonraki 12 Ay: ${translateIndustryBenchmarkLabel(context.inputs.industry)} modelini yalnızca bu kanıt kapıları ${context.inputs.geography} içinde sağlandıktan sonra başlangıç pazarının ötesine genişlet. Beklenen etki: doğrulanmış operasyon kanıtından ölçeklenir.`),
+    ]
+  );
 
   // Eliminate filler: strip generic AI hedge sentences and exact-duplicate
   // sentences from every field. Runs after every content-adding pass above
@@ -3788,14 +3837,33 @@ function parseFullPlanReport(
 // registry those [R#] identifiers resolve against) guarantees the Sources
 // page always lists real, resolvable titles/publishers/URLs instead of
 // whatever the model separately wrote (or failed to write) for that field.
+// Confirmed live: a Sources page title rendered truncated mid-abbreviation
+// ("FPDS (U.S.") with the rest of the real title/publisher missing
+// entirely. Root cause: this Title:/Publisher:/... format is one field
+// per LINE (both this report's own evidence-summary renderer and the
+// PDF's citation parser split on "\n" and read each field up to its own
+// line break) -- but a source's raw sourceTitle/claim/value/publisher
+// text (extracted from a live webpage) sometimes carries its own
+// embedded newline (e.g. a publisher name that wrapped across two lines
+// on the source page, like "U.S.\nCensus Bureau"). That embedded
+// newline silently split one field into two lines downstream, leaving
+// only the first fragment ("U.S.") attached to its label and the rest
+// ("Census Bureau") an orphaned, unlabeled line neither parser
+// recognized. Collapsing embedded newlines to a single space keeps
+// every field on its own single line, matching what this format assumes.
+const collapseEvidenceFieldWhitespace = (value: string) =>
+  value.replace(/\s*\n+\s*/g, " ").trim();
+
 function buildResearchEvidenceLines(research: DomainResearchBundle) {
   return research.evidence.map((item) => {
-    const title = [item.sourceTitle || item.field, item.claim || item.value]
-      .filter(Boolean)
-      .join(": ");
+    const title = collapseEvidenceFieldWhitespace(
+      [item.sourceTitle || item.field, item.claim || item.value]
+        .filter(Boolean)
+        .join(": ")
+    );
     const lines = [`Title: ${title}`];
-    if (item.publisher) lines.push(`Publisher: ${item.publisher}`);
-    if (item.publishedDate) lines.push(`Year: ${item.publishedDate}`);
+    if (item.publisher) lines.push(`Publisher: ${collapseEvidenceFieldWhitespace(item.publisher)}`);
+    if (item.publishedDate) lines.push(`Year: ${collapseEvidenceFieldWhitespace(item.publishedDate)}`);
     lines.push(`Reference: [${item.id}]`);
     if (item.url) lines.push(`URL: ${item.url}`);
     return lines.join("\n");

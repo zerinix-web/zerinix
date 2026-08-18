@@ -42,7 +42,24 @@ const ventureCreationSignals =
 const specializedDomainSignals: Array<[Exclude<ReportDomain, "business" | "real_estate">, RegExp]> = [
   ["legal", /\b(contract|agreement|clause|legal|compliance|liability|indemnity|termination|governing law|sözleşme|hukuk|uyum|sorumluluk|tazminat|fesih)\b/i],
   ["accounting", /\b(accounting|invoice|ledger|trial balance|tax|vat|ifrs|gaap|muhasebe|fatura|vergi|kdv|defter)\b/i],
-  ["procurement", /\b(procurement|supplier|vendor|tender|rfp|sourcing|purchase order|tedarik|tedarikçi|ihale|satın alma)\b/i],
+  // Confirmed live: an event-planning SaaS ("manage vendor bookings,
+  // guest RSVPs, and on-site logistics") was classified into the
+  // procurement domain purely because it mentioned "vendor" -- a word
+  // any marketplace, events, or coordination platform uses routinely
+  // for the caterers/venues/suppliers it works with, not a reliable
+  // signal that the business itself IS a procurement/supply-chain
+  // company. Same reasoning as the fintech "payments" false positive
+  // fixed earlier in financial-model.ts's inferIndustryKey: bare
+  // "vendor"/"supplier"/"tender"/"sourcing"/"rfp" are checked in
+  // specializedDomainSignals BEFORE operatingBusinessSignals ever gets a
+  // chance to recognize an ordinary SaaS/platform/marketplace prompt, so
+  // a single incidental mention of any of these words could hijack the
+  // whole domain classification. Requiring the more specific compound
+  // phrase below (the business's own core offering, not an incidental
+  // feature mention) keeps genuine procurement/sourcing platforms
+  // matching while no longer catching every business that merely works
+  // with vendors/suppliers as part of a different core business.
+  ["procurement", /\b(procurement|e-procurement|vendor management|vendor sourcing|vendor onboarding|supplier management|supplier onboarding|supplier sourcing|rfp management|request for proposal|purchase order (?:system|management|platform)|tender process|sourcing platform|tedarik zinciri|tedarikçi yönetimi|ihale süreci|satın alma platformu)\b/i],
   ["operations", /\b(operations|workflow|capacity|inventory|warehouse|logistics|manufacturing|quality control|retail|store|branch|sku|product sales|healthcare|hospital|clinic|patient flow|operasyon|iş akışı|kapasite|stok|depo|lojistik|üretim|perakende|market zinciri|mağaza|şube|ürün satış|sağlık|hastane|klinik|hasta akışı)\b/i],
   ["finance", /\b(finance|financial|investment|portfolio|cash flow|forecast|valuation|revenue|margin|balance sheet|finans|nakit akışı|değerleme|gelir|bilanço)\b/i],
 ];

@@ -52,9 +52,22 @@ test("business-plan risks field does not append a duplicate templated risk matri
     /function risksAlreadyIncludeRiskMatrix\(content: string\) \{\s*\n\s*return \(\s*\n\s*\/\\b\(\?:probability\|olasılık\)\\b\/i\.test\(content\) &&\s*\n\s*\/\\b\(\?:mitigation\|azaltım\|azaltma\)\\b\/i\.test\(content\)/,
     "the detection helper must check for the risk matrix's real required structure (Probability/Mitigation, English or Turkish), not a heading the model is told never to write"
   );
+  // The risk-matrix append itself was moved to run after the
+  // labelModelDerivedFinancialClaims loop (see
+  // shouldAppendRiskMatrix's own comment in plan-executor.ts) so the
+  // deterministic risk matrix can never be mistaken for unverifiable
+  // AI-written prose and replaced with a generic fallback -- but the
+  // decision of WHETHER to append it must still be made from the
+  // model's own pre-labeling content, since risksAlreadyIncludeRiskMatrix
+  // checks for the model's own Probability/Mitigation structure.
   assert.match(
     source,
-    /normalized\.risks = risksAlreadyIncludeRiskMatrix\(normalized\.risks\)\s*\n\s*\? normalized\.risks\s*\n\s*: appendIntelligenceBlock\(\s*\n\s*normalized\.risks,/,
+    /const shouldAppendRiskMatrix = !risksAlreadyIncludeRiskMatrix\(normalized\.risks\);/,
+    "the append-or-skip decision must still be computed from the model's own content before labeling"
+  );
+  assert.match(
+    source,
+    /normalized\.risks = shouldAppendRiskMatrix\s*\n\s*\? appendIntelligenceBlock\(\s*\n\s*normalized\.risks,/,
     "the append must be skipped when the model's own content already satisfies the risk-matrix requirement"
   );
 });

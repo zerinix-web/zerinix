@@ -139,7 +139,21 @@ export function inferIndustryKey(value: string): IndustryKey {
       [/\b(kahve|kahveci|kafe|cafe|coffee|espresso|roastery|specialty coffee|speciality coffee|tea|beverage|içecek|icecek)\b/, "luxuryCoffee"],
       [/\b(ev charging|charging station|charge point|charger network|electric charging)\b/, "evCharging"],
       [/\b(scooter|scooters|scooter rental|micromobility|micro mobility|bike sharing|bikeshare|ride sharing|urban mobility|shared mobility)\b/, "mobility"],
-      [/\b(fintech|payments|banking|lending|wallet|neobank|insurance|insurtech)\b/, "fintech"],
+      // Confirmed live: a freelance graphic-design marketplace ("milestone-
+      // based payments" between clients and designers) was classified as
+      // FinTech, because the bare word "payments" alone matched here --
+      // "payments" is a checkout/billing FEATURE almost every marketplace,
+      // e-commerce, or subscription SaaS prompt mentions, not a reliable
+      // signal that the business itself IS a financial-services company.
+      // Same reasoning applies to "wallet" and "insurance" (a marketplace
+      // can casually mention "insurance for freelancers" as a feature
+      // without being an insurtech company). Requiring the more specific
+      // compound phrase below (the business's own core offering, not an
+      // incidental feature mention) keeps genuine fintech/payments/
+      // insurtech companies matching while no longer catching every
+      // platform that merely processes payments as part of its own,
+      // different core business.
+      [/\b(fintech|banking|lending|neobank|insurtech|payment processing|payments? platform|payments? company|payments? gateway|payments? infrastructure|digital wallet|e-wallet|crypto wallet|money transfer|remittance|buy now pay later|\bbnpl\b|robo-advisor|insurance company|insurance platform|insurance marketplace)\b/, "fintech"],
       [/\b(ecommerce|e-commerce|online store|shopify|retail marketplace|dtc|d2c|direct to consumer|direct-to-consumer|online satış|e-ticaret)\b/, "ecommerce"],
       [/\b(marketplace|two-sided|two sided|platform marketplace)\b/, "marketplace"],
       [/\b(restaurant|food service|foodservice|fast casual|fine dining|qsr|restoran|lokanta|yemek)\b/, "restaurant"],

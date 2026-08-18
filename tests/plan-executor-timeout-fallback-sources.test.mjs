@@ -42,7 +42,16 @@ function buildEvidenceLine(item) {
 
 test("createGroundedBusinessTimeoutFallback builds evidence lines in the source (drift check)", () => {
   assert.match(planExecutorSource, /`Title: \$\{title\}`/);
-  assert.match(planExecutorSource, /`Publisher: \$\{item\.publisher\}`/);
+  // Publisher/title fields are now wrapped in collapseEvidenceFieldWhitespace:
+  // a raw source's publisher/title text sometimes carries its own embedded
+  // newline (confirmed live: a truncated-looking "FPDS (U.S." Sources page
+  // entry was actually a publisher value that wrapped mid-line, e.g.
+  // "U.S.\nCensus Bureau"), which silently split one field into two lines
+  // downstream since this format is one field per line.
+  assert.match(
+    planExecutorSource,
+    /`Publisher: \$\{collapseEvidenceFieldWhitespace\(item\.publisher\)\}`/
+  );
   assert.match(planExecutorSource, /`Reference: \[\$\{item\.id\}\]`/);
   assert.match(planExecutorSource, /`URL: \$\{item\.url\}`/);
   // The old, unparseable single-line bullet shape must be gone.

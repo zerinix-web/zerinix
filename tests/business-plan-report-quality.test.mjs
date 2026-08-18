@@ -67,17 +67,21 @@ test("Business Plan API logs stage-specific failures instead of returning generi
 });
 
 test("Business Plan renderers recognize non-SaaS financial labels", () => {
-  assert.match(plannerSource, /rider cac\|rider ltv\|active riders\|yearly revenue\|monthly revenue/);
-
-  // dashboardPdfSource's mobility-detection regex deliberately dropped
-  // "yearly revenue"/"monthly revenue" as trigger words: they are the
-  // mobility fallback *labels* themselves (mobilityFinancialDashboardMetrics
-  // below), not a mobility signal, and financialAssumptions' own prompt
-  // instructs every report -- any vertical -- to write "MRR/Monthly
-  // Revenue", so keeping them as triggers mislabeled ordinary non-mobility
-  // Business Plan reports with rideshare-specific metric names.
-  assert.match(dashboardPdfSource, /rider cac\|rider ltv\|active riders/);
-  assert.doesNotMatch(dashboardPdfSource, /yearly revenue\|monthly revenue/);
+  // Reproduces a real, confirmed production bug: an e-commerce inventory
+  // SaaS report's Financial Dashboard (both the PDF export and the
+  // on-screen dashboard, which each keep their own separate copy of this
+  // detection logic) was mislabeled "Rider CAC"/"Rider LTV" because the
+  // previous loose keyword list false-positived on an incidental,
+  // unrelated mention of a common word (e.g. "rental") elsewhere in the
+  // report. Both copies now key off the one deterministic signal the
+  // server actually uses to decide "Rider CAC" vs "CAC" in the first
+  // place -- financial-model.ts's own `Industry benchmark: ${benchmark.
+  // label}` line, which reads "Mobility / scooter rental" only when this
+  // report's inputs.industryKey is genuinely "mobility".
+  assert.match(plannerSource, /Industry benchmark:\\s\*Mobility \\\/ scooter rental/);
+  assert.match(plannerSource, /Sektör referansı:\\s\*Mobilite \\\/ scooter kiralama/);
+  assert.match(dashboardPdfSource, /Industry benchmark:\\s\*Mobility \\\/ scooter rental/);
+  assert.match(dashboardPdfSource, /Sektör referansı:\\s\*Mobilite \\\/ scooter kiralama/);
   assert.match(dashboardPdfSource, /mobilityFinancialDashboardMetrics/);
 });
 

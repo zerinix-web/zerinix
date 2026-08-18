@@ -1286,15 +1286,28 @@ const founderScorePdfDimensionMetrics = [
   { label: "Founder Evidence", aliases: ["Founder Evidence", "Kurucu Kanıtı"] },
 ];
 
+// Same fix as ReportPdfButton.tsx's identical kpiDashboardMetrics (the
+// PDF export's own separate copy of this list): CAC deliberately
+// removed. The kpiDashboard prompt (plan.ts) explicitly instructs the
+// model "Do not include CAC, LTV, Gross Margin, Payback, ARR, MRR,
+// Burn, or Runway; those belong to Unit Economics and Financial
+// Dashboard" -- so a CAC card here was always structurally wrong, and
+// with no proper "CAC: $X" line ever written for this section, its
+// value extraction fell through to the bare-score fallback below,
+// which (confirmed live, e-commerce inventory SaaS report) rendered
+// CAC's dollar figure with a nonsensical "%" suffix ("CAC 51%") on the
+// on-screen dashboard too. isPercentage marks which of these are
+// genuinely 0-100% completion/funnel metrics -- only those may fall
+// back to a bare extracted number with a "%" suffix; see
+// extractKpiValueFromSnippet below.
 const kpiDashboardMetrics = [
-  { label: "Acquisition", aliases: ["Acquisition", "acquisition", "Edinim"] },
-  { label: "Activation", aliases: ["Activation", "activation", "Aktivasyon"] },
-  { label: "Retention", aliases: ["Retention", "retention", "Elde Tutma"] },
-  { label: "Revenue", aliases: ["Revenue", "revenue", "Gelir"] },
-  { label: "CAC", aliases: ["CAC"] },
-  { label: "WTP", aliases: ["WTP", "Ödeme İsteği"] },
-  { label: "Sales cycle", aliases: ["Sales cycle", "Satış Döngüsü"] },
-  { label: "Conversion", aliases: ["Conversion", "Dönüşüm"] },
+  { label: "Acquisition", aliases: ["Acquisition", "acquisition", "Edinim"], isPercentage: true },
+  { label: "Activation", aliases: ["Activation", "activation", "Aktivasyon"], isPercentage: true },
+  { label: "Retention", aliases: ["Retention", "retention", "Elde Tutma"], isPercentage: true },
+  { label: "Revenue", aliases: ["Revenue", "revenue", "Gelir"], isPercentage: false },
+  { label: "WTP", aliases: ["WTP", "Ödeme İsteği"], isPercentage: false },
+  { label: "Sales cycle", aliases: ["Sales cycle", "Satış Döngüsü"], isPercentage: false },
+  { label: "Conversion", aliases: ["Conversion", "Dönüşüm"], isPercentage: true },
 ];
 
 const unitEconomicsMetrics = [
@@ -1931,7 +1944,19 @@ function deriveBusinessDescriptionFromSections(
 }
 
 function isMobilityReportContent(content: string) {
-  return /\b(scooter|micromobility|micro mobility|shared mobility|bike sharing|bikeshare|per-ride|urban riders|commuters|fleet utilization|rental|rider cac|rider ltv|active riders|yearly revenue|monthly revenue)\b/i.test(
+  // Same fix as ReportPdfButton.tsx's isMobilityReportContent (the PDF
+  // export's identical duplicate of this function): the previous loose
+  // keyword list false-positived on ordinary, unrelated mentions of
+  // common words like "rental"/"commuters" elsewhere in a non-mobility
+  // report, mislabeling its on-screen Financial Dashboard with "Rider
+  // CAC"/"Rider LTV". Matching the one deterministic
+  // "Industry benchmark: Mobility / scooter rental" line every report's
+  // Financial Assumptions always includes (financial-model.ts's
+  // sharedAssumptions, set exactly when inputs.industryKey === "mobility")
+  // ties this to the same signal the server actually used, eliminating
+  // false positives from incidental word mentions anywhere else in the
+  // report.
+  return /\bIndustry benchmark:\s*Mobility \/ scooter rental\b|\bSektör referansı:\s*Mobilite \/ scooter kiralama\b/i.test(
     content
   );
 }
@@ -2328,22 +2353,42 @@ function extractKpiQuantityValue(snippet: string) {
   return matches?.at(-1)?.trim() || "";
 }
 
-function extractKpiValueFromSnippet(snippet: string, aliases: string[] | readonly string[]) {
+function extractKpiValueFromSnippet(
+  snippet: string,
+  aliases: string[] | readonly string[],
+  isPercentage: boolean
+) {
   const explicitValue = extractKpiObjectField(snippet, ["value", "değer", "current", "mevcut", "baseline", "metric"]);
   const targetValue = extractKpiObjectField(snippet, ["target", "hedef"]);
   const quantityValue = extractKpiQuantityValue(snippet);
-  const score = extractScoreFromAliases(snippet, aliases);
+  // Same fix as ReportPdfButton.tsx's identical extractKpiValueFromSnippet:
+  // a bare 1-3 digit number with no unit word attached (extractScore) is
+  // only safe to render as "N%" for metrics that are genuinely 0-100%
+  // completion/funnel figures. For everything else (Revenue, WTP, Sales
+  // cycle) guessing "%" produces the same CAC bug this was fixed for
+  // ("$51" rendered as "51%"); "Validation Required" is the honest
+  // fallback the kpiDashboard prompt itself already specifies.
+  const score = isPercentage ? extractScoreFromAliases(snippet, aliases) : null;
   const value = explicitValue ||
     targetValue ||
     quantityValue ||
     (score === null ? "" : `${score}%`) ||
     "";
 
-  return isMissingKpiText(value) ? "Validation Required" : value;
+  // Also guards a genuinely empty value: the drawing code's own fallback
+  // for a falsy card value independently recomputes a bare score and
+  // appends "%" with no isPercentage awareness at all, so leaving
+  // `value` as "" here would let that same wrong-unit bug resurface
+  // downstream for every non-percentage metric, not just CAC.
+  return !value || isMissingKpiText(value) ? "Validation Required" : value;
 }
 
-function extractKpiValueFromAliases(content: string, aliases: string[] | readonly string[]) {
-  return extractKpiValueFromSnippet(extractKpiSnippet(content, aliases), aliases);
+function extractKpiValueFromAliases(
+  content: string,
+  aliases: string[] | readonly string[],
+  isPercentage: boolean
+) {
+  return extractKpiValueFromSnippet(extractKpiSnippet(content, aliases), aliases, isPercentage);
 }
 
 function extractKpiTargetFromSnippet(snippet: string) {
@@ -2385,7 +2430,7 @@ function extractKpiActionFromAliases(content: string, aliases: string[] | readon
 
 function normalizePdfKpiMetrics(content: string) {
   return kpiDashboardMetrics.map((metric) => {
-    const value = extractKpiValueFromAliases(content, metric.aliases);
+    const value = extractKpiValueFromAliases(content, metric.aliases, metric.isPercentage);
     const target = extractKpiTargetFromAliases(content, metric.aliases);
     const status = extractKpiStatusFromAliases(content, metric.aliases);
     const owner = extractKpiOwnerFromAliases(content, metric.aliases);

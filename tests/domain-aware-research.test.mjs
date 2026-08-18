@@ -137,9 +137,12 @@ test("research execution is bounded, concurrent, cached, and phase-timed", () =>
   );
   assert.match(research, /model: researchModel/);
   assert.match(research, /await Promise\.all\(workers\)/);
+  // selectedStages (not the flat researchSourceStages constant directly)
+  // since research source guidance is now domain-aware -- see
+  // getResearchSourceStages/businessResearchSourceStages below.
   assert.match(
     research,
-    /mapWithConcurrency\(\s*researchSourceStages,\s*RESEARCH_CONCURRENCY_LIMIT/
+    /mapWithConcurrency\(\s*selectedStages,\s*RESEARCH_CONCURRENCY_LIMIT/
   );
   assert.match(research, /researchRequestCache = new Map/);
   assert.match(research, /tavilyRequestCache = new Map/);

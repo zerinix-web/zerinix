@@ -1,3 +1,19 @@
+// Same fix as ReportPdfButton.tsx's identical formatMetricCardValue (the
+// PDF export's own separate copy of this function): the report's own
+// generation prompt requires every numeric claim to be tagged Verified/
+// Estimated/Assumption/AI Analysis (or the Turkish equivalent), and the
+// model sometimes writes that tag directly after the value with no
+// colon/dash/pipe separator at all ("CAC: $51 AI Analysis"), which none
+// of the delimiter-based splits below catch (they all require a
+// punctuation separator before the matched word). Confirmed live
+// (e-commerce inventory SaaS report): this left the raw tag word
+// concatenated straight onto the on-screen dashboard card's value.
+// Stripped as a trailing suffix, with or without parens/a leading dash,
+// since the tag only ever appears at the end of an otherwise-clean value
+// here.
+const evidenceTagSuffixPattern =
+  /\s*[-–—]?\s*\(?\b(?:Verified|Estimated|Assumption|Planning assumption|AI Analysis|Model estimate|Model-derived estimate|Approximate|Doğrulanmış|Tahmini|Yaklaşık|Varsayım|Planlama varsayımı|AI Analizi|Model çıkarımı|Model tahmini)\b\)?\s*$/i;
+
 export function formatMetricCardValue(value: string) {
   const cleanValue = value.trim().replace(/\*\*/g, "");
 
@@ -9,6 +25,7 @@ export function formatMetricCardValue(value: string) {
     .split(/\b(?:formula|assumptions?|varsayımlar|confidence|güven|evidence|validation evidence|validation needed|metadata|referans|benchmark(?: source| comparison)?|raw benchmark context|explanation|justification|source)\b\s*[:\-–—=]/i)[0]
     .split(/\s+(?:based on|using|assuming|calculated from|derived from)\s+/i)[0]
     .split(/\s*[;|]\s*/)[0]
+    .replace(evidenceTagSuffixPattern, "")
     .replace(/^["'`]+|["'`]+$/g, "")
     .replace(/(\d)\.\s+(\d)(\s*[kKmMbB%])?/g, "$1.$2$3")
     .replace(/(\d),\s+(\d{3})/g, "$1,$2")

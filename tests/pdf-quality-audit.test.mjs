@@ -92,14 +92,30 @@ test("escapeRegExp tolerates a non-breaking space wherever a literal space was e
   assert.match(pdfSource, /\.replace\(\/ \/g, "\[ \\\\u00a0\]"\)/);
 });
 
-test("isMobilityReportContent no longer treats \"yearly revenue\"/\"monthly revenue\" as mobility signals", () => {
-  const match = pdfSource.match(/return \/\\b\(scooter\|[\s\S]*?\)\\b\/i\.test\(/);
-  assert.ok(match, "isMobilityReportContent's detection regex not found");
-  assert.doesNotMatch(match[0], /yearly revenue/i);
-  assert.doesNotMatch(match[0], /monthly revenue/i);
-  // Still recognizes the real, mobility-exclusive signals.
-  assert.match(match[0], /rider cac/i);
-  assert.match(match[0], /rider ltv/i);
+test("isMobilityReportContent matches only the deterministic Industry benchmark line, not loose topic words", () => {
+  // Reproduces a real, confirmed production bug: an e-commerce inventory
+  // SaaS report's Financial Dashboard was mislabeled "Rider CAC"/"Rider
+  // LTV" because the previous loose keyword list (scooter/rental/
+  // commuters/fleet utilization/...) false-positived on an unrelated,
+  // incidental mention of one of those common words elsewhere in the
+  // report. The fix ties detection to the one deterministic signal the
+  // server itself uses to decide "Rider CAC" vs "CAC" in the first place
+  // -- financial-model.ts's `Industry benchmark: ${benchmark.label}`
+  // line, which reads "Mobility / scooter rental" only when
+  // inputs.industryKey is actually "mobility".
+  const match = pdfSource.match(/function isMobilityReportContent\(content: string\) \{[\s\S]*?\n\}/);
+  assert.ok(match, "isMobilityReportContent not found");
+  // The actual detection logic (the return statement) must be the new
+  // deterministic pattern, not the old loose keyword-alternation regex --
+  // checked against the return statement itself, not the whole function
+  // body, since the explanatory comment above it legitimately still
+  // names the old keywords as historical context.
+  const returnStatement = match[0].slice(match[0].indexOf("return"));
+  assert.match(returnStatement, /Industry benchmark:\\s\*Mobility \\\/ scooter rental/);
+  assert.match(returnStatement, /Sektör referansı:\\s\*Mobilite \\\/ scooter kiralama/);
+  assert.doesNotMatch(returnStatement, /\bcommuters\b/i);
+  assert.doesNotMatch(returnStatement, /\bfleet utilization\b/i);
+  assert.doesNotMatch(returnStatement, /\bmicromobility\b/i);
 });
 
 test("the Table of Contents surfaces a count instead of silently dropping entries once it fills its single reserved page", () => {
