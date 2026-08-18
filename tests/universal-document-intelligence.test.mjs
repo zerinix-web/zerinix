@@ -168,6 +168,21 @@ test("the universal layer never reads or writes body.analysisMode", () => {
 });
 
 test("layer 4 does not touch report generation, PDF generation, or Business Intelligence logic", () => {
+  // Scoped to layer 4's own statement (same startIndex/endIndex bounds as
+  // "the universal layer never reads or writes body.analysisMode" above),
+  // not the whole file -- route.ts legitimately imports from
+  // app/lib/report-engine/domain elsewhere (readRequestExpertiseProfile
+  // uses classifyReportDomain to seed its own domain fallback), which is
+  // unrelated to layer 4 and not a report-generation/PDF/billing call.
+  const startIndex = planRouteSource.indexOf(
+    "createUniversalDocumentIntelligenceFallback({"
+  );
+  const endMarker = "body.universalDocumentIntelligence = universalDocumentIntelligence;";
+  const endIndex = planRouteSource.indexOf(endMarker, startIndex) + endMarker.length;
+  const statementSource = planRouteSource.slice(startIndex, endIndex);
+
+  assert.ok(startIndex > -1 && endIndex > startIndex);
+
   const forbiddenPaths = [
     "app/lib/pdf-engine",
     "app/lib/report-engine",
@@ -178,6 +193,6 @@ test("layer 4 does not touch report generation, PDF generation, or Business Inte
   ];
 
   for (const path of forbiddenPaths) {
-    assert.doesNotMatch(planRouteSource, new RegExp(path.replace(/\//g, "\\/")));
+    assert.doesNotMatch(statementSource, new RegExp(path.replace(/\//g, "\\/")));
   }
 });

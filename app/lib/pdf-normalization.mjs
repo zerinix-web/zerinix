@@ -414,9 +414,7 @@ function cleanupRepeatedPdfPhrasing(value = "") {
     .replace(/\b(Doğrulama Zekası|Doğrulama Yol Haritası|AI Aksiyon Planı):\s*\1\b/gi, "$1")
     .replace(/\bExecution risk:\s*is healthier when payback[^.\n]*(?:\.[^\n]*)?/gi, "Execution risk: Execution risk improves when payback and break-even timing are realistic, evidence is stronger, and operational complexity is lower.")
     .replace(/\bExecution risk:\s*Execution risk\b/gi, "Execution risk")
-    .replace(/\bYürütme Riski:\s*Yürütme Riski\b/gi, "Yürütme Riski")
-    .replace(/\bHigh Risk\b/g, "Needs Validation")
-    .replace(/\bYüksek Risk\b/g, "Doğrulama Gerekli");
+    .replace(/\bYürütme Riski:\s*Yürütme Riski\b/gi, "Yürütme Riski");
 }
 
 function cleanupDuplicatePdfHeadingLines(value = "") {
@@ -626,7 +624,6 @@ function cleanupTurkishPdfLanguageLeakage(value = "") {
     .replace(/\b(?:Execution risk|Yürütme Riski)\s+is healthier when payback[^.\n]*(?:\.[^\n]*)?/gi, "Yürütme Riski, geri ödeme ve başabaş zamanlaması gerçekçi olduğunda, kanıt seviyesi güçlendiğinde ve operasyonel karmaşıklık azaldığında daha yönetilebilir hale gelir.")
     .replace(/\bExecution risk\b/gi, "Yürütme Riski")
     .replace(/\bNeeds Validation\b/g, "Doğrulama Gerekli")
-    .replace(/\bYüksek Risk\b/g, "Doğrulama Gerekli")
     .replace(/\bNext\s+30\s+(?:Days|Gün)\b/gi, "Sonraki 30 Gün")
     .replace(/\bNext\s+90\s+(?:Days|Gün)\b/gi, "Sonraki 90 Gün")
     .replace(/\bNext\s+6\s+(?:Months?|Ay)\b/gi, "Sonraki 6 Ay")

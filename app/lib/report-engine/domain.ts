@@ -103,6 +103,22 @@ const supportedStrategicDomains = new Set<ReportDomain>([
  * The selected card owns the top-level workflow. Strategic Advisory may use a
  * specialized internal domain, but that domain must come from the resolved
  * expertise profile rather than a second classifier overriding the selection.
+ *
+ * "plan" (Business Idea Validation) and "market" (Market Intelligence) are
+ * products the user explicitly selected -- there is no separate "real
+ * estate"/"legal"/etc. product reachable from either, so a real_estate (or
+ * any other specialized) signal at this point can only ever be an upstream
+ * misclassification, never an explicit user choice. Confirmed live: a
+ * Business Idea Validation prompt describing an AI SaaS platform for
+ * commercial-building energy costs was routed to the real-estate
+ * investment-analysis report (zoning/parcel/title/cadastral content)
+ * because an upstream domain signal (independent of this function --
+ * either expertise-profile.ts's own keyword fallback or a client-supplied
+ * reportReadiness value) resolved to "real_estate", and this function used
+ * to let that override the "plan" selection. Both branches below now
+ * unconditionally return "business", the same way "market" already did,
+ * so this class of misrouting is structurally impossible regardless of
+ * what any upstream classifier -- current or future -- infers.
  */
 export function resolveReportDomainForSelectedMode({
   selectedMode,
@@ -113,24 +129,15 @@ export function resolveReportDomainForSelectedMode({
   inferredDomain: ReportDomain;
   expertiseDomain?: unknown;
 }): ReportDomain {
-  const normalizedExpertiseDomain =
-    typeof expertiseDomain === "string"
-      ? expertiseDomain.trim().toLowerCase()
-      : "";
-  const hasRealEstateDomain =
-    inferredDomain === "real_estate" || normalizedExpertiseDomain === "real_estate";
-
-  if (selectedMode === "plan") {
-    return hasRealEstateDomain ? "real_estate" : "business";
-  }
-
-  if (selectedMode === "market") {
+  if (selectedMode === "plan" || selectedMode === "market") {
     return "business";
   }
 
   if (selectedMode !== "chat" || typeof expertiseDomain !== "string") {
     return inferredDomain;
   }
+
+  const normalizedExpertiseDomain = expertiseDomain.trim().toLowerCase();
 
   if (supportedStrategicDomains.has(normalizedExpertiseDomain as ReportDomain)) {
     return normalizedExpertiseDomain as ReportDomain;

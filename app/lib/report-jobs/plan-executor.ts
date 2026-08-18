@@ -1551,20 +1551,48 @@ function createSourcesAssumptionsFallback(
     .join("\n");
 }
 
-function cleanInternalSourceFallbacks(content: string, language: ResponseLanguage) {
+// Strips literal broken-interpolation artifacts (raw "sources.xxx" object
+// paths, "undefined", the ".none.provided.by.user" placeholder key) that
+// can leak into ANY field's text, not just sourcesAssumptions -- safe to
+// run universally since it only ever removes garbage, never real prose.
+function stripInternalPlaceholderArtifacts(content: string, language: ResponseLanguage) {
   const cleanReplacement = reportText(
     language,
     "Source category: Planning assumption. External citation metadata was not provided.",
     "Kaynak kategorisi: Planlama varsayımı. Harici atıf metadatası sağlanmadı."
   );
 
-  return normalizeReportSourceSection(content
+  return content
     .replace(/\bsources(?:\.[a-z0-9_-]+)+\b/gi, cleanReplacement)
     .replace(/\bdeduplicated\.none\.provided\.by\.user\b/gi, cleanReplacement)
     .replace(/\bnone\.provided\.by\.user\b/gi, cleanReplacement)
     .replace(/\bundefined\b/gi, reportText(language, "Not verified", "Doğrulanmadı"))
     .replace(/\n{3,}/g, "\n\n")
-    .trim(), { language, allowExternalCitations: false });
+    .trim();
+}
+
+// normalizeReportSourceSection (via normalizeEvidenceLabels) reverse-maps
+// clean, user-facing evidence-provenance phrasing ("Planning Assumption",
+// "Benchmark Derived", "Validation Required") back to the raw internal
+// classification vocabulary ("Assumption", "Estimated", "AI Analysis") --
+// exactly the banned raw-status strings this pipeline works to keep out of
+// user-facing output. That's the correct, intentional pre-processing step
+// for the SOURCES section specifically (its own downstream consumer,
+// buildEvidenceSummary, expects that canonical vocabulary), but this
+// function used to also run inside enforcePlanReportLanguage for every
+// other field. Confirmed live: a deterministic SWOT sentence that
+// correctly read "...is still a planning assumption..." came out reading
+// "...is still a Assumption..." (mid-sentence, ungrammatical, and itself
+// a banned tag) purely because it happened to contain that phrase --
+// with zero connection to sources or citations. This helper is now
+// reserved for the two call sites that are actually processing the
+// sourcesAssumptions field; every other field only gets the safe,
+// non-semantic artifact cleanup above.
+function cleanInternalSourceFallbacks(content: string, language: ResponseLanguage) {
+  return normalizeReportSourceSection(
+    stripInternalPlaceholderArtifacts(content, language),
+    { language, allowExternalCitations: false }
+  );
 }
 
 // Business Plan's shared scoring/financial-modeling data layer
@@ -1721,7 +1749,7 @@ const englishFinancialFragmentTranslations: Array<[RegExp, string | ((...args: s
   [/\bPricing model: unit sales plus service contracts\b/gi, "Fiyatlandırma modeli: birim satışlar artı hizmet sözleşmeleri"],
   [/\bPricing model: /gi, "Fiyatlandırma modeli: "],
   [/\bValidation evidence: present in prompt\b/gi, "Doğrulama kanıtı: talepte belirtilmiş"],
-  [/\bValidation evidence: not provided; planning assumptions require validation\b/gi,
+  [/\bValidation evidence: not yet supplied; planning assumptions require validation\b/gi,
     "Doğrulama kanıtı: belirtilmemiş; planlama varsayımları doğrulama gerektirir"],
   [/\bValidation evidence: /gi, "Doğrulama kanıtı: "],
   // The same inputs.geography/businessModel/pricingModel/targetCustomer
@@ -1830,7 +1858,7 @@ function enforcePlanReportLanguage(
   language: ResponseLanguage,
   context?: AiFinancialModelContext
 ) {
-  let normalized = cleanInternalSourceFallbacks(content, language);
+  let normalized = stripInternalPlaceholderArtifacts(content, language);
 
   if (context) {
     const confidenceValue = `${context.reportIntelligence.totalScore}%`;
@@ -1967,13 +1995,20 @@ function enforcePlanReportLanguage(
     .replace(/\bTetikleyici\s*:/g, "Trigger:")
     .replace(/\bAksiyon\s*:/g, "Action:")
     .replace(/\bDurum\s*:/g, "Status:")
-    .replace(/\bModel çıkarımı\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "AI Analysis")
+    // These three reverse-mapping targets used to be the literal English
+    // classification tags ("AI Analysis" / "Assumption") -- now themselves
+    // banned raw-status strings for user-facing output, same as the "not
+    // provided" default this function's own unavailable-copy no longer
+    // uses. Reverse-mapped stray Turkish now lands on the same clean,
+    // non-tag phrasing as a native English report gets below, instead of
+    // reintroducing the exact strings this fix removes.
+    .replace(/\bModel çıkarımı\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "model-derived estimate")
     // "Yaklaşık" ("approximately") is ordinary, extremely common Turkish
     // vocabulary far beyond this tag's use -- unlike the other three
     // phrases here, it can't be safely reverse-mapped by a blind regex
     // without corrupting unrelated sentences, so it's intentionally not
     // included in this defensive (English-report) cleanup direction.
-    .replace(/\bPlanlama varsayımı\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "Assumption")
+    .replace(/\bPlanlama varsayımı\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "planning assumption")
     .replace(/\bDoğrulanmış\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "Verified")
     .replace(/\bDoğrulama gerekli\b/gi, "Validation Required")
     .replace(/\bModel hedefi\b/gi, "Model target")
@@ -1982,6 +2017,52 @@ function enforcePlanReportLanguage(
     .replace(/\bBEKLE\b/g, "HOLD")
     .replace(/\bDOĞRULA\b/g, "VALIDATE")
     .replace(/\bREDDET\b/g, "REJECT")
+    // The model is separately instructed (the field prompt's evidence-
+    // labeling requirement, which this function cannot change) to tag
+    // claims as Verified/Estimated/Assumption/AI Analysis even when
+    // writing natively in English -- these read as raw internal
+    // classification tags rather than report prose. "Estimated" and
+    // "Assumption" are also ordinary English words used constantly in
+    // legitimate financial prose ("Estimated market size is..."), so
+    // only the bare tag position (right after a delimiter or line start)
+    // is converted, never a normal sentence use of the same word. The
+    // trailing lookahead includes "|" alongside the other delimiters --
+    // confirmed live that kpiDashboard's own "Label: VALUE | Target: ... |
+    // Status: ..." pipe-delimited row shape left "AI Analysis" sitting
+    // right before " | Target:", which the original lookahead (colon/
+    // paren/period/newline only) didn't recognize as a tag boundary.
+    // Two more bare-tag shapes confirmed live, run BEFORE the individual
+    // per-word conversions below (order matters: once the individual "AI
+    // Analysis" pattern below has already turned it into "model-derived
+    // estimate", the compound pattern here can no longer recognize
+    // "Estimated/AI Analysis" as two adjacent tags): (a) two tag words
+    // joined by "/" ("Estimated/AI Analysis") used as a compound
+    // classifier -- that exact slash-joined shape never occurs in
+    // organic prose, so it's safe to convert regardless of what
+    // surrounds it; (b) a tag word sitting right before a closing paren
+    // with ordinary prose words in front of it inside the same
+    // parenthetical ("(financial model Estimated)") -- the paren-close
+    // is itself a strong enough boundary signal that the usual "must be
+    // right after a delimiter" prefix requirement can be dropped.
+    .replace(
+      /\b(Verified|Estimated|Assumption|AI Analysis)\s*\/\s*(Verified|Estimated|Assumption|AI Analysis)\b/gi,
+      (_match, first, second) => {
+        const convertTagWord = (word: string) => {
+          const normalized = word.toLowerCase();
+          if (normalized === "verified") return "Verified";
+          if (normalized === "estimated") return "Approximate";
+          if (normalized === "assumption") return "Planning assumption";
+          return "model-derived estimate";
+        };
+        return `${convertTagWord(first)}/${convertTagWord(second)}`;
+      }
+    )
+    .replace(/\b(Estimated|Assumption)\b(?=\s*\))/gi, (_match, word) =>
+      word.toLowerCase() === "estimated" ? "Approximate" : "Planning assumption"
+    )
+    .replace(/\bAI Analysis\b(?=\s*[:).|\n]|$)/gim, "model-derived estimate")
+    .replace(/(^|[:|(\-–—]\s*)Estimated\b(?=\s*[:).|\-–—\n]|$)/gim, "$1Approximate")
+    .replace(/(^|[:|(\-–—]\s*)Assumption\b(?=\s*[:).|\-–—\n]|$)/gim, "$1Planning assumption")
     .trim();
 }
 
@@ -2558,6 +2639,40 @@ function getVisibleDecision(context: AiFinancialModelContext) {
   return "HOLD";
 }
 
+// Every dimension name this function is ever called with (English and
+// Turkish), plus the overall score headings -- used as a hard stop
+// boundary below. The model does not reliably put each dimension on its
+// own line; live testing showed it just as often writes the whole
+// founderScore field as one continuous paragraph with dimensions
+// separated by ". " or "; " instead of a newline (e.g. "Market
+// Attractiveness: 53/100; Business Model Quality: 69/100; ..."). Since
+// [^\n] does not stop at those separators, a capture bounded only by
+// "not a newline" ran straight through every later dimension's own
+// label and score, producing captured "explanations" that were really
+// 2-4 dimensions concatenated together -- the concrete cause of the
+// doubled/contradictory scores and truncated fragments this was asked
+// to eliminate.
+const FOUNDER_DIMENSION_STOP_LABELS = [
+  "Idea Quality",
+  "Fikir Kalitesi",
+  "Market Attractiveness",
+  "Pazar Çekiciliği",
+  "Business Model Quality",
+  "İş Modeli Kalitesi",
+  "Validation Confidence",
+  "Doğrulama Güveni",
+  "Execution Complexity",
+  "Yürütme Karmaşıklığı",
+  "Evidence Confidence",
+  "Kanıt Güveni",
+  "Founder Evidence",
+  "Kurucu Kanıtı",
+  "Founder Readiness Score",
+  "Aggregate Founder Readiness Score",
+  "Overall Founder Readiness Score",
+  "Kurucu Hazırlık Skoru",
+];
+
 // The founderScore prompt (plan.ts) asks the model for a concrete,
 // company-specific explanation per dimension, but the canonical builder
 // used to ignore parsed.founderScore entirely and always print the same
@@ -2567,11 +2682,54 @@ function getVisibleDecision(context: AiFinancialModelContext) {
 // model's own reasoning for this business when it actually wrote one.
 function extractFounderDimensionExplanation(content: string, label: string) {
   const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Every character consumed after the label -- both the gap before the
+  // separator and the captured explanation itself -- is rejected if it
+  // is the start of ANOTHER dimension's label. Without this, a lazy
+  // "any characters" gap can skip straight over an unrelated dimension
+  // (and its score) hunting for a distant number+separator shape to
+  // match against, and an unguarded capture runs straight into the next
+  // dimension's own label and score when the source has no newline
+  // there. Both were confirmed live: the gap skipping produced an
+  // explanation built from a completely different, distant dimension;
+  // the unguarded capture produced multi-dimension run-on fragments.
+  const stopLookahead = FOUNDER_DIMENSION_STOP_LABELS.filter(
+    (other) => other.toLowerCase() !== label.toLowerCase()
+  )
+    .map((other) => other.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  const guardedChar = `(?:(?!${stopLookahead})[^\\n])`;
+  // The model's own founderScore text often states its own 0-100 score
+  // right after the label (e.g. "Business Model Quality: 32/100 - ...",
+  // or, just as often live, "Business Model Quality: 32/100;" with no
+  // real prose at all), same as the deterministic score this
+  // explanation is spliced next to. This optional, non-capturing group
+  // skips exactly that score-and-trailing-punctuation shape (if present)
+  // before the real capture begins, so the model's own number is never
+  // captured as part of "explanation" regardless of what punctuation
+  // follows it -- a plain second-separator requirement (the previous
+  // approach) missed shapes like "32/100 (regulatory + integration)"
+  // where a parenthetical, not a dash/colon, follows the number. Live
+  // testing also surfaced a bare-number variant with no "/100" or "%"
+  // suffix at all (e.g. "Idea Quality: 70 — idea addresses..."), which
+  // the first alternative can't match since it requires that suffix --
+  // the second alternative covers it, requiring either an explicit
+  // separator or a following "(" immediately after the number, so an
+  // ordinary sentence that happens to start with a number ("3 paid
+  // pilots signed by Q2") is never mistaken for a restated score. Live
+  // testing also surfaced a bare number followed directly by a
+  // parenthetical with no separator at all in between (e.g. "Business
+  // Model Quality: 77 (recurring SaaS with upsell)"), which the original
+  // punctuation-only second alternative missed -- the "(" lookahead
+  // covers that shape without consuming it, so the real capture below
+  // still gets the parenthetical itself as the explanation.
+  const scoreSkip =
+    `(?:\\d{1,3}\\s*(?:/\\s*100|%)\\s*[-–—;:.,]*\\s*` +
+    `|\\d{1,3}\\s*(?:[-–—;:.,]+\\s*|(?=\\()))?`;
   const match = new RegExp(
-    `${escapedLabel}[^\\n]*?(?:\\d{1,3}\\s*(?:/\\s*100|%))?\\s*[-–—:]\\s*([^\\n]{20,320})`,
+    `${escapedLabel}${guardedChar}*?[-–—:]\\s*${scoreSkip}(${guardedChar}{20,320})`,
     "i"
   ).exec(content);
-  const explanation = match?.[1]?.trim().replace(/[.!?]+\s*$/, "");
+  const explanation = match?.[1]?.trim().replace(/[.!?;]+\s*$/, "");
 
   return explanation && explanation.length >= 20 ? `${explanation}.` : "";
 }
@@ -3339,13 +3497,55 @@ function normalizeFullPlanReport(
     language
   );
 
+  // Every metric this report's own financial engine computes is equally
+  // "available" -- ARPA/CAC are derived by the same createFinancialModel
+  // pass as ARR/Runway/Year-3 revenue, so a line about one of them must
+  // never be allowed to read as unavailable while the others are shown as
+  // fact. Keyed by every display label a metric is already shown under
+  // elsewhere in this report (metricLine/marketSizeLine), lower-cased.
+  const metricDisplayValues: Record<string, string> = {};
+  for (const metric of Object.values(context.metrics)) {
+    metricDisplayValues[metric.label.toLowerCase()] = metric.displayValue;
+  }
+  // context.inputs.targetCustomer is the same single source of truth the
+  // rest of this report already treats as known (Financial Assumptions,
+  // the SWOT and executive-decision builders all read it unconditionally)
+  // -- reused here so Business Model's "who pays" and Go-to-Market's
+  // "beachhead positioning" can never claim that same concept is
+  // unavailable while the Target Customer / ICP section already states it.
+  const knownFacts = {
+    buyer: context.inputs.targetCustomer,
+    beachhead: context.inputs.targetCustomer,
+  };
+
   for (const field of planFields) {
     normalized[field] = enforcePlanReportLanguage(
       labelModelDerivedFinancialClaims({
         content: normalized[field],
-        metricValues: Object.values(context.metrics).map(
+        // founderScore is built entirely by buildCanonicalFounderScore --
+        // every score is the deterministic decision engine's own number,
+        // and every explanation clause is either a fixed, already-safe
+        // fallback sentence or a short fragment extracted (via
+        // extractFounderDimensionExplanation, which never invents a
+        // number) from the model's own reasoning. None of that needs, or
+        // should get, the "flag this as an unverifiable financial claim"
+        // treatment meant for freely-written AI prose elsewhere. Live
+        // testing confirmed a real failure mode: a founder-readiness
+        // score (e.g. 66/100) coincidentally matched a completely
+        // unrelated metric's digits elsewhere in the report, so the
+        // WHOLE canonical line -- score and explanation both -- was
+        // wholesale replaced with the generic "unavailable" message
+        // (founderScore's own labels like "Business Model Quality" don't
+        // match any financial metric category, so there was no more
+        // specific fallback to catch it). Passing no metric values here
+        // makes metricPattern null, which is a guaranteed no-op for
+        // every line.
+        metricValues: field === "founderScore" ? [] : Object.values(context.metrics).map(
           (metric) => metric.displayValue
         ),
+        metricDisplayValues,
+        knownFacts,
+        fieldName: field,
         language,
         sourceContext: context.normalizedBusinessIdea,
       }),
@@ -3519,10 +3719,26 @@ function createGroundedBusinessTimeoutFallback({
   language: ResponseLanguage;
 }) {
   const report = parseFullPlanReport("{}", context, language);
-  const evidenceLines = research.evidence.map(
-    (item) =>
-      `- [${item.id}] ${item.sourceTitle || item.publisher || item.field}: ${item.claim || item.value} ${item.url || ""}`.trim()
-  );
+  // Title:/Publisher:/URL: (one field per line) is the one citation shape
+  // both this report's own evidence-summary renderer (evidence-summary.ts's
+  // extractCitationDetail) and the PDF's citation parser (ReportPdfButton.tsx's
+  // parseCitations) already recognize. The previous "- [R#] Title: claim url"
+  // single-line shape matched neither -- every real, verified evidence item
+  // (with a real title, publisher, and URL) was silently unparseable, so the
+  // PDF fell through to its generic "no citations found" placeholder
+  // (Market Comparisons / Financial Comparisons / Planning Assumptions)
+  // instead of showing the actual sources. No data changes, only the shape.
+  const evidenceLines = research.evidence.map((item) => {
+    const title = [item.sourceTitle || item.field, item.claim || item.value]
+      .filter(Boolean)
+      .join(": ");
+    const lines = [`Title: ${title}`];
+    if (item.publisher) lines.push(`Publisher: ${item.publisher}`);
+    if (item.publishedDate) lines.push(`Year: ${item.publishedDate}`);
+    lines.push(`Reference: [${item.id}]`);
+    if (item.url) lines.push(`URL: ${item.url}`);
+    return lines.join("\n");
+  });
   const timeoutDisclosure =
     language === "Turkish"
       ? "Rapor sentez sağlayıcısı süre bütçesine ulaştı. Aşağıdaki karar analizi; doğrulanmış araştırma kanıtları, tutarlı finansal model ve mevcut kalite kapıları kullanılarak tamamlandı."
@@ -3534,7 +3750,7 @@ function createGroundedBusinessTimeoutFallback({
     language === "Turkish"
       ? "Doğrulanmış dış araştırma kanıtları:"
       : "Verified external research evidence:",
-    evidenceLines.join("\n") ||
+    evidenceLines.join("\n\n") ||
       (language === "Turkish"
         ? "- Süre bütçesi içinde kullanılabilir dış kanıt dönmedi."
         : "- No usable external evidence returned within the time budget."),

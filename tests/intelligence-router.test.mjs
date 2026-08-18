@@ -171,6 +171,18 @@ test("app/api/plan/route.ts wires the router right after layer 4, independently 
 });
 
 test("layer 5 does not touch report generation, PDF generation, or the existing decision-intelligence subsystem", () => {
+  // Scoped to layer 5's own statement, not the whole file -- route.ts
+  // legitimately imports from app/lib/report-engine/domain elsewhere
+  // (readRequestExpertiseProfile uses classifyReportDomain to seed its
+  // own domain fallback), which is unrelated to layer 5 and not report
+  // generation/PDF/decision-intelligence.
+  const startIndex = planRouteSource.indexOf("body.decisionPlan = buildDecisionPlan({");
+  const endMarker = "const decisionPlan = body.decisionPlan as DecisionPlan;";
+  const endIndex = planRouteSource.indexOf(endMarker, startIndex) + endMarker.length;
+  const statementSource = planRouteSource.slice(startIndex, endIndex);
+
+  assert.ok(startIndex > -1 && endIndex > startIndex);
+
   const forbiddenPaths = [
     "app/lib/pdf-engine",
     "app/lib/report-engine",
@@ -181,6 +193,6 @@ test("layer 5 does not touch report generation, PDF generation, or the existing 
   ];
 
   for (const path of forbiddenPaths) {
-    assert.doesNotMatch(planRouteSource, new RegExp(path.replace(/\//g, "\\/")));
+    assert.doesNotMatch(statementSource, new RegExp(path.replace(/\//g, "\\/")));
   }
 });

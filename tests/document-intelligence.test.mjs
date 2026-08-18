@@ -150,6 +150,18 @@ test("app/api/plan/route.ts classifies attachments and overrides analysisMode be
 });
 
 test("document classification does not touch report generation, PDF design, or billing files", () => {
+  // Scoped to the document-classification layer's own statements, not the
+  // whole file -- route.ts legitimately imports from
+  // app/lib/report-engine/domain elsewhere (readRequestExpertiseProfile
+  // uses classifyReportDomain to seed its own domain fallback), which is
+  // unrelated to this layer and not report generation/PDF/billing.
+  const startIndex = planRouteSource.indexOf("const documentClassification =");
+  const endMarker = "body.analysisMode = documentAwareRouting.selectedMode;";
+  const afterEndMarker = planRouteSource.indexOf("}", planRouteSource.indexOf(endMarker, startIndex) + endMarker.length) + 1;
+  const statementSource = planRouteSource.slice(startIndex, afterEndMarker);
+
+  assert.ok(startIndex > -1 && afterEndMarker > startIndex);
+
   const touchedFiles = [
     "app/lib/pdf-engine",
     "app/lib/report-engine",
@@ -159,6 +171,6 @@ test("document classification does not touch report generation, PDF design, or b
   ];
 
   for (const path of touchedFiles) {
-    assert.doesNotMatch(planRouteSource, new RegExp(path.replace(/\//g, "\\/")));
+    assert.doesNotMatch(statementSource, new RegExp(path.replace(/\//g, "\\/")));
   }
 });

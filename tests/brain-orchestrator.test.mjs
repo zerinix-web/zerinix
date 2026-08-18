@@ -208,10 +208,19 @@ test("does not create another intelligence engine, and does not itself modify re
 test("is integrated into /api/plan behind a feature flag, and never replaces the report generator, PDF generation, billing, auth, or UI code in that route", () => {
   assert.match(planRouteSource, /runBrainOrchestrator/);
   assert.match(planRouteSource, /ZERINIX_BRAIN_ORCHESTRATOR_ENABLED/);
-  assert.doesNotMatch(
-    planRouteSource,
-    /from ["'].*(?:pdf-engine|report-engine|billing)/i
-  );
+  // Imports are file-level in JS/TS, so this can't be scoped to the
+  // orchestrator's own statements the way the other layer-isolation tests
+  // are -- instead this excludes the one specific, legitimate exception:
+  // readRequestExpertiseProfile (unrelated to the orchestrator) imports
+  // classifyReportDomain, a pure domain-classification utility, from
+  // app/lib/report-engine/domain to seed its own domain fallback. Any
+  // OTHER report-engine import, or any pdf-engine/billing import, still
+  // fails this check.
+  const forbiddenImportLines = (planRouteSource.match(/^import[^\n]*from\s+["'][^"']+["'];?/gm) || [])
+    .filter((line) => /(?:pdf-engine|report-engine|billing)/i.test(line))
+    .filter((line) => !/report-engine\/domain["']/.test(line));
+
+  assert.deepEqual(forbiddenImportLines, []);
 });
 
 test("the orchestrator only coordinates the 7 existing engines and imports nothing from the legal-specific layers", () => {

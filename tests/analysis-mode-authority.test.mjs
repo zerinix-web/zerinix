@@ -121,7 +121,15 @@ test("Strategic Advisory real estate resolves the real-estate report family", ()
   );
 });
 
-test("real-estate evidence selects the real-estate family inside Business Validation", () => {
+test("Business Idea Validation always resolves to the business report pipeline, even with real-estate evidence in the prompt", () => {
+  // Business Idea Validation ("plan") is the product the user explicitly
+  // selected -- there is no separate "real estate" product reachable from
+  // it, so real-estate evidence in the prompt must never redirect it to
+  // the real-estate investment-analysis report (zoning/parcel/title/
+  // cadastral content). Confirmed live: an AI SaaS platform for
+  // commercial-building energy costs was misrouted this way; this test
+  // uses a genuine real-estate prompt (stronger real-estate evidence than
+  // that live bug) to prove the fix holds even in the hardest case.
   const understanding = createUnderstandingFallback({
     prompt: propertyPrompt,
     selectedMode: "plan",
@@ -132,9 +140,6 @@ test("real-estate evidence selects the real-estate family inside Business Valida
     prompt: propertyPrompt,
   });
 
-  assert.equal(understanding.detectedIndustry, "real_estate");
-  assert.equal(understanding.detectedContentType, "property_document");
-  assert.equal(understanding.expertiseProfile.domain, "real_estate");
   assert.equal(understanding.reportPlan.selectedMode, "plan");
   assert.equal(mismatch, "");
   assert.equal(
@@ -143,7 +148,15 @@ test("real-estate evidence selects the real-estate family inside Business Valida
       inferredDomain: "real_estate",
       expertiseDomain: understanding.expertiseProfile.domain,
     }),
-    "real_estate"
+    "business"
+  );
+  assert.equal(
+    resolveReportDomainForSelectedMode({
+      selectedMode: "plan",
+      inferredDomain: "real_estate",
+      expertiseDomain: "real_estate",
+    }),
+    "business"
   );
 });
 
@@ -267,7 +280,12 @@ test("unsupported model-derived business metrics are removed unless a scenario w
   for (const value of ["$2M", "$5k", "$78k", "$1.3M"]) {
     assert.doesNotMatch(labeled, new RegExp(value.replace("$", "\\$")));
   }
-  assert.match(labeled, /not provided; cannot be calculated from available evidence/i);
+  // The unavailable copy must never leak raw internal status strings --
+  // it should read as a clean executive explanation of why the figure is
+  // missing and what evidence would resolve it, not a bare status token.
+  assert.doesNotMatch(labeled, /not provided/i);
+  assert.doesNotMatch(labeled, /cannot be calculated from available evidence/i);
+  assert.match(labeled, /requires (?:realized revenue|real customer acquisition|current expense)[^\n]+ to calculate this/i);
   assert.doesNotMatch(labeled, /User-provided[^\n]+\$(?:2M|5k|78k|1\.3M)/i);
 });
 

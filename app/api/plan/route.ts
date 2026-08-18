@@ -21,6 +21,7 @@ import {
   normalizeSelectedAnalysisMode,
   resolveExpertiseProfile,
 } from "@/app/lib/ai/expertise-profile";
+import { classifyReportDomain } from "@/app/lib/report-engine/domain";
 import {
   createDynamicReportPlanFallback,
   resolveDynamicReportPlan,
@@ -146,11 +147,27 @@ function readRequestExpertiseProfile(body: ReportJobRequestPayload) {
       })
     : [];
   const selectedMode = normalizeSelectedAnalysisMode(body.analysisMode);
+  const prompt = typeof body.prompt === "string" ? body.prompt : "";
+  // Falls back to classifyReportDomain (the classifier with the operating-
+  // business exception) whenever the caller supplied no detectedIndustry --
+  // without this, createExpertiseProfileFallback's own detectDomain() below
+  // hits its unconditional real-estate keyword check (e.g. "gayrimenkul")
+  // with no chance to recognize an operating business (e.g. a proptech SaaS
+  // prompt), misrouting it to the Real Estate report pipeline.
   const fallback = createExpertiseProfileFallback({
-    prompt: typeof body.prompt === "string" ? body.prompt : "",
+    prompt,
     assets,
     selectedMode,
-    detectedDomain: readiness.detectedIndustry,
+    detectedDomain:
+      readiness.detectedIndustry ??
+      classifyReportDomain(
+        prompt,
+        assets.map((asset) => ({
+          name: asset.name,
+          type: asset.mimeType,
+          textContent: asset.textContent,
+        }))
+      ),
   });
 
   return resolveExpertiseProfile(

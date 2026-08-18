@@ -146,6 +146,20 @@ test("app/api/plan/route.ts generates the legal document summary only when docum
 });
 
 test("legal document understanding does not touch business, market, finance, real-estate, billing, or PDF logic", () => {
+  // Scoped to the legal-document-understanding layer's own statements
+  // (isLegalCaseAnalysis through the body.documentIntelligence assignment),
+  // not the whole file -- route.ts legitimately imports from
+  // app/lib/report-engine/domain elsewhere (readRequestExpertiseProfile
+  // uses classifyReportDomain to seed its own domain fallback), which is
+  // unrelated to this layer and not business/market/finance/real-estate/
+  // billing/PDF logic.
+  const startIndex = planRouteSource.indexOf("const isLegalCaseAnalysis =");
+  const endMarker = "...(legalCaseAnalysis ? { legalCaseAnalysis } : {}),";
+  const endIndex = planRouteSource.indexOf(endMarker, startIndex) + endMarker.length;
+  const statementSource = planRouteSource.slice(startIndex, endIndex);
+
+  assert.ok(startIndex > -1 && endIndex > startIndex);
+
   const forbiddenPaths = [
     "app/lib/pdf-engine",
     "app/lib/report-engine",
@@ -156,7 +170,7 @@ test("legal document understanding does not touch business, market, finance, rea
   ];
 
   for (const path of forbiddenPaths) {
-    assert.doesNotMatch(planRouteSource, new RegExp(path.replace(/\//g, "\\/")));
+    assert.doesNotMatch(statementSource, new RegExp(path.replace(/\//g, "\\/")));
   }
 });
 

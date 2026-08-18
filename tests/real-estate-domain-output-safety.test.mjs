@@ -38,7 +38,7 @@ const propertyAssets = [
   },
 ];
 
-test("land request plus uploaded property evidence resolves to real estate", () => {
+test("land request plus uploaded property evidence resolves to real estate under Strategic Advisory, but Business Idea Validation always stays on the business pipeline", () => {
   const understanding = createUnderstandingFallback({
     prompt: propertyPrompt,
     assets: propertyAssets,
@@ -56,13 +56,29 @@ test("land request plus uploaded property evidence resolves to real estate", () 
     }))),
     "real_estate"
   );
+  // Strategic Advisory ("chat") is unaffected and still resolves this
+  // genuine land/title evidence to the real-estate profile.
+  assert.equal(
+    resolveReportDomainForSelectedMode({
+      selectedMode: "chat",
+      inferredDomain: "real_estate",
+      expertiseDomain: understanding.expertiseProfile.domain,
+    }),
+    "real_estate"
+  );
+  // Business Idea Validation ("plan") is the product the user explicitly
+  // selected -- it must always resolve to "business", never "real_estate",
+  // even with strong land/title/parcel evidence in the prompt and assets.
+  // This is the exact live bug: an AI SaaS platform for commercial-
+  // building energy costs was misrouted to the real-estate
+  // investment-analysis report under "plan" mode.
   assert.equal(
     resolveReportDomainForSelectedMode({
       selectedMode: "plan",
       inferredDomain: "real_estate",
       expertiseDomain: understanding.expertiseProfile.domain,
     }),
-    "real_estate"
+    "business"
   );
 });
 

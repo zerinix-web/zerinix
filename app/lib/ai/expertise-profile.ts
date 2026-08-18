@@ -65,8 +65,17 @@ const employmentSignals =
   /\b(?:employment|employee|employer|terminated|termination|dismissal|overtime|wages?|salary|retaliat|exempt|misclassif|worked\s+for|iş hukuku|işçi|işveren|işten çıkar|fazla mesai|ücret|maaş|kıdem|ihbar)\b/i;
 const wageRetaliationSignals =
   /\b(?:overtime|unpaid|wages?|salary|retaliat|reporting|whistleblow|exempt|misclassif|fazla mesai|ödenmeyen|ödenmemiş|ücret|maaş|misilleme|ihbar)\b/i;
+// "office building"/"commercial building" used to be listed here as
+// real-estate signals, but they describe WHAT a business serves or
+// operates in, not that the request is itself a real-estate/land
+// transaction -- confirmed live: an AI SaaS platform for reducing
+// commercial-building energy costs was misrouted to the real-estate
+// investment-analysis report (zoning/parcel/title/cadastral content)
+// purely because the prompt said "commercial building". The remaining
+// terms below are all specific to an actual property/land transaction or
+// title/zoning record, not to a business that merely serves buildings.
 const realEstateSignals =
-  /(?:\b(?:real[\s-]?estate|property|land|parcel|title deed|deed|cadastr|zoning|investment property|office building|commercial building)\b|tapu|arsa|arazi|parsel|imar|kadastro|gayrimenkul|taşınmaz|ofis binası|ticari bina|iş merkezi|plaza)/i;
+  /(?:\b(?:real[\s-]?estate|property|land|parcel|title deed|deed|cadastr|zoning|investment property)\b|tapu|arsa|arazi|parsel|imar|kadastro|gayrimenkul|taşınmaz|ofis binası|ticari bina|iş merkezi|plaza)/i;
 const retailSignals =
   /\b(?:retail|store|branch|sku|product sales|inventory|stock turnover|sell-through|perakende|mağaza|şube|ürün satış|stok|devir hızı)\b/i;
 const financeSignals =

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import { sanitizeAiResponseText } from "../app/lib/ai/response-sanitization.ts";
 import {
@@ -137,4 +138,263 @@ test("identical missing-data explanations within one section are consolidated in
   const occurrences = output.match(/kurucunun kanal başına edinim maliyeti/g) || [];
   assert.equal(occurrences.length, 1, "the shared explanation must appear once, not once per metric");
   assert.match(output, /^CAC, LTV, Geri ödeme süresi: /m);
+});
+
+test("a genuinely High Risk Financial Quality status is never silently downgraded to Needs Validation by PDF normalization", () => {
+  // Reproduces a real production bug found via live report generation:
+  // localizePdfPresentationText had a blind `.replace(/\bHigh Risk\b/g,
+  // "Needs Validation")` with no scoping. "High Risk" is not an internal
+  // implementation label -- it is one of exactly three legitimate,
+  // deterministically-computed FinancialQuality values (financial-model.ts:
+  // Healthy | Needs Validation | High Risk), and the only place that text
+  // appears anywhere in the codebase. The blind replace silently
+  // reclassified every genuinely High Risk report as the weaker "Needs
+  // Validation" -- a real financial-consistency/accuracy bug, not a
+  // cosmetic one, since a founder reading the PDF would see a materially
+  // different (and false) risk signal.
+  const output = localizePdfPresentationText(
+    "Financial Quality:\n- Status: High Risk\nFinancial Warnings:\n- Capital efficiency requires validation. (AI Planning Assumption)",
+    "en"
+  );
+
+  assert.match(output, /Status: High Risk/);
+  assert.doesNotMatch(output, /Status: Needs Validation/);
+  // The same bug's blind text-mangling also truncated the adjacent
+  // evidence-type label, dropping "Planning" from "AI Planning
+  // Assumption" -- confirmed to share the same root cause.
+  assert.match(output, /\(AI Planning Assumption\)/);
+});
+
+test("a genuinely Yüksek Risk Financial Quality status is never silently downgraded to Doğrulama Gerekli by PDF normalization", () => {
+  const output = localizePdfPresentationText(
+    "Finansal Kalite:\n- Durum: Yüksek Risk\nFinansal Uyarılar:\n- Sermaye verimliliği doğrulama gerektiriyor. (AI Planlama Varsayımı)",
+    "tr"
+  );
+
+  assert.match(output, /Yüksek Risk/);
+  assert.doesNotMatch(output, /Durum: Doğrulama Gerekli/);
+});
+
+test("English default unavailable copy never leaks the raw 'not provided' / 'cannot be calculated' status strings", () => {
+  const output = labelModelDerivedFinancialClaims({
+    content: ["Some Unlabeled Figure: $2M"].join("\n"),
+    metricValues: ["$2M"],
+    language: "English",
+    sourceContext: "AI decision platform for SMEs",
+  });
+
+  assert.doesNotMatch(output, /not provided/i);
+  assert.doesNotMatch(output, /cannot be calculated from available evidence/i);
+  assert.match(output, /requires additional verified data before this can be shown/i);
+});
+
+test("a line about the already-established buyer/beachhead reuses the known fact instead of claiming it is unavailable", () => {
+  const businessModelOutput = labelModelDerivedFinancialClaims({
+    content: ["Who pays: $150/month subscription fee from the buyer"].join("\n"),
+    metricValues: ["$150/month"],
+    knownFacts: { buyer: "B2B / enterprise customers", beachhead: "B2B / enterprise customers" },
+    language: "English",
+    sourceContext: "AI decision platform for SMEs",
+  });
+
+  assert.doesNotMatch(businessModelOutput, /requires additional verified data/i);
+  assert.match(businessModelOutput, /^Who pays: B2B \/ enterprise customers$/m);
+
+  const gtmOutput = labelModelDerivedFinancialClaims({
+    content: ["Beachhead positioning: targeting a $500k pilot cohort"].join("\n"),
+    metricValues: ["$500k"],
+    knownFacts: { buyer: "B2B / enterprise customers", beachhead: "B2B / enterprise customers" },
+    language: "English",
+    sourceContext: "AI decision platform for SMEs",
+  });
+
+  assert.doesNotMatch(gtmOutput, /requires additional verified data/i);
+  assert.match(gtmOutput, /^Beachhead positioning: B2B \/ enterprise customers$/m);
+});
+
+test("businessModel/goToMarketPlan reuse the known buyer/beachhead fact even when the model labels the line something other than 'Who pays'/'Beachhead positioning'", () => {
+  // Reproduces a real production bug found via live report generation:
+  // the model does not reliably prefix these lines with the exact
+  // concept name -- it just as often writes "Revenue mechanics:" or
+  // "İş Modeli:" for the same underlying concept. knownFactForLabel only
+  // matches the label text; this proves the field-level fallback (keyed
+  // off which report field is being processed, not the model's own
+  // wording) catches the case that label-matching alone missed.
+  const businessModelOutput = labelModelDerivedFinancialClaims({
+    content: "Revenue mechanics: $49/month per seat from the salon owner, billed via subscription",
+    metricValues: ["$49/month"],
+    knownFacts: { buyer: "Salon owners / independent salon operators", beachhead: "Salon owners / independent salon operators" },
+    fieldName: "businessModel",
+    language: "English",
+    sourceContext: "beauty salon SaaS platform",
+  });
+
+  assert.doesNotMatch(businessModelOutput, /requires (?:additional verified data|realized revenue data)/i);
+  assert.equal(businessModelOutput, "Revenue mechanics: Salon owners / independent salon operators");
+
+  const gtmOutput = labelModelDerivedFinancialClaims({
+    content: "Channel thesis: targeting $2M in pipeline via outbound sales",
+    metricValues: ["$2M"],
+    knownFacts: { buyer: "Career changers", beachhead: "Career changers seeking software roles" },
+    fieldName: "goToMarketPlan",
+    language: "English",
+    sourceContext: "coding bootcamp platform",
+  });
+
+  assert.doesNotMatch(gtmOutput, /requires additional verified data/i);
+  assert.equal(gtmOutput, "Channel thesis: Career changers seeking software roles");
+
+  // A precisely-named metric (CAC) inside businessModel must still get
+  // its own real computed value, not the buyer fallback -- the
+  // field-level fallback must only apply once the more specific
+  // known-metric-value check has already failed.
+  const cacInsideBusinessModel = labelModelDerivedFinancialClaims({
+    content: "CAC: $500 per customer via paid channels",
+    metricValues: ["$500"],
+    metricDisplayValues: { cac: "$1,050" },
+    knownFacts: { buyer: "Salon owners", beachhead: "Salon owners" },
+    fieldName: "businessModel",
+    language: "English",
+    sourceContext: "beauty salon SaaS platform",
+  });
+
+  assert.equal(cacInsideBusinessModel, "CAC: $1,050 (Planning assumption)");
+});
+
+test("a free-flowing sentence with no 'Label: value' structure is left untouched instead of having a broken fragment appended", () => {
+  // Reproduces a real production bug found via live report generation: a
+  // deterministic SWOT bullet already correctly read "...16.4 months
+  // payback is still a planning assumption until acquisition channels
+  // are tested." -- a full sentence, no colon anywhere. Because the
+  // fallback logic assumed every flagged line has a "Label: value"
+  // shape, it treated the ENTIRE sentence as "the label" and appended a
+  // second, category-based explanation onto it, producing:
+  // "...tested.: requires real customer acquisition and retention
+  // data...". The sentence already honestly says the figure is a
+  // planning assumption -- there is no safe label to rebuild around, so
+  // it must be left exactly as-is.
+  const alreadyLabeled = labelModelDerivedFinancialClaims({
+    content: "- 16.4 months payback is still a planning assumption until acquisition channels are tested.",
+    metricValues: ["16.4 months"],
+    language: "English",
+    sourceContext: "insurtech platform for claims automation",
+  });
+
+  assert.equal(
+    alreadyLabeled,
+    "- 16.4 months payback is still a planning assumption until acquisition channels are tested."
+  );
+
+  // A "Label: value" line must still be flagged and replaced normally --
+  // this fix must not suppress flagging just because the word
+  // "Estimated" appears in the LABEL portion before the colon.
+  const stillFlagged = labelModelDerivedFinancialClaims({
+    content: "Estimated required funding: $1.3M",
+    metricValues: ["$1.3M"],
+    language: "English",
+    sourceContext: "AI decision platform for SMEs",
+  });
+
+  assert.doesNotMatch(stillFlagged, /\$1\.3M/);
+  assert.match(stillFlagged, /requires current expense and financing data/);
+});
+
+test("a dense multi-clause businessModel paragraph only has its flagged clause replaced -- every other clause survives untouched", () => {
+  // Reproduces a real production bug found via live report generation:
+  // the model wrote the entire businessModel field as ONE paragraph with
+  // several distinct "Label: value." clauses joined by ". " instead of a
+  // newline per clause. Because the whole line was treated as a single
+  // atomic replaceable unit, one unverifiable number in the LAST clause
+  // (a gross-margin percentage) caused the FIRST clause's label ("Kim
+  // öder" / "Who pays") to be used for a replacement that discarded
+  // every other clause in the paragraph -- five legitimate, unflagged
+  // clauses of real content were silently destroyed.
+  const output = labelModelDerivedFinancialClaims({
+    content:
+      "Kim öder: restoran işletmesi (abone). Ne öder: aylık abonelik ücreti. " +
+      "Fiyat birimi: ARPA aylık/konum başı. Tekrarlayan mantık: abonelik yenilemesi. " +
+      "Brüt marj: yazılım SaaS modeline uygun yüksek marj (modelde 78% olarak kullanıldı). " +
+      "Retention loop: israf tasarrufu gösterdikçe abonelik yenilemesi.",
+    metricValues: ["78%"],
+    knownFacts: { buyer: "öngörülen ilk kullanıcılar", beachhead: "öngörülen ilk kullanıcılar" },
+    fieldName: "businessModel",
+    language: "Turkish",
+    sourceContext: "restoran tedarik yönetimi SaaS",
+  });
+
+  // Every clause that was never flagged must survive verbatim.
+  assert.match(output, /^Kim öder: restoran işletmesi \(abone\)\./);
+  assert.match(output, /Ne öder: aylık abonelik ücreti\./);
+  assert.match(output, /Fiyat birimi: ARPA aylık\/konum başı\./);
+  assert.match(output, /Tekrarlayan mantık: abonelik yenilemesi\./);
+  assert.match(output, /Retention loop: israf tasarrufu gösterdikçe abonelik yenilemesi\./);
+
+  // Only the flagged clause (containing the unverifiable 78%) is
+  // replaced, and with the margin-specific explanation -- not the bare
+  // buyer/beachhead fallback, since "Brüt marj" names a distinct,
+  // precise metric category rather than restating "who pays".
+  assert.doesNotMatch(output, /78%/);
+  assert.match(output, /Brüt marj: gerçekleşmiş gelir ve maliyet verisi bulunmadığı için hesaplanamıyor/);
+  assert.doesNotMatch(output, /Brüt marj: öngörülen ilk kullanıcılar/);
+});
+
+test("a line about a metric this report's own financial engine already computed reuses that canonical value instead of claiming it is unavailable", () => {
+  const output = labelModelDerivedFinancialClaims({
+    content: ["ARPA: $412/month average across the base", "CAC: $980 fully loaded"].join("\n"),
+    metricValues: ["$412", "$980"],
+    metricDisplayValues: { arpa: "$480/month", cac: "$1,050" },
+    language: "English",
+    sourceContext: "AI decision platform for SMEs",
+  });
+
+  assert.doesNotMatch(output, /requires additional verified data/i);
+  assert.doesNotMatch(output, /not provided/i);
+  assert.match(output, /^ARPA: \$480\/month \(Planning assumption\)$/m);
+  assert.match(output, /^CAC: \$1,050 \(Planning assumption\)$/m);
+});
+
+test("a founderScore line is never wholesale-replaced just because its explanation happens to mention a number that coincidentally matches an unrelated metric's own displayValue elsewhere in the report", () => {
+  // Reproduces a real production bug found via live report generation:
+  // buildCanonicalFounderScore's canonical "Business Model Quality:
+  // 66/100 - [explanation]" line is entirely deterministic (the score
+  // from the decision engine, the explanation either a fixed fallback or
+  // a short fragment of the model's own already-safe reasoning) -- but
+  // it still passed through labelModelDerivedFinancialClaims like any
+  // other field. When the explanation happened to mention a percentage
+  // (e.g. "64% gross margin") that coincidentally equals a totally
+  // unrelated metric's own canonical displayValue, the WHOLE line --
+  // BOTH the deterministic score and the explanation -- was replaced
+  // with the generic "unavailable" message, since founderScore's own
+  // labels ("Business Model Quality") don't match any financial-metric
+  // category and there is no buyer/beachhead known-fact for this field.
+  // The fix: plan-executor.ts's call site passes metricValues: [] for
+  // the founderScore field specifically, which this test proves is
+  // sufficient (an empty array makes metricPattern null, a guaranteed
+  // no-op for every line) without needing to touch the shared function.
+  const founderScoreContent = [
+    "Founder Readiness Score: 46/100",
+    "Idea Quality: 58/100 - focused vertical with clear pain.",
+    "Business Model Quality: 66/100 - SaaS margins plausible at 64% gross margin but capital efficiency weak.",
+    "Founder Evidence: 25/100 - limited founder/team data provided.",
+  ].join("\n");
+
+  const output = labelModelDerivedFinancialClaims({
+    content: founderScoreContent,
+    metricValues: [],
+    fieldName: "founderScore",
+    language: "English",
+    sourceContext: "HVAC field service SaaS",
+  });
+
+  assert.equal(output, founderScoreContent);
+  assert.doesNotMatch(output, /requires additional verified data/i);
+});
+
+test("plan-executor.ts passes metricValues: [] specifically for the founderScore field (drift check)", () => {
+  const src = readFileSync("app/lib/report-jobs/plan-executor.ts", "utf8");
+  assert.match(
+    src,
+    /metricValues: field === "founderScore" \? \[\] : Object\.values\(context\.metrics\)\.map\(/,
+    "founderScore's metricValues exclusion has diverged from plan-executor.ts"
+  );
 });

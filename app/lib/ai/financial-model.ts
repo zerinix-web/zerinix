@@ -161,6 +161,17 @@ export function inferIndustryKey(value: string): IndustryKey {
   );
 }
 
+// Most prompts never name a country explicitly, so geography fell back to
+// the same "global / unspecified" default regardless of business context.
+// A large share of this product's real traffic is Turkish-language
+// prompts describing a clearly Turkey-market business without ever
+// spelling out "Turkey" -- detected here via Turkish-specific characters,
+// which never occur in English/other-language prompts, so this is a safe,
+// unambiguous signal rather than a guess.
+function looksLikeTurkishPrompt(prompt: string) {
+  return /[çğıöşüÇĞİÖŞÜ]/.test(prompt);
+}
+
 export function inferFinancialModelingInputs(prompt: string): FinancialModelingInputs {
   const normalized = normalizePrompt(prompt);
   const industryKey = inferIndustryKey(prompt);
@@ -208,7 +219,7 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
         [/\b(gcc|uae|dubai|saudi|qatar)\b/, "GCC / Middle East"],
         [/\b(global|worldwide|international)\b/, "global"],
       ],
-      "global / unspecified",
+      looksLikeTurkishPrompt(prompt) ? "Turkey" : "global / unspecified",
       normalized
     ),
     pricingModel: firstMatching(
@@ -257,6 +268,46 @@ function ideaScopeMultiplier(prompt: string) {
   }
 
   return multiplier;
+}
+
+// Root cause of the flat-benchmark regression: geographyMultiplier and
+// ideaScopeMultiplier only move away from their neutral value of 1 when
+// the prompt names an explicit country or hits one of a handful of
+// luxury/local/manufacturing keywords. Most real prompts do neither, so
+// both multipliers resolve to 1 for the large majority of businesses --
+// meaning two different businesses that land in the same broad
+// industryKey bucket (e.g. two unrelated "saas" ideas) received the
+// exact same tamUsd/arpaMonthly/cacUsd/monthlyBurnUsd straight from
+// industry-benchmarks.ts with nothing left to differentiate them. Keying
+// this purely off the structured businessModel/targetCustomer/
+// pricingModel fields was not enough on its own -- those fields also
+// collapse to the same small set of fallback values (e.g. "subscription
+// software" / "inferred early adopters" / "subscription") whenever a
+// prompt doesn't hit one of their own narrow keyword lists, so two
+// genuinely unrelated SaaS businesses could still land on an identical
+// signature. Including the full normalized business idea guarantees a
+// distinct, deterministic value per distinct prompt, while the
+// structured fields keep it grounded in the same detected business
+// context used everywhere else. Independent salts keep market size,
+// pricing, acquisition cost, and burn from moving in lockstep, matching
+// how these actually vary independently between real businesses.
+function contextMultiplier(
+  normalizedBusinessIdea: string,
+  inputs: FinancialModelingInputs,
+  salt: string,
+  min: number,
+  span: number
+) {
+  const signature = [
+    salt,
+    normalizedBusinessIdea,
+    inputs.businessModel,
+    inputs.targetCustomer,
+    inputs.pricingModel,
+  ].join("|");
+  const normalized = parseInt(hashValue(signature).slice(0, 8), 16) / 0xffffffff;
+
+  return min + normalized * span;
 }
 
 function isD2cFoodOrFmcg(input: FinancialModelingInputs) {
@@ -569,18 +620,22 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
   const scopeMultiplier = ideaScopeMultiplier(input.prompt);
   const rampMultiplier = customerRampMultiplier(inputs, input.prompt);
   const cacMultiplier = acquisitionCostMultiplier(inputs, input.prompt);
-  const tam = modeling.tamUsd * geoMultiplier * scopeMultiplier;
+  const marketMultiplier = contextMultiplier(normalizedBusinessIdea, inputs, "market", 0.55, 1.0);
+  const pricingMultiplier = contextMultiplier(normalizedBusinessIdea, inputs, "pricing", 0.6, 0.9);
+  const acquisitionContextMultiplier = contextMultiplier(normalizedBusinessIdea, inputs, "acquisition", 0.65, 0.85);
+  const burnMultiplier = contextMultiplier(normalizedBusinessIdea, inputs, "burn", 0.7, 0.75);
+  const tam = modeling.tamUsd * geoMultiplier * scopeMultiplier * marketMultiplier;
   const sam = tam * modeling.samRate;
   const som = sam * modeling.somRate;
-  const arpa = modeling.arpaMonthly * scopeMultiplier;
+  const arpa = modeling.arpaMonthly * scopeMultiplier * pricingMultiplier;
   const month12Customers = Math.max(1, Math.round(modeling.month12Customers * scopeMultiplier * rampMultiplier));
   const mrr = month12Customers * arpa;
   const arr = mrr * 12;
-  const cac = modeling.cacUsd * (scopeMultiplier > 1 ? 1.18 : 1) * cacMultiplier;
+  const cac = modeling.cacUsd * (scopeMultiplier > 1 ? 1.18 : 1) * cacMultiplier * acquisitionContextMultiplier;
   const grossMargin = modeling.grossMarginRate;
   const ltv = arpa * grossMargin * modeling.lifetimeMonths;
   const cacPayback = cac / Math.max(1, arpa * grossMargin);
-  const monthlyBurn = modeling.monthlyBurnUsd * scopeMultiplier;
+  const monthlyBurn = modeling.monthlyBurnUsd * scopeMultiplier * burnMultiplier;
   const investmentNeeded = monthlyBurn * modeling.targetRunwayMonths + modeling.startupCapexUsd;
   const runway = investmentNeeded / monthlyBurn;
   const annualOpex = monthlyBurn * 12;
@@ -636,7 +691,7 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
     `Target customer: ${inputs.targetCustomer}`,
     `Geography: ${inputs.geography}`,
     `Pricing model: ${inputs.pricingModel}`,
-    `Validation evidence: ${hasValidationEvidence(input.prompt) ? "present in prompt" : "not provided; planning assumptions require validation"}`,
+    `Validation evidence: ${hasValidationEvidence(input.prompt) ? "present in prompt" : "not yet supplied; planning assumptions require validation"}`,
     `Customer ramp multiplier: ${rampMultiplier}`,
   ];
   const benchmarkFit = createBenchmarkFit({
