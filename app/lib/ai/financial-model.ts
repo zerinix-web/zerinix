@@ -157,7 +157,6 @@ export function inferIndustryKey(value: string): IndustryKey {
       [/\b(ecommerce|e-commerce|online store|shopify|retail marketplace|dtc|d2c|direct to consumer|direct-to-consumer|online satış|e-ticaret)\b/, "ecommerce"],
       [/\b(marketplace|two-sided|two sided|platform marketplace)\b/, "marketplace"],
       [/\b(restaurant|food service|foodservice|fast casual|fine dining|qsr|restoran|lokanta|yemek)\b/, "restaurant"],
-      [/\b(drone|drones|uav|autonomous aerial|aerial robotics)\b/, "drone"],
       // Confirmed live: a commercial shipping/fleet-operations AI platform
       // ("...automates voyage planning, monitors regulatory compliance,
       // and integrates with existing maritime ERP systems...") was
@@ -174,7 +173,41 @@ export function inferIndustryKey(value: string): IndustryKey {
       // generic catches and enriched with maritime-specific vocabulary so
       // a shipping/fleet-operations business is never shadowed by a later,
       // broader match.
-      [/\b(logistics|freight|supply chain|warehouse|delivery|shipping|maritime|vessel|fleet operations?|voyage planning|port operations|cargo)\b/, "logistics"],
+      //
+      // Confirmed live (round 2): an AI-native maritime logistics
+      // intelligence platform for governments, ports, shipping companies,
+      // and defense organizations was classified as "Drone technology /
+      // autonomous systems" -- contaminating Financial Assumptions,
+      // Benchmark Intelligence, SWOT, and the roadmap with drone-hardware
+      // terminology -- because the prompt described drone imagery as ONE
+      // of several intelligence input sources (alongside satellite
+      // imagery, AIS vessel tracking, and customs data), and the "drone"
+      // pattern below matched that single supporting-technology mention
+      // before this logistics/maritime pattern -- positioned after it --
+      // ever got a chance to match the prompt's own primary business
+      // vocabulary ("maritime", "logistics", "shipping"). Same class of
+      // bug as every fix in this function: a supporting input/technology a
+      // platform ingests or analyzes is not the same signal as what the
+      // business itself sells. Moved this pattern ahead of "drone" (and
+      // enriched with maritime-intelligence-specific vocabulary: AIS
+      // tracking, customs, port authority/intelligence, maritime security/
+      // defense) so a maritime intelligence platform is never shadowed by
+      // a later,
+      // narrower match on one of its input sources -- while a genuine
+      // drone manufacturer or drone-software company (no maritime/
+      // logistics vocabulary anywhere in its prompt) still falls through
+      // to the drone pattern below correctly.
+      // "satellite imagery" is deliberately NOT included as a standalone
+      // trigger here (unlike the other maritime-qualified phrases below):
+      // confirmed it would otherwise misclassify unrelated agriculture,
+      // insurance, and urban-planning geospatial-imagery businesses as
+      // "logistics" purely because they also analyze satellite imagery --
+      // the exact same false-positive shape this whole fix exists to
+      // eliminate. A maritime intelligence prompt is already caught by its
+      // own maritime-specific vocabulary (maritime/shipping/vessel/AIS/
+      // port/customs) without needing this ambiguous, cross-industry term.
+      [/\b(logistics|freight|supply chain|warehouse|delivery|shipping|maritime|vessel|vessels|fleet operations?|voyage planning|port operations|port authority|seaport|cargo|ais tracking|automatic identification system|customs clearance|customs screening|customs authority|maritime security|maritime defense|maritime intelligence|maritime analytics|maritime domain awareness|port intelligence)\b/, "logistics"],
+      [/\b(drone|drones|uav|autonomous aerial|aerial robotics)\b/, "drone"],
       // Confirmed live: an AI-powered procurement platform "for global
       // automotive manufacturers" (integrating with SAP/Oracle/Dynamics,
       // predicting supplier risk, monitoring ESG compliance) was
