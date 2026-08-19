@@ -358,13 +358,35 @@ export function detectPdfPresentationLocale(value = "") {
 
   if (
     /[çğıöşüÇĞİÖŞÜ]/.test(normalized) ||
-    /\b(?:pazar|müşteri|gelir|risk|fırsat|özet|kaynak|varsayım|doğrulama|yatırım|kurucu|rekabet|tavsiye|yönetici|iş modeli|fiyatlandırma)\b/i.test(normalized)
+    // "risk" is deliberately excluded from this keyword list -- it is
+    // spelled identically in Turkish and English, so it can never
+    // disambiguate the two languages. Confirmed live: it was the sole
+    // trigger that misdetected genuinely English report sections (any
+    // section mentioning "risk" -- Risk Posture, Main Risk, a Risks
+    // section -- effectively every business report) as Turkish, which
+    // then rendered Turkish evidence badges ("Varsayım") and the
+    // localized "Bölüm" section eyebrow inside otherwise fully-English
+    // reports. Every other keyword here is a Turkish-only word (not a
+    // valid English word), so removing "risk" does not reduce genuine
+    // Turkish detection -- a real Turkish section is virtually never
+    // signaled by "risk" alone.
+    /\b(?:pazar|müşteri|gelir|fırsat|özet|kaynak|varsayım|doğrulama|yatırım|kurucu|rekabet|tavsiye|yönetici|iş modeli|fiyatlandırma)\b/i.test(normalized)
   ) {
     return "tr";
   }
 
   if (/[äöüßÄÖÜ]/.test(normalized) || /\b(?:Zusammenfassung|Entscheidung|Risiken|Quellen|Empfehlungen)\b/i.test(normalized)) return "de";
-  if (/[àâçéèêëîïôûùüÿœÀÂÇÉÈÊËÎÏÔÛÙÜŸŒ]/.test(normalized) || /\b(?:Synthèse|Décision|Risques|Sources|Recommandations)\b/i.test(normalized)) return "fr";
+  // "Sources" is deliberately excluded from this keyword list -- it is
+  // spelled identically in French and English, so it can never
+  // disambiguate the two languages. Confirmed live: it was the sole
+  // trigger that misdetected genuinely English report sections (every
+  // report has a Sources section) as French, which then rendered French
+  // evidence badges ("Hypothèse", "Analyse IA", "Estimé") inside
+  // otherwise fully-English reports -- the same bug class as "risk" in
+  // the Turkish branch above. Every remaining keyword here is a
+  // French-only word (not a valid English word), so removing "Sources"
+  // does not reduce genuine French detection.
+  if (/[àâçéèêëîïôûùüÿœÀÂÇÉÈÊËÎÏÔÛÙÜŸŒ]/.test(normalized) || /\b(?:Synthèse|Décision|Risques|Recommandations)\b/i.test(normalized)) return "fr";
   if (/[áéíóúñ¿¡ÁÉÍÓÚÑ]/.test(normalized) || /\b(?:Resumen|Decisión|Riesgos|Fuentes|Recomendaciones)\b/i.test(normalized)) return "es";
 
   return "en";

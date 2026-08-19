@@ -3193,6 +3193,19 @@ function PremiumSectionVisual({
   investmentScore?: ReportInvestmentScore;
 }) {
   const field = section.field;
+
+  // PERFORMANCE FIX -- this locale computation used to run unconditionally
+  // for every section, on every render, even for fields this component
+  // never renders anything for (it falls through to `return null` at the
+  // end regardless). hasPremiumSectionVisual already mirrors exactly which
+  // fields this function handles, so bailing out before the expensive
+  // detectPdfPresentationLocale scan for every other field is a pure
+  // performance fix -- the output is identical, since those fields would
+  // have hit the same `return null` anyway, just after wasted work.
+  if (!hasPremiumSectionVisual(section)) {
+    return null;
+  }
+
   const evidenceLocale = getResponseLanguage(detectPdfPresentationLocale(section.content));
 
   if (field === "tamSamSom") {
@@ -4526,6 +4539,145 @@ function ConversationSidebar({
     </>
   );
 }
+
+// PERFORMANCE FIX -- confirmed live: dashboard/report pages became
+// extremely slow (sometimes appearing stuck on the loading skeleton)
+// during report streaming. Root cause: dedupeReportSections (used by
+// ReportPanel below) rebuilds a brand-new section object for every field
+// on every streaming chunk (standard, expected immutable-state practice),
+// so every already-completed section gets a new object reference on every
+// render even though its own text hasn't changed. This section's render
+// body used to recompute detectPdfPresentationLocale/
+// normalizeReportPresentationText/getReportPresentationLabels -- each a
+// multi-pass scan over the full section text -- inline on every render of
+// the parent, so EVERY already-finished section paid that cost again on
+// EVERY chunk of a DIFFERENT, still-streaming section. The cost grew with
+// report length and render frequency, matching the reported regression.
+// Extracting this as its own memoized component, with a custom comparator
+// keyed on the section's own content (a string, compared by value) rather
+// than the section object's reference, means React skips re-rendering
+// (and re-running this expensive work) entirely for any section whose
+// text hasn't actually changed since the last render. Pure performance
+// fix -- every value produced, and all rendered output, is identical to
+// before.
+const ReportSectionCard = memo(
+  function ReportSectionCard({
+    section,
+    index,
+    investmentScore,
+    isDomainDecisionReport,
+    reportQuality,
+    waitingMessage,
+  }: {
+    section: ReportSection;
+    index: number;
+    investmentScore?: ReportInvestmentScore;
+    isDomainDecisionReport: boolean;
+    reportQuality?: ReportQualityScore;
+    waitingMessage: string;
+  }) {
+    const Icon = section.icon;
+    const isFinancialDashboard = section.field === "financialDashboard";
+    const { detailsContent, presentationLabels, hasVisibleDetailsContent, sectionPdfLocale, sectionEvidenceLocale } =
+      useMemo(() => {
+        const detailsContent = isFinancialDashboard
+          ? ""
+          : normalizeReportPresentationText(
+              section.field === "founderScore"
+                ? normalizeFounderReadinessScoreText(
+                    section.content,
+                    readFounderReadinessScoreValue(investmentScore)
+                  )
+                : section.content
+            );
+        const presentationLabels = getReportPresentationLabels(section.content);
+        const hasVisibleDetailsContent = detailsContent.replace(/[#*_`>\-[\]\s()]/g, "").trim().length > 0;
+        const sectionPdfLocale = detectPdfPresentationLocale(section.content);
+        const sectionEvidenceLocale = getResponseLanguage(sectionPdfLocale);
+
+        return { detailsContent, presentationLabels, hasVisibleDetailsContent, sectionPdfLocale, sectionEvidenceLocale };
+        // section.content is a string, compared by value -- this only
+        // recomputes when this section's own text (or investmentScore, on
+        // which founderScore's derived text also depends) actually changes.
+      }, [section.content, section.field, isFinancialDashboard, investmentScore]);
+
+    return (
+      <article
+        className={getReportArticleClass(section)}
+        style={{ contain: section.content === waitingMessage ? "layout paint" : undefined }}
+      >
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-teal-200/30 to-transparent" />
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-inner shadow-white/5">
+            <Icon className="h-5 w-5 text-teal-200" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h3 className="text-xl font-semibold tracking-tight text-white">
+                {section.title}
+              </h3>
+              <div className="flex w-fit flex-wrap items-center gap-2">
+                <EvidenceBadge level={getSectionEvidenceLevel(section)} locale={sectionEvidenceLocale} />
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
+                  {sectionPdfLocale === "tr" ? "Bölüm" : "Section"} {String(index + 1).padStart(2, "0")}
+                </span>
+              </div>
+            </div>
+            <div className="mt-4 border-t border-white/10 pt-4">
+              {section.field === "executiveSummary" ? (
+                <ExecutiveSummaryVisual
+                  section={section}
+                  investmentScore={investmentScore}
+                />
+              ) : null}
+              {!isDomainDecisionReport ? (
+                <ExecutiveSnapshotPanel
+                  section={section}
+                  investmentScore={investmentScore}
+                  reportQuality={reportQuality}
+                />
+              ) : null}
+              {!isDomainDecisionReport &&
+              hasPremiumSectionVisual(section) &&
+              section.field !== "executiveSummary" &&
+              section.field !== "financialDashboard" &&
+              section.field !== "tamSamSom" ? (
+                <ExecutiveInsightBanner section={section} />
+              ) : null}
+              {!isDomainDecisionReport ? (
+                <PremiumSectionVisual
+                  section={section}
+                  investmentScore={investmentScore}
+                />
+              ) : null}
+              {hasVisibleDetailsContent && section.field !== "tamSamSom" ? (
+                <>
+                  <SectionTakeaway content={detailsContent} />
+                  <AnalysisNotes
+                    compact
+                    label={isFinancialDashboard ? "Metric Details" : presentationLabels.details}
+                  >
+                    <MarkdownRenderer content={detailsContent} />
+                  </AnalysisNotes>
+                </>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </article>
+    );
+  },
+  (prev, next) =>
+    prev.section.content === next.section.content &&
+    prev.section.field === next.section.field &&
+    prev.section.title === next.section.title &&
+    prev.section.icon === next.section.icon &&
+    prev.index === next.index &&
+    prev.investmentScore === next.investmentScore &&
+    prev.isDomainDecisionReport === next.isDomainDecisionReport &&
+    prev.reportQuality === next.reportQuality &&
+    prev.waitingMessage === next.waitingMessage
+);
 
 const ReportPanel = memo(function ReportPanel({
   reportData,
@@ -6030,91 +6182,17 @@ const ReportPanel = memo(function ReportPanel({
           />
         ) : null}
 
-        {visibleSections.map((section, index) => {
-          const Icon = section.icon;
-          const isFinancialDashboard = section.field === "financialDashboard";
-          const detailsContent = isFinancialDashboard
-            ? ""
-            : normalizeReportPresentationText(
-                section.field === "founderScore"
-                  ? normalizeFounderReadinessScoreText(
-                      section.content,
-                      readFounderReadinessScoreValue(investmentScore)
-                    )
-                  : section.content
-              );
-          const presentationLabels = getReportPresentationLabels(section.content);
-          const hasVisibleDetailsContent = detailsContent.replace(/[#*_`>\-[\]\s()]/g, "").trim().length > 0;
-          const sectionPdfLocale = detectPdfPresentationLocale(section.content);
-          const sectionEvidenceLocale = getResponseLanguage(sectionPdfLocale);
-
-          return (
-            <article
-              key={section.field}
-              className={getReportArticleClass(section)}
-              style={{ contain: section.content === waitingMessage ? "layout paint" : undefined }}
-            >
-              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-teal-200/30 to-transparent" />
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-inner shadow-white/5">
-                  <Icon className="h-5 w-5 text-teal-200" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <h3 className="text-xl font-semibold tracking-tight text-white">
-                      {section.title}
-                    </h3>
-                    <div className="flex w-fit flex-wrap items-center gap-2">
-                      <EvidenceBadge level={getSectionEvidenceLevel(section)} locale={sectionEvidenceLocale} />
-                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
-                        {sectionPdfLocale === "tr" ? "Bölüm" : "Section"} {String(index + 1).padStart(2, "0")}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="mt-4 border-t border-white/10 pt-4">
-                    {section.field === "executiveSummary" ? (
-                      <ExecutiveSummaryVisual
-                        section={section}
-                        investmentScore={investmentScore}
-                      />
-                    ) : null}
-                    {!isDomainDecisionReport ? (
-                      <ExecutiveSnapshotPanel
-                        section={section}
-                        investmentScore={investmentScore}
-                        reportQuality={reportQuality}
-                      />
-                    ) : null}
-                    {!isDomainDecisionReport &&
-                    hasPremiumSectionVisual(section) &&
-                    section.field !== "executiveSummary" &&
-                    section.field !== "financialDashboard" &&
-                    section.field !== "tamSamSom" ? (
-                      <ExecutiveInsightBanner section={section} />
-                    ) : null}
-                    {!isDomainDecisionReport ? (
-                      <PremiumSectionVisual
-                        section={section}
-                        investmentScore={investmentScore}
-                      />
-                    ) : null}
-                    {hasVisibleDetailsContent && section.field !== "tamSamSom" ? (
-                      <>
-                        <SectionTakeaway content={detailsContent} />
-                      <AnalysisNotes
-                          compact
-                          label={isFinancialDashboard ? "Metric Details" : presentationLabels.details}
-                      >
-                        <MarkdownRenderer content={detailsContent} />
-                      </AnalysisNotes>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            </article>
-          );
-        })}
+        {visibleSections.map((section, index) => (
+          <ReportSectionCard
+            key={section.field}
+            section={section}
+            index={index}
+            investmentScore={investmentScore}
+            isDomainDecisionReport={isDomainDecisionReport}
+            reportQuality={reportQuality}
+            waitingMessage={waitingMessage}
+          />
+        ))}
       </div>
 
       <div className="grid gap-3 border-t border-white/10 p-4 sm:grid-cols-2 sm:p-5">
