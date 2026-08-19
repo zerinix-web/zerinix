@@ -331,7 +331,7 @@ test("a normal, complete organization name is never flagged as truncated", () =>
 // remainder became an orphaned, unlabeled line no parser recognized.
 
 test("buildResearchEvidenceLines collapses embedded newlines within a single field so it can never span multiple lines (drift check)", () => {
-  assert.match(planExecutorSource, /function buildResearchEvidenceLines\(research: DomainResearchBundle\)/);
+  assert.match(planExecutorSource, /function buildResearchEvidenceLines\(evidence: DomainResearchEvidence\[\]\)/);
   assert.match(planExecutorSource, /collapseEvidenceFieldWhitespace/);
   assert.match(
     planExecutorSource,

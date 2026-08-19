@@ -178,13 +178,13 @@ test("the exact live maritime prompt (Singapore, Greece, Norway, UAE) no longer 
   const regions = new Set(geography.split(" + "));
   assert.ok(regions.has("Singapore"), `Singapore missing from "${geography}"`);
   assert.ok(regions.has("Europe"), `Europe (Greece/Norway) missing from "${geography}"`);
-  assert.ok(regions.has("GCC / Middle East"), `GCC / Middle East (UAE) missing from "${geography}"`);
+  assert.ok(regions.has("United Arab Emirates"), `United Arab Emirates missing from "${geography}"`);
 });
 
-test("'United Arab Emirates' (full name, not just the 'UAE' abbreviation) resolves to GCC / Middle East", () => {
+test("'United Arab Emirates' (full name, not just the 'UAE' abbreviation) resolves to its own explicit country, not the broader GCC / Middle East region", () => {
   assert.equal(
     inferFinancialModelingInputs("A logistics platform for the United Arab Emirates market.").geography,
-    "GCC / Middle East"
+    "United Arab Emirates"
   );
 });
 

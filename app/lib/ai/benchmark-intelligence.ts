@@ -110,7 +110,12 @@ export function createBenchmarkIntelligenceScore(financialModel: FinancialModel)
       : 54) - validationPenalty
   );
   const geographyFit = clampScore(
-    (/turkey|türkiye|us|usa|uk|europe|gcc|global|local|regional/i.test(inputs.geography)
+    // "united arab emirates" is matched explicitly alongside "gcc" -- UAE
+    // now resolves to its own explicit country label instead of being
+    // collapsed into "GCC / Middle East" (see the geography resolver in
+    // financial-model.ts), so this scoring heuristic is kept matching the
+    // same prompts it already matched, unaffected by that display/label fix.
+    (/turkey|türkiye|us|usa|uk|europe|gcc|united arab emirates|global|local|regional/i.test(inputs.geography)
       ? 68
       : 48) - Math.min(12, validationPenalty)
   );

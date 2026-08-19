@@ -4026,8 +4026,8 @@ function parseFullPlanReport(
 const collapseEvidenceFieldWhitespace = (value: string) =>
   value.replace(/\s*\n+\s*/g, " ").trim();
 
-function buildResearchEvidenceLines(research: DomainResearchBundle) {
-  return research.evidence.map((item) => {
+function buildResearchEvidenceLines(evidence: DomainResearchEvidence[]) {
+  return evidence.map((item) => {
     const title = collapseEvidenceFieldWhitespace(
       [item.sourceTitle || item.field, item.claim || item.value]
         .filter(Boolean)
@@ -4042,6 +4042,56 @@ function buildResearchEvidenceLines(research: DomainResearchBundle) {
   });
 }
 
+// CRITICAL PRODUCTION FIX -- AML/Fraud source relevance. Confirmed live:
+// an AML/Fraud compliance Business Plan report's Sources page cited
+// unrelated generic federal sources (Office of Personnel Management,
+// Environmental Protection Agency, Foundations for Evidence-Based
+// Policymaking Act material) that have no connection to anti-money-
+// laundering, KYC, sanctions, or fraud compliance -- the research
+// evidence registry has no subject-matter relevance filter, so any
+// government source a broad "regulatory source" search query happens to
+// return is treated as equally citable regardless of topical fit. This
+// never fabricates a replacement source (real evidence is the only
+// input): it only reorders known AML/KYC/sanctions/fraud authorities
+// (FATF, FinCEN, FCA, MAS, OCC, FFIEC, BIS, Wolfsberg Group, and other
+// directly relevant regulators) to the front when they are ALREADY
+// present in the real evidence, and drops a narrow, explicit list of
+// known-irrelevant generic government sources. Every other source --
+// including any government source not on that explicit list -- is left
+// exactly as found; this is a targeted correction for the two specific
+// bug shapes reported live, not a general-purpose source-quality filter.
+const amlFraudComplianceSignals =
+  /\b(anti[\s-]?money[\s-]?laundering|money laundering|\baml\b|\bkyc\b|know your customer|sanctions screening|sanctions compliance|transaction monitoring|financial crime|fraud detection|fraud prevention|fraud compliance)\b/i;
+
+const amlRelevantAuthoritySignals =
+  /\b(fatf|financial action task force|fincen|financial crimes enforcement network|\bfca\b|financial conduct authority|\bmas\b|monetary authority of singapore|\bocc\b|comptroller of the currency|ffiec|federal financial institutions examination council|\bbis\b|bank for international settlements|wolfsberg)\b/i;
+
+const amlIrrelevantGenericSourceSignals =
+  /\b(office of personnel management|\bopm\b|environmental protection agency|\bepa\b|evidence[\s-]based policymaking|foundations for evidence)\b/i;
+
+function isAmlFraudComplianceReport(normalizedBusinessIdea: string) {
+  return amlFraudComplianceSignals.test(normalizedBusinessIdea);
+}
+
+function prioritizeAmlFraudRelevantEvidence(
+  evidence: DomainResearchEvidence[]
+): DomainResearchEvidence[] {
+  const sourceText = (item: DomainResearchEvidence) =>
+    `${item.sourceTitle} ${item.publisher} ${item.url}`;
+  const relevant: DomainResearchEvidence[] = [];
+  const rest: DomainResearchEvidence[] = [];
+
+  for (const item of evidence) {
+    if (amlRelevantAuthoritySignals.test(sourceText(item))) {
+      relevant.push(item);
+    } else if (!amlIrrelevantGenericSourceSignals.test(sourceText(item))) {
+      rest.push(item);
+    }
+  }
+
+  return [...relevant, ...rest];
+}
+
 // Builds the full sourcesAssumptions field content directly from the
 // research evidence registry -- the same registry the model's own inline
 // [R#] citations (in Market Opportunity, Problem, etc.) resolve against --
@@ -4051,9 +4101,13 @@ function buildResearchEvidenceLines(research: DomainResearchBundle) {
 // real titles instead of falling through to a generic placeholder.
 function buildRealSourcesAssumptionsField(
   research: DomainResearchBundle,
-  language: ResponseLanguage
+  language: ResponseLanguage,
+  normalizedBusinessIdea = ""
 ) {
-  const evidenceLines = buildResearchEvidenceLines(research);
+  const evidence = isAmlFraudComplianceReport(normalizedBusinessIdea)
+    ? prioritizeAmlFraudRelevantEvidence(research.evidence)
+    : research.evidence;
+  const evidenceLines = buildResearchEvidenceLines(evidence);
 
   return [
     language === "Turkish"
@@ -4092,7 +4146,7 @@ function createGroundedBusinessTimeoutFallback({
   // no user-facing disclosure is needed.
   report.sourcesAssumptions = [
     report.sourcesAssumptions,
-    buildRealSourcesAssumptionsField(research, language),
+    buildRealSourcesAssumptionsField(research, language, context.normalizedBusinessIdea),
   ].join("\n\n");
 
   return report;
@@ -7041,7 +7095,8 @@ Write only the content for this section. Do not write a JSON object, field name,
           // ran.
           parsedCachedReport.sourcesAssumptions = buildRealSourcesAssumptionsField(
             cachedBusinessResearch,
-            responseLanguage
+            responseLanguage,
+            cachedUnifiedFinancialContext.normalizedBusinessIdea
           );
         }
         logSkippedResearchForReportCache({
@@ -7447,7 +7502,8 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             // not just the timeout-fallback path.
             parsedReport.sourcesAssumptions = buildRealSourcesAssumptionsField(
               businessResearch,
-              responseLanguage
+              responseLanguage,
+              researchAwareFinancialContext.normalizedBusinessIdea
             );
             const reportMetadataContext = createReportMetadataContext({
               prompt: promptText,

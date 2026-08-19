@@ -304,8 +304,19 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
         [/\b(uk|united kingdom|london)\b/, "United Kingdom"],
         [/\b(europe|eu|germany|france|italy|spain|greece|norway)\b/, "Europe"],
         [/\b(turkey|turkiye|tuerkiye|istanbul|türkiye)\b/, "Turkey"],
-        [/\b(gcc|uae|united arab emirates|dubai|abu dhabi|saudi|qatar)\b/, "GCC / Middle East"],
         [/\bsingapore\b/, "Singapore"],
+        // Confirmed live: an AML/Fraud compliance prompt explicitly naming
+        // "United States, United Kingdom, Singapore, United Arab Emirates,
+        // and Switzerland" had the UAE silently replaced with the broader
+        // "GCC / Middle East" region label, and Switzerland was dropped
+        // entirely (no entry existed for it at all). An explicitly named
+        // country must never be collapsed into a region label -- "GCC /
+        // Middle East" is kept only for the broader Gulf signals (Dubai,
+        // Abu Dhabi, Saudi, Qatar, or the bare "GCC" acronym) that were
+        // never a specific country name to begin with.
+        [/\b(uae|united arab emirates)\b/, "United Arab Emirates"],
+        [/\b(gcc|dubai|abu dhabi|saudi|qatar)\b/, "GCC / Middle East"],
+        [/\b(switzerland|swiss|zurich|zürich|geneva)\b/, "Switzerland"],
         [/\b(japan|tokyo|japanese)\b/, "Japan"],
         [/\b(south korea|korea|seoul|korean)\b/, "South Korea"],
         [/\b(mexico|mexico city|mexican)\b/, "Mexico"],
@@ -386,6 +397,12 @@ function geographyMultiplier(geography: string) {
   if (geography === "United Kingdom") return 0.08;
   if (geography === "Turkey") return 0.035;
   if (geography === "GCC / Middle East") return 0.06;
+  // United Arab Emirates now resolves to its own explicit country label
+  // instead of being collapsed into "GCC / Middle East" (see the geography
+  // resolver above) -- kept at the same multiplier it already had under
+  // that label, since financial-calculation behavior is unrelated to this
+  // display/label fix and must not change.
+  if (geography === "United Arab Emirates") return 0.06;
   return 1;
 }
 

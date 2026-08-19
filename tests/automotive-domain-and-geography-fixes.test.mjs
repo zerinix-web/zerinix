@@ -133,7 +133,7 @@ test("previously-fixed geography scenarios (maritime multi-region, North America
   ).geography;
   assert.deepEqual(
     new Set(maritimeGeo.split(" + ")),
-    new Set(["Europe", "GCC / Middle East", "Singapore"])
+    new Set(["Europe", "United Arab Emirates", "Singapore"])
   );
 
   const naEuropeGeo = inferFinancialModelingInputs(

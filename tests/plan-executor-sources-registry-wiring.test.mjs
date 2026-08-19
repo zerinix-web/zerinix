@@ -40,7 +40,7 @@ const planExecutorSource = readFileSync("app/lib/report-jobs/plan-executor.ts", 
 test("sourcesAssumptions is rebuilt from businessResearch.evidence for every report, not just the timeout-fallback path (drift check)", () => {
   assert.match(
     planExecutorSource,
-    /function buildResearchEvidenceLines\(research: DomainResearchBundle\)/,
+    /function buildResearchEvidenceLines\(evidence: DomainResearchEvidence\[\]\)/,
     "the shared evidence-line builder has diverged from plan-executor.ts"
   );
   assert.match(
@@ -53,14 +53,14 @@ test("sourcesAssumptions is rebuilt from businessResearch.evidence for every rep
   // timeout-fallback path's own existing logic.
   assert.match(
     planExecutorSource,
-    /parsedReport\.sourcesAssumptions = buildRealSourcesAssumptionsField\(\s*businessResearch,\s*responseLanguage\s*\)/,
+    /parsedReport\.sourcesAssumptions = buildRealSourcesAssumptionsField\(\s*businessResearch,\s*responseLanguage,\s*researchAwareFinancialContext\.normalizedBusinessIdea\s*\)/,
     "the main generation path's sourcesAssumptions override has diverged from plan-executor.ts"
   );
   // The timeout-fallback path must reuse the SAME shared builder, not a
   // second, independently-maintained copy of the same logic.
   assert.match(
     planExecutorSource,
-    /report\.sourcesAssumptions = \[\s*report\.sourcesAssumptions,\s*buildRealSourcesAssumptionsField\(research, language\),\s*\]\.join\("\\n\\n"\);/,
+    /report\.sourcesAssumptions = \[\s*report\.sourcesAssumptions,\s*buildRealSourcesAssumptionsField\(research, language, context\.normalizedBusinessIdea\),\s*\]\.join\("\\n\\n"\);/,
     "the timeout-fallback path's reuse of the shared builder has diverged from plan-executor.ts"
   );
   // The cache-hit replay path is a third call site that needs the exact
@@ -76,7 +76,7 @@ test("sourcesAssumptions is rebuilt from businessResearch.evidence for every rep
   // parseFullPlanReport ran on the cached response text.
   assert.match(
     planExecutorSource,
-    /parsedCachedReport\.sourcesAssumptions = buildRealSourcesAssumptionsField\(\s*cachedBusinessResearch,\s*responseLanguage\s*\)/,
+    /parsedCachedReport\.sourcesAssumptions = buildRealSourcesAssumptionsField\(\s*cachedBusinessResearch,\s*responseLanguage,\s*cachedUnifiedFinancialContext\.normalizedBusinessIdea\s*\)/,
     "the cache-hit replay path's sourcesAssumptions override has diverged from plan-executor.ts"
   );
 });
