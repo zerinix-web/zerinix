@@ -68,13 +68,22 @@ function extractFounderDimensionExplanation(content, label) {
     .join("|");
   const guardedChar = `(?:(?!${stopLookahead})[^\\n])`;
   const scoreSkip =
-    `(?:\\d{1,3}\\s*(?:/\\s*100|%)\\s*[-–—;:.,]*\\s*` +
+    `(?:(?:scored\\s+|scoring\\s+|rated\\s+|rating\\s+of\\s+)?\\d{1,3}\\s*(?:/\\s*100|%|out\\s+of\\s+(?:a\\s+possible\\s+)?100|points?)\\s*[-–—;:.,]*\\s*` +
     `|\\d{1,3}\\s*(?:[-–—;:.,]+\\s*|(?=\\()))?`;
   const match = new RegExp(
     `${escapedLabel}${guardedChar}*?[-–—:]\\s*${scoreSkip}(${guardedChar}{20,320})`,
     "i"
   ).exec(content);
-  const explanation = match?.[1]?.trim().replace(/[.!?;]+\s*$/, "");
+  let explanation = match?.[1]?.trim().replace(/[.!?;]+\s*$/, "");
+
+  if (explanation) {
+    explanation = explanation
+      .replace(
+        /^(?:scored\s+|scoring\s+|rated\s+|rating\s+of\s+)?\d{1,3}\s*(?:\/\s*100|%|out\s+of\s+(?:a\s+possible\s+)?100|points?)\b[\s,;:\-–—]*/i,
+        ""
+      )
+      .trim();
+  }
 
   return explanation && explanation.length >= 20 ? `${explanation}.` : "";
 }
@@ -91,21 +100,28 @@ test("mirrored extractFounderDimensionExplanation regex is present verbatim in t
     ),
     "the stop-label guard has diverged from plan-executor.ts"
   );
+
+  const fnMatch = /function extractFounderDimensionExplanation\([\s\S]*?\n\}/.exec(planExecutorSource);
+  assert.ok(fnMatch, "extractFounderDimensionExplanation not found");
+  const fnBody = fnMatch[0];
+
+  // Score-skip must recognize the canonical "NN/100"/"NN%" shape AND the
+  // wider phrasings a model restates its own score in ("NN out of 100",
+  // "scored NN out of a possible 100", "NN points") -- see
+  // founder-readiness-score-binding-consistency.test.mjs for the exact
+  // live bug this widened pattern fixes.
+  assert.match(fnBody, /out\\s\+of\\s\+\(\?:a\\s\+possible\\s\+\)\?100/, "the 'out of 100' score-skip alternative has diverged from plan-executor.ts");
+  assert.match(fnBody, /scored\\s\+\|scoring\\s\+\|rated\\s\+\|rating\\s\+of\\s\+/, "the leading-verb score-skip alternative has diverged from plan-executor.ts");
+  assert.match(fnBody, /points\?\)/, "the 'points' score-skip alternative has diverged from plan-executor.ts");
   assert.ok(
-    planExecutorSource.includes(
-      "`(?:\\\\d{1,3}\\\\s*(?:/\\\\s*100|%)\\\\s*[-–—;:.,]*\\\\s*` +"
-    ) &&
-      planExecutorSource.includes(
-        "`|\\\\d{1,3}\\\\s*(?:[-–—;:.,]+\\\\s*|(?=\\\\()))?`;"
-      ),
-    "the optional score-skip group has diverged from plan-executor.ts"
-  );
-  assert.ok(
-    planExecutorSource.includes(
+    fnBody.includes(
       "`${escapedLabel}${guardedChar}*?[-–—:]\\\\s*${scoreSkip}(${guardedChar}{20,320})`,"
     ),
     "the combined pattern has diverged from plan-executor.ts"
   );
+  // Defensive post-capture strip: catches any restated score the
+  // pre-capture skip above still doesn't anticipate.
+  assert.match(fnBody, /explanation\s*=\s*explanation\s*\n?\s*\.replace\(/, "the defensive post-capture strip has diverged from plan-executor.ts");
 });
 
 test("does not swallow the model's own score number into the captured explanation", () => {

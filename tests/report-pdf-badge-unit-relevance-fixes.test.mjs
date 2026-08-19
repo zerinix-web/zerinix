@@ -146,7 +146,7 @@ function mirrorExtractKpiValueFromSnippet({ explicitValue, targetValue, quantity
     (effectiveScore === null ? "" : `${effectiveScore}%`) ||
     "";
 
-  return !value ? "Validation Required" : value;
+  return !value ? "Not yet measured" : value;
 }
 
 test("a non-percentage metric (CAC-shaped: a bare dollar figure) never renders with a guessed '%' suffix", () => {
@@ -161,7 +161,7 @@ test("a non-percentage metric (CAC-shaped: a bare dollar figure) never renders w
     isPercentage: false,
   });
 
-  assert.equal(result, "Validation Required");
+  assert.equal(result, "Not yet measured");
   assert.doesNotMatch(result, /%/);
 });
 
@@ -184,7 +184,7 @@ test("extractKpiValueFromSnippet's own empty-value guard is present in both rend
   ]) {
     assert.match(
       source,
-      /return !value \|\| isMissingKpiText\(value\) \? "Validation Required" : value;/,
+      /return !value \|\| isMissingKpiText\(value\) \? "Not yet measured" : value;/,
       `${name}: extractKpiValueFromSnippet no longer guards an empty resolved value`
     );
   }

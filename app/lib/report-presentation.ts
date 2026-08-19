@@ -371,9 +371,25 @@ function readFounderReadinessTextMetric(content: string | undefined, label: stri
 
   for (const alias of FOUNDER_READINESS_TEXT_ALIASES[label] || [label]) {
     const escapedAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Confirmed live (renewable-energy report): buildCanonicalFounderScore
+    // always writes one dimension per line, but downstream text processing
+    // (filler/duplicate-sentence stripping, cross-section dedup) can merge
+    // adjacent dimensions onto a single run-on line with no "\n" between
+    // them -- the same shape plan-executor.ts's own
+    // extractFounderDimensionExplanation already has to handle. The
+    // original anchor here (line-start only) silently failed to match any
+    // dimension after the first in that shape, returning null and falling
+    // through to the separately-computed investmentScore fallback below --
+    // a DIFFERENT extraction path that reads the same underlying data but
+    // is not guaranteed to agree number-for-number, producing exactly the
+    // card/narrative mismatch this fix exists to close. A sentence-ending
+    // boundary (". "/"! "/"? "/"; " followed by whitespace) is added as a
+    // third valid anchor, so a mid-paragraph dimension label is found
+    // directly from the text -- the single source of truth -- instead of
+    // silently deferring to a second, independently-computed source.
     const match = content.match(
       new RegExp(
-        `(?:^|\\n)\\s*(?:[-*•]\\s*)?(?:\\*\\*)?${escapedAlias}(?:\\*\\*)?\\s*[:\\-–—]\\s*(\\d{1,3})\\s*(?:%|\\/\\s*100)?`,
+        `(?:^|\\n|[.!?;]\\s+)\\s*(?:[-*•]\\s*)?(?:\\*\\*)?${escapedAlias}(?:\\*\\*)?\\s*[:\\-–—]\\s*(\\d{1,3})\\s*(?:%|\\/\\s*100)?`,
         "i"
       )
     );

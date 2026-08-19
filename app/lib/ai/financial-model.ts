@@ -158,16 +158,53 @@ export function inferIndustryKey(value: string): IndustryKey {
       [/\b(marketplace|two-sided|two sided|platform marketplace)\b/, "marketplace"],
       [/\b(restaurant|food service|foodservice|fast casual|fine dining|qsr|restoran|lokanta|yemek)\b/, "restaurant"],
       [/\b(drone|drones|uav|autonomous aerial|aerial robotics)\b/, "drone"],
-      [/\b(cybersecurity|security|soc|compliance|threat|fraud)\b/, "cybersecurity"],
-      [/\b(ai|artificial intelligence|automation|agent|assistant|llm)\b/, "ai"],
-      [/\b(saas|crm|software|platform)\b/, "saas"],
+      // Confirmed live: a commercial shipping/fleet-operations AI platform
+      // ("...automates voyage planning, monitors regulatory compliance,
+      // and integrates with existing maritime ERP systems...") was
+      // misclassified as Cybersecurity, contaminating its Benchmark
+      // Intelligence, Financial Assumptions, and SWOT with Cybersecurity
+      // terminology -- because "compliance" alone matched the
+      // cybersecurity pattern below, and this logistics/maritime pattern
+      // was positioned AFTER it (and after the generic "ai"/"saas"
+      // catches), so firstMatching's first-match-wins order never reached
+      // it. Same class of bug as the "payments" fix above: "compliance"
+      // is a feature almost every regulated industry (maritime, medical,
+      // financial, food safety, ...) mentions, not a reliable signal the
+      // business itself IS a cybersecurity company. Moved ahead of the
+      // generic catches and enriched with maritime-specific vocabulary so
+      // a shipping/fleet-operations business is never shadowed by a later,
+      // broader match.
+      [/\b(logistics|freight|supply chain|warehouse|delivery|shipping|maritime|vessel|fleet operations?|voyage planning|port operations|cargo)\b/, "logistics"],
+      // Confirmed live: an AI-powered procurement platform "for global
+      // automotive manufacturers" (integrating with SAP/Oracle/Dynamics,
+      // predicting supplier risk, monitoring ESG compliance) was
+      // classified as generic "ai" -- because "AI-powered"/"automatically"
+      // matched the generic ai/automation catch below, and this
+      // manufacturing pattern (which "automotive manufacturers" itself
+      // matches, twice) was positioned AFTER it, so firstMatching's
+      // first-match-wins order never reached it, same as the logistics/
+      // cybersecurity bug above. Every genuinely specific industry pattern
+      // below (healthcare/hospitality/luxuryGoods/manufacturing/fitness/
+      // agriculture) is moved ahead of the generic ai/saas/cybersecurity
+      // catches for the same reason: a prompt naming its own specific
+      // industry almost always ALSO mentions "AI", "platform", or
+      // "automation" as a feature, and the more specific signal must win.
       [/\b(hospital|clinic|healthcare|medical|patient|doctor)\b/, "healthcare"],
-      [/\b(logistics|freight|supply chain|warehouse|delivery|shipping)\b/, "logistics"],
       [/\b(hotel|resort|hospitality|travel)\b/, "hospitality"],
       [/\b(yacht|marine|boat|ship|luxury goods|jewelry|watch)\b/, "luxuryGoods"],
-      [/\b(battery|ev|electric vehicle|manufacturing|manufacturer|factory|industrial)\b/, "manufacturing"],
+      [/\b(battery|ev|electric vehicle|manufacturing|manufacturer|factory|industrial|automotive)\b/, "manufacturing"],
       [/\b(gym|fitness|franchise|pilates|wellness club)\b/, "fitness"],
       [/\b(farming|agriculture|vertical farm|food production|greenhouse)\b/, "agriculture"],
+      // "compliance"/"security"/"threat"/"fraud" alone are features
+      // countless non-cybersecurity industries mention (maritime
+      // regulatory compliance, food safety compliance, port security,
+      // fraud prevention for e-commerce checkout, ...) -- narrowed to the
+      // specific compound phrases that actually signal the business
+      // itself is a cybersecurity/InfoSec company, following the same
+      // precedent as the "payments" fix above.
+      [/\b(cybersecurity|cyber security|infosec|information security|network security|endpoint security|threat detection|threat intelligence|threat hunting|fraud detection|fraud prevention|security operations center|\bsoc\b|managed detection and response|\bmdr\b|penetration testing|vulnerability management|security compliance platform|compliance automation platform)\b/, "cybersecurity"],
+      [/\b(ai|artificial intelligence|automation|agent|assistant|llm)\b/, "ai"],
+      [/\b(saas|crm|software|platform)\b/, "saas"],
       [/\b(agency|consulting|service|studio)\b/, "services"],
     ],
     "services",
@@ -244,13 +281,34 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
     // one and dropping the rest.
     geography: (() => {
       const hasNorthAmerica = /\bnorth america\b/.test(normalized);
+      // Confirmed live: a maritime/shipping fleet-operations prompt naming
+      // "Singapore, Greece, Norway, and the United Arab Emirates" fell
+      // back to the unspecified-geography default -- none of those four
+      // countries were in this list at all (Greece/Norway had no Europe-
+      // adjacent entry, Singapore had no region of its own, and UAE only
+      // matched its own three-letter abbreviation, not the full country
+      // name the prompt actually used). Matches this list's existing
+      // country-to-region granularity (e.g. Germany/France/Italy/Spain all
+      // already map to the single "Europe" value).
+      // Confirmed live: an automotive-procurement prompt naming "Germany,
+      // Japan, South Korea, Mexico, and the United States" resolved to
+      // "United States + Europe + global" -- Japan/South Korea/Mexico had
+      // no entry at all (silently dropped), and "global" was treated as a
+      // co-equal region signal alongside the named countries purely
+      // because the prompt's own "for global automotive manufacturers"
+      // used the word as an ambition descriptor, not a "no specific
+      // region" signal -- so it was incorrectly added on top of, rather
+      // than instead of, the five real countries actually named.
       const regionPatterns: Array<[RegExp, string]> = [
         [/\b(us|usa|united states)\b/, "United States"],
         [/\b(uk|united kingdom|london)\b/, "United Kingdom"],
-        [/\b(europe|eu|germany|france|italy|spain)\b/, "Europe"],
+        [/\b(europe|eu|germany|france|italy|spain|greece|norway)\b/, "Europe"],
         [/\b(turkey|turkiye|tuerkiye|istanbul|türkiye)\b/, "Turkey"],
-        [/\b(gcc|uae|dubai|saudi|qatar)\b/, "GCC / Middle East"],
-        [/\b(global|worldwide|international)\b/, "global"],
+        [/\b(gcc|uae|united arab emirates|dubai|abu dhabi|saudi|qatar)\b/, "GCC / Middle East"],
+        [/\bsingapore\b/, "Singapore"],
+        [/\b(japan|tokyo|japanese)\b/, "Japan"],
+        [/\b(south korea|korea|seoul|korean)\b/, "South Korea"],
+        [/\b(mexico|mexico city|mexican)\b/, "Mexico"],
       ];
       const matchedRegions = new Set(
         regionPatterns
@@ -266,6 +324,15 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
 
       if (matchedRegions.size > 0) {
         return [...matchedRegions].join(" + ");
+      }
+
+      // "global"/"worldwide"/"international" only means anything as a
+      // geography signal when NO specific country was named at all --
+      // once any real region matched above, a prompt's own unrelated use
+      // of "global" (e.g. describing ambition, not geography) must never
+      // be added alongside it.
+      if (/\b(global|worldwide|international)\b/.test(normalized)) {
+        return "global";
       }
 
       return looksLikeTurkishPrompt(prompt) ? "Turkey" : UNSPECIFIED_GEOGRAPHY;

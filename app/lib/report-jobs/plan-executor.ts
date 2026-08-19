@@ -2019,6 +2019,8 @@ function enforcePlanReportLanguage(
       .replace(/\bVarsayım\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "Planlama varsayımı")
       .replace(/\bVerified\b/gi, "Doğrulanmış")
       .replace(/\bValidation Required\b/g, "Doğrulama gerekli")
+      .replace(/\bNot yet measured\b/gi, "Henüz ölçülmedi")
+      .replace(/\bto be defined\b/gi, "Tanımlanacak")
       .replace(/\bModel target\b/g, "Model hedefi")
       .replace(/\bWatch\b/g, "İzleme")
       .replace(/\bDecision Confidence\b/g, "Karar Güveni")
@@ -2064,6 +2066,8 @@ function enforcePlanReportLanguage(
     .replace(/\bPlanlama varsayımı\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "planning assumption")
     .replace(/\bDoğrulanmış\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "Verified")
     .replace(/\bDoğrulama gerekli\b/gi, "Validation Required")
+    .replace(/\bHenüz ölçülmedi\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "Not yet measured")
+    .replace(/\bTanımlanacak\b(?![a-zA-ZçğıöşüÇĞİÖŞÜ])/gi, "to be defined")
     .replace(/\bModel hedefi\b/gi, "Model target")
     .replace(/\bİzleme\b/g, "Watch")
     .replace(/\bGEÇ\b/g, "PASS")
@@ -2318,22 +2322,30 @@ function ensureCompleteReportText(content: string) {
 }
 
 function removePlaceholderKpiValues(content: string) {
+  // Confirmed live: this repair pass (for a malformed AI-written "1"/"1/1"
+  // KPI placeholder) used to substitute the literal internal tags
+  // "Validation Required" / "validation test required" -- exactly the
+  // raw-sounding placeholder text this report must never expose, just
+  // introduced here instead of removed. Both slots now get the same
+  // professional, user-facing phrasing used everywhere else a KPI has no
+  // verified value yet (see replaceBareValidationRequiredValue below);
+  // enforcePlanReportLanguage still localizes it for Turkish reports.
   return content
-    .replace(/\|\s*1\s*\|\s*Target\s*:\s*1\s*\|/gi, "| Validation Required | Target: validation test required |")
-    .replace(/\b1\s*\|\s*Target\s*:\s*1\b/gi, "Validation Required | Target: validation test required")
-    .replace(/\b1\s*(?:[-–—]\s*)?\/\s*(?:target\s*[:\-–—]?\s*)?1\b/gi, "Validation Required")
-    .replace(/\b1\s*\/\s*Target\s*:\s*1\b/gi, "Validation Required")
-    .replace(/\b1\s*\/\s*Target\s*1\b/gi, "Validation Required")
-    .replace(/\b1\s*\/\s*Target\b/gi, "Validation Required")
+    .replace(/\|\s*1\s*\|\s*Target\s*:\s*1\s*\|/gi, "| Not yet measured | Target: to be defined |")
+    .replace(/\b1\s*\|\s*Target\s*:\s*1\b/gi, "Not yet measured | Target: to be defined")
+    .replace(/\b1\s*(?:[-–—]\s*)?\/\s*(?:target\s*[:\-–—]?\s*)?1\b/gi, "Not yet measured")
+    .replace(/\b1\s*\/\s*Target\s*:\s*1\b/gi, "Not yet measured")
+    .replace(/\b1\s*\/\s*Target\s*1\b/gi, "Not yet measured")
+    .replace(/\b1\s*\/\s*Target\b/gi, "Not yet measured")
     .replace(
       /\bValue\s*:\s*1\s*(?:\||,|;|\s+-\s+)\s*Target\s*:\s*1\b/gi,
-      "Value: Validation Required | Target: validation test required"
+      "Value: Not yet measured | Target: to be defined"
     )
-    .replace(/\bMetric\s*:\s*1\b/gi, "Metric: Validation Required")
-    .replace(/\b(Current|Baseline|Threshold)\s*:\s*1\b/gi, "$1: Validation Required")
-    .replace(/\bTarget\s*:\s*1\b/gi, "Target: validation test required")
-    .replace(/\bTarget\s+1\b/gi, "Target: validation test required")
-    .replace(/\bValue\s*:\s*1\b/gi, "Value: Validation Required")
+    .replace(/\bMetric\s*:\s*1\b/gi, "Metric: Not yet measured")
+    .replace(/\b(Current|Baseline|Threshold)\s*:\s*1\b/gi, "$1: Not yet measured")
+    .replace(/\bTarget\s*:\s*1\b/gi, "Target: to be defined")
+    .replace(/\bTarget\s+1\b/gi, "Target: to be defined")
+    .replace(/\bValue\s*:\s*1\b/gi, "Value: Not yet measured")
     .trim();
 }
 
@@ -2798,14 +2810,41 @@ function extractFounderDimensionExplanation(content: string, label: string) {
   // punctuation-only second alternative missed -- the "(" lookahead
   // covers that shape without consuming it, so the real capture below
   // still gets the parenthetical itself as the explanation.
+  // Confirmed live (airport ground-handling report): the model doesn't
+  // always restate its own score in the canonical "NN/100"/"NN%" shape
+  // this skip was built for -- "55 out of 100 - ..." and "scored 55 out
+  // of a possible 100 ..." are both real, observed phrasings that neither
+  // scoreSkip alternative below matched, so the model's own (possibly
+  // different) number was captured as part of the "explanation" and spliced
+  // directly next to the deterministic score card reads from
+  // (readFounderReadinessMetricValue, report-presentation.ts) -- e.g.
+  // "Market Attractiveness: 75/100 - 55 out of 100 - ...", which a reader
+  // sees as the card (75) and the explanatory text (55) disagreeing, even
+  // though only one number (75) ever drove anything. "out of 100"/"out of
+  // a possible 100"/"points" are added as recognized scale suffixes, and
+  // an optional leading "scored"/"rated"/... verb is now skipped too.
   const scoreSkip =
-    `(?:\\d{1,3}\\s*(?:/\\s*100|%)\\s*[-–—;:.,]*\\s*` +
+    `(?:(?:scored\\s+|scoring\\s+|rated\\s+|rating\\s+of\\s+)?\\d{1,3}\\s*(?:/\\s*100|%|out\\s+of\\s+(?:a\\s+possible\\s+)?100|points?)\\s*[-–—;:.,]*\\s*` +
     `|\\d{1,3}\\s*(?:[-–—;:.,]+\\s*|(?=\\()))?`;
   const match = new RegExp(
     `${escapedLabel}${guardedChar}*?[-–—:]\\s*${scoreSkip}(${guardedChar}{20,320})`,
     "i"
   ).exec(content);
-  const explanation = match?.[1]?.trim().replace(/[.!?;]+\s*$/, "");
+  let explanation = match?.[1]?.trim().replace(/[.!?;]+\s*$/, "");
+
+  // Defensive second pass: strips any restated score the pre-capture skip
+  // above still didn't anticipate (an LLM restates its own 0-100 score in
+  // essentially unbounded phrasing), so a future phrasing gap here can
+  // never again leak a second, possibly-different number next to the
+  // deterministic score -- the single source of truth for what's shown.
+  if (explanation) {
+    explanation = explanation
+      .replace(
+        /^(?:scored\s+|scoring\s+|rated\s+|rating\s+of\s+)?\d{1,3}\s*(?:\/\s*100|%|out\s+of\s+(?:a\s+possible\s+)?100|points?)\b[\s,;:\-–—]*/i,
+        ""
+      )
+      .trim();
+  }
 
   return explanation && explanation.length >= 20 ? `${explanation}.` : "";
 }
@@ -3470,6 +3509,111 @@ function buildPlanExecutiveDecisionBrief(
   };
 }
 
+// Confirmed live in a pharmacy Business Plan report: the internal
+// "Validation Required" evidence-classification tag (report-evidence-
+// confidence.ts's own vocabulary, which the model is separately instructed
+// to tag numeric claims with) leaked into user-facing text as Sources
+// metadata -- "Source type: Validation Required" / "Confidence: Validation
+// Required" -- reading as a broken internal placeholder rather than an
+// omitted, genuinely-unavailable field. Strips only that specific
+// label/value pair (never the source's title, publisher, or year), so a
+// citation with partial metadata still shows everything it actually has.
+const sourceMetadataValidationPlaceholderPattern =
+  /\b(?:Source type|Kaynak türü|Confidence|Güven)\s*[:\-–—]\s*(?:Validation Required|Doğrulama [Gg]erekli)\.?/gi;
+
+function omitInternalSourceMetadataPlaceholders(content: string) {
+  return content
+    .split("\n")
+    .map((line) => {
+      sourceMetadataValidationPlaceholderPattern.lastIndex = 0;
+      if (!sourceMetadataValidationPlaceholderPattern.test(line)) {
+        return line;
+      }
+
+      // A pipe-delimited metadata line (e.g. a KPI/citation row) only
+      // drops the offending segment, keeping every other field intact.
+      if (line.includes("|")) {
+        return line
+          .split("|")
+          .map((segment) => segment.trim())
+          .filter((segment) => {
+            sourceMetadataValidationPlaceholderPattern.lastIndex = 0;
+            return segment && !sourceMetadataValidationPlaceholderPattern.test(segment);
+          })
+          .join(" | ");
+      }
+
+      const bulletMatch = line.match(/^(\s*(?:[-*•]\s*)?)/);
+      const remainder = line
+        .replace(sourceMetadataValidationPlaceholderPattern, "")
+        .replace(/^[,;\s]+|[,;\s]+$/g, "")
+        .trim();
+
+      if (!remainder) return "";
+      return bulletMatch ? `${bulletMatch[1]}${remainder}` : remainder;
+    })
+    .join("\n");
+}
+
+// Confirmed live (carbon-accounting/ESG report): the internal "Validation
+// Required" tag also leaked into a Founder Readiness dimension's own
+// EXPLANATION prose as a trailing clause -- "Validation Confidence:
+// 52/100 - primary customer and pricing Validation Required." -- a shape
+// the original Title-Case-only, position-agnostic pattern below already
+// replaced correctly (it IS Title Case), but always with the KPI-value
+// phrasing "Not yet measured", which reads as a non sequitur bolted onto
+// the end of a sentence ("...pricing Not yet measured.") rather than
+// natural English. This is now three tiers, applied in order:
+//
+// 1. VALUE-style -- immediately preceded by a bare "Label:"/"Label-"
+//    separator with nothing else in between (e.g. "Metric: Validation
+//    Required", "Status: Validation required", any case) -- these are
+//    genuinely KPI-card values/statuses, so "Not yet measured" is correct
+//    and stays consistent with the sibling Value/Target columns.
+// 2. PROSE-trailing -- not value-style, but ends the clause/sentence it's
+//    in (followed by "."/";"/":"/newline/end of string, any case) -- e.g.
+//    "...pricing Validation Required." This is prose that happens to end
+//    on the tag; "requires validation" completes it as a real sentence
+//    instead of leaving a KPI-style phrase dangling after a noun phrase.
+// 3. Residual catch-all -- Title-Case only, wherever it still appears
+//    (mid-sentence, no clear boundary) -- the original, conservative
+//    default, so nothing is ever left unreplaced.
+//
+// Ordinary all-lowercase prose that continues past the tag ("further
+// validation required before scaling") matches none of the three tiers
+// (not value-preceded, not clause-ending, not Title-Case) and is
+// correctly left untouched -- it is not the internal tag, just ordinary
+// English using the same two words as a real grammatical predicate.
+const valueStyleValidationRequiredPattern =
+  /(?<=[:\-–—]\s{0,3})\b(?:validation required|doğrulama gerekli)\b/gim;
+const trailingProseValidationRequiredPattern =
+  /\b(?:validation required|doğrulama gerekli)\b(?=\s*[.;:\n]|\s*$)/gim;
+const bareValidationRequiredValuePattern = /\b(?:Validation [Rr]equired|Doğrulama [Gg]erekli)\b/g;
+
+function replaceBareValidationRequiredValue(content: string, language: ResponseLanguage) {
+  const valueReplacement = language === "Turkish" ? "Henüz ölçülmedi" : "Not yet measured";
+  const proseReplacement = language === "Turkish" ? "doğrulama gerektiriyor" : "requires validation";
+
+  return content
+    .replace(valueStyleValidationRequiredPattern, valueReplacement)
+    .replace(trailingProseValidationRequiredPattern, proseReplacement)
+    .replace(bareValidationRequiredValuePattern, valueReplacement);
+}
+
+// Confirmed live: a compact per-unit metric word occasionally loses its
+// leading space during generation ("perlocation", "perclaim"). Narrowly
+// scoped to a fixed list of denominator nouns that plausibly follow "per"
+// in this report's own KPI/financial vocabulary (including the pharmacy
+// domain's own "per claim"/"per prescription" framing), so ordinary words
+// that legitimately start with "per" (percent, period, performance,
+// permit, personnel, perspective, ...) are never touched.
+const perUnitWordBoundaryPattern =
+  /\bper(location|claim|prescription|patient|pharmacy|store|branch|customer|user|seat|unit|transaction|order|script|account|employee|month|week|year|day|visit)\b/gi;
+
+function fixPerUnitWordBoundaryArtifacts(content: string) {
+  return content.replace(perUnitWordBoundaryPattern, "per $1");
+}
+
 function normalizeFullPlanReport(
   report: Record<PlanReportField, string>,
   context?: AiFinancialModelContext,
@@ -3487,7 +3631,14 @@ function normalizeFullPlanReport(
   if (!context) {
     for (const field of planFields) {
       normalized[field] = stripFillerAndDuplicateSentences(
-        enforcePlanReportLanguage(normalized[field], language)
+        fixPerUnitWordBoundaryArtifacts(
+          replaceBareValidationRequiredValue(
+            omitInternalSourceMetadataPlaceholders(
+              enforcePlanReportLanguage(normalized[field], language)
+            ),
+            language
+          )
+        )
       );
     }
     normalized.sourcesAssumptions = buildEvidenceSummary(normalized.sourcesAssumptions, language);
@@ -3691,6 +3842,12 @@ function normalizeFullPlanReport(
   // and before dedup, so it can't strip a sentence dedup would still want
   // to compare against, and can't be undone by a later append.
   for (const field of planFields) {
+    normalized[field] = fixPerUnitWordBoundaryArtifacts(
+      replaceBareValidationRequiredValue(
+        omitInternalSourceMetadataPlaceholders(normalized[field]),
+        language
+      )
+    );
     normalized[field] = stripFillerAndDuplicateSentences(normalized[field]);
   }
 

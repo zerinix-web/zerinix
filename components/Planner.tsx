@@ -2256,9 +2256,12 @@ function extractScenarioSnippet(content: string, scenario: string) {
 }
 
 function isMissingKpiText(value: string) {
-  return /^1$/.test(value.trim()) ||
+  const trimmed = value.trim();
+
+  return !trimmed ||
+    /^1$/.test(trimmed) ||
     /\b1\s*(?:[-–—]\s*)?\/\s*(?:target\s*[:\-–—]?\s*)?1\b/i.test(value) ||
-    /\b(?:value|metric|current|baseline|threshold|target)\s*[:\-–—]?\s*1\b/i.test(value.trim());
+    /\b(?:value|metric|current|baseline|threshold|target)\s*[:\-–—]?\s*1\b/i.test(trimmed);
 }
 
 function extractCanonicalKpiSnippet(content: string, aliases: string[] | readonly string[]) {
@@ -2338,7 +2341,12 @@ function extractKpiObjectField(snippet: string, fieldLabels: string[]) {
   );
   const value = match?.[1]?.trim().replace(/\*\*/g, "") || "";
 
-  return isMissingKpiText(value) ? "Validation Required" : value;
+  // Genuinely not found: return empty (not the internal "Validation
+  // Required" tag) so this shared helper's callers can fall through to
+  // their own next extraction strategy or their own context-appropriate
+  // user-facing fallback text. Same fix as ReportPdfButton.tsx's
+  // identical extractKpiObjectField.
+  return isMissingKpiText(value) ? "" : value;
 }
 
 function extractKpiQuantityValue(snippet: string) {
@@ -2362,8 +2370,8 @@ function extractKpiValueFromSnippet(
   // only safe to render as "N%" for metrics that are genuinely 0-100%
   // completion/funnel figures. For everything else (Revenue, WTP, Sales
   // cycle) guessing "%" produces the same CAC bug this was fixed for
-  // ("$51" rendered as "51%"); "Validation Required" is the honest
-  // fallback the kpiDashboard prompt itself already specifies.
+  // ("$51" rendered as "51%"); an honest "not yet measured" fallback
+  // (never the internal "Validation Required" tag) is used instead.
   const score = isPercentage ? extractScoreFromAliases(snippet, aliases) : null;
   const value = explicitValue ||
     targetValue ||
@@ -2376,7 +2384,7 @@ function extractKpiValueFromSnippet(
   // appends "%" with no isPercentage awareness at all, so leaving
   // `value` as "" here would let that same wrong-unit bug resurface
   // downstream for every non-percentage metric, not just CAC.
-  return !value || isMissingKpiText(value) ? "Validation Required" : value;
+  return !value || isMissingKpiText(value) ? "Not yet measured" : value;
 }
 
 function extractKpiValueFromAliases(
@@ -2391,7 +2399,7 @@ function extractKpiTargetFromSnippet(snippet: string) {
   const target = extractKpiObjectField(snippet, ["target", "hedef"]);
   const cleanTarget = target ? compactPdfMetricValue(target) || target : "";
 
-  return isMissingKpiText(cleanTarget) ? "Validation Required" : cleanTarget;
+  return isMissingKpiText(cleanTarget) ? "To be defined" : cleanTarget;
 }
 
 function extractKpiTargetFromAliases(content: string, aliases: string[] | readonly string[]) {
@@ -2623,7 +2631,7 @@ function formatPdfCitationContent(content: string, realEstate = false) {
       "  Type: Financial benchmark / planning assumption",
       "• Planning Assumptions",
       "  Type: Model assumption",
-      "• Validation Required",
+      "• Primary Research",
       "  Type: Primary research required",
       "",
       methodologyBlock,
@@ -2636,11 +2644,15 @@ function formatPdfCitationContent(content: string, realEstate = false) {
     .map((source) =>
       [
         `• ${source.sourceName}`,
-        `  Source type: ${source.sourceType}`,
+        // Source type / Confidence are only rendered when
+        // getFinalDedupePdfSources actually resolved a real, classified
+        // value -- an unclassified source omits the field rather than
+        // printing the internal "Validation Required" tag.
+        ...(source.sourceType ? [`  Source type: ${source.sourceType}`] : []),
         `  Publisher: ${source.publisher}`,
         `  Year: ${source.publicationYear || "Not specified"}`,
         `  URL: ${source.url || "Not provided"}`,
-        `  Confidence: ${source.trustLabel}`,
+        ...(source.trustLabel ? [`  Confidence: ${source.trustLabel}`] : []),
       ].join("\n")
     )
     .join("\n");

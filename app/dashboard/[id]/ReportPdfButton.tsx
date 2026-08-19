@@ -203,7 +203,10 @@ function getPdfCitationSourceTypeLabel(citation: CitationData) {
   if (level === "benchmarkDerived") return "Benchmark Derived";
   if (level === "planningAssumption") return "Planning Assumption";
 
-  return "Validation Required";
+  // Genuinely unclassified: omit the field rather than print the internal
+  // "Validation Required" tag -- same "omit, don't fabricate" convention
+  // already used for publisher/year/URL/accessed date below.
+  return "";
 }
 
 function getPdfCitationTrustLabel(citation: CitationData) {
@@ -213,7 +216,7 @@ function getPdfCitationTrustLabel(citation: CitationData) {
   if (level === "benchmarkDerived") return "Benchmark Derived";
   if (level === "planningAssumption") return "Planning Assumption";
 
-  return "Validation Required";
+  return "";
 }
 
 function dedupePdfCitations(citations: CitationData[]) {
@@ -825,7 +828,7 @@ function formatPdfCitationContent(content: string, realEstate = false) {
       "  Type: Financial benchmark / planning assumption",
       "• Planning Assumptions",
       "  Type: Model assumption",
-      "• Validation Required",
+      "• Primary Research",
       "  Type: Primary research required",
       "",
       methodologyBlock,
@@ -848,16 +851,20 @@ function formatPdfCitationContent(content: string, realEstate = false) {
         // so a reader can trace a citation seen earlier in the report
         // straight back to its exact Sources entry.
         `• ${source.referenceTag ? `${source.referenceTag} ` : ""}${source.sourceName}`,
-        `  Source type: ${source.sourceType}`,
         // Metadata that isn't actually known is omitted entirely rather
         // than printed as "Publisher: Not specified" / "URL: Not
         // provided" -- a clean, shorter citation reads as production
         // quality; a citation full of broken-looking fields does not.
+        // Source type/Confidence follow the same rule now: an unclassified
+        // source (getPdfCitationSourceTypeLabel/getPdfCitationTrustLabel
+        // returning "") omits the line instead of printing the internal
+        // "Validation Required" tag.
+        ...(source.sourceType ? [`  Source type: ${source.sourceType}`] : []),
         ...(source.publisher ? [`  Publisher: ${source.publisher}`] : []),
         ...(source.publicationYear ? [`  Year: ${source.publicationYear}`] : []),
         ...(source.url ? [`  URL: ${source.url}`] : []),
         ...(source.accessDate ? [`  Accessed: ${source.accessDate}`] : []),
-        `  Confidence: ${source.trustLabel}`,
+        ...(source.trustLabel ? [`  Confidence: ${source.trustLabel}`] : []),
       ].join("\n")
     )
     // A blank line between entries gives each source card visual room to
@@ -1943,9 +1950,9 @@ function extractKpiValueFromSnippet(
   // completion/funnel figures. For everything else (Revenue, WTP, Sales
   // cycle -- currency, counts, or durations with no fixed unit) guessing
   // "%" produces exactly the CAC bug this was fixed for ("$51" rendered
-  // as "51%"); "Validation Required" is the honest fallback the
-  // kpiDashboard prompt itself already specifies for an unresolved
-  // metric, not a wrong unit slapped on a bare digit.
+  // as "51%"); an honest "not yet measured" fallback (never the internal
+  // "Validation Required" tag) is used for an unresolved metric instead
+  // of a wrong unit slapped on a bare digit.
   const score = isPercentage ? extractScoreFromAliases(snippet, aliases) : null;
   const value = explicitValue ||
     targetValue ||
@@ -1960,7 +1967,7 @@ function extractKpiValueFromSnippet(
   // "%" with no isPercentage awareness at all, so leaving `value` as ""
   // here would let that same wrong-unit bug resurface downstream for
   // every non-percentage metric, not just CAC.
-  return !value || isMissingKpiText(value) ? "Validation Required" : value;
+  return !value || isMissingKpiText(value) ? "Not yet measured" : value;
 }
 
 function extractKpiValueFromAliases(
@@ -1972,9 +1979,12 @@ function extractKpiValueFromAliases(
 }
 
 function isMissingKpiText(value: string) {
-  return /^1$/.test(value.trim()) ||
+  const trimmed = value.trim();
+
+  return !trimmed ||
+    /^1$/.test(trimmed) ||
     /\b1\s*(?:[-–—]\s*)?\/\s*(?:target\s*[:\-–—]?\s*)?1\b/i.test(value) ||
-    /\b(?:value|metric|current|baseline|threshold|target)\s*[:\-–—]?\s*1\b/i.test(value.trim());
+    /\b(?:value|metric|current|baseline|threshold|target)\s*[:\-–—]?\s*1\b/i.test(trimmed);
 }
 
 function extractKpiSnippet(content: string, aliases: string[] | readonly string[]) {
@@ -2014,7 +2024,14 @@ function extractKpiObjectField(snippet: string, fieldLabels: string[]) {
   );
   const value = match?.[1]?.trim().replace(/\*\*/g, "") || "";
 
-  return isMissingKpiText(value) ? "Validation Required" : value;
+  // Genuinely not found: return empty (not the internal "Validation
+  // Required" tag) so this shared helper's callers -- extractKpiValueFromSnippet's
+  // multi-strategy OR chain, and extractKpiTargetFromSnippet below -- can
+  // fall through to their own next extraction strategy or their own
+  // context-appropriate user-facing fallback text, instead of this one
+  // generic (value-or-target-agnostic) helper short-circuiting both with
+  // the same placeholder.
+  return isMissingKpiText(value) ? "" : value;
 }
 
 function extractKpiQuantityValue(snippet: string) {
@@ -2029,7 +2046,7 @@ function extractKpiTargetFromSnippet(snippet: string) {
   const target = extractKpiObjectField(snippet, ["target", "hedef"]);
   const cleanTarget = target ? compactPdfMetricValue(target) || target : "";
 
-  return isMissingKpiText(cleanTarget) ? "Validation Required" : cleanTarget;
+  return isMissingKpiText(cleanTarget) ? "To be defined" : cleanTarget;
 }
 
 function extractKpiTargetFromAliases(content: string, aliases: string[] | readonly string[]) {
@@ -3175,7 +3192,7 @@ export function buildStandardReportPdf({
           : reportQualityBreakdown.length
           ? reportQualityBreakdown.map((item) => `${item.label}: ${item.value}`)
           : executiveSnapshot.confidenceRadar.map((dimension) =>
-              `${dimension.label}: ${dimension.score === null ? "Validation Required" : `${dimension.score}%`}`
+              `${dimension.label}: ${dimension.score === null ? "Not yet measured" : `${dimension.score}%`}`
             );
         const risksLayout = getInsightPanelLayout(
           confidenceOrQualityItems,

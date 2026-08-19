@@ -551,6 +551,25 @@ export function labelModelDerivedFinancialClaims({
     return result;
   };
 
+  // Confirmed live (pharmacy Business Plan report): several of this
+  // function's own generated explanations end on a word, not a sentence-
+  // ending mark (e.g. "...to calculate this"). When two such clauses land
+  // on the same source line, joining them with a bare space produced a
+  // run-on with no boundary at all -- "...to calculate this Retention
+  // loop: ...". This applies to every clause pair generically (not just
+  // this one label/reason combination): any non-final clause that doesn't
+  // already end in sentence-ending punctuation gets a period before the
+  // next clause is appended.
+  const sentenceEndingPunctuationPattern = /[.!?:;]$/;
+  const joinClausesWithSentenceBoundaries = (clauses: string[]) =>
+    clauses
+      .map((clause, index) => {
+        if (index === clauses.length - 1) return clause;
+        const trimmed = clause.trimEnd();
+        return sentenceEndingPunctuationPattern.test(trimmed) ? trimmed : `${trimmed}.`;
+      })
+      .join(" ");
+
   const labeled = content.split("\n").map((line) => {
     const clauses = splitIntoClauses(line);
     // A clause dropped for repeating an already-shown explanation (see
@@ -560,7 +579,9 @@ export function labelModelDerivedFinancialClaims({
     // behind where the duplicate used to be.
     const labeledClauses = clauses.map(labelClause).filter(Boolean);
 
-    return labeledClauses.length > 1 ? labeledClauses.join(" ") : labeledClauses[0] || "";
+    return labeledClauses.length > 1
+      ? joinClausesWithSentenceBoundaries(labeledClauses)
+      : labeledClauses[0] || "";
   });
 
   return consolidateRepeatedUnavailableLines(labeled, generatedUnavailableLines).join("\n");

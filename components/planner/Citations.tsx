@@ -111,7 +111,10 @@ export function getPdfCitationSourceTypeLabel(citation: CitationData) {
   if (level === "benchmarkDerived") return "Benchmark Derived";
   if (level === "planningAssumption") return "Planning Assumption";
 
-  return "Validation Required";
+  // Genuinely unclassified: omit the field rather than print the internal
+  // "Validation Required" tag -- same "omit, don't fabricate" convention
+  // already used for publisher/year/URL elsewhere in this module.
+  return "";
 }
 
 export function getPdfCitationTrustLabel(citation: CitationData) {
@@ -121,7 +124,7 @@ export function getPdfCitationTrustLabel(citation: CitationData) {
   if (level === "benchmarkDerived") return "Benchmark Derived";
   if (level === "planningAssumption") return "Planning Assumption";
 
-  return "Validation Required";
+  return "";
 }
 
 export function dedupePdfCitations(citations: CitationData[]) {
