@@ -51,27 +51,27 @@ export function labelModelDerivedFinancialClaims({
     English: {
       assumption: "Planning assumption",
       unspecifiedModel: "Unspecified business model",
-      unavailable: "requires additional verified data before this can be shown",
+      unavailable: "additional verified data has not yet been provided for this business",
     },
     Turkish: {
       assumption: "Planlama varsayımı",
       unspecifiedModel: "Belirtilmemiş iş modeli",
-      unavailable: "mevcut kanıtlarla hesaplanamıyor; doğrulanmış ek veri gerekir",
+      unavailable: "bu işletme için henüz doğrulanmış ek veri sağlanmadı",
     },
     German: {
       assumption: "Planungsannahme",
       unspecifiedModel: "Nicht angegebenes Geschäftsmodell",
-      unavailable: "erfordert zusätzliche geprüfte Daten, bevor dies angezeigt werden kann",
+      unavailable: "für dieses Unternehmen liegen noch keine zusätzlichen geprüften Daten vor",
     },
     French: {
       assumption: "Hypothèse de planification",
       unspecifiedModel: "Modèle économique non précisé",
-      unavailable: "nécessite des données supplémentaires vérifiées avant de pouvoir être affiché",
+      unavailable: "aucune donnée supplémentaire vérifiée n'est encore disponible pour cette entreprise",
     },
     Spanish: {
       assumption: "Supuesto de planificación",
       unspecifiedModel: "Modelo de negocio no especificado",
-      unavailable: "requiere datos verificados adicionales antes de poder mostrarse",
+      unavailable: "aún no se dispone de datos verificados adicionales para esta empresa",
     },
   }[language];
   const escapePattern = (value: string) =>
@@ -179,26 +179,26 @@ export function labelModelDerivedFinancialClaims({
   const specificCategoryUnavailableCopy = (fieldLabel: string): string | null => {
     if (language === "Turkish") {
       if (/\b(?:CAC|LTV|edinim|dönüşüm|geri ödeme|payback|ödeme isteği|wtp)\b/i.test(fieldLabel)) {
-        return "gerçek müşteri edinimi ve elde tutma verisi bulunmadığı için hesaplanamıyor; kurucunun kanal başına edinim maliyeti ve kohort elde tutma kayıtlarını toplaması gerekir";
+        return "bu işletme için henüz doğrulanmış müşteri edinimi ve elde tutma verisi bulunmuyor; kurucunun kanal başına edinim maliyeti ve kohort elde tutma kayıtlarını toplaması gerekir";
       }
       if (
         /\bARR\b|\bMRR\b|\bARPA\b/i.test(fieldLabel) ||
         (!revenueOnlyWordIsAmbiguous && /\b(?:gelir|ciro|revenue)\b/i.test(fieldLabel))
       ) {
-        return "gerçekleşmiş gelir verisi bulunmadığı için hesaplanamıyor; kurucunun fatura/ödeme kayıtlarından gerçekleşmiş gelir verisini paylaşması gerekir";
+        return "bu işletme için henüz doğrulanmış gerçekleşmiş gelir verisi bulunmuyor; kurucunun fatura/ödeme kayıtlarından gerçekleşmiş gelir verisini paylaşması gerekir";
       }
       if (/\b(?:TAM|SAM|SOM|pazar|market size)\b/i.test(fieldLabel)) {
-        return "doğrulanmış pazar büyüklüğü verisi bulunmadığı için hesaplanamıyor; sektör raporu veya resmi istatistik gibi doğrulanmış kaynaklar gerekir";
+        return "bu işletme için henüz doğrulanmış pazar büyüklüğü verisi bulunmuyor; sektör raporu veya resmi istatistik gibi doğrulanmış kaynaklar gerekir";
       }
       if (
         /\b(?:runway|burn|funding|fonlama|finansman|gider|maliyet|nakit\s*yak[ıi]m[ıi]?|finansal\s*pist|başabaş|breakeven|break-even|yatırım|ebitda)\b/i.test(
           fieldLabel
         )
       ) {
-        return "güncel gider ve finansman verisi bulunmadığı için hesaplanamıyor; kurucunun güncel nakit pozisyonu ve aylık giderlerini paylaşması gerekir";
+        return "bu işletme için henüz doğrulanmış güncel gider ve finansman verisi bulunmuyor; kurucunun güncel nakit pozisyonu ve aylık giderlerini paylaşması gerekir";
       }
       if (/\b(?:margin|marj|kârlılık|profit)\b/i.test(fieldLabel)) {
-        return "gerçekleşmiş gelir ve maliyet verisi bulunmadığı için hesaplanamıyor; kurucunun birim maliyet ve satış fiyatı verisini paylaşması gerekir";
+        return "bu işletme için henüz doğrulanmış gerçekleşmiş gelir ve maliyet verisi bulunmuyor; kurucunun birim maliyet ve satış fiyatı verisini paylaşması gerekir";
       }
 
       return null;
@@ -206,24 +206,24 @@ export function labelModelDerivedFinancialClaims({
 
     if (language === "English") {
       if (/\b(?:CAC|LTV|acquisition|conversion|payback|willingness\s*to\s*pay|wtp)\b/i.test(fieldLabel)) {
-        return "requires real customer acquisition and retention data; the founder should collect channel-level acquisition cost and cohort retention records to calculate this";
+        return "no verified customer acquisition and retention data exists yet for this business; the founder should collect channel-level acquisition cost and cohort retention records to calculate this";
       }
       if (
         /\bARR\b|\bMRR\b|\bARPA\b/i.test(fieldLabel) ||
         (!revenueOnlyWordIsAmbiguous && /\brevenue\b/i.test(fieldLabel))
       ) {
-        return "requires realized revenue data; the founder should share actual invoicing or payment records to calculate this";
+        return "no verified realized-revenue data exists yet for this business; the founder should share actual invoicing or payment records to calculate this";
       }
       if (/\b(?:TAM|SAM|SOM|market size)\b/i.test(fieldLabel)) {
-        return "requires verified market-sizing data; independent industry reports or official statistics are needed to calculate this";
+        return "no independently verified market-sizing data exists yet for this business; independent industry reports or official statistics are needed to calculate this";
       }
       if (
         /\b(?:runway|burn|funding|monthly\s*burn|break-?even|investment\s*needed|ebitda)\b/i.test(fieldLabel)
       ) {
-        return "requires current expense and financing data; the founder should share current cash position and monthly spend to calculate this";
+        return "no verified expense or financing data exists yet for this business; the founder should share current cash position and monthly spend to calculate this";
       }
       if (/\b(?:margin|profit)\b/i.test(fieldLabel)) {
-        return "requires realized revenue and cost data; the founder should share unit cost and selling price to calculate this";
+        return "no verified revenue or cost data exists yet for this business; the founder should share unit cost and selling price to calculate this";
       }
 
       return null;
@@ -362,8 +362,8 @@ export function labelModelDerivedFinancialClaims({
         : "the founder should share the evidence behind this figure to calculate it";
 
     return language === "Turkish"
-      ? `${subject} için doğrulanmış veri bulunmadığından hesaplanamıyor; ${evidenceClause}`
-      : `${subject} requires verified supporting data before this can be shown; ${evidenceClause}`;
+      ? `${subject}: bu işletme için henüz doğrulanmış veri bulunmuyor; ${evidenceClause}`
+      : `${subject}: no independently verified data exists yet for this business; ${evidenceClause}`;
   };
 
   // Tracks which output lines are actually a generated unavailable-data

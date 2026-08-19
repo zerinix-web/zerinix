@@ -2641,13 +2641,13 @@ function buildCanonicalKpiDashboard(context: AiFinancialModelContext, language: 
     ),
     reportText(
       language,
-      `Activation: Validation Required | Target: prove the first paid activation from ${context.inputs.targetCustomer} on the ${context.inputs.pricingModel} offer before scaling | Status: Validation required`,
-      `Aktivasyon: Doğrulama gerekli | Hedef: ölçeklemeden önce ${context.inputs.targetCustomer} için ${context.inputs.pricingModel} teklifinden ilk ücretli aktivasyonu kanıtla | Durum: Doğrulama gerekli`
+      `Activation: Not yet measured | Target: prove the first paid activation from ${context.inputs.targetCustomer} on the ${context.inputs.pricingModel} offer before scaling | Status: Pending validation`,
+      `Aktivasyon: Henüz ölçülmedi | Hedef: ölçeklemeden önce ${context.inputs.targetCustomer} için ${context.inputs.pricingModel} teklifinden ilk ücretli aktivasyonu kanıtla | Durum: Doğrulama bekleniyor`
     ),
     reportText(
       language,
-      `Retention: Validation Required | Target: validate repeat purchase or renewal behavior for ${context.inputs.targetCustomer} before increasing acquisition spend | Status: Validation required`,
-      `Elde Tutma: Doğrulama gerekli | Hedef: edinim harcamasını artırmadan önce ${context.inputs.targetCustomer} için tekrar satın alma veya yenileme davranışını doğrula | Durum: Doğrulama gerekli`
+      `Retention: Not yet measured | Target: validate repeat purchase or renewal behavior for ${context.inputs.targetCustomer} before increasing acquisition spend | Status: Pending validation`,
+      `Elde Tutma: Henüz ölçülmedi | Hedef: edinim harcamasını artırmadan önce ${context.inputs.targetCustomer} için tekrar satın alma veya yenileme davranışını doğrula | Durum: Doğrulama bekleniyor`
     ),
     reportText(
       language,
@@ -2661,18 +2661,18 @@ function buildCanonicalKpiDashboard(context: AiFinancialModelContext, language: 
     ),
     reportText(
       language,
-      `WTP: ${metrics.arpa.displayValue} | Target: validate willingness to pay with signed pilots or paid commitments | Status: Validation required`,
-      `Ödeme İsteği: ${metrics.arpa.displayValue} | Hedef: ödeme isteğini imzalı pilotlar veya ücretli taahhütlerle doğrula | Durum: Doğrulama gerekli`
+      `WTP: ${metrics.arpa.displayValue} | Target: validate willingness to pay with signed pilots or paid commitments | Status: Pending validation`,
+      `Ödeme İsteği: ${metrics.arpa.displayValue} | Hedef: ödeme isteğini imzalı pilotlar veya ücretli taahhütlerle doğrula | Durum: Doğrulama bekleniyor`
     ),
     reportText(
       language,
-      `Sales cycle: Validation Required | Target: measure time from a qualified ${context.inputs.targetCustomer} lead to first paid conversion in the ${context.inputs.businessModel} model | Status: Validation required`,
-      `Satış Döngüsü: Doğrulama gerekli | Hedef: ${context.inputs.businessModel} modelinde nitelikli ${context.inputs.targetCustomer} adayından ilk ücretli dönüşüme kadar geçen süreyi ölç | Durum: Doğrulama gerekli`
+      `Sales cycle: Not yet measured | Target: measure time from a qualified ${context.inputs.targetCustomer} lead to first paid conversion in the ${context.inputs.businessModel} model | Status: Pending validation`,
+      `Satış Döngüsü: Henüz ölçülmedi | Hedef: ${context.inputs.businessModel} modelinde nitelikli ${context.inputs.targetCustomer} adayından ilk ücretli dönüşüme kadar geçen süreyi ölç | Durum: Doğrulama bekleniyor`
     ),
     reportText(
       language,
-      `Conversion: Validation Required | Target: prove repeatable conversion from ${context.inputs.targetCustomer} on the ${context.inputs.pricingModel} offer before scaling spend | Status: Validation required`,
-      `Dönüşüm: Doğrulama gerekli | Hedef: harcamayı ölçeklemeden önce ${context.inputs.targetCustomer} için ${context.inputs.pricingModel} teklifinden tekrarlanabilir dönüşümü kanıtla | Durum: Doğrulama gerekli`
+      `Conversion: Not yet measured | Target: prove repeatable conversion from ${context.inputs.targetCustomer} on the ${context.inputs.pricingModel} offer before scaling spend | Status: Pending validation`,
+      `Dönüşüm: Henüz ölçülmedi | Hedef: harcamayı ölçeklemeden önce ${context.inputs.targetCustomer} için ${context.inputs.pricingModel} teklifinden tekrarlanabilir dönüşümü kanıtla | Durum: Doğrulama bekleniyor`
     ),
   ].join("\n");
 }

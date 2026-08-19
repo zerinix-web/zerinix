@@ -92,10 +92,10 @@ test("missing financial metrics use metric-specific Turkish explanations", () =>
   // Each explanation states why the metric is missing, what evidence
   // is absent, and what the founder should collect next -- not a bare
   // one-line placeholder repeated identically across metrics.
-  assert.match(output, /ARR: gerçekleşmiş gelir verisi bulunmadığı için hesaplanamıyor; kurucunun fatura\/ödeme kayıtlarından gerçekleşmiş gelir verisini paylaşması gerekir/);
-  assert.match(output, /CAC: gerçek müşteri edinimi ve elde tutma verisi bulunmadığı için hesaplanamıyor; kurucunun kanal başına edinim maliyeti ve kohort elde tutma kayıtlarını toplaması gerekir/);
-  assert.match(output, /TAM: doğrulanmış pazar büyüklüğü verisi bulunmadığı için hesaplanamıyor; sektör raporu veya resmi istatistik gibi doğrulanmış kaynaklar gerekir/);
-  assert.match(output, /Brüt marj: gerçekleşmiş gelir ve maliyet verisi bulunmadığı için hesaplanamıyor; kurucunun birim maliyet ve satış fiyatı verisini paylaşması gerekir/);
+  assert.match(output, /ARR: bu işletme için henüz doğrulanmış gerçekleşmiş gelir verisi bulunmuyor; kurucunun fatura\/ödeme kayıtlarından gerçekleşmiş gelir verisini paylaşması gerekir/);
+  assert.match(output, /CAC: bu işletme için henüz doğrulanmış müşteri edinimi ve elde tutma verisi bulunmuyor; kurucunun kanal başına edinim maliyeti ve kohort elde tutma kayıtlarını toplaması gerekir/);
+  assert.match(output, /TAM: bu işletme için henüz doğrulanmış pazar büyüklüğü verisi bulunmuyor; sektör raporu veya resmi istatistik gibi doğrulanmış kaynaklar gerekir/);
+  assert.match(output, /Brüt marj: bu işletme için henüz doğrulanmış gerçekleşmiş gelir ve maliyet verisi bulunmuyor; kurucunun birim maliyet ve satış fiyatı verisini paylaşması gerekir/);
 });
 
 test("unrelated lines that only coincidentally share the same trailing value are never merged", () => {
@@ -188,7 +188,7 @@ test("English default unavailable copy never leaks the raw 'not provided' / 'can
   // The generic fallback now embeds the field's own label so two
   // different unmatched fields never produce byte-identical text (see
   // the dedicated "no verbatim-repeated fallback sentence" test below).
-  assert.match(output, /Some Unlabeled Figure requires verified supporting data before this can be shown/i);
+  assert.match(output, /Some Unlabeled Figure: no independently verified data exists yet for this business/i);
 });
 
 test("two different fields that both fall through to the generic fallback never produce byte-identical unavailable text", () => {
@@ -216,8 +216,8 @@ test("two different fields that both fall through to the generic fallback never 
   // WTP is a known category (willingness to pay is grouped with CAC/LTV
   // as a customer-acquisition-evidence concept); "Next 30 Days" matches
   // no category and hits the generic, label-embedding fallback.
-  assert.match(wtpOutput, /requires real customer acquisition and retention data/i);
-  assert.match(nextStepsOutput, /Next 30 Days requires verified supporting data/i);
+  assert.match(wtpOutput, /no verified customer acquisition and retention data exists yet/i);
+  assert.match(nextStepsOutput, /Next 30 Days: no independently verified data exists yet/i);
 });
 
 test("a line about the already-established buyer/beachhead reuses the known fact instead of claiming it is unavailable", () => {
@@ -229,7 +229,7 @@ test("a line about the already-established buyer/beachhead reuses the known fact
     sourceContext: "AI decision platform for SMEs",
   });
 
-  assert.doesNotMatch(businessModelOutput, /requires additional verified data/i);
+  assert.doesNotMatch(businessModelOutput, /no independently verified data exists yet/i);
   assert.match(businessModelOutput, /^Who pays: B2B \/ enterprise customers$/m);
 
   const gtmOutput = labelModelDerivedFinancialClaims({
@@ -240,7 +240,7 @@ test("a line about the already-established buyer/beachhead reuses the known fact
     sourceContext: "AI decision platform for SMEs",
   });
 
-  assert.doesNotMatch(gtmOutput, /requires additional verified data/i);
+  assert.doesNotMatch(gtmOutput, /no independently verified data exists yet/i);
   assert.match(gtmOutput, /^Beachhead positioning: B2B \/ enterprise customers$/m);
 });
 
@@ -261,7 +261,7 @@ test("businessModel/goToMarketPlan reuse the known buyer/beachhead fact even whe
     sourceContext: "beauty salon SaaS platform",
   });
 
-  assert.doesNotMatch(businessModelOutput, /requires (?:additional verified data|realized revenue data)/i);
+  assert.doesNotMatch(businessModelOutput, /no independently verified data exists yet|no verified realized-revenue data exists yet/i);
   assert.equal(businessModelOutput, "Revenue mechanics: Salon owners / independent salon operators");
 
   const gtmOutput = labelModelDerivedFinancialClaims({
@@ -273,7 +273,7 @@ test("businessModel/goToMarketPlan reuse the known buyer/beachhead fact even whe
     sourceContext: "coding bootcamp platform",
   });
 
-  assert.doesNotMatch(gtmOutput, /requires additional verified data/i);
+  assert.doesNotMatch(gtmOutput, /no independently verified data exists yet/i);
   assert.equal(gtmOutput, "Channel thesis: Career changers seeking software roles");
 
   // A precisely-named metric (CAC) inside businessModel must still get
@@ -328,7 +328,7 @@ test("a free-flowing sentence with no 'Label: value' structure is left untouched
   });
 
   assert.doesNotMatch(stillFlagged, /\$1\.3M/);
-  assert.match(stillFlagged, /requires current expense and financing data/);
+  assert.match(stillFlagged, /no verified expense or financing data exists yet/);
 });
 
 test("a dense multi-clause businessModel paragraph only has its flagged clause replaced -- every other clause survives untouched", () => {
@@ -366,7 +366,7 @@ test("a dense multi-clause businessModel paragraph only has its flagged clause r
   // buyer/beachhead fallback, since "Brüt marj" names a distinct,
   // precise metric category rather than restating "who pays".
   assert.doesNotMatch(output, /78%/);
-  assert.match(output, /Brüt marj: gerçekleşmiş gelir ve maliyet verisi bulunmadığı için hesaplanamıyor/);
+  assert.match(output, /Brüt marj: bu işletme için henüz doğrulanmış gerçekleşmiş gelir ve maliyet verisi bulunmuyor/);
   assert.doesNotMatch(output, /Brüt marj: öngörülen ilk kullanıcılar/);
 });
 
@@ -379,7 +379,7 @@ test("a line about a metric this report's own financial engine already computed 
     sourceContext: "AI decision platform for SMEs",
   });
 
-  assert.doesNotMatch(output, /requires additional verified data/i);
+  assert.doesNotMatch(output, /no independently verified data exists yet/i);
   assert.doesNotMatch(output, /not provided/i);
   assert.match(output, /^ARPA: \$480\/month \(Planning assumption\)$/m);
   assert.match(output, /^CAC: \$1,050 \(Planning assumption\)$/m);
@@ -419,7 +419,7 @@ test("a founderScore line is never wholesale-replaced just because its explanati
   });
 
   assert.equal(output, founderScoreContent);
-  assert.doesNotMatch(output, /requires additional verified data/i);
+  assert.doesNotMatch(output, /no independently verified data exists yet/i);
 });
 
 test("plan-executor.ts passes metricValues: [] specifically for the founderScore field (drift check)", () => {
@@ -448,7 +448,7 @@ test("a bare evidence-classification tag the model mistakenly wrote as a content
     sourceContext: "otel SaaS platformu",
   });
 
-  assert.doesNotMatch(output, /Planlama varsayımı: mevcut kanıtlarla/);
+  assert.doesNotMatch(output, /Planlama varsayımı: bu işletme için henüz doğrulanmış/);
   // The clause is left untouched (deferred to enforcePlanReportLanguage's
   // later tag-cleanup pass), so the model's own sentence survives.
   assert.match(output, /^Planlama varsayımı: Gelir \$842k'a çıkar\./m);
@@ -505,7 +505,7 @@ test("a Turkish metric label (e.g. 'Aylık Nakit Yakımı') resolves to the same
     sourceContext: "otel SaaS platformu",
   });
 
-  assert.doesNotMatch(output, /mevcut kanıtlarla hesaplanamıyor/);
+  assert.doesNotMatch(output, /bu işletme için henüz doğrulanmış (?:veri bulunmuyor|ek veri sağlanmadı)/);
   assert.match(output, /Aylık Nakit Yakımı: \$248k\/month \(Planlama varsayımı\)/);
   assert.match(output, /Finansal Pist: 22\.4 months \(Planlama varsayımı\)/);
   assert.match(output, /Başabaş: Month 45 \(Planlama varsayımı\)/);

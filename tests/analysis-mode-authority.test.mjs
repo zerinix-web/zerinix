@@ -285,7 +285,7 @@ test("unsupported model-derived business metrics are removed unless a scenario w
   // missing and what evidence would resolve it, not a bare status token.
   assert.doesNotMatch(labeled, /not provided/i);
   assert.doesNotMatch(labeled, /cannot be calculated from available evidence/i);
-  assert.match(labeled, /requires (?:realized revenue|real customer acquisition|current expense)[^\n]+ to calculate this/i);
+  assert.match(labeled, /no verified (?:realized-revenue|customer acquisition and retention|expense or financing) data exists yet[^\n]+ to calculate this/i);
   assert.doesNotMatch(labeled, /User-provided[^\n]+\$(?:2M|5k|78k|1\.3M)/i);
 });
 

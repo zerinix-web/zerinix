@@ -340,17 +340,17 @@ test("two different milestones whose own flagged sub-clause produces the exact s
 
   const nextSixMonths = `Next 6 months: optimize pricing. ${labelSubClause(
     "Proof",
-    "requires verified supporting data before this can be shown; the founder should share the execution evidence behind this milestone"
+    "no independently verified data exists yet for this business; the founder should share the execution evidence behind this milestone"
   )}`;
   const nextTwelveMonths = `Next 12 months: expand jurisdictions. ${labelSubClause(
     "Proof",
-    "requires verified supporting data before this can be shown; the founder should share the execution evidence behind this milestone"
+    "no independently verified data exists yet for this business; the founder should share the execution evidence behind this milestone"
   )}`;
 
-  assert.match(nextSixMonths, /Proof: requires verified/);
+  assert.match(nextSixMonths, /Proof: no independently verified/);
   // The second, identical "Proof: ..." fragment is dropped -- the
   // milestone's own lead-in sentence survives, just without repeating
   // the exact same explanation a second time.
-  assert.doesNotMatch(nextTwelveMonths, /Proof: requires verified/);
+  assert.doesNotMatch(nextTwelveMonths, /Proof: no independently verified/);
   assert.match(nextTwelveMonths, /Next 12 months: expand jurisdictions\.\s*$/);
 });

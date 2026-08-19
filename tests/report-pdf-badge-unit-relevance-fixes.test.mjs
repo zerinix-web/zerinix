@@ -235,8 +235,8 @@ function mirrorGenericUnavailableCopyForLabel(fieldLabel, fieldName, fieldEviden
       : "the founder should share the evidence behind this figure to calculate it";
 
   return language === "Turkish"
-    ? `${subject} için doğrulanmış veri bulunmadığından hesaplanamıyor; ${evidenceClause}`
-    : `${subject} requires verified supporting data before this can be shown; ${evidenceClause}`;
+    ? `${subject}: bu işletme için henüz doğrulanmış veri bulunmuyor; ${evidenceClause}`
+    : `${subject}: no independently verified data exists yet for this business; ${evidenceClause}`;
 }
 
 test("four different fields that all fall through to the generic fallback never produce byte-identical explanation text", () => {
@@ -252,7 +252,7 @@ test("four different fields that all fall through to the generic fallback never 
   const next6 = mirrorGenericUnavailableCopyForLabel("Next 6 Months", "roadmap306090", context, "English");
 
   const suffixes = [competitor, scenario, next30, next6].map(
-    (line) => line.split("requires verified supporting data before this can be shown; ")[1]
+    (line) => line.split("no independently verified data exists yet for this business; ")[1]
   );
 
   assert.notEqual(suffixes[0], suffixes[1]);
