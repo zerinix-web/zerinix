@@ -61,7 +61,9 @@ import {
   getEvidenceLabel,
   inferEvidenceLevel,
   type EvidenceLevel,
+  type EvidenceLocale,
 } from "@/app/lib/report-evidence";
+import { getResponseLanguage } from "@/app/lib/report-language";
 import {
   buildLegalReportSections,
   formatLegalSourceContent,
@@ -241,14 +243,14 @@ function cleanEvidenceMetadataForDisplay(content: string) {
     .trim();
 }
 
-function getDashboardEvidenceLabel(level: EvidenceLevel) {
-  return getEvidenceLabel(level, "Turkish");
+function getDashboardEvidenceLabel(level: EvidenceLevel, locale: EvidenceLocale = "English") {
+  return getEvidenceLabel(level, locale);
 }
 
-function EvidenceBadge({ level }: { level: EvidenceLevel }) {
+function EvidenceBadge({ level, locale = "English" }: { level: EvidenceLevel; locale?: EvidenceLocale }) {
   return (
     <span className={`w-fit shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${getEvidenceBadgeClass(level)}`}>
-      {getDashboardEvidenceLabel(level)}
+      {getDashboardEvidenceLabel(level, locale)}
     </span>
   );
 }
@@ -824,6 +826,8 @@ function ExecutiveSummaryVisual({
     return null;
   }
 
+  const evidenceLocale = getResponseLanguage(detectPdfPresentationLocale(content));
+
   const score =
     investmentScore?.totalScore ??
     extractScore(content, "AI Investment Score") ??
@@ -918,7 +922,7 @@ function ExecutiveSummaryVisual({
                   {kpi.label}
                 </p>
                 <div className="mt-2">
-                  <EvidenceBadge level={kpi.evidence} />
+                  <EvidenceBadge level={kpi.evidence} locale={evidenceLocale} />
                 </div>
                 <p className="mt-3 line-clamp-2 text-2xl font-semibold tracking-tight text-white">
                   {kpi.value}
@@ -1006,6 +1010,7 @@ function ReportSectionVisual({
   investmentScore?: ReportInvestmentScore;
 }) {
   const normalizedTitle = title.toLowerCase();
+  const evidenceLocale = getResponseLanguage(detectPdfPresentationLocale(content));
 
   if (normalizedTitle.includes("tam / sam / som")) {
     const bars = [
@@ -1034,7 +1039,7 @@ function ReportSectionVisual({
 	                <div className="rounded-2xl border border-white/10 bg-black/35 p-3 text-center">
 	                  <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">{bar.label}</p>
 	                  <div className="mt-2 flex justify-center">
-	                    <EvidenceBadge level={getDashboardMetricEvidence(bar.label, value, content)} />
+	                    <EvidenceBadge level={getDashboardMetricEvidence(bar.label, value, content)} locale={evidenceLocale} />
 	                  </div>
 	                </div>
                 <div className="h-14 rounded-2xl border border-white/10 bg-zinc-950 p-1.5">
@@ -1230,7 +1235,7 @@ function ReportSectionVisual({
 	              <div key={metric} className="bg-zinc-950/80 p-4">
 	                <div className="flex items-start justify-between gap-2">
 	                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
-	                  <EvidenceBadge level={evidence} />
+	                  <EvidenceBadge level={evidence} locale={evidenceLocale} />
 	                </div>
 	                <p className="mt-3 break-words text-lg font-semibold leading-6 text-white sm:truncate sm:whitespace-nowrap">
 	                  {value || "—"}
@@ -1299,7 +1304,7 @@ function ReportSectionVisual({
                   <p className="line-clamp-2 min-w-0 break-words text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-500">
                     {metric.label}
                   </p>
-	                  <EvidenceBadge level={evidence} />
+	                  <EvidenceBadge level={evidence} locale={evidenceLocale} />
                 </div>
                 <div className="mt-4 min-w-0">
                   <p className="break-words text-[clamp(1.15rem,2.2vw,1.65rem)] font-semibold leading-tight tracking-tight text-white sm:truncate sm:whitespace-nowrap">
@@ -1572,7 +1577,7 @@ function ReportSectionVisual({
 	            <div className="min-w-0">
 	              <div className="flex items-start justify-between gap-2">
 	                <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
-	                <EvidenceBadge level={evidence} />
+	                <EvidenceBadge level={evidence} locale={evidenceLocale} />
 	              </div>
 	              <p className="mt-2 line-clamp-2 text-xl font-semibold text-white">
 	                {value || "Target"}
@@ -2695,6 +2700,7 @@ export default async function ReportDetailPage({
   const reportLocale = detectPdfPresentationLocale(
     report.prompt || storedReportSections.map((section) => section.content).join("\n")
   );
+  const reportEvidenceLocale = getResponseLanguage(reportLocale);
   const uniqueReportSections = isLegalReport
     ? buildLegalReportSections(storedReportSections, reportLocale, report.prompt)
         .map((section) =>
@@ -3008,7 +3014,7 @@ export default async function ReportDetailPage({
 	                <p className="text-sm text-zinc-500">Report Type</p>
 	              </div>
 	              <div className="mt-3">
-	                <EvidenceBadge level="planningAssumption" />
+	                <EvidenceBadge level="planningAssumption" locale={reportEvidenceLocale} />
 	              </div>
 	              <p className="mt-3 text-lg font-semibold text-white">{report.type}</p>
             </div>
@@ -3018,7 +3024,7 @@ export default async function ReportDetailPage({
 	                <p className="text-sm text-zinc-500">Created</p>
 	              </div>
 	              <div className="mt-3">
-	                <EvidenceBadge level="verified" />
+	                <EvidenceBadge level="verified" locale={reportEvidenceLocale} />
 	              </div>
 	              <p className="mt-3 text-lg font-semibold text-white">
                 {formatDate(report.createdAt)}
@@ -3030,7 +3036,7 @@ export default async function ReportDetailPage({
 	                <p className="text-sm text-zinc-500">Status</p>
 	              </div>
 	              <div className="mt-3">
-	                <EvidenceBadge level="verified" />
+	                <EvidenceBadge level="verified" locale={reportEvidenceLocale} />
 	              </div>
 	              <p className="mt-3 text-lg font-semibold text-white">{report.status}</p>
             </div>
@@ -3043,7 +3049,7 @@ export default async function ReportDetailPage({
 	                <p className="text-sm text-zinc-500">Workspace</p>
 	              </div>
 	              <div className="mt-3">
-	                <EvidenceBadge level="verified" />
+	                <EvidenceBadge level="verified" locale={reportEvidenceLocale} />
 	              </div>
 	              <p className="mt-3 line-clamp-2 text-lg font-semibold text-white">
                 {workspaceName}
@@ -3188,7 +3194,7 @@ export default async function ReportDetailPage({
 	                          {item.label}
 	                        </p>
 	                        <div className="mt-2">
-	                          <EvidenceBadge level={item.evidence} />
+	                          <EvidenceBadge level={item.evidence} locale={reportEvidenceLocale} />
 	                        </div>
 	                      </div>
 	                    </div>
@@ -3317,11 +3323,11 @@ export default async function ReportDetailPage({
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 	                              <div>
 	                                <span className="w-fit rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
-	                                  Section {String(index + 1).padStart(2, "0")}
+	                                  {reportLocale === "tr" ? "Bölüm" : "Section"} {String(index + 1).padStart(2, "0")}
 	                                </span>
 	                                {!isLegalReport ? (
 	                                  <div className="mt-2">
-	                                    <EvidenceBadge level={getDashboardSectionEvidence(section)} />
+	                                    <EvidenceBadge level={getDashboardSectionEvidence(section)} locale={reportEvidenceLocale} />
 	                                  </div>
 	                                ) : null}
 	                                <h2 className="mt-3 text-2xl font-semibold tracking-[-0.025em] text-white">

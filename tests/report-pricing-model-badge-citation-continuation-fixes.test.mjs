@@ -79,7 +79,7 @@ test("Planner.tsx's on-screen React badge (a proper, visually distinct <span>, n
   // browser-rendered dashboard -- only the PDF's flat-text duplicate of
   // it was removed.
   assert.match(plannerSource, /getFinancialMetricConfidenceBadgeClass\(confidenceBadge\)/);
-  assert.match(plannerSource, /getDashboardEvidenceLabel\(confidenceBadge\)/);
+  assert.match(plannerSource, /getDashboardEvidenceLabel\(confidenceBadge, evidenceLocale\)/);
 });
 
 // --- Issue 2: "inferred pricing model" placeholder ---------------------

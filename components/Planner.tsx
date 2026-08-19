@@ -137,6 +137,7 @@ import {
   getEvidenceLabel,
   inferEvidenceLevel,
   type EvidenceLevel,
+  type EvidenceLocale,
 } from "@/app/lib/report-evidence";
 import { formatMetricCardValue } from "@/components/planner/report-utils";
 import { detectRecommendation } from "@/components/planner/decision-label";
@@ -1760,8 +1761,8 @@ function getFinancialMetricConfidenceBadgeClass(badge: FinancialMetricConfidence
   return getEvidenceBadgeClass(badge);
 }
 
-function getDashboardEvidenceLabel(level: EvidenceLevel) {
-  return getEvidenceLabel(level, "Turkish");
+function getDashboardEvidenceLabel(level: EvidenceLevel, locale: EvidenceLocale = "English") {
+  return getEvidenceLabel(level, locale);
 }
 
 function getSectionEvidenceLevel(section: ReportSection): EvidenceLevel {
@@ -1796,10 +1797,10 @@ function getSectionEvidenceLevel(section: ReportSection): EvidenceLevel {
   return "planningAssumption";
 }
 
-function EvidenceBadge({ level }: { level: EvidenceLevel }) {
+function EvidenceBadge({ level, locale = "English" }: { level: EvidenceLevel; locale?: EvidenceLocale }) {
   return (
     <span className={`w-fit shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${getFinancialMetricConfidenceBadgeClass(level)}`}>
-      {getDashboardEvidenceLabel(level)}
+      {getDashboardEvidenceLabel(level, locale)}
     </span>
   );
 }
@@ -2989,6 +2990,8 @@ function ExecutiveSummaryVisual({
     return null;
   }
 
+  const evidenceLocale = getResponseLanguage(detectPdfPresentationLocale(section.content));
+
   const score =
     investmentScore?.totalScore ??
     extractScore(section.content, "AI Investment Score") ??
@@ -3090,7 +3093,7 @@ function ExecutiveSummaryVisual({
                   {kpi.label}
 	                </p>
 	                <div className="mt-2">
-	                  <EvidenceBadge level={kpi.evidence as EvidenceLevel} />
+	                  <EvidenceBadge level={kpi.evidence as EvidenceLevel} locale={evidenceLocale} />
 	                </div>
                 <p className="mt-3 line-clamp-2 text-2xl font-semibold tracking-tight text-white">
                   {kpi.value}
@@ -3172,6 +3175,7 @@ function PremiumSectionVisual({
   investmentScore?: ReportInvestmentScore;
 }) {
   const field = section.field;
+  const evidenceLocale = getResponseLanguage(detectPdfPresentationLocale(section.content));
 
   if (field === "tamSamSom") {
     const rows = getReportMarketRows(section.content);
@@ -3207,7 +3211,7 @@ function PremiumSectionVisual({
                 </span>
               </div>
               <div className="mt-3">
-                <EvidenceBadge level={getSectionEvidenceLevel(section)} />
+                <EvidenceBadge level={getSectionEvidenceLevel(section)} locale={evidenceLocale} />
               </div>
               <p className="mt-5 truncate whitespace-nowrap text-3xl font-semibold tracking-tight text-white">
                 {row.value}
@@ -3404,7 +3408,7 @@ if (field === "swotAnalysis") {
                 <div className="flex items-start justify-between gap-2">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
                   <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
-                    {getDashboardEvidenceLabel(confidenceBadge)}
+                    {getDashboardEvidenceLabel(confidenceBadge, evidenceLocale)}
                   </span>
                 </div>
                 <p className="mt-3 truncate whitespace-nowrap text-lg font-semibold text-white">
@@ -3510,7 +3514,7 @@ if (field === "swotAnalysis") {
                     {metric.label}
                   </p>
                   <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
-                    {getDashboardEvidenceLabel(confidenceBadge)}
+                    {getDashboardEvidenceLabel(confidenceBadge, evidenceLocale)}
                   </span>
                 </div>
                 <div className="mt-4 min-w-0">
@@ -3807,7 +3811,7 @@ if (field === "swotAnalysis") {
                 <div className="flex items-start justify-between gap-2">
                   <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
                   <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
-                    {getDashboardEvidenceLabel(confidenceBadge)}
+                    {getDashboardEvidenceLabel(confidenceBadge, evidenceLocale)}
                   </span>
                 </div>
                 <p className="mt-2 line-clamp-2 text-xl font-semibold text-white">
@@ -6023,6 +6027,8 @@ const ReportPanel = memo(function ReportPanel({
               );
           const presentationLabels = getReportPresentationLabels(section.content);
           const hasVisibleDetailsContent = detailsContent.replace(/[#*_`>\-[\]\s()]/g, "").trim().length > 0;
+          const sectionPdfLocale = detectPdfPresentationLocale(section.content);
+          const sectionEvidenceLocale = getResponseLanguage(sectionPdfLocale);
 
           return (
             <article
@@ -6041,9 +6047,9 @@ const ReportPanel = memo(function ReportPanel({
                       {section.title}
                     </h3>
                     <div className="flex w-fit flex-wrap items-center gap-2">
-                      <EvidenceBadge level={getSectionEvidenceLevel(section)} />
+                      <EvidenceBadge level={getSectionEvidenceLevel(section)} locale={sectionEvidenceLocale} />
                       <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
-                        Section {String(index + 1).padStart(2, "0")}
+                        {sectionPdfLocale === "tr" ? "Bölüm" : "Section"} {String(index + 1).padStart(2, "0")}
                       </span>
                     </div>
                   </div>
