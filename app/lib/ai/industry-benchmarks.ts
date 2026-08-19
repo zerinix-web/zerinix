@@ -15,6 +15,7 @@ export type IndustryKey =
   | "evCharging"
   | "mobility"
   | "manufacturing"
+  | "energy"
   | "hospitality"
   | "luxuryGoods"
   | "fitness"
@@ -418,6 +419,36 @@ export const industryBenchmarks: Record<IndustryKey, IndustryBenchmark> = {
       targetRunwayMonths: 24,
     },
   },
+  energy: {
+    key: "energy",
+    label: "Clean energy / grid technology",
+    benchmarkBasis:
+      "Renewable energy and grid technology software benchmarks adjusted for utility sales cycles, regulatory approval, and long-term energy contracts.",
+    confidence: "Medium",
+    ranges: {
+      grossMargin: { low: 0.55, high: 0.78, unit: "percent" },
+      cac: { low: 10_000, high: 55_000, unit: "usd" },
+      ltv: { low: 60_000, high: 480_000, unit: "usd" },
+      cacPayback: { low: 12, high: 30, unit: "months" },
+      arrGrowth: { low: 0.4, high: 1.3, unit: "percent" },
+      ebitdaMargin: { low: -0.4, high: 0.24, unit: "percent" },
+      revenueMultiple: { low: 3, high: 10, unit: "multiple" },
+    },
+    modeling: {
+      tamUsd: 48_000_000_000,
+      samRate: 0.04,
+      somRate: 0.007,
+      arpaMonthly: 3_200,
+      month12Customers: 34,
+      customerGrowthRate: 0.68,
+      cacUsd: 16_000,
+      grossMarginRate: 0.64,
+      lifetimeMonths: 34,
+      monthlyBurnUsd: 220_000,
+      startupCapexUsd: 320_000,
+      targetRunwayMonths: 18,
+    },
+  },
   hospitality: {
     key: "hospitality",
     label: "Hospitality / hotels",
@@ -671,6 +702,16 @@ function normalizeIndustryKey(industry: string): IndustryKey {
     bikesharing: "mobility",
     ridesharing: "mobility",
     manufacturing: "manufacturing",
+    energy: "energy",
+    renewableenergy: "energy",
+    cleanenergy: "energy",
+    cleantech: "energy",
+    energyinfrastructure: "energy",
+    energysoftware: "energy",
+    gridtechnology: "energy",
+    gridtech: "energy",
+    utilities: "energy",
+    utility: "energy",
     hospitality: "hospitality",
     luxurygoods: "luxuryGoods",
     fitness: "fitness",

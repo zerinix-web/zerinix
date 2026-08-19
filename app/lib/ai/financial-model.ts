@@ -192,6 +192,25 @@ export function inferIndustryKey(value: string): IndustryKey {
       [/\b(hospital|clinic|healthcare|medical|patient|doctor)\b/, "healthcare"],
       [/\b(hotel|resort|hospitality|travel)\b/, "hospitality"],
       [/\b(yacht|marine|boat|ship|luxury goods|jewelry|watch)\b/, "luxuryGoods"],
+      // Confirmed live: an AI-powered renewable energy portfolio
+      // optimization platform for utilities was classified as "Advanced
+      // manufacturing" -- contaminating Financial Assumptions, Benchmark
+      // Intelligence, SWOT, and the roadmap with industrial-manufacturing
+      // terminology -- because it described managing "battery storage"
+      // assets, and the manufacturing pattern below matches the bare word
+      // "battery" alone (a physical PRODUCT signal, not a reliable signal
+      // that the business itself manufactures anything). Same class of bug
+      // as the "payments"/"compliance"/"vendor" false positives fixed
+      // above: an energy SOFTWARE/optimization/trading platform routinely
+      // mentions batteries, grids, and utilities as the ASSETS it manages,
+      // not as evidence it builds physical hardware. Moved ahead of the
+      // manufacturing pattern so a genuine energy/utility/grid software
+      // business is never shadowed by that later, broader match -- a
+      // prompt that instead says "battery manufacturer" or "EV factory"
+      // still correctly falls through to manufacturing below, since none
+      // of this pattern's compound phrases match a bare manufacturing
+      // claim.
+      [/\b(renewable energy|clean energy|clean[\s-]?tech|solar (?:power|energy|farm|panel|asset)|\bsolar\b|wind (?:power|energy|farm|turbine)|energy grid|power grid|smart grid|grid technology|grid infrastructure|grid modernization|grid storage|energy infrastructure|energy trading|power trading|electricity trading|energy management platform|energy optimization|renewable portfolio|energy portfolio|distributed energy|microgrid|virtual power plant|demand response|battery storage|energy storage|utility company|utilities sector|energy utility|utility grid|power utility|electric utility|for utilities)\b/, "energy"],
       [/\b(battery|ev|electric vehicle|manufacturing|manufacturer|factory|industrial|automotive)\b/, "manufacturing"],
       [/\b(gym|fitness|franchise|pilates|wellness club)\b/, "fitness"],
       [/\b(farming|agriculture|vertical farm|food production|greenhouse)\b/, "agriculture"],
@@ -525,6 +544,7 @@ function confidenceFor(input: {
   );
   const hardToEstimate =
     input.industryKey === "manufacturing" ||
+    input.industryKey === "energy" ||
     input.industryKey === "healthcare" ||
     input.industryKey === "hospitality" ||
     input.industryKey === "luxuryGoods" ||

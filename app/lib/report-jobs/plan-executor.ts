@@ -1619,6 +1619,7 @@ const industryBenchmarkLabelTranslations: Record<string, string> = {
   "EV Charging": "Elektrikli araç şarjı",
   "Mobility / scooter rental": "Mobilite / scooter kiralama",
   "Advanced manufacturing": "İleri üretim",
+  "Clean energy / grid technology": "Temiz enerji / şebeke teknolojisi",
   "Hospitality / hotels": "Ağırlama / otelcilik",
   "Luxury goods / marine": "Lüks ürünler / denizcilik",
   "Fitness / gym franchise": "Fitness / spor salonu bayiliği",
