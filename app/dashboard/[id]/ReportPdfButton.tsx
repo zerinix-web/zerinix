@@ -367,11 +367,26 @@ function getFirstReadableSentence(value: string) {
   return looksLikePromptOrInstruction(sentence) ? "" : sentence.trim();
 }
 
+// Confirmed live: raw prompt text like "i want to build an AML/Fraud
+// compliance platform..." was displayed verbatim as the report's business
+// description, reading as a leftover chat instruction rather than a
+// professional one-line summary. Stripping this filler opening reframes it
+// as a plain noun phrase ("An AML/Fraud compliance platform...") -- the
+// original meaning is unchanged, only the framing.
+const leadingWantToPhrase =
+  /^i\s+(?:want|would like|plan|am planning|need)\s+to\s+(?:build|create|start|launch|develop)\s+/i;
+
+function sentenceCaseFirstLetter(value: string) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
 function getBusinessIdeaFromPrompt(value: string) {
-  const cleaned = normalizePdfText(value)
+  let cleaned = normalizePdfText(value)
     .replace(/^[-*•]\s*/, "")
     .replace(/\?+$/g, "")
     .trim();
+
+  cleaned = sentenceCaseFirstLetter(cleaned.replace(leadingWantToPhrase, ""));
 
   if (!cleaned || looksLikePromptOrInstruction(cleaned)) {
     return "";

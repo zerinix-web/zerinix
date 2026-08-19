@@ -1895,11 +1895,27 @@ function looksLikePromptOrInstruction(value: string) {
   );
 }
 
+// Confirmed live: raw prompt text like "i want to build an AML/Fraud
+// compliance platform..." was displayed verbatim as the report's business
+// description, reading as a leftover chat instruction rather than a
+// professional one-line summary. Stripping this filler opening reframes it
+// as a plain noun phrase ("An AML/Fraud compliance platform...") -- the
+// original meaning is unchanged, only the framing.
+const leadingWantToPhrase =
+  /^i\s+(?:want|would like|plan|am planning|need)\s+to\s+(?:build|create|start|launch|develop)\s+/i;
+
+function sentenceCaseFirstLetter(value: string) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
 function getBusinessIdeaFromPrompt(value: string) {
-  const cleaned = normalizePdfText(value)
-    .replace(/^[-*•]\s*/, "")
-    .replace(/\?+$/g, "")
-    .trim();
+  const cleaned = sentenceCaseFirstLetter(
+    normalizePdfText(value)
+      .replace(/^[-*•]\s*/, "")
+      .replace(/\?+$/g, "")
+      .trim()
+      .replace(leadingWantToPhrase, "")
+  );
 
   if (
     !cleaned ||
@@ -2645,14 +2661,16 @@ function formatPdfCitationContent(content: string, realEstate = false) {
     .map((source) =>
       [
         `• ${source.sourceName}`,
-        // Source type / Confidence are only rendered when
-        // getFinalDedupePdfSources actually resolved a real, classified
-        // value -- an unclassified source omits the field rather than
-        // printing the internal "Validation Required" tag.
+        // Source type / Publisher / Year / URL / Confidence are only
+        // rendered when a real value actually exists -- confirmed live,
+        // an unavailable field used to still print its label with an
+        // empty or placeholder value ("Publisher:", "Year: Not
+        // specified", "URL: Not provided"), which reads as broken/
+        // fabricated metadata rather than simply absent information.
         ...(source.sourceType ? [`  Source type: ${source.sourceType}`] : []),
-        `  Publisher: ${source.publisher}`,
-        `  Year: ${source.publicationYear || "Not specified"}`,
-        `  URL: ${source.url || "Not provided"}`,
+        ...(source.publisher ? [`  Publisher: ${source.publisher}`] : []),
+        ...(source.publicationYear ? [`  Year: ${source.publicationYear}`] : []),
+        ...(source.url ? [`  URL: ${source.url}`] : []),
         ...(source.trustLabel ? [`  Confidence: ${source.trustLabel}`] : []),
       ].join("\n")
     )

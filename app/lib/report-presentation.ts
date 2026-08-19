@@ -136,6 +136,28 @@ function removeAdjacentDuplicateWords(content: string) {
   return content.replace(/\b([\p{L}\p{N}][\p{L}\p{N}'’.-]*)\s+\1\b/giu, "$1");
 }
 
+// FINAL PRODUCTION POLISH -- generic template-artifact cleanup. Confirmed
+// live across several reports: broken sentence/field concatenation left
+// behind literal double periods ("...assumptions.. is validated"),
+// duplicated punctuation from adjacent template fragments (",,", "!!",
+// "::"), and stray double spaces / trailing whitespace from conditional
+// field joins. Language-agnostic (applies to both English and Turkish
+// content) and deliberately narrow: a genuine ellipsis ("...") is never
+// touched (the lookbehind/lookahead below only match exactly two periods
+// with no third adjacent), and nothing here rewrites words or removes
+// content -- only stray repeated punctuation and whitespace.
+function cleanupTemplatePresentationArtifacts(content: string) {
+  return content
+    .replace(/(?<!\.)\.\.(?!\.)/g, ".")
+    .replace(/([,;:!?])\1+/g, "$1")
+    // Only collapses a run of 2+ spaces/tabs that follows a non-whitespace
+    // character -- intentional leading indentation (e.g. the Sources
+    // section's "  Publisher: ..." nested under its "• Source Name" bullet)
+    // starts a line with nothing before it, so it is never touched.
+    .replace(/([^\s])[ \t]{2,}/g, "$1 ")
+    .replace(/[ \t]+\n/g, "\n");
+}
+
 function removeDuplicateLines(content: string) {
   const seen = new Set<string>();
 
@@ -173,9 +195,11 @@ function removeDuplicateLines(content: string) {
 }
 
 export function normalizeReportPresentationText(content: string) {
-  let normalized = removeDuplicateLines(
-    removeAdjacentDuplicateWords(
-      normalizeExecutiveInsightLabels(sanitizeInternalRoutingMetadata(content))
+  let normalized = cleanupTemplatePresentationArtifacts(
+    removeDuplicateLines(
+      removeAdjacentDuplicateWords(
+        normalizeExecutiveInsightLabels(sanitizeInternalRoutingMetadata(content))
+      )
     )
   )
     .replace(/\n{3,}/g, "\n\n")

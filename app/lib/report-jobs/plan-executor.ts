@@ -3060,10 +3060,20 @@ function removeLegacyValidationIntelligenceBlock(content: string) {
 }
 
 function buildExecutiveInsight(context: AiFinancialModelContext, focus: string, language: ResponseLanguage) {
+  // Confirmed live: nextCriticalAction is always a full imperative sentence
+  // ("Run primary research to validate market size and contribution margin
+  // assumptions.", "Convert the strongest ICP into paid pilots...", "Do not
+  // scale spend until...") -- gluing it in lowercase as the object of
+  // "after ___ is validated" produced ungrammatical, run-on text for every
+  // possible value ("...allocate capital only after run primary research
+  // to validate market size and contribution margin assumptions. is
+  // validated against..."). Presenting it as its own standalone sentence,
+  // in its original casing, reads naturally regardless of which action
+  // sentence is returned.
   return reportText(
     language,
-    `AI Executive Insight: ${focus} matters because the founder should allocate capital only after ${context.investmentScore.nextCriticalAction.toLowerCase()} is validated against the ${context.metrics.cacPayback.displayValue} payback and ${context.metrics.runway.displayValue} runway.`,
-    `AI Yönetici İçgörüsü: ${focus}, kurucunun sermayeyi ancak ${context.investmentScore.nextCriticalAction.toLowerCase()} ${context.metrics.cacPayback.displayValue} geri ödeme ve ${context.metrics.runway.displayValue} finansal pist varsayımına göre doğrulandıktan sonra ayırması gerektiği için önemlidir.`
+    `AI Executive Insight: ${focus} matters because capital should only be committed once this is complete: ${context.investmentScore.nextCriticalAction} Confirm it holds against the ${context.metrics.cacPayback.displayValue} payback and ${context.metrics.runway.displayValue} runway.`,
+    `AI Yönetici İçgörüsü: ${focus} önemlidir çünkü sermaye ancak şu adım tamamlandıktan sonra ayrılmalıdır: ${context.investmentScore.nextCriticalAction} Bunu ${context.metrics.cacPayback.displayValue} geri ödeme ve ${context.metrics.runway.displayValue} finansal pist varsayımına göre doğrulayın.`
   );
 }
 
