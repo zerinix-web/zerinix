@@ -2997,6 +2997,71 @@ function MiniProgressCircle({
   );
 }
 
+// A real word/phrase label ("Owner", "Target"), not a bare number or time-
+// like fragment ("3", "12:30") that a naive colon-split would otherwise
+// misread as a label -- keeps the structured-value rendering below from
+// firing on a value that merely happens to contain a colon.
+function looksLikeKpiValueLabel(text: string) {
+  return /^[A-Za-z][A-Za-z\s/&-]{1,30}$/.test(text.trim());
+}
+
+// KPI values extracted from report text sometimes arrive as multiple
+// "Label: text" fragments joined with "|" (e.g. "Owner: Growth Lead |
+// Target: 5 net new customers/month") rather than a single short metric.
+// Presentation-only parsing of the already-extracted value string -- the
+// underlying extraction/data model is untouched.
+function parseKpiValueSegments(value: string) {
+  if (!value) return [];
+
+  return value
+    .split("|")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .map((segment) => {
+      const colonIndex = segment.indexOf(":");
+      if (colonIndex === -1) {
+        return { label: "", text: segment };
+      }
+      return {
+        label: segment.slice(0, colonIndex).trim(),
+        text: segment.slice(colonIndex + 1).trim(),
+      };
+    });
+}
+
+// FINAL KPI UI POLISH -- confirmed live: a combined value like "Owner:
+// Growth Lead | Target: 5 net new customers/month" rendered as one dense,
+// hard-to-scan line. Separates it into label / value / supporting-text
+// tiers (showing the most important segment first, per requirement) while
+// leaving a genuinely simple value (a short number/percentage with no
+// "Label:" structure) rendered exactly as before.
+function KpiValueContent({ value }: { value: string }) {
+  const segments = parseKpiValueSegments(value);
+  const [first, ...rest] = segments;
+
+  if (first?.label && looksLikeKpiValueLabel(first.label)) {
+    const supporting = rest
+      .map((segment) => (segment.label ? `${segment.label}: ${segment.text}` : segment.text))
+      .join(" · ");
+
+    return (
+      <div className="mt-2 min-h-[3.5rem]">
+        <p className="text-[9px] font-semibold uppercase tracking-wide text-zinc-500">{first.label}</p>
+        <p className="line-clamp-1 text-sm font-semibold leading-tight text-white">{first.text || "—"}</p>
+        {supporting ? (
+          <p className="mt-0.5 line-clamp-1 text-[10px] leading-snug text-zinc-400">{supporting}</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <p className="mt-2 line-clamp-2 min-h-[3.5rem] max-w-full text-balance text-lg font-semibold leading-tight text-white">
+      {value || "Target"}
+    </p>
+  );
+}
+
 function ExecutiveSummaryVisual({
   section,
   investmentScore,
@@ -3836,25 +3901,27 @@ if (field === "swotAnalysis") {
           );
 
           return (
-            <div key={metric} className="grid grid-cols-[4.25rem_1fr] gap-4 rounded-3xl border border-white/10 bg-white/[0.035] p-4">
-              <MiniProgressCircle label="" value={extractPercentScore(section.content, metric)} />
-              <div className="min-w-0">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
-                  <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
+            <div key={metric} className="grid min-h-[11.5rem] grid-cols-[4.25rem_1fr] gap-4 rounded-3xl border border-white/10 bg-white/[0.035] p-4">
+              <div className="flex items-center">
+                <MiniProgressCircle label="" value={extractPercentScore(section.content, metric)} />
+              </div>
+              <div className="flex min-w-0 flex-col">
+                <div className="flex min-h-[3rem] flex-col gap-1">
+                  <p className="line-clamp-2 text-[10px] font-medium uppercase leading-snug tracking-[0.1em] text-zinc-500">{metric}</p>
+                  <span className={`w-fit shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
                     {getDashboardEvidenceLabel(confidenceBadge, evidenceLocale)}
                   </span>
                 </div>
-                <p className="mt-2 line-clamp-2 text-xl font-semibold text-white">
-                  {value || "Target"}
-                </p>
-                <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-zinc-800">
-                  <div
-                    className="h-full rounded-full bg-teal-200/80"
-                    style={{ width: `${extractPercentScore(section.content, metric) ?? 0}%` }}
-                  />
+                <KpiValueContent value={value} />
+                <div className="mt-auto pt-4">
+                  <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                    <div
+                      className="h-full rounded-full bg-teal-200/80"
+                      style={{ width: `${extractPercentScore(section.content, metric) ?? 0}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-zinc-500">Analytics widget</p>
                 </div>
-                <p className="mt-2 text-xs text-zinc-500">Analytics widget</p>
               </div>
             </div>
           );
