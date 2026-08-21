@@ -132,9 +132,25 @@ test("Planner.tsx: Source type / Confidence lines are only rendered when the sou
   );
 });
 
-test("Planner.tsx: the zero-citations fallback category list no longer uses 'Validation Required' as a bullet heading (drift check)", () => {
+test("Planner.tsx: the zero-citations fallback no longer uses 'Validation Required' as a bullet heading (drift check)", () => {
   assert.doesNotMatch(plannerSource, /"• Validation Required"/);
-  assert.match(plannerSource, /"• Primary Research"/);
+});
+
+// A later CRITICAL PRODUCTION FIX (provenance/sources separation) replaced
+// the zero-citations fallback's "• Market Comparisons" / "• Primary
+// Research" style bullets entirely -- they were styled identically to a
+// real cited source and had no way to be told apart from one. See
+// components/Planner.tsx and app/dashboard/[id]/ReportPdfButton.tsx's
+// formatPdfCitationContent: zero citations now renders a plain "External
+// Sources: none available for this report." line, kept visually distinct
+// from a real "• Source Name" citation entry, instead of fabricating
+// bulleted categories that read as citations.
+test("Planner.tsx: the zero-citations fallback states plainly that no external sources are available, never styled as a fabricated citation bullet", () => {
+  assert.match(plannerSource, /"External Sources: none available for this report\."/);
+  assert.doesNotMatch(plannerSource, /"• Market Comparisons"/);
+  assert.doesNotMatch(plannerSource, /"• Financial Comparisons"/);
+  assert.doesNotMatch(plannerSource, /"• Planning Assumptions"/);
+  assert.doesNotMatch(plannerSource, /"• Primary Research"/);
 });
 
 // --- End-to-end simulation of formatPdfCitationContent's real output -----

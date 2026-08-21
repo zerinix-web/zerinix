@@ -98,7 +98,7 @@ test("the exact live automotive-procurement prompt preserves all five named coun
 
   assert.notEqual(geography, "global");
   assert.notEqual(geography, "global markets");
-  for (const expected of ["United States", "Europe", "Japan", "South Korea", "Mexico"]) {
+  for (const expected of ["United States", "Germany", "Japan", "South Korea", "Mexico"]) {
     assert.ok(regions.has(expected), `"${expected}" missing from geography "${geography}"`);
   }
 });
@@ -119,7 +119,7 @@ test("'global' as an ambition descriptor is never added alongside specifically-n
   const regions = geography.split(" + ");
 
   assert.ok(!regions.includes("global"), `"global" should not appear alongside named countries in "${geography}"`);
-  assert.deepEqual(new Set(regions), new Set(["Europe", "Japan"]));
+  assert.deepEqual(new Set(regions), new Set(["Germany", "Japan"]));
 });
 
 test("'global'/'worldwide'/'international' still resolves correctly when it is the ONLY geography signal (no regression)", () => {
@@ -133,7 +133,7 @@ test("previously-fixed geography scenarios (maritime multi-region, North America
   ).geography;
   assert.deepEqual(
     new Set(maritimeGeo.split(" + ")),
-    new Set(["Europe", "United Arab Emirates", "Singapore"])
+    new Set(["Greece", "Norway", "United Arab Emirates", "Singapore"])
   );
 
   const naEuropeGeo = inferFinancialModelingInputs(

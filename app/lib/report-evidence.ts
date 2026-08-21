@@ -1,5 +1,15 @@
+// "derived" is a distinct provenance tier from "verified": a value the
+// user stated directly (e.g. MRR) is verified; a value mathematically
+// calculated from that verified value (e.g. ARR = MRR x 12) is real and
+// trustworthy but was never itself provided, so it must never display as
+// "Verified" -- see PRODUCTION DATA PROVENANCE POLISH. Detection for it
+// is checked ahead of "verified" below specifically because its own
+// wording ("derived from the verified MRR figure") legitimately contains
+// the substring "verified" as a modifier, not as a claim that this exact
+// value was itself supplied.
 export type EvidenceLevel =
   | "verified"
+  | "derived"
   | "benchmarkDerived"
   | "planningAssumption"
   | "validationRequired";
@@ -9,19 +19,21 @@ export type EvidenceLocale = import("@/app/lib/report-language").ResponseLanguag
 export const evidenceLabels: Record<EvidenceLocale, Record<EvidenceLevel, string>> = {
   English: {
     verified: "Verified",
+    derived: "Derived",
     benchmarkDerived: "Estimated",
     planningAssumption: "Assumption",
     validationRequired: "AI Analysis",
   },
   Turkish: {
     verified: "Doğrulanmış",
+    derived: "Türetilmiş",
     benchmarkDerived: "Tahmini",
     planningAssumption: "Varsayım",
     validationRequired: "AI Analizi",
   },
-  German: { verified: "Verifiziert", benchmarkDerived: "Geschätzt", planningAssumption: "Annahme", validationRequired: "KI-Analyse" },
-  French: { verified: "Vérifié", benchmarkDerived: "Estimé", planningAssumption: "Hypothèse", validationRequired: "Analyse IA" },
-  Spanish: { verified: "Verificado", benchmarkDerived: "Estimado", planningAssumption: "Supuesto", validationRequired: "Análisis de IA" },
+  German: { verified: "Verifiziert", derived: "Abgeleitet", benchmarkDerived: "Geschätzt", planningAssumption: "Annahme", validationRequired: "KI-Analyse" },
+  French: { verified: "Vérifié", derived: "Dérivé", benchmarkDerived: "Estimé", planningAssumption: "Hypothèse", validationRequired: "Analyse IA" },
+  Spanish: { verified: "Verificado", derived: "Derivado", benchmarkDerived: "Estimado", planningAssumption: "Supuesto", validationRequired: "Análisis de IA" },
 };
 
 export function getEvidenceLabel(level: EvidenceLevel, locale: EvidenceLocale = "English") {
@@ -30,6 +42,13 @@ export function getEvidenceLabel(level: EvidenceLevel, locale: EvidenceLocale = 
 
 export function normalizeEvidenceLevel(value: string): EvidenceLevel {
   const normalized = value.trim().toLowerCase();
+
+  // Checked before "verified" below: "derived from the verified MRR
+  // figure" legitimately contains the word "verified" as a modifier on
+  // the SOURCE value, not a claim that this figure was itself supplied.
+  if (/\b(derived from|derived value|calculated from the (?:verified|user[\s-]?provided)|türetilmiş|abgeleitet|dérivé|derivado)\b/i.test(normalized)) {
+    return "derived";
+  }
 
   if (/\b(verified|actual|audited|invoice|bookkeeping|accounting|bank|stripe|doğrulanmış)\b/i.test(normalized)) {
     return "verified";
@@ -61,6 +80,13 @@ export function inferEvidenceLevel(input: {
     return "validationRequired";
   }
 
+  // Checked before "verified" below -- see the EvidenceLevel comment
+  // above for why "derived from the verified MRR figure" must resolve to
+  // "derived", not "verified".
+  if (/\b(derived from|derived value|calculated from the (?:verified|user[\s-]?provided))\b/i.test(evidenceContext)) {
+    return "derived";
+  }
+
   if (/\b(verified|actual|audited|invoice|bookkeeping|accounting|bank|stripe)\b/i.test(evidenceContext)) {
     return "verified";
   }
@@ -88,6 +114,7 @@ export function inferEvidenceLevel(input: {
 
 export function getEvidenceValidationNeed(level: EvidenceLevel) {
   if (level === "verified") return "Monitor actuals";
+  if (level === "derived") return "Recheck if the source figure changes";
   if (level === "benchmarkDerived") return "Validate with operating data";
   if (level === "planningAssumption") return "Confirm planning input";
 
@@ -95,6 +122,10 @@ export function getEvidenceValidationNeed(level: EvidenceLevel) {
 }
 
 export function getEvidenceBadgeClass(level: EvidenceLevel) {
+  if (level === "derived") {
+    return "bg-violet-300/10 text-violet-200";
+  }
+
   if (level === "benchmarkDerived") {
     return "bg-teal-200 text-black";
   }

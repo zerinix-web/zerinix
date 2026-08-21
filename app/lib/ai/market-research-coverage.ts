@@ -168,11 +168,23 @@ function freshness(item: DomainResearchEvidence) {
 
 function promptReadiness(prompt: string) {
   const normalized = prompt.toLowerCase();
+  // Confirmed live: a prompt reporting "working prototype, two enterprise
+  // design partners, no paid contracts yet" matched none of these
+  // patterns -- "prototype"/"mvp"/"beta" have no entry at all, and
+  // "design partners" narrowly missed pattern 3's "partnership" (singular
+  // noun form, not "partner(s)"). Non-revenue validation evidence like a
+  // working prototype or a design/pilot partner must positively affect
+  // founder/execution readiness even though it correctly stays outside
+  // hasValidationEvidence's stricter revenue/traction keyword set
+  // (financial-model.ts, investment-score.ts) -- that distinction is what
+  // keeps design partners from ever being counted as paid customers or
+  // revenue.
   const founderSignals = [
     /\b(?:founder|cofounder|team|domain expertise|operator)\b/,
     /\b(?:pilot|customers?|revenue|traction|waitlist|interviews?|validated|loi)\b/,
     /\b(?:capital|budget|funding|runway|self-funded|bootstrapped)\b/,
-    /\b(?:launch plan|roadmap|milestone|hire|partnership|distribution)\b/,
+    /\b(?:launch plan|roadmap|milestone|hire|partnership|partners?|distribution)\b/,
+    /\b(?:prototype|mvp|proof of concept|poc|beta(?:\s+customers?)?|design partners?|pilot partners?|pilot customers?)\b/,
   ].map((pattern) => pattern.test(normalized));
   const founderReadiness = clamp(
     25 + founderSignals.reduce((sum, present) => sum + (present ? 15 : 0), 0)
@@ -330,11 +342,24 @@ export function applyMarketResearchCoverageToContext(
     dimensions.executionReadiness,
     [`Execution readiness: ${dimensions.executionReadiness}%`, "Derived from validation, capital, team, and execution inputs—not missing market-size data."]
   );
+  // Confirmed live: "Market attractiveness" here used to read purely from
+  // dimensions.marketConfidence -- a measure of how much VERIFIED EXTERNAL
+  // web evidence was found, not of whether the opportunity itself is
+  // attractive. A prompt reporting real, specific, self-reported evidence
+  // (a working prototype, named design partners) that a narrow B2B/
+  // enterprise niche's public web search simply has no indexed coverage
+  // for was scored "Market attractiveness: 0%" purely because research
+  // came back empty, with the founder's own credible claims never
+  // factored in at all. Blending in founderReadiness (prompt-derived,
+  // covers exactly this self-reported evidence -- see promptReadiness
+  // above) means thin external search coverage alone can no longer zero
+  // this out, while a prompt with neither external corroboration nor any
+  // self-reported evidence still scores low, honestly.
   const founderScore = scoreCategory(
     decisionEngine.founderScore,
     dimensions.founderReadiness,
     [
-      `Market attractiveness: ${dimensions.marketConfidence}%`,
+      `Market attractiveness: ${Math.round((dimensions.marketConfidence + dimensions.founderReadiness) / 2)}%`,
       `Business model quality: ${dimensions.productEvidence}%`,
       `Validation confidence: ${dimensions.executionReadiness}%`,
       `Execution complexity: ${dimensions.executionReadiness}%`,

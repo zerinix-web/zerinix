@@ -49,6 +49,10 @@ async function importReportPresentation() {
     '"@/app/lib/report-investment-score"',
     JSON.stringify(pathToFileURL(join(repoRoot, "app/lib/report-investment-score.ts")).href)
   );
+  source = source.replace(
+    '"@/app/lib/report-engine/executive-decision-brief"',
+    JSON.stringify(pathToFileURL(join(repoRoot, "app/lib/report-engine/executive-decision-brief.ts")).href)
+  );
 
   const dir = mkdtempSync(join(tmpdir(), "zerinix-report-presentation-"));
   const outPath = join(dir, "report-presentation.ts");

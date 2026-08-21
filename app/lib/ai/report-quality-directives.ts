@@ -61,6 +61,14 @@ const universalDecisionQualityDirectives = [
   "Keep SWOT, Porter, and Risks mutually exclusive: SWOT inventories internal capabilities and external openings; Porter explains structural industry economics; Risks describes subject-specific failure modes with indicators and mitigations. Never reuse the same sentence, example, or recommendation across them.",
   "Use natural analytical continuity through dependencies between sections, not filler transitions such as 'as mentioned above', 'building on the previous section', or generic concluding sentences.",
   "Never reuse a complete narrative paragraph in another section. If the same fact is required for consistency, state only the new implication owned by the current section.",
+  // Confirmed live: a prompt naming 5 explicit countries had only 2-3 of
+  // them survive into the generated Market Analysis/Executive Summary
+  // prose, the rest silently dropped as the model paraphrased for brevity.
+  // Every explicit fact the user supplied (country, industry, customer
+  // segment, technology, market) is itself evidence, not a word choice --
+  // dropping one is a silent loss of user-provided information, not a
+  // stylistic simplification.
+  "Every specific entity the user's own request names explicitly -- a country, industry, customer segment, technology, or market -- must appear consistently in every section where it is relevant (e.g. all named countries appear in market sizing, expansion, and financial sections). Never silently drop one for brevity; if a section legitimately excludes one, state the reason in one clause rather than omitting it silently.",
 ];
 
 // Business Idea Validation only: founder/CEO framing, unit-economics

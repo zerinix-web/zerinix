@@ -10,45 +10,91 @@ import {
   formatKeyFinancialAssumptionsList,
 } from "../app/lib/financial-evidence-labeling.ts";
 
-test("only the 4 required financial evidence labels exist", () => {
+test("only the 3 required financial evidence labels exist (PRODUCTION DATA PROVENANCE POLISH)", () => {
   assert.deepEqual(
     [...financialEvidenceTypeValues].sort(),
-    ["Industry benchmark", "Model estimate", "Planning assumption", "Verified source"].sort()
+    ["Benchmark / Assumption", "Derived", "Verified"].sort()
   );
 });
 
 // --- Classification is derived from each metric's own real formula/ ---
 // --- benchmarkComparison/assumptions text, never fabricated. ---
 
-test("a benchmark-derived formula (TAM, CAC, gross margin, monthly burn) is classified Industry benchmark", () => {
+test("a benchmark-derived formula (TAM, CAC, gross margin, monthly burn) is classified Benchmark / Assumption", () => {
   const tam = { label: "TAM", formula: "industry TAM x geography multiplier x idea scope multiplier", benchmarkComparison: "Derived from benchmark market scope.", assumptions: [] };
   const cac = { label: "CAC", formula: "benchmark CAC x complexity multiplier", benchmarkComparison: "Within range", assumptions: [] };
   const grossMargin = { label: "Gross Margin", formula: "industry gross margin benchmark", benchmarkComparison: "Within range", assumptions: [] };
 
-  assert.equal(classifyFinancialMetricEvidenceType(tam), "Industry benchmark");
-  assert.equal(classifyFinancialMetricEvidenceType(cac), "Industry benchmark");
-  assert.equal(classifyFinancialMetricEvidenceType(grossMargin), "Industry benchmark");
+  assert.equal(classifyFinancialMetricEvidenceType(tam), "Benchmark / Assumption");
+  assert.equal(classifyFinancialMetricEvidenceType(cac), "Benchmark / Assumption");
+  assert.equal(classifyFinancialMetricEvidenceType(grossMargin), "Benchmark / Assumption");
 });
 
-test("a pure calculation composed from other metrics (LTV, CAC payback, runway) is classified Model estimate", () => {
+test("a pure calculation composed from other benchmark-derived metrics (LTV, CAC payback, runway) is classified Benchmark / Assumption, not Derived", () => {
   const ltv = { label: "LTV", formula: "ARPA x Gross Margin x lifetime months", benchmarkComparison: "Within range", assumptions: ["Lifetime: 24 months"] };
   const payback = { label: "CAC Payback", formula: "CAC / monthly gross profit per customer", benchmarkComparison: "Within range", assumptions: [] };
   const runway = { label: "Runway", formula: "Investment Needed / Monthly Burn", benchmarkComparison: "Runway is calculated from financing need and monthly burn.", assumptions: [] };
 
-  assert.equal(classifyFinancialMetricEvidenceType(ltv), "Model estimate");
-  assert.equal(classifyFinancialMetricEvidenceType(payback), "Model estimate");
-  assert.equal(classifyFinancialMetricEvidenceType(runway), "Model estimate");
+  assert.equal(classifyFinancialMetricEvidenceType(ltv), "Benchmark / Assumption");
+  assert.equal(classifyFinancialMetricEvidenceType(payback), "Benchmark / Assumption");
+  assert.equal(classifyFinancialMetricEvidenceType(runway), "Benchmark / Assumption");
 });
 
-test("a metric with no benchmark/composition signal defaults to Planning assumption, never Verified source, without real user evidence", () => {
+test("a metric with no benchmark/composition signal defaults to Benchmark / Assumption, never Verified, without real user evidence", () => {
   const metric = { label: "Custom", formula: "flat estimate", benchmarkComparison: "N/A", assumptions: ["Assumed conservatively"] };
-  assert.equal(classifyFinancialMetricEvidenceType(metric, false), "Planning assumption");
+  assert.equal(classifyFinancialMetricEvidenceType(metric, false), "Benchmark / Assumption");
 });
 
-test("Verified source is only ever returned when real user-provided evidence is passed in -- never guessed", () => {
+test("Verified is only ever returned when real user-provided evidence is passed in -- never guessed", () => {
   const metric = { label: "Custom", formula: "flat estimate", benchmarkComparison: "N/A", assumptions: [] };
-  assert.equal(classifyFinancialMetricEvidenceType(metric, true), "Verified source");
-  assert.notEqual(classifyFinancialMetricEvidenceType(metric, false), "Verified source");
+  assert.equal(classifyFinancialMetricEvidenceType(metric, true), "Verified");
+  assert.notEqual(classifyFinancialMetricEvidenceType(metric, false), "Verified");
+});
+
+// --- New tier: a value mathematically derived only from another ---
+// --- verified value (e.g. ARR = MRR x 12) is Derived, never Verified. ---
+
+test("a metric whose formula/assumptions say it was stated directly by the user is classified Verified", () => {
+  const arr = {
+    label: "ARR",
+    formula: "User-provided (stated directly in the request)",
+    benchmarkComparison: "ARR reflects the actual figure supplied in the request, not a benchmark estimate.",
+    assumptions: ["Actual, user-provided ARR: $600k"],
+  };
+  assert.equal(classifyFinancialMetricEvidenceType(arr), "Verified");
+});
+
+test("the exact live bug: a metric calculated only from another verified metric (ARR derived from a stated MRR) is classified Derived, never Verified and never Benchmark / Assumption", () => {
+  const arr = {
+    label: "ARR",
+    formula: "Derived from the verified MRR (x 12)",
+    benchmarkComparison: "ARR is derived directly from the verified MRR, not a benchmark estimate.",
+    assumptions: ["Derived value: ARR calculated from the verified MRR of $25k."],
+  };
+  assert.equal(classifyFinancialMetricEvidenceType(arr), "Derived");
+});
+
+test("Derived text mentioning 'verified' as a modifier on the source value is never misclassified as Verified (word-collision guard)", () => {
+  const mrr = {
+    label: "MRR",
+    formula: "Derived from the verified ARR (/ 12)",
+    benchmarkComparison: "MRR is derived directly from the verified ARR, not a benchmark estimate.",
+    assumptions: ["Derived value: MRR calculated from the verified ARR of $600k."],
+  };
+  assert.equal(classifyFinancialMetricEvidenceType(mrr), "Derived");
+});
+
+test("Derived text mentioning 'benchmark' as a negation is never misclassified as Benchmark / Assumption (word-collision guard)", () => {
+  // The literal word "benchmark" appears here only inside "not a
+  // benchmark estimate" -- a negation describing what this value is
+  // NOT, not a benchmark classification of the value itself.
+  const arr = {
+    label: "ARR",
+    formula: "Derived from the verified MRR (x 12)",
+    benchmarkComparison: "ARR is derived directly from the verified MRR, not a benchmark estimate.",
+    assumptions: [],
+  };
+  assert.equal(classifyFinancialMetricEvidenceType(arr), "Derived");
 });
 
 test("hasVerifiedUserProvidedData ignores the generic 'no direct operating data' placeholder", () => {
@@ -57,15 +103,15 @@ test("hasVerifiedUserProvidedData ignores the generic 'no direct operating data'
   assert.equal(hasVerifiedUserProvidedData(["User reported $12,000 MRR from Stripe."]), true);
 });
 
-test("a benchmark signal always wins over a composition signal, even if the formula also divides/multiplies", () => {
+test("a benchmark signal always wins over a composition signal, even if the formula also divides/multiplies (both now resolve to the same Benchmark / Assumption tier)", () => {
   const metric = { label: "X", formula: "industry benchmark rate x adjustment", benchmarkComparison: "", assumptions: [] };
-  assert.equal(classifyFinancialMetricEvidenceType(metric), "Industry benchmark");
+  assert.equal(classifyFinancialMetricEvidenceType(metric), "Benchmark / Assumption");
 });
 
 test("localizeFinancialEvidenceType renders in all 5 supported languages with distinct text", () => {
-  const english = localizeFinancialEvidenceType("Industry benchmark", "English");
+  const english = localizeFinancialEvidenceType("Benchmark / Assumption", "English");
   for (const language of ["Turkish", "German", "French", "Spanish"]) {
-    const localized = localizeFinancialEvidenceType("Industry benchmark", language);
+    const localized = localizeFinancialEvidenceType("Benchmark / Assumption", language);
     assert.notEqual(localized, english);
     assert.ok(localized.length > 0);
   }
@@ -153,7 +199,7 @@ test("neither plan-executor.ts nor market-analysis route.ts declares a new repor
 
 test("plan's metricLine/marketSizeLine output still starts directly with the label (unchanged shape), so the existing PDF visual extractor is unaffected", () => {
   const pdfVisualLinePattern = /^\s*TAM\s*[:\-–—]/i;
-  const planTamLine = "TAM: $500,000 | evidence=Industry benchmark | formula=x | assumptions=y | benchmark=z | confidence=High";
+  const planTamLine = "TAM: $500,000 | evidence=Benchmark / Assumption | formula=x | assumptions=y | benchmark=z | confidence=High";
   assert.equal(pdfVisualLinePattern.test(planTamLine), true);
 
   const valuePattern = /^\s*TAM\s*[:\-–—]\s*((?:[<>~≈]?\s*)?[€$₺]?\s*\d+(?:[.,]\d+)*(?:\s*[kKmMbBtT%])?)/i;
@@ -162,6 +208,6 @@ test("plan's metricLine/marketSizeLine output still starts directly with the lab
 
 test("market's appended key-metrics lines are bulleted, so the PDF's label-must-start-the-line visual extractor never picks them up (the existing AI-authored TAM mention, if any, still governs the visual unchanged)", () => {
   const pdfVisualLinePattern = /^\s*TAM\s*[:\-–—]/i;
-  const marketAppendixLine = "- TAM: $500,000 | evidence=Industry benchmark | confidence=High";
+  const marketAppendixLine = "- TAM: $500,000 | evidence=Benchmark / Assumption | confidence=High";
   assert.equal(pdfVisualLinePattern.test(marketAppendixLine.trim()), false);
 });

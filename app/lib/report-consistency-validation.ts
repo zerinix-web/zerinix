@@ -8,6 +8,7 @@
 // formatting -- only the contradicting number/keyword changes), and the
 // consistency score/correction log are for internal use only.
 import type { ResponseLanguage } from "./report-language.ts";
+import { decisionTokensForLanguage } from "./report-engine/executive-decision-brief.ts";
 
 export type ConsistencyCorrectionType =
   | "recommendation_mismatch"
@@ -144,6 +145,64 @@ function correctRecommendationMentions(
 
       changed = true;
       return authoritativeDecision;
+    });
+
+    if (changed) {
+      corrections.push({ field, type: "recommendation_mismatch", before: content, after: nextContent });
+      sections[field] = nextContent;
+    }
+  }
+}
+
+// Confirmed live: correctRecommendationMentions above only ever matches
+// the OLD PASS/HOLD/VALIDATE/REJECT vocabulary. Every report now states
+// its verdict through the shared Executive Decision layer instead
+// (GO/CONDITIONAL GO/NO-GO, see executive-decision-brief.ts) -- so that
+// check had become a silent no-op: nothing in a modern report ever
+// contains a PASS/HOLD/VALIDATE/REJECT token to correct, which is
+// exactly how a report could show "WAIT"/"PASS"-family language on the
+// cover (derived independently, see report-presentation.ts) while the
+// Executive Summary said "CONDITIONAL GO", with no cross-check ever
+// firing. This scans every non-protected section for the CURRENT
+// vocabulary's tokens (in the report's own language, all 5 supported
+// languages, not just English/Turkish) and replaces any mismatch with the
+// one real, canonically-computed decision -- same mechanism, current
+// vocabulary.
+function correctExecutiveDecisionMentions(
+  sections: Record<string, string>,
+  fields: readonly string[],
+  authoritativeToken: string,
+  language: ResponseLanguage,
+  protectedFields: ReadonlySet<string>,
+  corrections: ConsistencyCorrection[]
+) {
+  const tokens = decisionTokensForLanguage(language)
+    .slice()
+    // Longest token first: "CONDITIONAL GO"/"NO-GO" must match whole,
+    // never let the bare "GO" alternative match just the tail of one of
+    // them and leave "CONDITIONAL "/"NO-" dangling in the text.
+    .sort((a, b) => b.length - a.length)
+    .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(`\\b(${tokens.join("|")})\\b`, "g");
+
+  for (const field of fields) {
+    if (protectedFields.has(field)) {
+      continue;
+    }
+
+    const content = sections[field];
+    if (!content) {
+      continue;
+    }
+
+    let changed = false;
+    const nextContent = content.replace(pattern, (match) => {
+      if (match === authoritativeToken) {
+        return match;
+      }
+
+      changed = true;
+      return authoritativeToken;
     });
 
     if (changed) {
@@ -520,6 +579,13 @@ export type ConsistencyValidationInput = {
   fields: readonly string[];
   language: ResponseLanguage;
   authoritativeDecision?: string;
+  // The current, canonical Executive Decision token (e.g. "GO"/
+  // "CONDITIONAL GO"/"NO-GO", localized to `language`) -- the same value
+  // the Executive Summary's own decision line was rendered from. Corrects
+  // any other section that states this vocabulary's tokens differently.
+  // Independent of, and additive to, authoritativeDecision above (which
+  // only ever matches the older PASS/HOLD/VALIDATE/REJECT vocabulary).
+  authoritativeExecutiveDecisionToken?: string;
   decisionProtectedFields?: readonly string[];
   metricTargets?: readonly MetricConsistencyTarget[];
   metricProtectedFields?: readonly string[];
@@ -553,6 +619,17 @@ export function runConsistencyValidationPass(
       input.sections,
       input.fields,
       input.authoritativeDecision,
+      input.language,
+      decisionProtected,
+      corrections
+    );
+  }
+
+  if (input.authoritativeExecutiveDecisionToken) {
+    correctExecutiveDecisionMentions(
+      input.sections,
+      input.fields,
+      input.authoritativeExecutiveDecisionToken,
       input.language,
       decisionProtected,
       corrections

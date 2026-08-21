@@ -836,17 +836,21 @@ function formatPdfCitationContent(content: string, realEstate = false) {
         methodologyBlock,
       ].join("\n");
     }
+    // Confirmed live: this used to render internal provenance/methodology
+    // categories ("Market Comparisons", "Financial Comparisons", etc.) as
+    // "• Label" / "  Type: ..." bullets -- the exact same visual shape as
+    // a real cited source a few lines below (source.sourceName / "Source
+    // type: ..."). A reader had no way to tell these apart from genuine
+    // external citations. When there are zero real citations, say so
+    // plainly under its own heading, kept visually distinct from (never
+    // styled like) a source entry, and let the methodology note below
+    // explain what the report's figures are actually derived from
+    // instead.
     return [
-      "• Market Comparisons",
-      "  Type: Industry benchmark",
-      "• Financial Comparisons",
-      "  Type: Financial benchmark / planning assumption",
-      "• Planning Assumptions",
-      "  Type: Model assumption",
-      "• Primary Research",
-      "  Type: Primary research required",
+      "External Sources: none available for this report.",
       "",
       methodologyBlock,
+      "No primary research or externally verifiable citation currently backs this report's figures -- they are derived from industry benchmark comparisons, financial benchmark/planning assumptions, and internal modeling. Primary research would raise confidence further.",
     ].join("\n");
   }
 
@@ -2777,7 +2781,24 @@ export function buildStandardReportPdf({
         const marketDecisionCategory = isMarketIntelligenceReport
           ? marketDecisionColorCategory(marketDecisionText)
           : null;
-        const recommendation = report.investmentScore?.recommendation || detectRecommendation(fullReportContent) || "WAIT";
+        // Same canonical, locale-agnostic decision the Executive Summary
+        // banner and the Executive Recommendation section below both read
+        // from -- keeps the cover badge's color/label from ever disagreeing
+        // with the Executive Summary the way independently re-deriving from
+        // the raw investmentScore.recommendation ("GO"/"WAIT"/"PASS", a
+        // different vocabulary than the Executive Summary's own "GO"/
+        // "CONDITIONAL GO"/"NO GO") previously could.
+        const coverExecutiveDecisionCode = !isMarketIntelligenceReport
+          ? extractExecutiveDecisionFromText(marketExecutiveSummaryContent)?.code
+          : null;
+        const recommendation =
+          coverExecutiveDecisionCode === "GO"
+            ? "GO"
+            : coverExecutiveDecisionCode === "NO_GO"
+              ? "PASS"
+              : coverExecutiveDecisionCode === "CONDITIONAL_GO"
+                ? "WAIT"
+                : report.investmentScore?.recommendation || detectRecommendation(fullReportContent) || "WAIT";
         const recommendationFill = isMarketIntelligenceReport
           ? marketDecisionCategory === "GO"
             ? "#064e3b"

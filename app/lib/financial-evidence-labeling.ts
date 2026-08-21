@@ -1,7 +1,8 @@
 // Financial evidence labeling: classifies every computed financial
 // metric (ARR, TAM, CAGR, ROI, CAC, LTV, margins, market size, etc.)
-// into exactly one of the 4 required evidence types, and consolidates
-// the assumptions behind them into one deduplicated list.
+// into exactly one of the 3 required evidence types (PRODUCTION DATA
+// PROVENANCE POLISH), and consolidates the assumptions behind them into
+// one deduplicated list.
 //
 // Never invents a classification: every metric already carries real,
 // already-computed `formula` / `benchmarkComparison` / `assumptions`
@@ -10,14 +11,14 @@
 // text to pick the accurate label -- it does not change what any
 // metric's value is, and it never upgrades a metric to a stronger
 // label than its own derivation text supports (never presents an
-// estimate as a verified fact).
+// estimate as a verified fact, and never presents a value calculated
+// from a verified figure -- e.g. ARR = MRR x 12 -- as itself Verified).
 import type { ResponseLanguage } from "./report-language.ts";
 
 export const financialEvidenceTypeValues = [
-  "Verified source",
-  "Industry benchmark",
-  "Model estimate",
-  "Planning assumption",
+  "Verified",
+  "Derived",
+  "Benchmark / Assumption",
 ] as const;
 
 export type FinancialEvidenceType = (typeof financialEvidenceTypeValues)[number];
@@ -29,11 +30,29 @@ export type FinancialMetricLike = {
   assumptions: readonly string[];
 };
 
+// A metric whose own formula/assumptions text says the value was
+// supplied directly (see financial-model.ts's userStated overrides:
+// "User-provided (stated directly in the request)", "Actual,
+// user-provided MRR: ..."). Checked first: this text can legitimately
+// also contain benchmark-sounding words nowhere here, but ordering it
+// first keeps the strongest, most specific signal from ever being
+// diluted by a weaker one below.
+const verifiedSignal = /\buser[\s-]?provided\b|\bstated directly in the request\b/i;
+// A metric mathematically calculated only from another verified metric
+// (see financial-model.ts: ARR derived from a stated MRR, or vice
+// versa). Checked before benchmarkSignal specifically because this
+// text's own wording ("derived from the verified MRR", "not a benchmark
+// estimate") legitimately contains "verified"/"benchmark" as words
+// describing the SOURCE value or a negation, not a benchmark
+// classification of this value itself.
+const derivedFromVerifiedSignal = /\bderived from the verified\b|\bderived value\b/i;
 const benchmarkSignal = /\b(benchmark|industry)\b/i;
 // A formula that composes other already-computed values (e.g.
 // "CAC / monthly gross profit per customer", "Investment Needed /
 // Monthly Burn") rather than citing a benchmark or industry figure --
-// the metric is derived by the model's own math, not looked up.
+// the metric is derived by the model's own math from benchmark inputs,
+// not a value calculated from a verified user figure (that case is
+// caught by derivedFromVerifiedSignal above first).
 const derivedCompositionSignal = /[×x/]|\bcalculated from\b|\bderived from\b/i;
 
 // Real, non-generic evidence that the user supplied actual operating
@@ -56,51 +75,54 @@ export function classifyFinancialMetricEvidenceType(
 ): FinancialEvidenceType {
   const derivationText = `${metric.formula} ${metric.benchmarkComparison} ${metric.assumptions.join(" ")}`;
 
+  if (verifiedSignal.test(derivationText)) {
+    return "Verified";
+  }
+
+  if (derivedFromVerifiedSignal.test(derivationText)) {
+    return "Derived";
+  }
+
   if (benchmarkSignal.test(derivationText)) {
-    return "Industry benchmark";
+    return "Benchmark / Assumption";
   }
 
   if (derivedCompositionSignal.test(metric.formula)) {
-    return "Model estimate";
+    return "Benchmark / Assumption";
   }
 
   if (hasUserEvidence) {
-    return "Verified source";
+    return "Verified";
   }
 
-  return "Planning assumption";
+  return "Benchmark / Assumption";
 }
 
 const evidenceTypeLabelTranslations: Record<ResponseLanguage, Record<FinancialEvidenceType, string>> = {
   English: {
-    "Verified source": "Verified source",
-    "Industry benchmark": "Industry benchmark",
-    "Model estimate": "Model estimate",
-    "Planning assumption": "Planning assumption",
+    Verified: "Verified",
+    Derived: "Derived",
+    "Benchmark / Assumption": "Benchmark / Assumption",
   },
   Turkish: {
-    "Verified source": "Doğrulanmış kaynak",
-    "Industry benchmark": "Sektör referansı",
-    "Model estimate": "Model tahmini",
-    "Planning assumption": "Planlama varsayımı",
+    Verified: "Doğrulanmış",
+    Derived: "Türetilmiş",
+    "Benchmark / Assumption": "Benchmark / Varsayım",
   },
   German: {
-    "Verified source": "Verifizierte Quelle",
-    "Industry benchmark": "Branchenbenchmark",
-    "Model estimate": "Modellschätzung",
-    "Planning assumption": "Planungsannahme",
+    Verified: "Verifiziert",
+    Derived: "Abgeleitet",
+    "Benchmark / Assumption": "Benchmark / Annahme",
   },
   French: {
-    "Verified source": "Source vérifiée",
-    "Industry benchmark": "Référentiel du secteur",
-    "Model estimate": "Estimation du modèle",
-    "Planning assumption": "Hypothèse de planification",
+    Verified: "Vérifié",
+    Derived: "Dérivé",
+    "Benchmark / Assumption": "Référence / Hypothèse",
   },
   Spanish: {
-    "Verified source": "Fuente verificada",
-    "Industry benchmark": "Referencia del sector",
-    "Model estimate": "Estimación del modelo",
-    "Planning assumption": "Supuesto de planificación",
+    Verified: "Verificado",
+    Derived: "Derivado",
+    "Benchmark / Assumption": "Referencia / Supuesto",
   },
 };
 

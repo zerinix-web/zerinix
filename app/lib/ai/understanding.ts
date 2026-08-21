@@ -249,8 +249,19 @@ const MARKETING_WORKFLOW_PATTERN =
 // desire/evaluation endings a Turkish speaker uses after it -- which is
 // a structural sentence pattern, not a sector-vocabulary word list, so
 // it does not need updating per industry.
+// Confirmed live: a prompt for "an AI-powered enterprise risk intelligence
+// platform" (sanctions, compliance, cyber incidents, supplier contracts,
+// geopolitical risk) explicitly asking for "a complete investor-grade
+// business plan" was routed to the legal/contract workflow instead --
+// none of the phrases above covered "business plan"/"business idea
+// validation"/"investor-grade business report", the exact wording the
+// requirement names as an explicit request that must win, so
+// isVentureEvaluation stayed false and the prompt's own domain vocabulary
+// ("supplier contracts") fell straight through to LEGAL_WORKFLOW_PATTERN
+// below. A user's explicit report-format request must always be checked
+// here, not just implicit venture-launch phrasing.
 const BUSINESS_WORKFLOW_PATTERN =
-  /\b(?:business idea|startup|launch|founder|build a|start a business|is it (?:worth|sensible to)\s+(?:starting|building|launching)|should i (?:start|build|launch)|does it make sense to (?:start|build|launch)|iş fikri|girişim|kurmak istiyorum|şirket kur)\b|\b(?:kurmak|açmak|başlatmak|kurmayı|açmayı|başlatmayı)\s+(?:istiyorum|düşünüyorum|planlıyorum|mantıklı\s*mı|kârlı\s*mı|karlı\s*mı|iyi\s*(?:bir\s*)?fikir\s*mi|mantıklı\s*olur\s*mu)/i;
+  /\b(?:business idea|business plan|investor[\s-]?grade business (?:plan|report)|business idea validation|startup|launch|founder|build a|start a business|is it (?:worth|sensible to)\s+(?:starting|building|launching)|should i (?:start|build|launch)|does it make sense to (?:start|build|launch)|iş fikri|iş planı|yatırımcı(?:\s+seviyesinde)? iş planı|girişim|kurmak istiyorum|şirket kur)\b|\b(?:kurmak|açmak|başlatmak|kurmayı|açmayı|başlatmayı)\s+(?:istiyorum|düşünüyorum|planlıyorum|mantıklı\s*mı|kârlı\s*mı|karlı\s*mı|iyi\s*(?:bir\s*)?fikir\s*mi|mantıklı\s*olur\s*mu)/i;
 const LEGAL_DEADLINE_PATTERN =
   /(?:\b(?:deadline|filing date|hearing date|mediation date|limitation deadline|signing date)\b|son tarih|dava açma süresi|başvuru süresi|duruşma tarihi|arabuluculuk tarihi|zamanaşımı tarihi|imza tarihi)/i;
 const LEGAL_PERSPECTIVE_PATTERN =

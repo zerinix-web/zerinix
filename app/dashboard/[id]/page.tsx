@@ -247,10 +247,65 @@ function getDashboardEvidenceLabel(level: EvidenceLevel, locale: EvidenceLocale 
   return getEvidenceLabel(level, locale);
 }
 
-function EvidenceBadge({ level, locale = "English" }: { level: EvidenceLevel; locale?: EvidenceLocale }) {
+// PRODUCTION DATA PROVENANCE POLISH -- standardized to exactly three
+// user-facing categories across Financial Dashboard, Unit Economics, and
+// KPI Dashboard: Verified (falls through to getDashboardEvidenceLabel
+// below), Derived (a value calculated only from verified data, e.g. ARR
+// from a stated MRR -- never shown as Verified), and Benchmark /
+// Assumption (a single, consolidated label -- the reader does not need
+// to distinguish an industry benchmark from a planning assumption from
+// an AI estimate to know the one thing that matters: this number was not
+// supplied or derived from what was supplied). Distinct wording only,
+// never a change to the underlying EvidenceLevel/[Verified]/[Estimated]/
+// [Assumption] tag vocabulary the AI is prompted with and
+// report-evidence-confidence.ts parses, which must stay exactly as-is.
+const financialEvidenceBadgeLabels: Partial<Record<EvidenceLevel, Record<EvidenceLocale, string>>> = {
+  derived: {
+    English: "Derived",
+    Turkish: "Türetilmiş",
+    German: "Abgeleitet",
+    French: "Dérivé",
+    Spanish: "Derivado",
+  },
+  benchmarkDerived: {
+    English: "Benchmark / Assumption",
+    Turkish: "Benchmark / Varsayım",
+    German: "Benchmark / Annahme",
+    French: "Référence / Hypothèse",
+    Spanish: "Referencia / Supuesto",
+  },
+  planningAssumption: {
+    English: "Benchmark / Assumption",
+    Turkish: "Benchmark / Varsayım",
+    German: "Benchmark / Annahme",
+    French: "Référence / Hypothèse",
+    Spanish: "Referencia / Supuesto",
+  },
+  validationRequired: {
+    English: "Benchmark / Assumption",
+    Turkish: "Benchmark / Varsayım",
+    German: "Benchmark / Annahme",
+    French: "Référence / Hypothèse",
+    Spanish: "Referencia / Supuesto",
+  },
+};
+
+function getFinancialEvidenceBadgeLabel(level: EvidenceLevel, locale: EvidenceLocale = "English") {
+  return financialEvidenceBadgeLabels[level]?.[locale] ?? getDashboardEvidenceLabel(level, locale);
+}
+
+function EvidenceBadge({
+  level,
+  locale = "English",
+  financial = false,
+}: {
+  level: EvidenceLevel;
+  locale?: EvidenceLocale;
+  financial?: boolean;
+}) {
   return (
     <span className={`w-fit shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${getEvidenceBadgeClass(level)}`}>
-      {getDashboardEvidenceLabel(level, locale)}
+      {financial ? getFinancialEvidenceBadgeLabel(level, locale) : getDashboardEvidenceLabel(level, locale)}
     </span>
   );
 }
@@ -1310,7 +1365,7 @@ function ReportSectionVisual({
             <div key={metric} className="bg-zinc-950/80 p-4">
               <div className="flex items-start justify-between gap-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
-                <EvidenceBadge level={evidence} locale={evidenceLocale} />
+                <EvidenceBadge level={evidence} locale={evidenceLocale} financial />
               </div>
               <p className="mt-3 break-words text-lg font-semibold leading-6 text-white sm:truncate sm:whitespace-nowrap">
                 {value || "—"}
@@ -1388,7 +1443,7 @@ function ReportSectionVisual({
                   <p className="line-clamp-2 min-w-0 break-words text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-500">
                     {metric.label}
                   </p>
-                  <EvidenceBadge level={evidence} locale={evidenceLocale} />
+                  <EvidenceBadge level={evidence} locale={evidenceLocale} financial />
                 </div>
                 <div className="mt-4 min-w-0">
                   <p className="break-words text-[clamp(1.15rem,2.2vw,1.65rem)] font-semibold leading-tight tracking-tight text-white sm:truncate sm:whitespace-nowrap">
@@ -1677,7 +1732,7 @@ function ReportSectionVisual({
 	            <div className="flex min-w-0 flex-col">
 	              <div className="flex min-h-[3rem] flex-col gap-1">
 	                <p className="line-clamp-2 text-[10px] font-medium uppercase leading-snug tracking-[0.1em] text-zinc-500">{metric}</p>
-	                <EvidenceBadge level={evidence} locale={evidenceLocale} />
+	                <EvidenceBadge level={evidence} locale={evidenceLocale} financial />
 	              </div>
 	              <KpiValueContent value={value} />
 	              <div className="mt-auto pt-4">

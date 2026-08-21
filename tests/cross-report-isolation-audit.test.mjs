@@ -88,7 +88,7 @@ const distinctReportPrompts = [
     prompt:
       "An AI-powered renewable energy portfolio optimization platform for utilities, managing solar, wind, and battery storage assets across the grid in Germany and France.",
     expectedIndustryKey: "energy",
-    expectedGeography: "Europe",
+    expectedGeography: "Germany + France",
   },
   {
     label: "AML/Fraud compliance",

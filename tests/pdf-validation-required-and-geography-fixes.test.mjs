@@ -95,9 +95,23 @@ test("ReportPdfButton.tsx: the Source type / Confidence lines are only rendered 
   );
 });
 
-test("ReportPdfButton.tsx: the zero-citations fallback category list no longer uses 'Validation Required' as a bullet heading (drift check)", () => {
+test("ReportPdfButton.tsx: the zero-citations fallback no longer uses 'Validation Required' as a bullet heading (drift check)", () => {
   assert.doesNotMatch(pdfSource, /"• Validation Required"/);
-  assert.match(pdfSource, /"• Primary Research"/);
+});
+
+// A later CRITICAL PRODUCTION FIX (provenance/sources separation) replaced
+// the zero-citations fallback's "• Market Comparisons" / "• Primary
+// Research" style bullets entirely -- they were styled identically to a
+// real cited source and had no way to be told apart from one. See
+// formatPdfCitationContent: zero citations now renders a plain "External
+// Sources: none available for this report." line instead of fabricating
+// bulleted categories that read as citations.
+test("ReportPdfButton.tsx: the zero-citations fallback states plainly that no external sources are available, never styled as a fabricated citation bullet", () => {
+  assert.match(pdfSource, /"External Sources: none available for this report\."/);
+  assert.doesNotMatch(pdfSource, /"• Market Comparisons"/);
+  assert.doesNotMatch(pdfSource, /"• Financial Comparisons"/);
+  assert.doesNotMatch(pdfSource, /"• Planning Assumptions"/);
+  assert.doesNotMatch(pdfSource, /"• Primary Research"/);
 });
 
 test("ReportPdfButton.tsx: the Business Plan confidence-radar fallback (executiveSnapshot.confidenceRadar) no longer shows 'Validation Required' for a null score (drift check)", () => {
@@ -177,7 +191,8 @@ test("the exact live maritime prompt (Singapore, Greece, Norway, UAE) no longer 
   assert.notEqual(geography, "global");
   const regions = new Set(geography.split(" + "));
   assert.ok(regions.has("Singapore"), `Singapore missing from "${geography}"`);
-  assert.ok(regions.has("Europe"), `Europe (Greece/Norway) missing from "${geography}"`);
+  assert.ok(regions.has("Greece"), `Greece missing from "${geography}"`);
+  assert.ok(regions.has("Norway"), `Norway missing from "${geography}"`);
   assert.ok(regions.has("United Arab Emirates"), `United Arab Emirates missing from "${geography}"`);
 });
 
@@ -188,9 +203,14 @@ test("'United Arab Emirates' (full name, not just the 'UAE' abbreviation) resolv
   );
 });
 
-test("Greece and Norway individually resolve to Europe, matching this list's existing country-to-region granularity", () => {
-  assert.equal(inferFinancialModelingInputs("A SaaS platform for clinics in Greece.").geography, "Europe");
-  assert.equal(inferFinancialModelingInputs("A SaaS platform for clinics in Norway.").geography, "Europe");
+// An explicitly named country must never be collapsed into a region label
+// (see the CRITICAL PRODUCTION FIX that added individual Germany/France/
+// Italy/Spain/Greece/Norway/Netherlands/Saudi Arabia/Qatar entries to
+// financial-model.ts's regionPatterns) -- "Europe" is now reserved for a
+// genuinely generic mention (the bare word "Europe"/"EU").
+test("Greece and Norway each resolve to their own explicit country, not the broader 'Europe' region", () => {
+  assert.equal(inferFinancialModelingInputs("A SaaS platform for clinics in Greece.").geography, "Greece");
+  assert.equal(inferFinancialModelingInputs("A SaaS platform for clinics in Norway.").geography, "Norway");
 });
 
 test("Singapore alone resolves to its own 'Singapore' region", () => {

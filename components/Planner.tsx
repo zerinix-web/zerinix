@@ -1765,6 +1765,53 @@ function getDashboardEvidenceLabel(level: EvidenceLevel, locale: EvidenceLocale 
   return getEvidenceLabel(level, locale);
 }
 
+// PRODUCTION DATA PROVENANCE POLISH -- standardized to exactly three
+// user-facing categories across Financial Dashboard, Unit Economics, and
+// KPI Dashboard: Verified (falls through to getDashboardEvidenceLabel
+// below), Derived (a value calculated only from verified data, e.g. ARR
+// from a stated MRR -- never shown as Verified), and Benchmark /
+// Assumption (a single, consolidated label -- the reader does not need
+// to distinguish an industry benchmark from a planning assumption from
+// an AI estimate to know the one thing that matters: this number was not
+// supplied or derived from what was supplied). Distinct wording only,
+// never a change to the underlying EvidenceLevel/[Verified]/[Estimated]/
+// [Assumption] tag vocabulary the AI is prompted with and
+// report-evidence-confidence.ts parses, which must stay exactly as-is.
+const financialEvidenceBadgeLabels: Partial<Record<EvidenceLevel, Record<EvidenceLocale, string>>> = {
+  derived: {
+    English: "Derived",
+    Turkish: "Türetilmiş",
+    German: "Abgeleitet",
+    French: "Dérivé",
+    Spanish: "Derivado",
+  },
+  benchmarkDerived: {
+    English: "Benchmark / Assumption",
+    Turkish: "Benchmark / Varsayım",
+    German: "Benchmark / Annahme",
+    French: "Référence / Hypothèse",
+    Spanish: "Referencia / Supuesto",
+  },
+  planningAssumption: {
+    English: "Benchmark / Assumption",
+    Turkish: "Benchmark / Varsayım",
+    German: "Benchmark / Annahme",
+    French: "Référence / Hypothèse",
+    Spanish: "Referencia / Supuesto",
+  },
+  validationRequired: {
+    English: "Benchmark / Assumption",
+    Turkish: "Benchmark / Varsayım",
+    German: "Benchmark / Annahme",
+    French: "Référence / Hypothèse",
+    Spanish: "Referencia / Supuesto",
+  },
+};
+
+function getFinancialEvidenceBadgeLabel(level: EvidenceLevel, locale: EvidenceLocale = "English") {
+  return financialEvidenceBadgeLabels[level]?.[locale] ?? getDashboardEvidenceLabel(level, locale);
+}
+
 function getSectionEvidenceLevel(section: ReportSection): EvidenceLevel {
   if (section.field === "sources" || section.field === "sourcesAssumptions") {
     return "verified";
@@ -2641,17 +2688,21 @@ function formatPdfCitationContent(content: string, realEstate = false) {
         methodologyBlock,
       ].join("\n");
     }
+    // Confirmed live: this used to render internal provenance/methodology
+    // categories ("Market Comparisons", "Financial Comparisons", etc.) as
+    // "• Label" / "  Type: ..." bullets -- the exact same visual shape as
+    // a real cited source a few lines below (source.sourceName / "Source
+    // type: ..."). A reader had no way to tell these apart from genuine
+    // external citations. When there are zero real citations, say so
+    // plainly under its own heading, kept visually distinct from (never
+    // styled like) a source entry, and let the methodology note below
+    // explain what the report's figures are actually derived from
+    // instead.
     return [
-      "• Market Comparisons",
-      "  Type: Industry benchmark",
-      "• Financial Comparisons",
-      "  Type: Financial benchmark / planning assumption",
-      "• Planning Assumptions",
-      "  Type: Model assumption",
-      "• Primary Research",
-      "  Type: Primary research required",
+      "External Sources: none available for this report.",
       "",
       methodologyBlock,
+      "No primary research or externally verifiable citation currently backs this report's figures -- they are derived from industry benchmark comparisons, financial benchmark/planning assumptions, and internal modeling. Primary research would raise confidence further.",
     ].join("\n");
   }
 
@@ -3513,7 +3564,7 @@ if (field === "swotAnalysis") {
               <div className="flex items-start justify-between gap-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
                 <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
-                  {getDashboardEvidenceLabel(confidenceBadge, evidenceLocale)}
+                  {getFinancialEvidenceBadgeLabel(confidenceBadge, evidenceLocale)}
                 </span>
               </div>
               <p className="mt-3 truncate whitespace-nowrap text-lg font-semibold text-white">
@@ -3629,7 +3680,7 @@ if (field === "swotAnalysis") {
                     {metric.label}
                   </p>
                   <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
-                    {getDashboardEvidenceLabel(confidenceBadge, evidenceLocale)}
+                    {getFinancialEvidenceBadgeLabel(confidenceBadge, evidenceLocale)}
                   </span>
                 </div>
                 <div className="mt-4 min-w-0">
@@ -3942,7 +3993,7 @@ if (field === "swotAnalysis") {
                 <div className="flex min-h-[3rem] flex-col gap-1">
                   <p className="line-clamp-2 text-[10px] font-medium uppercase leading-snug tracking-[0.1em] text-zinc-500">{metric}</p>
                   <span className={`w-fit shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
-                    {getDashboardEvidenceLabel(confidenceBadge, evidenceLocale)}
+                    {getFinancialEvidenceBadgeLabel(confidenceBadge, evidenceLocale)}
                   </span>
                 </div>
                 <KpiValueContent value={value} />

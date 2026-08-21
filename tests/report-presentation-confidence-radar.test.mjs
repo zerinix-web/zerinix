@@ -7,11 +7,12 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
-// report-presentation.ts has one REAL (non-type-only) "@/"-aliased import
-// (report-output-sanitization), so plain `node --test` can't resolve it
-// directly -- same established pattern as executive-decision-pipeline.test.mjs's
-// importExecutiveQualityGate: rewrite that one specifier to an absolute
-// file:// path and import from a throwaway temp file.
+// report-presentation.ts has REAL (non-type-only) "@/"-aliased imports
+// (report-output-sanitization, report-engine/executive-decision-brief), so
+// plain `node --test` can't resolve it directly -- same established
+// pattern as executive-decision-pipeline.test.mjs's importExecutiveQualityGate:
+// rewrite each specifier to an absolute file:// path and import from a
+// throwaway temp file.
 async function importReportPresentation() {
   const sourcePath = join(repoRoot, "app/lib/report-presentation.ts");
   const sanitizationPath = join(repoRoot, "app/lib/report-output-sanitization.ts");
@@ -19,6 +20,10 @@ async function importReportPresentation() {
   source = source.replace(
     '"@/app/lib/report-output-sanitization"',
     JSON.stringify(pathToFileURL(sanitizationPath).href)
+  );
+  source = source.replace(
+    '"@/app/lib/report-engine/executive-decision-brief"',
+    JSON.stringify(pathToFileURL(join(repoRoot, "app/lib/report-engine/executive-decision-brief.ts")).href)
   );
 
   const dir = mkdtempSync(join(tmpdir(), "zerinix-report-presentation-"));

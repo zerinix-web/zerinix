@@ -126,7 +126,11 @@ test("previously-fixed multi-region geography scenarios are unaffected (no regre
   const naEuropeGeo = inferFinancialModelingInputs("clinics across North America and Europe").geography;
   assert.deepEqual(new Set(naEuropeGeo.split(" + ")), new Set(["North America", "Europe"]));
 
-  assert.equal(inferFinancialModelingInputs("A SaaS platform for clinics in Greece.").geography, "Europe");
+  // An explicitly named country (Greece) is no longer collapsed into the
+  // "Europe" region label -- see the CRITICAL PRODUCTION FIX that gave
+  // Germany/France/Italy/Spain/Greece/Norway/Netherlands/Saudi Arabia/
+  // Qatar their own regionPatterns entries.
+  assert.equal(inferFinancialModelingInputs("A SaaS platform for clinics in Greece.").geography, "Greece");
   assert.equal(inferFinancialModelingInputs("A fintech platform for small businesses in Singapore.").geography, "Singapore");
 });
 

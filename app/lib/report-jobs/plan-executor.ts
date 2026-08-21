@@ -130,10 +130,12 @@ import { labelModelDerivedFinancialClaims } from "@/app/lib/report-engine/financ
 import {
   formatExecutiveDecisionBrief,
   extractGenericDecisionSignal,
+  localizeExecutiveDecision,
   type ExecutiveDecisionBrief,
   type ExecutiveDecisionCode,
 } from "@/app/lib/report-engine/executive-decision-brief";
 import { assertNoDecisionContradiction } from "@/app/lib/report-engine/decision-contradiction-gate";
+import { cleanupTemplatePresentationArtifacts } from "@/app/lib/report-presentation";
 import { buildEvidenceSummary } from "@/app/lib/report-engine/evidence-summary";
 import { stripFillerAndDuplicateSentences } from "@/app/lib/report-engine/filler-detection";
 import {
@@ -3860,6 +3862,14 @@ function normalizeFullPlanReport(
       )
     );
     normalized[field] = stripFillerAndDuplicateSentences(normalized[field]);
+    // Confirmed live: duplicated punctuation from adjacent template/AI
+    // fragment joins ("funding..", ",,", "!!") reached the persisted
+    // report and every consumer of it (API, PDF export) -- this cleanup
+    // already existed (report-presentation.ts) but was wired only into
+    // the client dashboard's own render call, not the generation pipeline
+    // itself. Fixing it once here, at the source, means every consumer
+    // gets clean text instead of needing its own copy of this pass.
+    normalized[field] = cleanupTemplatePresentationArtifacts(normalized[field]);
   }
 
   const deduped = dedupeReportParagraphsAcrossSections(normalized, {
@@ -3906,6 +3916,12 @@ function normalizeFullPlanReport(
     fields: planFields,
     language,
     authoritativeDecision: localizeDecision(getVisibleDecision(context), language),
+    // The single canonical decision -- the exact token the Executive
+    // Summary's own decision line was rendered from (buildPlanExecutive
+    // DecisionBrief, above). Every other section must agree with this,
+    // not with the raw investmentScore.recommendation engine value (a
+    // different vocabulary -- see report-presentation.ts).
+    authoritativeExecutiveDecisionToken: localizeExecutiveDecision(planExecutiveDecisionBrief.decision, language),
     decisionProtectedFields: ["executiveSummary"],
     metricTargets: buildPlanFinancialConsistencyTargets(context),
     metricProtectedFields: ["financialDashboard", "unitEconomics", "tamSamSom"],

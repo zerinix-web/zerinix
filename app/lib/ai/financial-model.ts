@@ -296,7 +296,20 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
     businessModel: firstMatching(
       [
         [/\b(kahve|coffee|espresso|roastery|specialty coffee|speciality coffee|premium kahve)\b/, "D2C Brand + Subscription + B2B"],
-        [/\b(saas|subscription|platform|software|crm|cybersecurity)\b/, "subscription software"],
+        // Confirmed live: "AI-powered strategic procurement intelligence
+        // for large manufacturing and energy companies" (analyzes
+        // supplier contracts, ERP data; integrates with SAP/Oracle/Coupa)
+        // classified as "asset-heavy manufacturing" -- the only signal
+        // present was the industry it SERVES ("manufacturing"), not any
+        // word describing what the business itself sells, and the
+        // manufacturer pattern below has no way to distinguish "a company
+        // that manufactures things" from "a SaaS company selling software
+        // to manufacturers". An AI-powered intelligence/analytics product
+        // is reliably a software business regardless of which industry's
+        // data it analyzes, so this is checked before any
+        // customer-industry pattern (manufacturer/consulting/etc. below)
+        // can misread the customer's industry as the vendor's own model.
+        [/\b(saas|subscription|platform|software|crm|cybersecurity|ai-powered|ai powered|artificial intelligence|machine learning platform|intelligence platform|intelligence software)\b/, "subscription software"],
         [/\b(dtc|d2c|direct to consumer|direct-to-consumer|consumer brand|ecommerce|e-commerce|online store|e-ticaret|online satış)\b/, "D2C Brand / E-commerce"],
         [/\b(marketplace|two-sided|two sided)\b/, "marketplace"],
         [/\b(scooter|scooters|micromobility|micro mobility|bike sharing|bikeshare|shared mobility)\b/, "asset-heavy rental / utilization model"],
@@ -354,7 +367,23 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
       const regionPatterns: Array<[RegExp, string]> = [
         [/\b(us|usa|united states)\b/, "United States"],
         [/\b(uk|united kingdom|london)\b/, "United Kingdom"],
-        [/\b(europe|eu|germany|france|italy|spain|greece|norway)\b/, "Europe"],
+        // Confirmed live: a procurement-intelligence prompt explicitly
+        // naming "Germany, ... France, Netherlands, ... Saudi Arabia,
+        // United Arab Emirates, ..." had Germany/France/Netherlands
+        // silently collapsed into a single "Europe" token (Netherlands had
+        // no entry at all) and Saudi Arabia collapsed into "GCC / Middle
+        // East" -- the exact class of bug already fixed for UAE/Switzerland
+        // below: an explicitly named country must never be collapsed into
+        // a region label. "Europe"/"EU" is kept only as a fallback for
+        // genuinely generic mentions that name no specific country.
+        [/\b(europe|eu)\b/, "Europe"],
+        [/\b(germany|deutschland)\b/, "Germany"],
+        [/\bfrance\b/, "France"],
+        [/\bitaly\b/, "Italy"],
+        [/\bspain\b/, "Spain"],
+        [/\bgreece\b/, "Greece"],
+        [/\bnorway\b/, "Norway"],
+        [/\b(netherlands|holland)\b/, "Netherlands"],
         [/\b(turkey|turkiye|tuerkiye|istanbul|türkiye)\b/, "Turkey"],
         [/\bsingapore\b/, "Singapore"],
         // Confirmed live: an AML/Fraud compliance prompt explicitly naming
@@ -364,14 +393,21 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
         // entirely (no entry existed for it at all). An explicitly named
         // country must never be collapsed into a region label -- "GCC /
         // Middle East" is kept only for the broader Gulf signals (Dubai,
-        // Abu Dhabi, Saudi, Qatar, or the bare "GCC" acronym) that were
-        // never a specific country name to begin with.
+        // Abu Dhabi, or the bare "GCC" acronym) that were never a specific
+        // country name to begin with.
         [/\b(uae|united arab emirates)\b/, "United Arab Emirates"],
-        [/\b(gcc|dubai|abu dhabi|saudi|qatar)\b/, "GCC / Middle East"],
+        [/\b(saudi arabia|saudi)\b/, "Saudi Arabia"],
+        [/\bqatar\b/, "Qatar"],
+        [/\b(gcc|dubai|abu dhabi)\b/, "GCC / Middle East"],
         [/\b(switzerland|swiss|zurich|zürich|geneva)\b/, "Switzerland"],
         [/\b(japan|tokyo|japanese)\b/, "Japan"],
         [/\b(south korea|korea|seoul|korean)\b/, "South Korea"],
         [/\b(mexico|mexico city|mexican)\b/, "Mexico"],
+        // Confirmed live: "Germany, Japan, South Korea, United States, and
+        // Canada" silently dropped Canada entirely -- no entry existed for
+        // it at all, the same class of gap already fixed for Netherlands/
+        // Switzerland/Qatar above.
+        [/\b(canada|canadian|toronto|vancouver)\b/, "Canada"],
       ];
       const matchedRegions = new Set(
         regionPatterns
@@ -418,7 +454,13 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
         // show up while describing a different or explicitly-rejected
         // model.
         [/\b(take rate|commission|marketplace|revenue share|revenue-share|royalty|royalties|percentage of (?:revenue|sales|royalties|funds)|take a (?:cut|percentage|share)|share of (?:funds|revenue|sales))\b/, "take-rate / commission"],
-        [/\b(subscription|monthly|annual|saas|software|cybersecurity)\b/, "subscription"],
+        // Same reasoning as the businessModel classifier above: an
+        // AI-powered intelligence/analytics product is reliably sold as
+        // software (subscription pricing) regardless of which industry's
+        // data it analyzes -- checked before the manufacturer/drone
+        // patterns below can misread the customer's industry as the
+        // vendor's own pricing mechanism.
+        [/\b(subscription|monthly|annual|saas|software|cybersecurity|ai-powered|ai powered|artificial intelligence|machine learning platform|intelligence platform|intelligence software)\b/, "subscription"],
         [/\b(dtc|d2c|direct to consumer|direct-to-consumer|consumer brand|ecommerce|e-commerce|e-ticaret|online satış)\b/, "online unit sales plus repeat purchase frequency"],
         [/\b(usage|per use|consumption)\b/, "usage-based"],
         [/\b(scooter|scooters|micromobility|bike sharing|bikeshare|ride sharing|rental)\b/, "per-ride rental plus passes"],
@@ -455,6 +497,26 @@ function geographyMultiplier(geography: string) {
   // that label, since financial-calculation behavior is unrelated to this
   // display/label fix and must not change.
   if (geography === "United Arab Emirates") return 0.06;
+  // Germany/France/Italy/Spain/Greece/Norway/Netherlands now resolve to
+  // their own explicit country label instead of being collapsed into
+  // "Europe" (see the geography resolver above) -- kept at the same
+  // multiplier "Europe" already had, since financial-calculation behavior
+  // is unrelated to this display/label fix and must not change.
+  if (
+    geography === "Germany" ||
+    geography === "France" ||
+    geography === "Italy" ||
+    geography === "Spain" ||
+    geography === "Greece" ||
+    geography === "Norway" ||
+    geography === "Netherlands"
+  ) {
+    return 0.3;
+  }
+  // Saudi Arabia/Qatar now resolve to their own explicit country label
+  // instead of being collapsed into "GCC / Middle East" -- same reasoning,
+  // same preserved multiplier.
+  if (geography === "Saudi Arabia" || geography === "Qatar") return 0.06;
   return 1;
 }
 
@@ -555,6 +617,88 @@ function hasValidationEvidence(prompt: string) {
   return /\b(revenue|sales|customers?|subscribers?|pre[-\s]?orders?|waitlist|loi|pilot|retention|repeat purchase|churn|conversion|cohort|traction|mrr|arr|gelir|satış|satis|müşteri|musteri|abon[eelik]*|ön sipariş|on siparis|bekleme listesi)\b/.test(
     withoutNegatedClaims
   );
+}
+
+// Confirmed live: a prompt stating a real, current "$18,000 MRR" was
+// still shown in the report as a benchmark-formula-derived MRR figure --
+// hasValidationEvidence above only ever answers "does SOME evidence
+// exist" as a boolean; nothing anywhere extracted the user's own literal
+// number and used it. Every metric below was a pure multiplier chain off
+// industry-benchmark modeling data, with no path for a real, explicitly-
+// stated figure to ever become the metric's actual value. This extracts
+// the small set of financial facts a founder is most likely to state
+// directly (current MRR, current ARR, current paying-customer count) so
+// createFinancialModel can use them as the authoritative value instead of
+// silently overwriting them with a benchmark estimate.
+function parseUsdAmount(rawValue: string, rawSuffix: string): number | null {
+  const value = Number(rawValue.replace(/,/g, ""));
+  if (!Number.isFinite(value)) return null;
+
+  const suffix = rawSuffix.toLowerCase();
+  if (suffix === "k" || suffix === "thousand") return value * 1_000;
+  if (suffix === "m" || suffix === "million") return value * 1_000_000;
+
+  return value;
+}
+
+const usdAmountGroup = "\\$?\\s*([\\d][\\d,]*(?:\\.\\d+)?)\\s*(k|thousand|m|million)?";
+
+// Same negation vocabulary as negatedEvidenceClaimPattern above, applied
+// to the ~30 characters immediately before a matched figure -- "we don't
+// have $18,000 in MRR yet" must never be read as a real $18,000 MRR
+// figure.
+function hasNearbyNegation(prompt: string, index: number) {
+  const precedingContext = prompt.slice(Math.max(0, index - 30), index);
+
+  return /\b(?:no|not|zero|without|never (?:had|have|has)|don'?t have|doesn'?t have|do not have|does not have|haven'?t|have not|hasn'?t|has not|lack(?:s|ing)? of)\s*$/i.test(
+    precedingContext
+  );
+}
+
+function extractLabeledUsdAmount(prompt: string, labelPattern: string): number | null {
+  const valueThenLabel = new RegExp(
+    `${usdAmountGroup}\\s*(?:in\\s+|of\\s+)?(?:${labelPattern})\\b`,
+    "i"
+  );
+  const labelThenValue = new RegExp(
+    `\\b(?:${labelPattern})\\b\\s*(?:of|is|at|was|reached|[:=-])?\\s*${usdAmountGroup}`,
+    "i"
+  );
+
+  const match = prompt.match(valueThenLabel) || prompt.match(labelThenValue);
+  if (!match || typeof match.index !== "number") return null;
+  if (hasNearbyNegation(prompt, match.index)) return null;
+
+  return parseUsdAmount(match[1], match[2] || "");
+}
+
+// Deliberately excludes bare "users" (freemium/signup counts are not the
+// same claim as paying customers) and any figure immediately qualified as
+// a market-size estimate ("potential"/"target"/"addressable"/"projected"
+// customers describes an opportunity, not a real, current customer base).
+function extractUserStatedCustomerCount(prompt: string): number | null {
+  const match = prompt.match(/\b([\d][\d,]*)\s*(?:paying\s+|active\s+|current\s+)?customers?\b/i);
+  if (!match || typeof match.index !== "number") return null;
+  if (hasNearbyNegation(prompt, match.index)) return null;
+
+  const precedingContext = prompt.slice(Math.max(0, match.index - 40), match.index).toLowerCase();
+  if (/\b(?:potential|target|addressable|total addressable|estimated|projected|expected|future)\s*$/.test(precedingContext)) {
+    return null;
+  }
+
+  return Number(match[1].replace(/,/g, ""));
+}
+
+function extractUserStatedFinancials(prompt: string): {
+  mrr: number | null;
+  arr: number | null;
+  customers: number | null;
+} {
+  return {
+    mrr: extractLabeledUsdAmount(prompt, "MRR|monthly recurring revenue"),
+    arr: extractLabeledUsdAmount(prompt, "ARR|annual recurring revenue"),
+    customers: extractUserStatedCustomerCount(prompt),
+  };
 }
 
 function customerRampMultiplier(input: FinancialModelingInputs, prompt: string) {
@@ -860,9 +1004,16 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
   const sam = tam * modeling.samRate;
   const som = sam * modeling.somRate;
   const arpa = modeling.arpaMonthly * scopeMultiplier * pricingMultiplier;
-  const month12Customers = Math.max(1, Math.round(modeling.month12Customers * scopeMultiplier * rampMultiplier));
-  const mrr = month12Customers * arpa;
-  const arr = mrr * 12;
+  const userStated = extractUserStatedFinancials(input.prompt);
+  const month12Customers =
+    userStated.customers ?? Math.max(1, Math.round(modeling.month12Customers * scopeMultiplier * rampMultiplier));
+  // A real, current MRR/ARR the user stated is the authoritative value --
+  // never overwritten by the benchmark formula below. ARR still derives
+  // from MRR (mrr x 12) when only MRR was stated, keeping the two
+  // internally consistent rather than mixing one real and one modeled
+  // figure.
+  const mrr = userStated.mrr ?? (userStated.arr ? userStated.arr / 12 : month12Customers * arpa);
+  const arr = userStated.arr ?? mrr * 12;
   const cac = modeling.cacUsd * (scopeMultiplier > 1 ? 1.18 : 1) * cacMultiplier * acquisitionContextMultiplier;
   const grossMargin = modeling.grossMarginRate;
   const ltv = arpa * grossMargin * modeling.lifetimeMonths;
@@ -1051,10 +1202,31 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
         label: arrLabel,
         value: arr,
         unit: "usd",
-        confidence: confidence(arrLabel),
-        formula: arrFormula,
-        assumptions: [...sharedAssumptions, `${mrrLabel}: ${formatUsd(mrr)}`, `Month-12 ${customerUnit}: ${month12Customers}`],
-        benchmarkComparison: `${arrLabel} is calculated from ${customerUnit} and pricing assumptions.`,
+        // Three distinct provenance tiers, never conflated (PRODUCTION
+        // DATA PROVENANCE POLISH): a user-stated ARR is Verified; an ARR
+        // calculated only from a user-stated MRR (mrr x 12) is real and
+        // trustworthy but was never itself supplied, so it is Derived,
+        // not Verified; anything else is the ordinary benchmark formula.
+        // The wording below is what inferEvidenceLevel (report-
+        // evidence.ts) actually classifies from -- "derived from the
+        // verified..." is checked ahead of the bare "verified" keyword
+        // there specifically so this phrasing resolves to Derived.
+        confidence: userStated.arr || userStated.mrr ? "High" : confidence(arrLabel),
+        formula: userStated.arr
+          ? "User-provided (stated directly in the request)"
+          : userStated.mrr
+            ? `Derived from the verified ${mrrLabel} (x 12)`
+            : arrFormula,
+        assumptions: userStated.arr
+          ? [`Actual, user-provided ${arrLabel}: ${formatUsd(arr)}`]
+          : userStated.mrr
+            ? [`Derived value: ${arrLabel} calculated from the verified ${mrrLabel} of ${formatUsd(mrr)}.`]
+            : [...sharedAssumptions, `${mrrLabel}: ${formatUsd(mrr)}`, `Month-12 ${customerUnit}: ${month12Customers}`],
+        benchmarkComparison: userStated.arr
+          ? `${arrLabel} reflects the actual figure supplied in the request, not a benchmark estimate.`
+          : userStated.mrr
+            ? `${arrLabel} is derived directly from the verified ${mrrLabel}, not a benchmark estimate.`
+            : `${arrLabel} is calculated from ${customerUnit} and pricing assumptions.`,
       }),
       revenueGrowth: metric({
         label: "Revenue Growth",
@@ -1069,10 +1241,25 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
         label: mrrLabel,
         value: mrr,
         unit: "usd",
-        confidence: confidence(mrrLabel),
-        formula: mrrFormula,
-        assumptions: [...sharedAssumptions, `Month-12 ${customerUnit}: ${month12Customers}`, `${arpaLabel}: ${formatUsd(arpa)}/month`],
-        benchmarkComparison: `${mrrLabel} is calculated from ${customerUnit} and pricing assumptions.`,
+        // Same three-tier logic as ARR above, mirrored: a user-stated
+        // MRR is Verified; an MRR calculated only from a user-stated ARR
+        // (arr / 12) is Derived, not Verified.
+        confidence: userStated.mrr || userStated.arr ? "High" : confidence(mrrLabel),
+        formula: userStated.mrr
+          ? "User-provided (stated directly in the request)"
+          : userStated.arr
+            ? `Derived from the verified ${arrLabel} (/ 12)`
+            : mrrFormula,
+        assumptions: userStated.mrr
+          ? [`Actual, user-provided ${mrrLabel}: ${formatUsd(mrr)}`]
+          : userStated.arr
+            ? [`Derived value: ${mrrLabel} calculated from the verified ${arrLabel} of ${formatUsd(arr)}.`]
+            : [...sharedAssumptions, `Month-12 ${customerUnit}: ${month12Customers}`, `${arpaLabel}: ${formatUsd(arpa)}/month`],
+        benchmarkComparison: userStated.mrr
+          ? `${mrrLabel} reflects the actual figure supplied in the request, not a benchmark estimate.`
+          : userStated.arr
+            ? `${mrrLabel} is derived directly from the verified ${arrLabel}, not a benchmark estimate.`
+            : `${mrrLabel} is calculated from ${customerUnit} and pricing assumptions.`,
       }),
       ebitda: metric({
         label: "EBITDA",

@@ -77,9 +77,13 @@ test("Planner.tsx's PDF export no longer draws a confidence-badge line for Finan
 test("Planner.tsx's on-screen React badge (a proper, visually distinct <span>, not a PDF text line) is untouched (no regression)", () => {
   // The legitimate, correctly-designed UI badge must still exist for the
   // browser-rendered dashboard -- only the PDF's flat-text duplicate of
-  // it was removed.
+  // it was removed. A later CRITICAL PRODUCTION FIX (PRODUCTION DATA
+  // PROVENANCE POLISH) standardized the label lookup itself to the
+  // 3-tier getFinancialEvidenceBadgeLabel across Financial Dashboard,
+  // Unit Economics, and KPI Dashboard -- same badge span, updated label
+  // source.
   assert.match(plannerSource, /getFinancialMetricConfidenceBadgeClass\(confidenceBadge\)/);
-  assert.match(plannerSource, /getDashboardEvidenceLabel\(confidenceBadge, evidenceLocale\)/);
+  assert.match(plannerSource, /getFinancialEvidenceBadgeLabel\(confidenceBadge, evidenceLocale\)/);
 });
 
 // --- Issue 2: "inferred pricing model" placeholder ---------------------

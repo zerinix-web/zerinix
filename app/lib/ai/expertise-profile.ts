@@ -143,11 +143,21 @@ function normalizedDetectedDomain(value: unknown) {
   return aliases[normalized] || "";
 }
 
+// An explicit business-plan/business-idea request must win over a bare
+// domain-vocabulary word (sanctions, compliance, contracts, regulatory)
+// appearing purely as the venture's own subject matter -- same guard
+// understanding.ts's BUSINESS_WORKFLOW_PATTERN now applies ahead of its
+// own LEGAL_WORKFLOW_PATTERN check, kept here too since this fallback can
+// run independently of that upstream classification.
+const explicitBusinessRequestSignals =
+  /\b(?:business idea|business plan|investor[\s-]?grade business (?:plan|report)|business idea validation|iş planı|yatırımcı(?:\s+seviyesinde)? iş planı)\b/i;
+
 function detectDomain(
   combined: string,
   assets: readonly ExpertiseAsset[],
   detectedDomain: unknown
 ): ExpertiseProfile["domain"] {
+  if (explicitBusinessRequestSignals.test(combined)) return "business";
   if (realEstateSignals.test(combined)) return "real_estate";
   if (employmentSignals.test(combined) || legalSignals.test(combined)) return "legal";
   if (retailSignals.test(combined)) return "retail";

@@ -3,6 +3,7 @@ import {
   polishTurkishUserFacingOutput,
   sanitizeInternalRoutingMetadata,
 } from "@/app/lib/report-output-sanitization";
+import { extractExecutiveDecisionFromText } from "@/app/lib/report-engine/executive-decision-brief";
 
 export type ExecutiveSnapshot = {
   decision: string;
@@ -146,7 +147,7 @@ function removeAdjacentDuplicateWords(content: string) {
 // touched (the lookbehind/lookahead below only match exactly two periods
 // with no third adjacent), and nothing here rewrites words or removes
 // content -- only stray repeated punctuation and whitespace.
-function cleanupTemplatePresentationArtifacts(content: string) {
+export function cleanupTemplatePresentationArtifacts(content: string) {
   return content
     .replace(/(?<!\.)\.\.(?!\.)/g, ".")
     .replace(/([,;:!?])\1+/g, "$1")
@@ -732,8 +733,18 @@ export function buildExecutiveSnapshot(
   );
 
   return {
+    // Read the same deterministic "Decision: GO (Confidence: 72%)" line
+    // the Executive Summary itself was rendered from (locale-agnostic --
+    // matches Turkish/German/French/Spanish reports too), before ever
+    // falling back to the raw engine value. investmentScore.recommendation
+    // is a different, 3-state vocabulary ("GO"/"WAIT"/"PASS") than the
+    // Executive Summary's own "GO"/"CONDITIONAL GO"/"NO GO" verdict --
+    // reading it first previously let the cover page show "WAIT" next to
+    // an Executive Summary that said "CONDITIONAL GO" for the same report.
     decision: polishTurkishUserFacingOutput(
-      investmentScore?.recommendation || extractDecision(normalized, isTurkish)
+      extractExecutiveDecisionFromText(content)?.token.toUpperCase() ||
+        investmentScore?.recommendation ||
+        extractDecision(normalized, isTurkish)
     ),
     confidence:
       typeof investmentScore?.confidence === "number"
