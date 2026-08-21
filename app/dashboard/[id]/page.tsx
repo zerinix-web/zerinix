@@ -1283,6 +1283,11 @@ function ReportSectionVisual({
     const flow = isMobilityReportContent(content)
       ? ["Revenue", "Rider CAC", "Rider LTV", "Payback", "Runway"]
       : ["Revenue", "CAC", "LTV", "Payback", "Runway"];
+    const flowMetrics = flow.map((metric) => {
+      const value = formatMetricCardValue(extractMetricValue(content, metric));
+      return { metric, value, evidence: getDashboardMetricEvidence(metric, value, content) };
+    });
+    const hasVerifiedEvidence = flowMetrics.some((item) => item.evidence === "verified");
 
     return (
       <div className="mb-5 overflow-hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(90deg,rgba(94,234,212,0.08),rgba(255,255,255,0.025))]">
@@ -1291,23 +1296,27 @@ function ReportSectionVisual({
             Unit Economics Chain
           </p>
         </div>
+        {!hasVerifiedEvidence ? (
+          <div className="border-b border-amber-300/20 bg-amber-300/10 px-5 py-3">
+            <p className="text-xs leading-5 text-amber-100/90">
+              <span className="font-semibold">No verified financial data available.</span>{" "}
+              The figures below are modeled estimates based on industry benchmarks and planning
+              assumptions, not confirmed business performance.
+            </p>
+          </div>
+        ) : null}
         <div className="grid gap-px bg-white/10 md:grid-cols-5">
-	          {flow.map((metric) => {
-	            const value = formatMetricCardValue(extractMetricValue(content, metric));
-	            const evidence = getDashboardMetricEvidence(metric, value, content);
-
-	            return (
-	              <div key={metric} className="bg-zinc-950/80 p-4">
-	                <div className="flex items-start justify-between gap-2">
-	                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
-	                  <EvidenceBadge level={evidence} locale={evidenceLocale} />
-	                </div>
-	                <p className="mt-3 break-words text-lg font-semibold leading-6 text-white sm:truncate sm:whitespace-nowrap">
-	                  {value || "—"}
-	                </p>
-	              </div>
-	            );
-	          })}
+          {flowMetrics.map(({ metric, value, evidence }) => (
+            <div key={metric} className="bg-zinc-950/80 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
+                <EvidenceBadge level={evidence} locale={evidenceLocale} />
+              </div>
+              <p className="mt-3 break-words text-lg font-semibold leading-6 text-white sm:truncate sm:whitespace-nowrap">
+                {value || "—"}
+              </p>
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -1341,6 +1350,12 @@ function ReportSectionVisual({
   }
 
   if (normalizedTitle.includes("financial dashboard")) {
+    const dashboardMetrics = getFinancialDashboardMetrics(content).map((metric) => {
+      const value = formatMetricCardValue(extractMetricValueFromAliases(content, metric.aliases));
+      return { metric, value, evidence: getDashboardMetricEvidence(metric.label, value, content) };
+    });
+    const hasVerifiedEvidence = dashboardMetrics.some((item) => item.evidence === "verified");
+
     return (
       <div className="mb-5 overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.12),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.015))]">
         <div className="flex flex-col gap-2 border-b border-white/10 p-5 sm:flex-row sm:items-end sm:justify-between">
@@ -1356,20 +1371,24 @@ function ReportSectionVisual({
             Live model
           </span>
         </div>
+        {!hasVerifiedEvidence ? (
+          <div className="border-b border-amber-300/20 bg-amber-300/10 px-5 py-3">
+            <p className="text-xs leading-5 text-amber-100/90">
+              <span className="font-semibold">No verified financial data available.</span>{" "}
+              The figures below are modeled estimates based on industry benchmarks and planning
+              assumptions, not confirmed business performance.
+            </p>
+          </div>
+        ) : null}
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-	          {getFinancialDashboardMetrics(content).map((metric, index) => {
-	            const value = formatMetricCardValue(
-	              extractMetricValueFromAliases(content, metric.aliases)
-	            );
-	            const evidence = getDashboardMetricEvidence(metric.label, value, content);
-
-	            return (
+          {dashboardMetrics.map(({ metric, value, evidence }, index) => {
+            return (
               <div key={metric.label} className="flex min-h-32 min-w-0 flex-col justify-between overflow-hidden rounded-3xl border border-white/10 bg-black/35 p-3.5 shadow-xl shadow-black/20">
                 <div className="flex items-start justify-between gap-3">
                   <p className="line-clamp-2 min-w-0 break-words text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-500">
                     {metric.label}
                   </p>
-	                  <EvidenceBadge level={evidence} locale={evidenceLocale} />
+                  <EvidenceBadge level={evidence} locale={evidenceLocale} />
                 </div>
                 <div className="mt-4 min-w-0">
                   <p className="break-words text-[clamp(1.15rem,2.2vw,1.65rem)] font-semibold leading-tight tracking-tight text-white sm:truncate sm:whitespace-nowrap">
@@ -1432,9 +1451,23 @@ function ReportSectionVisual({
       Base: "border-teal-200/20 bg-teal-200/[0.055]",
       Best: "border-emerald-300/20 bg-emerald-300/[0.06]",
     } as const;
+    const hasVerifiedEvidence = scenarioMetrics.some((metric) => {
+      const value = extractMetricValue(content, metric);
+      return getDashboardMetricEvidence(metric, value, content) === "verified";
+    });
 
     return (
       <div className="mb-5 space-y-4">
+        {!hasVerifiedEvidence ? (
+          <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 px-5 py-3">
+            <p className="text-xs leading-5 text-amber-100/90">
+              <span className="font-semibold">Scenario analysis is modeled, not measured.</span>{" "}
+              Baseline financial evidence has not been provided, so the Worst / Base / Best figures
+              below are industry-benchmark projections and planning assumptions, not confirmed
+              business performance.
+            </p>
+          </div>
+        ) : null}
         <div className="grid gap-3 md:grid-cols-3">
         {["Worst", "Base", "Best"].map((scenario) => {
           const snippet = extractSectionSnippet(content, scenario);

@@ -3481,6 +3481,15 @@ if (field === "swotAnalysis") {
     const flow = isMobilityReportContent(section.content)
       ? ["Revenue", "Rider CAC", "Rider LTV", "Payback", "Runway"]
       : ["Revenue", "CAC", "LTV", "Payback", "Runway"];
+    const flowMetrics = flow.map((metric) => {
+      const value = formatMetricCardValue(extractMetricValue(section.content, metric));
+      return {
+        metric,
+        value,
+        confidenceBadge: getFinancialMetricConfidenceBadge(metric, [metric], section.content, value),
+      };
+    });
+    const hasVerifiedEvidence = flowMetrics.some((item) => item.confidenceBadge === "verified");
 
     return (
       <div className="mb-5 overflow-hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(90deg,rgba(94,234,212,0.08),rgba(255,255,255,0.025))]">
@@ -3489,30 +3498,29 @@ if (field === "swotAnalysis") {
             Unit Economics Chain
           </p>
         </div>
+        {!hasVerifiedEvidence ? (
+          <div className="border-b border-amber-300/20 bg-amber-300/10 px-5 py-3">
+            <p className="text-xs leading-5 text-amber-100/90">
+              <span className="font-semibold">No verified financial data available.</span>{" "}
+              The figures below are modeled estimates based on industry benchmarks and planning
+              assumptions, not confirmed business performance.
+            </p>
+          </div>
+        ) : null}
         <div className="grid gap-px bg-white/10 md:grid-cols-5">
-          {flow.map((metric) => {
-            const value = formatMetricCardValue(extractMetricValue(section.content, metric));
-            const confidenceBadge = getFinancialMetricConfidenceBadge(
-              metric,
-              [metric],
-              section.content,
-              value
-            );
-
-            return (
-              <div key={metric} className="bg-zinc-950/80 p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
-                  <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
-                    {getDashboardEvidenceLabel(confidenceBadge, evidenceLocale)}
-                  </span>
-                </div>
-                <p className="mt-3 truncate whitespace-nowrap text-lg font-semibold text-white">
-                  {value || "—"}
-                </p>
+          {flowMetrics.map(({ metric, value, confidenceBadge }) => (
+            <div key={metric} className="bg-zinc-950/80 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
+                <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
+                  {getDashboardEvidenceLabel(confidenceBadge, evidenceLocale)}
+                </span>
               </div>
-            );
-          })}
+              <p className="mt-3 truncate whitespace-nowrap text-lg font-semibold text-white">
+                {value || "—"}
+              </p>
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -3573,6 +3581,18 @@ if (field === "swotAnalysis") {
   }
 
   if (field === "financialDashboard") {
+    const dashboardMetrics = getFinancialDashboardMetrics(section.content).map((metric) => {
+      const value = formatMetricCardValue(
+        extractMetricValueFromAliases(section.content, metric.aliases)
+      );
+      return {
+        metric,
+        value,
+        confidenceBadge: getFinancialMetricConfidenceBadge(metric.label, metric.aliases, section.content, value),
+      };
+    });
+    const hasVerifiedEvidence = dashboardMetrics.some((item) => item.confidenceBadge === "verified");
+
     return (
       <div className="mb-5 overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.12),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.015))]">
         <div className="flex flex-col gap-2 border-b border-white/10 p-5 sm:flex-row sm:items-end sm:justify-between">
@@ -3588,18 +3608,17 @@ if (field === "swotAnalysis") {
             Live model
           </span>
         </div>
+        {!hasVerifiedEvidence ? (
+          <div className="border-b border-amber-300/20 bg-amber-300/10 px-5 py-3">
+            <p className="text-xs leading-5 text-amber-100/90">
+              <span className="font-semibold">No verified financial data available.</span>{" "}
+              The figures below are modeled estimates based on industry benchmarks and planning
+              assumptions, not confirmed business performance.
+            </p>
+          </div>
+        ) : null}
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-          {getFinancialDashboardMetrics(section.content).map((metric, index) => {
-            const value = formatMetricCardValue(
-              extractMetricValueFromAliases(section.content, metric.aliases)
-            );
-            const confidenceBadge = getFinancialMetricConfidenceBadge(
-              metric.label,
-              metric.aliases,
-              section.content,
-              value
-            );
-
+          {dashboardMetrics.map(({ metric, value, confidenceBadge }, index) => {
             return (
               <div
                 key={metric.label}
@@ -3669,9 +3688,23 @@ if (field === "swotAnalysis") {
       Base: "border-teal-200/20 bg-teal-200/[0.055]",
       Best: "border-emerald-300/20 bg-emerald-300/[0.06]",
     } as const;
+    const hasVerifiedEvidence = scenarioMetrics.some((metric) => {
+      const value = extractMetricValue(section.content, metric);
+      return getFinancialMetricConfidenceBadge(metric, [metric], section.content, value || "") === "verified";
+    });
 
     return (
       <div className="mb-5 space-y-4">
+        {!hasVerifiedEvidence ? (
+          <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 px-5 py-3">
+            <p className="text-xs leading-5 text-amber-100/90">
+              <span className="font-semibold">Scenario analysis is modeled, not measured.</span>{" "}
+              Baseline financial evidence has not been provided, so the Worst / Base / Best figures
+              below are industry-benchmark projections and planning assumptions, not confirmed
+              business performance.
+            </p>
+          </div>
+        ) : null}
         <div className="grid gap-3 md:grid-cols-3">
         {["Worst", "Base", "Best"].map((scenario) => {
           const snippet = extractScenarioSnippet(section.content, scenario);
