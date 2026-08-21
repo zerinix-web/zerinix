@@ -3881,6 +3881,26 @@ function normalizeFullPlanReport(
   // never surfaces a message to the user. The score/correction log are
   // for internal quality tracking only (logged below), never written
   // into report content.
+  // Weak-signal flags for the strategic-signal-contradiction rules below:
+  // an already-computed score/metric being weak doesn't make the report
+  // wrong on its own, but pairing it with an unqualified aggressive
+  // recommendation elsewhere (premium pricing, aggressive hiring, rapid
+  // scaling, higher burn, international expansion, large marketing spend)
+  // is the contradiction this pass exists to catch. Thresholds below 50%
+  // of category maximum / a sub-1.0 LTV:CAC ratio / under 6 months runway
+  // mirror the same "weak evidence" bar already used elsewhere in this
+  // pipeline (see hasValidationEvidence and the uncertainty-banner gate).
+  const investmentScoreCategories = context.investmentScore.categories;
+  const isCategoryWeak = (category: { score: number; maximumScore: number }) =>
+    category.maximumScore > 0 && category.score / category.maximumScore < 0.5;
+  const strategicSignals = {
+    weakCompetitiveAdvantage: isCategoryWeak(investmentScoreCategories.competitiveAdvantage),
+    weakMarketOpportunity: isCategoryWeak(investmentScoreCategories.marketOpportunity),
+    negativeUnitEconomics: context.metrics.ltv.value < context.metrics.cac.value,
+    lowRunway: context.metrics.runway.value < 6,
+    lowValidationConfidence: isCategoryWeak(investmentScoreCategories.teamFounder),
+  };
+
   const consistencyResult = runConsistencyValidationPass({
     sections: deduped,
     fields: planFields,
@@ -3894,6 +3914,8 @@ function normalizeFullPlanReport(
       opportunitiesHostField: "swotAnalysis",
       opportunitiesHeading: reportLabel(language, "Opportunities:", "Fırsatlar:"),
     },
+    strategicSignals,
+    regulatoryRiskField: "risks",
   });
   if (consistencyResult.correctionsApplied.length > 0) {
     logOperationalInfo("[api:plan] consistency validation applied corrections", {

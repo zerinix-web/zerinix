@@ -326,3 +326,272 @@ test("neither plan-executor.ts nor market-analysis route.ts declares a new repor
   assert.doesNotMatch(planSource, /consistencyScore:\s*\{/);
   assert.doesNotMatch(marketSource, /consistencyScore:\s*\{/);
 });
+
+// --- CRITICAL REPORT QUALITY TEST: contradictory strategic recommendations ---
+//
+// A report can pass every check above (same decision everywhere, same
+// metric values, no risk/opportunity duplicate) while still pairing a
+// weak, already-computed underlying signal in one section with an
+// unqualified aggressive recommendation in a completely different
+// section that never accounts for it. Each test below reproduces one of
+// the 8 intentionally-contradictory scenarios from the report-quality
+// audit and confirms the pass appends a deterministic, non-fabricating
+// caution sentence rather than rewriting the AI's own sentence (grammar
+// safety) or silently dropping the aggressive claim (would hide the
+// model's actual output).
+
+test("high competition / weak differentiation + unjustified premium pricing claim is flagged with a caveat, original sentence untouched", () => {
+  const sections = {
+    pricingStrategy: "Given strong pricing power, we recommend premium pricing above market rate.",
+  };
+  const before = sections.pricingStrategy;
+  const result = runConsistencyValidationPass({
+    sections,
+    fields: Object.keys(sections),
+    language: "English",
+    strategicSignals: {
+      weakCompetitiveAdvantage: true,
+      weakMarketOpportunity: false,
+      negativeUnitEconomics: false,
+      lowRunway: false,
+      lowValidationConfidence: false,
+    },
+  });
+
+  assert.match(sections.pricingStrategy, new RegExp(before.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(sections.pricingStrategy, /competitive differentiation has not been established/);
+  assert.equal(result.correctionsApplied[0].type, "strategic_signal_contradiction");
+});
+
+test("low market demand + aggressive hiring recommendation is flagged", () => {
+  const sections = {
+    founderRoadmap: "Demand signals are still forming. In 90 days, hire aggressively to capture the market.",
+  };
+  const result = runConsistencyValidationPass({
+    sections,
+    fields: Object.keys(sections),
+    language: "English",
+    strategicSignals: {
+      weakCompetitiveAdvantage: false,
+      weakMarketOpportunity: true,
+      negativeUnitEconomics: false,
+      lowRunway: false,
+      lowValidationConfidence: false,
+    },
+  });
+
+  assert.match(sections.founderRoadmap, /hiring should stay lean until demand signals strengthen/);
+  assert.equal(result.correctionsApplied[0].type, "strategic_signal_contradiction");
+});
+
+test("negative unit economics (LTV below CAC) + rapid scaling recommendation is flagged", () => {
+  const sections = {
+    scenarioAnalysis: "Best Case: scale rapidly once the funnel is proven.",
+  };
+  const result = runConsistencyValidationPass({
+    sections,
+    fields: Object.keys(sections),
+    language: "English",
+    strategicSignals: {
+      weakCompetitiveAdvantage: false,
+      weakMarketOpportunity: false,
+      negativeUnitEconomics: true,
+      lowRunway: false,
+      lowValidationConfidence: false,
+    },
+  });
+
+  assert.match(sections.scenarioAnalysis, /LTV\/CAC needs to clear a healthy threshold/);
+  assert.equal(result.correctionsApplied[0].type, "strategic_signal_contradiction");
+});
+
+test("cash constraints (thin runway) + recommendation to increase burn rate is flagged", () => {
+  const sections = {
+    financialAssumptions: "To hit the growth target, increase the burn rate over the next two quarters.",
+  };
+  const result = runConsistencyValidationPass({
+    sections,
+    fields: Object.keys(sections),
+    language: "English",
+    strategicSignals: {
+      weakCompetitiveAdvantage: false,
+      weakMarketOpportunity: false,
+      negativeUnitEconomics: false,
+      lowRunway: true,
+      lowValidationConfidence: false,
+    },
+  });
+
+  assert.match(sections.financialAssumptions, /any increase in burn should be conditioned on a funding plan/);
+  assert.equal(result.correctionsApplied[0].type, "strategic_signal_contradiction");
+});
+
+test("weak PMF / low validation confidence + immediate international expansion recommendation is flagged", () => {
+  const sections = {
+    goToMarketPlan: "Product-market fit is still being tested locally. Prioritize international expansion next quarter.",
+  };
+  const result = runConsistencyValidationPass({
+    sections,
+    fields: Object.keys(sections),
+    language: "English",
+    strategicSignals: {
+      weakCompetitiveAdvantage: false,
+      weakMarketOpportunity: false,
+      negativeUnitEconomics: false,
+      lowRunway: false,
+      lowValidationConfidence: true,
+    },
+  });
+
+  assert.match(sections.goToMarketPlan, /should follow evidence of repeatable demand rather than precede it/);
+  assert.equal(result.correctionsApplied[0].type, "strategic_signal_contradiction");
+});
+
+test("low customer validation + large marketing spend recommendation is flagged", () => {
+  const sections = {
+    salesStrategy: "Customer validation is limited to a handful of early conversations. Commit to a large marketing spend to accelerate pipeline.",
+  };
+  const result = runConsistencyValidationPass({
+    sections,
+    fields: Object.keys(sections),
+    language: "English",
+    strategicSignals: {
+      weakCompetitiveAdvantage: false,
+      weakMarketOpportunity: false,
+      negativeUnitEconomics: false,
+      lowRunway: false,
+      lowValidationConfidence: true,
+    },
+  });
+
+  assert.match(sections.salesStrategy, /should follow evidence of repeatable demand rather than precede it/);
+  assert.equal(result.correctionsApplied[0].type, "strategic_signal_contradiction");
+});
+
+test("high regulatory risk in the Risks section contradicting a 'low overall risk' conclusion elsewhere is flagged (RULE G)", () => {
+  const sections = {
+    risks: "Regulatory risk is high in this jurisdiction and licensing approval is not guaranteed.",
+    executiveSummary: "Overall risk for this venture is low given the founder's track record.",
+  };
+  const result = runConsistencyValidationPass({
+    sections,
+    fields: Object.keys(sections),
+    language: "English",
+    regulatoryRiskField: "risks",
+  });
+
+  assert.match(sections.executiveSummary, /flags high regulatory\/compliance exposure/);
+  // The Risks section itself, which is the one carrying the actual
+  // finding, is never watered down or rewritten -- only the contradicting
+  // sentence elsewhere gets the caveat appended.
+  assert.equal(sections.risks, "Regulatory risk is high in this jurisdiction and licensing approval is not guaranteed.");
+  assert.equal(result.correctionsApplied[0].type, "strategic_signal_contradiction");
+});
+
+test("no false positives: aggressive phrasing with no corresponding weak signal is left untouched", () => {
+  const sections = {
+    pricingStrategy: "Given strong pricing power, we recommend premium pricing above market rate.",
+    founderRoadmap: "In 90 days, hire aggressively to capture the market.",
+  };
+  const before = { ...sections };
+  const result = runConsistencyValidationPass({
+    sections,
+    fields: Object.keys(sections),
+    language: "English",
+    strategicSignals: {
+      weakCompetitiveAdvantage: false,
+      weakMarketOpportunity: false,
+      negativeUnitEconomics: false,
+      lowRunway: false,
+      lowValidationConfidence: false,
+    },
+  });
+
+  assert.deepEqual(sections, before);
+  assert.equal(result.correctionsApplied.length, 0);
+});
+
+test("no false positives: a weak signal with no matching aggressive phrasing anywhere leaves the report untouched", () => {
+  const sections = {
+    pricingStrategy: "Pricing should be validated directly with early customers before it is finalized.",
+  };
+  const before = { ...sections };
+  const result = runConsistencyValidationPass({
+    sections,
+    fields: Object.keys(sections),
+    language: "English",
+    strategicSignals: {
+      weakCompetitiveAdvantage: true,
+      weakMarketOpportunity: true,
+      negativeUnitEconomics: true,
+      lowRunway: true,
+      lowValidationConfidence: true,
+    },
+  });
+
+  assert.deepEqual(sections, before);
+  assert.equal(result.correctionsApplied.length, 0);
+});
+
+test("re-running the pass on already-corrected content never stacks a duplicate caveat onto the same sentence", () => {
+  const sections = {
+    pricingStrategy: "Given strong pricing power, we recommend premium pricing above market rate.",
+  };
+  const signals = {
+    weakCompetitiveAdvantage: true,
+    weakMarketOpportunity: false,
+    negativeUnitEconomics: false,
+    lowRunway: false,
+    lowValidationConfidence: false,
+  };
+
+  runConsistencyValidationPass({ sections, fields: Object.keys(sections), language: "English", strategicSignals: signals });
+  const afterFirstPass = sections.pricingStrategy;
+  const result = runConsistencyValidationPass({ sections, fields: Object.keys(sections), language: "English", strategicSignals: signals });
+
+  assert.equal(sections.pricingStrategy, afterFirstPass);
+  assert.equal(result.correctionsApplied.length, 0);
+  const occurrences = sections.pricingStrategy.split("competitive differentiation has not been established").length - 1;
+  assert.equal(occurrences, 1);
+});
+
+test("the strategic-signal caveat is localized for Turkish reports", () => {
+  const sections = {
+    pricingStrategy: "Given strong pricing power, we recommend premium pricing above market rate.",
+  };
+  runConsistencyValidationPass({
+    sections,
+    fields: Object.keys(sections),
+    language: "Turkish",
+    strategicSignals: {
+      weakCompetitiveAdvantage: true,
+      weakMarketOpportunity: false,
+      negativeUnitEconomics: false,
+      lowRunway: false,
+      lowValidationConfidence: false,
+    },
+  });
+
+  assert.match(sections.pricingStrategy, /rekabetçi farklılaşma henüz kanıtlanmadığı/);
+});
+
+// --- Wiring: plan-executor.ts computes real strategic signals from the ---
+// --- report's own investment-score categories and financial metrics. ---
+
+test("plan-executor.ts derives strategicSignals from context.investmentScore.categories and context.metrics, not hardcoded/fabricated values", () => {
+  const passIndex = planSource.indexOf("runConsistencyValidationPass({");
+  const strategicSignalsIndex = planSource.lastIndexOf("const strategicSignals = {", passIndex);
+  assert.ok(strategicSignalsIndex > 0, "strategicSignals computation not found before the consistency pass call");
+
+  const block = planSource.slice(strategicSignalsIndex, passIndex);
+  assert.match(block, /investmentScoreCategories\.competitiveAdvantage/);
+  assert.match(block, /investmentScoreCategories\.marketOpportunity/);
+  assert.match(block, /investmentScoreCategories\.teamFounder/);
+  assert.match(block, /context\.metrics\.ltv\.value/);
+  assert.match(block, /context\.metrics\.cac\.value/);
+  assert.match(block, /context\.metrics\.runway\.value/);
+
+  const passCallBlock = planSource.slice(passIndex, planSource.indexOf("});", passIndex));
+  assert.match(passCallBlock, /strategicSignals,/);
+  assert.match(passCallBlock, /regulatoryRiskField:\s*"risks"/);
+});
