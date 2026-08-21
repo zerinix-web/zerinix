@@ -120,11 +120,29 @@ function promptSpecificityScore(prompt: string) {
   return clamp(0.35 + matchedSignals * 0.13, 0.35, 1);
 }
 
+// Confirmed live: a prompt explicitly disclaiming evidence ("I have no
+// customers, no revenue, no funding, no prototype, and no validated
+// scientific evidence") was misread as CLAIMING it, purely because
+// "customers" and "revenue" literally appear inside the negated clause --
+// this independently-duplicated copy of financial-model.ts's own
+// hasValidationEvidence had the identical bug, and it directly drives the
+// Founder Score / Execution Risk categories' own "Validation evidence
+// detected: yes/no" narrative line and several real score adjustments
+// (e.g. a +0.08 evidence bonus instead of the correct -0.08 penalty, and
+// a validation-level score of 70 instead of 48). Negated occurrences are
+// stripped before the positive-evidence scan runs, matching financial-
+// model.ts's fix exactly, so "no revenue" no longer counts as "has
+// revenue evidence" while a genuine claim like "we have 200 customers on
+// a waitlist" is untouched.
+const negatedEvidenceClaimPattern =
+  /\b(?:no|not|zero|without|never (?:had|have|has)|don'?t have|doesn'?t have|do not have|does not have|haven'?t(?:\s+(?:got|had))?|have not(?:\s+(?:got|had))?|hasn'?t(?:\s+(?:got|had))?|has not(?:\s+(?:got|had))?|lack(?:s|ing)? of|no direct|not yet)\s+(?:\w+\s+){0,3}?(?:revenue|sales|customers?|subscribers?|pre[-\s]?orders?|waitlist|loi|pilot|retention|repeat purchase|churn|conversion|cohort|traction|mrr|arr|gelir|satış|satis|müşteri|musteri|abone|abonelik|ön sipariş|on siparis|bekleme listesi)\b/gi;
+
 function hasValidationEvidence(prompt: string) {
   const normalized = normalizePrompt(prompt);
+  const withoutNegatedClaims = normalized.replace(negatedEvidenceClaimPattern, " ");
 
   return /\b(revenue|sales|customers?|subscribers?|pre[-\s]?orders?|waitlist|loi|pilot|retention|repeat purchase|churn|conversion|cohort|traction|mrr|arr|gelir|satış|satis|müşteri|musteri|abone|abonelik|ön sipariş|on siparis|bekleme listesi)\b/.test(
-    normalized
+    withoutNegatedClaims
   );
 }
 

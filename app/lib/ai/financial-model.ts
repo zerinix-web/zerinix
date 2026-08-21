@@ -525,11 +525,35 @@ function isD2cFoodOrFmcg(input: FinancialModelingInputs) {
   );
 }
 
+// Confirmed live: a prompt explicitly disclaiming evidence ("I have no
+// customers, no revenue, no funding, no prototype, and no validated
+// scientific evidence") was misread as CLAIMING it, purely because
+// "customers" and "revenue" literally appear inside the negated clause.
+// This function's result unconditionally gates whether the Financial
+// Assumptions narrative says "Validation evidence: present in prompt"
+// (financial-assumptions-adjacent code below), whether the Sources block
+// claims "User supplied validation evidence in the request" instead of
+// "No direct operating data was supplied", and -- with no industry
+// gating at all -- whether Benchmark Intelligence's own validationGaps
+// array includes or SUPPRESSES the disclosure "No direct customer,
+// revenue, retention, or acquisition evidence was provided in the
+// request." A founder explicitly saying they have none of these things
+// must never have that exact disclosure silently withheld. Negated
+// occurrences (no/not/zero/without/never had/don't have/lack of/... plus
+// up to a few intervening descriptive words, e.g. "no validated
+// scientific evidence") are stripped before the positive-evidence scan
+// runs, so "no revenue" no longer counts as "has revenue evidence" while
+// a genuine claim like "we have 200 customers on a waitlist" is
+// untouched (nothing before "customers" matches a negation trigger).
+const negatedEvidenceClaimPattern =
+  /\b(?:no|not|zero|without|never (?:had|have|has)|don'?t have|doesn'?t have|do not have|does not have|haven'?t(?:\s+(?:got|had))?|have not(?:\s+(?:got|had))?|hasn'?t(?:\s+(?:got|had))?|has not(?:\s+(?:got|had))?|lack(?:s|ing)? of|no direct|not yet)\s+(?:\w+\s+){0,3}?(?:revenue|sales|customers?|subscribers?|pre[-\s]?orders?|waitlist|loi|pilot|retention|repeat purchase|churn|conversion|cohort|traction|mrr|arr|gelir|satış|satis|müşteri|musteri|abon[eelik]*|ön sipariş|on siparis|bekleme listesi)\b/gi;
+
 function hasValidationEvidence(prompt: string) {
   const normalized = normalizePrompt(prompt);
+  const withoutNegatedClaims = normalized.replace(negatedEvidenceClaimPattern, " ");
 
   return /\b(revenue|sales|customers?|subscribers?|pre[-\s]?orders?|waitlist|loi|pilot|retention|repeat purchase|churn|conversion|cohort|traction|mrr|arr|gelir|satış|satis|müşteri|musteri|abon[eelik]*|ön sipariş|on siparis|bekleme listesi)\b/.test(
-    normalized
+    withoutNegatedClaims
   );
 }
 
