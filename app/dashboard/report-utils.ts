@@ -5,7 +5,7 @@ import {
   type ReportMetadata,
 } from "@/app/lib/report-investment-score";
 import { dedupeReportSections } from "@/app/lib/report-section-normalization";
-import { sanitizeAcquisitionReportSections } from "@/app/lib/report-engine/acquisition-presentation";
+import { sanitizeReportSectionsForPresentation } from "@/app/lib/report-engine/report-presentation-sanitizer";
 
 export type DashboardReport = {
   id: string;
@@ -381,19 +381,19 @@ export function normalizeReport(row: ReportRow): DashboardReport {
           : reportType === "Strategic Report"
             ? "Strategic Decision Report"
             : "Business Plan Report";
-  // CRITICAL FIX -- remove internal evidence/reasoning-pipeline leakage
-  // from the customer-facing acquisition report (External Evidence/
-  // Sources sections, [R#]/evidence-registry citation tags, publisher and
-  // URL lists, leaked decision-intelligence metadata). Applied once, here,
-  // regardless of which branch of normalizeSections produced the rows, so
-  // both the dashboard viewer and the PDF button (which both read this
-  // same normalized report) inherit the fix from a single source. Never
-  // changes generation, routing, or the stored row itself -- presentation
-  // only, per the fix's own scope.
-  const sections =
-    reportType === "Acquisition Due Diligence Report"
-      ? sanitizeAcquisitionReportSections(normalizeSections(row))
-      : normalizeSections(row);
+  // CRITICAL PRODUCT FIX -- convert internal reasoning output into clean
+  // executive language, for every report type (External Evidence/Sources
+  // sections, [R#]/evidence-registry citation tags, publisher and URL
+  // lists, decision-engine/synthesis-provider/deadline-fallback internal
+  // vocabulary, leaked decision-intelligence metadata, and the
+  // [Unknown][Required:field] template sentence rewritten into natural
+  // language). Applied once, here, unconditionally, regardless of which
+  // branch of normalizeSections produced the rows and regardless of
+  // report type, so both the dashboard viewer and the PDF button (which
+  // both read this same normalized report) inherit the fix from a single
+  // source. Never changes generation, routing, reasoning, or the stored
+  // row itself -- presentation only, per the fix's own scope.
+  const sections = sanitizeReportSectionsForPresentation(normalizeSections(row));
   const investmentScore = readReportInvestmentScore(row.metadata);
   const rowStatus = readString(row, ["status", "state"], "completed");
   const failedReport = rowStatus.toLowerCase() !== "completed";

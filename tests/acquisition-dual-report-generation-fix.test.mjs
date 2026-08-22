@@ -78,8 +78,8 @@ async function importReportUtils() {
     JSON.stringify(pathToFileURL(join(repoRoot, "app/lib/report-section-normalization.ts")).href)
   );
   source = source.replace(
-    '"@/app/lib/report-engine/acquisition-presentation"',
-    JSON.stringify(pathToFileURL(join(repoRoot, "app/lib/report-engine/acquisition-presentation.ts")).href)
+    '"@/app/lib/report-engine/report-presentation-sanitizer"',
+    JSON.stringify(pathToFileURL(join(repoRoot, "app/lib/report-engine/report-presentation-sanitizer.ts")).href)
   );
   const dir = mkdtempSync(join(tmpdir(), "zerinix-report-utils-"));
   const outPath = join(dir, "report-utils.ts");
