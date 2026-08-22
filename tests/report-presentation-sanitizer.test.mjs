@@ -331,21 +331,32 @@ test("stripReportPresentationArtifacts removes every R# identifier shape, regard
 // --- 4. Final report reads like a premium executive advisor ---------------
 // ---    (the [Unknown][Required:field] rewrite, not just tag-stripping) ---
 
-test("stripReportPresentationArtifacts rewrites the exact BAD fallback sentence into natural executive language, per the fix's own required example", () => {
+// NOTE: superseded by the "final cleanup" turn -- the rewrite used to
+// insert the humanized field identifier as the sentence's own subject
+// ("Valuation purchase price requires additional verification before
+// this can be finalized."), which itself leaked an internal research-
+// task field name in lightly-cleaned form. Every occurrence now becomes
+// the same fixed, genuinely generic executive sentence instead --
+// confirmed correct via the dedicated
+// report-presentation-sanitizer-all-surfaces.test.mjs suite.
+test("stripReportPresentationArtifacts rewrites the exact BAD fallback sentence into the fix's own required generic GOOD sentence, regardless of the internal field identifier", () => {
   const rewritten = stripReportPresentationArtifacts(
     "[Unknown] [Required:valuation_purchase_price] Some external sources could not be verified."
   );
   assert.doesNotMatch(rewritten, /\[Unknown\]/);
   assert.doesNotMatch(rewritten, /\[Required:/);
   assert.doesNotMatch(rewritten, /Some external sources could not be verified/);
-  assert.match(rewritten, /^Valuation purchase price requires additional verification before this can be finalized\.$/);
+  assert.doesNotMatch(rewritten, /valuation_purchase_price/i);
+  assert.equal(rewritten, "Additional financial and operational information is needed before making a final decision.");
 });
 
-test("stripReportPresentationArtifacts's rewrite works for any humanized field identifier, not just the one named example", () => {
+test("stripReportPresentationArtifacts's rewrite is identical regardless of which internal field identifier triggered it -- never leaks the field name in any form", () => {
   const rewritten = stripReportPresentationArtifacts(
     "[Unknown] [Required:employment_records] Some external sources could not be verified, so this field is not definitive."
   );
-  assert.match(rewritten, /^Employment records requires additional verification before this can be finalized\.$/);
+  assert.doesNotMatch(rewritten, /employment_records/i);
+  assert.doesNotMatch(rewritten, /employment records/i);
+  assert.equal(rewritten, "Additional financial and operational information is needed before making a final decision.");
 });
 
 test("normalizeReport's rewritten sentence never contains internal template phrasing ('Some external sources could not be verified', 'this field is not definitive') anywhere in the final report", () => {
@@ -357,17 +368,26 @@ test("normalizeReport's rewritten sentence never contains internal template phra
   }
 });
 
-test("normalizeReport preserves the [Verified]/[Derived] deal-fact labels and figures exactly -- purchase price, ARR, EV/ARR, financing figures survive the rewrite untouched", () => {
+// NOTE: superseded by the "final cleanup" turn -- [Verified]/[Derived]
+// bracket labels are now removed too (a deliberate policy reversal from
+// an earlier turn), while the underlying figures they labeled must
+// survive exactly. "[Verified] Purchase price: $40M" -> "Purchase price:
+// $40M", never the bare label alone.
+test("normalizeReport preserves the underlying purchase price, ARR, EV/ARR, and financing figures exactly, with the [Verified]/[Derived] bracket labels now removed", () => {
   const report = normalizeReport(acquisitionReportRow());
   const targetOverview = report.sections.find((s) => s.field === "targetCompanyOverview")?.content || "";
   const valuation = report.sections.find((s) => s.field === "valuationAnalysis")?.content || "";
   const financing = report.sections.find((s) => s.field === "financingStructure")?.content || "";
 
-  assert.match(targetOverview, /\[Verified\] Purchase price: \$14M/);
-  assert.match(targetOverview, /\[Verified\] Target ARR: \$2\.8M/);
-  assert.match(valuation, /\[Derived\] EV\/ARR: 5\.0x/);
-  assert.match(financing, /\[Derived\] Equity contribution: \$8M/);
-  assert.match(financing, /\[Derived\] Debt requirement: \$6M/);
+  assert.doesNotMatch(targetOverview, /\[Verified\]/);
+  assert.doesNotMatch(valuation, /\[Derived\]/);
+  assert.doesNotMatch(financing, /\[Derived\]/);
+
+  assert.match(targetOverview, /Purchase price: \$14M/);
+  assert.match(targetOverview, /Target ARR: \$2\.8M/);
+  assert.match(valuation, /EV\/ARR: 5\.0x/);
+  assert.match(financing, /Equity contribution: \$8M/);
+  assert.match(financing, /Debt requirement: \$6M/);
 });
 
 test("normalizeReport leaves natural executive-language sentences intact after stripping internal tags -- the fix removes labels, not analysis", () => {
@@ -407,9 +427,9 @@ test("sanitizeReportSectionsForPresentation drops a section that becomes fully e
   // deletion) is what happens for this specific shape.
   assert.equal(sections.length, 2);
   assert.ok(sections.some((s) => s.field === "missingInformation"));
-  assert.match(
+  assert.equal(
     sections.find((s) => s.field === "missingInformation").content,
-    /^X requires additional verification before this can be finalized\.$/
+    "Additional financial and operational information is needed before making a final decision."
   );
 });
 

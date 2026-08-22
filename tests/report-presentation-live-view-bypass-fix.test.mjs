@@ -223,21 +223,40 @@ test("the live view contains zero R identifiers, zero URLs, zero 'Verified from.
   assert.doesNotMatch(allContent, /evidence registry/i, "'evidence registry' leaked");
 });
 
-test("the live view preserves the $40M purchase price, $10M target ARR, and the derived 4.0x EV/ARR multiple exactly, correctly labeled [Verified]/[Derived]", () => {
+// NOTE: superseded by the "final cleanup" turn -- [Verified]/[Derived]
+// bracket labels are now removed from customer-facing output too (a
+// deliberate policy reversal from an earlier turn: "[Verified] Purchase
+// price: $40M" -> "Purchase price: $40M"), while the underlying figures
+// they labeled must survive exactly.
+test("the live view preserves the $40M purchase price, $10M target ARR, and the derived 4.0x EV/ARR multiple exactly, with the [Verified]/[Derived] bracket labels now removed", () => {
   const { reportOutput } = simulateLiveViewExtraction(persistedAcquisitionSections());
 
-  assert.match(reportOutput.targetCompanyOverview, /\[Verified\] Purchase price: \$40M/);
-  assert.match(reportOutput.targetCompanyOverview, /\[Verified\] Target ARR: \$10M/);
-  assert.match(reportOutput.valuationAnalysis, /\[Derived\] EV\/ARR: 4\.0x/);
+  assert.doesNotMatch(reportOutput.targetCompanyOverview, /\[Verified\]/);
+  assert.doesNotMatch(reportOutput.valuationAnalysis, /\[Derived\]/);
+
+  assert.match(reportOutput.targetCompanyOverview, /Purchase price: \$40M/);
+  assert.match(reportOutput.targetCompanyOverview, /Target ARR: \$10M/);
+  assert.match(reportOutput.valuationAnalysis, /EV\/ARR: 4\.0x/);
 });
 
-test("the live view's Missing Information field is rewritten into a natural sentence (not just tag-stripped) for the $40M/$10M acquisition case", () => {
+// NOTE: superseded by the "final cleanup" turn -- the rewrite no longer
+// inserts the internal field identifier ("valuation_purchase_price" /
+// "Valuation purchase price") as the sentence's own subject; every
+// [Unknown][Required:...] occurrence now becomes the same fixed, fully
+// generic executive sentence, matching the fix's own required GOOD
+// example exactly.
+test("the live view's Missing Information field is rewritten into the fix's own required generic GOOD sentence for the $40M/$10M acquisition case, never mentioning the internal field identifier", () => {
   const { reportOutput } = simulateLiveViewExtraction(persistedAcquisitionSections());
 
   assert.doesNotMatch(reportOutput.missingInformation, /\[Unknown\]/);
   assert.doesNotMatch(reportOutput.missingInformation, /\[Required:/);
   assert.doesNotMatch(reportOutput.missingInformation, /Some external sources could not be verified/i);
-  assert.match(reportOutput.missingInformation, /^Valuation purchase price requires additional verification before this can be finalized\.$/);
+  assert.doesNotMatch(reportOutput.missingInformation, /valuation_purchase_price/i);
+  assert.doesNotMatch(reportOutput.missingInformation, /valuation purchase price/i);
+  assert.equal(
+    reportOutput.missingInformation,
+    "Additional financial and operational information is needed before making a final decision."
+  );
 });
 
 test("the live view leaves natural executive-language analysis intact for the $40M/$10M acquisition case -- the fix removes labels, not the underlying reasoning", () => {

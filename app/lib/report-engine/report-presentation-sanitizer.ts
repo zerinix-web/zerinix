@@ -70,14 +70,30 @@ export function isUniversalCustomerFacingSection(section: {
 // "[Basis:verified evidence and deadline fallback]" tags every domain's
 // timeout fallback in plan-executor.ts writes into its fields),
 // [Recommendation], [User], and the "Verified from X"/[Unknown]/
-// [Estimate]/[Assumption] evidence-classification tags. Deliberately does
-// NOT match the bare [Verified]/[Derived] labels the deal-facts pipeline
-// prepends to acquisition purchase price/ARR/EV-ARR/financing figures
-// (app/lib/ai/acquisition-deal-facts.ts) -- those are meaningful figures
-// this fix must preserve, and neither is ever followed by "from ...
-// source" or any other suffix, so this pattern never touches them.
+// [Estimate]/[Assumption] evidence-classification tags.
+//
+// CRITICAL FIX -- final cleanup: bare [Verified]/[Derived] now match too
+// -- this reverses an earlier turn's deliberate exclusion. That turn kept
+// them on the theory that a bracket LABEL naming the evidence tier was
+// itself useful signal; confirmed live, it was not -- "[Verified]
+// Purchase price: $40M" still reads as internal notation to a customer.
+// The underlying figure is what must survive, not the classification
+// label around it: "[Verified] Purchase price: $40M" -> "Purchase price:
+// $40M". The heading line each deal-facts block is prepended under
+// ("Verified Deal Facts:" / "Derived Valuation Metric:" / "Derived
+// Financing Metrics:", see acquisition-deal-facts.ts's
+// formatVerifiedDealFactsBlock/formatDerivedValuationBlock/
+// formatDerivedFinancingBlock) is stripped separately below, by the same
+// reasoning.
 const citationBracketTagPattern =
-  /\[(?:R\d+|Asset:[^\]]*|Method:[^\]]*|Required:[^\]]*|Basis:[^\]]*|Recommendation|Verified from (?:uploaded asset|official source|external source)|Unknown|Estimated?|Assumption|User)\]/gi;
+  /\[(?:R\d+|Asset:[^\]]*|Method:[^\]]*|Required:[^\]]*|Basis:[^\]]*|Recommendation|Verified from (?:uploaded asset|official source|external source)|Unknown|Estimated?|Assumption|User|Verified|Derived)\]/gi;
+
+// The internal block-label heading each deal-facts block is prepended
+// under (acquisition-deal-facts.ts) -- a label for the block, not part of
+// any individual figure, so it is removed as a whole line rather than
+// left dangling once its own [Verified]/[Derived] tags are gone.
+const dealFactsHeadingLinePattern =
+  /^\s*(?:Verified Deal Facts|Derived Valuation Metric|Derived Financing Metrics|Doğrulanmış İşlem Bilgileri|Türetilmiş Değerleme Metriği|Türetilmiş Finansman Metrikleri)\s*:\s*$/gim;
 
 // The same "Verified from X" evidence-classification phrase, unbracketed
 // -- CRITICAL FIX -- apply presentation sanitization to ALL report
@@ -93,30 +109,69 @@ const bareVerifiedFromPhrasePattern =
 // research item (see plan-executor.ts's createGroundedDomainTimeoutFallback/
 // createGroundedAcquisitionTimeoutFallback: "[Unknown] [Required:${task.
 // field}] Some external sources could not be verified, so this field is
-// not definitive."). Rewritten into a natural sentence built from the
-// humanized field identifier BEFORE the generic bracket-tag stripper
-// below ever runs, so the result reads like an executive advisor's own
-// words ("Purchase price assessment requires additional information...")
-// instead of a stripped-down fragment of the internal template sentence.
+// not definitive.").
+//
+// CRITICAL FIX -- final cleanup: an earlier turn rewrote this into a
+// sentence built from the humanized field identifier ("Valuation
+// purchase price requires additional verification before this can be
+// finalized.") -- confirmed live, that still leaked the internal
+// research-task field name (raw or lightly humanized: "authoritative
+// source", "target_financials", "valuation_purchase_price",
+// "integration_operational_risk", ...) as the sentence's own subject,
+// which reads as internal notation regardless of the underscore cleanup.
+// The field identifier is dropped entirely now -- every occurrence
+// becomes the same fixed, genuinely natural executive sentence.
 const unknownRequiredSentencePattern =
-  /\[Unknown\]\s*\[Required:([^\]]+)\]\s*[^\n]*/gi;
-
-function humanizeFieldIdentifier(field: string): string {
-  const cleaned = field
-    .trim()
-    .replace(/_/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-
-  return cleaned.replace(/^./, (char) => char.toUpperCase());
-}
+  /\[Unknown\]\s*\[Required:[^\]]+\]\s*[^\n]*/gi;
+const unknownRequiredReplacementSentence =
+  "Additional financial and operational information is needed before making a final decision.";
 
 function rewriteUnknownRequiredSentences(content: string): string {
-  return content.replace(unknownRequiredSentencePattern, (_match, field: string) => {
-    const topic = humanizeFieldIdentifier(field);
-    return `${topic} requires additional verification before this can be finalized.`;
+  return content.replace(unknownRequiredSentencePattern, unknownRequiredReplacementSentence);
+}
+
+// decision-intelligence/risk-engine.ts's own deterministic evidence-gap
+// sentence: "Critical decision evidence remains unresolved: ${field}." --
+// unlike the [Required:...] tag above, this one names a genuinely
+// meaningful topic (e.g. "valuation"), so it is rewritten to keep that
+// topic rather than genericized away, matching the fix's own required
+// example.
+const criticalDecisionEvidenceSentencePattern =
+  /\bCritical decision evidence remains unresolved:\s*([^.\n]+)\.?/gi;
+
+function rewriteCriticalDecisionEvidenceSentences(content: string): string {
+  return content.replace(criticalDecisionEvidenceSentencePattern, (_match, topic: string) => {
+    const cleanTopic = topic.trim().replace(/_/g, " ").toLowerCase();
+    return `The ${cleanTopic} should be reviewed further before closing.`;
   });
+}
+
+// plan-executor.ts's per-domain timeout-fallback disclosure sentence
+// (English and Turkish; see createGroundedDomainTimeoutFallback/
+// createGroundedAcquisitionTimeoutFallback's own `localized.timeout`) --
+// entirely internal operational status text with no analytical content,
+// so it is removed as a whole sentence rather than word-by-word: removing
+// only "synthesis provider"/"existing decision engine" from inside it
+// would leave a grammatically broken remnant ("The  reached its
+// deadline; ... and the ."). Matched loosely (word-count-bounded gaps,
+// not an exact string) so minor wording drift in plan-executor.ts still
+// gets caught.
+const timeoutDisclosureSentencePattern =
+  /\bThe synthesis provider reached its deadline[\s\S]{0,20}?this preliminary report was completed from verified evidence and the existing decision engine\.?/gi;
+const timeoutDisclosureSentencePatternTr =
+  /\bSentez sağlayıcısı süre sınırına ulaştı[\s\S]{0,20}?bu ön rapor doğrulanmış kanıtlar ve mevcut karar motoru kullanılarak tamamlandı\.?/gi;
+
+// Any bare snake_case token (lowercase words joined by underscores) is
+// unambiguously an internal identifier leak -- ordinary English prose
+// never contains an underscore, so this can never mistakenly rewrite
+// legitimate analysis. Catches every research-task/section-plan field
+// identifier this codebase uses (target_financials, purchase_price,
+// valuation_purchase_price, integration_operational_risk, and any other,
+// not-yet-seen one) without needing a hand-maintained lookup table.
+const snakeCaseIdentifierPattern = /\b[a-z]+(?:_[a-z]+)+\b/g;
+
+function naturalizeSnakeCaseIdentifiers(content: string): string {
+  return content.replace(snakeCaseIdentifierPattern, (match) => match.replace(/_/g, " "));
 }
 
 // A leaked decision-intelligence extracted-fact line -- e.g. a
@@ -139,9 +194,14 @@ const internalRegistryLinePattern =
 
 // Standalone internal-pipeline vocabulary that must never appear as prose
 // in a customer report, even mid-sentence and even if not wrapped in a
-// bracket tag or its own line.
+// bracket tag or its own line. "existing decision engine" listed before
+// the bare "decision engine" it contains, as a defensive second layer --
+// timeoutDisclosureSentencePattern above already removes the full
+// sentence this phrase normally appears in, but if that sentence's
+// wording ever drifts enough to not match, this still catches the phrase
+// itself instead of leaving "existing" orphaned.
 const internalVocabularyPattern =
-  /\b(?:evidence registry|research task registry|decision intelligence(?:\s+engine)?|executive assessment|decision engine|synthesis provider|deadline fallback)\b/gi;
+  /\b(?:evidence registry|research task registry|decision intelligence(?:\s+engine)?|executive assessment|existing decision engine|decision engine|synthesis provider|deadline fallback)\b/gi;
 
 const bareUrlPattern = /https?:\/\/\S+/gi;
 const confidenceScorePattern = /\bconfidence\s*\d{1,3}\/100\b/gi;
@@ -156,25 +216,35 @@ function collapseWhitespace(value: string): string {
     .trim();
 }
 
-// Order matters: the [Unknown]/[Required:...] rewrite runs FIRST (it
-// needs the tags still in place to read the field identifier out of
-// them), then whole-line removals (so a bracket tag at the start of an
-// internal-registry/leaked-fact line doesn't get stripped in isolation,
-// leaving an orphaned rest-of-line fragment behind), then inline bracket
-// tags, standalone vocabulary, confidence scores, and bare URLs are
-// stripped from whatever prose remains.
+// Order matters: sentence-level rewrites run FIRST, while their own
+// bracket tags/exact wording are still intact ([Unknown]/[Required:...]
+// and the timeout-disclosure sentence need to match themselves whole,
+// before any smaller pattern below could partially consume them and
+// leave a broken remnant); then whole-line removals (so a bracket tag at
+// the start of an internal-registry/leaked-fact/deal-facts-heading line
+// doesn't get stripped in isolation, leaving an orphaned rest-of-line
+// fragment behind); then inline bracket tags (now including bare
+// [Verified]/[Derived]), the unbracketed "Verified from X" phrase,
+// standalone vocabulary, confidence scores, and bare URLs; and finally
+// any remaining raw snake_case identifier is naturalized as the last
+// polish pass.
 export function stripReportPresentationArtifacts(content: string): string {
   if (!content) return content;
 
   let sanitized = content;
   sanitized = rewriteUnknownRequiredSentences(sanitized);
+  sanitized = rewriteCriticalDecisionEvidenceSentences(sanitized);
+  sanitized = sanitized.replace(timeoutDisclosureSentencePattern, "");
+  sanitized = sanitized.replace(timeoutDisclosureSentencePatternTr, "");
   sanitized = sanitized.replace(leakedInternalFactLinePattern, "");
   sanitized = sanitized.replace(internalRegistryLinePattern, "");
+  sanitized = sanitized.replace(dealFactsHeadingLinePattern, "");
   sanitized = sanitized.replace(citationBracketTagPattern, "");
   sanitized = sanitized.replace(bareVerifiedFromPhrasePattern, "");
   sanitized = sanitized.replace(internalVocabularyPattern, "");
   sanitized = sanitized.replace(confidenceScorePattern, "");
   sanitized = sanitized.replace(bareUrlPattern, "");
+  sanitized = naturalizeSnakeCaseIdentifiers(sanitized);
 
   return collapseWhitespace(sanitized);
 }
