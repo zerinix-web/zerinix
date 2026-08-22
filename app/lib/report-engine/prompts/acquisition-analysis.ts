@@ -22,37 +22,37 @@ export const acquisitionAnalysisPrompts = {
   executiveAcquisitionSummary:
     "Open with the acquisition decision in one sentence: proceed, proceed conditionally, renegotiate, or walk away, and identify the target, transaction type (asset purchase, stock purchase, merger), and parties without inventing absent identifiers. This is the report's executive entry point -- a board-level summary of the deal, never a startup elevator pitch.",
   targetCompanyOverview:
-    "Describe the target company: business, operations, customers, and financial profile, extracted from uploaded assets and the user's own statements. Separate readable evidence from ambiguous or missing data.",
+    "Describe the target company: business, operations, customers, and financial profile, extracted from uploaded assets and the user's own statements. Lead with every verified deal fact supplied in the deterministic deal-facts context (purchase price, target ARR, customer count, employee count, buyer available capital, financing structure) exactly as given, correctly labeled [Verified]. Separate readable evidence from ambiguous or missing data.",
   externalEvidence:
-    "Synthesize the completed external research -- comparable M&A transactions, industry benchmarks, and market data -- prioritizing official and primary sources. Every claim must cite an evidence registry ID.",
+    "Synthesize the completed external research -- comparable M&A transactions, industry benchmarks, regulatory considerations, and market data relevant to this deal's sector and jurisdiction -- prioritizing official and primary sources. If no relevant external evidence was returned, say so explicitly and continue the analysis using the verified deal facts and derived metrics; never leave this field empty or block the report. Every claim must cite an evidence registry ID.",
   strategicFit:
-    "Assess the strategic rationale and fit of this acquisition: strategic fit with the acquirer's own strategy, market position, competitive advantage gained, and why this target specifically.",
+    "Assess the strategic rationale and fit of this acquisition: strategic fit with the acquirer's own strategy, market position, competitive advantage gained, and why this target specifically. Write real, deal-specific analysis grounded in the target's actual profile -- never a generic statement that could apply to any acquisition.",
   valuationAnalysis:
-    "Assess valuation using EV/ARR (or the appropriate revenue/earnings multiple), comparable transactions, and the implied purchase multiple, then assess whether the purchase price is fair given that valuation and the target's verified financial profile. Never invent a multiple, comparable transaction, or price figure that was not supplied or researched.",
+    "Assess valuation using EV/ARR (or the appropriate revenue/earnings multiple), comparable transactions, and the implied purchase multiple, then assess whether the purchase price is fair given that valuation and the target's verified financial profile. When the deterministic deal-facts context provides a computed EV/ARR, state it exactly as given, labeled [Derived], and do not recompute it independently or state a different multiple. Never invent a multiple, comparable transaction, or price figure that was not supplied or researched.",
   financingStructure:
-    "Assess the proposed or likely financing structure for this acquisition (cash, stock, debt, or a combination) and its implications for the acquirer.",
+    "Assess the proposed or likely financing structure for this acquisition (cash, stock, debt, or a combination) and its implications for the acquirer. When the deterministic deal-facts context provides a computed equity contribution, debt requirement, or debt/equity split, state those figures exactly as given, labeled [Derived], and do not recompute them independently.",
   debtCapacity:
-    "Assess the acquirer's and/or combined entity's debt capacity and leverage implications of the proposed financing structure.",
+    "Assess the acquirer's and/or combined entity's debt capacity and leverage implications of the proposed financing structure, using the derived debt requirement and debt share of purchase price from the deal-facts context when available.",
   roiAnalysis:
-    "Provide evidence-based ROI scenarios (downside, base, upside) for this acquisition. State explicitly when a scenario cannot be supported from the evidence provided rather than inventing one.",
+    "Provide evidence-based ROI scenarios (downside, base, upside) for this acquisition, grounded in the verified deal facts (purchase price, target ARR, synergy assumptions) where available. State explicitly when a scenario cannot be supported from the evidence provided rather than inventing one.",
   irrAnalysis:
     "Provide an IRR estimate only when enough information exists to compute it (cash flow timing, exit assumption, holding period). State explicitly when IRR cannot be computed from the evidence provided -- never invent one.",
   revenueSynergies:
-    "Assess revenue synergies specifically (cross-sell, upsell, new-channel access, pricing power), each with its supporting rationale and evidence. Never invent a synergy figure without a stated basis.",
+    "Assess revenue synergies specifically (cross-sell, upsell, new-channel access, pricing power) using the target's actual customer base and business where relevant, each with its supporting rationale and evidence. Never invent a synergy figure without a stated basis.",
   costSynergies:
-    "Assess cost synergies specifically (overlapping functions, procurement leverage, facility consolidation, technology consolidation), each with its supporting rationale and evidence. Never invent a synergy figure without a stated basis.",
+    "Assess cost synergies specifically (overlapping functions, procurement leverage, facility consolidation, technology consolidation) using the target's actual headcount and operating profile where relevant, each with its supporting rationale and evidence. Never invent a synergy figure without a stated basis.",
   integrationRisks:
-    "Assess integration risk: technology integration, cultural integration, systems/process consolidation, and the disruption risk of combining the two organizations.",
+    "Assess integration risk: technology integration, cultural integration, systems/process consolidation, and the disruption risk of combining the two organizations. For a technology or cybersecurity target, explicitly assess security architecture and data-handling integration risk.",
   operationalRisks:
-    "Assess operational risks distinct from integration: supply chain, key operational dependencies, customer/vendor concentration, and delivery continuity risk during and after the transition.",
+    "Assess operational risks distinct from integration: supply chain, key operational dependencies, customer/vendor concentration, and delivery continuity risk during and after the transition. When the target's enterprise customer count is known, assess customer-concentration and retention risk against it specifically.",
   regulatoryReview:
-    "Assess antitrust, competition, and sector-specific regulatory approval considerations that could affect deal timing or feasibility, only from verified sources.",
+    "Assess antitrust, competition, and sector-specific regulatory approval considerations that could affect deal timing or feasibility, only from verified sources. For an EU or Germany-based target, explicitly address EU competition/merger-control review and, when the target handles personal data or operates in a regulated sector, GDPR and any applicable sector-specific regime (e.g. DORA, BaFin supervision) -- only when the deal's actual jurisdiction and sector make them applicable, never as a generic checklist for a deal they do not apply to.",
   competitivePosition:
     "Assess the combined entity's competitive position after the acquisition: market share shift, competitor response, and durability of the advantage gained.",
   dealRisks:
     "Rank material deal risks (beyond integration and operations) by mechanism, evidence, likelihood, consequence, and mitigation -- including key-person risk, customer concentration, contingent liabilities, and litigation exposure where evidenced.",
   postMergerIntegrationPlan:
-    "Provide a post-merger integration plan sequenced across the first 30, 60, and 90 days after closing, with owner and evidence target for each major step.",
+    "Provide a real, deal-specific post-merger integration plan sequenced across the first 30, 60, and 90 days after closing, with owner and evidence target for each major step -- never a generic template. Cover at minimum: Days 1-30 -- legal and financial close, customer and contract review, security architecture audit, and retention-risk mapping for key staff and customers. Days 31-60 -- product and infrastructure integration, cross-sell planning, and org design. Days 61-90 -- unified go-to-market execution, KPI tracking, synergy realization, and an integration review. Adapt and extend this structure with steps specific to the target's actual sector, size, and the deal's own facts -- do not just restate this list verbatim.",
   missingInformation:
     "List unresolved critical facts. For each: why it specifically matters to this acquisition decision, what proxy or adjacent evidence was used in its place if any, how its absence changed confidence, and what part of the decision cannot be finalized until it is resolved. Vary the explanation to the actual fact each time -- never reuse the same sentence shape across items.",
   finalInvestmentRecommendation:
@@ -202,6 +202,11 @@ export function buildAcquisitionAnalysisInstructions(language: ResponseLanguage)
     `Never use startup-pitch or venture-validation vocabulary anywhere in this report, including: ${getForbiddenTermLabels("acquisition_due_diligence").join(", ")}. This is an acquisition of an existing business, not a startup being pitched or validated -- do not introduce founder scoring, product-market fit, startup execution scoring, or a build/don't-build recommendation.`,
     "Read Strategic Fit, Valuation Analysis, Financing Structure, Debt Capacity, ROI Analysis, IRR Analysis, Revenue Synergies, Cost Synergies, Integration Risks, Operational Risks, Regulatory Review, Competitive Position, and Deal Risks as one continuous argument, each building on what the last one established, ending in the Post-Merger Integration Plan and the Final Investment Recommendation. Do not write any of them as an isolated observation disconnected from that chain.",
     "When a fact could not be verified, do not write a bare 'not verified' notice. Instead: name the exact source or document required, explain briefly why that specific gap matters to this decision, state what proxy or adjacent evidence stands in for it if any, and say what part of the decision stays open until it is resolved. Vary this explanation to the specific fact each time.",
+    // CRITICAL ACQUISITION CONTENT FIX -- confirmed live: sections came
+    // back too empty, and some fields were reduced to a bare cross-
+    // reference sentence instead of real analysis.
+    "Every field must contain substantive, deal-specific analysis of at least several sentences grounded in the verified deal facts, derived metrics, uploaded assets, and research provided. Never write a bare cross-reference such as 'see [section] for the established premise' or similar -- state each field's own distinct analysis and decision implication, even when it draws on the same underlying facts as another field. A short cross-reference is acceptable only to avoid repeating an identical paragraph verbatim, and even then must be followed by the field's own new analysis, never stand alone as the entire field.",
+    "When the deterministic deal-facts context in the input supplies verified facts or derived metrics, use those exact figures and exact [Verified]/[Derived] labels wherever they are relevant to a field -- never recompute a derived metric to a different value, never relabel a Derived figure as Verified or a Verified figure as Derived, and never omit a relevant supplied figure.",
     ...buildUniversalDecisionQualityDirectives(),
     ...insightLedgerAndTokenBudgetDirectives,
     ...buildExecutiveConsultingStyleDirectives(),

@@ -196,6 +196,16 @@ import {
   type AcquisitionAnalysisField,
 } from "@/app/lib/report-engine/prompts/acquisition-analysis";
 import {
+  extractAcquisitionDealFacts,
+  computeAcquisitionDerivedMetrics,
+  formatAcquisitionDealFactsContext,
+  formatVerifiedDealFactsBlock,
+  formatDerivedValuationBlock,
+  formatDerivedFinancingBlock,
+  type AcquisitionDealFacts,
+  type AcquisitionDerivedMetrics,
+} from "@/app/lib/ai/acquisition-deal-facts";
+import {
   buildRealEstateInstructions,
   realEstateFieldLabels,
   realEstateFields,
@@ -529,12 +539,23 @@ function serializeDomainAnalysisReportChunks(
   ].join("");
 }
 
+// CRITICAL ACQUISITION CONTENT FIX -- never runs the generic cross-
+// section dedup pass on acquisition reports. Confirmed live: it was
+// replacing genuine section content with a bare "See [section] for the
+// established premise" placeholder -- acquisition's 19 fields are
+// narrower and more numerous than the generic domain-analysis/business-
+// plan schemas this pass was tuned for, and its own applyAcquisitionDeter
+// ministicOverrides deliberately prepends the SAME verified-facts/
+// derived-metrics blocks to multiple sections (targetCompanyOverview,
+// valuationAnalysis, financingStructure) by design, since a founder deal
+// price is legitimately relevant context in more than one section -- a
+// generic near-duplicate-paragraph detector would otherwise collapse
+// that intentional repetition into the same placeholder text.
 function serializeAcquisitionAnalysisReportChunks(report: AcquisitionAnalysisReport) {
-  const conciseReport = dedupeReportParagraphsAcrossSections(report);
   return [
     serializeReportStreamChunk({ reportDomain: "acquisition" }),
     ...acquisitionAnalysisFields.map((field) =>
-      serializeReportStreamChunk({ [field]: conciseReport[field] })
+      serializeReportStreamChunk({ [field]: report[field] })
     ),
   ].join("");
 }
@@ -4519,6 +4540,133 @@ function buildRealSourcesAssumptionsField(
   ].join("\n\n");
 }
 
+// CRITICAL ACQUISITION CONTENT FIX -- acquisition source relevance.
+// Confirmed live: an acquisition due-diligence report's research evidence
+// and Sources field pulled in generic, topically unrelated sources (HHS,
+// WHO, APA, MBA.com, Wikipedia, education/healthcare material) that have
+// no connection to M&A, valuation, financing, or the deal's actual
+// jurisdiction/sector -- the research registry has no subject-matter
+// relevance filter, so any source a broad search query happens to return
+// is treated as equally citable. Mirrors prioritizeAmlFraudRelevantEvidence's
+// pattern exactly: never fabricates a replacement source, only reorders
+// evidence already present so M&A/valuation/financing/regulatory-relevant
+// items lead, and drops a narrow, explicit list of known-irrelevant
+// generic reference/education/healthcare sources. Applied to BOTH the
+// research context fed to the model and the deterministic Sources field
+// built below, so an irrelevant source can never surface anywhere in an
+// acquisition report, not just its citation list.
+const acquisitionDomainRelevantSignals =
+  /\b(m&a|merger|acquisition|due diligence|valuation|ev\/arr|purchase price|earnout|leveraged buyout|\blbo\b|debt financing|credit facility|term loan|private equity|corporate development|antitrust|competition authority|merger control|germany|deutschland|european union|\beu\b|gdpr|dora|digital operational resilience|bafin|bundesbank|european central bank|\becb\b|cybersecurity|information security|infosec|saas valuation|arr multiple|revenue multiple)\b/i;
+
+const acquisitionIrrelevantSourceSignals =
+  /\b(hhs\.gov|department of health and human services|who\.int|world health organization|apa\.org|american psychological association|mba\.com|wikipedia|\.edu\b|university of|college of|centers for disease control|cdc\.gov|hospital|clinic|patient care|medical school|nih\.gov|national institutes of health)\b/i;
+
+function prioritizeAcquisitionRelevantEvidence(
+  evidence: DomainResearchEvidence[]
+): DomainResearchEvidence[] {
+  const sourceText = (item: DomainResearchEvidence) =>
+    `${item.sourceTitle} ${item.publisher} ${item.url} ${item.claim} ${item.value}`;
+  const relevant: DomainResearchEvidence[] = [];
+  const rest: DomainResearchEvidence[] = [];
+
+  for (const item of evidence) {
+    const text = sourceText(item);
+    if (acquisitionIrrelevantSourceSignals.test(text)) {
+      continue;
+    }
+    if (acquisitionDomainRelevantSignals.test(text)) {
+      relevant.push(item);
+    } else {
+      rest.push(item);
+    }
+  }
+
+  return [...relevant, ...rest];
+}
+
+// Builds the acquisition report's sources field directly from the
+// (already relevance-filtered) research evidence registry, the same
+// pattern buildRealSourcesAssumptionsField uses for business_plan --
+// never trusts the model to independently reconstruct or filter the
+// citation list. Requirement 6 (never block the report on missing
+// external evidence): explicitly states when no usable evidence was
+// found and continues, rather than throwing or leaving the field empty.
+function buildAcquisitionSourcesField(
+  research: DomainResearchBundle,
+  language: ResponseLanguage
+) {
+  const relevantEvidence = prioritizeAcquisitionRelevantEvidence(research.evidence);
+  const evidenceLines = buildResearchEvidenceLines(relevantEvidence);
+
+  return [
+    language === "Turkish"
+      ? "Doğrulanmış dış araştırma kanıtları:"
+      : "Verified external research evidence:",
+    evidenceLines.join("\n\n") ||
+      (language === "Turkish"
+        ? "- Bu işlemle doğrudan ilgili, kullanılabilir dış kanıt bulunamadı. Değerlendirme, kullanıcı tarafından doğrulanan işlem bilgilerine ve bunlardan türetilen hesaplamalara dayanmaktadır."
+        : "- No directly relevant external evidence was found for this deal. This assessment relies on the user-verified deal facts and the calculations derived from them."),
+    research.unresolvedFields.length
+      ? language === "Turkish"
+        ? "Bazı dış kaynaklar doğrulanamadığı için ilgili bölümler kesin sonuç içermiyor."
+        : "Some external sources could not be verified, so the affected sections are not definitive."
+      : language === "Turkish"
+        ? "Kritik araştırma alanları kullanılabilir kanıtla tamamlandı."
+        : "Critical research fields were completed with usable evidence.",
+  ].join("\n\n");
+}
+
+// CRITICAL ACQUISITION CONTENT FIX -- guarantees the deal's own verified
+// facts and derived metrics (EV/ARR, equity/debt split) appear, correctly
+// computed and correctly labeled Verified/Derived, in the exact sections
+// that need them -- regardless of what the model independently wrote.
+// Mirrors this file's existing "Executive Decision First" prepend
+// pattern (formatExecutiveDecisionBrief prepended to
+// executiveAcquisitionSummary in parseAcquisitionAnalysisReport): never
+// trust the model alone for a number code can compute exactly. Applied
+// at every report-construction site (both cache-hit paths and fresh
+// generation) so a cached report from before this fix was deployed still
+// gets the correct figures once re-served.
+function applyAcquisitionDeterministicOverrides(
+  report: AcquisitionAnalysisReport,
+  facts: AcquisitionDealFacts,
+  derived: AcquisitionDerivedMetrics,
+  research: DomainResearchBundle | null,
+  language: ResponseLanguage
+): AcquisitionAnalysisReport {
+  const isTurkish = language === "Turkish";
+  const updated = { ...report };
+
+  const verifiedFactsBlock = formatVerifiedDealFactsBlock(facts, isTurkish ? "Turkish" : "English");
+  if (verifiedFactsBlock) {
+    updated.targetCompanyOverview = [verifiedFactsBlock, updated.targetCompanyOverview]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  const valuationDerivedBlock = formatDerivedValuationBlock(derived, isTurkish ? "Turkish" : "English");
+  if (valuationDerivedBlock) {
+    updated.valuationAnalysis = [valuationDerivedBlock, updated.valuationAnalysis]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  const financingDerivedBlock = formatDerivedFinancingBlock(derived, isTurkish ? "Turkish" : "English");
+  if (financingDerivedBlock) {
+    updated.financingStructure = [financingDerivedBlock, updated.financingStructure]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  if (!research) {
+    return updated;
+  }
+
+  updated.sources = buildAcquisitionSourcesField(research, language);
+
+  return updated;
+}
+
 function createGroundedBusinessTimeoutFallback({
   context,
   research,
@@ -6940,6 +7088,12 @@ async function generateAcquisitionDueDiligenceReport({
   }
 
   const { model, planTier, promptHash } = productionLimit;
+  // CRITICAL ACQUISITION CONTENT FIX -- computed once, up front, from
+  // promptText alone (no research/generation dependency), so every
+  // return path below -- both cache hits and fresh generation -- can
+  // apply the same guaranteed-correct deterministic figures.
+  const acquisitionDealFacts = extractAcquisitionDealFacts(promptText);
+  const acquisitionDerivedMetrics = computeAcquisitionDerivedMetrics(acquisitionDealFacts);
   const researchIdentity: ResearchCacheIdentity = {
     normalizedPrompt: productionLimit.normalizedPrompt,
     uploadedAssetHash: assetFingerprint,
@@ -6974,6 +7128,13 @@ async function generateAcquisitionDueDiligenceReport({
           expectedDomain: domain,
         });
       }
+      const presentedCachedReport = applyAcquisitionDeterministicOverrides(
+        cachedReport,
+        acquisitionDealFacts,
+        acquisitionDerivedMetrics,
+        cachedResearch ?? null,
+        responseLanguage
+      );
 
       logSkippedResearchForReportCache({
         identity: researchIdentity,
@@ -6981,7 +7142,7 @@ async function generateAcquisitionDueDiligenceReport({
       });
       return new Response(
         encoder.encode(
-          serializeAcquisitionAnalysisReportChunks(cachedReport)
+          serializeAcquisitionAnalysisReportChunks(presentedCachedReport)
         ),
         {
           headers: {
@@ -7016,7 +7177,19 @@ async function generateAcquisitionDueDiligenceReport({
       ...dynamicResearchPlanningInput,
     }),
   });
-  const researchContext = formatDomainResearchForReportGeneration(domainResearch);
+  // CRITICAL ACQUISITION CONTENT FIX -- reject topically irrelevant
+  // evidence (HHS/WHO/APA/MBA.com/Wikipedia/education/healthcare) before
+  // it ever reaches the model, not just after generation -- see
+  // prioritizeAcquisitionRelevantEvidence's own comment for the full
+  // rationale. Only the model-facing context is filtered; domainResearch
+  // itself stays unfiltered for caching/validation, and
+  // buildAcquisitionSourcesField below re-derives the deterministic
+  // sources field from the same filter independently.
+  const relevanceFilteredResearch = {
+    ...domainResearch,
+    evidence: prioritizeAcquisitionRelevantEvidence(domainResearch.evidence),
+  };
+  const researchContext = formatDomainResearchForReportGeneration(relevanceFilteredResearch);
   const adaptiveWriterPlan = createAdaptiveReportWriterPlan({
       expertiseProfile: dynamicResearchPlanningInput.expertiseProfile,
       reportPlan: dynamicResearchPlanningInput.reportPlan,
@@ -7030,6 +7203,15 @@ async function generateAcquisitionDueDiligenceReport({
   const adaptiveWriterContext =
     formatAdaptiveReportWriterGenerationContext(adaptiveWriterPlan);
 
+  // acquisitionDealFacts/acquisitionDerivedMetrics were already computed
+  // above (before the pre-research cache check) -- only the formatted
+  // prompt-context string is built here, once responseLanguage is known.
+  const acquisitionDealFactsContext = formatAcquisitionDealFactsContext(
+    acquisitionDealFacts,
+    acquisitionDerivedMetrics,
+    responseLanguage === "Turkish" ? "Turkish" : "English"
+  );
+
   if (cached && !isReportGenerationFailureText(cached.responseText)) {
     try {
       const cachedReport = parseAcquisitionAnalysisReport(cached.responseText, responseLanguage);
@@ -7038,10 +7220,17 @@ async function generateAcquisitionDueDiligenceReport({
         bundle: domainResearch,
         expectedDomain: domain,
       });
+      const presentedCachedReport = applyAcquisitionDeterministicOverrides(
+        cachedReport,
+        acquisitionDealFacts,
+        acquisitionDerivedMetrics,
+        domainResearch,
+        responseLanguage
+      );
 
       return new Response(
         encoder.encode(
-          serializeAcquisitionAnalysisReportChunks(cachedReport)
+          serializeAcquisitionAnalysisReportChunks(presentedCachedReport)
         ),
         {
           headers: {
@@ -7068,13 +7257,19 @@ ${promptText}
 
 ${expertiseContext}
 
+${
+  acquisitionDealFactsContext
+    ? `Deterministic deal facts and derived metrics (computed in code from the user's own prompt -- use these exact figures and exact [Verified]/[Derived] labels verbatim wherever they are relevant; never recompute, restate with a different value, or relabel them):\n${acquisitionDealFactsContext}`
+    : "No explicit deal facts (purchase price, target ARR, customer/employee counts, buyer capital, financing structure) were stated in the prompt. Do not invent any -- state plainly which figures are missing and what would be needed to compute them."
+}
+
 Uploaded asset evidence:
 ${assetContext || "No uploaded asset evidence was available."}
 
 Asset evidence rules:
 ${assetEvidenceInstructions || "Do not claim that an uploaded asset verified any fact."}
 
-Completed domain-aware research:
+Completed domain-aware research (already filtered to sources relevant to this deal's sector, jurisdiction, and transaction type; irrelevant generic sources have been removed):
 ${researchContext}
 
 Adaptive report-writing contract:
@@ -7091,8 +7286,10 @@ ${acquisitionAnalysisFields
 
 The research sufficiency decision is ${domainResearch.recommendedOutput}.
 Research is already complete. Synthesize it; do not replace verified facts with general knowledge.
+If no relevant external evidence was found for a section, say so explicitly in that section and continue the analysis using the verified deal facts and derived metrics above -- never leave a section empty and never fail the report because external evidence is thin or unavailable.
 Every material claim must cite [R#], [Asset: filename], [User], [Method: ...], [Required: ...], or [Basis: ...].
 Never invent values, sources, professional findings, prices, or operational facts.
+Every section must contain real, substantive analysis specific to this deal -- never a bare cross-reference like "see [section] for the established premise" unless the exact same paragraph would otherwise be repeated verbatim; state the section's own distinct implication instead.
 Do not include commentary outside the JSON object.`);
 
   const stream = new ReadableStream<Uint8Array>({
@@ -7137,19 +7334,32 @@ Do not include commentary outside the JSON object.`);
           `OpenAI ${domain} report generation`
         ).finally(() => reportAbort.cleanup());
         assertCompletedOpenAiResponse(response);
+        // presentedReport (the raw model output) is what gets cached --
+        // applyAcquisitionDeterministicOverrides is re-applied on every
+        // cache-hit read path too (see above), so caching the RAW output
+        // and always overriding on read is the single source of truth;
+        // caching the already-overridden text would double-prepend the
+        // deterministic blocks the next time this cache entry is served.
         const presentedReport = parseAcquisitionAnalysisReport(extractResponseText(response), responseLanguage);
         validateDomainResearchQualitySafely({
           report: presentedReport,
           bundle: domainResearch,
           expectedDomain: domain,
         });
+        const finalReport = applyAcquisitionDeterministicOverrides(
+          presentedReport,
+          acquisitionDealFacts,
+          acquisitionDerivedMetrics,
+          domainResearch,
+          responseLanguage
+        );
         const tokenUsage = extractTokenUsage(response);
         const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
         const serializedReport = JSON.stringify(presentedReport);
 
         controller.enqueue(
           encoder.encode(
-            serializeAcquisitionAnalysisReportChunks(presentedReport)
+            serializeAcquisitionAnalysisReportChunks(finalReport)
           )
         );
         logReportTimingSummary({
@@ -7212,12 +7422,18 @@ Do not include commentary outside the JSON object.`);
       } catch (error) {
         const errorMessage = getPlanErrorMessage(error);
         if (/timed out|timeout|aborted|abort/i.test(errorMessage)) {
-          const fallbackReport = createGroundedAcquisitionTimeoutFallback({
-            research: domainResearch,
-            assets: analysisAssets,
-            language: responseLanguage,
-            prompt: promptText,
-          });
+          const fallbackReport = applyAcquisitionDeterministicOverrides(
+            createGroundedAcquisitionTimeoutFallback({
+              research: domainResearch,
+              assets: analysisAssets,
+              language: responseLanguage,
+              prompt: promptText,
+            }),
+            acquisitionDealFacts,
+            acquisitionDerivedMetrics,
+            domainResearch,
+            responseLanguage
+          );
           controller.enqueue(
             encoder.encode(
               serializeAcquisitionAnalysisReportChunks(fallbackReport)
