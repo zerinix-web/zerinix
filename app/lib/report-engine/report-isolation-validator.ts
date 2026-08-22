@@ -10,7 +10,8 @@
 export type ReportProductType =
   | "market_intelligence"
   | "business_plan"
-  | "strategic_advisory";
+  | "strategic_advisory"
+  | "acquisition_due_diligence";
 
 export type IsolationViolation = {
   field: string;
@@ -72,11 +73,36 @@ const marketIntelligenceTemplateTerms: ForbiddenPattern[] = [
   { term: "Major Players section", pattern: headingPattern("Major Players") },
 ];
 
+// Acquisition Due Diligence's own forbidden vocabulary: the internal
+// startup-scoring/validation-engine terms that can never legitimately
+// belong in an M&A report of an already-operating target company,
+// regardless of evidence. Deliberately NOT the raw metric names (CAC,
+// LTV, ARR, MRR, Runway, EBITDA) that founderInvestmentTerms blocks
+// outright -- those are legitimate, evidence-grounded acquisition
+// vocabulary here (EV/ARR valuation, the target's real ARR, its runway
+// pre-close) and are governed instead by a generation-time instruction
+// (never fabricate them unless user-provided or labeled "Planning
+// Assumption" -- see buildDomainAnalysisInstructions' acquisition
+// directives), not a blanket word-level ban.
+const startupValidationEngineTerms: ForbiddenPattern[] = [
+  { term: "Founder Readiness", pattern: /\bfounder\s+readiness\b/i },
+  { term: "Founder Score / Founder Decision Engine", pattern: /\bfounder\s+(?:score|scoring|decision\s+engine|execution)\b/i },
+  { term: "Validation Gate", pattern: /\bvalidation\s+gate\b/i },
+  { term: "Product-Market Fit", pattern: /\bpmf\b|\bproduct[\s-]market\s+fit\b/i },
+  { term: "Investor-facing language", pattern: /\binvestor[\s-]ready\b|\binvestment\s+readiness\b/i },
+  { term: "Fundraising", pattern: /\bfundraising\b|\bfunding\s+round\b|\bseed\s+round\b|\bseries\s+[a-e]\s+(?:round|funding)\b/i },
+  { term: "Startup/Business validation terminology", pattern: /\bstartup\s+validation\b|\bbusiness\s+validation\b/i },
+  { term: "Build / Don't Build recommendation", pattern: /\bbuild\s*\/\s*(?:don'?t|do\s+not)\s*build\b/i },
+  { term: "Internal execution gate", pattern: /\b(?:execution|evidence)\s+gate\b/i },
+  { term: "Business-plan decision verdict token", pattern: /\b(?:PASS|HOLD|VALIDATE|REJECT)\b/ },
+];
+
 const FORBIDDEN_TERMS: Record<ReportProductType, ForbiddenPattern[]> = {
   market_intelligence: founderInvestmentTerms,
   business_plan: marketIntelligenceTemplateTerms,
   // Strategic Advisory must inherit neither report's specific vocabulary.
   strategic_advisory: [...founderInvestmentTerms, ...marketIntelligenceTemplateTerms],
+  acquisition_due_diligence: [...startupValidationEngineTerms, ...marketIntelligenceTemplateTerms],
 };
 
 // Single source of truth for "what must this report type never contain,"

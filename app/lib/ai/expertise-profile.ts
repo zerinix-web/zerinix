@@ -14,6 +14,7 @@ export const expertiseDomainValues = [
   "logistics",
   "manufacturing",
   "technology",
+  "acquisition",
   "general",
 ] as const;
 
@@ -81,6 +82,17 @@ const retailSignals =
 const financeSignals =
   /\b(?:financial statement|balance sheet|income statement|cash flow|profitability|liquidity|leverage|expense structure|bilanço|gelir tablosu|nakit akış|kârlılık|karlılık|likidite|borçluluk|gider yapısı)\b/i;
 
+// CRITICAL PRODUCTION FIX -- acquisition due diligence routing. Mirrors
+// domain.ts's acquisitionSignals: deliberately requires an unambiguous,
+// compound M&A phrase (never a bare generic word like "leverage" or
+// "valuation" alone, which are ordinary vocabulary in any finance/
+// business prompt). This is only the fallback path -- production always
+// supplies detectedDomain from classifyReportDomain first (see
+// createExpertiseProfileFallback below), so this keeps the fallback in
+// sync rather than being the primary defense.
+const acquisitionSignals =
+  /\b(?:acquisitions?|acquiring|acquire\s+(?:a\s+|the\s+)?(?:company|business|firm|startup|target)|corporate acquisition|acquisition target|target company|mergers?|m\s?&\s?a\b|m\s+and\s+a\b|due diligence|buy[\s-]?outs?|post[\s-]?merger|enterprise value|ev\s*\/\s*arr|purchase price|comparable transactions?|financing structure|debt financing|şirket satın alma|satın alma hedefi|birleşme|devralma|hedef şirket)\b/i;
+
 const domainForbiddenTopics: Partial<
   Record<ExpertiseProfile["domain"], string[]>
 > = {
@@ -99,6 +111,21 @@ const domainForbiddenTopics: Partial<
   ],
   finance: ["zoning", "legal claim strength", "startup GTM unless requested"],
   retail: ["zoning", "legal claim strength", "startup execution score"],
+  // The target is an already-operating company being acquired, not a
+  // startup being pitched or validated -- these are startup-pitch/
+  // fundraising concepts that must never be fabricated for a target
+  // company, and burn rate/runway/CAC/LTV/churn/ARR growth/revenue
+  // projections are only allowed when the user explicitly provided them
+  // or they are clearly labeled "Planning Assumption" (enforced in the
+  // generation directives, not here).
+  acquisition: [
+    "founder readiness",
+    "product-market fit",
+    "startup execution score",
+    "capital efficiency",
+    "fundraising",
+    "seed round",
+  ],
 };
 
 function unique(values: readonly string[], limit = 12) {
@@ -137,6 +164,7 @@ function normalizedDetectedDomain(value: unknown) {
     operations: "operations",
     procurement: "procurement",
     business: "business",
+    acquisition: "acquisition",
     general: "general",
   };
 
@@ -157,6 +185,12 @@ function detectDomain(
   assets: readonly ExpertiseAsset[],
   detectedDomain: unknown
 ): ExpertiseProfile["domain"] {
+  // Checked first: an acquisition/M&A due-diligence request must never
+  // fall through to the business-plan or real-estate/legal/finance
+  // branches below, even when it also contains ordinary business/legal/
+  // finance vocabulary (see domain.ts's acquisitionSignals for the full
+  // rationale).
+  if (acquisitionSignals.test(combined)) return "acquisition";
   if (explicitBusinessRequestSignals.test(combined)) return "business";
   if (realEstateSignals.test(combined)) return "real_estate";
   if (employmentSignals.test(combined) || legalSignals.test(combined)) return "legal";
@@ -388,6 +422,52 @@ export function createExpertiseProfileFallback({
       forbiddenTopics: domainForbiddenTopics.real_estate || [],
       criticalClarifications: [],
       confidence: jurisdiction ? 0.9 : 0.82,
+    };
+  }
+
+  if (domain === "acquisition") {
+    return {
+      domain,
+      subdomain: "acquisition_due_diligence",
+      taskType: "acquisition_investment_assessment",
+      jurisdiction,
+      userGoal: modeGoal(
+        mode,
+        "assess acquisition attractiveness, valuation, financing structure, integration risk, and the investment decision"
+      ),
+      professionalPerspective:
+        "M&A due-diligence and corporate development advisor",
+      requiredAnalyses: [
+        "acquisition attractiveness",
+        "valuation (EV/ARR, comparable transactions, purchase multiple)",
+        "purchase price fairness",
+        "financing structure and debt capacity",
+        "ROI scenarios and IRR estimates",
+        "integration risk",
+        "operational, revenue, and cost synergies",
+        "technology and cultural integration",
+        "regulatory considerations",
+        "post-merger integration roadmap",
+      ],
+      decisionCriteria: [
+        "valuation support (comparable transactions, purchase multiple)",
+        "purchase price fairness",
+        "financing structure and debt capacity",
+        "projected ROI/IRR",
+        "integration and synergy realism",
+        "regulatory risk",
+      ],
+      requiredEvidence: [
+        "target company financials",
+        "comparable transaction data",
+        "financing terms",
+        "synergy assumptions",
+        "regulatory filings",
+        "integration plan",
+      ],
+      forbiddenTopics: domainForbiddenTopics.acquisition || [],
+      criticalClarifications: [],
+      confidence: 0.85,
     };
   }
 

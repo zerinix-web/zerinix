@@ -101,6 +101,7 @@ export type ResearchDomain =
   | "accounting"
   | "operations"
   | "procurement"
+  | "acquisition"
   | "business"
   | "general";
 
@@ -432,6 +433,44 @@ const domainDefinitions: Record<
         field: "regulatory_requirements",
         objective: "Verify import, product, safety, labor, and environmental obligations.",
         preferredSources: ["customs authority", "regulator", "standards body"],
+      },
+    ],
+  },
+  acquisition: {
+    // Kept consistent with report-engine/domain.ts's acquisitionSignals
+    // (the one actually used for domain classification).
+    signals:
+      /\b(acquisitions?|acquiring|acquire\s+(?:a\s+|the\s+)?(?:company|business|firm|startup|target)|corporate acquisition|acquisition target|target company|mergers?|m\s?&\s?a\b|m\s+and\s+a\b|due diligence|buy[\s-]?outs?|post[\s-]?merger|enterprise value|ev\s*\/\s*arr|purchase price|comparable transactions?|şirket satın alma|birleşme|devralma|hedef şirket)\b/i,
+    criticalFields: [
+      "target_financials",
+      "valuation",
+      "purchase_price",
+      "financing_structure",
+      "debt_capacity",
+      "synergies",
+      "integration_risk",
+      "regulatory_considerations",
+    ],
+    research: [
+      {
+        field: "target_financials",
+        objective: "Verify the target company's financial statements, revenue, and margin.",
+        preferredSources: ["target company filing", "audited financial statement", "securities regulator"],
+      },
+      {
+        field: "comparable_transactions",
+        objective: "Verify recent comparable M&A transactions and purchase multiples.",
+        preferredSources: ["M&A database", "investment bank research", "industry report"],
+      },
+      {
+        field: "financing_terms",
+        objective: "Verify available financing structure, debt terms, and leverage capacity.",
+        preferredSources: ["lender term sheet", "credit rating agency", "central bank"],
+      },
+      {
+        field: "regulatory_considerations",
+        objective: "Verify antitrust, competition, and sector-specific regulatory approval requirements.",
+        preferredSources: ["competition authority", "sector regulator", "official guidance"],
       },
     ],
   },

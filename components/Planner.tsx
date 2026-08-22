@@ -975,6 +975,7 @@ function getSpecializedReportTitle(
     accounting: { English: "Accounting Review", Turkish: "Muhasebe İncelemesi", German: "Rechnungslegungsprüfung", French: "Examen comptable", Spanish: "Revisión contable" },
     operations: { English: "Operations Analysis", Turkish: "Operasyon Analizi", German: "Betriebsanalyse", French: "Analyse opérationnelle", Spanish: "Análisis operativo" },
     procurement: { English: "Procurement Analysis", Turkish: "Tedarik Analizi", German: "Beschaffungsanalyse", French: "Analyse des achats", Spanish: "Análisis de compras" },
+    acquisition: { English: "Acquisition Due Diligence Report", Turkish: "Satın Alma Durum Tespiti Raporu", German: "Akquisitions-Due-Diligence-Bericht", French: "Rapport de diligence raisonnable d'acquisition", Spanish: "Informe de diligencia debida de adquisición" },
   };
 
   return titles[domain][language];

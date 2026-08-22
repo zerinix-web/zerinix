@@ -5,13 +5,38 @@ export type ReportDomain =
   | "finance"
   | "accounting"
   | "operations"
-  | "procurement";
+  | "procurement"
+  | "acquisition";
 
 type ReportDomainAsset = {
   name?: string;
   type?: string;
   textContent?: string;
 };
+
+// CRITICAL PRODUCTION FIX -- acquisition due diligence routing. Confirmed
+// live: an M&A due-diligence prompt ("we are evaluating an acquisition
+// target... assess valuation, purchase price, financing structure,
+// integration risk") routinely also contains ordinary legal vocabulary
+// (contracts the target holds, regulatory/compliance considerations,
+// liability, indemnity) and finance vocabulary (valuation, revenue,
+// leverage) -- both of specializedDomainSignals' own "legal" and "finance"
+// entries below would otherwise claim it first, producing a generic Legal
+// Assessment or Business Validation report full of startup-pitch
+// vocabulary (burn rate, runway, CAC, execution scoring) that has no
+// place in an acquisition of an already-operating company. This must be
+// checked before every other specialized-domain signal.
+//
+// Deliberately requires an unambiguous, compound M&A-specific phrase --
+// never a bare generic word like "integration", "leverage", "synergies",
+// or "valuation" alone, each of which is ordinary vocabulary in ordinary
+// business/finance prompts having nothing to do with acquiring a company
+// (a startup's own "how do we leverage our data" or "what's our
+// valuation" pitch must never be misrouted here). "purchase price" and
+// "enterprise value"/"EV/ARR" are kept as standalone triggers since they
+// are not ordinarily used outside a company-sale context.
+const acquisitionSignals =
+  /\b(?:acquisitions?|acquiring|acquire\s+(?:a\s+|the\s+)?(?:company|business|firm|startup|target)|corporate acquisition|acquisition target|target company|mergers?|m\s?&\s?a\b|m\s+and\s+a\b|due diligence|buy[\s-]?outs?|post[\s-]?merger|enterprise value|ev\s*\/\s*arr|purchase price|comparable transactions?|financing structure|debt financing|şirket satın alma|satın alma hedefi|birleşme|devralma|hedef şirket)\b/i;
 
 const realEstateSignals =
   /(?:\b(?:real[\s-]?estate|property|properties|land|parcel|plot|title deed|deed|land registry|registry document|cadastral|cadastre|zoning|land use|planning permission|development potential|comparable sale|comparable listing|mortgage|easement|right of way|freehold|leasehold)\b|tapu(?:ya|yu|nun|da|dan)?|tapu senedi|arsa(?:ya|yı|nın|da|dan)?|arazi(?:ye|yi|nin|de|den)?|parsel(?:e|i|in|de|den)?|pafta|\bada\b|gayrimenkul(?:e|ü|ün|de|den)?|taşınmaz(?:a|ı|ın|da|dan)?|imar(?:ı|ın|da|dan)?|kadastro|emlak|kira|konut|daire|bina(?:sı|yı|nın|da|dan)?|ofis(?:i|in|te|ten)?|ofis binası|ticari bina|iş merkezi|plaza|mülkiyet|irtifak|şerh|ipotek)/i;
@@ -75,6 +100,16 @@ export function classifyReportDomain(
   const hasRealEstateSignal = realEstateSignals.test(combined);
 
   if (!hasRealEstateSignal) {
+    // Checked ahead of every other branch, including the explicit
+    // business-report/venture-creation check: an acquisition/M&A
+    // due-diligence request is never a venture-launch request, even when
+    // it names the target as a "startup" or "company" being bought, and
+    // must never fall through to Business Validation, Legal Assessment,
+    // or the generic Finance domain analysis.
+    if (acquisitionSignals.test(combined)) {
+      return "acquisition";
+    }
+
     if (
       explicitBusinessReportSignals.test(prompt) ||
       ventureCreationSignals.test(prompt)
@@ -114,6 +149,7 @@ const supportedStrategicDomains = new Set<ReportDomain>([
   "accounting",
   "operations",
   "procurement",
+  "acquisition",
 ]);
 
 /**

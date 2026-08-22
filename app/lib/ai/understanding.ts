@@ -226,6 +226,21 @@ const GEOGRAPHY_PATTERN =
   /\b(?:Türkiye|Turkey|Almanya|Germany|İstanbul|Ankara|İzmir|Europe|European Union|EU|United Kingdom|UK|USA|United States|city|country|region|şehir|ülke|bölge|il|ilçe|mahalle|pazar)\b/i;
 const TIMEFRAME_PATTERN =
   /\b(?:today|week|month|quarter|year|deadline|timeline|holding period|gün|hafta|ay|çeyrek|yıl|dönem|vade|takvim|süre|20\d{2})\b/i;
+// CRITICAL PRODUCTION FIX -- acquisition due diligence routing. Checked
+// ahead of every other specialized workflow (see selectAnalysisWorkflow):
+// an M&A due-diligence prompt routinely also contains ordinary legal
+// vocabulary (the target's existing contracts, regulatory/compliance
+// considerations) and finance vocabulary (valuation, revenue), either of
+// which would otherwise claim it first and produce a generic Legal
+// Assessment or Business Validation report full of startup-pitch
+// vocabulary (burn rate, runway, CAC, execution scoring) that has no
+// place in an acquisition of an already-operating company. Deliberately
+// requires an unambiguous, compound M&A-specific phrase -- never a bare
+// generic word like "integration", "leverage", "synergies", or
+// "valuation" alone, each of which is ordinary vocabulary in ordinary
+// business/finance prompts unrelated to acquiring a company.
+const ACQUISITION_WORKFLOW_PATTERN =
+  /\b(?:acquisitions?|acquiring|acquire\s+(?:a\s+|the\s+)?(?:company|business|firm|startup|target)|corporate acquisition|acquisition target|target company|mergers?|m\s?&\s?a\b|m\s+and\s+a\b|due diligence|buy[\s-]?outs?|post[\s-]?merger|enterprise value|ev\s*\/\s*arr|purchase price|comparable transactions?|financing structure|debt financing|şirket satın alma|satın alma hedefi|birleşme|devralma|hedef şirket)\b/i;
 const LEGAL_WORKFLOW_PATTERN =
   /(?:\b(?:contract|agreement|nda|lease|terms|legal|law|lawsuit|litigation|employment law|wrongful dismissal|unfair dismissal|unpaid wages|severance|notice pay|reinstatement|mediation|limitation period)\b|sözleşme|anlaşma|kira|fesih|taraflar|hukuk|hukuki|mevzuat|dava|iş hukuku|işten çıkar|işveren|işçi|çalışan|kıdem|ihbar|ödenmeyen ücret|ödenmemiş maaş|yıllık izin|işe iade|arabuluculuk|zamanaşımı|savunma alınma|yazılı uyarı)/i;
 const CONTRACT_WORKFLOW_PATTERN =
@@ -275,6 +290,7 @@ export type AnalysisWorkflow =
   | "business"
   | "finance"
   | "marketing"
+  | "acquisition"
   | "generic";
 
 export function selectAnalysisWorkflow({
@@ -294,6 +310,13 @@ export function selectAnalysisWorkflow({
     return "legal";
   }
   if (isRealEstate) return "real_estate";
+
+  // Never routed to Legal Assessment, Business Validation, or Finance --
+  // must be checked before the venture-evaluation and legal-case-in-hand
+  // guards below, since an acquisition/M&A due-diligence request is never
+  // a venture-launch request, even when it names the target as a
+  // "startup" or "company" being bought.
+  if (ACQUISITION_WORKFLOW_PATTERN.test(combined)) return "acquisition";
 
   // A prompt whose dominant signal is evaluating or launching a venture
   // (any sector) is a business-evaluation request, even when it names a

@@ -363,6 +363,40 @@ const profiles: Record<DecisionDomain, DomainProfile> = {
     riskModel: ["market", "customer", "competition", "economics", "execution"],
     reportTemplate: "business_plan",
   },
+  // CRITICAL PRODUCTION FIX -- acquisition due diligence routing. The
+  // target is an already-operating company being bought, not a venture
+  // being launched or validated -- criticalEvidence/researchRequirements
+  // deliberately center on valuation, financing, and integration, never
+  // on demand validation or founder/execution scoring (see
+  // report-engine/prompts/domain-analysis.ts's acquisition directives for
+  // the corresponding "never fabricate startup metrics" generation rule).
+  acquisition: {
+    id: "acquisition",
+    label: "Acquisition Due Diligence",
+    signals: [
+      /\b(?:acquisitions?|acquiring|acquire\s+(?:a\s+|the\s+)?(?:company|business|firm|startup|target)|corporate acquisition|acquisition target|target company|mergers?|m\s?&\s?a\b|m\s+and\s+a\b|due diligence|buy[\s-]?outs?|post[\s-]?merger|enterprise value|ev\s*\/\s*arr|purchase price|comparable transactions?|şirket satın alma|birleşme|devralma|hedef şirket)\b/i,
+    ],
+    criticalEvidence: [
+      "target_financials",
+      "valuation",
+      "purchase_price",
+      "financing_structure",
+      "debt_capacity",
+      "synergies",
+      "integration_risk",
+      "regulatory_considerations",
+    ],
+    researchRequirements: [
+      requirement("target_financials", "Verify the target company's financial statements, revenue, and margin.", ["target company filing", "audited financial statement", "securities regulator"], "critical"),
+      requirement("comparable_transactions", "Verify recent comparable M&A transactions and purchase multiples.", ["M&A database", "investment bank research", "industry report"], "critical"),
+      requirement("financing_terms", "Verify available financing structure, debt terms, and leverage capacity.", ["lender term sheet", "credit rating agency", "central bank"], "critical"),
+      requirement("regulatory_considerations", "Verify antitrust, competition, and sector-specific regulatory approval requirements.", ["competition authority", "sector regulator", "official guidance"], "critical"),
+      requirement("synergy_assumptions", "Verify operational, revenue, and cost synergy assumptions against comparable integrations.", ["industry report", "investment bank research"], "high", false),
+    ],
+    decisionRules: genericRules,
+    riskModel: ["valuation", "financing", "integration", "regulatory", "synergy_realization"],
+    reportTemplate: "acquisition_due_diligence_analysis",
+  },
   general: {
     id: "general",
     label: "General Strategic Advisory",

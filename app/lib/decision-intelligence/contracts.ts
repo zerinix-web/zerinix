@@ -38,6 +38,7 @@ export type DecisionDomain =
   | "insurance"
   | "government"
   | "business"
+  | "acquisition"
   | "general";
 
 export type EvidenceCategory =

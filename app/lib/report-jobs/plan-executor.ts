@@ -6263,6 +6263,9 @@ async function generateSpecializedDomainReport({
               })
             )
           : cachedReport;
+      if (domain === "acquisition") {
+        assertReportIsolation("acquisition_due_diligence", presentedReport);
+      }
 
       logSkippedResearchForReportCache({
         identity: researchIdentity,
@@ -6345,6 +6348,9 @@ async function generateSpecializedDomainReport({
               })
             )
           : cachedReport;
+      if (domain === "acquisition") {
+        assertReportIsolation("acquisition_due_diligence", presentedReport);
+      }
 
       return new Response(
         encoder.encode(
@@ -6465,6 +6471,9 @@ Do not include commentary outside the JSON object.`);
                 })
               )
             : report;
+        if (domain === "acquisition") {
+          assertReportIsolation("acquisition_due_diligence", presentedReport);
+        }
         const tokenUsage = extractTokenUsage(response);
         const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
         const serializedReport = JSON.stringify(presentedReport);
@@ -7022,7 +7031,8 @@ async function executePlanRequestInner(
       reportDomain === "finance" ||
       reportDomain === "accounting" ||
       reportDomain === "operations" ||
-      reportDomain === "procurement"
+      reportDomain === "procurement" ||
+      reportDomain === "acquisition"
     ) {
       return generateSpecializedDomainReport({
         domain: reportDomain,
