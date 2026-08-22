@@ -126,33 +126,39 @@ const domainForbiddenTopics: Partial<
   // plan is actually built from -- so a plan section literally titled
   // "Go-To-Market Strategy" or "Pricing Strategy" passed straight through
   // isTextCompatible's forbiddenTopics check into the acquisition
-  // report's own section-routing contract. Deliberately still excludes
-  // bare CAC/LTV/ARR/MRR/Runway/EBITDA: those are legitimate,
-  // evidence-grounded acquisition vocabulary for an already-operating
-  // target company (see report-isolation-validator.ts's own comment),
-  // not a startup-pitch concept.
+  // report's own section-routing contract.
+  //
+  // CRITICAL FIX -- separate legitimate acquisition metrics from Business
+  // Plan leakage: "unit economics template" widened to also name CAC
+  // payback and Customer Acquisition Cost directly -- CAC and LTV are a
+  // startup unit-economics TEMPLATE, not evidence-grounded acquisition
+  // vocabulary, even when a real figure is available. ARR, Revenue,
+  // EBITDA, Gross margin, Cash flow, Purchase price, EV/ARR, ROI, IRR,
+  // Debt service, and Financing structure remain deliberately excluded
+  // from this list -- those are legitimate acquisition vocabulary for an
+  // already-operating target company (see report-isolation-validator.ts's
+  // own comment), not a startup-pitch concept.
+  //
+  // Consolidated into related groups (one string can name more than one
+  // near-synonym) to stay within profileList's 12-item schema cap
+  // (expertiseProfileSchema.forbiddenTopics) -- this fallback profile
+  // object is never itself re-validated against that schema at runtime
+  // (see resolveExpertiseProfile), but a client-supplied profile echoing
+  // it back on a later request would be, so the declared limit is
+  // respected here regardless.
   acquisition: [
-    "founder readiness",
-    "founder roadmap",
+    "founder readiness / founder roadmap / founder validation",
     "product-market fit",
     "startup execution score",
     "capital efficiency",
-    "fundraising",
-    "seed round",
-    "total addressable market",
-    "serviceable addressable market",
-    "serviceable obtainable market",
-    "tam/sam/som",
+    "fundraising / seed round",
+    "total addressable market / serviceable addressable market / serviceable obtainable market / tam/sam/som",
     "ideal customer profile",
-    "go-to-market",
-    "go to market",
-    "pricing strategy",
-    "sales strategy",
-    "startup kpi",
-    "startup kpis",
-    "business validation",
-    "product validation",
-    "unit economics template",
+    "go-to-market / gtm validation",
+    "pricing strategy / sales strategy",
+    "startup kpi framework",
+    "business validation / product validation / startup validation metrics",
+    "unit economics template / cac payback / customer acquisition cost",
   ],
 };
 

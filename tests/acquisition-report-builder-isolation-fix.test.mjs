@@ -88,9 +88,15 @@ test("expertise-profile.ts: acquisition's forbiddenTopics now names every Busine
   }
 });
 
-test("expertise-profile.ts: acquisition's forbiddenTopics never blocks legitimate ARR/CAC/LTV/MRR raw metric names (those are real evidence-grounded acquisition vocabulary, not startup-pitch vocabulary)", () => {
+// NOTE: CAC and LTV moved out of this "never blocks" guarantee in the
+// separate-legitimate-metrics-from-Business-Plan-leakage fix -- they are
+// now deliberately treated as a startup unit-economics TEMPLATE, not
+// evidence-grounded acquisition vocabulary (see the dedicated CAC/LTV
+// rejection tests below). ARR, MRR, Runway, and EBITDA remain legitimate
+// and untouched.
+test("expertise-profile.ts: acquisition's forbiddenTopics never blocks legitimate ARR/MRR/Runway/EBITDA raw metric names (those are real evidence-grounded acquisition vocabulary, not startup-pitch vocabulary)", () => {
   const forbidden = acquisitionProfile.forbiddenTopics.map((t) => t.toLowerCase());
-  for (const metric of ["cac", "ltv", "arr", "mrr", "runway", "ebitda"]) {
+  for (const metric of ["arr", "mrr", "runway", "ebitda"]) {
     assert.ok(
       !forbidden.some((topic) => topic === metric),
       `acquisition forbiddenTopics incorrectly blocks the bare metric "${metric}"`
@@ -203,10 +209,18 @@ function poisonedAcquisitionCandidate(profile) {
         id: "financial_profile",
         title: "Financial Profile",
         purpose:
-          "The target reports $12M ARR, a CAC of $4,200 per enterprise account, an EBITDA margin of 18%, and 24 months of post-close runway.",
+          "The target reports $12M ARR, an EBITDA margin of 18%, and 24 months of post-close runway.",
         requiredEvidenceTypes: ["user_statement"],
         analysisMethod: "financial_profile_review",
         priority: "high",
+      },
+      {
+        id: "unit_economics",
+        title: "Unit Economics",
+        purpose: "Assess the target's CAC and LTV as a unit-economics framework.",
+        requiredEvidenceTypes: ["user_statement"],
+        analysisMethod: "unit_economics_review",
+        priority: "standard",
       },
     ],
     dashboardMetrics: [
@@ -247,14 +261,19 @@ test("resolveDynamicReportPlan strips Business Plan-flavored sections (Go-To-Mar
   assert.ok(!ids.includes("pricing_strategy"), "Pricing Strategy section was not filtered out");
 });
 
-test("resolveDynamicReportPlan keeps legitimate acquisition sections, including one using real evidence-grounded ARR/CAC/EBITDA/Runway figures", () => {
+test("resolveDynamicReportPlan keeps legitimate acquisition sections, including one using real evidence-grounded ARR/EBITDA/Runway figures", () => {
   const ids = resolvedAcquisitionPlan.sections.map((s) => s.id);
   assert.ok(ids.includes("strategic_fit"), "legitimate Strategic Fit section was incorrectly filtered out");
   assert.ok(ids.includes("valuation_analysis"), "legitimate Valuation Analysis section was incorrectly filtered out");
   assert.ok(
     ids.includes("financial_profile"),
-    "a section using real ARR/CAC/EBITDA/Runway figures was incorrectly filtered out -- these are legitimate acquisition vocabulary, not startup-pitch vocabulary"
+    "a section using real ARR/EBITDA/Runway figures was incorrectly filtered out -- these are legitimate acquisition vocabulary, not startup-pitch vocabulary"
   );
+});
+
+test("resolveDynamicReportPlan strips a section built around CAC/LTV unit economics from an AI-generated acquisition candidate plan -- CAC/LTV are a startup Business Plan template, not evidence-grounded acquisition vocabulary (requirement: separate legitimate acquisition metrics from Business Plan leakage)", () => {
+  const ids = resolvedAcquisitionPlan.sections.map((s) => s.id);
+  assert.ok(!ids.includes("unit_economics"), "a CAC/LTV unit-economics section was not filtered out");
 });
 
 test("resolveDynamicReportPlan strips a TAM dashboard metric from an AI-generated acquisition candidate plan, keeping the legitimate EV/ARR metric", () => {

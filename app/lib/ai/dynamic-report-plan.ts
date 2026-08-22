@@ -126,12 +126,20 @@ const domainIncompatiblePatterns: Partial<
   // assignOutputField, which maps these titles/purposes into the fixed
   // acquisitionAnalysisFields output keys -- the JSON key stays correct,
   // but the section's own title/purpose text still biases the model
-  // toward Business Plan content inside it). Deliberately excludes bare
-  // CAC/LTV/ARR/MRR/Runway/EBITDA: those are legitimate, evidence-
-  // grounded acquisition vocabulary for an already-operating target
-  // company, not a startup-pitch concept.
+  // toward Business Plan content inside it).
+  //
+  // CRITICAL FIX -- separate legitimate acquisition metrics from Business
+  // Plan leakage. CAC and LTV (and "unit economics" framing generally)
+  // ARE now blocked here -- confirmed live, these are a startup unit-
+  // economics TEMPLATE, not evidence-grounded acquisition vocabulary,
+  // even when a real figure is available. ARR, MRR, Revenue, EBITDA,
+  // Gross margin, Cash flow, Runway, Purchase price, EV/ARR, ROI, IRR,
+  // Debt service, and Financing structure remain deliberately excluded
+  // from this pattern: those are legitimate, evidence-grounded
+  // acquisition vocabulary for an already-operating target company, not a
+  // startup-pitch concept.
   acquisition:
-    /\b(?:tam|sam|som|icp|ideal customer profile|go[- ]to[- ]market|pricing strategy|founder roadmap|startup kpis?|business validation|product validation|sales strategy|unit economics template|customer validation|product[- ]market fit|startup execution)\b/i,
+    /\b(?:tam|sam|som|icp|ideal customer profile|go[- ]to[- ]market|pricing strategy|founder roadmap|startup kpis?|business validation|product validation|founder validation|gtm validation|startup validation(?: metrics)?|sales strategy|unit economics(?: template)?|cac payback|customer acquisition cost|cac|ltv|customer validation|product[- ]market fit|startup execution)\b/i,
 };
 
 function unique<T>(values: readonly T[], key: (value: T) => string, limit: number) {
@@ -441,8 +449,16 @@ export function createDynamicReportPlanFallback({
         gate("financing_confirmed", "Financing structure and debt capacity are confirmed.", "Verified buyer capital, financing terms, or debt capacity evidence"),
         gate("integration_plan_supported", "A concrete post-merger integration plan exists.", "Target operating profile and integration-scope evidence"),
       ],
+      // Named items listed BEFORE ...profile.forbiddenTopics: the schema
+      // caps forbiddenSections at 16 entries (dynamicReportPlanSchema),
+      // and expertise-profile.ts's own domainForbiddenTopics.acquisition
+      // list alone already exceeds that cap -- spreading it first would
+      // silently truncate away every one of these acquisition-fallback-
+      // specific named items before uniqueText's slice(0, 16) ever saw
+      // them. These named items are unique to this report; forbiddenTopics
+      // is the more generic, larger source, so it is the one that should
+      // lose entries to the cap if anything has to.
       forbiddenSections: uniqueText([
-        ...profile.forbiddenTopics,
         "Problem",
         "Solution",
         "Ideal Customer Profile",
@@ -451,9 +467,20 @@ export function createDynamicReportPlanFallback({
         "Go-To-Market",
         "Sales Strategy",
         "Founder Roadmap",
+        "Founder Validation",
+        "GTM Validation",
+        "Startup Validation Metrics",
         "Startup KPIs",
         "Business Validation",
         "Product Validation",
+        // CRITICAL FIX -- separate legitimate acquisition metrics from
+        // Business Plan leakage: CAC/LTV are a startup unit-economics
+        // template, not evidence-grounded acquisition vocabulary (ARR,
+        // EBITDA, EV/ARR, ROI, IRR, financing structure remain allowed
+        // and are never listed here). Combined into one entry (rather
+        // than three) to stay inside the 16-item cap above.
+        "Unit Economics (CAC/LTV/ARR/MRR) / CAC Payback / Customer Acquisition Cost framework",
+        ...profile.forbiddenTopics,
       ], 16),
     };
   }

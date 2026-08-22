@@ -143,20 +143,32 @@ const domainProhibitedTopics: Partial<Record<ExpertiseProfile["domain"], string[
   // generation context every acquisition report is written from
   // (formatAdaptiveReportWriterGenerationContext); acquisition had no
   // entry here, so nothing in this specific path told the model to avoid
-  // Business Plan/startup-pitch section concepts. Excludes bare CAC/LTV/
-  // ARR/MRR: legitimate acquisition vocabulary for an operating target.
+  // Business Plan/startup-pitch section concepts.
+  //
+  // CRITICAL FIX -- separate legitimate acquisition metrics from Business
+  // Plan leakage: CAC and LTV are now named explicitly -- a startup unit-
+  // economics TEMPLATE, not evidence-grounded acquisition vocabulary, even
+  // when a real figure is available. Bare ARR/MRR stay excluded from this
+  // list: legitimate acquisition vocabulary for an operating target (real
+  // ARR, EV/ARR valuation).
   acquisition: [
     "problem/solution framing",
     "ideal customer profile",
     "TAM/SAM/SOM",
     "go-to-market strategy",
+    "GTM validation",
     "pricing strategy",
     "sales strategy",
     "founder roadmap",
+    "founder validation",
     "startup KPI framework",
     "business validation",
     "product validation",
+    "startup validation metrics",
     "unit economics template",
+    "CAC (Customer Acquisition Cost)",
+    "CAC payback",
+    "LTV (Lifetime Value)",
   ],
 };
 
@@ -484,10 +496,20 @@ export function createAdaptiveReportWriterPlan({
     decisionQuestion: expertiseProfile.userGoal || reportPlan.primaryDecision,
     uploadedMaterialTypes: unique(uploadedMaterialTypes, 12),
     sections,
+    // CRITICAL FIX -- separate legitimate acquisition metrics from
+    // Business Plan leakage. domainProhibitedTopics[domain] listed FIRST:
+    // unique()'s default 30-item cap could otherwise be exhausted by
+    // expertiseProfile.forbiddenTopics/reportPlan.forbiddenSections before
+    // the domain-specific list's own entries (e.g. acquisition's "LTV
+    // (Lifetime Value)"/"CAC payback") were ever added -- confirmed live,
+    // those two were silently dropped from the acquisition report's own
+    // "Prohibited topics" line with the old ordering. The domain-specific
+    // list is the most load-bearing and least redundant source, so it
+    // should be the last one to lose entries to the cap, not the first.
     prohibitedTopics: unique([
+      ...(domainProhibitedTopics[expertiseProfile.domain] || []),
       ...expertiseProfile.forbiddenTopics,
       ...reportPlan.forbiddenSections,
-      ...(domainProhibitedTopics[expertiseProfile.domain] || []),
     ]),
     globalWritingRules: [
       "Write as a senior domain consultant: concise, professional, executive, and decision-oriented.",
