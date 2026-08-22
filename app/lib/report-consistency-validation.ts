@@ -17,7 +17,8 @@ export type ConsistencyCorrectionType =
   | "financial_metric_mismatch"
   | "timeline_mismatch"
   | "risk_opportunity_duplicate"
-  | "strategic_signal_contradiction";
+  | "strategic_signal_contradiction"
+  | "lifecycle_recommendation_mismatch";
 
 export type ConsistencyCorrection = {
   field: string;
@@ -561,6 +562,59 @@ function resolveStrategicSignalMismatches(
   }
 }
 
+// CRITICAL SCORING ENGINE FIX -- company lifecycle awareness. The AI
+// directive in report-quality-directives.ts asks the model to avoid this
+// vocabulary for revenue/growth-stage companies, but a prompt-level
+// instruction is not a guarantee for freeform AI-generated sections
+// (Risks, SWOT, roadmap prose). This is the deterministic backstop: any
+// leftover validation-stage phrase for a company already past that stage
+// is corrected in place to the canonical revenue/growth-stage vocabulary,
+// mirroring resolveStrategicSignalMismatches' "never trust freeform AI
+// text alone" precedent. Never runs for idea/mvp/pilot-stage companies,
+// so early-stage validation language is always left untouched.
+const lifecycleRecommendationCorrections: ReadonlyArray<{
+  pattern: RegExp;
+  replacement: string;
+}> = [
+  { pattern: /validate\s+(?:the\s+)?willingness\s+to\s+pay/gi, replacement: "improve retention and expand enterprise accounts" },
+  { pattern: /validate\s+demand/gi, replacement: "improve retention and expand enterprise accounts" },
+  { pattern: /(?:find|get)\s+(?:our|its|their|your|the)?\s*first\s+customers?/gi, replacement: "expand enterprise accounts" },
+  { pattern: /prove\s+(?:the\s+)?first\s+paid\s+activation/gi, replacement: "optimize CAC efficiency" },
+];
+
+function resolveLifecycleRecommendationMismatches(
+  sections: Record<string, string>,
+  fields: readonly string[],
+  lifecycleStage: string | undefined,
+  corrections: ConsistencyCorrection[]
+) {
+  if (lifecycleStage !== "revenue" && lifecycleStage !== "growth") return;
+
+  for (const field of fields) {
+    const content = sections[field];
+    if (!content) continue;
+
+    let nextContent = content;
+    let changed = false;
+    for (const { pattern, replacement } of lifecycleRecommendationCorrections) {
+      if (pattern.test(nextContent)) {
+        changed = true;
+        nextContent = nextContent.replace(pattern, replacement);
+      }
+    }
+
+    if (changed) {
+      corrections.push({
+        field,
+        type: "lifecycle_recommendation_mismatch",
+        before: content,
+        after: nextContent,
+      });
+      sections[field] = nextContent;
+    }
+  }
+}
+
 // score: 100 minus a fixed penalty per correction actually applied,
 // floored at 0. Purely internal -- never rendered in any report
 // section, PDF, or API response body a user reads.
@@ -601,6 +655,12 @@ export type ConsistencyValidationInput = {
   // detect a contradiction against any other field claiming "low overall
   // risk." Omit to skip RULE G entirely (e.g. no Risks field exists).
   regulatoryRiskField?: string;
+  // Company lifecycle stage ("idea"/"mvp"/"pilot"/"revenue"/"growth"), from
+  // company-lifecycle.ts. When "revenue"/"growth", scans every field for
+  // leftover validation-stage phrasing and corrects it deterministically
+  // -- see resolveLifecycleRecommendationMismatches. Omit or pass an
+  // idea/mvp/pilot stage to skip this rule entirely.
+  lifecycleStage?: string;
 };
 
 // Runs every cross-section consistency check against the report's own
@@ -679,6 +739,13 @@ export function runConsistencyValidationPass(
       corrections
     );
   }
+
+  resolveLifecycleRecommendationMismatches(
+    input.sections,
+    input.fields,
+    input.lifecycleStage,
+    corrections
+  );
 
   return {
     score: computeConsistencyScore(corrections),

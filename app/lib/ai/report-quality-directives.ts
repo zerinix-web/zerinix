@@ -83,6 +83,14 @@ const businessPlanDecisionSupportDirectives = [
   "Maintain executive continuity without repetition: Executive Summary states the verdict, the evidence gap, and the first 90 days of action; the Roadmap sequences what must be proven next beyond that window instead of restating the rationale.",
   "Treat the business model, ICP, pricing, unit economics, roadmap, and recommendation as one linked operating plan.",
   "Executive Summary is the report's only decision layer: state the Final Decision, Confidence, Why, Biggest Risks, Biggest Opportunity, and First 90-Day Action Plan there and nowhere else. Do not let it repeat Business Model, SWOT, Roadmap, or Financial Dashboard prose.",
+  // CRITICAL SCORING ENGINE FIX -- company lifecycle awareness. Confirmed
+  // live: a company reporting real paying customers and millions in ARR
+  // still received validation-stage language ("validate willingness to
+  // pay", "get first customers") throughout the report. The detected
+  // lifecycle stage is stated explicitly in the financial-model context
+  // block above (Data-Driven Financial Analysis Engine); this directive
+  // makes following it mandatory rather than optional.
+  "Match every recommendation to the company's detected lifecycle stage (stated in the financial model context as 'Company lifecycle stage'). A company with verified paying customers, MRR, or ARR must never be told to validate demand, validate willingness to pay, find/get its first customers, or prove first paid activation -- that evidence already exists. For revenue/growth-stage companies, phrase recommendations as improve retention, expand enterprise accounts, optimize CAC efficiency, scale distribution, and protect margins. Reserve validation-focused language (customer interviews, proving demand, first paid activation, finding first customers) for companies with no reported revenue.",
 ];
 
 // Business Idea Validation-only, enforced at the type level: market.ts and

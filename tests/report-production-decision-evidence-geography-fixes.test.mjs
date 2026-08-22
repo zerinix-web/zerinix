@@ -201,9 +201,12 @@ test("prototype/design-partner evidence raises founder readiness by exactly one 
   // Base (25) + 15 per matched category: this prompt matches "partners"
   // (launch-plan/partnership category) and "prototype"/"design partners"
   // (its own category) -- 2 of 5 possible categories, not every one, so
-  // the result is a modest, explainable step (55), never a full/inflated
-  // 100.
-  assert.equal(result.dimensions.founderReadiness, 55);
+  // that part of the result is a modest, explainable step (55). A later
+  // CRITICAL SCORING ENGINE FIX (company lifecycle awareness) adds one
+  // further small step on top for MVP-stage signals specifically (+6,
+  // via the local lifecycleBoost in promptReadiness) -- still a modest,
+  // explainable total, never a full/inflated 100.
+  assert.equal(result.dimensions.founderReadiness, 61);
   assert.ok(result.dimensions.founderReadiness < 100);
 });
 
@@ -279,6 +282,10 @@ async function importFinancialModel() {
   source = source.replace(
     '"@/app/lib/ai/industry-benchmarks"',
     JSON.stringify(pathToFileURL(benchmarksPath).href)
+  );
+  source = source.replace(
+    '"@/app/lib/ai/company-lifecycle"',
+    JSON.stringify(pathToFileURL(join(repoRoot, "app/lib/ai/company-lifecycle.ts")).href)
   );
 
   const dir = mkdtempSync(join(tmpdir(), "zerinix-financial-model-"));

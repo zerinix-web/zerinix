@@ -52,6 +52,10 @@ async function importFinancialModel() {
     '"@/app/lib/ai/industry-benchmarks"',
     JSON.stringify(pathToFileURL(benchmarksPath).href)
   );
+  source = source.replace(
+    '"@/app/lib/ai/company-lifecycle"',
+    JSON.stringify(pathToFileURL(join(repoRoot, "app/lib/ai/company-lifecycle.ts")).href)
+  );
   const dir = mkdtempSync(join(tmpdir(), "zerinix-financial-model-"));
   const outPath = join(dir, "financial-model.ts");
   writeFileSync(outPath, source);
@@ -59,9 +63,21 @@ async function importFinancialModel() {
 }
 
 const { createFinancialModel, validateFinancialConsistency } = await importFinancialModel();
-const { createInvestmentScore } = await import(
-  pathToFileURL(join(repoRoot, "app/lib/ai/investment-score.ts")).href
-);
+
+async function importInvestmentScore() {
+  const sourcePath = join(repoRoot, "app/lib/ai/investment-score.ts");
+  let source = readFileSync(sourcePath, "utf8");
+  source = source.replace(
+    '"@/app/lib/ai/company-lifecycle"',
+    JSON.stringify(pathToFileURL(join(repoRoot, "app/lib/ai/company-lifecycle.ts")).href)
+  );
+  const dir = mkdtempSync(join(tmpdir(), "zerinix-investment-score-"));
+  const outPath = join(dir, "investment-score.ts");
+  writeFileSync(outPath, source);
+  return import(pathToFileURL(outPath).href);
+}
+
+const { createInvestmentScore } = await importInvestmentScore();
 const financialModelSource = readFileSync(join(repoRoot, "app/lib/ai/financial-model.ts"), "utf8");
 const investmentScoreSource = readFileSync(join(repoRoot, "app/lib/ai/investment-score.ts"), "utf8");
 

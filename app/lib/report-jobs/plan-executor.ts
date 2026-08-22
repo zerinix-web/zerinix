@@ -136,6 +136,7 @@ import {
 } from "@/app/lib/report-engine/executive-decision-brief";
 import { assertNoDecisionContradiction } from "@/app/lib/report-engine/decision-contradiction-gate";
 import { cleanupTemplatePresentationArtifacts } from "@/app/lib/report-presentation";
+import { isRevenueOrGrowthStage } from "@/app/lib/ai/company-lifecycle";
 import { buildEvidenceSummary } from "@/app/lib/report-engine/evidence-summary";
 import { stripFillerAndDuplicateSentences } from "@/app/lib/report-engine/filler-detection";
 import {
@@ -2252,6 +2253,11 @@ function createPlanFieldFallback(
   const businessModelLabel = context?.inputs.businessModel || "the detected business model";
   const geographyLabel = context?.inputs.geography || "the target market";
   const pricingModelLabel = context?.inputs.pricingModel || "the detected pricing approach";
+  // CRITICAL SCORING ENGINE FIX -- even this rare AI-failure fallback
+  // path must not tell a revenue/growth-stage company to "validate
+  // repeatable acquisition"/"prove willingness to pay" when it already
+  // has verified paying customers.
+  const isRevenueOrGrowthFallback = context ? isRevenueOrGrowthStage(context.inputs.lifecycleStage) : false;
 
   const fallbackByField: Record<PlanReportField, string> = {
     executiveSummary: `Decision summary: ${businessContext} requires focused validation before scaling capital. The report should be read as a directional founder diligence memo until primary customer, pricing, and cost evidence is verified.`,
@@ -2270,11 +2276,17 @@ function createPlanFieldFallback(
     unitEconomics: `Unit economics: Validate ARPA or ACV, gross margin, CAC, LTV, payback, and retention before scaling. The most important assumption is whether acquisition cost and payback remain viable as the channel expands.`,
     financialDashboard: `Financial dashboard: Track revenue, gross margin, CAC, LTV, payback, burn, runway, EBITDA, break-even timing, and investment needed from one consistent assumption set. Treat missing values as validation gaps.`,
     scenarioAnalysis: `Worst Case: Demand or CAC underperforms, extending payback and reducing runway.\nBase Case: The model follows current assumptions with controlled validation spend.\nBest Case: Conversion and retention improve, allowing faster capital deployment after proof points are met.`,
-    kpiDashboard: `KPI dashboard: Monitor acquisition, activation, retention, pipeline quality, revenue signal, product reliability, and learning velocity. Each KPI should have a target threshold and a warning threshold.`,
+    kpiDashboard: isRevenueOrGrowthFallback
+      ? `KPI dashboard: Monitor retention, net revenue retention, expansion revenue, CAC payback, sales efficiency, and enterprise growth from the existing paying base. Each KPI should have a target threshold and a warning threshold.`
+      : `KPI dashboard: Monitor acquisition, activation, retention, pipeline quality, revenue signal, product reliability, and learning velocity. Each KPI should have a target threshold and a warning threshold.`,
     risks: `Risks for ${shortBusinessLabel}: track demand uncertainty, CAC escalation, retention weakness, competitive response, regulatory friction, capital intensity, and execution delays. Each risk needs a leading indicator and mitigation plan.`,
     kpis: `KPI governance: Assign owners, review cadence, decision thresholds, and action triggers for the operating metrics. Missed thresholds should change spend, roadmap, or segment focus.`,
-    founderRoadmap: `Founder roadmap for ${shortBusinessLabel}: tomorrow, define the riskiest assumption. This week, run direct customer validation. In 30 days, prove willingness to pay. In 90 days, validate repeatable acquisition. In 180 days, decide whether to scale or redesign.`,
-    roadmap306090: `30 Days (${shortBusinessLabel}): Validate pain, ICP, and pricing signal.\n90 Days: Secure repeatable early acquisition and delivery proof.\n180 Days: Confirm retention, payback, and operating cadence.\n12 Months: Scale only if decision thresholds are met.`,
+    founderRoadmap: isRevenueOrGrowthFallback
+      ? `Founder roadmap for ${shortBusinessLabel}: tomorrow, instrument retention and CAC payback on the existing paying base. This week, formalize the upsell/cross-sell motion. In 30 days, report net revenue retention. In 90 days, prove expansion revenue is repeatable. In 180 days, decide where to scale next.`
+      : `Founder roadmap for ${shortBusinessLabel}: tomorrow, define the riskiest assumption. This week, run direct customer validation. In 30 days, prove willingness to pay. In 90 days, validate repeatable acquisition. In 180 days, decide whether to scale or redesign.`,
+    roadmap306090: isRevenueOrGrowthFallback
+      ? `30 Days (${shortBusinessLabel}): Instrument retention, net revenue retention, and CAC payback on the existing paying base.\n90 Days: Formalize the upsell/cross-sell motion and prove expansion revenue.\n180 Days: Confirm sales efficiency holds while scaling acquisition spend.\n12 Months: Expand into the next-priority segment or geography from verified operating evidence.`
+      : `30 Days (${shortBusinessLabel}): Validate pain, ICP, and pricing signal.\n90 Days: Secure repeatable early acquisition and delivery proof.\n180 Days: Confirm retention, payback, and operating cadence.\n12 Months: Scale only if decision thresholds are met.`,
     financialAssumptions: `Key assumptions: Revenue, gross margin, CAC, LTV, payback, burn, runway, EBITDA, break-even timing, and investment needed must come from one assumption set. Missing values require validation with primary data.`,
     founderScore: `Founder Readiness Score: Use the decision engine to evaluate market opportunity, financial health, execution difficulty, competitive pressure, capital efficiency, technology leverage, and founder readiness. Missing evidence lowers confidence.`,
     sourcesAssumptions: `Sources and Assumptions: Verified external citations were not returned in a complete structured form. No source URLs or publisher metadata have been fabricated. Planning inputs require validation before investment decisions.`,
@@ -2640,7 +2652,55 @@ function buildCanonicalScenarioAnalysis(context: AiFinancialModelContext, langua
   ].join("\n");
 }
 
-function buildCanonicalKpiDashboard(context: AiFinancialModelContext, language: ResponseLanguage = "English") {
+// CRITICAL SCORING ENGINE FIX -- company lifecycle awareness. The
+// Roadmap's own "AI Action Plan" block used to unconditionally read as a
+// validation roadmap ("test the offer and record paid-conversion
+// evidence", "repeat the winning acquisition motion") regardless of
+// whether the company already has real, verified revenue. Idea/MVP/
+// pilot-stage companies keep exactly that validation roadmap; revenue/
+// growth-stage companies get a scaling roadmap instead (retention,
+// expansion, sales efficiency, market expansion) -- REVENUE_STAGE and
+// GROWTH_STAGE's own required behavior.
+function buildAiActionPlanLines(context: AiFinancialModelContext, language: ResponseLanguage) {
+  const stage = context.inputs.lifecycleStage;
+
+  if (!isRevenueOrGrowthStage(stage)) {
+    return [
+      reportText(language, `- Immediate Actions: ${context.investmentScore.nextCriticalAction}. Expected impact: resolves the highest-risk decision gate.`, `- Acil Aksiyonlar: ${context.investmentScore.nextCriticalAction}. Beklenen etki: en riskli karar kapısını çözer.`),
+      reportText(language, `- Next 30 Days: test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer} and record paid-conversion evidence at the ${context.metrics.arpa.displayValue} planning input. Expected impact: establishes a credible demand gate.`, `- Sonraki 30 Gün: ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile test et ve ${context.metrics.arpa.displayValue} planlama girdisinde ücretli dönüşüm kanıtını kaydet. Beklenen etki: güvenilir bir talep kapısı oluşturur.`),
+      reportText(language, `- Next 90 Days: repeat the winning acquisition and delivery motion for the ${context.inputs.businessModel} model. Expected impact: tests whether the operating loop is repeatable.`, `- Sonraki 90 Gün: ${context.inputs.businessModel} modeli için kazanan edinim ve teslimat hareketini tekrarla. Beklenen etki: operasyon döngüsünün tekrarlanabilirliğini test eder.`),
+      reportText(language, `- Next 6 Months: hold ${context.metrics.grossMargin.displayValue} gross margin while demonstrating ${context.metrics.cacPayback.displayValue} payback and repeat behavior. Expected impact: proves capital efficiency.`, `- Sonraki 6 Ay: ${context.metrics.cacPayback.displayValue} geri ödeme ve tekrar davranışını gösterirken ${context.metrics.grossMargin.displayValue} brüt marjı koru. Beklenen etki: sermaye verimliliğini kanıtlar.`),
+      reportText(language, `- Next 12 Months: expand the ${context.inputs.industry} model beyond the beachhead only after those proof gates hold in ${context.inputs.geography}. Expected impact: scales from verified operating evidence.`, `- Sonraki 12 Ay: ${translateIndustryBenchmarkLabel(context.inputs.industry)} modelini yalnızca bu kanıt kapıları ${context.inputs.geography} içinde sağlandıktan sonra başlangıç pazarının ötesine genişlet. Beklenen etki: doğrulanmış operasyon kanıtından ölçeklenir.`),
+    ];
+  }
+
+  const isGrowth = stage === "growth";
+
+  return [
+    reportText(language, `- Immediate Actions: ${context.investmentScore.nextCriticalAction}. Expected impact: resolves the highest-risk decision gate.`, `- Acil Aksiyonlar: ${context.investmentScore.nextCriticalAction}. Beklenen etki: en riskli karar kapısını çözer.`),
+    reportText(language, `- Next 30 Days: instrument retention, net revenue retention, and CAC payback on the existing ${context.metrics.arr.displayValue} paying base. Expected impact: replaces assumption with measured expansion and efficiency data.`, `- Sonraki 30 Gün: mevcut ${context.metrics.arr.displayValue} ödeme yapan tabanda elde tutma, net gelir elde tutma ve CAC geri ödemesini ölçmeye başla. Beklenen etki: varsayımı ölçülen genişleme ve verimlilik verisiyle değiştirir.`),
+    reportText(language, `- Next 90 Days: formalize the upsell and cross-sell motion for the ${context.inputs.businessModel} model to grow revenue within the existing ${context.inputs.targetCustomer} accounts. Expected impact: tests whether expansion revenue is repeatable.`, `- Sonraki 90 Gün: mevcut ${context.inputs.targetCustomer} hesaplarında geliri büyütmek için ${context.inputs.businessModel} modelinde ek satış ve çapraz satış hareketini resmileştir. Beklenen etki: genişleme gelirinin tekrarlanabilir olup olmadığını test eder.`),
+    reportText(language, `- Next 6 Months: protect ${context.metrics.grossMargin.displayValue} gross margin and ${context.metrics.cacPayback.displayValue} CAC payback while scaling acquisition spend. Expected impact: proves growth does not come at the cost of unit economics.`, `- Sonraki 6 Ay: edinim harcamasını ölçeklerken ${context.metrics.grossMargin.displayValue} brüt marjı ve ${context.metrics.cacPayback.displayValue} CAC geri ödemesini koru. Beklenen etki: büyümenin birim ekonomisi pahasına gerçekleşmediğini kanıtlar.`),
+    reportText(
+      language,
+      isGrowth
+        ? `- Next 12 Months: expand the ${context.inputs.industry} model into the next-priority segment or geography within ${context.inputs.geography}, using the verified ${context.metrics.arr.displayValue} operating base as the proof point. Expected impact: scales enterprise growth from already-verified evidence, not a new assumption.`
+        : `- Next 12 Months: convert the current ${context.metrics.arr.displayValue} revenue base into a repeatable growth motion before committing to new-market expansion. Expected impact: builds the retention and efficiency evidence a growth-stage expansion would require.`,
+      isGrowth
+        ? `- Sonraki 12 Ay: doğrulanmış ${context.metrics.arr.displayValue} operasyon tabanını kanıt noktası olarak kullanarak ${translateIndustryBenchmarkLabel(context.inputs.industry)} modelini ${context.inputs.geography} içinde bir sonraki öncelikli segmente veya bölgeye genişlet. Beklenen etki: kurumsal büyümeyi yeni bir varsayımdan değil, zaten doğrulanmış kanıttan ölçekler.`
+        : `- Sonraki 12 Ay: yeni pazar genişlemesine geçmeden önce mevcut ${context.metrics.arr.displayValue} gelir tabanını tekrarlanabilir bir büyüme hareketine dönüştür. Beklenen etki: büyüme aşaması genişlemesinin gerektireceği elde tutma ve verimlilik kanıtını oluşturur.`
+    ),
+  ];
+}
+
+// CRITICAL SCORING ENGINE FIX -- company lifecycle awareness. This used
+// to be the ONLY KPI Dashboard shape, unconditionally telling a company
+// with $4.8M ARR from 37 paying customers to "validate willingness to
+// pay" and "prove the first paid activation" -- evidence it already has.
+// Idea/MVP/pilot-stage companies (isRevenueOrGrowthStage false) still get
+// exactly this validation-focused set; revenue/growth-stage companies
+// get buildRevenueStageKpiDashboard below instead.
+function buildValidationStageKpiDashboard(context: AiFinancialModelContext, language: ResponseLanguage = "English") {
   const { metrics, revenueForecast } = context;
   const yearOne = revenueForecast[0];
   const customerLabel =
@@ -2692,7 +2752,69 @@ function buildCanonicalKpiDashboard(context: AiFinancialModelContext, language: 
   ].join("\n");
 }
 
-function buildCanonicalKpiGovernance(context: AiFinancialModelContext, language: ResponseLanguage) {
+// Revenue/growth-stage KPI set: retention, expansion, and sales-
+// efficiency metrics that presuppose paying customers already exist,
+// never "validate willingness to pay"/"get first customers" language.
+function buildRevenueStageKpiDashboard(context: AiFinancialModelContext, language: ResponseLanguage = "English") {
+  const { metrics } = context;
+  const isGrowth = context.inputs.lifecycleStage === "growth";
+
+  return [
+    reportText(
+      language,
+      `ARR Growth: ${metrics.arr.displayValue} ARR | Target: grow ARR at a benchmark-consistent rate | Status: Track from billing/subscription data`,
+      `ARR Büyümesi: ${metrics.arr.displayValue} ARR | Hedef: ARR'yi referans büyüme oranında artır | Durum: Faturalama/abonelik verilerinden izle`
+    ),
+    reportText(
+      language,
+      `MRR Growth: ${metrics.mrr.displayValue} MRR | Target: grow MRR month over month | Status: Track from billing/subscription data`,
+      `MRR Büyümesi: ${metrics.mrr.displayValue} MRR | Hedef: MRR'yi ay be ay artır | Durum: Faturalama/abonelik verilerinden izle`
+    ),
+    reportText(
+      language,
+      `Net Revenue Retention: Not provided | Target: expand revenue within the existing ${metrics.arr.displayValue} base through upsell and cross-sell | Status: Track from paying accounts`,
+      `Net Gelir Elde Tutma: Sağlanmadı | Hedef: mevcut ${metrics.arr.displayValue} tabanında ek satış ve çapraz satışla geliri genişlet | Durum: Ödeme yapan hesaplardan izle`
+    ),
+    reportText(
+      language,
+      `Gross Retention: Not provided | Target: hold gross customer retention high on the existing ${context.inputs.targetCustomer} base | Status: Track from paying accounts`,
+      `Brüt Elde Tutma: Sağlanmadı | Hedef: mevcut ${context.inputs.targetCustomer} tabanında brüt müşteri elde tutmayı yüksek tut | Durum: Ödeme yapan hesaplardan izle`
+    ),
+    reportText(
+      language,
+      `Expansion Revenue: Not provided | Target: grow average account value beyond the current ${metrics.arpa.displayValue}/month baseline | Status: Track from paying accounts`,
+      `Genişleme Geliri: Sağlanmadı | Hedef: ortalama hesap değerini mevcut aylık ${metrics.arpa.displayValue} tabanının üzerine çıkar | Durum: Ödeme yapan hesaplardan izle`
+    ),
+    reportText(
+      language,
+      `Customer Expansion: Not provided | Target: increase the share of existing ${context.inputs.targetCustomer} accounts buying additional seats or products | Status: Track from paying accounts`,
+      `Müşteri Genişlemesi: Sağlanmadı | Hedef: mevcut ${context.inputs.targetCustomer} hesaplarından ek koltuk veya ürün satın alan payı artır | Durum: Ödeme yapan hesaplardan izle`
+    ),
+    reportText(
+      language,
+      `Sales Efficiency: ${metrics.cac.displayValue} CAC vs. ${metrics.arpa.displayValue}/month ARPA | Target: grow new ARR per dollar of sales and marketing spend | Status: Watch`,
+      `Satış Verimliliği: ${metrics.cac.displayValue} CAC / aylık ${metrics.arpa.displayValue} ARPA | Hedef: satış ve pazarlama harcamasının dolar başına yeni ARR'yi artır | Durum: İzleme`
+    ),
+    reportText(
+      language,
+      `CAC Payback: ${metrics.cacPayback.displayValue} | Target: hold CAC payback within the benchmark range while scaling spend | Status: Watch`,
+      `CAC Geri Ödeme: ${metrics.cacPayback.displayValue} | Hedef: harcamayı ölçeklerken CAC geri ödemesini referans aralıkta tut | Durum: İzleme`
+    ),
+    reportText(
+      language,
+      `Enterprise Pipeline: Not provided | Target: ${isGrowth ? `build qualified enterprise pipeline across ${context.inputs.geography} expansion markets while protecting ${metrics.grossMargin.displayValue} margin` : `build a qualified enterprise pipeline beyond the current ${metrics.arr.displayValue} ARR base`} | Status: Track from paying accounts`,
+      `Kurumsal Boru Hattı: Sağlanmadı | Hedef: ${isGrowth ? `${metrics.grossMargin.displayValue} marjı korurken ${context.inputs.geography} genişleme pazarlarında nitelikli kurumsal boru hattı oluştur` : `mevcut ${metrics.arr.displayValue} ARR tabanının ötesinde nitelikli kurumsal boru hattı oluştur`} | Durum: Ödeme yapan hesaplardan izle`
+    ),
+  ].join("\n");
+}
+
+function buildCanonicalKpiDashboard(context: AiFinancialModelContext, language: ResponseLanguage = "English") {
+  return isRevenueOrGrowthStage(context.inputs.lifecycleStage)
+    ? buildRevenueStageKpiDashboard(context, language)
+    : buildValidationStageKpiDashboard(context, language);
+}
+
+function buildValidationStageKpiGovernance(context: AiFinancialModelContext, language: ResponseLanguage) {
   const rows =
     language === "Turkish"
       ? [
@@ -2711,6 +2833,47 @@ function buildCanonicalKpiGovernance(context: AiFinancialModelContext, language:
           ["CAC", "Growth Lead", `${context.metrics.cac.displayValue} or better`, "CAC exceeds payback threshold", "Slow paid acquisition and shift to organic/partner channel tests"],
           ["Conversion", "Sales / GTM", `Repeatable paid conversion from ${context.inputs.targetCustomer}`, "Qualified leads do not pay", `Reposition ICP, message, and sales process for the ${context.inputs.businessModel} model`],
         ];
+
+  return rows;
+}
+
+// Revenue/growth-stage governance rows -- same Owner/Target/Trigger/
+// Action shape, retention/expansion/efficiency framing instead of
+// first-paid-activation/willingness-to-pay framing.
+function buildRevenueStageKpiGovernance(context: AiFinancialModelContext, language: ResponseLanguage) {
+  const isGrowth = context.inputs.lifecycleStage === "growth";
+  const rows =
+    language === "Turkish"
+      ? [
+          ["ARR Büyümesi", "Finance Lead", `${context.metrics.arr.displayValue} ARR tabanından referans oranında büyüme`, "ARR büyümesi baz senaryonun altında kalırsa", "Fiyat, paket ve kanal varsayımlarını yeniden test et"],
+          ["MRR Büyümesi", "Finance Lead", `${context.metrics.mrr.displayValue} MRR tabanından ay be ay büyüme`, "MRR büyümesi ardışık aylarda düz kalırsa", "Faturalama kohortlarını gözden geçir ve fiyatlandırma/paketleme testlerini daralt"],
+          ["Net Gelir Elde Tutma", "Founder / Ops", `${context.metrics.arr.displayValue} tabanında ek satış ve çapraz satışla genişleme`, "Net gelir elde tutma %100'ün altına düşerse", "Genişleme oyun kitabını ve hesap planlama sürecini gözden geçir"],
+          ["Brüt Elde Tutma", "Founder / Ops", `Mevcut ${context.inputs.targetCustomer} tabanında yüksek brüt elde tutma`, "Elde tutma referans aralığın altına düşerse", "Müşteri başarısı ritmini ve ürün kapsamını gözden geçir"],
+          ["Genişleme Geliri", "Sales / GTM", `Aylık ${context.metrics.arpa.displayValue} ortalama hesap değerinin üzerine çıkış`, "Genişleme geliri düz kalırsa", "Ek satış ve çapraz satış hareketini resmileştir"],
+          ["Müşteri Genişlemesi", "Sales / GTM", `Ek koltuk veya ürün satın alan mevcut hesap payını artır`, "Müşteri genişleme oranı düz kalırsa", "Hesap içi upsell/cross-sell oyun kitabını resmileştir"],
+          ["Satış Verimliliği", "Growth Lead", `Harcanan dolar başına yeni ARR'yi artır`, "Satış verimliliği düşerse", "Kanal karmasını ve satış sürecini yeniden değerlendir"],
+          ["CAC Geri Ödeme", "Growth Lead", `${context.metrics.cacPayback.displayValue} veya daha iyi`, "CAC geri ödeme eşiğini aşarsa", "Ücretli edinimi yavaşlat ve organik/ortak kanal testlerine kay"],
+          ["Kurumsal Boru Hattı", "Sales / GTM", isGrowth ? `${context.inputs.geography} genişleme pazarlarında nitelikli kurumsal boru hattı` : `${context.metrics.arr.displayValue} ARR tabanının ötesinde nitelikli kurumsal boru hattı`, "Nitelikli kurumsal fırsat sayısı düşerse", isGrowth ? `${context.inputs.geography} genişlemesinin sıralamasını ve yatırımını yeniden değerlendir` : "Kurumsal satış hareketini ve ICP hedeflemesini yeniden değerlendir"],
+        ]
+      : [
+          ["ARR Growth", "Finance Lead", `Growth from the ${context.metrics.arr.displayValue} ARR base at a benchmark-consistent rate`, "ARR growth falls below the base case", "Retest pricing, packaging, and channel assumptions"],
+          ["MRR Growth", "Finance Lead", `Month-over-month growth from the ${context.metrics.mrr.displayValue} MRR base`, "MRR growth stays flat for consecutive months", "Review billing cohorts and narrow pricing/packaging tests"],
+          ["Net Revenue Retention", "Founder / Ops", `Expansion within the ${context.metrics.arr.displayValue} base via upsell and cross-sell`, "Net revenue retention falls below 100%", "Review the expansion playbook and account planning process"],
+          ["Gross Retention", "Founder / Ops", `High gross retention on the existing ${context.inputs.targetCustomer} base`, "Retention falls below the benchmark range", "Review customer success cadence and product scope"],
+          ["Expansion Revenue", "Sales / GTM", `Grow beyond the ${context.metrics.arpa.displayValue}/month average account value`, "Expansion revenue stays flat", "Formalize the upsell and cross-sell motion"],
+          ["Customer Expansion", "Sales / GTM", `Increase the share of existing accounts buying additional seats or products`, "Customer expansion rate stays flat", "Formalize the account-level upsell/cross-sell playbook"],
+          ["Sales Efficiency", "Growth Lead", `Increase new ARR generated per dollar spent`, "Sales efficiency declines", "Reassess channel mix and sales process"],
+          ["CAC Payback", "Growth Lead", `${context.metrics.cacPayback.displayValue} or better`, "CAC payback exceeds the benchmark threshold", "Slow paid acquisition and shift to organic/partner channel tests"],
+          ["Enterprise Pipeline", "Sales / GTM", isGrowth ? `Qualified enterprise pipeline across ${context.inputs.geography} expansion markets` : `Qualified enterprise pipeline beyond the current ${context.metrics.arr.displayValue} ARR base`, "Qualified enterprise opportunity count declines", isGrowth ? `Reassess the sequencing and investment behind ${context.inputs.geography} expansion` : "Reassess enterprise sales motion and ICP targeting"],
+        ];
+
+  return rows;
+}
+
+function buildCanonicalKpiGovernance(context: AiFinancialModelContext, language: ResponseLanguage) {
+  const rows = isRevenueOrGrowthStage(context.inputs.lifecycleStage)
+    ? buildRevenueStageKpiGovernance(context, language)
+    : buildValidationStageKpiGovernance(context, language);
 
   return rows
     .map(([kpi, owner, target, trigger, action]) =>
@@ -3210,11 +3373,19 @@ function riskSeverityLevel(probability: RiskLevel, impact: RiskLevel): RiskLevel
 }
 
 function buildRiskMatrix(context: AiFinancialModelContext, language: ResponseLanguage) {
+  // CRITICAL SCORING ENGINE FIX -- a revenue/growth-stage company's
+  // fallback risk framing must not default to demand-validation language
+  // when demand is already verified by real paying customers.
+  const isRevenueOrGrowthRisk = isRevenueOrGrowthStage(context.inputs.lifecycleStage);
   const risks = context.investmentScore.topRisks.length
     ? context.investmentScore.topRisks
     : language === "Turkish"
-      ? ["Talep doğrulama riski", "CAC ve geri ödeme riski", "Yürütme sıralaması riski"]
-      : ["Demand validation risk", "CAC and payback risk", "Execution sequencing risk"];
+      ? isRevenueOrGrowthRisk
+        ? ["Elde tutma ve genişleme riski", "CAC ve geri ödeme riski", "Rekabetçi savunulabilirlik riski"]
+        : ["Talep doğrulama riski", "CAC ve geri ödeme riski", "Yürütme sıralaması riski"]
+      : isRevenueOrGrowthRisk
+        ? ["Retention and expansion risk", "CAC and payback risk", "Competitive defensibility risk"]
+        : ["Demand validation risk", "CAC and payback risk", "Execution sequencing risk"];
 
   return risks.slice(0, 4).map((risk) => {
     const { probability: probabilityLevel, impact: impactLevel } = assessRiskLevels(risk, context);
@@ -3841,13 +4012,7 @@ function normalizeFullPlanReport(
   normalized.roadmap306090 = appendIntelligenceBlock(
     normalized.roadmap306090,
     reportLabel(language, "AI Action Plan", "AI Aksiyon Planı"),
-    [
-      reportText(language, `- Immediate Actions: ${context.investmentScore.nextCriticalAction}. Expected impact: resolves the highest-risk decision gate.`, `- Acil Aksiyonlar: ${context.investmentScore.nextCriticalAction}. Beklenen etki: en riskli karar kapısını çözer.`),
-      reportText(language, `- Next 30 Days: test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer} and record paid-conversion evidence at the ${context.metrics.arpa.displayValue} planning input. Expected impact: establishes a credible demand gate.`, `- Sonraki 30 Gün: ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile test et ve ${context.metrics.arpa.displayValue} planlama girdisinde ücretli dönüşüm kanıtını kaydet. Beklenen etki: güvenilir bir talep kapısı oluşturur.`),
-      reportText(language, `- Next 90 Days: repeat the winning acquisition and delivery motion for the ${context.inputs.businessModel} model. Expected impact: tests whether the operating loop is repeatable.`, `- Sonraki 90 Gün: ${context.inputs.businessModel} modeli için kazanan edinim ve teslimat hareketini tekrarla. Beklenen etki: operasyon döngüsünün tekrarlanabilirliğini test eder.`),
-      reportText(language, `- Next 6 Months: hold ${context.metrics.grossMargin.displayValue} gross margin while demonstrating ${context.metrics.cacPayback.displayValue} payback and repeat behavior. Expected impact: proves capital efficiency.`, `- Sonraki 6 Ay: ${context.metrics.cacPayback.displayValue} geri ödeme ve tekrar davranışını gösterirken ${context.metrics.grossMargin.displayValue} brüt marjı koru. Beklenen etki: sermaye verimliliğini kanıtlar.`),
-      reportText(language, `- Next 12 Months: expand the ${context.inputs.industry} model beyond the beachhead only after those proof gates hold in ${context.inputs.geography}. Expected impact: scales from verified operating evidence.`, `- Sonraki 12 Ay: ${translateIndustryBenchmarkLabel(context.inputs.industry)} modelini yalnızca bu kanıt kapıları ${context.inputs.geography} içinde sağlandıktan sonra başlangıç pazarının ötesine genişlet. Beklenen etki: doğrulanmış operasyon kanıtından ölçeklenir.`),
-    ]
+    buildAiActionPlanLines(context, language)
   );
 
   // Eliminate filler: strip generic AI hedge sentences and exact-duplicate
@@ -3932,6 +4097,7 @@ function normalizeFullPlanReport(
     },
     strategicSignals,
     regulatoryRiskField: "risks",
+    lifecycleStage: context.inputs.lifecycleStage,
   });
   if (consistencyResult.correctionsApplied.length > 0) {
     logOperationalInfo("[api:plan] consistency validation applied corrections", {

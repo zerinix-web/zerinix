@@ -6,6 +6,7 @@ import {
   type FinancialMetricModel,
   type FinancialModel,
 } from "@/app/lib/ai/financial-model";
+import { lifecycleStageLabel, isRevenueOrGrowthStage } from "@/app/lib/ai/company-lifecycle";
 import {
   createDecisionConfidenceModel,
   type DecisionConfidenceModel,
@@ -171,10 +172,16 @@ export function formatCanonicalFinancialAssumptions(
     ? consistency.warnings.map((warning) => `- ${warning.message} (${warning.evidenceType})`).join("\n")
     : "- No contradictions detected in ARR/MRR, LTV/CAC, payback, burn/runway, funding, or break-even relationships.";
 
+  const lifecycleStage = context.inputs.lifecycleStage;
+  const lifecycleInstruction = isRevenueOrGrowthStage(lifecycleStage)
+    ? "This company already has verified paying customers -- never write 'validate willingness to pay', 'get first customers', or similar pre-revenue validation language anywhere in the report. Write about retention, net revenue retention, expansion revenue, CAC payback, and sales efficiency instead."
+    : "This company has not yet reported paying customers or verified revenue -- validation-focused language (customer interviews, willingness to pay, first paid activation) is appropriate here.";
+
   return `Data-Driven Financial Analysis Engine (${context.version}, ${context.fingerprint})
 Business idea fingerprint: ${context.normalizedBusinessIdea}
 Detected modeling inputs:
 - Industry: ${context.inputs.industry}
+- Company lifecycle stage: ${lifecycleStageLabel(lifecycleStage)}. ${lifecycleInstruction}
 - Business model: ${context.inputs.businessModel}
 - Target customer: ${context.inputs.targetCustomer}
 - Geography: ${context.inputs.geography}

@@ -6,6 +6,10 @@ import {
   type IndustryBenchmark,
   type IndustryKey,
 } from "@/app/lib/ai/industry-benchmarks";
+import {
+  detectCompanyLifecycleStage,
+  type CompanyLifecycleStage,
+} from "@/app/lib/ai/company-lifecycle";
 
 export type FinancialModelInput = {
   prompt: string;
@@ -19,6 +23,7 @@ export type FinancialModelingInputs = {
   targetCustomer: string;
   geography: string;
   pricingModel: string;
+  lifecycleStage: CompanyLifecycleStage;
 };
 
 export type FinancialMetricModel = {
@@ -482,6 +487,7 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
       "not-yet-validated",
       normalized
     ),
+    lifecycleStage: detectCompanyLifecycleStage(prompt, extractUserStatedFinancials(prompt)),
   };
 }
 
@@ -689,7 +695,7 @@ function extractUserStatedCustomerCount(prompt: string): number | null {
   return Number(match[1].replace(/,/g, ""));
 }
 
-function extractUserStatedFinancials(prompt: string): {
+export function extractUserStatedFinancials(prompt: string): {
   mrr: number | null;
   arr: number | null;
   customers: number | null;

@@ -186,14 +186,37 @@ function promptReadiness(prompt: string) {
     /\b(?:launch plan|roadmap|milestone|hire|partnership|partners?|distribution)\b/,
     /\b(?:prototype|mvp|proof of concept|poc|beta(?:\s+customers?)?|design partners?|pilot partners?|pilot customers?)\b/,
   ].map((pattern) => pattern.test(normalized));
+  // CRITICAL SCORING ENGINE FIX -- company lifecycle awareness. A company
+  // with verified paying customers/MRR/ARR is categorically further along
+  // than one that only matches founderSignals[1]'s generic "customers/
+  // revenue" keyword pattern, so its founder/execution readiness gets an
+  // additional stage-proportional step on top of the keyword-based base
+  // score. Deliberately a local, self-contained approximation rather
+  // than importing detectCompanyLifecycleStage from company-lifecycle.ts
+  // (the canonical version, also used by financial-model.ts and
+  // investment-score.ts) -- this module is kept intentionally free of
+  // real cross-file imports so it stays directly importable in tests
+  // with no path rewriting (dozens of existing tests rely on that).
+  const hasPayingRevenueSignal =
+    /\b(paying customers?|\d[\d,]*\s*paying|mrr|arr|annual recurring revenue|monthly recurring revenue)\b/i.test(
+      normalized
+    ) &&
+    !/\b(?:no|not|zero|without|don'?t have|doesn'?t have|do not have|does not have|haven'?t|have not|pre[-\s]?revenue)\s+(?:\w+\s+){0,3}?(paying customers?|mrr|arr|revenue)\b/i.test(
+      normalized
+    );
+  const hasGrowthScaleSignal =
+    hasPayingRevenueSignal &&
+    /\b(\$\s*[1-9](?:\.\d+)?\s*m(?:illion)?\b|expand|expansion|scale|scaling|international)\b/i.test(normalized);
+  const lifecycleBoost = hasGrowthScaleSignal ? 30 : hasPayingRevenueSignal ? 22 : founderSignals[4] ? 6 : 0;
   const founderReadiness = clamp(
-    25 + founderSignals.reduce((sum, present) => sum + (present ? 15 : 0), 0)
+    25 + founderSignals.reduce((sum, present) => sum + (present ? 15 : 0), 0) + lifecycleBoost
   );
   const executionReadiness = clamp(
     30 +
       (founderSignals[1] ? 22 : 0) +
       (founderSignals[2] ? 14 : 0) +
-      (founderSignals[3] ? 20 : 0)
+      (founderSignals[3] ? 20 : 0) +
+      lifecycleBoost
   );
   return { founderReadiness, executionReadiness };
 }
@@ -307,6 +330,29 @@ function scoreCategory<T extends { score: number; maximumScore: number; reasonin
   };
 }
 
+// CRITICAL SCORING ENGINE FIX -- one canonical score source, never
+// duplicated/conflicting values across sections. Confirmed live:
+// "Business Model Quality" appeared with a high score in one section and
+// a low score in another for the SAME report. Root cause: investment-
+// score.ts's teamFounder category already computes a correct, lifecycle-
+// aware "Business model quality" percentage from real financial-model
+// signals (recurring revenue, margin, payback) -- decisionEngine.
+// founderScore starts as a copy of that category (see investment-
+// score.ts's decisionEngine construction), so its reasoning array
+// already carries the right number. This function used to silently
+// discard it and substitute dimensions.productEvidence -- a measure of
+// how many distinct domains mention this company's product/pricing
+// online, which has no relationship to business model quality at all.
+// Business model quality and execution complexity are founder/business-
+// model judgments, not something external web research can verify, so
+// they are read back from the category's own original reasoning and
+// reused verbatim rather than recomputed from an unrelated dimension.
+function extractOriginalReasoningPercent(reasoning: readonly string[], label: string): number | null {
+  const line = reasoning.find((entry) => entry.startsWith(`${label}:`));
+  const match = line?.match(/(\d+)%/);
+  return match ? Number(match[1]) : null;
+}
+
 export function applyMarketResearchCoverageToContext(
   context: AiFinancialModelContext,
   bundle: Pick<DomainResearchBundle, "evidence">,
@@ -317,6 +363,11 @@ export function applyMarketResearchCoverageToContext(
     coverageOverride || evaluateMarketResearchCoverage(bundle.evidence, prompt);
   const dimensions = coverage.dimensions;
   const decisionEngine = context.investmentScore.decisionEngine;
+  const originalFounderReasoning = decisionEngine.founderScore.reasoning;
+  const originalBusinessModelQuality = extractOriginalReasoningPercent(originalFounderReasoning, "Business model quality");
+  const originalExecutionComplexity = extractOriginalReasoningPercent(originalFounderReasoning, "Execution complexity");
+  const originalValidationConfidence = extractOriginalReasoningPercent(originalFounderReasoning, "Validation confidence");
+  const originalEvidenceConfidence = extractOriginalReasoningPercent(originalFounderReasoning, "Evidence confidence");
   const marketScore = scoreCategory(
     decisionEngine.marketScore,
     dimensions.marketConfidence,
@@ -360,10 +411,19 @@ export function applyMarketResearchCoverageToContext(
     dimensions.founderReadiness,
     [
       `Market attractiveness: ${Math.round((dimensions.marketConfidence + dimensions.founderReadiness) / 2)}%`,
-      `Business model quality: ${dimensions.productEvidence}%`,
-      `Validation confidence: ${dimensions.executionReadiness}%`,
-      `Execution complexity: ${dimensions.executionReadiness}%`,
-      `Evidence confidence: ${coverage.overallConfidence}%`,
+      // Business model quality, validation confidence, execution
+      // complexity, and evidence confidence are founder/business-model
+      // judgments (recurring revenue, margin, payback, lifecycle stage --
+      // see investment-score.ts) -- not something external web-research
+      // coverage can verify, so the category's own original,
+      // already-lifecycle-aware value is reused verbatim instead of
+      // being replaced by an unrelated research-coverage dimension. Falls
+      // back to the coverage dimension only if the original line was
+      // somehow missing (defensive, should not happen in practice).
+      `Business model quality: ${originalBusinessModelQuality ?? dimensions.productEvidence}%`,
+      `Validation confidence: ${originalValidationConfidence ?? dimensions.executionReadiness}%`,
+      `Execution complexity: ${originalExecutionComplexity ?? dimensions.executionReadiness}%`,
+      `Evidence confidence: ${originalEvidenceConfidence ?? coverage.overallConfidence}%`,
       `Founder evidence: ${dimensions.founderReadiness}%`,
     ]
   );

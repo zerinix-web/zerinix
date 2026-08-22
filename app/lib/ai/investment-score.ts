@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { BenchmarkConfidence } from "@/app/lib/ai/industry-benchmarks";
 import type { FinancialModel } from "@/app/lib/ai/financial-model";
+import { lifecycleConfidenceBoost, isRevenueOrGrowthStage } from "@/app/lib/ai/company-lifecycle";
 
 export type InvestmentScoreCategoryKey =
   | "marketOpportunity"
@@ -254,12 +255,35 @@ function createNextCriticalAction(model: FinancialModel, recommendation: "GO" | 
     return "Do not scale spend until the weakest economics are redesigned and validated.";
   }
 
+  // CRITICAL SCORING ENGINE FIX -- company lifecycle awareness. A company
+  // with real paying customers must never be told to "validate
+  // willingness to pay" or "get first customers" -- that evidence already
+  // exists. Revenue/growth-stage companies get retention/expansion/CAC-
+  // payback framing instead, matching REVENUE_STAGE's own required
+  // behavior ("do NOT recommend validate willingness to pay if customers
+  // already pay; analyze retention, expansion, CAC, payback, sales
+  // efficiency").
+  const stage = model.inputs.lifecycleStage;
+  if (isRevenueOrGrowthStage(stage)) {
+    if (model.metrics.cacPayback.value > model.benchmark.ranges.cacPayback.high) {
+      return "Optimize CAC efficiency by tightening acquisition spend or raising net revenue retention before increasing budget.";
+    }
+
+    return stage === "growth"
+      ? "Scale distribution into new markets while protecting margins and expanding enterprise accounts."
+      : "Improve retention and expand enterprise accounts on the existing paying base before increasing acquisition spend.";
+  }
+
   if (model.metrics.cacPayback.value > model.benchmark.ranges.cacPayback.high) {
     return "Validate a lower-CAC acquisition motion before increasing budget.";
   }
 
   if (model.metrics.grossMargin.confidence === "Low" || model.metrics.tam.confidence === "Low") {
     return "Run primary research to validate market size and contribution margin assumptions.";
+  }
+
+  if (stage === "pilot") {
+    return "Convert the strongest pilots into paid, renewing contracts using the calculated pricing and payback targets.";
   }
 
   if (recommendation === "GO") {
@@ -298,7 +322,21 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
   ]);
   const d2cFoodOrFmcg = isD2cFoodOrFmcg(model);
   const validationEvidence = hasValidationEvidence(input.prompt);
-  const evidenceAdjustment = validationEvidence ? 0.08 : d2cFoodOrFmcg ? -0.18 : -0.08;
+  // CRITICAL SCORING ENGINE FIX -- company lifecycle awareness. This used
+  // to be a single flat +0.08 boost for "any validation evidence exists
+  // at all," so a company with $4.8M ARR from 37 paying customers scored
+  // identically to one with a single unpaid pilot -- both just cleared
+  // the same yes/no bar. lifecycleConfidenceBoost adds a further,
+  // stage-proportional step on top of that same base boost: none for
+  // idea stage, modest for MVP/pilot, and the largest step for
+  // revenue/growth stage, where paying customers are categorically
+  // stronger evidence than a prototype or a pilot.
+  const lifecycleStage = model.inputs.lifecycleStage;
+  const evidenceAdjustment = validationEvidence
+    ? 0.08 + lifecycleConfidenceBoost(lifecycleStage)
+    : d2cFoodOrFmcg
+      ? -0.18
+      : -0.08;
   const executionComplexityAdjustment = d2cFoodOrFmcg ? -0.1 : 0;
   const defensibilitySignals = hasAny(normalizedPrompt, [
     /\b(proprietary|patent|data moat|network effect|regulated|compliance|brand|luxury|enterprise)\b/,
@@ -325,8 +363,29 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
     d2cFoodOrFmcg ? 0.7 : 0.66,
     0.88
   );
-  const validationLevelScore = validationEvidence ? 0.68 : d2cFoodOrFmcg ? 0.42 : 0.45;
-  const founderEvidenceScore = founderSignals ? 0.72 : 0.34;
+  // Same lifecycle gradation as evidenceAdjustment above, applied to the
+  // two figures that most directly answer "how much do we trust this
+  // company's own evidence": Validation Confidence and Founder/Evidence
+  // Confidence. Base 0.60 keeps the previous flat 0.68 as roughly the
+  // pilot-stage anchor (0.60 + 0.08 lifecycle boost), while revenue/
+  // growth stage push meaningfully higher, matching REVENUE_STAGE's
+  // "significantly increase evidence confidence" requirement.
+  const validationLevelScore = validationEvidence
+    ? clamp(0.6 + lifecycleConfidenceBoost(lifecycleStage), 0, 0.95)
+    : d2cFoodOrFmcg
+      ? 0.42
+      : 0.45;
+  // Full lifecycle boost weight (not dampened), matching
+  // validationLevelScore -- a $4M+ ARR, production, paying-enterprise-
+  // customer company must not land anywhere near a pre-revenue idea's
+  // Evidence Confidence, and a partial weight left too small a gap here
+  // specifically (confirmed live: 34% vs 49%, still readable as "similar"
+  // even though every other lifecycle-graded figure showed a clear gap).
+  const founderEvidenceScore = clamp(
+    (founderSignals ? 0.72 : 0.34) + lifecycleConfidenceBoost(lifecycleStage),
+    0,
+    0.95
+  );
   const executionComplexityScore = capitalHeavy ? 0.42 : d2cFoodOrFmcg ? 0.5 : 0.66;
 
   const marketOpportunity = makeCategory({
@@ -502,13 +561,24 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
   const totalScore = roundScore(
     categoryList.reduce((sum, category) => sum + category.score, 0)
   );
+  // CRITICAL SCORING ENGINE FIX -- this term used to be a flat 70 for
+  // "any validation evidence exists," diluted further by three other
+  // averaged terms unrelated to lifecycle stage (metric confidence,
+  // founder/defensibility keyword presence). A company with verified
+  // paying customers must score meaningfully more confident than one
+  // with an unpaid pilot, so this term now scales directly and
+  // monotonically with lifecycle stage.
   const confidence = roundScore(
     average([
       average(Object.values(metrics).map((metric) => confidenceValue(metric.confidence))),
       clamp(specificity + evidenceAdjustment, 0.28, 1) * 100,
       founderSignals ? 72 : 58,
       defensibilitySignals ? 72 : 58,
-      validationEvidence ? 70 : d2cFoodOrFmcg ? 38 : 48,
+      validationEvidence
+        ? clamp(70 + lifecycleConfidenceBoost(lifecycleStage) * 100, 70, 100)
+        : d2cFoodOrFmcg
+          ? 38
+          : 48,
     ])
   );
   const recommendation = createRecommendation(totalScore, confidence);
