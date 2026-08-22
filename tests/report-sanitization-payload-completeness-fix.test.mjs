@@ -262,12 +262,28 @@ test("sanitization strength is unchanged -- every pattern stripReportPresentatio
 
 // --- 5. Drift check: fix is scoped to the sanitizer, not generation -------
 
-test("plan-executor.ts's createGroundedAcquisitionTimeoutFallback still sets roiAnalysis/irrAnalysis to localized.timeout -- unmodified by this fix, proving the schema-preservation fallback lives entirely in the sanitizer, not in a generation-side workaround (drift check)", async () => {
+// NOTE: superseded by the "acquisition sections are still falling back to
+// empty responses" turn -- confirmed live, a field set to NOTHING BUT
+// localized.timeout (or a bare [Recommendation]-tagged decision.recommendation
+// word like "Wait") sanitizes down to either the sanitizer's generic
+// backfill sentence or the bare verdict word itself, exactly the bug the
+// user reported reaching production. The fix could not stay scoped to the
+// sanitizer alone (the sanitizer can only rewrite what is there); it had to
+// move upstream into createGroundedAcquisitionTimeoutFallback itself, which
+// now builds every field from real deal facts and derived metrics instead
+// of ever setting roiAnalysis/irrAnalysis to bare localized.timeout. This
+// reverses the "lives entirely in the sanitizer" guarantee this test used
+// to assert -- deliberately, per the explicit new requirement to fix the
+// generator, not just the presentation layer.
+test("plan-executor.ts's createGroundedAcquisitionTimeoutFallback no longer sets roiAnalysis/irrAnalysis to bare localized.timeout -- both now carry real deal-specific ROI/IRR analysis text", async () => {
   const { readFileSync } = await import("node:fs");
   const planExecutorSource = readFileSync(
     new URL("../app/lib/report-jobs/plan-executor.ts", import.meta.url),
     "utf8"
   );
-  assert.match(planExecutorSource, /roiAnalysis: localized\.timeout,/);
-  assert.match(planExecutorSource, /irrAnalysis: localized\.timeout,/);
+  assert.doesNotMatch(planExecutorSource, /roiAnalysis: localized\.timeout,/);
+  assert.doesNotMatch(planExecutorSource, /irrAnalysis: localized\.timeout,/);
+  assert.match(planExecutorSource, /function buildFallbackRoiAnalysis\(/);
+  assert.match(planExecutorSource, /What can be calculated/);
+  assert.match(planExecutorSource, /What cannot be calculated/);
 });
