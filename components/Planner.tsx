@@ -184,6 +184,10 @@ import { planFieldLabels } from "@/app/lib/report-engine/prompts/plan";
 import { marketFieldLabels } from "@/app/lib/report-engine/prompts/market";
 import { inferReportDomainFromFieldNames } from "@/app/lib/report-engine/domain-inference";
 import {
+  isUniversalCustomerFacingSection,
+  stripReportPresentationArtifacts,
+} from "@/app/lib/report-engine/report-presentation-sanitizer";
+import {
   useAttachments,
   type PlannerAttachment,
 } from "@/components/planner/useAttachments";
@@ -1183,9 +1187,18 @@ function getReportMarkdown(
   reportData: Partial<MarketReport & PlanReport>,
   fields: ReportFieldDefinition[]
 ) {
+  // This markdown is persisted into the chat message (persistMessage/
+  // updatePersistedMessage) -- a durable artifact separate from the
+  // reports table row -- so isUniversalCustomerFacingSection/
+  // stripReportPresentationArtifacts are applied here too, not just
+  // upstream where reportData/fields were built, so a saved conversation
+  // reopened later never shows the un-sanitized markdown either.
   const sections = fields
+    .filter((entry) => isUniversalCustomerFacingSection(entry))
     .map(({ field, title: sectionTitle }) => {
-      const content = sanitizeReportFieldContent(field, reportData[field] || "");
+      const content = stripReportPresentationArtifacts(
+        sanitizeReportFieldContent(field, reportData[field] || "")
+      );
 
       return content ? `### ${sectionTitle}\n${content}` : "";
     })
@@ -4931,14 +4944,24 @@ const ReportPanel = memo(function ReportPanel({
   const sections = useMemo<ReportSection[]>(() => {
     if (reportData) {
       return dedupeReportSections(
-        reportFields.map(({ field, title, icon }) => ({
-          field,
-          title,
-          icon,
-          content:
-            sanitizeReportFieldContent(field, reportData[field] || "") ||
-            waitingMessage,
-        }))
+        reportFields
+          .filter((entry) => isUniversalCustomerFacingSection(entry))
+          .map(({ field, title, icon }) => ({
+            field,
+            title,
+            icon,
+            content:
+              // stripReportPresentationArtifacts runs last -- a final
+              // defensive pass at the actual render boundary, on top of
+              // (not instead of) sanitizeReportFieldContent's own,
+              // unrelated diagnostic-routing cleanup, so this panel
+              // renders clean output even if some future caller ever
+              // passes reportData/reportFields in from a path that
+              // doesn't already filter/sanitize upstream.
+              stripReportPresentationArtifacts(
+                sanitizeReportFieldContent(field, reportData[field] || "")
+              ) || waitingMessage,
+          }))
       );
     }
 
@@ -8996,14 +9019,34 @@ export default function Planner({
         }
       }
 
+      // CRITICAL FIX -- find why report sanitization is not reaching
+      // production output. Root cause: this LIVE, immediately-post-
+      // generation report view (reportOutput / setPlanReport /
+      // getReportMarkdown below, rendered through ReportPanel and
+      // persisted into the chat message) reads directly from the
+      // worker's persisted sections and was never routed through the
+      // sanitizer at all -- report-utils.ts's normalizeReport (and its
+      // sanitizeReportSectionsForPresentation call) only runs when a
+      // SAVED report is later reloaded via loadUserReport, an entirely
+      // different code path a user only reaches by navigating away and
+      // back. A user saw the raw, unsanitized report the moment
+      // generation finished, in the same session, before that ever
+      // happened. Filtered here, before the extraction loop (not after),
+      // so completedFields/hasCompletePayload below are computed against
+      // the same, already-excluded field list -- excluding a field after
+      // counting it complete would make hasCompletePayload false and the
+      // whole report throw as incomplete.
+      outputFields = outputFields.filter((entry) => isUniversalCustomerFacingSection(entry));
+
       for (const { field, title } of outputFields) {
         const persistedSection = persistedSections.find(
           (section) => section.field === field || section.title === title
         );
-        const content =
+        const content = stripReportPresentationArtifacts(
           typeof persistedSection?.content === "string"
             ? persistedSection.content.trim()
-            : "";
+            : ""
+        );
 
         if (!content) {
           continue;
@@ -9194,15 +9237,17 @@ export default function Planner({
         });
   const activeReportFields = useMemo(
     () =>
-      (activeReportMode === "plan"
-        ? localizeReportFields(
-            getPlanFieldsForDomain(
-              activePlanReportDomain,
-              lastRequest?.prompt || prompt
-            ),
-            activeReportLanguage
-          )
-        : localizeReportFields(reportFields, activeReportLanguage)) as Array<{
+      (
+        activeReportMode === "plan"
+          ? localizeReportFields(
+              getPlanFieldsForDomain(
+                activePlanReportDomain,
+                lastRequest?.prompt || prompt
+              ),
+              activeReportLanguage
+            )
+          : localizeReportFields(reportFields, activeReportLanguage)
+      ).filter((entry) => isUniversalCustomerFacingSection(entry)) as Array<{
         field: keyof (MarketReport & PlanReport);
         title: string;
         icon: LucideIcon;
