@@ -5,6 +5,7 @@ import {
   type ReportMetadata,
 } from "@/app/lib/report-investment-score";
 import { dedupeReportSections } from "@/app/lib/report-section-normalization";
+import { sanitizeAcquisitionReportSections } from "@/app/lib/report-engine/acquisition-presentation";
 
 export type DashboardReport = {
   id: string;
@@ -380,7 +381,19 @@ export function normalizeReport(row: ReportRow): DashboardReport {
           : reportType === "Strategic Report"
             ? "Strategic Decision Report"
             : "Business Plan Report";
-  const sections = normalizeSections(row);
+  // CRITICAL FIX -- remove internal evidence/reasoning-pipeline leakage
+  // from the customer-facing acquisition report (External Evidence/
+  // Sources sections, [R#]/evidence-registry citation tags, publisher and
+  // URL lists, leaked decision-intelligence metadata). Applied once, here,
+  // regardless of which branch of normalizeSections produced the rows, so
+  // both the dashboard viewer and the PDF button (which both read this
+  // same normalized report) inherit the fix from a single source. Never
+  // changes generation, routing, or the stored row itself -- presentation
+  // only, per the fix's own scope.
+  const sections =
+    reportType === "Acquisition Due Diligence Report"
+      ? sanitizeAcquisitionReportSections(normalizeSections(row))
+      : normalizeSections(row);
   const investmentScore = readReportInvestmentScore(row.metadata);
   const rowStatus = readString(row, ["status", "state"], "completed");
   const failedReport = rowStatus.toLowerCase() !== "completed";

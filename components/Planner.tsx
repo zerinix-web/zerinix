@@ -182,6 +182,7 @@ import {
 } from "@/app/lib/report-engine/prompts/acquisition-analysis";
 import { planFieldLabels } from "@/app/lib/report-engine/prompts/plan";
 import { marketFieldLabels } from "@/app/lib/report-engine/prompts/market";
+import { inferReportDomainFromFieldNames } from "@/app/lib/report-engine/domain-inference";
 import {
   useAttachments,
   type PlannerAttachment,
@@ -8607,7 +8608,12 @@ export default function Planner({
       expertiseDomain: reportReadiness?.expertiseProfile.domain,
     });
     const baseDomainFields = getPlanFieldsForDomain(reportDomain);
-    const outputFields = localizeReportFields(
+    // CRITICAL FIX -- dual report generation / mismatched report
+    // identity. Both are reassigned once, and only once, if the worker's
+    // persisted report turns out to be a different domain than this
+    // pre-fetch guess -- see the self-correction block right before
+    // persistedSections is read, below.
+    let outputFields = localizeReportFields(
       requestedMode === "market"
         ? reportFields
         : reportDomain === "operations"
@@ -8615,7 +8621,7 @@ export default function Planner({
           : baseDomainFields,
       reportLanguage
     );
-    const reportTitle =
+    let reportTitle =
       requestedMode === "market"
         ? copy.marketTitle
         : reportDomain === "real_estate"
@@ -8941,6 +8947,54 @@ export default function Planner({
             content?: string;
           }>)
         : [];
+
+      // CRITICAL FIX -- dual report generation / mismatched report
+      // identity. reportDomain/outputFields/reportTitle above are a
+      // CLIENT-SIDE guess made before the worker ever ran; in "chat" mode
+      // that guess depends on the LLM-based /api/understanding call's
+      // expertiseProfile.domain, which can disagree with the domain the
+      // worker actually generated under (worker.ts's own inferDomain is
+      // authoritative there -- it reads the report generator's own
+      // reportDomain stream event). Every report schema in this codebase
+      // deliberately shares zero field names with any other, so when the
+      // guess is wrong, none of outputFields will ever match a persisted
+      // section -- self-correct from the persisted sections' own field
+      // names (the same distinguishing-field technique worker.ts's
+      // inferDomain already uses) before reading them, rather than
+      // rendering the wrong title over content it can't parse or failing
+      // outright with an incomplete-payload error.
+      if (requestedMode !== "market") {
+        const persistedFieldNames = persistedSections
+          .map((section) => section.field)
+          .filter((field): field is string => Boolean(field));
+        const clientGuessMatchesPersistedReport = outputFields.some(({ field }) =>
+          persistedFieldNames.includes(field)
+        );
+
+        if (!clientGuessMatchesPersistedReport && persistedFieldNames.length > 0) {
+          const correctedDomain = inferReportDomainFromFieldNames(persistedFieldNames);
+
+          if (correctedDomain !== reportDomain) {
+            console.warn("[planner] corrected report domain from persisted sections", {
+              reportRequestId,
+              guessedDomain: reportDomain,
+              correctedDomain,
+            });
+            outputFields = localizeReportFields(
+              getPlanFieldsForDomain(correctedDomain, submittedPrompt),
+              reportLanguage
+            );
+            reportTitle =
+              correctedDomain === "real_estate"
+                ? copy.realEstateTitle
+                : correctedDomain === "acquisition"
+                ? getAcquisitionReportTitle(reportLanguage)
+                : isSpecializedReportDomain(correctedDomain)
+                  ? getSpecializedReportTitle(correctedDomain, reportLanguage)
+                  : copy.planTitle;
+          }
+        }
+      }
 
       for (const { field, title } of outputFields) {
         const persistedSection = persistedSections.find(
