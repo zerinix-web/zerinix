@@ -259,7 +259,36 @@ function extractDecision(content: string, isTurkish = false) {
     "Tavsiye",
     "Final decision",
     "Nihai karar",
+    "Executive recommendation",
+    "Yönetici tavsiyesi",
   ]);
+
+  // CRITICAL FIX -- Acquisition Due Diligence reports state their own
+  // three-tier executive call (Proceed with Conditions / Pause with
+  // Reasons / Reject) instead of the Business Plan GO/WAIT/NO-GO
+  // vocabulary the scan below recognizes. Confirmed live: neither
+  // "Proceed" nor "Pause" matches any keyword below, so every acquisition
+  // report fell through to the hardcoded "WAIT" default regardless of
+  // what its own Final Investment Recommendation actually said -- exactly
+  // the "overly conservative generic signal" this fix removes. Checked
+  // first (the two multi-word phrases are distinctive enough to scan the
+  // whole content safely, unlike a bare "Proceed"/"Pause" which could be
+  // an ordinary English word elsewhere in the report) and returned
+  // verbatim, never collapsed into WAIT.
+  const acquisitionMatch =
+    (labeled && labeled.match(/\b(Proceed with Conditions|Pause with Reasons)\b/i)) ||
+    content.match(/\b(Proceed with Conditions|Pause with Reasons)\b/i);
+
+  if (acquisitionMatch) {
+    return acquisitionMatch[1].toLowerCase() === "proceed with conditions"
+      ? isTurkish
+        ? "KOŞULLU İLERLE"
+        : "PROCEED WITH CONDITIONS"
+      : isTurkish
+        ? "GEREKÇELİ DURAKLAT"
+        : "PAUSE WITH REASONS";
+  }
+
   // Recommendation's own labeled span is often just next-step bullets, not
   // a restatement of the verdict (the executiveSummary prompt puts the
   // actual PASS/HOLD/VALIDATE/REJECT keyword in a separate "Bottom Line"
@@ -282,28 +311,146 @@ function extractDecision(content: string, isTurkish = false) {
     return "GO";
   }
   if (value === "REJECT") {
-    return "NO-GO";
+    // Shown verbatim, matching the acquisition report's own vocabulary
+    // (Proceed with Conditions / Pause with Reasons / Reject), rather
+    // than collapsed into the Business Plan "NO-GO" token -- the model's
+    // own stated word is more transparent than a forced remap.
+    return isTurkish ? "REDDET" : "REJECT";
   }
 
   return value;
 }
 
-function extractConfidenceValue(content: string, isTurkish = false) {
-  const labeled = extractLabelValue(content, [
-    "Decision Confidence",
-    "Confidence",
-    "Karar Güveni",
-    "Güven",
-  ]);
-  const match = (labeled || content).match(/\b(\d{1,3})\s*%/);
+// CRITICAL FIX -- upgrade Executive Decision Center output. Confirmed
+// live: an unlabeled confidence scan against the *entire* report (any
+// report with real dollar-denominated deal facts -- financing splits,
+// EV/ARR-adjacent percentages -- has several legitimate, unrelated "N%"
+// figures in it) was picking up the first bare percentage anywhere in the
+// document and displaying it as "the" confidence score, regardless of
+// whether it had anything to do with confidence at all -- e.g. a 5%
+// figure from an unrelated sentence rendered as "Confidence: 5%" next to
+// a report that never stated a confidence level. Requiring the match to
+// sit within a short window of the word "confidence" itself (covering the
+// common "Decision: GO (Confidence: 72%)" mid-line shape) keeps every
+// genuine confidence figure working exactly as before while refusing to
+// fabricate one from an unrelated percentage.
+function findNearbyLabeledPercent(content: string, labels: string[]) {
+  const labelAlternation = labels
+    .map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  const match = content.match(
+    new RegExp(`\\b(?:${labelAlternation})\\b[^%\\n]{0,20}?(\\d{1,3})\\s*%`, "i")
+  );
 
-  return match
-    ? `${Math.min(100, Number(match[1]))}%`
-    : labeled || (isTurkish ? "Kanıt düzeyi açıklanmalı" : "Needs evidence review");
+  return match ? Math.max(0, Math.min(100, Number(match[1]))) : null;
 }
 
-function extractPercentScore(content: string, labels: string[]) {
+// Domain-neutral proxy for "available inputs / missing inputs / analysis
+// completeness" (the exact three signals the Confidence Score and
+// Financial Quality cards are meant to reflect): counts concrete
+// dollar-denominated figures already stated in the report against
+// explicit gap phrases ("not yet verified", "still pending", etc.) --
+// never a new financial calculation, purely a presence/absence read of
+// text the report already contains.
+function assessInputCompleteness(content: string): "high" | "moderate" | "limited" {
+  const concreteFigureCount = (
+    content.match(/\$\d[\d,.]*\s*(?:k|m|bn|thousand|million|billion)?\b/gi) || []
+  ).length;
+  const gapPhraseCount = (
+    content.match(
+      /\b(?:not yet verified|not yet provided|not yet available|still (?:missing|pending|needed|awaiting)|cannot be (?:determined|calculated|fully determined)|has not been verified)\b/gi
+    ) || []
+  ).length;
+
+  if (concreteFigureCount >= 3 && gapPhraseCount <= 2) {
+    return "high";
+  }
+  if (concreteFigureCount >= 1) {
+    return "moderate";
+  }
+
+  return "limited";
+}
+
+function buildConfidenceCompletenessFallback(content: string, isTurkish: boolean) {
+  const completeness = assessInputCompleteness(content);
+
+  if (completeness === "high") {
+    return isTurkish
+      ? "Orta-Yüksek -- temel rakamlar mevcut, tam doğrulama sürüyor"
+      : "Moderate-to-High -- key figures are available, full verification is still in progress";
+  }
+  if (completeness === "moderate") {
+    return isTurkish
+      ? "Sınırlı -- bazı rakamlar mevcut, önemli girdiler hâlâ eksik"
+      : "Limited -- some figures are available, key inputs are still missing";
+  }
+
+  return isTurkish
+    ? "Erken Aşama -- temel girdiler henüz sağlanmadı"
+    : "Early-Stage -- core inputs have not yet been provided";
+}
+
+// CRITICAL FIX -- upgrade Executive Decision Center output. "Validation
+// Required" was a blanket default for every report whose text never
+// literally contains a "Financial Quality:" labeled line (true of every
+// Acquisition Due Diligence report, which has no such field) -- the same
+// completeness signal used for the Confidence Score fallback above gives
+// a genuinely useful executive read instead of one static, generic phrase
+// for every report regardless of how much financial detail it actually
+// contains.
+function buildFinancialQualityFallback(content: string, isTurkish: boolean) {
+  const completeness = assessInputCompleteness(content);
+
+  if (completeness === "high") {
+    return isTurkish
+      ? "Ön Değerlendirme -- Tam Denetim Sürüyor"
+      : "Preliminary -- Full Audit In Progress";
+  }
+  if (completeness === "moderate") {
+    return isTurkish
+      ? "Kısmi -- Ek Mali Bilgi Gerekli"
+      : "Partial -- Additional Financials Needed";
+  }
+
+  return isTurkish
+    ? "Erken Aşama -- Mali Tablolar Bekleniyor"
+    : "Early-Stage -- Financial Statements Pending";
+}
+
+function extractConfidenceValue(content: string, isTurkish = false) {
+  const labels = ["Decision Confidence", "Confidence", "Karar Güveni", "Güven"];
   const labeled = extractLabelValue(content, labels);
+  const labeledMatch = labeled.match(/\b(\d{1,3})\s*%/);
+
+  if (labeledMatch) {
+    return `${Math.min(100, Number(labeledMatch[1]))}%`;
+  }
+
+  const nearbyScore = findNearbyLabeledPercent(content, labels);
+  if (nearbyScore !== null) {
+    return `${nearbyScore}%`;
+  }
+
+  return labeled || buildConfidenceCompletenessFallback(content, isTurkish);
+}
+
+function extractPercentScore(
+  content: string,
+  labels: string[],
+  options: { requireNearbyLabelWord?: boolean } = {}
+) {
+  const labeled = extractLabelValue(content, labels);
+
+  if (labeled) {
+    const match = labeled.match(/\b(\d{1,3})\s*(?:%|\/\s*100)?\b/);
+    return match ? Math.max(0, Math.min(100, Number(match[1]))) : null;
+  }
+
+  if (options.requireNearbyLabelWord) {
+    return findNearbyLabeledPercent(content, labels);
+  }
+
   // A bare number is only safe to trust within the labeled span itself
   // (e.g. "Founder Score: 72" with no "%"). Falling back to the same bare
   // match against the *entire* report when no label is found at all (true
@@ -312,9 +459,7 @@ function extractPercentScore(content: string, labels: string[]) {
   // text -- e.g. the "5" in "$5.9B" market size -- and displays it as a
   // fabricated score. Require an explicit "%"/"/100" suffix for that
   // unlabeled fallback so it can't misfire on an arbitrary figure.
-  const match = labeled
-    ? labeled.match(/\b(\d{1,3})\s*(?:%|\/\s*100)?\b/)
-    : content.match(/\b(\d{1,3})\s*(?:%|\/\s*100)\b/);
+  const match = content.match(/\b(\d{1,3})\s*(?:%|\/\s*100)\b/);
 
   if (!match) {
     return null;
@@ -657,6 +802,22 @@ function buildConfidenceRadar(
   }));
 }
 
+// CRITICAL FIX -- upgrade Executive Decision Center output. Confirmed
+// live: plain substring .includes() let the "action" keyword match
+// inside the word "Transaction" -- so an Acquisition Due Diligence
+// report's very first paragraph ("Transaction overview: ...") always
+// won the Next Action slot ahead of any real action-shaped sentence
+// later in the report, regardless of keyword relevance. Unicode-aware
+// word-boundary matching (via lookaround, so it works for Turkish
+// letters too, unlike ASCII \b) fixes this generically for every report
+// type and every keyword, not just this one collision -- a keyword can
+// still match as part of a longer PHRASE ("further review is
+// recommended"), just never as a fragment inside an unrelated word.
+function containsKeyword(text: string, keyword: string): boolean {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "iu").test(text);
+}
+
 function collectBullets(content: string, keywords: string[], fallback: string[]) {
   const lines = normalizeReportPresentationText(content)
     .split("\n")
@@ -664,10 +825,10 @@ function collectBullets(content: string, keywords: string[], fallback: string[])
     .filter((line) => line.length > 18);
 
   const matches = lines.filter((line) =>
-    keywords.some((keyword) => line.toLowerCase().includes(keyword.toLowerCase()))
+    keywords.some((keyword) => containsKeyword(line, keyword))
   );
   const sentences = splitSentences(content).filter((sentence) =>
-    keywords.some((keyword) => sentence.toLowerCase().includes(keyword.toLowerCase()))
+    keywords.some((keyword) => containsKeyword(sentence, keyword))
   );
 
   return [...matches, ...sentences, ...fallback]
@@ -698,12 +859,11 @@ export function buildExecutiveSnapshot(
   const confidenceScore =
     typeof investmentScore?.confidence === "number"
       ? investmentScore.confidence
-      : extractPercentScore(normalized, [
-          "Decision Confidence",
-          "Confidence",
-          "Karar Güveni",
-          "Güven",
-        ]);
+      : extractPercentScore(
+          normalized,
+          ["Decision Confidence", "Confidence", "Karar Güveni", "Güven"],
+          { requireNearbyLabelWord: true }
+        );
   const founderScoreValue =
     readFounderScoreValue(investmentScore) ??
     extractPercentScore(normalized, [
@@ -716,14 +876,37 @@ export function buildExecutiveSnapshot(
     ]);
   const riskBullets = collectBullets(
     normalized,
-    ["risk", "validation", "doğrulama", "uncertain", "belirsiz", "cac", "funding", "sermaye"],
+    // CRITICAL FIX -- upgrade Executive Decision Center output. The
+    // original keyword set was Business-Plan-shaped (validation/CAC/
+    // funding) and recognized none of an acquisition report's own risk
+    // vocabulary, so Main Risk always fell through to a generic
+    // startup-flavored fallback for every acquisition report regardless
+    // of what its real Integration Risks/Deal Risks sections said.
+    // Additive only -- every keyword already recognized keeps matching
+    // exactly as before for every other report type.
+    [
+      "risk", "validation", "doğrulama", "uncertain", "belirsiz", "cac", "funding", "sermaye",
+      "integration", "entegrasyon", "leverage", "kaldıraç", "retention risk", "elde tutma riski",
+      "financial verification", "mali doğrulama", "security architecture", "güvenlik mimarisi",
+      "customer concentration", "müşteri yoğunlaşması",
+    ],
     isTurkish
       ? ["Ana riskler doğrulama, müşteri edinimi ve sermaye verimliliği etrafında yoğunlaşır."]
       : ["The main risks sit around validation, acquisition, and capital efficiency."]
   );
   const actionBullets = collectBullets(
     normalized,
-    ["next", "action", "validate", "doğrula", "test", "interview", "pilot", "roadmap", "yol haritası"],
+    // Same fix, for Next Action: the original keywords were startup-
+    // validation language ("validate", "test", "pilot") that never
+    // matches an acquisition report's own due-diligence action phrasing
+    // ("Further review is recommended for...", "Management should
+    // validate... before...", "...before closing"). Additive only.
+    [
+      "next", "action", "validate", "doğrula", "test", "interview", "pilot", "roadmap", "yol haritası",
+      "further review is recommended", "further review", "management should validate",
+      "management should review", "before final approval", "security assessment",
+      "güvenlik değerlendirmesi",
+    ],
     isTurkish
       ? ["Öncelik, kritik varsayımları küçük ve ölçülebilir deneylerle doğrulamaktır."]
       : ["The priority is to validate critical assumptions through small measurable tests."]
@@ -731,6 +914,16 @@ export function buildExecutiveSnapshot(
   const normalizedRiskBullets = riskBullets.map((risk) =>
     normalizeExecutiveRiskPresentation(risk, isTurkish)
   );
+  // Acquisition Due Diligence's Executive Summary always ends with a
+  // labeled "Conditions before closing" part naming the specific items
+  // still to review -- a far more reliable Next Action than a keyword
+  // scan across the whole summary, which can just as easily land on an
+  // earlier, less specific "management should validate..." aside inside
+  // the Main opportunity paragraph.
+  const conditionsBeforeClosing = extractLabelValue(normalized, [
+    "Conditions before closing",
+    "Kapanıştan önce koşullar",
+  ]);
 
   return {
     // Read the same deterministic "Decision: GO (Confidence: 72%)" line
@@ -757,7 +950,7 @@ export function buildExecutiveSnapshot(
       extractQuality(
         normalized,
         ["Financial Quality", "Financial Quality:", "Finansal Kalite"],
-        isTurkish ? "Doğrulama Gerekli" : "Validation Required"
+        buildFinancialQualityFallback(normalized, isTurkish)
       ),
       isTurkish
     ),
@@ -772,7 +965,7 @@ export function buildExecutiveSnapshot(
       investmentScore?.topRisks?.[0] || normalizedRiskBullets[0],
       isTurkish
     ),
-    nextAction: investmentScore?.nextCriticalAction || actionBullets[0],
+    nextAction: investmentScore?.nextCriticalAction || conditionsBeforeClosing || actionBullets[0],
     riskLevel: inferRiskLevel(normalized, ["risk", "validation", "cac", "funding", "execution", "rekabet", "sermaye"]),
     riskHeatmap: buildRiskHeatmap(normalized, isTurkish),
     confidenceRadar: buildConfidenceRadar(normalized, investmentScore, isTurkish),

@@ -63,13 +63,23 @@ test("extractDecision falls back to the whole field's content for the decision k
   );
 });
 
+// NOTE: superseded by the "upgrade Executive Decision Center output" turn
+// -- extractPercentScore was restructured from a single ternary into
+// separate branches (labeled / requireNearbyLabelWord / unlabeled) to add
+// a third, stricter unlabeled mode for Confidence specifically (an
+// acquisition report's many legitimate percentages -- debt share, equity
+// share -- made the old plain "any %/100 in the whole document" fallback
+// misfire). The original guarantee this test checks -- the bare, fully
+// unlabeled fallback still requires an explicit "%"/"/100" suffix, so it
+// can never fabricate a score from an arbitrary number -- still holds,
+// just in the function's final branch now instead of a ternary's else arm.
 test("extractPercentScore requires an explicit %/100 suffix for its unlabeled full-content fallback, so it can't fabricate a score from an unrelated bare number", () => {
   const match = presentationSource.match(/function extractPercentScore\([\s\S]*?\n}\n/);
   assert.ok(match, "extractPercentScore function not found");
-  assert.match(match[0], /labeled\s*\n?\s*\?\s*labeled\.match/);
-  // The unlabeled (content) branch's suffix group must be mandatory, i.e.
-  // not end in the `?` that made it optional before this fix.
-  assert.match(match[0], /:\s*content\.match\(\/\\b\(\\d\{1,3\}\)\\s\*\(\?:%\|\\\/\\s\*100\)\\b\/\)/);
+  assert.match(match[0], /if \(labeled\) \{/);
+  // The final, fully-unlabeled branch's suffix group must be mandatory,
+  // i.e. not end in the `?` that made it optional before the original fix.
+  assert.match(match[0], /const match = content\.match\(\/\\b\(\\d\{1,3\}\)\\s\*\(\?:%\|\\\/\\s\*100\)\\b\/\);/);
 });
 
 // --- pdf-normalization.mjs: Turkish Lira glyph substitution -------------
