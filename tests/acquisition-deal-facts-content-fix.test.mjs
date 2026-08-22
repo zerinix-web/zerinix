@@ -283,21 +283,29 @@ test("buildAcquisitionAnalysisInstructions requires substantive, deal-specific a
   );
 });
 
+// NOTE: superseded by the "improve acquisition analysis depth" turn --
+// the required 30/60/90-day milestones were explicitly redefined (30
+// days: financial validation, customer contract review, security
+// assessment, employee retention plan; 60 days: technology integration,
+// operating-model alignment, customer strategy; 90 days: synergy
+// tracking, unified roadmap, KPI review), replacing the earlier
+// "legal and financial close"/"security architecture audit"/
+// "retention-risk mapping" phrasing.
 test("postMergerIntegrationPlan prompt requires a real, deal-specific 30\\/60\\/90-day plan with the requested milestones (drift check)", () => {
   const fnMatch = /postMergerIntegrationPlan:\s*\n?\s*"([\s\S]*?)",\n/.exec(acquisitionAnalysisSource);
   assert.ok(fnMatch, "postMergerIntegrationPlan prompt not found");
   const prompt = fnMatch[1];
 
-  assert.match(prompt, /legal and financial close/i);
-  assert.match(prompt, /customer and contract review/i);
-  assert.match(prompt, /security architecture audit/i);
-  assert.match(prompt, /retention-risk mapping/i);
-  assert.match(prompt, /product and infrastructure integration/i);
-  assert.match(prompt, /cross-sell planning/i);
-  assert.match(prompt, /org design/i);
-  assert.match(prompt, /go-to-market/i);
-  assert.match(prompt, /KPI tracking/i);
-  assert.match(prompt, /synergy realization/i);
+  assert.match(prompt, /financial validation/i);
+  assert.match(prompt, /customer contract review/i);
+  assert.match(prompt, /security assessment/i);
+  assert.match(prompt, /employee retention plan/i);
+  assert.match(prompt, /technology integration/i);
+  assert.match(prompt, /operating-model alignment/i);
+  assert.match(prompt, /customer strategy/i);
+  assert.match(prompt, /synergy tracking/i);
+  assert.match(prompt, /unified go-to-market roadmap/i);
+  assert.match(prompt, /KPI review/i);
   assert.match(prompt, /never a generic template/i);
 });
 
