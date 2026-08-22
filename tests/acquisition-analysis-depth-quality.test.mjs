@@ -72,6 +72,12 @@ test("executiveAcquisitionSummary requires the five-part structure: transaction 
   assert.doesNotMatch(prompt, /generic hold\/wait placeholder$/);
 });
 
+test("executiveAcquisitionSummary explicitly forbids outputting only the bare verdict word 'Wait' (or 'Proceed'/'Reject') as this field's entire content", () => {
+  const prompt = acquisitionAnalysisPrompts.executiveAcquisitionSummary;
+  assert.match(prompt, /Never output only the single word 'Wait'/);
+  assert.match(prompt, /'Proceed' or 'Reject'/);
+});
+
 // --- 2. Strategic Fit -------------------------------------------------------
 
 test("strategicFit forbids the bare 'Additional information is needed' placeholder and requires Known facts / Derived insights / Assumptions separation", () => {
@@ -151,6 +157,7 @@ test("integrationRisks requires real analysis across technology integration, cus
   assert.match(prompt, /customer retention/i);
   assert.match(prompt, /employee retention/i);
   assert.match(prompt, /security architecture/i);
+  assert.match(prompt, /security operations/i);
   assert.match(prompt, /operational alignment/i);
   assert.match(prompt, /never a generic risk list/i);
 });
@@ -194,6 +201,11 @@ test("buildAcquisitionAnalysisInstructions forbids 'More evidence required' / 'A
   assert.match(instructions, /Further review is recommended for/);
   assert.match(instructions, /Management should validate/);
   assert.match(instructions, /naming the exact item/i);
+});
+
+test("buildAcquisitionAnalysisInstructions bans 'Additional information is needed' globally (every field, not only the ones that already name it locally)", () => {
+  assert.match(instructions, /'Additional information is needed'/);
+  assert.match(instructions, /applies to every field, not only the ones that name the phrase explicitly/i);
 });
 
 // --- 11. Combined coverage: every required content area is present ----------
