@@ -172,6 +172,23 @@ const supportedStrategicDomains = new Set<ReportDomain>([
  * unconditionally return "business", the same way "market" already did,
  * so this class of misrouting is structurally impossible regardless of
  * what any upstream classifier -- current or future -- infers.
+ *
+ * "acquisition" is a deliberate, explicit exception to that boundary under
+ * "plan" specifically (confirmed product decision, not a routing bug):
+ * there is no dedicated M&A/acquisition-due-diligence product card, so a
+ * real user evaluating an acquisition most naturally clicks the first,
+ * most prominent card -- "Business Idea Validation" -- since nothing
+ * about the three visible options signals which one fits "should I buy
+ * this company." Unlike real_estate/legal/finance/etc above, this is not
+ * "an upstream misclassification of an otherwise-ambiguous prompt" -- an
+ * acquisition/M&A prompt is never ambiguous with a genuine business-idea
+ * request (acquisitionSignals in this file requires an unambiguous,
+ * compound M&A phrase, never a bare generic word), so honoring it here
+ * cannot misroute a real Business Idea Validation request. "market" is
+ * deliberately NOT given the same exception: Market Intelligence is
+ * market research, not a decision-analysis report, and its own pipeline
+ * (executeMarketAnalysisRequest) never consults this function's return
+ * value for routing in the first place.
  */
 export function resolveReportDomainForSelectedMode({
   selectedMode,
@@ -182,7 +199,11 @@ export function resolveReportDomainForSelectedMode({
   inferredDomain: ReportDomain;
   expertiseDomain?: unknown;
 }): ReportDomain {
-  if (selectedMode === "plan" || selectedMode === "market") {
+  if (selectedMode === "plan") {
+    return inferredDomain === "acquisition" ? "acquisition" : "business";
+  }
+
+  if (selectedMode === "market") {
     return "business";
   }
 

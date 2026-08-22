@@ -104,10 +104,21 @@ test("expertise-profile.ts's realEstateSignals regex no longer lists office buil
   );
 });
 
-test("resolveReportDomainForSelectedMode unconditionally returns business for plan/market modes (drift check)", () => {
+test("resolveReportDomainForSelectedMode unconditionally returns business for real_estate/legal/finance/etc under plan/market modes, with a single deliberate exception for acquisition under plan (drift check)", () => {
+  // "market" is still an unconditional return -- unaffected by the
+  // acquisition exception, which is scoped to "plan" only (confirmed
+  // product decision: Market Intelligence never consults this function's
+  // return value for routing in the first place, since its own pipeline
+  // short-circuits before reportDomain-based branching runs).
   assert.match(
     domainSource,
-    /if \(selectedMode === "plan" \|\| selectedMode === "market"\) \{\s*return "business";\s*\}/
+    /if \(selectedMode === "market"\) \{\s*return "business";\s*\}/
+  );
+  // "plan" now has exactly one named exception (acquisition); every other
+  // inferredDomain value still unconditionally resolves to "business".
+  assert.match(
+    domainSource,
+    /if \(selectedMode === "plan"\) \{\s*return inferredDomain === "acquisition" \? "acquisition" : "business";\s*\}/
   );
   assert.doesNotMatch(domainSource, /hasRealEstateDomain/);
 });

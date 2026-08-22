@@ -2662,7 +2662,7 @@ export function buildStandardReportPdf({
       const isMarketIntelligenceReport = isMarketIntelligenceDashboardReport(report);
       const isAcquisitionReport =
         report.type === "Acquisition Due Diligence Report" ||
-        report.sections.some((section) => section.field === "purchasePriceFairness");
+        report.sections.some((section) => section.field === "valuationAnalysis");
       const businessIdea = isLegalReport
         ? normalizePdfText(report.prompt).slice(0, 220)
         : deriveBusinessDescriptionFromSections(report, pdfSections);
@@ -3102,11 +3102,11 @@ export function buildStandardReportPdf({
             ]
           : isAcquisitionReport
           ? [
-              [localizePdfPresentationLabel("Valuation", pdfLocale), pdfSections.find((section) => section.field === "valuation")?.content || "Not verified"],
-              [localizePdfPresentationLabel("Purchase Price Fairness", pdfLocale), pdfSections.find((section) => section.field === "purchasePriceFairness")?.content || "Not verified"],
+              [localizePdfPresentationLabel("Valuation", pdfLocale), pdfSections.find((section) => section.field === "valuationAnalysis")?.content || "Not verified"],
+              [localizePdfPresentationLabel("Strategic Fit", pdfLocale), pdfSections.find((section) => section.field === "strategicFit")?.content || "Not verified"],
               [localizePdfPresentationLabel("Financing Structure", pdfLocale), pdfSections.find((section) => section.field === "financingStructure")?.content || "Not verified"],
-              [localizePdfPresentationLabel("Synergies", pdfLocale), pdfSections.find((section) => section.field === "synergies")?.content || "Not verified"],
-              [localizePdfPresentationLabel("Integration Risk", pdfLocale), pdfSections.find((section) => section.field === "integrationRisk")?.content || "Not verified"],
+              [localizePdfPresentationLabel("Revenue Synergies", pdfLocale), pdfSections.find((section) => section.field === "revenueSynergies")?.content || "Not verified"],
+              [localizePdfPresentationLabel("Integration Risks", pdfLocale), pdfSections.find((section) => section.field === "integrationRisks")?.content || "Not verified"],
               [localizePdfPresentationLabel("Deal Risks", pdfLocale), pdfSections.find((section) => section.field === "dealRisks")?.content || "Not verified"],
             ]
           : [
@@ -3638,12 +3638,14 @@ export function buildStandardReportPdf({
           normalizedTitle.includes("founder readiness") ||
           normalizedTitle.includes("kurucu skoru") ||
           normalizedTitle.includes("kurucu hazırlık");
-        // "ROI / IRR Scenarios" (Acquisition Due Diligence's own field,
-        // roiIrrScenarios) also matches the bare "scenario" substring but
-        // must never render the Business-Plan Worst/Base/Best widget
-        // below (see the matching exclusion in app/dashboard/[id]/page.tsx).
+        // Acquisition Due Diligence's own ROI Analysis / IRR Analysis
+        // fields (roiAnalysis, irrAnalysis) must never render the
+        // Business-Plan Worst/Base/Best widget below, even defensively
+        // against a title that happens to contain "scenario" (see the
+        // matching exclusion in app/dashboard/[id]/page.tsx).
         const isScenarioSection =
-          field !== "roiIrrScenarios" &&
+          field !== "roiAnalysis" &&
+          field !== "irrAnalysis" &&
           (field === "scenarioAnalysis" || normalizedTitle.includes("scenario") || normalizedTitle.includes("senaryo"));
         const isPorterSection = normalizedTitle.includes("porter");
         const isKpiSection = field === "kpiDashboard" || field === "kpis" || normalizedTitle.includes("kpi");
@@ -3974,12 +3976,13 @@ export function buildStandardReportPdf({
           return headerHeight + Math.max(1, rows.length) * rowHeight + 4;
         }
 
-        // Acquisition Due Diligence's own postMergerRoadmap field also
-        // matches "roadmap" but must never draw the fixed Business-Plan
-        // founder timeline (Tomorrow/This Week/30 Days/90 Days/180 Days/
-        // 12 Months) below -- see the matching exclusion in
+        // Acquisition Due Diligence's own postMergerIntegrationPlan field
+        // must never draw the fixed Business-Plan founder timeline
+        // (Tomorrow/This Week/30 Days/90 Days/180 Days/12 Months) below,
+        // even defensively against a title that happens to contain
+        // "roadmap" -- see the matching exclusion in
         // app/dashboard/[id]/page.tsx.
-        if (field !== "postMergerRoadmap" && normalizedTitle.includes("roadmap")) {
+        if (field !== "postMergerIntegrationPlan" && normalizedTitle.includes("roadmap")) {
           const stepWidth = (bodyWidth - 10) / 6;
           founderRoadmapSteps.forEach((step, index) => {
             const x = bodyX + index * (stepWidth + 2);
@@ -4279,7 +4282,11 @@ export function buildStandardReportPdf({
           return getTamVisualHeight();
         }
 
-        if (section.field !== "roiIrrScenarios" && normalizedTitle.includes("scenario")) {
+        if (
+          section.field !== "roiAnalysis" &&
+          section.field !== "irrAnalysis" &&
+          normalizedTitle.includes("scenario")
+        ) {
           return 26;
         }
 
@@ -4288,7 +4295,7 @@ export function buildStandardReportPdf({
           return 8 + Math.max(1, rows.length) * 15 + 4;
         }
 
-        if (section.field !== "postMergerRoadmap" && normalizedTitle.includes("roadmap")) {
+        if (section.field !== "postMergerIntegrationPlan" && normalizedTitle.includes("roadmap")) {
           return 31;
         }
 

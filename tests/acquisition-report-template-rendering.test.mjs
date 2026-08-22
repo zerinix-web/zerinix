@@ -196,19 +196,23 @@ test("report-utils.ts: DashboardReport/MobileReportType both include 'Acquisitio
 
 test("report-utils.ts: sectionLabels includes every acquisition-specific field name", () => {
   for (const field of [
-    "targetCompanyFacts",
-    "acquisitionAttractiveness",
-    "valuation",
-    "purchasePriceFairness",
+    "executiveAcquisitionSummary",
+    "targetCompanyOverview",
+    "strategicFit",
+    "valuationAnalysis",
     "financingStructure",
     "debtCapacity",
-    "roiIrrScenarios",
-    "synergies",
-    "integrationRisk",
+    "roiAnalysis",
+    "irrAnalysis",
+    "revenueSynergies",
+    "costSynergies",
+    "integrationRisks",
+    "operationalRisks",
     "regulatoryReview",
-    "postMergerRoadmap",
+    "competitivePosition",
     "dealRisks",
-    "investmentRecommendation",
+    "postMergerIntegrationPlan",
+    "finalInvestmentRecommendation",
   ]) {
     assert.match(reportUtilsSource, new RegExp(`\\b${field}:\\s*"`), `sectionLabels missing ${field}`);
   }
@@ -239,19 +243,22 @@ test("ReportPdfButton.tsx: isAcquisitionReport is detected and drives a dedicate
   assert.match(pdfButtonSource, /isAcquisitionReport\s*\n\s*\? legalConfidence/);
   assert.match(pdfButtonSource, /localizePdfPresentationLabel\("Deal Confidence", pdfLocale\)/);
   assert.match(pdfButtonSource, /isAcquisitionReport\s*\n\s*\?\s*\[\s*\n\s*\[localizePdfPresentationLabel\("Valuation", pdfLocale\)/);
-  for (const field of ["valuation", "purchasePriceFairness", "financingStructure", "synergies", "integrationRisk", "dealRisks"]) {
+  for (const field of ["valuationAnalysis", "strategicFit", "financingStructure", "revenueSynergies", "integrationRisks", "dealRisks"]) {
     assert.match(pdfButtonSource, new RegExp(`section\\.field === "${field}"`));
   }
 });
 
-test("ReportPdfButton.tsx: the acquisition ROI/IRR Scenarios section never triggers the generic Business-Plan Worst/Base/Best scenario widget (drift check)", () => {
-  assert.match(pdfButtonSource, /field !== "roiIrrScenarios" &&\s*\n\s*\(field === "scenarioAnalysis"/);
-  assert.match(pdfButtonSource, /section\.field !== "roiIrrScenarios" && normalizedTitle\.includes\("scenario"\)/);
+test("ReportPdfButton.tsx: the acquisition ROI/IRR Analysis sections never trigger the generic Business-Plan Worst/Base/Best scenario widget (drift check)", () => {
+  assert.match(pdfButtonSource, /field !== "roiAnalysis" &&\s*\n\s*field !== "irrAnalysis" &&\s*\n\s*\(field === "scenarioAnalysis"/);
+  assert.match(
+    pdfButtonSource,
+    /section\.field !== "roiAnalysis" &&\s*\n\s*section\.field !== "irrAnalysis" &&\s*\n\s*normalizedTitle\.includes\("scenario"\)/
+  );
 });
 
-test("ReportPdfButton.tsx: the acquisition Post-Merger Integration Roadmap section never triggers the fixed founder-roadmap timeline widget (drift check)", () => {
-  assert.match(pdfButtonSource, /field !== "postMergerRoadmap" && normalizedTitle\.includes\("roadmap"\)/);
-  assert.match(pdfButtonSource, /section\.field !== "postMergerRoadmap" && normalizedTitle\.includes\("roadmap"\)/);
+test("ReportPdfButton.tsx: the acquisition Post-Merger Integration Plan section never triggers the fixed founder-roadmap timeline widget (drift check)", () => {
+  assert.match(pdfButtonSource, /field !== "postMergerIntegrationPlan" && normalizedTitle\.includes\("roadmap"\)/);
+  assert.match(pdfButtonSource, /section\.field !== "postMergerIntegrationPlan" && normalizedTitle\.includes\("roadmap"\)/);
 });
 
 // --- app/dashboard/[id]/page.tsx: same exclusions for the on-screen view -
@@ -290,18 +297,22 @@ test("page.tsx: never renders Founder Roadmap / TAM-SAM-SOM / Go-to-Market widge
   // to decide which specialized widget to show (beyond the two
   // deliberately-excluded scenario/roadmap overlaps already tested above).
   const acquisitionTitles = [
-    "Subject Identification",
-    "Target Company Facts",
+    "Executive Acquisition Summary",
+    "Target Company Overview",
     "External Evidence",
-    "Acquisition Attractiveness",
-    "Valuation",
-    "Purchase Price Fairness",
+    "Strategic Fit",
+    "Valuation Analysis (EV/ARR, Purchase Price Fairness)",
     "Financing Structure",
     "Debt Capacity",
+    "Revenue Synergies",
+    "Cost Synergies",
+    "Integration Risks",
+    "Operational Risks",
     "Regulatory Review",
+    "Competitive Position",
     "Deal Risks",
     "Missing Information",
-    "Investment Recommendation and Executive Decision",
+    "Final Investment Recommendation",
     "Sources",
   ];
   const businessPlanOnlyTriggers = [

@@ -142,24 +142,59 @@ test("classifyReportDomain: a bare generic word (leverage, integration, synergie
   }
 });
 
-// --- Requirement: never reachable from Business Idea Validation or     --
-// --- Market Intelligence -- both remain hard-forced to "business",     --
-// --- matching the existing architecture for every other specialized    --
-// --- domain (real_estate/legal/finance/...).                          --
+// --- Requirement (revised, confirmed product decision): every OTHER    --
+// --- specialized domain (real_estate/legal/finance/...) remains hard-  --
+// --- forced to "business" under both "plan" and "market". Acquisition  --
+// --- is the one deliberate exception, and only under "plan": there is  --
+// --- no dedicated M&A entry point, so a user evaluating an acquisition --
+// --- most naturally clicks "Business Idea Validation" (the first,      --
+// --- most prominent card) -- confirmed live: every acquisition prompt  --
+// --- was still rendering as a Business Plan because of this exact      --
+// --- boundary. "market" keeps the old unconditional "business" behavior --
+// --- (Market Intelligence is market research, not a decision report,   --
+// --- and its own pipeline never consults this function for routing).  --
 
-test("resolveReportDomainForSelectedMode: an acquisition-classified prompt under the 'plan' (Business Idea Validation) or 'market' (Market Intelligence) product still forces 'business', never 'acquisition'", () => {
+test("resolveReportDomainForSelectedMode: an acquisition-classified prompt under 'plan' (Business Idea Validation) now resolves to 'acquisition' -- the confirmed fix for the live bug where every acquisition prompt rendered as a Business Plan regardless of content", () => {
   assert.equal(
     resolveReportDomainForSelectedMode({
       selectedMode: "plan",
       inferredDomain: "acquisition",
       expertiseDomain: "acquisition",
     }),
-    "business"
+    "acquisition"
   );
+});
+
+test("resolveReportDomainForSelectedMode: an acquisition-classified prompt under 'market' (Market Intelligence) still forces 'business' -- the acquisition exception is scoped to 'plan' only", () => {
   assert.equal(
     resolveReportDomainForSelectedMode({
       selectedMode: "market",
       inferredDomain: "acquisition",
+      expertiseDomain: "acquisition",
+    }),
+    "business"
+  );
+});
+
+test("resolveReportDomainForSelectedMode: every OTHER specialized domain (real_estate/legal/finance/accounting/operations/procurement) still unconditionally forces 'business' under 'plan' -- the exception is acquisition-only, no other domain gained a new escape hatch", () => {
+  for (const domain of ["real_estate", "legal", "finance", "accounting", "operations", "procurement"]) {
+    assert.equal(
+      resolveReportDomainForSelectedMode({
+        selectedMode: "plan",
+        inferredDomain: domain,
+        expertiseDomain: domain,
+      }),
+      "business",
+      `domain "${domain}" unexpectedly escaped "plan" mode`
+    );
+  }
+});
+
+test("resolveReportDomainForSelectedMode: a non-acquisition inferredDomain under 'plan' still forces 'business' even when expertiseDomain independently says 'acquisition' (the escape is keyed off the fresh classifyReportDomain-derived inferredDomain, not the possibly-stale expertiseDomain)", () => {
+  assert.equal(
+    resolveReportDomainForSelectedMode({
+      selectedMode: "plan",
+      inferredDomain: "business",
       expertiseDomain: "acquisition",
     }),
     "business"
@@ -223,19 +258,35 @@ test("createExpertiseProfileFallback: passing classifyReportDomain's own 'acquis
   assert.equal(profile.domain, "acquisition");
 });
 
-test("resolveReportDomainForSelectedMode (not createExpertiseProfileFallback's own domain field) is the actual enforcement point: even when expertiseProfile.domain says 'acquisition' under 'plan'/'market', the final resolved domain is 'business'", () => {
-  for (const selectedMode of ["plan", "market"]) {
-    const profile = createExpertiseProfileFallback({
-      prompt: acquisitionPrompts.plainAcquisition,
-      selectedMode,
-    });
-    const finalDomain = resolveReportDomainForSelectedMode({
-      selectedMode,
-      inferredDomain: classifyReportDomain(acquisitionPrompts.plainAcquisition),
-      expertiseDomain: profile.domain,
-    });
-    assert.equal(finalDomain, "business", `selectedMode "${selectedMode}" did not force business`);
-  }
+test("resolveReportDomainForSelectedMode is the actual enforcement point for the final routed domain: under 'plan' it now resolves an acquisition prompt to 'acquisition' (the confirmed fix), while 'market' still forces 'business' for the same prompt", () => {
+  const inferredDomain = classifyReportDomain(acquisitionPrompts.plainAcquisition);
+  assert.equal(inferredDomain, "acquisition");
+
+  const planProfile = createExpertiseProfileFallback({
+    prompt: acquisitionPrompts.plainAcquisition,
+    selectedMode: "plan",
+  });
+  assert.equal(
+    resolveReportDomainForSelectedMode({
+      selectedMode: "plan",
+      inferredDomain,
+      expertiseDomain: planProfile.domain,
+    }),
+    "acquisition"
+  );
+
+  const marketProfile = createExpertiseProfileFallback({
+    prompt: acquisitionPrompts.plainAcquisition,
+    selectedMode: "market",
+  });
+  assert.equal(
+    resolveReportDomainForSelectedMode({
+      selectedMode: "market",
+      inferredDomain,
+      expertiseDomain: marketProfile.domain,
+    }),
+    "business"
+  );
 });
 
 // --- The dedicated acquisition schema itself: acquisition-specific     --
@@ -290,16 +341,45 @@ test("acquisitionAnalysisFields never contains a Business Plan/Startup field (Fo
   }
 });
 
-test("acquisitionAnalysisFields contains the exact requested acquisition-specific sections: valuation, purchase price fairness, financing structure, debt capacity, ROI/IRR, synergies, integration, regulatory review, post-merger roadmap", () => {
-  assert.ok(acquisitionAnalysisFields.includes("valuation"));
-  assert.ok(acquisitionAnalysisFields.includes("purchasePriceFairness"));
-  assert.ok(acquisitionAnalysisFields.includes("financingStructure"));
-  assert.ok(acquisitionAnalysisFields.includes("debtCapacity"));
-  assert.ok(acquisitionAnalysisFields.includes("roiIrrScenarios"));
-  assert.ok(acquisitionAnalysisFields.includes("synergies"));
-  assert.ok(acquisitionAnalysisFields.includes("integrationRisk"));
-  assert.ok(acquisitionAnalysisFields.includes("regulatoryReview"));
-  assert.ok(acquisitionAnalysisFields.includes("postMergerRoadmap"));
+test("acquisitionAnalysisFields contains every exact requested section: Executive Acquisition Summary, Strategic Fit, Target Company Overview, Valuation Analysis, Financing Structure, Debt Capacity, ROI Analysis, IRR Analysis, Revenue Synergies, Cost Synergies, Integration Risks, Operational Risks, Regulatory Review, Competitive Position, Deal Risks, Post-Merger Integration Plan, Final Investment Recommendation", () => {
+  for (const field of [
+    "executiveAcquisitionSummary",
+    "strategicFit",
+    "targetCompanyOverview",
+    "valuationAnalysis",
+    "financingStructure",
+    "debtCapacity",
+    "roiAnalysis",
+    "irrAnalysis",
+    "revenueSynergies",
+    "costSynergies",
+    "integrationRisks",
+    "operationalRisks",
+    "regulatoryReview",
+    "competitivePosition",
+    "dealRisks",
+    "postMergerIntegrationPlan",
+    "finalInvestmentRecommendation",
+  ]) {
+    assert.ok(acquisitionAnalysisFields.includes(field), `missing requested field: ${field}`);
+  }
+});
+
+test("acquisitionAnalysisFields never contains the OLD (pre-rewrite) field names -- confirms the schema was actually replaced, not just extended", () => {
+  for (const oldField of [
+    "subjectIdentification",
+    "targetCompanyFacts",
+    "acquisitionAttractiveness",
+    "valuation",
+    "purchasePriceFairness",
+    "roiIrrScenarios",
+    "synergies",
+    "integrationRisk",
+    "postMergerRoadmap",
+    "investmentRecommendation",
+  ]) {
+    assert.ok(!acquisitionAnalysisFields.includes(oldField), `stale old field name still present: ${oldField}`);
+  }
 });
 
 test("acquisitionAnalysisFieldLabels provides a label for every field, in every supported language", () => {
@@ -315,7 +395,7 @@ test("validateAcquisitionAnalysisReport throws when a required field is missing,
   const complete = Object.fromEntries(acquisitionAnalysisFields.map((field) => [field, "content"]));
   assert.deepEqual(validateAcquisitionAnalysisReport(complete), complete);
 
-  const incomplete = { ...complete, valuation: "" };
+  const incomplete = { ...complete, valuationAnalysis: "" };
   assert.throws(() => validateAcquisitionAnalysisReport(incomplete), /missing fields/);
 });
 
@@ -341,9 +421,8 @@ test("buildDomainAnalysisInstructions throws or produces no acquisition content 
   }
 });
 
-test("domainAnalysisFields (the generic schema) and acquisitionAnalysisFields (the dedicated schema) share no field names beyond the universal subjectIdentification/externalEvidence/missingInformation/sources connective fields", () => {
+test("domainAnalysisFields (the generic schema) and acquisitionAnalysisFields (the dedicated schema) share no field names beyond the universal externalEvidence/missingInformation/sources connective fields", () => {
   const expectedSharedFields = new Set([
-    "subjectIdentification",
     "externalEvidence",
     "missingInformation",
     "sources",
@@ -362,25 +441,26 @@ test("buildAcquisitionAnalysisInstructions (the model's role/behavior directives
   const combined = `${instructions}\n${Object.values(acquisitionAnalysisPrompts).join("\n")}`;
 
   assert.match(combined, /M&A due-diligence/i);
-  assert.match(combined, /acquisition attractiveness/i);
+  assert.match(combined, /strategic fit/i);
   assert.match(combined, /EV\/ARR/);
   assert.match(combined, /comparable transactions/i);
   assert.match(combined, /purchase multiple/i);
-  assert.match(combined, /purchase price fairness|purchase price is fair/i);
+  assert.match(combined, /purchase price is fair/i);
   assert.match(combined, /financing structure/i);
   assert.match(combined, /debt capacity/i);
   assert.match(combined, /ROI scenarios/i);
-  assert.match(combined, /IRR/);
+  assert.match(combined, /IRR estimate/i);
   assert.match(combined, /integration risk/i);
-  assert.match(combined, /operational synergies/i);
   assert.match(combined, /revenue synergies/i);
   assert.match(combined, /cost synergies/i);
   assert.match(combined, /technology integration/i);
   assert.match(combined, /cultural integration/i);
+  assert.match(combined, /operational risks/i);
+  assert.match(combined, /competitive position/i);
   assert.match(combined, /regulatory/i);
   assert.match(combined, /30, 60, and 90/);
   assert.match(combined, /investment recommendation/i);
-  assert.match(combined, /executive decision|Investment Recommendation and Executive Decision/i);
+  assert.match(combined, /executive decision|final investment recommendation/i);
   assert.match(combined, /burn rate/i);
   assert.match(combined, /runway/i);
   assert.match(combined, /\bCAC\b/);
@@ -391,14 +471,27 @@ test("buildAcquisitionAnalysisInstructions (the model's role/behavior directives
   assert.match(combined, /must be preserved exactly, not withheld/i);
 });
 
-test("buildAcquisitionAnalysisInstructions explicitly forbids Business Plan/Startup sections by name (Founder Roadmap, Go-to-Market Plan, Pricing Strategy, CAC/LTV validation, TAM/SAM/SOM, Product validation)", () => {
+test("buildAcquisitionAnalysisInstructions explicitly forbids every named startup section from the request: Problem, Solution, ICP, TAM/SAM/SOM, Pricing Strategy, Go-To-Market, Sales Strategy, Founder Roadmap, Founder Readiness, Startup KPIs, Business Validation, Product Validation", () => {
   const instructions = buildAcquisitionAnalysisInstructions("English");
-  assert.match(instructions, /Founder Roadmap/);
-  assert.match(instructions, /Go-to-Market Plan/);
-  assert.match(instructions, /Pricing Strategy/);
-  assert.match(instructions, /CAC\/LTV validation/);
-  assert.match(instructions, /TAM\/SAM\/SOM/);
-  assert.match(instructions, /Product validation/);
+  for (const section of [
+    "Problem",
+    "Solution",
+    "ICP",
+    "TAM/SAM/SOM",
+    "Pricing Strategy",
+    "Go-To-Market",
+    "Sales Strategy",
+    "Founder Roadmap",
+    "Founder Readiness",
+    "Startup KPIs",
+    "Business Validation",
+    "Product Validation",
+  ]) {
+    assert.ok(
+      instructions.includes(section),
+      `instructions do not name forbidden section "${section}"`
+    );
+  }
 });
 
 // --- Report isolation: acquisition report never carries startup-       --
@@ -407,19 +500,19 @@ test("buildAcquisitionAnalysisInstructions explicitly forbids Business Plan/Star
 
 test("assertReportIsolation('acquisition_due_diligence', ...) rejects startup-scoring vocabulary (Founder Score, PMF, decision-verdict tokens)", () => {
   const violatingSections = {
-    acquisitionAttractiveness: "The target shows strong Founder Readiness and a high Product-Market Fit score.",
+    strategicFit: "The target shows strong Founder Readiness and a high Product-Market Fit score.",
   };
   assert.throws(() => assertReportIsolation("acquisition_due_diligence", violatingSections));
 
   const violatingSections2 = {
-    investmentRecommendation: "Our recommendation is PASS based on the Founder Score.",
+    finalInvestmentRecommendation: "Our recommendation is PASS based on the Founder Score.",
   };
   assert.throws(() => assertReportIsolation("acquisition_due_diligence", violatingSections2));
 });
 
 test("assertReportIsolation('acquisition_due_diligence', ...) never blocks legitimate, evidence-based ARR/CAC/LTV/Runway/EBITDA mentions (these are real acquisition-analysis vocabulary, not startup-pitch vocabulary)", () => {
   const legitimateSections = {
-    valuation:
+    valuationAnalysis:
       "The target reports $12M ARR and a CAC of $4,200 per enterprise account. EBITDA margin is 18%. Post-close runway under the proposed financing structure is 24 months.",
   };
 
@@ -429,13 +522,13 @@ test("assertReportIsolation('acquisition_due_diligence', ...) never blocks legit
 
 test("assertReportIsolation('acquisition_due_diligence', ...) passes for a clean, on-topic acquisition report using the dedicated field names", () => {
   const cleanSections = {
-    acquisitionAttractiveness: "The target company is a well-positioned acquisition candidate with a defensible market position.",
-    valuation: "Valuation is supported by an EV/ARR multiple of 6.2x against comparable transactions.",
-    purchasePriceFairness: "Purchase price of $48M appears fair given the valuation range.",
-    integrationRisk: "Integration risk is moderate.",
-    synergies: "Expected operational and cost synergies of $2M annually within 18 months.",
-    postMergerRoadmap: "Days 1-30: finalize integration team and retention plan. Days 31-60: begin systems integration. Days 61-90: realize first cost synergies.",
-    investmentRecommendation: "Recommendation: proceed conditionally on confirmed financing terms.",
+    strategicFit: "The target company is a well-positioned acquisition candidate with a defensible market position.",
+    valuationAnalysis: "Valuation is supported by an EV/ARR multiple of 6.2x against comparable transactions. Purchase price of $48M appears fair given the valuation range.",
+    integrationRisks: "Integration risk is moderate.",
+    revenueSynergies: "Expected cross-sell revenue synergies of $2M annually within 18 months.",
+    costSynergies: "Expected overlapping-function cost synergies of $1M annually within 12 months.",
+    postMergerIntegrationPlan: "Days 1-30: finalize integration team and retention plan. Days 31-60: begin systems integration. Days 61-90: realize first cost synergies.",
+    finalInvestmentRecommendation: "Recommendation: proceed conditionally on confirmed financing terms.",
   };
 
   assert.doesNotThrow(() => assertReportIsolation("acquisition_due_diligence", cleanSections));

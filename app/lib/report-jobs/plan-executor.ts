@@ -663,25 +663,25 @@ function buildDomainAnalysisExecutiveDecisionBrief(
 
 // Acquisition Due Diligence's own executive-decision-brief builder --
 // mirrors buildDomainAnalysisExecutiveDecisionBrief's shape but reads
-// from the dedicated acquisition field names (investmentRecommendation
-// instead of decisionAssessment/finalRecommendation, acquisitionAttractiveness
+// from the dedicated acquisition field names (finalInvestmentRecommendation
+// instead of decisionAssessment/finalRecommendation, strategicFit
 // instead of domainFindings, dealRisks instead of riskAnalysis,
-// postMergerRoadmap instead of recommendedActions) so the two report
-// families never share field-name assumptions.
+// postMergerIntegrationPlan instead of recommendedActions) so the two
+// report families never share field-name assumptions.
 function buildAcquisitionAnalysisExecutiveDecisionBrief(
   report: AcquisitionAnalysisReport,
   language: ResponseLanguage
 ): ExecutiveDecisionBrief {
   const { decision, confidence } = extractGenericDecisionSignal(
-    report.investmentRecommendation
+    report.finalInvestmentRecommendation
   );
 
-  const attractivenessLines = domainTopLines(report.acquisitionAttractiveness, 4);
+  const strategicFitLines = domainTopLines(report.strategicFit, 4);
   const biggestOpportunity =
-    attractivenessLines[0] ||
-    domainTopLines(report.investmentRecommendation, 1)[0] ||
-    report.investmentRecommendation.trim().slice(0, 200);
-  const reasonsTail = attractivenessLines.slice(1, 4);
+    strategicFitLines[0] ||
+    domainTopLines(report.finalInvestmentRecommendation, 1)[0] ||
+    report.finalInvestmentRecommendation.trim().slice(0, 200);
+  const reasonsTail = strategicFitLines.slice(1, 4);
   const topReasons = [biggestOpportunity, ...reasonsTail].slice(0, 3);
 
   const topRisks = domainTopLines(report.dealRisks, 3);
@@ -695,7 +695,7 @@ function buildAcquisitionAnalysisExecutiveDecisionBrief(
     : [report.missingInformation.trim().slice(0, 200)];
 
   const confidenceDirection: "reduced" | "supported" = confidence >= 65 ? "supported" : "reduced";
-  const confidenceFactors = confidenceDirection === "supported" ? attractivenessLines.slice(0, 3) : missingEvidence;
+  const confidenceFactors = confidenceDirection === "supported" ? strategicFitLines.slice(0, 3) : missingEvidence;
 
   const why =
     decision === "GO"
@@ -722,7 +722,7 @@ function buildAcquisitionAnalysisExecutiveDecisionBrief(
     `"${topRisk}" sorununu çözen doğrulanmış, bağımsız kanıtlar bu kararı değiştirir.`
   );
 
-  const roadmapLines = domainTopLines(report.postMergerRoadmap, 3);
+  const planLines = domainTopLines(report.postMergerIntegrationPlan, 3);
   const immediateNextAction =
     decision === "NO_GO"
       ? reportText(
@@ -730,7 +730,7 @@ function buildAcquisitionAnalysisExecutiveDecisionBrief(
           `Do not proceed on the current basis; the specific blocker is "${topRisk}" -- revisit only if new, verified evidence resolves it.`,
           `Mevcut haliyle ilerlemeyin; asıl engel "${topRisk}"; yalnızca yeni ve doğrulanmış kanıtlar bunu çözerse yeniden değerlendirin.`
         )
-      : roadmapLines[0] || report.postMergerRoadmap.trim().slice(0, 200);
+      : planLines[0] || report.postMergerIntegrationPlan.trim().slice(0, 200);
 
   return {
     decision,
@@ -738,7 +738,7 @@ function buildAcquisitionAnalysisExecutiveDecisionBrief(
     confidenceDirection,
     confidenceFactors,
     why,
-    topReasons: topReasons.length ? topReasons : domainTopLines(report.investmentRecommendation, 3),
+    topReasons: topReasons.length ? topReasons : domainTopLines(report.finalInvestmentRecommendation, 3),
     topRisks: resolvedTopRisks,
     missingEvidence,
     whatWouldChangeThisDecision,
@@ -849,13 +849,14 @@ function parseAcquisitionAnalysisReport(
   const validated = validateAcquisitionAnalysisReport(report);
 
   // Executive Decision First: prepend the mandatory opening block to the
-  // first field in schema order. No dedicated executiveSummary field
-  // exists on this report type, so subjectIdentification (schema-first)
-  // carries it instead of adding a new field to the schema/PDF/dashboard.
+  // first field in schema order -- executiveAcquisitionSummary, the
+  // report's own dedicated executive-entry-point field (not a shared/
+  // generic field name, unlike the domain-analysis family's
+  // subjectIdentification).
   const acquisitionExecutiveDecisionBrief = buildAcquisitionAnalysisExecutiveDecisionBrief(validated, language);
-  validated.subjectIdentification = [
+  validated.executiveAcquisitionSummary = [
     formatExecutiveDecisionBrief(acquisitionExecutiveDecisionBrief, language),
-    validated.subjectIdentification,
+    validated.executiveAcquisitionSummary,
   ].join("\n\n");
 
   validated.sources = buildEvidenceSummary(validated.sources, language);
@@ -878,7 +879,7 @@ function parseAcquisitionAnalysisReport(
   assertNoDecisionContradiction(
     acquisitionExecutiveDecisionBrief.decision,
     validated,
-    ["acquisitionAttractiveness", "postMergerRoadmap", "investmentRecommendation"],
+    ["strategicFit", "postMergerIntegrationPlan", "finalInvestmentRecommendation"],
     language
   );
 
@@ -886,7 +887,7 @@ function parseAcquisitionAnalysisReport(
   // that dumps information rather than helping a decision-maker act.
   assertExecutiveQualityGate({
     sections: validated,
-    firstField: "subjectIdentification",
+    firstField: "executiveAcquisitionSummary",
     sourceFields: ["sources"],
   });
 
@@ -6318,7 +6319,7 @@ function createMockAcquisitionAnalysisReport(): AcquisitionAnalysisReport {
   return Object.fromEntries(
     acquisitionAnalysisFields.map((field) => [
       field,
-      field === "investmentRecommendation" || field === "postMergerRoadmap"
+      field === "finalInvestmentRecommendation" || field === "postMergerIntegrationPlan"
         ? "[Recommendation] [Basis: diagnostic mode] Complete the listed evidence checks before making the decision."
         : "[Unknown] [Required: verified source or uploaded record] Evidence is not available in diagnostic mode.",
     ])
@@ -6379,22 +6380,25 @@ function createGroundedAcquisitionTimeoutFallback({
       .join("\n") || localized.noFacts;
 
   return validateAcquisitionAnalysisReport({
-    subjectIdentification: assetList,
-    targetCompanyFacts: factsText,
+    executiveAcquisitionSummary: `${localized.timeout}\n[Recommendation] [Basis:decision engine] ${decision.recommendation}`,
+    targetCompanyOverview: `${assetList}\n${factsText}`,
     externalEvidence: evidenceText,
-    acquisitionAttractiveness: `${localized.timeout}\n[Recommendation] [Basis:decision engine] ${decision.recommendation}`,
-    valuation: `[Recommendation] [Basis:acquisition evidence registry] ${decision.opportunities.join(" | ") || localized.noEvidence}`,
-    purchasePriceFairness: unresolvedText,
+    strategicFit: `[Recommendation] [Basis:acquisition evidence registry] ${decision.opportunities.join(" | ") || localized.noEvidence}`,
+    valuationAnalysis: `[Recommendation] [Basis:acquisition evidence registry] ${decision.opportunities.join(" | ") || localized.noEvidence}`,
     financingStructure: unresolvedText,
     debtCapacity: unresolvedText,
-    roiIrrScenarios: localized.timeout,
-    synergies: `[Recommendation] [Basis:acquisition evidence registry] ${decision.opportunities.join(" | ") || localized.noEvidence}`,
-    integrationRisk: `[Recommendation] [Basis:decision engine] ${decision.risks.join(" | ") || unresolvedText}`,
+    roiAnalysis: localized.timeout,
+    irrAnalysis: localized.timeout,
+    revenueSynergies: `[Recommendation] [Basis:acquisition evidence registry] ${decision.opportunities.join(" | ") || localized.noEvidence}`,
+    costSynergies: `[Recommendation] [Basis:acquisition evidence registry] ${decision.opportunities.join(" | ") || localized.noEvidence}`,
+    integrationRisks: `[Recommendation] [Basis:decision engine] ${decision.risks.join(" | ") || unresolvedText}`,
+    operationalRisks: `[Recommendation] [Basis:decision engine] ${decision.risks.join(" | ") || unresolvedText}`,
     regulatoryReview: unresolvedText,
-    postMergerRoadmap: `[Recommendation] [Basis:decision engine] ${decision.nextActions.join(" | ") || unresolvedText}`,
+    competitivePosition: unresolvedText,
     dealRisks: `[Recommendation] [Basis:decision engine] ${decision.risks.join(" | ") || unresolvedText}`,
+    postMergerIntegrationPlan: `[Recommendation] [Basis:decision engine] ${decision.nextActions.join(" | ") || unresolvedText}`,
     missingInformation: unresolvedText,
-    investmentRecommendation: `${localized.timeout}\n[Recommendation] [Basis:decision engine] ${decision.recommendation}`,
+    finalInvestmentRecommendation: `${localized.timeout}\n[Recommendation] [Basis:decision engine] ${decision.recommendation}`,
     sources: `${assetList}\n${evidenceText}`,
   });
 }
