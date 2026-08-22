@@ -7,11 +7,19 @@ import {
   insightLedgerAndTokenBudgetDirectives,
 } from "../../ai/report-quality-directives.ts";
 import { buildStrictReportLanguageInstruction } from "../../report-language.ts";
-import { getForbiddenTermLabels } from "../report-isolation-validator.ts";
 
+// "acquisition" deliberately excluded: it has its own fully dedicated
+// schema (acquisition-analysis.ts) with acquisition-specific field names,
+// not this generic 14-field domain-analysis shape -- see
+// acquisition-analysis.ts for why (Business Plan/Startup fields like
+// Founder Roadmap, GTM, Pricing Strategy, CAC/LTV validation, TAM/SAM/SOM
+// must never be reachable from an Acquisition Due Diligence report, and
+// neither should this module's own generic "Domain Findings"/"Financial
+// Implications" placeholders -- the report needs literal, named
+// acquisition sections instead).
 export type SpecializedReportDomain = Exclude<
   ReportDomain,
-  "business" | "real_estate"
+  "business" | "real_estate" | "acquisition"
 >;
 
 export const domainAnalysisPrompts = {
@@ -148,22 +156,7 @@ const domainRole: Record<SpecializedReportDomain, string> = {
     "operations analyst. Ground capacity, quality, cost, bottleneck, and implementation findings in observed data and authoritative benchmarks.",
   procurement:
     "procurement and supplier-risk analyst. Verify suppliers, compliance, sanctions, commercial terms, alternatives, and delivery risk.",
-  acquisition:
-    "M&A due-diligence and corporate development analyst. Assess the target company as an acquisition, not a startup pitch -- ground valuation, financing, and integration findings in verified evidence and comparable-transaction data.",
 };
-
-// CRITICAL PRODUCTION FIX -- Acquisition Due Diligence Routing. The 14
-// generic domainAnalysisFields above are shared by every specialized
-// domain (legal/finance/accounting/operations/procurement) and stay
-// domain-agnostic; this maps each of them onto the specific acquisition
-// content the field must contain, appended only when domain ===
-// "acquisition" so every other domain's instructions are unaffected.
-const acquisitionDueDiligenceDirectives = [
-  "This is an Acquisition Due Diligence Report for a company being acquired, not a startup validation, business plan, legal case assessment, or general strategic report. Cover: acquisition attractiveness, valuation (EV/ARR, comparable transactions, purchase multiple), purchase price fairness, financing structure, debt capacity, ROI scenarios, IRR estimates (when enough information exists), integration risks, operational synergies, revenue synergies, cost synergies, technology integration, cultural integration, regulatory considerations, a post-merger integration roadmap across the first 30/60/90 days, an investment recommendation, and an executive decision.",
-  "Domain Findings: cover acquisition attractiveness and the strategic rationale for the deal. Financial Implications: lead with valuation (EV/ARR, comparable transactions, purchase multiple), purchase price fairness, financing structure, and debt capacity. Scenario Analysis: present ROI scenarios and, when enough information exists, IRR estimates -- state explicitly when IRR cannot be computed from the evidence provided, never invent one. Operational Implications: cover integration risk, operational synergies, revenue synergies, cost synergies, technology integration, and cultural integration. Regulatory and Compliance Findings: cover antitrust, competition, and sector-specific approval considerations. Recommended Actions: structure as a post-merger integration roadmap sequenced across the first 30, 60, and 90 days. Final Recommendation: state the investment recommendation and executive decision -- proceed, proceed conditionally, renegotiate, or walk away.",
-  "Never invent startup operating metrics -- burn rate, runway, CAC, LTV, churn, ARR growth, or revenue projections -- unless the user explicitly provided the figure or it is clearly labeled 'Planning Assumption'. Verified figures the user or research provided about the target company (including its real ARR, MRR, or margin, when used for EV/ARR valuation or financing analysis) are legitimate acquisition evidence and must be preserved exactly, not withheld.",
-  `Never use startup-pitch or venture-validation vocabulary anywhere in this report, including: ${getForbiddenTermLabels("acquisition_due_diligence").join(", ")}. This is an acquisition of an existing business, not a startup being pitched or validated -- do not introduce founder scoring, product-market fit, startup execution scoring, or a build/don't-build recommendation.`,
-];
 
 export function buildDomainAnalysisInstructions(
   domain: SpecializedReportDomain,
@@ -179,7 +172,6 @@ export function buildDomainAnalysisInstructions(
     "Never invent numeric values, sources, professional conclusions, legal status, accounting treatment, prices, or operational findings.",
     "Read Domain Findings, Regulatory/Compliance, Financial Implications, Operational Implications, and Risk Analysis as one continuous argument, each building on what the last one established, ending in the Recommendation. Do not write any of them as an isolated observation disconnected from that chain.",
     "When a fact could not be verified, do not write a bare 'not verified' notice. Instead: name the exact source or document required, explain briefly why that specific gap matters to this decision, state what proxy or adjacent evidence stands in for it if any, and say what part of the decision stays open until it is resolved. Vary this explanation to the specific fact each time.",
-    ...(domain === "acquisition" ? acquisitionDueDiligenceDirectives : []),
     ...buildUniversalDecisionQualityDirectives(),
     ...insightLedgerAndTokenBudgetDirectives,
     ...buildExecutiveConsultingStyleDirectives(),

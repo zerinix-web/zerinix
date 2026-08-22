@@ -329,6 +329,17 @@ const pdfPresentationLabelPairs = [
     ["Not available", "Mevcut değil"],
     ["Not provided", "Veri bulunamadı"],
     ["Unavailable", "Kullanılamıyor"],
+    ["Valuation", "Değerleme"],
+    ["Purchase Price Fairness", "Satın Alma Fiyatının Adilliği"],
+    ["Financing Structure", "Finansman Yapısı"],
+    ["Debt Capacity", "Borçlanma Kapasitesi"],
+    ["Synergies", "Sinerjiler"],
+    ["Integration Risk", "Entegrasyon Riski"],
+    ["Regulatory Review", "Mevzuat İncelemesi"],
+    ["Deal Risks", "İşlem Riskleri"],
+    ["Deal Confidence", "İşlem Güveni"],
+    ["Due Diligence", "Durum Tespiti"],
+    ["Investment Recommendation", "Yatırım Tavsiyesi"],
 ];
 
 const turkishPdfPresentationLabels = new Map(

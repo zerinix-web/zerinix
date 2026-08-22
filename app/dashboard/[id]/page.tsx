@@ -1497,7 +1497,15 @@ function ReportSectionVisual({
     );
   }
 
-  if (normalizedTitle.includes("scenario")) {
+  // Acquisition Due Diligence's "ROI / IRR Scenarios" title also contains
+  // "scenario" -- excluded here so it never renders the generic
+  // Business-Plan Worst/Base/Best widget below, which searches for
+  // Revenue/MRR/Burn/Runway metrics under "Worst"/"Base"/"Best" headers
+  // that this section's own downside/base/upside ROI/IRR content was
+  // never asked to use, and would render mostly empty. Falls through to
+  // `return null`, so the section's real text content still renders via
+  // the surrounding ReportText block.
+  if (normalizedTitle.includes("scenario") && !normalizedTitle.includes("roi") && !normalizedTitle.includes("irr")) {
     const scenarioMetrics = isMobilityReportContent(content)
       ? ["Revenue", "Monthly Revenue", "Burn", "Runway", "Risk", "Decision"]
       : ["Revenue", "MRR", "Burn", "Runway", "Risk", "Decision"];
@@ -1647,7 +1655,20 @@ function ReportSectionVisual({
     );
   }
 
-  if (normalizedTitle.includes("roadmap") || normalizedTitle.includes("yol haritası")) {
+  // Acquisition Due Diligence's own "Post-Merger Integration Roadmap
+  // (30/60/90 Days)" section title also contains "roadmap"/"yol
+  // haritası" -- excluded here so it never renders the generic
+  // Business-Plan founder-roadmap widget below (fixed "Tomorrow / This
+  // Week / 30 Days / 90 Days / 180 Days / 12 Months" timeline plus a
+  // hardcoded "Validate demand / Protect runway / Refine ICP / Measure
+  // conversion" checklist -- startup-validation phrasing that has no
+  // place in an M&A integration plan). Falling through to `return null`
+  // below is correct: the section's real text content still renders via
+  // the surrounding ReportText block regardless of this visual widget.
+  const isPostMergerRoadmap =
+    normalizedTitle.includes("post-merger") || normalizedTitle.includes("birleşme sonrası");
+
+  if (!isPostMergerRoadmap && (normalizedTitle.includes("roadmap") || normalizedTitle.includes("yol haritası"))) {
     return (
       <div className="mb-5 touch-pan-x overflow-x-auto overscroll-x-contain rounded-[2rem] border border-white/10 bg-[linear-gradient(90deg,rgba(94,234,212,0.08),rgba(255,255,255,0.02))] p-4 [-webkit-overflow-scrolling:touch] [scrollbar-color:rgba(94,234,212,0.3)_transparent] [scrollbar-width:thin] sm:p-5">
         <div className="relative grid min-w-[840px] grid-cols-6 gap-4">
@@ -1757,6 +1778,13 @@ function ReportSectionVisual({
 
 function hasReportSectionVisual(title: string) {
   const normalizedTitle = title.toLowerCase();
+  // Mirrors the same acquisition-specific exclusions ReportSectionVisual
+  // itself applies (see its own comments) -- otherwise this gate opens an
+  // empty visual wrapper for a section whose content function correctly
+  // renders nothing.
+  const isPostMergerRoadmap =
+    normalizedTitle.includes("post-merger") || normalizedTitle.includes("birleşme sonrası");
+  const isRoiIrrScenario = normalizedTitle.includes("roi") || normalizedTitle.includes("irr");
 
   return (
     normalizedTitle.includes("executive summary") ||
@@ -1773,11 +1801,10 @@ function hasReportSectionVisual(title: string) {
     normalizedTitle.includes("founder readiness") ||
     normalizedTitle.includes("kurucu skoru") ||
     normalizedTitle.includes("kurucu hazırlık") ||
-    normalizedTitle.includes("scenario") ||
+    (normalizedTitle.includes("scenario") && !isRoiIrrScenario) ||
     normalizedTitle.includes("executive recommendation") ||
     normalizedTitle.includes("yönetici tavsiyesi") ||
-    normalizedTitle.includes("roadmap") ||
-    normalizedTitle.includes("yol haritası") ||
+    (!isPostMergerRoadmap && (normalizedTitle.includes("roadmap") || normalizedTitle.includes("yol haritası"))) ||
     normalizedTitle.includes("porter") ||
     normalizedTitle.includes("pricing") ||
     normalizedTitle.includes("go-to-market") ||

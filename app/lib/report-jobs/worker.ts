@@ -19,6 +19,11 @@ import {
   type SpecializedReportDomain,
 } from "@/app/lib/report-engine/prompts/domain-analysis";
 import {
+  acquisitionAnalysisFieldLabels,
+  acquisitionAnalysisFields,
+  type AcquisitionAnalysisField,
+} from "@/app/lib/report-engine/prompts/acquisition-analysis";
+import {
   realEstateFieldLabels,
   realEstateFields,
   type RealEstateReportField,
@@ -259,6 +264,10 @@ function getExpectedFields(domain: ReportExecutionDomain) {
     return realEstateFields as readonly string[];
   }
 
+  if (domain === "acquisition") {
+    return acquisitionAnalysisFields as readonly string[];
+  }
+
   if (isSpecializedDomain(domain)) {
     return domainAnalysisFields as readonly string[];
   }
@@ -277,6 +286,10 @@ function getFieldTitle(
 
   if (domain === "real_estate") {
     return realEstateFieldLabels[language][field as RealEstateReportField] || field;
+  }
+
+  if (domain === "acquisition") {
+    return acquisitionAnalysisFieldLabels[language][field as AcquisitionAnalysisField] || field;
   }
 
   if (isSpecializedDomain(domain)) {
@@ -305,6 +318,17 @@ const domainAnalysisDistinguishingFields = domainAnalysisFields.filter(
     !(planFields as readonly string[]).includes(field) &&
     !(realEstateFields as readonly string[]).includes(field)
 );
+// Acquisition Due Diligence has its own fully dedicated field names
+// (valuation, purchasePriceFairness, synergies, ...) -- none shared with
+// planFields/realEstateFields/domainAnalysisFields -- so every one of its
+// fields is already distinguishing; the same shared-name filter is kept
+// here anyway for defensive consistency with the two lists above.
+const acquisitionAnalysisDistinguishingFields = acquisitionAnalysisFields.filter(
+  (field) =>
+    !(planFields as readonly string[]).includes(field) &&
+    !(realEstateFields as readonly string[]).includes(field) &&
+    !(domainAnalysisFields as readonly string[]).includes(field)
+);
 
 function inferDomain(
   payload: Record<string, unknown>,
@@ -321,6 +345,7 @@ function inferDomain(
   if (
     candidate === "real_estate" ||
     candidate === "business" ||
+    candidate === "acquisition" ||
     isSpecializedDomain(candidate)
   ) {
     return candidate;
@@ -328,6 +353,10 @@ function inferDomain(
 
   if (events.some((event) => realEstateDistinguishingFields.some((field) => field in event))) {
     return "real_estate";
+  }
+
+  if (events.some((event) => acquisitionAnalysisDistinguishingFields.some((field) => field in event))) {
+    return "acquisition";
   }
 
   if (events.some((event) => domainAnalysisDistinguishingFields.some((field) => field in event))) {
@@ -443,6 +472,10 @@ function getReportType(domain: ReportExecutionDomain) {
     return "real_estate_investment_analysis";
   }
 
+  if (domain === "acquisition") {
+    return "acquisition_due_diligence_analysis";
+  }
+
   if (isSpecializedDomain(domain)) {
     return `${domain}_analysis`;
   }
@@ -466,6 +499,10 @@ function getReportTitle(
 
   if (domain === "real_estate") {
     return ({ English: "Real Estate Investment Analysis", Turkish: "Gayrimenkul Yatırım Analizi", German: "Immobilien-Investitionsanalyse", French: "Analyse d'investissement immobilier", Spanish: "Análisis de inversión inmobiliaria" } as const)[language];
+  }
+
+  if (domain === "acquisition") {
+    return ({ English: "Acquisition Due Diligence Report", Turkish: "Satın Alma Durum Tespiti Raporu", German: "Akquisitions-Due-Diligence-Bericht", French: "Rapport de diligence raisonnable d'acquisition", Spanish: "Informe de diligencia debida de adquisición" } as const)[language];
   }
 
   if (isSpecializedDomain(domain)) {

@@ -402,12 +402,12 @@ test("generation context preserves decision and section ownership without duplic
   assert.ok(compact.length <= legacy.length * 0.6);
 });
 
-test("all three existing report-writing paths consume the adaptive writer", async () => {
+test("all four existing report-writing paths (business plan, specialized domain-analysis, real estate, and the dedicated acquisition due diligence generator) consume the adaptive writer", async () => {
   const source = await readFile(
     new URL("../app/lib/report-jobs/plan-executor.ts", import.meta.url),
     "utf8"
   );
-  assert.equal((source.match(/createAdaptiveReportWriterPlan\(\{/g) || []).length, 3);
-  assert.equal((source.match(/Adaptive report-writing contract:/g) || []).length, 3);
+  assert.equal((source.match(/createAdaptiveReportWriterPlan\(\{/g) || []).length, 4);
+  assert.equal((source.match(/Adaptive report-writing contract:/g) || []).length, 4);
   assert.doesNotMatch(source, /pdf-engine\/.*adaptive-report-writer/);
 });

@@ -127,6 +127,16 @@ function splitSourcesAndMethodology(content: string) {
 
 export function isLegalRenderableReport(report: LegalRenderableReport) {
   if (report.type === "Real Estate Investment Analysis") return false;
+  // Acquisition Due Diligence gets the same explicit, unconditional
+  // exemption as Real Estate above. Without it, an acquisition report's
+  // legitimate discussion of the target's existing contracts, compliance
+  // posture, and regulatory review (all real, expected acquisition-
+  // analysis content) would match legalSignalPattern's bare "contract"/
+  // "legal"/"compliance" below and get misclassified as, and re-rendered
+  // with, the Legal Assessment template -- exactly the bug class the
+  // acquisition domain fix was built to eliminate at the routing layer,
+  // reappearing one layer later at rendering time.
+  if (report.type === "Acquisition Due Diligence Report") return false;
   // Market Intelligence gets the same explicit, unconditional exemption as
   // Real Estate above. Without it, this function's report.type !== "Strategic
   // Report" gate is the ONLY thing standing between a correctly-generated,

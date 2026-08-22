@@ -2660,6 +2660,9 @@ export function buildStandardReportPdf({
         report.type === "Real Estate Investment Analysis" ||
         /real[\s-]?estate|gayrimenkul|arsa|arazi|tapu/i.test(report.title);
       const isMarketIntelligenceReport = isMarketIntelligenceDashboardReport(report);
+      const isAcquisitionReport =
+        report.type === "Acquisition Due Diligence Report" ||
+        report.sections.some((section) => section.field === "purchasePriceFairness");
       const businessIdea = isLegalReport
         ? normalizePdfText(report.prompt).slice(0, 220)
         : deriveBusinessDescriptionFromSections(report, pdfSections);
@@ -2962,15 +2965,17 @@ export function buildStandardReportPdf({
 
         const tagY = previewY + previewHeight + 5;
         drawTag(
-          isRealEstateReport
-            ? localizePdfPresentationLabel("Due-Diligence Report", pdfLocale)
-            : isLegalReport
-              ? pdfLocale === "tr"
-                ? "Hukuki Analiz"
-                : "Legal Analysis"
-              : isMarketIntelligenceReport
-                ? localizePdfPresentationLabel("Evidence-Based", pdfLocale)
-                : localizePdfPresentationLabel("Investor Ready", pdfLocale),
+          isAcquisitionReport
+            ? localizePdfPresentationLabel("Due Diligence", pdfLocale)
+            : isRealEstateReport
+              ? localizePdfPresentationLabel("Due-Diligence Report", pdfLocale)
+              : isLegalReport
+                ? pdfLocale === "tr"
+                  ? "Hukuki Analiz"
+                  : "Legal Analysis"
+                : isMarketIntelligenceReport
+                  ? localizePdfPresentationLabel("Evidence-Based", pdfLocale)
+                  : localizePdfPresentationLabel("Investor Ready", pdfLocale),
           margin + 12,
           tagY,
           isLegalReport ? 42 : 36
@@ -3008,7 +3013,9 @@ export function buildStandardReportPdf({
                 ? overallInvestmentScore
                 : isMarketIntelligenceReport
                   ? marketConfidenceScore
-                  : founderScore) ?? "--"
+                  : isAcquisitionReport
+                    ? legalConfidence
+                    : founderScore) ?? "--"
           ),
           scoreX + 20,
           scoreY + 31
@@ -3024,7 +3031,9 @@ export function buildStandardReportPdf({
                 : "Evidence Strength"
               : isMarketIntelligenceReport
                 ? localizePdfPresentationLabel("Confidence Score", pdfLocale)
-                : localizePdfPresentationLabel("Founder Readiness Score", pdfLocale)
+                : isAcquisitionReport
+                  ? localizePdfPresentationLabel("Deal Confidence", pdfLocale)
+                  : localizePdfPresentationLabel("Founder Readiness Score", pdfLocale)
           ).toUpperCase(),
           scoreX + 12,
           scoreY + 43
@@ -3090,6 +3099,15 @@ export function buildStandardReportPdf({
               [localizePdfPresentationLabel("Main Risk", pdfLocale), marketTopRisks[0] || executiveSnapshot.mainRisk],
               [localizePdfPresentationLabel("Next Action", pdfLocale), marketNextAction || executiveSnapshot.nextAction],
               [localizePdfPresentationLabel("Report Type", pdfLocale), localizePdfPresentationLabel(report.type, pdfLocale)],
+            ]
+          : isAcquisitionReport
+          ? [
+              [localizePdfPresentationLabel("Valuation", pdfLocale), pdfSections.find((section) => section.field === "valuation")?.content || "Not verified"],
+              [localizePdfPresentationLabel("Purchase Price Fairness", pdfLocale), pdfSections.find((section) => section.field === "purchasePriceFairness")?.content || "Not verified"],
+              [localizePdfPresentationLabel("Financing Structure", pdfLocale), pdfSections.find((section) => section.field === "financingStructure")?.content || "Not verified"],
+              [localizePdfPresentationLabel("Synergies", pdfLocale), pdfSections.find((section) => section.field === "synergies")?.content || "Not verified"],
+              [localizePdfPresentationLabel("Integration Risk", pdfLocale), pdfSections.find((section) => section.field === "integrationRisk")?.content || "Not verified"],
+              [localizePdfPresentationLabel("Deal Risks", pdfLocale), pdfSections.find((section) => section.field === "dealRisks")?.content || "Not verified"],
             ]
           : [
               [localizePdfPresentationLabel("Confidence Score", pdfLocale), executiveSnapshot.confidence],
@@ -3620,7 +3638,13 @@ export function buildStandardReportPdf({
           normalizedTitle.includes("founder readiness") ||
           normalizedTitle.includes("kurucu skoru") ||
           normalizedTitle.includes("kurucu hazırlık");
-        const isScenarioSection = field === "scenarioAnalysis" || normalizedTitle.includes("scenario") || normalizedTitle.includes("senaryo");
+        // "ROI / IRR Scenarios" (Acquisition Due Diligence's own field,
+        // roiIrrScenarios) also matches the bare "scenario" substring but
+        // must never render the Business-Plan Worst/Base/Best widget
+        // below (see the matching exclusion in app/dashboard/[id]/page.tsx).
+        const isScenarioSection =
+          field !== "roiIrrScenarios" &&
+          (field === "scenarioAnalysis" || normalizedTitle.includes("scenario") || normalizedTitle.includes("senaryo"));
         const isPorterSection = normalizedTitle.includes("porter");
         const isKpiSection = field === "kpiDashboard" || field === "kpis" || normalizedTitle.includes("kpi");
         const isUnitEconomicsSection = field === "unitEconomics" || normalizedTitle.includes("unit economics") || normalizedTitle.includes("birim ekonomisi");
@@ -3950,7 +3974,12 @@ export function buildStandardReportPdf({
           return headerHeight + Math.max(1, rows.length) * rowHeight + 4;
         }
 
-        if (normalizedTitle.includes("roadmap")) {
+        // Acquisition Due Diligence's own postMergerRoadmap field also
+        // matches "roadmap" but must never draw the fixed Business-Plan
+        // founder timeline (Tomorrow/This Week/30 Days/90 Days/180 Days/
+        // 12 Months) below -- see the matching exclusion in
+        // app/dashboard/[id]/page.tsx.
+        if (field !== "postMergerRoadmap" && normalizedTitle.includes("roadmap")) {
           const stepWidth = (bodyWidth - 10) / 6;
           founderRoadmapSteps.forEach((step, index) => {
             const x = bodyX + index * (stepWidth + 2);
@@ -4250,7 +4279,7 @@ export function buildStandardReportPdf({
           return getTamVisualHeight();
         }
 
-        if (normalizedTitle.includes("scenario")) {
+        if (section.field !== "roiIrrScenarios" && normalizedTitle.includes("scenario")) {
           return 26;
         }
 
@@ -4259,7 +4288,7 @@ export function buildStandardReportPdf({
           return 8 + Math.max(1, rows.length) * 15 + 4;
         }
 
-        if (normalizedTitle.includes("roadmap")) {
+        if (section.field !== "postMergerRoadmap" && normalizedTitle.includes("roadmap")) {
           return 31;
         }
 

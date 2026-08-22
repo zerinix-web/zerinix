@@ -175,6 +175,11 @@ import {
   type DomainAnalysisField,
   type SpecializedReportDomain,
 } from "@/app/lib/report-engine/prompts/domain-analysis";
+import {
+  acquisitionAnalysisFieldLabels,
+  acquisitionAnalysisFields,
+  type AcquisitionAnalysisField,
+} from "@/app/lib/report-engine/prompts/acquisition-analysis";
 import { planFieldLabels } from "@/app/lib/report-engine/prompts/plan";
 import { marketFieldLabels } from "@/app/lib/report-engine/prompts/market";
 import {
@@ -244,7 +249,7 @@ type PlanReport = {
   financialAssumptions: string;
   founderScore: string;
   sourcesAssumptions: string;
-} & Record<RealEstateReportField | DomainAnalysisField, string> & Partial<MarketReport>;
+} & Record<RealEstateReportField | DomainAnalysisField | AcquisitionAnalysisField, string> & Partial<MarketReport>;
 
 type MarketReportField = keyof MarketReport;
 type PlanReportField = keyof PlanReport;
@@ -336,6 +341,7 @@ type InitialReport = {
     | "Business Plan"
     | "Market Analysis"
     | "Real Estate Investment Analysis"
+    | "Acquisition Due Diligence Report"
     | "Strategic Report";
   status: string;
   metadata?: ReportMetadata;
@@ -354,6 +360,7 @@ type RegenerationContext = {
     | "Business Plan"
     | "Market Analysis"
     | "Real Estate Investment Analysis"
+    | "Acquisition Due Diligence Report"
     | "Strategic Report";
   workspaceId: string;
   prompt: string;
@@ -677,6 +684,38 @@ const specializedReportFields: Array<{
   };
 });
 
+const acquisitionReportFields: Array<{
+  field: AcquisitionAnalysisField;
+  title: string;
+  icon: LucideIcon;
+}> = acquisitionAnalysisFields.map((field) => {
+  const icons: Partial<Record<AcquisitionAnalysisField, LucideIcon>> = {
+    subjectIdentification: ClipboardCheck,
+    targetCompanyFacts: FileText,
+    externalEvidence: Search,
+    acquisitionAttractiveness: Sparkles,
+    valuation: PieChart,
+    purchasePriceFairness: Landmark,
+    financingStructure: TrendingUp,
+    debtCapacity: BarChart3,
+    roiIrrScenarios: Gauge,
+    synergies: ListChecks,
+    integrationRisk: ShieldAlert,
+    regulatoryReview: Landmark,
+    postMergerRoadmap: CalendarDays,
+    dealRisks: ShieldAlert,
+    missingInformation: Info,
+    investmentRecommendation: Sparkles,
+    sources: FileText,
+  };
+
+  return {
+    field,
+    title: acquisitionAnalysisFieldLabels.English[field],
+    icon: icons[field] || FileText,
+  };
+});
+
 function isSpecializedReportDomain(
   domain: ReportDomain
 ): domain is SpecializedReportDomain {
@@ -691,6 +730,7 @@ function isSpecializedReportDomain(
 
 function getPlanFieldsForDomain(domain: ReportDomain, prompt = "") {
   if (domain === "real_estate") return realEstateReportFields;
+  if (domain === "acquisition") return acquisitionReportFields;
   if (
     domain === "operations" &&
     /\b(retail|store|branch|sku|product sales|inventory turnover|perakende|market zinciri|mağaza|şube|ürün satış|stok devir)\b/i.test(
@@ -757,6 +797,7 @@ function localizeReportFields<T extends ReportFieldDefinition>(
         ? field.title
         : realEstateFieldLabels[language]?.[field.field as RealEstateReportField]
           || domainAnalysisFieldLabels[language]?.[field.field as DomainAnalysisField]
+          || acquisitionAnalysisFieldLabels[language]?.[field.field as AcquisitionAnalysisField]
           || (marketFieldLabels[language] as Partial<Record<string, string>>)?.[field.field]
           || (planFieldLabels[language] as Partial<Record<string, string>>)?.[field.field]
           || field.title,
@@ -860,7 +901,7 @@ const emptyPlanReport = Object.assign({
   founderScore: "",
   sourcesAssumptions: "",
 }, Object.fromEntries(
-  [...realEstateFields, ...domainAnalysisFields].map((field) => [field, ""])
+  [...realEstateFields, ...domainAnalysisFields, ...acquisitionAnalysisFields].map((field) => [field, ""])
 )) as PlanReport;
 
 function detectResponseLanguage(value: string): ResponseLanguage {
@@ -975,10 +1016,21 @@ function getSpecializedReportTitle(
     accounting: { English: "Accounting Review", Turkish: "Muhasebe İncelemesi", German: "Rechnungslegungsprüfung", French: "Examen comptable", Spanish: "Revisión contable" },
     operations: { English: "Operations Analysis", Turkish: "Operasyon Analizi", German: "Betriebsanalyse", French: "Analyse opérationnelle", Spanish: "Análisis operativo" },
     procurement: { English: "Procurement Analysis", Turkish: "Tedarik Analizi", German: "Beschaffungsanalyse", French: "Analyse des achats", Spanish: "Análisis de compras" },
-    acquisition: { English: "Acquisition Due Diligence Report", Turkish: "Satın Alma Durum Tespiti Raporu", German: "Akquisitions-Due-Diligence-Bericht", French: "Rapport de diligence raisonnable d'acquisition", Spanish: "Informe de diligencia debida de adquisición" },
   };
 
   return titles[domain][language];
+}
+
+const acquisitionReportTitles: Record<ResponseLanguage, string> = {
+  English: "Acquisition Due Diligence Report",
+  Turkish: "Satın Alma Durum Tespiti Raporu",
+  German: "Akquisitions-Due-Diligence-Bericht",
+  French: "Rapport de diligence raisonnable d'acquisition",
+  Spanish: "Informe de diligencia debida de adquisición",
+};
+
+function getAcquisitionReportTitle(language: ResponseLanguage) {
+  return acquisitionReportTitles[language];
 }
 
 function generateConversationTitle(content: string) {
@@ -4919,14 +4971,31 @@ const ReportPanel = memo(function ReportPanel({
   const isRealEstateReport = reportFields.some(
     ({ field }) => field === "assetIdentification"
   );
+  // isLegalRenderableReport's heuristic (a bare "contract"/"legal"/
+  // "compliance" keyword match) exists to catch legal-shaped reports
+  // whose reportDomain wasn't reliably resolved -- it must never run when
+  // reportDomain is already confidently a DIFFERENT known specialized
+  // domain, since an Acquisition Due Diligence report legitimately
+  // discusses the target's existing contracts and regulatory/compliance
+  // considerations and must never be mislabeled and re-rendered as a
+  // Legal Assessment because of that vocabulary (same reasoning already
+  // applied to real_estate/market above the function's own type checks).
+  const isKnownNonLegalSpecializedDomain =
+    reportDomain === "real_estate" ||
+    reportDomain === "finance" ||
+    reportDomain === "accounting" ||
+    reportDomain === "operations" ||
+    reportDomain === "procurement" ||
+    reportDomain === "acquisition";
   const isLegalReport =
     reportDomain === "legal" ||
-    isLegalRenderableReport({
-      type: "Strategic Report",
-      title: reportTitle,
-      prompt: sourcePrompt || "",
-      sections,
-    });
+    (!isKnownNonLegalSpecializedDomain &&
+      isLegalRenderableReport({
+        type: "Strategic Report",
+        title: reportTitle,
+        prompt: sourcePrompt || "",
+        sections,
+      }));
   const isDomainDecisionReport =
     isRealEstateReport ||
     isLegalReport ||
@@ -8548,6 +8617,8 @@ export default function Planner({
         ? copy.marketTitle
         : reportDomain === "real_estate"
         ? copy.realEstateTitle
+        : reportDomain === "acquisition"
+        ? getAcquisitionReportTitle(reportLanguage)
         : isSpecializedReportDomain(reportDomain)
           ? getSpecializedReportTitle(reportDomain, reportLanguage)
           : copy.planTitle;
@@ -9090,9 +9161,11 @@ export default function Planner({
   const currentReportTitle = activeReportMode === "plan"
     ? activePlanReportDomain === "real_estate"
       ? currentLanguageCopy.realEstateTitle
-      : isSpecializedReportDomain(activePlanReportDomain)
-        ? getSpecializedReportTitle(activePlanReportDomain, activeReportLanguage)
-        : currentLanguageCopy.planTitle
+      : activePlanReportDomain === "acquisition"
+        ? getAcquisitionReportTitle(activeReportLanguage)
+        : isSpecializedReportDomain(activePlanReportDomain)
+          ? getSpecializedReportTitle(activePlanReportDomain, activeReportLanguage)
+          : currentLanguageCopy.planTitle
     : currentLanguageCopy.marketTitle;
   const activeAnalysisLabel = activePlanReportDomain === "legal"
     ? getSpecializedReportTitle("legal", activeReportLanguage)

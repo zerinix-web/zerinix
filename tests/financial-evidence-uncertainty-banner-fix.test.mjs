@@ -108,7 +108,7 @@ for (const [name, source] of [
   test(`${name}: Scenario Analysis has a 'modeled, not measured' banner gated on hasVerifiedEvidence`, () => {
     const fieldCheck = name === "Planner.tsx"
       ? 'field === "scenarioAnalysis") {'
-      : 'normalizedTitle.includes("scenario")) {';
+      : 'normalizedTitle.includes("scenario") && !normalizedTitle.includes("roi") && !normalizedTitle.includes("irr")) {';
     const startIndex = source.indexOf(fieldCheck);
     assert.ok(startIndex > -1, `${name}: Scenario Analysis block not found`);
     const block = source.slice(startIndex, startIndex + 2000);

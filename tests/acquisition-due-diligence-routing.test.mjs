@@ -2,32 +2,32 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-// CRITICAL PRODUCTION FIX -- Acquisition Due Diligence Routing.
+// CRITICAL PRODUCTION FIX -- Acquisition Due Diligence Routing + dedicated
+// schema.
 //
-// A prompt requesting acquisition/M&A due diligence was being routed to
-// a "Legal Assessment Report" (or, depending on wording, a generic
-// Business Validation / Finance domain-analysis report), producing
+// Turn 1: a prompt requesting acquisition/M&A due diligence was being
+// routed to a "Legal Assessment Report" (or, depending on wording, a
+// generic Business Validation / Finance domain-analysis report), producing
 // generic startup validation metrics (burn rate, runway, validation
 // readiness, execution scoring) that have no place in analyzing the
-// acquisition of an already-operating company.
-//
-// Root cause: none of the three independent domain classifiers
-// (report-engine/domain.ts's classifyReportDomain -- the real,
-// production-live one; expertise-profile.ts's detectDomain fallback;
-// understanding.ts's selectAnalysisWorkflow) had any acquisition/M&A
-// vocabulary, so an acquisition prompt fell through to whichever of
-// legal/business/finance's own signals happened to also match (M&A
-// due-diligence language routinely also mentions the target's existing
-// contracts, compliance, and valuation/revenue).
-//
-// Fix: a new "acquisition" ReportDomain/ExpertiseProfile domain/
-// AnalysisWorkflow value, detected via a dedicated acquisitionSignals
+// acquisition of an already-operating company. Fixed with a new
+// "acquisition" ReportDomain, detected via a dedicated acquisitionSignals
 // pattern checked BEFORE every other specialized-domain signal in all
-// three classifiers, routed through the existing generic domain-analysis
-// pipeline (same as legal/finance/accounting/operations/procurement) with
-// its own domainRole, content-shaping directives, and forbidden-term
-// isolation list -- never through Business Idea Validation, Market
-// Intelligence, or Legal Assessment.
+// three domain classifiers (classifyReportDomain, expertise-profile's
+// detectDomain fallback, understanding's selectAnalysisWorkflow).
+//
+// Turn 2: "acquisition" initially reused the GENERIC domain-analysis
+// 14-field schema (Domain Findings, Financial Implications, Operational
+// Implications, ...) shared with legal/finance/accounting/operations/
+// procurement, with acquisition-specific content only steered via prompt
+// directives layered on top of those generic field names. This gives
+// Acquisition Due Diligence its own fully dedicated schema
+// (acquisition-analysis.ts) and its own dedicated generator
+// (generateAcquisitionDueDiligenceReport in plan-executor.ts) with
+// acquisition-specific field names only -- never the generic
+// domain-analysis field names, and never any Business Plan/Startup field
+// (Founder Roadmap, Go-to-Market Plan, Pricing Strategy, CAC/LTV
+// validation, TAM/SAM/SOM, Product validation).
 
 const { classifyReportDomain, resolveReportDomainForSelectedMode } = await import(
   "../app/lib/report-engine/domain.ts"
@@ -36,7 +36,13 @@ const { createExpertiseProfileFallback } = await import(
   "../app/lib/ai/expertise-profile.ts"
 );
 const { selectAnalysisWorkflow } = await import("../app/lib/ai/understanding.ts");
-const { buildDomainAnalysisInstructions } = await import(
+const {
+  acquisitionAnalysisFields,
+  acquisitionAnalysisFieldLabels,
+  buildAcquisitionAnalysisInstructions,
+  validateAcquisitionAnalysisReport,
+} = await import("../app/lib/report-engine/prompts/acquisition-analysis.ts");
+const { domainAnalysisFields, buildDomainAnalysisInstructions } = await import(
   "../app/lib/report-engine/prompts/domain-analysis.ts"
 );
 const {
@@ -217,17 +223,6 @@ test("createExpertiseProfileFallback: passing classifyReportDomain's own 'acquis
   assert.equal(profile.domain, "acquisition");
 });
 
-// Note: createExpertiseProfileFallback's own `domain` field can still say
-// "acquisition" under an explicit "plan"/"market" selectedMode -- exactly
-// like every other specialized domain (real_estate, finance, ...) except
-// "legal" (which has its own special-cased override). This mirrors the
-// pre-existing architecture: expertiseProfile.domain is descriptive, and
-// the actual hard boundary that guarantees "plan"/"market" can never
-// surface a specialized-domain product is enforced one layer later, by
-// resolveReportDomainForSelectedMode (see the dedicated test above) --
-// the real production call sites (route.ts, plan-executor.ts) always
-// resolve the final report domain through that function, never directly
-// off expertiseProfile.domain.
 test("resolveReportDomainForSelectedMode (not createExpertiseProfileFallback's own domain field) is the actual enforcement point: even when expertiseProfile.domain says 'acquisition' under 'plan'/'market', the final resolved domain is 'business'", () => {
   for (const selectedMode of ["plan", "market"]) {
     const profile = createExpertiseProfileFallback({
@@ -243,41 +238,99 @@ test("resolveReportDomainForSelectedMode (not createExpertiseProfileFallback's o
   }
 });
 
-// --- buildDomainAnalysisInstructions (domain-analysis.ts) --------------
+// --- The dedicated acquisition schema itself: acquisition-specific     --
+// --- field names only -- never the generic domain-analysis field       --
+// --- names, and never any Business Plan/Startup field.                --
 
-test("buildDomainAnalysisInstructions('acquisition', ...) covers every required content area and forbids fabricated startup metrics", () => {
-  const instructions = buildDomainAnalysisInstructions("acquisition", "English");
+const genericDomainAnalysisOnlyFieldNames = [
+  "domainFindings",
+  "financialImplications",
+  "operationalImplications",
+  "riskAnalysis",
+  "scenarioAnalysis",
+  "decisionAssessment",
+  "recommendedActions",
+  "finalRecommendation",
+  "regulatoryCompliance",
+  "extractedFacts",
+];
 
-  assert.match(instructions, /M&A due-diligence/i);
-  assert.match(instructions, /acquisition attractiveness/i);
-  assert.match(instructions, /EV\/ARR/);
-  assert.match(instructions, /comparable transactions/i);
-  assert.match(instructions, /purchase multiple/i);
-  assert.match(instructions, /purchase price fairness/i);
-  assert.match(instructions, /financing structure/i);
-  assert.match(instructions, /debt capacity/i);
-  assert.match(instructions, /ROI scenarios/i);
-  assert.match(instructions, /IRR estimates/i);
-  assert.match(instructions, /integration risk/i);
-  assert.match(instructions, /operational synergies/i);
-  assert.match(instructions, /revenue synergies/i);
-  assert.match(instructions, /cost synergies/i);
-  assert.match(instructions, /technology integration/i);
-  assert.match(instructions, /cultural integration/i);
-  assert.match(instructions, /regulatory considerations|Regulatory and Compliance/i);
-  assert.match(instructions, /30, 60, and 90|30\/60\/90/);
-  assert.match(instructions, /investment recommendation/i);
-  assert.match(instructions, /executive decision/i);
-  assert.match(instructions, /burn rate/i);
-  assert.match(instructions, /runway/i);
-  assert.match(instructions, /\bCAC\b/);
-  assert.match(instructions, /\bLTV\b/);
-  assert.match(instructions, /churn/i);
-  assert.match(instructions, /ARR growth/i);
-  assert.match(instructions, /Planning Assumption/);
+const businessPlanStartupFieldNames = [
+  "founderRoadmap",
+  "goToMarketPlan",
+  "pricingStrategy",
+  "tamSamSom",
+  "kpiDashboard",
+  "founderScore",
+  "unitEconomics",
+  "salesStrategy",
+  "businessModel",
+  "swotAnalysis",
+  "portersFiveForces",
+  "competitorLandscape",
+  "financialAssumptions",
+  "roadmap306090",
+];
+
+test("acquisitionAnalysisFields never contains a generic domain-analysis field name (Domain Findings, Financial Implications, Operational Implications, Risk Analysis, Scenario Analysis, Decision Assessment, Recommended Actions, Final Recommendation, Regulatory Compliance, Extracted Facts)", () => {
+  for (const field of genericDomainAnalysisOnlyFieldNames) {
+    assert.ok(
+      !acquisitionAnalysisFields.includes(field),
+      `acquisitionAnalysisFields unexpectedly includes generic domain-analysis field "${field}"`
+    );
+  }
 });
 
-test("buildDomainAnalysisInstructions: the acquisition-specific directives never leak into any other specialized domain's instructions", () => {
+test("acquisitionAnalysisFields never contains a Business Plan/Startup field (Founder Roadmap, Go-to-Market Plan, Pricing Strategy, TAM/SAM/SOM, KPI Dashboard, Founder Score, Unit Economics, Sales Strategy, SWOT, Porter's Five Forces, ...)", () => {
+  for (const field of businessPlanStartupFieldNames) {
+    assert.ok(
+      !acquisitionAnalysisFields.includes(field),
+      `acquisitionAnalysisFields unexpectedly includes Business Plan/Startup field "${field}"`
+    );
+  }
+});
+
+test("acquisitionAnalysisFields contains the exact requested acquisition-specific sections: valuation, purchase price fairness, financing structure, debt capacity, ROI/IRR, synergies, integration, regulatory review, post-merger roadmap", () => {
+  assert.ok(acquisitionAnalysisFields.includes("valuation"));
+  assert.ok(acquisitionAnalysisFields.includes("purchasePriceFairness"));
+  assert.ok(acquisitionAnalysisFields.includes("financingStructure"));
+  assert.ok(acquisitionAnalysisFields.includes("debtCapacity"));
+  assert.ok(acquisitionAnalysisFields.includes("roiIrrScenarios"));
+  assert.ok(acquisitionAnalysisFields.includes("synergies"));
+  assert.ok(acquisitionAnalysisFields.includes("integrationRisk"));
+  assert.ok(acquisitionAnalysisFields.includes("regulatoryReview"));
+  assert.ok(acquisitionAnalysisFields.includes("postMergerRoadmap"));
+});
+
+test("acquisitionAnalysisFieldLabels provides a label for every field, in every supported language", () => {
+  for (const language of ["English", "Turkish", "German", "French", "Spanish"]) {
+    for (const field of acquisitionAnalysisFields) {
+      const label = acquisitionAnalysisFieldLabels[language][field];
+      assert.ok(typeof label === "string" && label.trim().length > 0, `missing ${language} label for ${field}`);
+    }
+  }
+});
+
+test("validateAcquisitionAnalysisReport throws when a required field is missing, and returns the report unchanged when complete", () => {
+  const complete = Object.fromEntries(acquisitionAnalysisFields.map((field) => [field, "content"]));
+  assert.deepEqual(validateAcquisitionAnalysisReport(complete), complete);
+
+  const incomplete = { ...complete, valuation: "" };
+  assert.throws(() => validateAcquisitionAnalysisReport(incomplete), /missing fields/);
+});
+
+// --- domain-analysis.ts must no longer know about "acquisition" at all --
+
+test("domain-analysis.ts's SpecializedReportDomain/domainRole no longer include 'acquisition' (drift check: the generic schema is legal/finance/accounting/operations/procurement only)", () => {
+  const source = readFileSync(
+    new URL("../app/lib/report-engine/prompts/domain-analysis.ts", import.meta.url),
+    "utf8"
+  );
+  assert.doesNotMatch(source, /acquisition:/);
+  assert.match(source, /"business" \| "real_estate" \| "acquisition"/);
+});
+
+test("buildDomainAnalysisInstructions throws or produces no acquisition content for the 5 generic specialized domains (no leakage)", () => {
   for (const domain of ["legal", "finance", "accounting", "operations", "procurement"]) {
     const instructions = buildDomainAnalysisInstructions(domain, "English");
     assert.doesNotMatch(
@@ -288,25 +341,85 @@ test("buildDomainAnalysisInstructions: the acquisition-specific directives never
   }
 });
 
+test("domainAnalysisFields (the generic schema) and acquisitionAnalysisFields (the dedicated schema) share no field names beyond the universal subjectIdentification/externalEvidence/missingInformation/sources connective fields", () => {
+  const expectedSharedFields = new Set([
+    "subjectIdentification",
+    "externalEvidence",
+    "missingInformation",
+    "sources",
+  ]);
+  const shared = domainAnalysisFields.filter((field) => acquisitionAnalysisFields.includes(field));
+  assert.deepEqual(new Set(shared), expectedSharedFields);
+});
+
+// --- buildAcquisitionAnalysisInstructions (acquisition-analysis.ts) ----
+
+test("buildAcquisitionAnalysisInstructions (the model's role/behavior directives) plus acquisitionAnalysisPrompts (the per-field prompts, both actually sent to the model together at generation time) cover every required content area and forbid fabricated startup metrics", async () => {
+  const { acquisitionAnalysisPrompts } = await import(
+    "../app/lib/report-engine/prompts/acquisition-analysis.ts"
+  );
+  const instructions = buildAcquisitionAnalysisInstructions("English");
+  const combined = `${instructions}\n${Object.values(acquisitionAnalysisPrompts).join("\n")}`;
+
+  assert.match(combined, /M&A due-diligence/i);
+  assert.match(combined, /acquisition attractiveness/i);
+  assert.match(combined, /EV\/ARR/);
+  assert.match(combined, /comparable transactions/i);
+  assert.match(combined, /purchase multiple/i);
+  assert.match(combined, /purchase price fairness|purchase price is fair/i);
+  assert.match(combined, /financing structure/i);
+  assert.match(combined, /debt capacity/i);
+  assert.match(combined, /ROI scenarios/i);
+  assert.match(combined, /IRR/);
+  assert.match(combined, /integration risk/i);
+  assert.match(combined, /operational synergies/i);
+  assert.match(combined, /revenue synergies/i);
+  assert.match(combined, /cost synergies/i);
+  assert.match(combined, /technology integration/i);
+  assert.match(combined, /cultural integration/i);
+  assert.match(combined, /regulatory/i);
+  assert.match(combined, /30, 60, and 90/);
+  assert.match(combined, /investment recommendation/i);
+  assert.match(combined, /executive decision|Investment Recommendation and Executive Decision/i);
+  assert.match(combined, /burn rate/i);
+  assert.match(combined, /runway/i);
+  assert.match(combined, /\bCAC\b/);
+  assert.match(combined, /\bLTV\b/);
+  assert.match(combined, /churn/i);
+  assert.match(combined, /ARR growth/i);
+  assert.match(combined, /Planning Assumption/);
+  assert.match(combined, /must be preserved exactly, not withheld/i);
+});
+
+test("buildAcquisitionAnalysisInstructions explicitly forbids Business Plan/Startup sections by name (Founder Roadmap, Go-to-Market Plan, Pricing Strategy, CAC/LTV validation, TAM/SAM/SOM, Product validation)", () => {
+  const instructions = buildAcquisitionAnalysisInstructions("English");
+  assert.match(instructions, /Founder Roadmap/);
+  assert.match(instructions, /Go-to-Market Plan/);
+  assert.match(instructions, /Pricing Strategy/);
+  assert.match(instructions, /CAC\/LTV validation/);
+  assert.match(instructions, /TAM\/SAM\/SOM/);
+  assert.match(instructions, /Product validation/);
+});
+
 // --- Report isolation: acquisition report never carries startup-       --
 // --- scoring vocabulary, but legitimate evidence-based metrics (the    --
 // --- target's real ARR/CAC/Runway) are never blocked outright.        --
 
 test("assertReportIsolation('acquisition_due_diligence', ...) rejects startup-scoring vocabulary (Founder Score, PMF, decision-verdict tokens)", () => {
   const violatingSections = {
-    domainFindings: "The target shows strong Founder Readiness and a high Product-Market Fit score.",
+    acquisitionAttractiveness: "The target shows strong Founder Readiness and a high Product-Market Fit score.",
   };
   assert.throws(() => assertReportIsolation("acquisition_due_diligence", violatingSections));
 
   const violatingSections2 = {
-    finalRecommendation: "Our recommendation is PASS based on the Founder Score.",
+    investmentRecommendation: "Our recommendation is PASS based on the Founder Score.",
   };
   assert.throws(() => assertReportIsolation("acquisition_due_diligence", violatingSections2));
 });
 
 test("assertReportIsolation('acquisition_due_diligence', ...) never blocks legitimate, evidence-based ARR/CAC/LTV/Runway/EBITDA mentions (these are real acquisition-analysis vocabulary, not startup-pitch vocabulary)", () => {
   const legitimateSections = {
-    financialImplications:
+    valuation:
       "The target reports $12M ARR and a CAC of $4,200 per enterprise account. EBITDA margin is 18%. Post-close runway under the proposed financing structure is 24 months.",
   };
 
@@ -314,13 +427,15 @@ test("assertReportIsolation('acquisition_due_diligence', ...) never blocks legit
   assert.deepEqual(findReportIsolationViolations("acquisition_due_diligence", legitimateSections), []);
 });
 
-test("assertReportIsolation('acquisition_due_diligence', ...) passes for a clean, on-topic acquisition report", () => {
+test("assertReportIsolation('acquisition_due_diligence', ...) passes for a clean, on-topic acquisition report using the dedicated field names", () => {
   const cleanSections = {
-    domainFindings: "The target company is a well-positioned acquisition candidate with a defensible market position.",
-    financialImplications: "Valuation is supported by an EV/ARR multiple of 6.2x against comparable transactions. Purchase price of $48M appears fair.",
-    operationalImplications: "Integration risk is moderate; expected operational and cost synergies of $2M annually within 18 months.",
-    recommendedActions: "Days 1-30: finalize integration team and retention plan. Days 31-60: begin systems integration. Days 61-90: realize first cost synergies.",
-    finalRecommendation: "Recommendation: proceed conditionally on confirmed financing terms.",
+    acquisitionAttractiveness: "The target company is a well-positioned acquisition candidate with a defensible market position.",
+    valuation: "Valuation is supported by an EV/ARR multiple of 6.2x against comparable transactions.",
+    purchasePriceFairness: "Purchase price of $48M appears fair given the valuation range.",
+    integrationRisk: "Integration risk is moderate.",
+    synergies: "Expected operational and cost synergies of $2M annually within 18 months.",
+    postMergerRoadmap: "Days 1-30: finalize integration team and retention plan. Days 31-60: begin systems integration. Days 61-90: realize first cost synergies.",
+    investmentRecommendation: "Recommendation: proceed conditionally on confirmed financing terms.",
   };
 
   assert.doesNotThrow(() => assertReportIsolation("acquisition_due_diligence", cleanSections));
@@ -372,27 +487,92 @@ const planExecutorSource = readFileSync(
   "utf8"
 );
 
-test("plan-executor.ts routes reportDomain === 'acquisition' into the specialized domain-analysis pipeline (drift check)", () => {
+test("plan-executor.ts routes reportDomain === 'acquisition' to its own dedicated generateAcquisitionDueDiligenceReport, not the generic generateSpecializedDomainReport (drift check)", () => {
   assert.match(
     planExecutorSource,
-    /reportDomain === "procurement" ||\s*\n\s*reportDomain === "acquisition"/
+    /if \(reportDomain === "acquisition"\) \{\s*\n\s*return generateAcquisitionDueDiligenceReport\(/
+  );
+  // "acquisition" must no longer appear in generateSpecializedDomainReport's
+  // own routing condition list (it has its own branch above instead).
+  assert.doesNotMatch(
+    planExecutorSource,
+    /reportDomain === "procurement" \|\|\s*\n\s*reportDomain === "acquisition"/
   );
 });
 
-test("plan-executor.ts runs assertReportIsolation('acquisition_due_diligence', ...) at every presentedReport construction site (drift check)", () => {
-  const occurrences = planExecutorSource.match(/assertReportIsolation\("acquisition_due_diligence"/g) || [];
-  assert.equal(occurrences.length, 3, `expected 3 assertReportIsolation("acquisition_due_diligence", ...) call sites, found ${occurrences.length}`);
+test("generateAcquisitionDueDiligenceReport uses the dedicated acquisition-analysis.ts schema throughout (drift check)", () => {
+  const fnStart = planExecutorSource.indexOf("async function generateAcquisitionDueDiligenceReport(");
+  assert.ok(fnStart > -1, "generateAcquisitionDueDiligenceReport not found");
+  const fnEnd = planExecutorSource.indexOf("\nexport async function getPlanExecutorUsageError", fnStart);
+  const fnBody = planExecutorSource.slice(fnStart, fnEnd);
+
+  assert.match(fnBody, /parseAcquisitionAnalysisReport/);
+  assert.match(fnBody, /serializeAcquisitionAnalysisReportChunks/);
+  assert.match(fnBody, /buildAcquisitionAnalysisInstructions/);
+  assert.match(fnBody, /acquisitionAnalysisFields/);
+  assert.match(fnBody, /createMockAcquisitionAnalysisReport/);
+  assert.match(fnBody, /createGroundedAcquisitionTimeoutFallback/);
+  // Never the generic domain-analysis schema or the legal-specific
+  // post-processing -- those belong only to generateSpecializedDomainReport.
+  assert.doesNotMatch(fnBody, /parseDomainAnalysisReport\(/);
+  assert.doesNotMatch(fnBody, /prepareLegalDecisionReport/);
+  assert.doesNotMatch(fnBody, /assessLegalResearchCoverage/);
 });
 
-test("plan-executor.ts never routes 'acquisition' through the legal-specific post-processing (prepareLegalDecisionReport/assessLegalResearchCoverage remain gated on domain === \"legal\" only)", () => {
+test("plan-executor.ts runs assertReportIsolation('acquisition_due_diligence', ...) exactly once, inside the shared parseAcquisitionAnalysisReport parser (single source of truth for every code path that returns an acquisition report)", () => {
+  const occurrences = planExecutorSource.match(/assertReportIsolation\("acquisition_due_diligence"/g) || [];
+  assert.equal(occurrences.length, 1, `expected exactly 1 occurrence, found ${occurrences.length}`);
+
+  const fnStart = planExecutorSource.indexOf("function parseAcquisitionAnalysisReport(");
+  const fnEnd = planExecutorSource.indexOf("\nfunction parseRealEstateReport", fnStart);
+  const fnBody = planExecutorSource.slice(fnStart, fnEnd);
+  assert.match(fnBody, /assertReportIsolation\("acquisition_due_diligence"/);
+});
+
+test("plan-executor.ts never routes 'acquisition' through the legal-specific post-processing anywhere in the file (prepareLegalDecisionReport/assessLegalResearchCoverage remain gated on domain === \"legal\" only)", () => {
   assert.doesNotMatch(planExecutorSource, /domain === "acquisition"[\s\S]{0,80}prepareLegalDecisionReport/);
   assert.doesNotMatch(planExecutorSource, /domain === "acquisition"[\s\S]{0,80}assessLegalResearchCoverage/);
 });
 
-// --- User-provided facts must always be preserved (requirement:        --
-// --- "Always preserve every user-provided fact exactly") --------------
+// --- worker.ts wiring: acquisition reports must resolve their own field --
+// --- list/labels/type/title, never fall back to the generic domain-     --
+// --- analysis schema or business_plan fields (drift check).            --
 
-test("buildDomainAnalysisInstructions instructs the model to preserve verified target-company figures exactly, not withhold them", () => {
-  const instructions = buildDomainAnalysisInstructions("acquisition", "English");
-  assert.match(instructions, /must be preserved exactly, not withheld/i);
+const workerSource = readFileSync(
+  new URL("../app/lib/report-jobs/worker.ts", import.meta.url),
+  "utf8"
+);
+
+test("worker.ts's getExpectedFields/getFieldTitle/getReportType/getReportTitle/inferDomain all handle domain === 'acquisition' using the dedicated schema (drift check)", () => {
+  assert.match(workerSource, /acquisitionAnalysisFields/);
+  assert.match(workerSource, /acquisitionAnalysisFieldLabels/);
+  assert.match(workerSource, /if \(domain === "acquisition"\) \{\s*\n\s*return acquisitionAnalysisFields/);
+  assert.match(workerSource, /if \(domain === "acquisition"\) \{\s*\n\s*return acquisitionAnalysisFieldLabels/);
+  assert.match(workerSource, /if \(domain === "acquisition"\) \{\s*\n\s*return "acquisition_due_diligence_analysis"/);
+  assert.match(workerSource, /candidate === "acquisition"/);
+  assert.match(workerSource, /acquisitionAnalysisDistinguishingFields/);
+});
+
+// --- components/Planner.tsx wiring: acquisition reports get their own  --
+// --- UI field list/title, and are never misrendered as a Legal         --
+// --- Assessment even when their content legitimately mentions          --
+// --- contracts/compliance (drift check).                              --
+
+const plannerSource = readFileSync(
+  new URL("../components/Planner.tsx", import.meta.url),
+  "utf8"
+);
+
+test("Planner.tsx has its own acquisitionReportFields UI descriptor list and routes domain === 'acquisition' to it (drift check)", () => {
+  assert.match(plannerSource, /const acquisitionReportFields:/);
+  assert.match(plannerSource, /if \(domain === "acquisition"\) return acquisitionReportFields;/);
+});
+
+test("Planner.tsx never lets a known non-legal specialized domain (including 'acquisition') fall through to the legal-shaped-content heuristic, so an acquisition report can never be mislabeled and re-rendered as a Legal Assessment (drift check)", () => {
+  assert.match(plannerSource, /isKnownNonLegalSpecializedDomain/);
+  assert.match(plannerSource, /reportDomain === "acquisition";/);
+  assert.match(
+    plannerSource,
+    /const isLegalReport =\s*\n\s*reportDomain === "legal" \|\|\s*\n\s*\(!isKnownNonLegalSpecializedDomain/
+  );
 });

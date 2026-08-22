@@ -16,6 +16,7 @@ export type DashboardReport = {
     | "Business Plan"
     | "Market Analysis"
     | "Real Estate Investment Analysis"
+    | "Acquisition Due Diligence Report"
     | "Strategic Report";
   status: string;
   metadata?: ReportMetadata;
@@ -31,6 +32,7 @@ export type MobileReportType =
   | "Business Plan"
   | "Market Analysis"
   | "Real Estate Investment Analysis"
+  | "Acquisition Due Diligence Report"
   | "Strategic Report";
 
 export type MobileReportPreview = {
@@ -124,6 +126,19 @@ const sectionLabels: Record<string, string> = {
   riskAnalysis: "Risk Analysis",
   decisionAssessment: "Decision Assessment",
   recommendedActions: "Recommended Actions",
+  targetCompanyFacts: "Target Company Facts",
+  acquisitionAttractiveness: "Acquisition Attractiveness",
+  valuation: "Valuation",
+  purchasePriceFairness: "Purchase Price Fairness",
+  financingStructure: "Financing Structure",
+  debtCapacity: "Debt Capacity",
+  roiIrrScenarios: "ROI / IRR Scenarios",
+  synergies: "Operational, Revenue, and Cost Synergies",
+  integrationRisk: "Integration Risk",
+  regulatoryReview: "Regulatory Review",
+  postMergerRoadmap: "Post-Merger Integration Roadmap (30/60/90 Days)",
+  dealRisks: "Deal Risks",
+  investmentRecommendation: "Investment Recommendation and Executive Decision",
 };
 
 const sectionOrder = Object.keys(sectionLabels);
@@ -216,6 +231,16 @@ function inferReportType(row: ReportRow) {
     return "Market Analysis";
   }
 
+  // Checked before the legal/finance/... "Strategic Report" catch-all
+  // below (whose substrings would never match "acquisition" anyway, but
+  // keeping this alongside real_estate/market documents the acquisition
+  // domain has its own dedicated report type, not a fallback into
+  // "Strategic Report" or the "Business Plan" catch-all at the end --
+  // both of which would misrender it through the wrong template).
+  if (rawType.includes("acquisition") || rawType.includes("satın alma")) {
+    return "Acquisition Due Diligence Report";
+  }
+
   if (
     rawType.includes("legal") ||
     rawType.includes("finance") ||
@@ -246,6 +271,10 @@ function inferMobileReportType(row: ReportRow): MobileReportType {
 
   if (rawType.includes("market") || rawType.includes("pazar")) {
     return "Market Analysis";
+  }
+
+  if (rawType.includes("acquisition") || rawType.includes("satın alma")) {
+    return "Acquisition Due Diligence Report";
   }
 
   if (
@@ -342,9 +371,11 @@ export function normalizeReport(row: ReportRow): DashboardReport {
       ? "Market Analysis Report"
       : reportType === "Real Estate Investment Analysis"
         ? "Real Estate Investment Analysis"
-        : reportType === "Strategic Report"
-          ? "Strategic Decision Report"
-          : "Business Plan Report";
+        : reportType === "Acquisition Due Diligence Report"
+          ? "Acquisition Due Diligence Report"
+          : reportType === "Strategic Report"
+            ? "Strategic Decision Report"
+            : "Business Plan Report";
   const sections = normalizeSections(row);
   const investmentScore = readReportInvestmentScore(row.metadata);
   const rowStatus = readString(row, ["status", "state"], "completed");
@@ -475,9 +506,11 @@ function normalizeReportSummary(row: ReportRow): DashboardReport {
       ? "Market Analysis Report"
       : reportType === "Real Estate Investment Analysis"
         ? "Real Estate Investment Analysis"
-        : reportType === "Strategic Report"
-          ? "Strategic Decision Report"
-          : "Business Plan Report";
+        : reportType === "Acquisition Due Diligence Report"
+          ? "Acquisition Due Diligence Report"
+          : reportType === "Strategic Report"
+            ? "Strategic Decision Report"
+            : "Business Plan Report";
   const rowStatus = readString(row, ["status", "state"], "completed");
   const failedReport = rowStatus.toLowerCase() !== "completed";
 

@@ -188,6 +188,14 @@ import {
   type SpecializedReportDomain,
 } from "@/app/lib/report-engine/prompts/domain-analysis";
 import {
+  buildAcquisitionAnalysisInstructions,
+  acquisitionAnalysisFieldLabels,
+  acquisitionAnalysisFields,
+  acquisitionAnalysisPrompts,
+  validateAcquisitionAnalysisReport,
+  type AcquisitionAnalysisField,
+} from "@/app/lib/report-engine/prompts/acquisition-analysis";
+import {
   buildRealEstateInstructions,
   realEstateFieldLabels,
   realEstateFields,
@@ -216,6 +224,7 @@ import {
 type PlanReportChunk = Partial<Record<PlanReportField, string>>;
 type RealEstateReport = Record<RealEstateReportField, string>;
 type DomainAnalysisReport = Record<DomainAnalysisField, string>;
+type AcquisitionAnalysisReport = Record<AcquisitionAnalysisField, string>;
 type DynamicResearchPlanningInput = {
   expertiseProfile: ExpertiseProfile;
   reportPlan: DynamicReportPlan;
@@ -520,6 +529,16 @@ function serializeDomainAnalysisReportChunks(
   ].join("");
 }
 
+function serializeAcquisitionAnalysisReportChunks(report: AcquisitionAnalysisReport) {
+  const conciseReport = dedupeReportParagraphsAcrossSections(report);
+  return [
+    serializeReportStreamChunk({ reportDomain: "acquisition" }),
+    ...acquisitionAnalysisFields.map((field) =>
+      serializeReportStreamChunk({ [field]: conciseReport[field] })
+    ),
+  ].join("");
+}
+
 // Strategic Advisory has no numeric decision-scoring engine of its own
 // (decisionAssessment/finalRecommendation are pure LLM narrative text) --
 // this extracts the mandatory opening block from that narrative rather
@@ -642,6 +661,91 @@ function buildDomainAnalysisExecutiveDecisionBrief(
   };
 }
 
+// Acquisition Due Diligence's own executive-decision-brief builder --
+// mirrors buildDomainAnalysisExecutiveDecisionBrief's shape but reads
+// from the dedicated acquisition field names (investmentRecommendation
+// instead of decisionAssessment/finalRecommendation, acquisitionAttractiveness
+// instead of domainFindings, dealRisks instead of riskAnalysis,
+// postMergerRoadmap instead of recommendedActions) so the two report
+// families never share field-name assumptions.
+function buildAcquisitionAnalysisExecutiveDecisionBrief(
+  report: AcquisitionAnalysisReport,
+  language: ResponseLanguage
+): ExecutiveDecisionBrief {
+  const { decision, confidence } = extractGenericDecisionSignal(
+    report.investmentRecommendation
+  );
+
+  const attractivenessLines = domainTopLines(report.acquisitionAttractiveness, 4);
+  const biggestOpportunity =
+    attractivenessLines[0] ||
+    domainTopLines(report.investmentRecommendation, 1)[0] ||
+    report.investmentRecommendation.trim().slice(0, 200);
+  const reasonsTail = attractivenessLines.slice(1, 4);
+  const topReasons = [biggestOpportunity, ...reasonsTail].slice(0, 3);
+
+  const topRisks = domainTopLines(report.dealRisks, 3);
+  const resolvedTopRisks = topRisks.length ? topRisks : [report.dealRisks.trim().slice(0, 200)];
+  const topRisk = (resolvedTopRisks[0] || reportText(language, "the primary risk", "birincil risk"))
+    .trim()
+    .replace(/[.!?]+$/, "");
+  const missingInformationLines = domainTopLines(report.missingInformation, 3);
+  const missingEvidence = missingInformationLines.length
+    ? missingInformationLines
+    : [report.missingInformation.trim().slice(0, 200)];
+
+  const confidenceDirection: "reduced" | "supported" = confidence >= 65 ? "supported" : "reduced";
+  const confidenceFactors = confidenceDirection === "supported" ? attractivenessLines.slice(0, 3) : missingEvidence;
+
+  const why =
+    decision === "GO"
+      ? reportText(
+          language,
+          `"${biggestOpportunity.replace(/[.!?]+$/, "")}" is well-supported by the available evidence and outweighs the identified deal risks at the current confidence level.`,
+          `"${biggestOpportunity.replace(/[.!?]+$/, "")}" mevcut kanıtlarla iyi desteklenmektedir ve şu anki güven seviyesinde belirlenen işlem risklerinden daha ağır basmaktadır.`
+        )
+      : decision === "CONDITIONAL_GO"
+        ? reportText(
+            language,
+            `The acquisition case -- "${biggestOpportunity.replace(/[.!?]+$/, "")}" -- is plausible, but "${topRisk}" remains unresolved, so this should proceed conditionally rather than unconditionally.`,
+            `Satın alma gerekçesi -- "${biggestOpportunity.replace(/[.!?]+$/, "")}" -- makul görünüyor, ancak "${topRisk}" henüz çözülmemiştir; bu nedenle koşulsuz değil, koşullu olarak ilerlenmelidir.`
+          )
+        : reportText(
+            language,
+            `"${topRisk}" outweighs the identified acquisition opportunity given the evidence currently available.`,
+            `Şu anda mevcut olan kanıtlar göz önüne alındığında, "${topRisk}" belirlenen satın alma fırsatından daha ağır basmaktadır.`
+          );
+
+  const whatWouldChangeThisDecision = reportText(
+    language,
+    `Verified, independent evidence that resolves "${topRisk}" would change this decision.`,
+    `"${topRisk}" sorununu çözen doğrulanmış, bağımsız kanıtlar bu kararı değiştirir.`
+  );
+
+  const roadmapLines = domainTopLines(report.postMergerRoadmap, 3);
+  const immediateNextAction =
+    decision === "NO_GO"
+      ? reportText(
+          language,
+          `Do not proceed on the current basis; the specific blocker is "${topRisk}" -- revisit only if new, verified evidence resolves it.`,
+          `Mevcut haliyle ilerlemeyin; asıl engel "${topRisk}"; yalnızca yeni ve doğrulanmış kanıtlar bunu çözerse yeniden değerlendirin.`
+        )
+      : roadmapLines[0] || report.postMergerRoadmap.trim().slice(0, 200);
+
+  return {
+    decision,
+    confidence,
+    confidenceDirection,
+    confidenceFactors,
+    why,
+    topReasons: topReasons.length ? topReasons : domainTopLines(report.investmentRecommendation, 3),
+    topRisks: resolvedTopRisks,
+    missingEvidence,
+    whatWouldChangeThisDecision,
+    immediateNextAction,
+  };
+}
+
 function parseDomainAnalysisReport(
   value: string,
   language: ResponseLanguage = "English"
@@ -703,6 +807,78 @@ function parseDomainAnalysisReport(
     domainExecutiveDecisionBrief.decision,
     validated,
     ["domainFindings", "recommendedActions", "finalRecommendation"],
+    language
+  );
+
+  // Quality Gate: fail generation instead of silently returning a report
+  // that dumps information rather than helping a decision-maker act.
+  assertExecutiveQualityGate({
+    sections: validated,
+    firstField: "subjectIdentification",
+    sourceFields: ["sources"],
+  });
+
+  return validated;
+}
+
+function parseAcquisitionAnalysisReport(
+  value: string,
+  language: ResponseLanguage = "English"
+): AcquisitionAnalysisReport {
+  let parsed: Record<string, unknown>;
+
+  try {
+    parsed = JSON.parse(value) as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(
+      `Acquisition report JSON parse failed: ${
+        error instanceof Error ? error.message : "Invalid JSON"
+      }.`
+    );
+  }
+
+  const report = Object.fromEntries(
+    acquisitionAnalysisFields.map((field) => [
+      field,
+      typeof parsed[field] === "string"
+        ? sanitizeVisibleReportContent(parsed[field] as string)
+        : "",
+    ])
+  ) as AcquisitionAnalysisReport;
+
+  const validated = validateAcquisitionAnalysisReport(report);
+
+  // Executive Decision First: prepend the mandatory opening block to the
+  // first field in schema order. No dedicated executiveSummary field
+  // exists on this report type, so subjectIdentification (schema-first)
+  // carries it instead of adding a new field to the schema/PDF/dashboard.
+  const acquisitionExecutiveDecisionBrief = buildAcquisitionAnalysisExecutiveDecisionBrief(validated, language);
+  validated.subjectIdentification = [
+    formatExecutiveDecisionBrief(acquisitionExecutiveDecisionBrief, language),
+    validated.subjectIdentification,
+  ].join("\n\n");
+
+  validated.sources = buildEvidenceSummary(validated.sources, language);
+
+  for (const field of acquisitionAnalysisFields) {
+    validated[field] = stripFillerAndDuplicateSentences(validated[field]);
+  }
+
+  // Acquisition Due Diligence must never carry Business Idea Validation's,
+  // Market Intelligence's, or startup-scoring vocabulary -- checked at
+  // both the shared Strategic-Advisory-family level (defensive, matches
+  // every other specialized domain) and the dedicated acquisition list
+  // (Founder Score, PMF, PASS/HOLD/VALIDATE/REJECT tokens, ...).
+  assertReportIsolation("strategic_advisory", validated);
+  assertReportIsolation("acquisition_due_diligence", validated);
+
+  // Fail generation rather than ship a report that tells the reader to
+  // avoid the decision in one field and to proceed/renegotiate/close in
+  // another.
+  assertNoDecisionContradiction(
+    acquisitionExecutiveDecisionBrief.decision,
+    validated,
+    ["acquisitionAttractiveness", "postMergerRoadmap", "investmentRecommendation"],
     language
   );
 
@@ -6138,6 +6314,91 @@ function createGroundedDomainTimeoutFallback({
     : fallbackReport;
 }
 
+function createMockAcquisitionAnalysisReport(): AcquisitionAnalysisReport {
+  return Object.fromEntries(
+    acquisitionAnalysisFields.map((field) => [
+      field,
+      field === "investmentRecommendation" || field === "postMergerRoadmap"
+        ? "[Recommendation] [Basis: diagnostic mode] Complete the listed evidence checks before making the decision."
+        : "[Unknown] [Required: verified source or uploaded record] Evidence is not available in diagnostic mode.",
+    ])
+  ) as AcquisitionAnalysisReport;
+}
+
+function createGroundedAcquisitionTimeoutFallback({
+  research,
+  assets,
+  language,
+}: {
+  research: DomainResearchBundle;
+  assets: ReturnType<typeof normalizeAnalysisAssets>;
+  language: ResponseLanguage;
+  prompt: string;
+}): AcquisitionAnalysisReport {
+  const facts = research.decisionIntelligence.extractedFacts.map(
+    (fact) =>
+      `[Verified from uploaded asset] [Asset:${fact.source}] ${fact.field}: ${fact.value}`
+  );
+  const evidence = research.evidence.map(
+    (item) =>
+      `[${item.label}] [${item.id}] ${item.field}: ${item.claim || item.value} ${item.url || ""}`.trim()
+  );
+  const unresolved = research.plan
+    .filter((task) => task.status !== "completed_with_evidence")
+    .map(
+      (task) =>
+        language === "Turkish"
+          ? `[Unknown] [Required:${task.field}] Bazı dış kaynaklar doğrulanamadığı için bu alan kesin sonuç içermiyor.`
+          : `[Unknown] [Required:${task.field}] Some external sources could not be verified, so this field is not definitive.`
+    );
+  const decision = research.decisionIntelligence.decision;
+  const localized = {
+    noFacts:
+      language === "Turkish"
+        ? "[Unknown] [Required:uploaded records] Yüklenen varlıklardan doğrulanmış bir bulgu çıkarılamadı."
+        : "[Unknown] [Required:uploaded records] No verified fact was extracted from the uploaded assets.",
+    noEvidence:
+      language === "Turkish"
+        ? "[Unknown] [Required:authoritative source] Süre bütçesi içinde kullanılabilir dış kanıt dönmedi."
+        : "[Unknown] [Required:authoritative source] No usable external evidence returned within the time budget.",
+    timeout:
+      language === "Turkish"
+        ? "[Recommendation] [Basis:verified evidence and deadline fallback] Sentez sağlayıcısı süre sınırına ulaştı; bu ön rapor doğrulanmış kanıtlar ve mevcut karar motoru kullanılarak tamamlandı."
+        : "[Recommendation] [Basis:verified evidence and deadline fallback] The synthesis provider reached its deadline; this preliminary report was completed from verified evidence and the existing decision engine.",
+  };
+  const factsText = facts.join("\n") || localized.noFacts;
+  const evidenceText = evidence.join("\n") || localized.noEvidence;
+  const unresolvedText =
+    unresolved.join("\n") ||
+    (language === "Turkish"
+      ? "[Recommendation] [Basis:research task registry] Tüm zorunlu araştırma görevleri kanıtla tamamlandı."
+      : "[Recommendation] [Basis:research task registry] All required research tasks completed with evidence.");
+  const assetList =
+    assets
+      .map((asset) => `[Verified from uploaded asset] [Asset:${asset.name}] ${asset.name} (${asset.type})`)
+      .join("\n") || localized.noFacts;
+
+  return validateAcquisitionAnalysisReport({
+    subjectIdentification: assetList,
+    targetCompanyFacts: factsText,
+    externalEvidence: evidenceText,
+    acquisitionAttractiveness: `${localized.timeout}\n[Recommendation] [Basis:decision engine] ${decision.recommendation}`,
+    valuation: `[Recommendation] [Basis:acquisition evidence registry] ${decision.opportunities.join(" | ") || localized.noEvidence}`,
+    purchasePriceFairness: unresolvedText,
+    financingStructure: unresolvedText,
+    debtCapacity: unresolvedText,
+    roiIrrScenarios: localized.timeout,
+    synergies: `[Recommendation] [Basis:acquisition evidence registry] ${decision.opportunities.join(" | ") || localized.noEvidence}`,
+    integrationRisk: `[Recommendation] [Basis:decision engine] ${decision.risks.join(" | ") || unresolvedText}`,
+    regulatoryReview: unresolvedText,
+    postMergerRoadmap: `[Recommendation] [Basis:decision engine] ${decision.nextActions.join(" | ") || unresolvedText}`,
+    dealRisks: `[Recommendation] [Basis:decision engine] ${decision.risks.join(" | ") || unresolvedText}`,
+    missingInformation: unresolvedText,
+    investmentRecommendation: `${localized.timeout}\n[Recommendation] [Basis:decision engine] ${decision.recommendation}`,
+    sources: `${assetList}\n${evidenceText}`,
+  });
+}
+
 async function generateSpecializedDomainReport({
   domain,
   req,
@@ -6263,9 +6524,6 @@ async function generateSpecializedDomainReport({
               })
             )
           : cachedReport;
-      if (domain === "acquisition") {
-        assertReportIsolation("acquisition_due_diligence", presentedReport);
-      }
 
       logSkippedResearchForReportCache({
         identity: researchIdentity,
@@ -6348,9 +6606,6 @@ async function generateSpecializedDomainReport({
               })
             )
           : cachedReport;
-      if (domain === "acquisition") {
-        assertReportIsolation("acquisition_due_diligence", presentedReport);
-      }
 
       return new Response(
         encoder.encode(
@@ -6471,9 +6726,6 @@ Do not include commentary outside the JSON object.`);
                 })
               )
             : report;
-        if (domain === "acquisition") {
-          assertReportIsolation("acquisition_due_diligence", presentedReport);
-        }
         const tokenUsage = extractTokenUsage(response);
         const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
         const serializedReport = JSON.stringify(presentedReport);
@@ -6553,6 +6805,418 @@ Do not include commentary outside the JSON object.`);
           controller.enqueue(
             encoder.encode(
               serializeDomainAnalysisReportChunks(domain, fallbackReport)
+            )
+          );
+          logReportTimingSummary({
+            requestId: reportRequestId,
+            assetExtractionMs,
+            entityExtractionMs: domainResearch.timings.entityExtractionMs,
+            researchPlanningMs: domainResearch.timings.researchPlanningMs,
+            researchExecutionMs: domainResearch.timings.researchExecutionMs,
+            reportGenerationMs: Date.now() - startedAt,
+            pdfPreparationMs: 0,
+            totalMs: Date.now() - pipelineStartedAt,
+          });
+          logOperationalInfo(
+            "[api:plan] specialized provider deadline used grounded fallback",
+            {
+              domain,
+              reportRequestId: reportRequestId || null,
+              evidenceCount: domainResearch.evidence.length,
+            }
+          );
+          controller.close();
+          return;
+        }
+        logPlanStageDiagnostic({
+          stage: "report_builder",
+          status: "failed",
+          input: {
+            domain,
+            prompt: promptText,
+            assetCount: analysisAssets.length,
+          },
+          output: null,
+          error,
+        });
+        controller.enqueue(
+          encoder.encode(serializePlanStreamError("report_builder", error))
+        );
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+    },
+  });
+}
+
+// Acquisition Due Diligence's own dedicated generator -- mirrors
+// generateSpecializedDomainReport's caching/research/streaming/timeout
+// plumbing (shared, schema-agnostic infrastructure), but always uses the
+// dedicated acquisition-analysis.ts schema and never runs any of the
+// legal-specific branches (prepareLegalDecisionReport/
+// assessLegalResearchCoverage), since those only ever apply to
+// domain === "legal" in the sibling function.
+async function generateAcquisitionDueDiligenceReport({
+  req,
+  supabase,
+  user,
+  ip,
+  promptText,
+  responseLanguage,
+  reportRequestId,
+  analysisAssets,
+  assetContext,
+  assetEvidenceInstructions,
+  expertiseContext,
+  assetFingerprint,
+  pipelineStartedAt,
+  assetExtractionMs,
+  dynamicResearchPlanningInput,
+  conversationId,
+}: {
+  req: Request;
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  user: User;
+  ip: string;
+  promptText: string;
+  responseLanguage: ResponseLanguage;
+  reportRequestId: string;
+  analysisAssets: ReturnType<typeof normalizeAnalysisAssets>;
+  assetContext: string;
+  assetEvidenceInstructions: string;
+  expertiseContext: string;
+  assetFingerprint: string;
+  pipelineStartedAt: number;
+  assetExtractionMs: number;
+  dynamicResearchPlanningInput: DynamicResearchPlanningInput;
+  conversationId?: string;
+}) {
+  const encoder = new TextEncoder();
+  const domain = "acquisition" as const;
+
+  if (isAiTestMode()) {
+    return new Response(
+      encoder.encode(
+        serializeAcquisitionAnalysisReportChunks(
+          createMockAcquisitionAnalysisReport()
+        )
+      ),
+      {
+        headers: {
+          "Content-Type": "application/x-ndjson; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+        },
+      }
+    );
+  }
+
+  const productionLimit = await checkAiProductionRateLimit({
+    supabase,
+    userId: user.id,
+    account: user,
+    endpoint: "/api/plan",
+    requestKind: "report_generation",
+    promptText,
+    reportField: FULL_REPORT_FIELD,
+    reportRequestId,
+    ip,
+  });
+
+  if (!productionLimit.allowed) {
+    return NextResponse.json(
+      { error: productionLimit.reason },
+      { status: 429 }
+    );
+  }
+
+  const { model, planTier, promptHash } = productionLimit;
+  const researchIdentity: ResearchCacheIdentity = {
+    normalizedPrompt: productionLimit.normalizedPrompt,
+    uploadedAssetHash: assetFingerprint,
+    analysisMode: dynamicResearchPlanningInput.selectedMode,
+    language: responseLanguage,
+    reportFamily: `${domain}_decision_analysis`,
+  };
+  const conversationResearch = await getConversationResearchSnapshot({
+    supabase,
+    userId: user.id,
+    conversationId,
+  });
+  const cacheKey = createPreResearchReportCacheKey({
+    endpoint: "/api/plan",
+    identity: researchIdentity,
+    model,
+    reportVariant: `${domain}_decision_analysis:fullReport:v1`,
+    contextFingerprint: conversationResearch
+      ? createResearchBundleFingerprint(conversationResearch.research)
+      : undefined,
+  });
+  const cached = await getCachedAiResponse(supabase, user.id, cacheKey);
+
+  if (cached && !isReportGenerationFailureText(cached.responseText)) {
+    try {
+      const cachedResearch = getCachedResearchFromReportData(cached.responseData);
+      const cachedReport = parseAcquisitionAnalysisReport(cached.responseText, responseLanguage);
+      if (cachedResearch) {
+        validateDomainResearchQuality({
+          report: cachedReport,
+          bundle: cachedResearch,
+          expectedDomain: domain,
+        });
+      }
+
+      logSkippedResearchForReportCache({
+        identity: researchIdentity,
+        research: cachedResearch,
+      });
+      return new Response(
+        encoder.encode(
+          serializeAcquisitionAnalysisReportChunks(cachedReport)
+        ),
+        {
+          headers: {
+            "Content-Type": "application/x-ndjson; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+          },
+        }
+      );
+    } catch (error) {
+      logOperationalInfo("[api:plan] ignored invalid pre-research domain cache", {
+        domain,
+        reportRequestId: reportRequestId || null,
+        reason: error instanceof Error ? error.message : "Unknown validation error",
+      });
+    }
+  }
+
+  const client = createOpenAiClient();
+  const { research: domainResearch } = await resolveDomainResearchWithCache({
+    supabase,
+    userId: user.id,
+    identity: researchIdentity,
+    conversationId,
+    execute: () => runDomainAwareResearch({
+      client,
+      model,
+      prompt: promptText,
+      assets: analysisAssets,
+      language: responseLanguage,
+      signal: req.signal,
+      researchUserId: user.id,
+      ...dynamicResearchPlanningInput,
+    }),
+  });
+  const researchContext = formatDomainResearchForReportGeneration(domainResearch);
+  const adaptiveWriterPlan = createAdaptiveReportWriterPlan({
+      expertiseProfile: dynamicResearchPlanningInput.expertiseProfile,
+      reportPlan: dynamicResearchPlanningInput.reportPlan,
+      validatedEvidence: domainResearch.validatedEvidence,
+      uploadedMaterialTypes: analysisAssets.map((asset) => asset.type),
+      outputContract: {
+        fields: acquisitionAnalysisFields,
+        labels: acquisitionAnalysisFieldLabels[responseLanguage],
+      },
+    });
+  const adaptiveWriterContext =
+    formatAdaptiveReportWriterGenerationContext(adaptiveWriterPlan);
+
+  if (cached && !isReportGenerationFailureText(cached.responseText)) {
+    try {
+      const cachedReport = parseAcquisitionAnalysisReport(cached.responseText, responseLanguage);
+      validateDomainResearchQuality({
+        report: cachedReport,
+        bundle: domainResearch,
+        expectedDomain: domain,
+      });
+
+      return new Response(
+        encoder.encode(
+          serializeAcquisitionAnalysisReportChunks(cachedReport)
+        ),
+        {
+          headers: {
+            "Content-Type": "application/x-ndjson; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+          },
+        }
+      );
+    } catch (error) {
+      logOperationalInfo("[api:plan] ignored invalid cached domain report", {
+        domain,
+        reportRequestId: reportRequestId || null,
+        reason: error instanceof Error ? error.message : "Unknown validation error",
+      });
+    }
+  }
+
+  // dedupeExactPromptBlocks only removes byte-for-byte identical paragraph
+  // blocks (e.g. the same finding appearing in both uploaded-asset
+  // evidence and the research context) -- it cannot drop unique content,
+  // so this is a zero-risk token reduction on top of the raw concatenation.
+  const input = dedupeExactPromptBlocks(`User goal:
+${promptText}
+
+${expertiseContext}
+
+Uploaded asset evidence:
+${assetContext || "No uploaded asset evidence was available."}
+
+Asset evidence rules:
+${assetEvidenceInstructions || "Do not claim that an uploaded asset verified any fact."}
+
+Completed domain-aware research:
+${researchContext}
+
+Adaptive report-writing contract:
+${adaptiveWriterContext}
+
+Generate an acquisition due diligence analysis as one structured JSON object.
+Return exactly these keys and no others:
+${acquisitionAnalysisFields
+  .map(
+    (field) =>
+      `- ${field}: ${acquisitionAnalysisFieldLabels[responseLanguage][field]} — ${acquisitionAnalysisPrompts[field]}`
+  )
+  .join("\n")}
+
+The research sufficiency decision is ${domainResearch.recommendedOutput}.
+Research is already complete. Synthesize it; do not replace verified facts with general knowledge.
+Every material claim must cite [R#], [Asset: filename], [User], [Method: ...], [Required: ...], or [Basis: ...].
+Never invent values, sources, professional findings, prices, or operational facts.
+Do not include commentary outside the JSON object.`);
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const startedAt = Date.now();
+
+      try {
+        const providerTimeoutMs = Math.max(
+          1_000,
+          Math.min(
+            FULL_REPORT_OPENAI_TIMEOUT_MS,
+            REAL_ESTATE_PIPELINE_BUDGET_MS -
+              (Date.now() - pipelineStartedAt)
+          )
+        );
+        const reportAbort = createReportAbortSignal(
+          req.signal,
+          providerTimeoutMs
+        );
+        const response = await withReportTimeout(
+          withOpenAiCostOperation(
+            {
+              operationName: `report_generation:${domain}`,
+              reportType: domain,
+            },
+            () => client.responses.create({
+              model,
+              instructions: buildAcquisitionAnalysisInstructions(responseLanguage),
+              input: buildAnalysisProviderInput(input, analysisAssets),
+              max_output_tokens: 8_000,
+              reasoning: { effort: "minimal" },
+              text: {
+                verbosity: "low",
+                format: createFullReportJsonSchema(
+                  `zerinix_${domain}_decision_analysis`,
+                  acquisitionAnalysisFields
+                ),
+              },
+            }, { signal: reportAbort.signal })
+          ),
+          providerTimeoutMs,
+          `OpenAI ${domain} report generation`
+        ).finally(() => reportAbort.cleanup());
+        assertCompletedOpenAiResponse(response);
+        const presentedReport = parseAcquisitionAnalysisReport(extractResponseText(response), responseLanguage);
+        validateDomainResearchQualitySafely({
+          report: presentedReport,
+          bundle: domainResearch,
+          expectedDomain: domain,
+        });
+        const tokenUsage = extractTokenUsage(response);
+        const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
+        const serializedReport = JSON.stringify(presentedReport);
+
+        controller.enqueue(
+          encoder.encode(
+            serializeAcquisitionAnalysisReportChunks(presentedReport)
+          )
+        );
+        logReportTimingSummary({
+          requestId: reportRequestId,
+          assetExtractionMs,
+          entityExtractionMs: domainResearch.timings.entityExtractionMs,
+          researchPlanningMs: domainResearch.timings.researchPlanningMs,
+          researchExecutionMs: domainResearch.timings.researchExecutionMs,
+          reportGenerationMs: Date.now() - startedAt,
+          pdfPreparationMs: 0,
+          totalMs: Date.now() - pipelineStartedAt,
+        });
+        controller.close();
+        void (async () => {
+          try {
+            await storeCachedAiResponse(supabase, {
+              userId: user.id,
+              cacheKey,
+              promptHash,
+              endpoint: "/api/plan",
+              reportField: FULL_REPORT_FIELD,
+              language: responseLanguage,
+              model,
+              responseText: serializedReport,
+              responseData: createReportCacheData(domainResearch),
+              tokenUsage,
+              estimatedCostUsd,
+              expiresInDays: 7,
+            });
+            await recordAiUsage(supabase, {
+              userId: user.id,
+              endpoint: "/api/plan",
+              reportField: FULL_REPORT_FIELD,
+              promptHash,
+              model,
+              planTier,
+              tokenUsage,
+              estimatedCostUsd,
+              cacheHit: false,
+              responseTimeMs: Date.now() - startedAt,
+              metadata: {
+                quota_event: false,
+                quota_mode: "report_generation",
+                report_domain: domain,
+                research_completed: domainResearch.researchCompleted,
+                research_evidence_count: domainResearch.evidence.length,
+                research_output: domainResearch.recommendedOutput,
+                report_request_id: reportRequestId || null,
+                usage_kind: "domain_report_generation",
+                actual_ai_call: true,
+              },
+            });
+          } catch (analyticsError) {
+            logServerError(
+              "api:plan:specialized-report-analytics",
+              analyticsError
+            );
+          }
+        })();
+      } catch (error) {
+        const errorMessage = getPlanErrorMessage(error);
+        if (/timed out|timeout|aborted|abort/i.test(errorMessage)) {
+          const fallbackReport = createGroundedAcquisitionTimeoutFallback({
+            research: domainResearch,
+            assets: analysisAssets,
+            language: responseLanguage,
+            prompt: promptText,
+          });
+          controller.enqueue(
+            encoder.encode(
+              serializeAcquisitionAnalysisReportChunks(fallbackReport)
             )
           );
           logReportTimingSummary({
@@ -7026,13 +7690,36 @@ async function executePlanRequestInner(
       });
     }
 
+    if (reportDomain === "acquisition") {
+      return generateAcquisitionDueDiligenceReport({
+        req,
+        supabase,
+        user,
+        ip,
+        promptText,
+        responseLanguage,
+        reportRequestId,
+        analysisAssets,
+        assetContext,
+        assetEvidenceInstructions,
+        expertiseContext,
+        assetFingerprint,
+        pipelineStartedAt,
+        assetExtractionMs,
+        dynamicResearchPlanningInput,
+        conversationId:
+          typeof body?.conversationId === "string"
+            ? body.conversationId
+            : undefined,
+      });
+    }
+
     if (
       reportDomain === "legal" ||
       reportDomain === "finance" ||
       reportDomain === "accounting" ||
       reportDomain === "operations" ||
-      reportDomain === "procurement" ||
-      reportDomain === "acquisition"
+      reportDomain === "procurement"
     ) {
       return generateSpecializedDomainReport({
         domain: reportDomain,

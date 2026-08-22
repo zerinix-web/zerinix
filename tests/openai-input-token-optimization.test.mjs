@@ -190,7 +190,11 @@ test("the repository OpenAI call inventory remains explicit and bounded", () => 
   // too vague to analyze as a specific business). Everything downstream
   // (financial model, competitor research, report writing) reads its
   // output the same way it reads a user-submitted business description.
-  assert.equal(callCount, 12);
+  // 13th call: plan-executor.ts's generateAcquisitionDueDiligenceReport,
+  // the Acquisition Due Diligence report's own dedicated generator
+  // (mirrors generateSpecializedDomainReport/generateRealEstateInvestmentReport,
+  // one call each, already counted above).
+  assert.equal(callCount, 13);
 });
 
 test("every instrumented OpenAI request logs safe estimated and actual input tokens", () => {

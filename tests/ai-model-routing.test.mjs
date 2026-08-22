@@ -77,7 +77,7 @@ test("cost report includes before after and monthly savings", () => {
   });
 });
 
-test("all twelve OpenAI calls are covered by centralized routing", () => {
+test("all thirteen OpenAI calls are covered by centralized routing", () => {
   const rateLimit = readFileSync("app/lib/ai/rate-limit.ts", "utf8");
   const directSites = [
     "app/api/understanding/route.ts",
@@ -105,7 +105,12 @@ test("all twelve OpenAI calls are covered by centralized routing", () => {
   // via resolveAiModelForRequestKind (the same centralized model-router
   // module as resolveAiModelRoutingDecision, just its simpler request-kind
   // form) rather than being an uncontrolled, ad hoc model choice.
-  assert.equal(callCount, 12);
+  // 13th call: plan-executor.ts's generateAcquisitionDueDiligenceReport,
+  // which reuses checkAiProductionRateLimit's already-centrally-routed
+  // model (the same pattern generateSpecializedDomainReport and
+  // generateRealEstateInvestmentReport already use) rather than choosing
+  // a model itself.
+  assert.equal(callCount, 13);
   assert.match(rateLimit, /resolveAiModelRoutingDecision/);
   for (const source of directSites) {
     assert.match(source, /resolveAiModelRoutingDecision/);
