@@ -6575,8 +6575,8 @@ function buildFallbackOpportunity(
       : `Main opportunity: the target's ${formatUsdCompact(facts.targetArr)} in recurring revenue across ${facts.enterpriseCustomers.toLocaleString("en-US")} enterprise customers is a base for post-close cross-sell and retention; management should validate this by reviewing the underlying customer contracts before it is treated as certain.`;
   }
   return isTurkish
-    ? "Main opportunity: Doğrulanmış kanıt kümesi henüz bu işlem için belirgin bir fırsatı desteklemiyor; müşteri sözleşmeleri ve finansal tablolar incelendikten sonra bu bölüm güncellenmelidir."
-    : "Main opportunity: the verified evidence gathered so far does not yet support a specific, well-evidenced opportunity claim for this deal; management should validate customer contracts and financial statements before this section is finalized.";
+    ? "Main opportunity: Şu ana kadar incelenen bilgiler bu işlem için belirgin bir fırsatı henüz desteklemiyor; müşteri sözleşmeleri ve finansal tablolar incelendikten sonra bu bölüm güncellenmelidir."
+    : "Main opportunity: what has been reviewed so far does not yet support a specific, well-supported opportunity claim for this deal; management should validate customer contracts and financial statements before this section is finalized.";
 }
 
 function buildFallbackKeyRisks(
@@ -6587,8 +6587,8 @@ function buildFallbackKeyRisks(
     return `Main risks: ${decision.risks.join(" | ")}`;
   }
   return isTurkish
-    ? "Main risks: Bu ön raporda doğrulanmış kanıtla desteklenen belirli bir risk henüz tespit edilmedi; entegrasyon karmaşıklığı, müşteri yoğunlaşması ve sınırlı finansal görünürlük, kapanıştan önce değerlendirilmesi gereken standart risk alanlarıdır."
-    : "Main risks: no deal-specific risk has yet been confirmed by verified evidence in this preliminary report; integration complexity, customer concentration, and limited financial visibility are the standard risk areas that should be assessed before closing.";
+    ? "Main risks: Bu ön raporda belirli bir risk henüz doğrulanmadı; entegrasyon karmaşıklığı, müşteri yoğunlaşması ve sınırlı finansal görünürlük, kapanıştan önce değerlendirilmesi gereken standart risk alanlarıdır."
+    : "Main risks: no deal-specific risk has yet been confirmed in this preliminary report; integration complexity, customer concentration, and limited financial visibility are the standard risk areas that should be assessed before closing.";
 }
 
 // CRITICAL FIX -- "Preliminary recommendation: Wait" was a generic,
@@ -6596,17 +6596,23 @@ function buildFallbackKeyRisks(
 // directly, with no deal-specific reasoning behind it. A senior M&A
 // advisor never hands a client a bare verdict word -- translates the
 // underlying decision-engine call (Proceed / Proceed Carefully / Wait /
-// Avoid) into the report's own three-tier executive vocabulary (Proceed /
-// Proceed with Conditions / Pause, matching acquisitionAnalysisPrompts.ts's
-// finalInvestmentRecommendation instruction), and always pairs it with
-// reasoning grounded in the deal's own facts and risks -- never a bare
-// confidence score or generic evidence-gap boilerplate.
+// Avoid) into the report's own three-tier executive vocabulary (Proceed
+// with Conditions / Pause with Reasons / Reject, matching
+// acquisitionAnalysisPrompts.ts's finalInvestmentRecommendation
+// instruction), and always pairs it with reasoning grounded in the deal's
+// own facts and risks -- never a bare confidence score or generic
+// evidence-gap boilerplate. Every tier's own label already names what
+// must accompany it (conditions, reasons), so "Pause" alone can never be
+// this field's entire content, and "Avoid" (the decision engine's
+// strongest negative signal) now maps to its own dedicated "Reject" tier
+// instead of being folded into the same "Pause" bucket as "Wait".
 function describeAcquisitionExecutiveCall(
   recommendation: DomainResearchBundle["decisionIntelligence"]["decision"]["recommendation"]
 ): string {
-  if (recommendation === "Proceed") return "Proceed";
-  if (recommendation === "Proceed Carefully") return "Proceed with conditions";
-  return "Pause";
+  if (recommendation === "Proceed") return "Proceed with Conditions";
+  if (recommendation === "Proceed Carefully") return "Proceed with Conditions";
+  if (recommendation === "Avoid") return "Reject";
+  return "Pause with Reasons";
 }
 
 function buildFallbackRecommendationReasoning(
@@ -6846,8 +6852,8 @@ function buildFallbackRevenueSynergies(
   const decisionOpportunities =
     decision.opportunities.length > 0
       ? isTurkish
-        ? `Ayrıca doğrulanmış kanıtlar şu fırsatları destekliyor: ${decision.opportunities.join(" | ")}`
-        : `In addition, the verified evidence supports: ${decision.opportunities.join(" | ")}`
+        ? `Ayrıca mevcut bulgular şu fırsatları destekliyor: ${decision.opportunities.join(" | ")}`
+        : `In addition, current findings support: ${decision.opportunities.join(" | ")}`
       : "";
   return [crossSell, expansion, portfolioFit, decisionOpportunities].filter(Boolean).join("\n\n");
 }
@@ -6874,8 +6880,8 @@ function buildFallbackCostSynergies(
   const decisionOpportunities =
     decision.opportunities.length > 0
       ? isTurkish
-        ? `Ayrıca doğrulanmış kanıtlar şu fırsatları destekliyor: ${decision.opportunities.join(" | ")}`
-        : `In addition, the verified evidence supports: ${decision.opportunities.join(" | ")}`
+        ? `Ayrıca mevcut bulgular şu fırsatları destekliyor: ${decision.opportunities.join(" | ")}`
+        : `In addition, current findings support: ${decision.opportunities.join(" | ")}`
       : "";
   return [infrastructure, operational, procurement, decisionOpportunities].filter(Boolean).join("\n\n");
 }
@@ -7006,8 +7012,8 @@ function createGroundedAcquisitionTimeoutFallback({
   const unresolvedText =
     unresolved.join("\n") ||
     (language === "Turkish"
-      ? "[Recommendation] [Basis:research task registry] Tüm zorunlu araştırma görevleri kanıtla tamamlandı."
-      : "[Recommendation] [Basis:research task registry] All required research tasks completed with evidence.");
+      ? "[Recommendation] [Basis:research task registry] Tüm zorunlu araştırma görevleri tamamlandı."
+      : "[Recommendation] [Basis:research task registry] All required research tasks are complete.");
   const assetList =
     assets
       .map((asset) => `[Verified from uploaded asset] [Asset:${asset.name}] ${asset.name} (${asset.type})`)

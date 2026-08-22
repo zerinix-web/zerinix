@@ -76,11 +76,13 @@ test("buildFallbackTransactionOverview no longer says the parties 'have not yet 
 
 // --- 3. Final Investment Recommendation: never a bare "Pause" -------------
 
-test("finalInvestmentRecommendation explicitly forbids outputting only the bare word 'Pause' (or 'Proceed') and requires the call to be based on current information", () => {
+// NOTE: the call vocabulary narrowed further in the "final acquisition
+// advisor polish" turn, from Proceed/Proceed with Conditions/Pause to
+// Proceed with Conditions/Pause with Reasons/Reject.
+test("finalInvestmentRecommendation explicitly forbids outputting only the bare word 'Pause', 'Reject', or 'Proceed' and requires the call to be based on current information", () => {
   const prompt = acquisitionAnalysisPrompts.finalInvestmentRecommendation;
-  assert.match(prompt, /Never output only the single word 'Pause'/);
-  assert.match(prompt, /'Proceed'/);
-  assert.match(prompt, /Proceed, Proceed with Conditions, or Pause/);
+  assert.match(prompt, /Never output only the word 'Pause', 'Reject', or 'Proceed'/);
+  assert.match(prompt, /Proceed with Conditions, Pause with Reasons, or Reject/);
   assert.match(prompt, /based on the current information available/);
 });
 

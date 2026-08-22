@@ -90,28 +90,36 @@ test("buildFallbackRevenueSynergies/buildFallbackCostSynergies never construct a
   }
 });
 
-// --- 3. Final Recommendation vocabulary: Proceed / Proceed with Conditions / Pause -
+// --- 3. Final Recommendation vocabulary: Proceed with Conditions / Pause with Reasons / Reject -
+// NOTE: superseded by the "final acquisition advisor polish" turn -- see
+// tests/acquisition-executive-language-final-polish.test.mjs for the
+// full rationale. The call vocabulary narrowed again, dropping a bare
+// "Proceed" and reintroducing a dedicated "Reject" tier.
 
-test("finalInvestmentRecommendation requires the Proceed / Proceed with Conditions / Pause vocabulary, and explicitly forbids the bare 'Preliminary recommendation: Wait' pattern", () => {
+test("finalInvestmentRecommendation requires the Proceed with Conditions / Pause with Reasons / Reject vocabulary, and explicitly forbids the bare 'Preliminary recommendation: Wait' pattern", () => {
   const prompt = acquisitionAnalysisPrompts.finalInvestmentRecommendation;
-  assert.match(prompt, /Proceed, Proceed with Conditions, or Pause/);
+  assert.match(prompt, /Proceed with Conditions, Pause with Reasons, or Reject/);
   assert.match(prompt, /never a bare 'Preliminary recommendation: Wait'/);
 });
 
-test("executiveAcquisitionSummary's own preliminary-recommendation part uses the same Proceed / Proceed with Conditions / Pause vocabulary as the final call", () => {
+test("executiveAcquisitionSummary's own preliminary-recommendation part uses the same Proceed with Conditions / Pause with Reasons / Reject vocabulary as the final call", () => {
   const prompt = acquisitionAnalysisPrompts.executiveAcquisitionSummary;
-  assert.match(prompt, /Proceed, Proceed with Conditions, or Pause/);
+  assert.match(prompt, /Proceed with Conditions, Pause with Reasons, or Reject/);
   assert.match(prompt, /matching the same vocabulary used in the Final Investment Recommendation/);
 });
 
+// NOTE: superseded by the "final acquisition advisor polish" turn -- see
+// tests/acquisition-executive-language-final-polish.test.mjs.
 test("describeAcquisitionExecutiveCall translates every decision-engine recommendation value into the report's three-tier vocabulary", () => {
   const fnMatch = /function describeAcquisitionExecutiveCall\([\s\S]*?\n}/.exec(planExecutorSource);
   assert.ok(fnMatch, "describeAcquisitionExecutiveCall not found");
   const body = fnMatch[0];
   assert.match(body, /recommendation === "Proceed"/);
   assert.match(body, /recommendation === "Proceed Carefully"/);
-  assert.match(body, /"Proceed with conditions"/);
-  assert.match(body, /return "Pause"/);
+  assert.match(body, /recommendation === "Avoid"/);
+  assert.match(body, /"Proceed with Conditions"/);
+  assert.match(body, /return "Reject"/);
+  assert.match(body, /return "Pause with Reasons"/);
 });
 
 // --- 4. Remove remaining internal wording -----------------------------------
