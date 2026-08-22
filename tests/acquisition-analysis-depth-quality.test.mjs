@@ -192,17 +192,16 @@ test("postMergerIntegrationPlan requires the exact real 30/60/90-day plan: finan
 
 // --- 9. Final Recommendation --------------------------------------------------
 
-// NOTE: superseded by the "final acquisition advisor polish" turn -- the
-// call vocabulary was narrowed again, from Proceed/Proceed with
-// Conditions/Pause to Proceed with Conditions/Pause with Reasons/Reject
-// (dropping a bare "Proceed" and reintroducing a dedicated "Reject" tier
-// for the decision engine's strongest negative signal, previously folded
-// into "Pause").
-test("finalInvestmentRecommendation requires a professional Proceed with Conditions/Pause with Reasons/Reject decision, each with its own required reasoning", () => {
+// NOTE: superseded by the "final executive dashboard language polish" turn
+// -- the call vocabulary changed again, from Proceed with Conditions/
+// Pause with Reasons/Reject to Proceed with Conditions/Pause Pending
+// Review/Reject -- board-memo phrasing rather than an internal-sounding
+// "explain your reasons" label.
+test("finalInvestmentRecommendation requires a professional Proceed with Conditions/Pause Pending Review/Reject decision, each with its own required reasoning", () => {
   const prompt = acquisitionAnalysisPrompts.finalInvestmentRecommendation;
-  assert.match(prompt, /Proceed with Conditions, Pause with Reasons, or Reject/);
+  assert.match(prompt, /Proceed with Conditions, Pause Pending Review, or Reject/);
   assert.match(prompt, /name the specific conditions/i);
-  assert.match(prompt, /name the specific reasons driving the pause/i);
+  assert.match(prompt, /name the specific review still pending/i);
   assert.match(prompt, /name the specific, material finding/i);
 });
 

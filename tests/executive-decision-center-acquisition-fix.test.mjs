@@ -14,7 +14,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 // patterns designed around the ORIGINAL Business Plan GO/WAIT/NO-GO
 // framework. Acquisition Due Diligence reports (built across many prior
 // turns) use their own three-tier executive call (Proceed with
-// Conditions / Pause with Reasons / Reject) and their own risk/action
+// Conditions / Pause Pending Review / Reject) and their own risk/action
 // vocabulary, none of which the original heuristics recognized -- so
 // every acquisition report's decision card silently fell through to
 // generic defaults: "WAIT" (decision), a stray unrelated percentage or
@@ -60,22 +60,24 @@ Main opportunity: the target's $10M in recurring revenue across 500 enterprise c
 
 Main risks: integration complexity and customer concentration are the standard risk areas that should be assessed before closing. Leverage from the $15M debt requirement (37.5% of the purchase price) also needs review.
 
-Preliminary recommendation: Pause with Reasons -- the target's financial statements and customer contracts are not yet verified; the full scale of the customer and employee base is still awaiting confirmation. This call remains preliminary until the closing conditions below are satisfied.
+Preliminary recommendation: Pause Pending Review -- the target's financial statements and customer contracts are not yet verified; the full scale of the customer and employee base is still awaiting confirmation. This call remains preliminary until the closing conditions below are satisfied.
 
 Conditions before closing: this preliminary assessment is based on the deal's current information. Management should review EBITDA, cash flow, customer contracts and security architecture before final approval.
 `;
 
 // --- 1. Decision card: real acquisition vocabulary, never a default WAIT --
 
-test("a 'Pause with Reasons' acquisition recommendation renders as PAUSE WITH REASONS on the decision card, never the generic WAIT default", () => {
+// NOTE: superseded by the "final executive dashboard language polish" turn
+// -- "Pause with Reasons" was itself renamed to "Pause Pending Review".
+test("a 'Pause Pending Review' acquisition recommendation renders as PAUSE PENDING REVIEW on the decision card, never the generic WAIT default", () => {
   const snapshot = buildExecutiveSnapshot(acquisitionExecutiveSummary, undefined, undefined);
-  assert.equal(snapshot.decision, "PAUSE WITH REASONS");
+  assert.equal(snapshot.decision, "PAUSE PENDING REVIEW");
   assert.notEqual(snapshot.decision, "WAIT");
 });
 
 test("a 'Proceed with Conditions' acquisition recommendation renders as PROCEED WITH CONDITIONS on the decision card", () => {
   const content = acquisitionExecutiveSummary.replace(
-    "Pause with Reasons -- the target's financial statements",
+    "Pause Pending Review -- the target's financial statements",
     "Proceed with Conditions -- the target's financial statements"
   );
   const snapshot = buildExecutiveSnapshot(content, undefined, undefined);

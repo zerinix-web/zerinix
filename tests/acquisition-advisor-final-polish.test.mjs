@@ -44,30 +44,34 @@ const { acquisitionAnalysisPrompts } = await import(
   "../app/lib/report-engine/prompts/acquisition-analysis.ts"
 );
 
-// --- 1. Final Recommendation: Proceed with Conditions / Pause with Reasons / Reject -
+// --- 1. Final Recommendation: Proceed with Conditions / Pause Pending Review / Reject -
+// NOTE: superseded by the "final executive dashboard language polish" turn
+// -- "Pause with Reasons" was itself renamed to "Pause Pending Review"
+// (board-memo phrasing rather than an internal-sounding "explain your
+// reasons" label). See tests/executive-decision-center-language-polish.test.mjs.
 
-test("describeAcquisitionExecutiveCall maps Proceed/Proceed Carefully to 'Proceed with Conditions', Wait to 'Pause with Reasons', and Avoid to its own dedicated 'Reject' tier", () => {
+test("describeAcquisitionExecutiveCall maps Proceed/Proceed Carefully to 'Proceed with Conditions', Wait to 'Pause Pending Review', and Avoid to its own dedicated 'Reject' tier", () => {
   const fnMatch = /function describeAcquisitionExecutiveCall\([\s\S]*?\n}/.exec(planExecutorSource);
   assert.ok(fnMatch, "describeAcquisitionExecutiveCall not found");
   const body = fnMatch[0];
   assert.match(body, /if \(recommendation === "Proceed"\) return "Proceed with Conditions";/);
   assert.match(body, /if \(recommendation === "Proceed Carefully"\) return "Proceed with Conditions";/);
   assert.match(body, /if \(recommendation === "Avoid"\) return "Reject";/);
-  assert.match(body, /return "Pause with Reasons";/);
+  assert.match(body, /return "Pause Pending Review";/);
 });
 
-test("finalInvestmentRecommendation requires exactly Proceed with Conditions / Pause with Reasons / Reject, each with its own named reasoning requirement, and forbids outputting only the bare call word", () => {
+test("finalInvestmentRecommendation requires exactly Proceed with Conditions / Pause Pending Review / Reject, each with its own named reasoning requirement, and forbids outputting only the bare call word", () => {
   const prompt = acquisitionAnalysisPrompts.finalInvestmentRecommendation;
-  assert.match(prompt, /Proceed with Conditions, Pause with Reasons, or Reject/);
-  assert.match(prompt, /Never output only the word 'Pause', 'Reject', or 'Proceed'/);
+  assert.match(prompt, /Proceed with Conditions, Pause Pending Review, or Reject/);
+  assert.match(prompt, /Never output only the words 'Pause Pending Review', 'Reject', or 'Proceed with Conditions'/);
   assert.match(prompt, /name the specific conditions/i);
-  assert.match(prompt, /name the specific reasons driving the pause/i);
+  assert.match(prompt, /name the specific review still pending/i);
   assert.match(prompt, /name the specific, material finding that makes the deal unworkable/i);
 });
 
 test("executiveAcquisitionSummary's preliminary-recommendation part uses the same three-tier vocabulary as the final call", () => {
   const prompt = acquisitionAnalysisPrompts.executiveAcquisitionSummary;
-  assert.match(prompt, /Proceed with Conditions, Pause with Reasons, or Reject/);
+  assert.match(prompt, /Proceed with Conditions, Pause Pending Review, or Reject/);
 });
 
 test("a bare decision.recommendation is never the sole content of the preliminary/final recommendation fields -- the call is always followed by '-- ${reasoning}'", () => {

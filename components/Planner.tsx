@@ -1243,8 +1243,8 @@ function moveReportAdvisoriesIntoWarningsSection({
         "executiveSummary";
   const heading =
     language === "Turkish"
-      ? "Uyarılar / Eksik Kanıtlar"
-      : "Warnings / Missing Evidence";
+      ? "Nihai Onay Öncesi Gerekli Bilgiler"
+      : "Key Information Needed Before Final Approval";
   const existingContent = reportData[warningField]?.trim() || "";
   const warningDetails = uniqueWarnings
     .filter((warning) => !existingContent.includes(warning))
@@ -1264,8 +1264,8 @@ function moveReportAdvisoriesIntoWarningsSection({
   }
 
   return language === "Turkish"
-    ? "Sağlayıcı ve doğrulama uyarıları raporun “Uyarılar / Eksik Kanıtlar” bölümüne eklendi."
-    : "Provider and verification warnings were included in the report’s “Warnings / Missing Evidence” section.";
+    ? "Sağlayıcı ve doğrulama uyarıları raporun “Nihai Onay Öncesi Gerekli Bilgiler” bölümüne eklendi."
+    : "Provider and verification warnings were included in the report’s “Key Information Needed Before Final Approval” section.";
 }
 
 function normalizeConversationPreview(content: string) {

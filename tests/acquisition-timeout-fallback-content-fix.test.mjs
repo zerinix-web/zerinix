@@ -110,21 +110,22 @@ test("plan-executor.ts defines every new fallback content generator this fix rel
   }
 });
 
-// NOTE: superseded by the "final acquisition intelligence polish" and
-// "final acquisition advisor polish" turns -- the raw decision-engine word
-// is no longer interpolated directly (that was itself still a
-// checklist-style output: a real word, but no reasoning behind it, and no
-// translation into the report's own executive vocabulary). It is now
-// translated via describeAcquisitionExecutiveCall (Proceed / Proceed
-// Carefully / Wait / Avoid -> Proceed with Conditions / Pause with
-// Reasons / Reject) and always paired with fact-grounded reasoning from
+// NOTE: superseded across the "final acquisition intelligence polish",
+// "final acquisition advisor polish", and "final executive dashboard
+// language polish" turns -- the raw decision-engine word is no longer
+// interpolated directly (that was itself still a checklist-style output:
+// a real word, but no reasoning behind it, and no translation into the
+// report's own executive vocabulary). It is now translated via
+// describeAcquisitionExecutiveCall (Proceed / Proceed Carefully / Wait /
+// Avoid -> Proceed with Conditions / Pause Pending Review / Reject) and
+// always paired with fact-grounded reasoning from
 // buildFallbackRecommendationReasoning, never a bare confidence score or
 // "critical evidence gaps" boilerplate.
 test("buildFallbackPreliminaryRecommendation/buildFallbackFinalRecommendation translate the raw decision-engine word into the report's own executive vocabulary and pair it with fact-grounded reasoning -- never a bare confidence score", () => {
   const translatorMatch = /function describeAcquisitionExecutiveCall\([\s\S]*?\n}/.exec(planExecutorSource);
   assert.ok(translatorMatch, "describeAcquisitionExecutiveCall not found");
   assert.match(translatorMatch[0], /"Proceed with Conditions"/);
-  assert.match(translatorMatch[0], /"Pause with Reasons"/);
+  assert.match(translatorMatch[0], /"Pause Pending Review"/);
   assert.match(translatorMatch[0], /"Reject"/);
 
   const reasoningMatch = /function buildFallbackRecommendationReasoning\([\s\S]*?\n}/.exec(planExecutorSource);
@@ -239,24 +240,24 @@ test("buildFallbackStrategicFit separates Known facts / Derived insights / Assum
 // STRUCTURE (real prose wrapped around any tagged/boilerplate fragment)
 // actually survives the real sanitizer.
 
-test("executiveAcquisitionSummary's worst case (no facts, no decision evidence, raw recommendation='Wait' translated to the executive call 'Pause with Reasons') never sanitizes down to a bare verdict word", () => {
+test("executiveAcquisitionSummary's worst case (no facts, no decision evidence, raw recommendation='Wait' translated to the executive call 'Pause Pending Review') never sanitizes down to a bare verdict word", () => {
   const worstCase = [
     "Transaction overview: this preliminary report has not yet identified verified core deal figures (purchase price, target ARR, customer count, or employee count); this section will be completed once those figures are supplied.",
     "Main opportunity: what has been reviewed so far does not yet support a specific, well-supported opportunity claim for this deal; management should validate customer contracts and financial statements before this section is finalized.",
     "Main risks: no deal-specific risk has yet been confirmed in this preliminary report; integration complexity, customer concentration, and limited financial visibility are the standard risk areas that should be assessed before closing.",
-    "Preliminary recommendation: Pause with Reasons -- the target's financial statements and customer contracts are not yet verified; the full scale of the customer and employee base is still awaiting confirmation. This call remains preliminary until the closing conditions below are satisfied.",
+    "Preliminary recommendation: Pause Pending Review -- the target's financial statements and customer contracts are not yet verified; the full scale of the customer and employee base is still awaiting confirmation. This call remains preliminary until the closing conditions below are satisfied.",
     "Conditions before closing: this preliminary assessment is based on the deal's current information. Management should validate the target's financial statements, customer contracts, and a security assessment before this recommendation becomes final.",
   ].join("\n\n");
 
   const sanitized = stripReportPresentationArtifacts(worstCase);
 
   assert.notEqual(sanitized.trim(), "Wait");
-  assert.notEqual(sanitized.trim(), "Pause with Reasons");
+  assert.notEqual(sanitized.trim(), "Pause Pending Review");
   assert.notEqual(sanitized.trim(), "Additional information is needed to complete this section.");
   assert.match(sanitized, /Transaction overview/);
   assert.match(sanitized, /Main opportunity/);
   assert.match(sanitized, /Main risks/);
-  assert.match(sanitized, /Preliminary recommendation: Pause with Reasons --/);
+  assert.match(sanitized, /Preliminary recommendation: Pause Pending Review --/);
   assert.match(sanitized, /Conditions before closing/);
 });
 

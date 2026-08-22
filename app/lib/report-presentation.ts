@@ -264,8 +264,8 @@ function extractDecision(content: string, isTurkish = false) {
   ]);
 
   // CRITICAL FIX -- Acquisition Due Diligence reports state their own
-  // three-tier executive call (Proceed with Conditions / Pause with
-  // Reasons / Reject) instead of the Business Plan GO/WAIT/NO-GO
+  // three-tier executive call (Proceed with Conditions / Pause Pending
+  // Review / Reject) instead of the Business Plan GO/WAIT/NO-GO
   // vocabulary the scan below recognizes. Confirmed live: neither
   // "Proceed" nor "Pause" matches any keyword below, so every acquisition
   // report fell through to the hardcoded "WAIT" default regardless of
@@ -276,8 +276,8 @@ function extractDecision(content: string, isTurkish = false) {
   // an ordinary English word elsewhere in the report) and returned
   // verbatim, never collapsed into WAIT.
   const acquisitionMatch =
-    (labeled && labeled.match(/\b(Proceed with Conditions|Pause with Reasons)\b/i)) ||
-    content.match(/\b(Proceed with Conditions|Pause with Reasons)\b/i);
+    (labeled && labeled.match(/\b(Proceed with Conditions|Pause Pending Review)\b/i)) ||
+    content.match(/\b(Proceed with Conditions|Pause Pending Review)\b/i);
 
   if (acquisitionMatch) {
     return acquisitionMatch[1].toLowerCase() === "proceed with conditions"
@@ -285,8 +285,8 @@ function extractDecision(content: string, isTurkish = false) {
         ? "KOŞULLU İLERLE"
         : "PROCEED WITH CONDITIONS"
       : isTurkish
-        ? "GEREKÇELİ DURAKLAT"
-        : "PAUSE WITH REASONS";
+        ? "İNCELEME BEKLİYOR"
+        : "PAUSE PENDING REVIEW";
   }
 
   // Recommendation's own labeled span is often just next-step bullets, not
@@ -312,7 +312,7 @@ function extractDecision(content: string, isTurkish = false) {
   }
   if (value === "REJECT") {
     // Shown verbatim, matching the acquisition report's own vocabulary
-    // (Proceed with Conditions / Pause with Reasons / Reject), rather
+    // (Proceed with Conditions / Pause Pending Review / Reject), rather
     // than collapsed into the Business Plan "NO-GO" token -- the model's
     // own stated word is more transparent than a forced remap.
     return isTurkish ? "REDDET" : "REJECT";
@@ -382,8 +382,8 @@ function buildConfidenceCompletenessFallback(content: string, isTurkish: boolean
   }
   if (completeness === "moderate") {
     return isTurkish
-      ? "Sınırlı -- bazı rakamlar mevcut, önemli girdiler hâlâ eksik"
-      : "Limited -- some figures are available, key inputs are still missing";
+      ? "Mevcut işlem girdilerine dayalı orta düzey güven; ek mali ve elde tutma verileri gereklidir."
+      : "Moderate confidence based on available transaction inputs; additional financial and retention data required.";
   }
 
   return isTurkish

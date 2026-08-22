@@ -165,7 +165,11 @@ test("completed report payloads render even when research contains advisory warn
     /const hasCompletePayload =\s*\n\s*completedFields\.size === outputFields\.length/
   );
   assert.match(plannerSource, /moveReportAdvisoriesIntoWarningsSection/);
-  assert.match(plannerSource, /Warnings \/ Missing Evidence/);
+  // NOTE: superseded by the "final executive dashboard language polish"
+  // turn -- the heading was renamed from "Warnings / Missing Evidence" to
+  // "Key Information Needed Before Final Approval", a board-memo-style
+  // label rather than an internal validation-system one.
+  assert.match(plannerSource, /Key Information Needed Before Final Approval/);
   assert.doesNotMatch(
     plannerSource,
     /if \(isReportGenerationFailureText\(chunk\)\)/

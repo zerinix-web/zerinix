@@ -358,7 +358,7 @@ export function createDecisionResult({
   const decisionReason =
     profile.id === "real_estate"
       ? recommendation === "Avoid"
-        ? `Do not commit capital because authoritative evidence identifies an adverse condition in ${[
+        ? `Do not commit capital because additional due diligence review identifies an adverse condition in ${[
             ...new Set(
               adverseMaterialEvidence
                 .map((item) => item.field)
@@ -452,7 +452,7 @@ export function createDecisionResult({
       (item) => item.field === field
     );
     if (!evidence.length) {
-      return `${label}: no parcel-specific authoritative evidence cleared this BUY gate.`;
+      return `${label}: no parcel-specific documentation cleared this BUY gate -- additional due diligence review is required.`;
     }
     if (validation.conflicts.some((item) => item.field === field)) {
       return `${label}: trusted sources conflict, so this BUY gate remains unresolved.`;
@@ -462,7 +462,7 @@ export function createDecisionResult({
       : evidence.every((item) => item.impact === "favorable")
         ? "favorable"
         : "not conclusively favorable";
-    return `${label}: authoritative evidence is ${impact} with maximum confidence ${Math.max(...evidence.map((item) => item.confidence))}/100.`;
+    return `${label}: the documentation reviewed is ${impact} with maximum confidence ${Math.max(...evidence.map((item) => item.confidence))}/100.`;
   };
   const realEstateReasons =
     finalDecision === "BUY"
@@ -475,7 +475,7 @@ export function createDecisionResult({
         ]
       : finalDecision === "AVOID"
         ? [
-            `Material adverse finding: authoritative evidence is adverse for ${adverseMaterialEvidence.map((item) => item.field).join(", ")}.`,
+            `Material adverse finding: additional due diligence review confirmed an adverse condition for ${adverseMaterialEvidence.map((item) => item.field).join(", ")}.`,
             `Source reliability: the adverse finding passed parcel matching, claim relevance, and primary-source validation at ${Math.max(...adverseMaterialEvidence.map((item) => item.confidence))}/100 confidence.`,
             `Contradiction status: no unresolved trusted-source conflict weakens the adverse finding used for AVOID.`,
             `Remaining uncertainty: ${unresolvedBuyGateFields.length} BUY-gate field(s) remain unresolved, but they cannot override the verified adverse condition.`,

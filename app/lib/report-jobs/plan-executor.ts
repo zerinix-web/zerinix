@@ -6596,23 +6596,24 @@ function buildFallbackKeyRisks(
 // directly, with no deal-specific reasoning behind it. A senior M&A
 // advisor never hands a client a bare verdict word -- translates the
 // underlying decision-engine call (Proceed / Proceed Carefully / Wait /
-// Avoid) into the report's own three-tier executive vocabulary (Proceed
-// with Conditions / Pause with Reasons / Reject, matching
+// Avoid) into the report's own three-tier board-level vocabulary (Proceed
+// with Conditions / Pause Pending Review / Reject, matching
 // acquisitionAnalysisPrompts.ts's finalInvestmentRecommendation
-// instruction), and always pairs it with reasoning grounded in the deal's
-// own facts and risks -- never a bare confidence score or generic
-// evidence-gap boilerplate. Every tier's own label already names what
-// must accompany it (conditions, reasons), so "Pause" alone can never be
-// this field's entire content, and "Avoid" (the decision engine's
-// strongest negative signal) now maps to its own dedicated "Reject" tier
-// instead of being folded into the same "Pause" bucket as "Wait".
+// instruction), and always pairs it with one sentence of reasoning
+// grounded in the deal's own facts and risks -- never a bare confidence
+// score or generic evidence-gap boilerplate. Every tier's own label
+// already names what it implies (conditions to satisfy, a review still
+// pending), so no tier alone can ever be this field's entire content, and
+// "Avoid" (the decision engine's strongest negative signal) has its own
+// dedicated "Reject" tier instead of being folded into the same pause
+// bucket as "Wait".
 function describeAcquisitionExecutiveCall(
   recommendation: DomainResearchBundle["decisionIntelligence"]["decision"]["recommendation"]
 ): string {
   if (recommendation === "Proceed") return "Proceed with Conditions";
   if (recommendation === "Proceed Carefully") return "Proceed with Conditions";
   if (recommendation === "Avoid") return "Reject";
-  return "Pause with Reasons";
+  return "Pause Pending Review";
 }
 
 function buildFallbackRecommendationReasoning(
