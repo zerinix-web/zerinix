@@ -69,6 +69,10 @@ import {
   formatLegalSourceContent,
   isLegalRenderableReport,
 } from "@/app/lib/report-engine/legal-report-rendering";
+import {
+  isUniversalCustomerFacingSection,
+  stripReportPresentationArtifacts,
+} from "@/app/lib/report-engine/report-presentation-sanitizer";
 
 export const dynamic = "force-dynamic";
 
@@ -2103,10 +2107,14 @@ function ExecutiveDecisionIntelligencePanel({ metadata }: { metadata?: ReportMet
         Executive Decision Intelligence
       </p>
       {summary.verdict ? (
-        <h4 className="mt-2 text-lg font-semibold tracking-tight text-white">{summary.verdict}</h4>
+        <h4 className="mt-2 text-lg font-semibold tracking-tight text-white">
+          {stripReportPresentationArtifacts(summary.verdict)}
+        </h4>
       ) : null}
       {summary.recommendation ? (
-        <p className="mt-2 text-sm leading-6 text-zinc-300">{summary.recommendation}</p>
+        <p className="mt-2 text-sm leading-6 text-zinc-300">
+          {stripReportPresentationArtifacts(summary.recommendation)}
+        </p>
       ) : null}
       {summary.aggregateConfidence !== null ? (
         <p className="mt-2 text-xs font-semibold text-zinc-400">
@@ -2895,12 +2903,29 @@ export default async function ReportDetailPage({
         )
         .filter((section) => section.content.trim())
     : storedReportSections;
-  const visibleSections = uniqueReportSections.filter(
-    (section) => !isSourceSectionTitle(section.title)
-  );
-  const sourceSections = uniqueReportSections.filter(
-    (section) => isSourceSectionTitle(section.title) && section.content.trim()
-  );
+  // CRITICAL FIX -- apply presentation sanitization to ALL report
+  // surfaces. Confirmed live: buildLegalReportSections above can
+  // reconstruct a FRESH "legalSources" section from the report's own
+  // citation content -- entirely after normalizeReport already excluded
+  // the original "sources"/"externalEvidence" fields -- so this dashboard
+  // viewer's own local isSourceSectionTitle-based split still surfaced a
+  // dedicated "Sources" appendix built from that reconstructed content.
+  // Uses the same canonical isUniversalCustomerFacingSection check
+  // ReportPdfButton.tsx's own late-stage filter uses, so the two surfaces
+  // can never drift out of sync again on what counts as a sources/
+  // evidence section -- and sourceSections is now always empty rather
+  // than a rendered "Research Appendix": the requirement is to remove the
+  // section entirely, not relocate it. stripReportPresentationArtifacts
+  // is the final defensive pass against any other internal artifact
+  // buildLegalReportSections' reconstruction might reintroduce.
+  const visibleSections = uniqueReportSections
+    .filter((section) => isUniversalCustomerFacingSection(section))
+    .map((section) => ({
+      ...section,
+      content: stripReportPresentationArtifacts(section.content),
+    }))
+    .filter((section) => section.content.trim().length > 0);
+  const sourceSections: typeof uniqueReportSections = [];
   const getReportSectionKey = (section: (typeof report.sections)[number]) =>
     `${report.id}:${section.field || section.title}`;
   const decisionSummaryItems = getDecisionSummaryItems(visibleSections);

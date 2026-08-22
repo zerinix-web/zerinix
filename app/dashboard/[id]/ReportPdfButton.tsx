@@ -61,6 +61,10 @@ import {
   type ExecutiveDecisionIntelligenceSummary,
 } from "@/app/lib/report-engine/executive-decision-intelligence-presentation";
 import {
+  isUniversalCustomerFacingSection,
+  stripReportPresentationArtifacts,
+} from "@/app/lib/report-engine/report-presentation-sanitizer";
+import {
   extractExecutiveDecisionFromText,
   localizedLabelVariants,
 } from "@/app/lib/report-engine/executive-decision-brief";
@@ -2650,7 +2654,20 @@ export function buildStandardReportPdf({
             ),
             pdfLocale
           );
-      const pdfSections = localizePdfReportSections(pdfBaseSectionsWithBenchmark, pdfLocale);
+      // CRITICAL FIX -- apply presentation sanitization to ALL report
+      // surfaces. Confirmed live: excluding "sources"/"externalEvidence"
+      // by field name upstream (normalizeReport) was not enough --
+      // buildLegalReportSections/mergePdfSourceSections above can
+      // construct a FRESH sources-like section (e.g. "legalSources") from
+      // the report's own citation content, entirely after normalizeReport
+      // already ran, so an upstream-only exclusion could never catch it.
+      // Filtered here, at the single array every downstream PDF surface
+      // (the per-section render loop, the Table of Contents, cover-page
+      // extraction) reads from, so none of them can independently
+      // reintroduce a Sources/External Evidence page.
+      const pdfSections = localizePdfReportSections(pdfBaseSectionsWithBenchmark, pdfLocale).filter(
+        (section) => isUniversalCustomerFacingSection(section)
+      );
       const localizedReportTitle = isLegalReport
         ? pdfLocale === "tr"
           ? "Hukuki Değerlendirme Raporu"
@@ -2666,7 +2683,13 @@ export function buildStandardReportPdf({
       const businessIdea = isLegalReport
         ? normalizePdfText(report.prompt).slice(0, 220)
         : deriveBusinessDescriptionFromSections(report, pdfSections);
-      const fullReportContent = basePdfSections
+      // Built from the sanitized/filtered pdfSections (not basePdfSections)
+      // -- this text is used only for regex-based cover-card value
+      // extraction (extractScore/extractMetricValue/extractConfidence/...
+      // below), and excluding the raw Sources/External Evidence content
+      // eliminates any chance of an extraction pattern accidentally
+      // matching inside a citation entry.
+      const fullReportContent = pdfSections
         .map((section) => `${section.title}\n${section.content}`)
         .join("\n\n");
       const tocEntries: Array<{ title: string; page: number }> = [];
@@ -2900,8 +2923,13 @@ export function buildStandardReportPdf({
           : isMarketIntelligenceReport
             ? marketDecisionText || executiveSnapshot.decision
             : executiveSnapshot.decision;
+        // Reads from basePdfSections (pre-sanitization-filter), not
+        // pdfSections -- the "legalSources" section itself is now excluded
+        // from pdfSections/rendering entirely, but the underlying source
+        // COUNT (a bare number, not the URLs/publishers themselves) is
+        // still a legitimate cover-page stat.
         const legalSourceCount = new Set(
-          (pdfSections.find((section) => section.field === "legalSources")?.content.match(/https?:\/\/[^\s)]+/g) || [])
+          (basePdfSections.find((section) => section.field === "legalSources")?.content.match(/https?:\/\/[^\s)]+/g) || [])
         ).size;
         const overallInvestmentScore =
           extractScore(fullReportContent, "Overall Investment Score") ??
@@ -3317,7 +3345,7 @@ export function buildStandardReportPdf({
         if (summary.verdict) {
           pdf.setFontSize(15);
           pdf.setTextColor("#f8fafc");
-          const verdictLines = wrapPdfText(summary.verdict, contentWidth - 24);
+          const verdictLines = wrapPdfText(stripReportPresentationArtifacts(summary.verdict), contentWidth - 24);
           for (const line of verdictLines) {
             pdf.text(line, margin + 12, cursorY);
             cursorY += 7;
@@ -3328,7 +3356,10 @@ export function buildStandardReportPdf({
         if (summary.recommendation) {
           pdf.setFontSize(10.5);
           pdf.setTextColor("#cbd5e1");
-          const recommendationLines = wrapPdfText(summary.recommendation, contentWidth - 24);
+          const recommendationLines = wrapPdfText(
+            stripReportPresentationArtifacts(summary.recommendation),
+            contentWidth - 24
+          );
           for (const line of recommendationLines) {
             pdf.text(line, margin + 12, cursorY);
             cursorY += 5.5;
@@ -4374,7 +4405,16 @@ export function buildStandardReportPdf({
       pdfSections.forEach((section) => {
         const visualHeight = getVisualHeight(section);
         const isTamSamSomPdfSection = section.field === "tamSamSom" || isTamSamSomTitle(section.title);
-        const sectionBodyContent =
+        // stripReportPresentationArtifacts wraps every branch as the final
+        // step -- pdfSections is already filtered to exclude Sources/
+        // External Evidence sections above, so isSourceSectionTitle can no
+        // longer match here, but this final pass is the last line of
+        // defense against any OTHER internal artifact a PDF-specific
+        // content transform (cleanPdfEvidenceMetadataText,
+        // cleanPdfLegacyValidationIntelligenceContent, ...) might
+        // reintroduce or fail to catch, on every rendering surface, not
+        // just the ones already sanitized upstream.
+        const sectionBodyContent = stripReportPresentationArtifacts(
           isTamSamSomPdfSection
             ? localizePdfPresentationText(cleanPdfEvidenceMetadataText(normalizePdfTamSamSomBodyContent(section.content)), pdfLocale)
             : isSourceSectionTitle(section.title)
@@ -4396,7 +4436,8 @@ export function buildStandardReportPdf({
                     )
                   ),
                   pdfLocale
-                );
+                )
+        );
         // Same font-measurement bug the SWOT/financial layouts above
         // already document: splitPdfReadableLines measures wrapping at
         // whatever font is active on `pdf` right now, which is whatever

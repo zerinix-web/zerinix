@@ -275,7 +275,14 @@ test("isUniversalCustomerFacingField / universalInternalOnlyFields exactly ident
   }
 });
 
-test("Business Plan's own 'sourcesAssumptions' field (a different field name from 'sources') is not excluded by the universal field list -- it legitimately mixes assumptions with citations, still content-sanitized like any other field", () => {
+// CRITICAL FIX -- apply presentation sanitization to ALL report surfaces:
+// this policy changed from the prior turn. Business Plan's own
+// "Sources / Assumptions" section (field "sourcesAssumptions", a
+// different field name from "sources") IS now excluded entirely, by
+// title, not just content-sanitized -- the requirement is to REMOVE the
+// section completely, matching every other report type's Sources
+// section, not merely to clean the citation detail out of it.
+test("Business Plan's own 'Sources / Assumptions' section is now excluded entirely, by title, matching the 'remove the Sources section completely' requirement for every report type", () => {
   const businessRow = {
     id: "r3",
     report_type: "business_plan",
@@ -289,11 +296,28 @@ test("Business Plan's own 'sourcesAssumptions' field (a different field name fro
     ],
   };
   const report = normalizeReport(businessRow);
+  assert.equal(report.sections.length, 0);
+});
+
+test("a genuinely non-sources Business Plan section still renders normally, with its content sanitized like any other section", () => {
+  const businessRow = {
+    id: "r4",
+    report_type: "business_plan",
+    status: "completed",
+    sections: [
+      {
+        field: "financialDashboard",
+        title: "Financial Dashboard",
+        content: "[Recommendation] [Basis:decision engine] Revenue is projected to grow 15% year over year.",
+      },
+    ],
+  };
+  const report = normalizeReport(businessRow);
   assert.equal(report.sections.length, 1);
-  assert.equal(report.sections[0].field, "sourcesAssumptions");
-  assert.doesNotMatch(report.sections[0].content, /Publisher:/);
-  assert.doesNotMatch(report.sections[0].content, /https?:\/\//);
-  assert.match(report.sections[0].content, /Assumption: 15% annual market growth\./);
+  assert.equal(report.sections[0].field, "financialDashboard");
+  assert.doesNotMatch(report.sections[0].content, /\[Recommendation\]/);
+  assert.doesNotMatch(report.sections[0].content, /\[Basis:/);
+  assert.match(report.sections[0].content, /Revenue is projected to grow 15% year over year\./);
 });
 
 // --- 3. No R identifiers appear (any domain) -------------------------------
@@ -419,9 +443,13 @@ test("report-utils.ts applies the universal presentation sanitizer unconditional
   assert.doesNotMatch(reportUtilsSource, /reportType === "Acquisition Due Diligence Report"\s*\n\s*\? sanitizeReportSectionsForPresentation/);
 });
 
-test("ReportPdfButton.tsx reads report.sections from the same normalized report object the dashboard viewer uses -- no separate/duplicated section source that could bypass the sanitizer (drift check)", () => {
-  assert.doesNotMatch(pdfButtonSource, /from\s+["']@\/app\/lib\/report-engine\/report-presentation-sanitizer["']/);
+test("ReportPdfButton.tsx reads report.sections from the same normalized report object the dashboard viewer uses, AND applies its own additional late-stage sanitization pass on pdfSections -- confirmed live, PDF-specific transforms (buildLegalReportSections) can reconstruct a fresh sources-like section after normalizeReport already ran, so the PDF surface needs a second, independent filter, not just the upstream one (drift check)", () => {
+  assert.match(pdfButtonSource, /from\s+["']@\/app\/lib\/report-engine\/report-presentation-sanitizer["']/);
   assert.match(pdfButtonSource, /report\.sections/);
+  assert.match(
+    pdfButtonSource,
+    /const pdfSections = localizePdfReportSections\(pdfBaseSectionsWithBenchmark, pdfLocale\)\.filter\(\s*\n\s*\(section\) => isUniversalCustomerFacingSection\(section\)/
+  );
 });
 
 test("acquisition prompts remain classified as Acquisition Due Diligence -- report_type resolves to the correct title, never a legal/generic one (routing untouched by this fix)", () => {

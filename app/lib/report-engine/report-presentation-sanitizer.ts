@@ -31,6 +31,39 @@ export function isUniversalCustomerFacingField(field: string): boolean {
   return !universalInternalOnlyFields.includes(field);
 }
 
+// CRITICAL FIX -- apply presentation sanitization to ALL report surfaces.
+// Confirmed live: excluding by field name alone was not enough -- Business
+// Plan's own sources field is literally named "sourcesAssumptions" (not
+// "sources"), and ReportPdfButton.tsx's legal-report path constructs its
+// own fresh "legalSources" section from the report's own citation content
+// AFTER normalizeReport already ran, so a field-name-only exclusion
+// upstream could never catch it. Both still render under a title a reader
+// unambiguously recognizes as a sources/evidence page (mirrors
+// ReportPdfButton.tsx's own pre-existing isSourceSectionTitle check, kept
+// here as the single canonical definition both the dashboard-viewer path
+// (via sanitizeReportSectionsForPresentation below) and the PDF's own
+// late-stage section filter share, so the two surfaces can never drift
+// out of sync on what counts as a sources/evidence section).
+const internalOnlySectionTitlePattern =
+  /^(sources(?:\s+continued)?|references|verified sources|external evidence|sources\s*\/\s*assumptions|kaynaklar(?:\s+devamı)?|doğrulanmış kaynaklar|dış kaynak kanıtları|kaynaklar\s*\/\s*varsayımlar|quellen|externe nachweise|fuentes|evidencia externa|éléments probants externes)$/i;
+
+export function isInternalOnlySectionTitle(title: string): boolean {
+  return internalOnlySectionTitlePattern.test(title.trim());
+}
+
+export function isUniversalCustomerFacingSection(section: {
+  field?: string;
+  title?: string;
+}): boolean {
+  if (section.field && !isUniversalCustomerFacingField(section.field)) {
+    return false;
+  }
+  if (section.title && isInternalOnlySectionTitle(section.title)) {
+    return false;
+  }
+  return true;
+}
+
 // Bracket-tag citation/provenance markers: [R12], [Asset: ...],
 // [Method: ...], [Required: ...], [Basis: ...] (including the exact
 // "[Basis:research task registry]" / "[Basis:decision engine]" /
@@ -45,6 +78,15 @@ export function isUniversalCustomerFacingField(field: string): boolean {
 // source" or any other suffix, so this pattern never touches them.
 const citationBracketTagPattern =
   /\[(?:R\d+|Asset:[^\]]*|Method:[^\]]*|Required:[^\]]*|Basis:[^\]]*|Recommendation|Verified from (?:uploaded asset|official source|external source)|Unknown|Estimated?|Assumption|User)\]/gi;
+
+// The same "Verified from X" evidence-classification phrase, unbracketed
+// -- CRITICAL FIX -- apply presentation sanitization to ALL report
+// surfaces: named explicitly as its own removal target, independent of
+// bracket notation, so a report surface that renders this phrase as bare
+// prose (not the "[Verified from X]" bracket-tag shape the pattern above
+// already catches) is covered too.
+const bareVerifiedFromPhrasePattern =
+  /\bVerified from (?:uploaded asset|official source|external source)\b/gi;
 
 // The exact "[Unknown] [Required:field] <generic template sentence>"
 // shape every domain's timeout fallback writes for an unresolved
@@ -129,6 +171,7 @@ export function stripReportPresentationArtifacts(content: string): string {
   sanitized = sanitized.replace(leakedInternalFactLinePattern, "");
   sanitized = sanitized.replace(internalRegistryLinePattern, "");
   sanitized = sanitized.replace(citationBracketTagPattern, "");
+  sanitized = sanitized.replace(bareVerifiedFromPhrasePattern, "");
   sanitized = sanitized.replace(internalVocabularyPattern, "");
   sanitized = sanitized.replace(confidenceScorePattern, "");
   sanitized = sanitized.replace(bareUrlPattern, "");
@@ -143,10 +186,10 @@ export function stripReportPresentationArtifacts(content: string): string {
 // artifact, no real prose) is dropped rather than rendered as a blank
 // card.
 export function sanitizeReportSectionsForPresentation<
-  T extends { field?: string; content: string },
+  T extends { field?: string; title?: string; content: string },
 >(sections: readonly T[]): T[] {
   return sections
-    .filter((section) => !section.field || isUniversalCustomerFacingField(section.field))
+    .filter((section) => isUniversalCustomerFacingSection(section))
     .map((section) => ({
       ...section,
       content: stripReportPresentationArtifacts(section.content),
