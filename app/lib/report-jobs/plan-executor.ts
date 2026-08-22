@@ -6591,13 +6591,85 @@ function buildFallbackKeyRisks(
     : "Main risks: no deal-specific risk has yet been confirmed by verified evidence in this preliminary report; integration complexity, customer concentration, and limited financial visibility are the standard risk areas that should be assessed before closing.";
 }
 
-function buildFallbackPreliminaryRecommendation(
+// CRITICAL FIX -- "Preliminary recommendation: Wait" was a generic,
+// checklist-style output: the raw decision-engine word interpolated
+// directly, with no deal-specific reasoning behind it. A senior M&A
+// advisor never hands a client a bare verdict word -- translates the
+// underlying decision-engine call (Proceed / Proceed Carefully / Wait /
+// Avoid) into the report's own three-tier executive vocabulary (Proceed /
+// Proceed with Conditions / Pause, matching acquisitionAnalysisPrompts.ts's
+// finalInvestmentRecommendation instruction), and always pairs it with
+// reasoning grounded in the deal's own facts and risks -- never a bare
+// confidence score or generic evidence-gap boilerplate.
+function describeAcquisitionExecutiveCall(
+  recommendation: DomainResearchBundle["decisionIntelligence"]["decision"]["recommendation"]
+): string {
+  if (recommendation === "Proceed") return "Proceed";
+  if (recommendation === "Proceed Carefully") return "Proceed with conditions";
+  return "Pause";
+}
+
+function buildFallbackRecommendationReasoning(
+  facts: AcquisitionDealFacts,
+  derived: AcquisitionDerivedMetrics,
   decision: DomainResearchBundle["decisionIntelligence"]["decision"],
   isTurkish: boolean
 ): string {
+  const reasons: string[] = [];
+  if (derived.evToArr != null) {
+    reasons.push(
+      isTurkish
+        ? `${derived.evToArr}x EV/ARR çarpanı doğrulanmış rakamlardan hesaplandı`
+        : `the ${derived.evToArr}x EV/ARR multiple is calculated from verified figures`
+    );
+  }
+  if (decision.risks.length > 0) {
+    reasons.push(
+      isTurkish
+        ? "yukarıda belirlenen riskler henüz tam olarak giderilmedi"
+        : "the risks identified above are not yet fully addressed"
+    );
+  } else {
+    reasons.push(
+      isTurkish
+        ? "hedefin finansal tabloları ve müşteri sözleşmeleri henüz doğrulanmadı"
+        : "the target's financial statements and customer contracts are not yet verified"
+    );
+  }
+  if (facts.enterpriseCustomers == null || facts.employees == null) {
+    reasons.push(
+      isTurkish
+        ? "müşteri ve çalışan tabanının tam ölçeği hâlâ teyit bekliyor"
+        : "the full scale of the customer and employee base is still awaiting confirmation"
+    );
+  }
+  return reasons.join("; ");
+}
+
+function buildFallbackPreliminaryRecommendation(
+  facts: AcquisitionDealFacts,
+  derived: AcquisitionDerivedMetrics,
+  decision: DomainResearchBundle["decisionIntelligence"]["decision"],
+  isTurkish: boolean
+): string {
+  const call = describeAcquisitionExecutiveCall(decision.recommendation);
+  const reasoning = buildFallbackRecommendationReasoning(facts, derived, decision, isTurkish);
   return isTurkish
-    ? `Preliminary recommendation: ${decision.recommendation} -- bu, mevcut güven düzeyinin (${decision.confidence}/100) ve çözülmemiş kritik kanıt boşluklarının bir sonucudur; aşağıdaki kapanış koşulları karşılanana kadar bu bir ön değerlendirme olarak ele alınmalıdır.`
-    : `Preliminary recommendation: ${decision.recommendation} -- this reflects the current confidence level (${decision.confidence}/100) and unresolved critical evidence gaps, and should be treated as preliminary until the closing conditions below are satisfied.`;
+    ? `Preliminary recommendation: ${call} -- ${reasoning}. Bu değerlendirme, aşağıdaki kapanış koşulları karşılanana kadar ön niteliktedir.`
+    : `Preliminary recommendation: ${call} -- ${reasoning}. This call remains preliminary until the closing conditions below are satisfied.`;
+}
+
+function buildFallbackFinalRecommendation(
+  facts: AcquisitionDealFacts,
+  derived: AcquisitionDerivedMetrics,
+  decision: DomainResearchBundle["decisionIntelligence"]["decision"],
+  isTurkish: boolean
+): string {
+  const call = describeAcquisitionExecutiveCall(decision.recommendation);
+  const reasoning = buildFallbackRecommendationReasoning(facts, derived, decision, isTurkish);
+  return isTurkish
+    ? `Executive recommendation: ${call} -- ${reasoning}. Bu tavsiyeye bağlı koşullar: Eksik Bilgiler bölümünde listelenen doğrulanmamış kalemlerin çözülmesi.`
+    : `Executive recommendation: ${call} -- ${reasoning}. Conditions attached to this call: resolving the unverified items listed in Missing Information.`;
 }
 
 function buildFallbackConditionsBeforeClosing(isTurkish: boolean): string {
@@ -6623,9 +6695,17 @@ function buildFallbackStrategicFit(
       ? (isTurkish
           ? `Derived insights: ${facts.enterpriseCustomers.toLocaleString("en-US")} kurumsal müşteri üzerinden ${formatUsdCompact(facts.targetArr)} ARR, tekrarlayan bir gelir modeline ve kurulu bir kurumsal müşteri tabanına işaret ediyor; ancak churn veya elde tutma oranı sağlanmadığından bu modelin öngörülebilirliği doğrulanamıyor.`
           : `Derived insights: ${formatUsdCompact(facts.targetArr)} in ARR across ${facts.enterpriseCustomers.toLocaleString("en-US")} enterprise customers points to a recurring-revenue business with an established enterprise customer base; its predictability cannot be confirmed without a supplied churn or retention rate.`)
-      : (isTurkish
-          ? "Derived insights: Müşteri sayısı ve ARR birlikte sağlanmadığından gelir kalitesi hakkında bir içgörü henüz oluşturulamıyor."
-          : "Derived insights: a derived insight about revenue quality cannot be produced yet without both the customer count and ARR figures together.");
+      : facts.targetArr != null
+        ? (isTurkish
+            ? `Derived insights: ${formatUsdCompact(facts.targetArr)} ARR, hedefin stratejik değerlendirmeye değer bir ölçekte tekrarlayan gelir ürettiğini gösteriyor; müşteri sayısı doğrulandığında bu gelirin ne kadar yoğunlaştığı netleşecektir.`
+            : `Derived insights: ${formatUsdCompact(facts.targetArr)} in ARR indicates the target already generates recurring revenue at a scale worth strategic evaluation; how concentrated that revenue is will become clearer once the customer count is verified.`)
+        : facts.enterpriseCustomers != null
+          ? (isTurkish
+              ? `Derived insights: ${facts.enterpriseCustomers.toLocaleString("en-US")} kurumsal müşterilik bir taban, üzerine inşa edilmeye değer kurulu bir satış hareketine işaret ediyor; gelir kalitesi ARR doğrulandığında değerlendirilebilecek.`
+              : `Derived insights: an enterprise customer base of ${facts.enterpriseCustomers.toLocaleString("en-US")} accounts points to an established go-to-market motion worth building on; revenue quality can be assessed once ARR is verified.`)
+          : (isTurkish
+              ? "Derived insights: Gelir kalitesi hakkında akıl yürütmek için en azından bir müşteri sayısı veya ARR rakamı gerekiyor; bu rakamlardan biri sağlandığında bu bölüm güncellenecektir."
+              : "Derived insights: reasoning about revenue quality needs at least a customer count or an ARR figure to work from; this section will be completed once one of those is supplied.");
   const assumption = isTurkish
     ? "Assumptions: Hedefin sektörü ve stratejik pazar konumu bu ön raporda doğrulanmadı -- bu açıkça bir varsayım olarak işaretlenmiştir ve stratejik uyum değerlendirmesi kesinleşmeden önce doğrulanmalıdır."
     : "Assumptions: this preliminary report has not verified the target's sector or strategic market position -- flagged explicitly as an assumption, and it should be confirmed before the strategic-fit assessment is treated as final.";
@@ -6733,6 +6813,73 @@ function buildFallbackFinancingStructure(
   return [leverage, financingRisk, repayment].join("\n\n");
 }
 
+// CRITICAL FIX -- revenueSynergies/costSynergies used to fall back to a
+// bare decision.opportunities join or a generic unresolved notice, never
+// real acquisition reasoning. Both now always cover their three required
+// dimensions using the target's own facts, and never invent a dollar
+// figure -- a synergy here is a named mechanism and its rationale, not a
+// number.
+function buildFallbackRevenueSynergies(
+  facts: AcquisitionDealFacts,
+  decision: DomainResearchBundle["decisionIntelligence"]["decision"],
+  isTurkish: boolean
+): string {
+  const crossSell =
+    facts.enterpriseCustomers != null
+      ? isTurkish
+        ? `Cross-sell opportunities: ${facts.enterpriseCustomers.toLocaleString("en-US")} kurumsal müşteri, alıcının kendi ürün hattı için potansiyel bir çapraz satış kanalı oluşturuyor; bir gelir sinerjisi olarak sayılmadan önce müşteri sözleşmeleri ve ürün uyumu üzerinden doğrulanmalıdır.`
+        : `Cross-sell opportunities: the ${facts.enterpriseCustomers.toLocaleString("en-US")} enterprise customers are a potential cross-sell channel for the acquirer's own product line; this should be validated against customer contracts and product fit before it is counted as a revenue synergy.`
+      : isTurkish
+        ? "Cross-sell opportunities: Kurumsal müşteri sayısı henüz doğrulanmadığından çapraz satış potansiyeli değerlendirilemiyor."
+        : "Cross-sell opportunities: cross-sell potential cannot be assessed yet without a verified enterprise customer count.";
+  const expansion =
+    facts.targetArr != null
+      ? isTurkish
+        ? `Customer expansion: Mevcut ${formatUsdCompact(facts.targetArr)} ARR, hesap içi genişleme (upsell) için bir temel oluşturuyor; bir genişleme oranı doğrulanmadan bu bir rakam olarak sayılmamalıdır.`
+        : `Customer expansion: the existing ${formatUsdCompact(facts.targetArr)} in ARR is a base for within-account upsell; this should not be counted as a figure until an expansion rate is verified.`
+      : isTurkish
+        ? "Customer expansion: Hedef ARR henüz doğrulanmadığından genişleme potansiyeli değerlendirilemiyor."
+        : "Customer expansion: expansion potential cannot be assessed yet without a verified target ARR.";
+  const portfolioFit = isTurkish
+    ? "Product portfolio fit: Hedefin ürün hattının alıcının mevcut portföyünü nasıl tamamladığı veya genişlettiği, karşılaştırmalı bir ürün incelemesi yapıldıktan sonra değerlendirilmelidir."
+    : "Product portfolio fit: how the target's product line complements or extends the acquirer's existing portfolio should be assessed once a comparative product review is completed.";
+  const decisionOpportunities =
+    decision.opportunities.length > 0
+      ? isTurkish
+        ? `Ayrıca doğrulanmış kanıtlar şu fırsatları destekliyor: ${decision.opportunities.join(" | ")}`
+        : `In addition, the verified evidence supports: ${decision.opportunities.join(" | ")}`
+      : "";
+  return [crossSell, expansion, portfolioFit, decisionOpportunities].filter(Boolean).join("\n\n");
+}
+
+function buildFallbackCostSynergies(
+  facts: AcquisitionDealFacts,
+  decision: DomainResearchBundle["decisionIntelligence"]["decision"],
+  isTurkish: boolean
+): string {
+  const infrastructure = isTurkish
+    ? "Infrastructure consolidation: Sistem, platform ve tesis örtüşmesi, teknik bir envanter incelemesi tamamlandıktan sonra değerlendirilmelidir."
+    : "Infrastructure consolidation: systems, platform, and facility overlap should be assessed once a technical inventory review is completed.";
+  const operational =
+    facts.employees != null
+      ? isTurkish
+        ? `Operational efficiency: ${facts.employees.toLocaleString("en-US")} çalışanlık bir organizasyonda örtüşen işlevlerin birleştirilmesi verimlilik fırsatları sunabilir; bu, bir organizasyon incelemesi sonrasında doğrulanmalıdır.`
+        : `Operational efficiency: in an organization of ${facts.employees.toLocaleString("en-US")} employees, consolidating overlapping functions may offer efficiency opportunities; this should be confirmed after an organizational review.`
+      : isTurkish
+        ? "Operational efficiency: Çalışan sayısı henüz doğrulanmadığından operasyonel verimlilik fırsatları değerlendirilemiyor."
+        : "Operational efficiency: efficiency opportunities cannot be assessed yet without a verified employee count.";
+  const procurement = isTurkish
+    ? "Procurement leverage: Birleşik satın alma hacmi, tedarikçi ve sözleşme konsolidasyonu için kaldıraç sağlayabilir; bu, mevcut tedarikçi sözleşmeleri incelendikten sonra nicelendirilmelidir."
+    : "Procurement leverage: combined purchasing volume may create leverage for vendor and contract consolidation; this should be quantified once existing vendor contracts are reviewed.";
+  const decisionOpportunities =
+    decision.opportunities.length > 0
+      ? isTurkish
+        ? `Ayrıca doğrulanmış kanıtlar şu fırsatları destekliyor: ${decision.opportunities.join(" | ")}`
+        : `In addition, the verified evidence supports: ${decision.opportunities.join(" | ")}`
+      : "";
+  return [infrastructure, operational, procurement, decisionOpportunities].filter(Boolean).join("\n\n");
+}
+
 function buildFallbackIntegrationRisks(
   facts: AcquisitionDealFacts,
   decision: DomainResearchBundle["decisionIntelligence"]["decision"],
@@ -6766,8 +6913,8 @@ function buildFallbackIntegrationRisks(
   const decisionRisks =
     decision.risks.length > 0
       ? isTurkish
-        ? `Ayrıca doğrulanmış kanıt değerlendirmesi şu riskleri tespit etti: ${decision.risks.join(" | ")}`
-        : `In addition, the evidence-based risk assessment identified: ${decision.risks.join(" | ")}`
+        ? `Bu incelemede ayrıca şu riskler öne çıktı: ${decision.risks.join(" | ")}`
+        : `A few additional risks also stand out in this review: ${decision.risks.join(" | ")}`
       : "";
   return [technology, security, customer, employee, operational, decisionRisks]
     .filter(Boolean)
@@ -6871,7 +7018,7 @@ function createGroundedAcquisitionTimeoutFallback({
       buildFallbackTransactionOverview(facts, isTurkish),
       buildFallbackOpportunity(facts, decision, isTurkish),
       buildFallbackKeyRisks(decision, isTurkish),
-      buildFallbackPreliminaryRecommendation(decision, isTurkish),
+      buildFallbackPreliminaryRecommendation(facts, derived, decision, isTurkish),
       buildFallbackConditionsBeforeClosing(isTurkish),
     ].join("\n\n"),
     targetCompanyOverview: `${assetList}\n${factsText}`,
@@ -6887,12 +7034,8 @@ function createGroundedAcquisitionTimeoutFallback({
         : "An IRR estimate cannot be provided yet -- it requires cash-flow timing, an exit assumption, and a holding period, none of which are available now.",
       buildFallbackReviewNote("cash-flow timing and exit assumptions"),
     ].join(" "),
-    revenueSynergies: decision.opportunities.length
-      ? `[Recommendation] [Basis:acquisition evidence registry] ${decision.opportunities.join(" | ")}`
-      : [unresolvedText, buildFallbackReviewNote("revenue-synergy evidence such as cross-sell and pricing data")].join("\n\n"),
-    costSynergies: decision.opportunities.length
-      ? `[Recommendation] [Basis:acquisition evidence registry] ${decision.opportunities.join(" | ")}`
-      : [unresolvedText, buildFallbackReviewNote("cost-synergy evidence such as overlapping functions and procurement leverage")].join("\n\n"),
+    revenueSynergies: buildFallbackRevenueSynergies(facts, decision, isTurkish),
+    costSynergies: buildFallbackCostSynergies(facts, decision, isTurkish),
     integrationRisks: buildFallbackIntegrationRisks(facts, decision, isTurkish),
     operationalRisks: decision.risks.length
       ? `[Recommendation] [Basis:decision engine] ${decision.risks.join(" | ")}`
@@ -6914,10 +7057,7 @@ function createGroundedAcquisitionTimeoutFallback({
       buildFallbackReviewNote("the unresolved items listed above"),
     ].join("\n\n"),
     finalInvestmentRecommendation: [
-      buildFallbackPreliminaryRecommendation(decision, isTurkish),
-      isTurkish
-        ? "Conditions attached to this call: Bu tavsiye, aşağıda listelenen doğrulanmamış kritik kanıtların çözülmesine bağlıdır."
-        : "Conditions attached to this call: this recommendation depends on resolving the unverified critical evidence listed in Missing Information.",
+      buildFallbackFinalRecommendation(facts, derived, decision, isTurkish),
       localized.timeout,
     ].join("\n\n"),
     sources: `${assetList}\n${evidenceText}`,

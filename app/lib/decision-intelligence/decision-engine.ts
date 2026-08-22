@@ -72,7 +72,7 @@ function nextActionFor(field: string) {
       "Commission an evidence-based valuation using validated comparables and an explicit calculation method.",
   };
   return actions[field] ||
-    `Obtain the authoritative evidence required to resolve ${field}.`;
+    `Confirm ${field} with the appropriate supporting documentation before this can be finalized.`;
 }
 
 function exactlyThreeNextActions({

@@ -89,13 +89,18 @@ test("plan-executor.ts defines every new fallback content generator this fix rel
     "buildFallbackTransactionOverview",
     "buildFallbackOpportunity",
     "buildFallbackKeyRisks",
+    "describeAcquisitionExecutiveCall",
+    "buildFallbackRecommendationReasoning",
     "buildFallbackPreliminaryRecommendation",
+    "buildFallbackFinalRecommendation",
     "buildFallbackConditionsBeforeClosing",
     "buildFallbackStrategicFit",
     "buildFallbackValuationInterpretation",
     "buildFallbackRoiAnalysis",
     "buildFallbackDebtCapacity",
     "buildFallbackFinancingStructure",
+    "buildFallbackRevenueSynergies",
+    "buildFallbackCostSynergies",
     "buildFallbackIntegrationRisks",
     "buildFallbackPostMergerIntegrationPlan",
     "buildFallbackReviewNote",
@@ -105,12 +110,62 @@ test("plan-executor.ts defines every new fallback content generator this fix rel
   }
 });
 
-test("buildFallbackPreliminaryRecommendation always embeds decision.recommendation inside a full sentence -- never as the line's sole content, so a bare 'Wait' can never survive sanitization alone", () => {
-  const fnMatch = /function buildFallbackPreliminaryRecommendation\([\s\S]*?\n}/.exec(planExecutorSource);
-  assert.ok(fnMatch, "buildFallbackPreliminaryRecommendation not found");
-  const body = fnMatch[0];
-  assert.match(body, /Preliminary recommendation: \$\{decision\.recommendation\} --/);
-  assert.match(body, /reflects the current confidence level/);
+// NOTE: superseded by the "final acquisition intelligence polish" turn --
+// the raw decision-engine word is no longer interpolated directly (that
+// was itself still a checklist-style output: a real word, but no reasoning
+// behind it, and no translation into the report's own executive
+// vocabulary). It is now translated via describeAcquisitionExecutiveCall
+// (Proceed / Proceed Carefully / Wait / Avoid -> Proceed / Proceed with
+// Conditions / Pause) and always paired with fact-grounded reasoning from
+// buildFallbackRecommendationReasoning, never a bare confidence score or
+// "critical evidence gaps" boilerplate.
+test("buildFallbackPreliminaryRecommendation/buildFallbackFinalRecommendation translate the raw decision-engine word into the report's own executive vocabulary and pair it with fact-grounded reasoning -- never a bare confidence score", () => {
+  const translatorMatch = /function describeAcquisitionExecutiveCall\([\s\S]*?\n}/.exec(planExecutorSource);
+  assert.ok(translatorMatch, "describeAcquisitionExecutiveCall not found");
+  assert.match(translatorMatch[0], /"Proceed with conditions"/);
+  assert.match(translatorMatch[0], /"Pause"/);
+
+  const reasoningMatch = /function buildFallbackRecommendationReasoning\([\s\S]*?\n}/.exec(planExecutorSource);
+  assert.ok(reasoningMatch, "buildFallbackRecommendationReasoning not found");
+  assert.doesNotMatch(reasoningMatch[0], /critical evidence gaps/i);
+  assert.doesNotMatch(reasoningMatch[0], /authoritative evidence/i);
+
+  const prelimMatch = /function buildFallbackPreliminaryRecommendation\([\s\S]*?\n}/.exec(planExecutorSource);
+  assert.ok(prelimMatch, "buildFallbackPreliminaryRecommendation not found");
+  assert.match(prelimMatch[0], /Preliminary recommendation: \$\{call\} -- \$\{reasoning\}/);
+  assert.doesNotMatch(prelimMatch[0], /confidence level \(\$\{decision\.confidence\}/);
+
+  const finalMatch = /function buildFallbackFinalRecommendation\([\s\S]*?\n}/.exec(planExecutorSource);
+  assert.ok(finalMatch, "buildFallbackFinalRecommendation not found");
+  assert.match(finalMatch[0], /Executive recommendation: \$\{call\} -- \$\{reasoning\}/);
+});
+
+test("plan-executor.ts no longer uses the banned internal-sounding phrases 'authoritative evidence', 'critical evidence gaps', or 'evidence-based risk assessment' anywhere", () => {
+  assert.doesNotMatch(planExecutorSource, /authoritative evidence/i);
+  assert.doesNotMatch(planExecutorSource, /critical evidence gaps/i);
+  assert.doesNotMatch(planExecutorSource, /evidence-based risk assessment/i);
+});
+
+test("decision-intelligence/decision-engine.ts's generic nextActionFor fallback no longer uses 'authoritative evidence'", async () => {
+  const decisionEngineSource = readFileSync(
+    new URL("../app/lib/decision-intelligence/decision-engine.ts", import.meta.url),
+    "utf8"
+  );
+  assert.doesNotMatch(decisionEngineSource, /Obtain the authoritative evidence required/);
+});
+
+test("buildFallbackRevenueSynergies/buildFallbackCostSynergies cover the required themes and never invent a dollar figure", () => {
+  const revenueMatch = /function buildFallbackRevenueSynergies\([\s\S]*?\n}/.exec(planExecutorSource);
+  assert.ok(revenueMatch, "buildFallbackRevenueSynergies not found");
+  assert.match(revenueMatch[0], /Cross-sell opportunities:/);
+  assert.match(revenueMatch[0], /Customer expansion:/);
+  assert.match(revenueMatch[0], /Product portfolio fit:/);
+
+  const costMatch = /function buildFallbackCostSynergies\([\s\S]*?\n}/.exec(planExecutorSource);
+  assert.ok(costMatch, "buildFallbackCostSynergies not found");
+  assert.match(costMatch[0], /Infrastructure consolidation:/);
+  assert.match(costMatch[0], /Operational efficiency:/);
+  assert.match(costMatch[0], /Procurement leverage:/);
 });
 
 test("buildFallbackIntegrationRisks covers technology, security, customer retention, employee retention, and operational alignment (the ticket's five required dimensions)", () => {
@@ -182,23 +237,24 @@ test("buildFallbackStrategicFit separates Known facts / Derived insights / Assum
 // STRUCTURE (real prose wrapped around any tagged/boilerplate fragment)
 // actually survives the real sanitizer.
 
-test("executiveAcquisitionSummary's worst case (no facts, no decision evidence, recommendation='Wait') never sanitizes down to the bare word 'Wait'", () => {
+test("executiveAcquisitionSummary's worst case (no facts, no decision evidence, raw recommendation='Wait' translated to the executive call 'Pause') never sanitizes down to a bare verdict word", () => {
   const worstCase = [
     "Transaction overview: this preliminary report has not yet identified verified core deal figures (purchase price, target ARR, customer count, or employee count); this section will be completed once those figures are supplied.",
     "Main opportunity: the verified evidence gathered so far does not yet support a specific, well-evidenced opportunity claim for this deal; management should validate customer contracts and financial statements before this section is finalized.",
     "Main risks: no deal-specific risk has yet been confirmed by verified evidence in this preliminary report; integration complexity, customer concentration, and limited financial visibility are the standard risk areas that should be assessed before closing.",
-    "Preliminary recommendation: Wait -- this reflects the current confidence level (0/100) and unresolved critical evidence gaps, and should be treated as preliminary until the closing conditions below are satisfied.",
+    "Preliminary recommendation: Pause -- the target's financial statements and customer contracts are not yet verified; the full scale of the customer and employee base is still awaiting confirmation. This call remains preliminary until the closing conditions below are satisfied.",
     "Conditions before closing: this is a preliminary report assembled from the verified evidence available so far. Management should validate the target's financial statements, customer contracts, and a security assessment before this recommendation becomes final.",
   ].join("\n\n");
 
   const sanitized = stripReportPresentationArtifacts(worstCase);
 
   assert.notEqual(sanitized.trim(), "Wait");
+  assert.notEqual(sanitized.trim(), "Pause");
   assert.notEqual(sanitized.trim(), "Additional information is needed to complete this section.");
   assert.match(sanitized, /Transaction overview/);
   assert.match(sanitized, /Main opportunity/);
   assert.match(sanitized, /Main risks/);
-  assert.match(sanitized, /Preliminary recommendation: Wait --/);
+  assert.match(sanitized, /Preliminary recommendation: Pause --/);
   assert.match(sanitized, /Conditions before closing/);
 });
 

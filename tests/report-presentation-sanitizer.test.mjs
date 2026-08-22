@@ -468,8 +468,17 @@ test("sanitizeReportSectionsForPresentation keeps a section whose original conte
 
 // --- 5. Drift checks: generation/routing/reasoning are untouched ----------
 
-test("plan-executor.ts's per-domain timeout fallbacks are unmodified by this fix -- they still write the full citation-tag detail internally (drift check, proves this fix is presentation-only)", () => {
-  assert.match(planExecutorSource, /\[Basis:acquisition evidence registry\]/);
+// NOTE: superseded in part by the "final acquisition intelligence polish"
+// turn -- revenueSynergies/costSynergies no longer use the
+// [Basis:acquisition evidence registry] tag at all (replaced with real,
+// deal-specific cross-sell/customer-expansion/product-portfolio-fit and
+// infrastructure-consolidation/operational-efficiency/procurement-leverage
+// reasoning), a deliberate content-generation improvement, not a
+// sanitization change. The other tagged fallback strings this test checks
+// (research task registry, the timeout-disclosure sentence) are untouched
+// and still prove this file continues to write internal citation-tag
+// detail for the sanitizer to correctly process.
+test("plan-executor.ts's per-domain timeout fallbacks still write internal citation-tag detail for the sanitizer to process (drift check)", () => {
   assert.match(planExecutorSource, /\[Basis:research task registry\]/);
   assert.match(planExecutorSource, /The synthesis provider reached its deadline/);
   assert.match(planExecutorSource, /existing decision engine/);

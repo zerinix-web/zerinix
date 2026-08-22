@@ -72,10 +72,14 @@ test("executiveAcquisitionSummary requires the five-part structure: transaction 
   assert.doesNotMatch(prompt, /generic hold\/wait placeholder$/);
 });
 
-test("executiveAcquisitionSummary explicitly forbids outputting only the bare verdict word 'Wait' (or 'Proceed'/'Reject') as this field's entire content", () => {
+// NOTE: superseded by the "final acquisition intelligence polish" turn --
+// the report's executive-call vocabulary was deliberately narrowed from
+// Proceed/Wait/Reject to Proceed/Proceed with Conditions/Pause, to read
+// like a senior M&A advisor's call rather than a validation checklist.
+test("executiveAcquisitionSummary explicitly forbids outputting only the bare verdict word 'Wait' (or 'Proceed'/'Pause') as this field's entire content", () => {
   const prompt = acquisitionAnalysisPrompts.executiveAcquisitionSummary;
   assert.match(prompt, /Never output only the single word 'Wait'/);
-  assert.match(prompt, /'Proceed' or 'Reject'/);
+  assert.match(prompt, /'Proceed' or 'Pause'/);
 });
 
 // --- 2. Strategic Fit -------------------------------------------------------
@@ -188,9 +192,12 @@ test("postMergerIntegrationPlan requires the exact real 30/60/90-day plan: finan
 
 // --- 9. Final Recommendation --------------------------------------------------
 
-test("finalInvestmentRecommendation requires a professional Proceed/Wait/Reject decision with conditions", () => {
+// NOTE: superseded by the "final acquisition intelligence polish" turn --
+// see the note above; the three-word call is now Proceed/Proceed with
+// Conditions/Pause.
+test("finalInvestmentRecommendation requires a professional Proceed/Proceed with Conditions/Pause decision with conditions", () => {
   const prompt = acquisitionAnalysisPrompts.finalInvestmentRecommendation;
-  assert.match(prompt, /Proceed, Wait, or Reject/);
+  assert.match(prompt, /Proceed, Proceed with Conditions, or Pause/);
   assert.match(prompt, /specific conditions attached to the call/i);
 });
 
