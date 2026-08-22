@@ -6557,8 +6557,8 @@ function buildFallbackTransactionOverview(
       : "Transaction overview: this preliminary report has not yet identified verified core deal figures (purchase price, target ARR, customer count, or employee count); this section will be completed once those figures are supplied.";
   }
   return isTurkish
-    ? `Transaction overview: Bu satın alma işlemi ${joinPhraseList(phrases, true)} ile tanımlanıyor. İşlem türü (varlık satın alma, hisse satın alma veya birleşme) ve taraflar henüz doğrulanmış kaynaklardan teyit edilmedi.`
-    : `Transaction overview: this acquisition is defined by ${joinPhraseList(phrases, false)}. The transaction type (asset purchase, stock purchase, or merger) and the parties involved have not yet been confirmed from verified sources.`;
+    ? `Transaction overview: Bu satın alma işlemi ${joinPhraseList(phrases, true)} ile tanımlanıyor. İşlem yapısı (varlık satın alma, hisse satın alma veya birleşme) ve taraflar durum tespiti sırasında doğrulanmalıdır.`
+    : `Transaction overview: this acquisition is defined by ${joinPhraseList(phrases, false)}. The transaction structure (asset purchase, stock purchase, or merger) and involved parties should be confirmed during due diligence.`;
 }
 
 function buildFallbackOpportunity(
@@ -6619,8 +6619,8 @@ function buildFallbackRecommendationReasoning(
   if (derived.evToArr != null) {
     reasons.push(
       isTurkish
-        ? `${derived.evToArr}x EV/ARR çarpanı doğrulanmış rakamlardan hesaplandı`
-        : `the ${derived.evToArr}x EV/ARR multiple is calculated from verified figures`
+        ? `${derived.evToArr}x EV/ARR çarpanı, kullanıcının kendi rakamlarından hesaplandı`
+        : `the ${derived.evToArr}x EV/ARR multiple is calculated directly from the deal's own figures`
     );
   }
   if (decision.risks.length > 0) {
@@ -6668,14 +6668,14 @@ function buildFallbackFinalRecommendation(
   const call = describeAcquisitionExecutiveCall(decision.recommendation);
   const reasoning = buildFallbackRecommendationReasoning(facts, derived, decision, isTurkish);
   return isTurkish
-    ? `Executive recommendation: ${call} -- ${reasoning}. Bu tavsiyeye bağlı koşullar: Eksik Bilgiler bölümünde listelenen doğrulanmamış kalemlerin çözülmesi.`
-    : `Executive recommendation: ${call} -- ${reasoning}. Conditions attached to this call: resolving the unverified items listed in Missing Information.`;
+    ? `Executive recommendation: ${call} -- ${reasoning}. Bu tavsiyeye bağlı koşullar: Eksik Bilgiler bölümünde listelenen açık maddelerin kapanıştan önce çözülmesi.`
+    : `Executive recommendation: ${call} -- ${reasoning}. Conditions attached to this call: the open items listed in Missing Information should be resolved before closing.`;
 }
 
 function buildFallbackConditionsBeforeClosing(isTurkish: boolean): string {
   return isTurkish
-    ? "Conditions before closing: Bu, doğrulanmış kanıtlardan derlenen bir ön rapordur. Yönetim, bu tavsiye kesinleşmeden önce finansal tabloları, müşteri sözleşmelerini ve bir güvenlik değerlendirmesini doğrulamalıdır."
-    : "Conditions before closing: this is a preliminary report assembled from the verified evidence available so far. Management should validate the target's financial statements, customer contracts, and a security assessment before this recommendation becomes final.";
+    ? "Conditions before closing: Bu ön değerlendirme, işlemin mevcut bilgilerine dayanmaktadır. Yönetim, bu tavsiye kesinleşmeden önce finansal tabloları, müşteri sözleşmelerini ve bir güvenlik değerlendirmesini doğrulamalıdır."
+    : "Conditions before closing: this preliminary assessment is based on the deal's current information. Management should validate the target's financial statements, customer contracts, and a security assessment before this recommendation becomes final.";
 }
 
 function buildFallbackStrategicFit(
@@ -6753,8 +6753,8 @@ function buildFallbackRoiAnalysis(
   const canCalculate =
     derived.evToArr != null
       ? isTurkish
-        ? `What can be calculated: doğrulanmış rakamlardan yalnızca ${derived.evToArr}x EV/ARR çarpanı türetilebiliyor.`
-        : `What can be calculated: only the ${derived.evToArr}x EV/ARR multiple can be derived from the verified figures so far.`
+        ? `What can be calculated: Bu aşamada işlemin kendi rakamlarından yalnızca ${derived.evToArr}x EV/ARR çarpanı türetilebiliyor.`
+        : `What can be calculated: at this stage, only the ${derived.evToArr}x EV/ARR multiple can be derived from the deal's own figures.`
       : isTurkish
         ? "What can be calculated: Satın alma fiyatı ve ARR birlikte doğrulanmadığından şu anda hiçbir oran hesaplanamıyor."
         : "What can be calculated: no ratio can currently be calculated without both a verified purchase price and ARR.";
