@@ -46,8 +46,25 @@ function parseUsdAmount(rawValue: string, rawSuffix: string): number | null {
   return value;
 }
 
+// CRITICAL FIX -- preserve user-provided acquisition facts as authoritative
+// inputs. Confirmed live: a structured, one-fact-per-line prompt --
+// "Purchase price: $40M\nARR: $10M\nEnterprise customers: 500\n
+// Employees: 80\nBuyer available capital: $25M" -- corrupted extraction
+// entirely. Plain \s* matches across a newline, and that appeared in TWO
+// places: (1) the connector between a value and its label, letting
+// "$40M" (Purchase price's own value) bleed forward into matching "ARR"
+// on the very next line; (2) more subtly, INSIDE usdAmountGroup itself,
+// between the captured digits and the optional k/m/bn suffix -- so even
+// with (1) fixed, "80" (Employees' own value, no suffix) still matched
+// usdAmountGroup with its trailing \s* silently consuming the newline
+// before reaching "Buyer available capital" on the following line.
+// sameLineGap excludes newlines everywhere a value/label connector is
+// built, so a value can only ever pair with a label genuinely on the same
+// line as it.
+const sameLineGap = "[^\\S\\r\\n]*";
+
 const usdAmountGroup =
-  "\\$?\\s*([\\d][\\d,]*(?:\\.\\d+)?)\\s*(k|thousand|m|million|bn|billion)?";
+  `\\$?${sameLineGap}([\\d][\\d,]*(?:\\.\\d+)?)${sameLineGap}(k|thousand|m|million|bn|billion)?`;
 
 // Same negation vocabulary as financial-model.ts's hasNearbyNegation,
 // applied to the ~30 characters immediately before a matched figure --
@@ -63,11 +80,11 @@ function hasNearbyNegation(prompt: string, index: number) {
 
 function extractLabeledUsdAmount(prompt: string, labelPattern: string): number | null {
   const valueThenLabel = new RegExp(
-    `${usdAmountGroup}\\s*(?:in\\s+|of\\s+)?(?:${labelPattern})\\b`,
+    `${usdAmountGroup}${sameLineGap}(?:in${sameLineGap}|of${sameLineGap})?(?:${labelPattern})\\b`,
     "i"
   );
   const labelThenValue = new RegExp(
-    `\\b(?:${labelPattern})\\b\\s*(?:of|is|at|was|reached|[:=-])?\\s*${usdAmountGroup}`,
+    `\\b(?:${labelPattern})\\b${sameLineGap}(?:of|is|at|was|reached|[:=-])?${sameLineGap}${usdAmountGroup}`,
     "i"
   );
 
@@ -78,10 +95,21 @@ function extractLabeledUsdAmount(prompt: string, labelPattern: string): number |
   return parseUsdAmount(match[1], match[2] || "");
 }
 
+// Handles both "80 employees" (value-then-label, prose) and
+// "Employees: 80" (label-then-value, structured one-fact-per-line input)
+// -- previously only the value-then-label direction was supported at all,
+// so a structured "Employees: 80" line was never read correctly.
 function extractLabeledCount(prompt: string, labelPattern: string): number | null {
-  const match = prompt.match(
-    new RegExp(`\\b([\\d][\\d,]*)\\s*(?:${labelPattern})\\b`, "i")
+  const valueThenLabel = new RegExp(
+    `\\b([\\d][\\d,]*)${sameLineGap}(?:${labelPattern})\\b`,
+    "i"
   );
+  const labelThenValue = new RegExp(
+    `\\b(?:${labelPattern})\\b${sameLineGap}(?:of|is|at|was|reached|[:=-])?${sameLineGap}([\\d][\\d,]*)\\b`,
+    "i"
+  );
+
+  const match = prompt.match(valueThenLabel) || prompt.match(labelThenValue);
   if (!match || typeof match.index !== "number") return null;
   if (hasNearbyNegation(prompt, match.index)) return null;
 
@@ -106,6 +134,16 @@ function extractRemainingFinancingType(
   );
   if (financedVia) return financedVia[1].toLowerCase() as "debt" | "equity";
 
+  // Structured, type-first phrasing ("Debt financing: $15M"), the same
+  // one-fact-per-line shape the other extractors above now support.
+  const typeFirstLabel = prompt.match(/\b(debt|equity|mix(?:ed)?)\s+financing\b/i);
+  if (typeFirstLabel) {
+    const value = typeFirstLabel[1].toLowerCase();
+    if (value.startsWith("mix")) return "mixed";
+    if (value === "debt") return "debt";
+    if (value === "equity") return "equity";
+  }
+
   return null;
 }
 
@@ -114,9 +152,21 @@ function extractRemainingFinancingType(
 // this is the TARGET company's real, current customer base, not a
 // market-size estimate.
 function extractEnterpriseCustomers(prompt: string): number | null {
-  const match = prompt.match(
-    /\b([\d][\d,]*)\s*(?:enterprise\s+)?(?:paying\s+|active\s+|current\s+)?customers?\b/i
+  const valueThenLabel = new RegExp(
+    `\\b([\\d][\\d,]*)${sameLineGap}(?:enterprise${sameLineGap})?(?:paying${sameLineGap}|active${sameLineGap}|current${sameLineGap})?customers?\\b`,
+    "i"
   );
+  // Anchored to "enterprise customers" specifically (not bare "customers")
+  // in the label-then-value direction -- unlike the value-first prose
+  // case, a bare "Customers: 500" label with no qualifier is ambiguous
+  // enough (could be a market-size or unrelated figure) that it should
+  // not be read as this field without the "enterprise" qualifier.
+  const labelThenValue = new RegExp(
+    `\\benterprise${sameLineGap}customers?\\b${sameLineGap}(?:of|is|at|was|reached|[:=-])?${sameLineGap}([\\d][\\d,]*)\\b`,
+    "i"
+  );
+
+  const match = prompt.match(valueThenLabel) || prompt.match(labelThenValue);
   if (!match || typeof match.index !== "number") return null;
   if (hasNearbyNegation(prompt, match.index)) return null;
 

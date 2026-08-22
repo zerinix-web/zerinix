@@ -237,6 +237,14 @@ export function buildAcquisitionAnalysisInstructions(language: ResponseLanguage)
     // reference sentence instead of real analysis.
     "Every field must contain substantive, deal-specific analysis of at least several sentences grounded in the verified deal facts, derived metrics, uploaded assets, and research provided. Never write a bare cross-reference such as 'see [section] for the established premise' or similar -- state each field's own distinct analysis and decision implication, even when it draws on the same underlying facts as another field. A short cross-reference is acceptable only to avoid repeating an identical paragraph verbatim, and even then must be followed by the field's own new analysis, never stand alone as the entire field.",
     "When the deterministic deal-facts context in the input supplies verified facts or derived metrics, use those exact figures and exact [Verified]/[Derived] labels wherever they are relevant to a field -- never recompute a derived metric to a different value, never relabel a Derived figure as Verified or a Verified figure as Derived, and never omit a relevant supplied figure.",
+    // CRITICAL FIX -- preserve user-provided acquisition facts as
+    // authoritative inputs. Confirmed live: the target's enterprise
+    // customer count and employee count were both present in the
+    // deal-facts context as [Verified], and the report still described
+    // them as unverified -- a fact the deal-facts context marks Verified
+    // must never be walked back into a caveat anywhere else in the same
+    // report.
+    "A fact the deterministic deal-facts context marks [Verified] -- including the target's enterprise customer count and employee count -- is a known user-provided input, not something still awaiting confirmation. Never describe a [Verified] figure as unverified, missing, unknown, or requiring verification anywhere in the report, even in a different field from the one where the figure first appears. Reserve 'unverified'/'requires verification'/'further review is recommended' language strictly for facts the deal-facts context does NOT supply.",
     ...buildUniversalDecisionQualityDirectives(),
     ...insightLedgerAndTokenBudgetDirectives,
     ...buildExecutiveConsultingStyleDirectives(),
