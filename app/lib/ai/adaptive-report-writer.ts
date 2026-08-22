@@ -138,6 +138,26 @@ const domainProhibitedTopics: Partial<Record<ExpertiseProfile["domain"], string[
   manufacturing: ["startup funding metrics", "unrelated legal strategy"],
   logistics: ["startup funding metrics", "unrelated legal strategy"],
   retail: ["unrelated contract strategy", "startup funding metrics"],
+  // CRITICAL FIX -- acquisition report builder isolation regression. This
+  // list feeds directly into the "Prohibited topics" line of the
+  // generation context every acquisition report is written from
+  // (formatAdaptiveReportWriterGenerationContext); acquisition had no
+  // entry here, so nothing in this specific path told the model to avoid
+  // Business Plan/startup-pitch section concepts. Excludes bare CAC/LTV/
+  // ARR/MRR: legitimate acquisition vocabulary for an operating target.
+  acquisition: [
+    "problem/solution framing",
+    "ideal customer profile",
+    "TAM/SAM/SOM",
+    "go-to-market strategy",
+    "pricing strategy",
+    "sales strategy",
+    "founder roadmap",
+    "startup KPI framework",
+    "business validation",
+    "product validation",
+    "unit economics template",
+  ],
 };
 
 const rolePatterns: Array<{ role: string; pattern: RegExp }> = [

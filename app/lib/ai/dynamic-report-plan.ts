@@ -115,6 +115,23 @@ const domainIncompatiblePatterns: Partial<
     /\b(?:zoning|title verification|property facts|legal claim|customer validation|product[- ]market fit|startup execution)\b/i,
   retail:
     /\b(?:zoning|title verification|legal claim|customer validation|product[- ]market fit|startup execution|saas metrics?)\b/i,
+  // CRITICAL FIX -- acquisition report builder isolation regression.
+  // Every other structured domain above filters an AI-generated dynamic
+  // section/metric against its own incompatible-vocabulary pattern before
+  // it ever reaches the report generator; acquisition had no entry here,
+  // so a dynamically-planned section titled e.g. "Go-To-Market Strategy"
+  // or a dashboard metric named "TAM" passed straight through
+  // isSectionCompatible/isMetricCompatible into the acquisition report's
+  // own section-routing contract (see adaptive-report-writer.ts's
+  // assignOutputField, which maps these titles/purposes into the fixed
+  // acquisitionAnalysisFields output keys -- the JSON key stays correct,
+  // but the section's own title/purpose text still biases the model
+  // toward Business Plan content inside it). Deliberately excludes bare
+  // CAC/LTV/ARR/MRR/Runway/EBITDA: those are legitimate, evidence-
+  // grounded acquisition vocabulary for an already-operating target
+  // company, not a startup-pitch concept.
+  acquisition:
+    /\b(?:tam|sam|som|icp|ideal customer profile|go[- ]to[- ]market|pricing strategy|founder roadmap|startup kpis?|business validation|product validation|sales strategy|unit economics template|customer validation|product[- ]market fit|startup execution)\b/i,
 };
 
 function unique<T>(values: readonly T[], key: (value: T) => string, limit: number) {
@@ -376,6 +393,67 @@ export function createDynamicReportPlanFallback({
       forbiddenSections: uniqueText([
         ...profile.forbiddenTopics,
         "Unrelated Legal Claim Analysis",
+      ], 16),
+    };
+  }
+
+  // CRITICAL FIX -- acquisition report builder isolation regression. This
+  // domain used to fall through to the fully generic bottom template
+  // (Executive Assessment / Material Facts / Decision Analysis / Material
+  // Risks / Priority Actions / Sources), leaving the model's own judgment
+  // as the only thing standing between the acquisition report and a
+  // Business Plan-flavored section plan. A dedicated, acquisition-shaped
+  // fallback -- mirroring the legal/real_estate/finance branches above --
+  // gives the model an on-topic default whenever its own dynamic plan is
+  // absent or rejected by resolveDynamicReportPlan's compatibility check.
+  if (allowDomainSpecificTemplate && profile.domain === "acquisition") {
+    return {
+      ...base,
+      reportTitle: "Acquisition Due Diligence Assessment",
+      reportPurpose: modePurpose(mode, "Assess acquisition attractiveness, valuation, financing structure, integration risk, and the investment decision"),
+      primaryDecision: "Determine whether to proceed, proceed conditionally, renegotiate, or walk away from the acquisition",
+      sections: [
+        section("executive_acquisition_decision", "Executive Acquisition Decision", "State the acquisition call and the evidence that controls it.", "acquisition_decision_synthesis", "critical"),
+        section("target_company_overview", "Target Company Overview", "Present the target's verified business, operations, customers, and financial profile.", "target_profile_review", "critical"),
+        section("strategic_fit", "Strategic Fit", "Assess strategic rationale, market position, and competitive advantage gained.", "strategic_fit_review", "critical"),
+        section("valuation_purchase_price", "Valuation and Purchase Price Fairness", "Assess EV/ARR or the appropriate multiple, comparable transactions, and purchase price fairness.", "valuation_analysis", "critical", ["user_statement", "uploaded_document", "external_source", "calculation"]),
+        section("financing_debt_capacity", "Financing Structure and Debt Capacity", "Assess the proposed financing mix, equity/debt split, and debt capacity implications.", "financing_structure_review", "critical", ["user_statement", "uploaded_document", "calculation"]),
+        section("roi_irr", "ROI and IRR Analysis", "Provide evidence-based ROI scenarios and an IRR estimate where computable.", "return_analysis", "high", ["user_statement", "uploaded_document", "calculation"]),
+        section("synergies", "Revenue and Cost Synergies", "Assess revenue and cost synergies with their supporting rationale and evidence.", "synergy_analysis", "high"),
+        section("integration_operational_risk", "Integration and Operational Risk", "Assess technology, cultural, and operational integration risk and disruption exposure.", "integration_risk_review", "critical"),
+        section("regulatory_review", "Regulatory Review", "Assess antitrust, competition, and sector-specific regulatory approval considerations.", "regulatory_review", "high", ["official_source", "external_source"]),
+        section("competitive_position", "Competitive Position", "Assess the combined entity's post-acquisition competitive position.", "competitive_position_review", "standard"),
+        section("deal_risks", "Deal Risks", "Rank material deal risks by mechanism, evidence, likelihood, consequence, and mitigation.", "deal_risk_review", "high"),
+        section("post_merger_integration", "Post-Merger Integration Plan", "Provide a deal-specific 30/60/90-day post-merger integration plan.", "integration_plan_synthesis", "critical"),
+        section("final_recommendation", "Final Investment Recommendation", "Give the final acquisition call with confidence and the condition that would change it.", "acquisition_decision_synthesis", "critical"),
+        section("sources_limitations", "Sources and Limitations", "List only sources actually used and state material limitations once.", "source_reliability_review", "high", ["official_source", "external_source", "uploaded_document"]),
+      ],
+      dashboardMetrics: [
+        metric("purchase_price", "Purchase Price", "User-verified purchase price.", "factual", ["user_statement", "uploaded_document"]),
+        metric("ev_arr_multiple", "EV/ARR Multiple", "Derived valuation multiple from verified purchase price and target ARR.", "calculated", ["calculation"]),
+        metric("financing_mix", "Financing Mix", "Derived equity/debt split of the purchase price.", "calculated", ["user_statement", "calculation"]),
+        metric("irr_estimate", "IRR Estimate", "IRR only when computable from verified cash-flow timing and exit assumptions.", "calculated", ["calculation"]),
+        metric("integration_risk", "Integration Risk", "Qualitative integration-risk posture."),
+        metric("investment_decision", "Investment Decision", "Current proceed, proceed-conditionally, renegotiate, or walk-away posture."),
+      ],
+      decisionGates: [
+        gate("valuation_supported", "Purchase price is supported by a computed multiple or comparable transactions.", "Verified purchase price, target ARR, or comparable transaction evidence"),
+        gate("financing_confirmed", "Financing structure and debt capacity are confirmed.", "Verified buyer capital, financing terms, or debt capacity evidence"),
+        gate("integration_plan_supported", "A concrete post-merger integration plan exists.", "Target operating profile and integration-scope evidence"),
+      ],
+      forbiddenSections: uniqueText([
+        ...profile.forbiddenTopics,
+        "Problem",
+        "Solution",
+        "Ideal Customer Profile",
+        "TAM/SAM/SOM",
+        "Pricing Strategy",
+        "Go-To-Market",
+        "Sales Strategy",
+        "Founder Roadmap",
+        "Startup KPIs",
+        "Business Validation",
+        "Product Validation",
       ], 16),
     };
   }

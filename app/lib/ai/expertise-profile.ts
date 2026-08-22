@@ -118,13 +118,41 @@ const domainForbiddenTopics: Partial<
   // projections are only allowed when the user explicitly provided them
   // or they are clearly labeled "Planning Assumption" (enforced in the
   // generation directives, not here).
+  // CRITICAL FIX -- acquisition report builder isolation regression.
+  // This list used to only cover founder-scoring/fundraising vocabulary;
+  // it never named the Business Plan/Startup section CONCEPTS (TAM/SAM/
+  // SOM, ICP, Go-To-Market, Pricing Strategy, Founder Roadmap, Startup
+  // KPI framework, Business/Product Validation) that the dynamic report
+  // plan is actually built from -- so a plan section literally titled
+  // "Go-To-Market Strategy" or "Pricing Strategy" passed straight through
+  // isTextCompatible's forbiddenTopics check into the acquisition
+  // report's own section-routing contract. Deliberately still excludes
+  // bare CAC/LTV/ARR/MRR/Runway/EBITDA: those are legitimate,
+  // evidence-grounded acquisition vocabulary for an already-operating
+  // target company (see report-isolation-validator.ts's own comment),
+  // not a startup-pitch concept.
   acquisition: [
     "founder readiness",
+    "founder roadmap",
     "product-market fit",
     "startup execution score",
     "capital efficiency",
     "fundraising",
     "seed round",
+    "total addressable market",
+    "serviceable addressable market",
+    "serviceable obtainable market",
+    "tam/sam/som",
+    "ideal customer profile",
+    "go-to-market",
+    "go to market",
+    "pricing strategy",
+    "sales strategy",
+    "startup kpi",
+    "startup kpis",
+    "business validation",
+    "product validation",
+    "unit economics template",
   ],
 };
 
