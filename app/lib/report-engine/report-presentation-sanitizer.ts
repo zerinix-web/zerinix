@@ -183,14 +183,23 @@ function naturalizeSnakeCaseIdentifiers(content: string): string {
 // fixed at that source here -- this is presentation, not extraction
 // logic -- this is the safety net that guarantees it can never reach the
 // customer regardless of why it was produced.
+// CRITICAL FIX -- sanitization must preserve complete report payload:
+// while auditing for that fix, both line patterns below turned out to
+// only consume ONE leading bracket tag ((?:\[[^\]]*\]\s*)?) before
+// requiring the label -- a real citation line commonly carries more than
+// one ("[Verified] [R1] Publisher: Statista"), so the second tag broke
+// the match entirely and the whole line survived unstripped. Both
+// patterns now consume any NUMBER of leading bracket tags
+// ((?:\[[^\]]*\]\s*)*), strengthening (never weakening) what already
+// matched.
 const leakedInternalFactLinePattern =
-  /^\s*(?:[-*•]\s*)?(?:\[[^\]]*\]\s*)?(?:legal_domain|requested_decision|jurisdiction_country|jurisdiction_region|governing_law)\s*:\s*.*$/gim;
+  /^\s*(?:[-*•]\s*)?(?:\[[^\]]*\]\s*)*(?:legal_domain|requested_decision|jurisdiction_country|jurisdiction_region|governing_law)\s*:\s*.*$/gim;
 
 // A raw citation-detail line from the research/evidence-registry format
 // (app/lib/ai/domain-research.ts's formatDomainResearchBundle): Publisher,
 // Source URL/title/type, Evidence ID, Confidence classification.
 const internalRegistryLinePattern =
-  /^\s*(?:[-*•]\s*)?(?:\[[^\]]*\]\s*)?(?:Publisher|Source\s*(?:URL|title|type)|Evidence\s*ID|Confidence\s*classification)\s*[:\-–—].*$/gim;
+  /^\s*(?:[-*•]\s*)?(?:\[[^\]]*\]\s*)*(?:Publisher|Source\s*(?:URL|title|type)|Evidence\s*ID|Confidence\s*classification)\s*[:\-–—].*$/gim;
 
 // Standalone internal-pipeline vocabulary that must never appear as prose
 // in a customer report, even mid-sentence and even if not wrapped in a
@@ -216,6 +225,34 @@ function collapseWhitespace(value: string): string {
     .trim();
 }
 
+// CRITICAL FIX -- sanitization must preserve complete report payload.
+// Confirmed live: some fields in the per-domain timeout fallback
+// (plan-executor.ts's createGroundedAcquisitionTimeoutFallback/
+// createGroundedDomainTimeoutFallback) are set to ENTIRELY the timeout-
+// disclosure sentence and nothing else -- e.g. `roiAnalysis:
+// localized.timeout` / `irrAnalysis: localized.timeout` -- so once
+// timeoutDisclosureSentencePattern (added in the prior "final cleanup"
+// turn) correctly removes that whole sentence, those two fields'
+// sanitized content became a true empty string. Planner.tsx's live view
+// then never called markSectionComplete for them (content is falsy), so
+// completedFields.size fell short of outputFields.length and the
+// hasCompletePayload check failed outright -- "Report job completed
+// without a complete report payload." This is never allowed to happen
+// again for ANY field, known or future: if a field HAD real content but
+// sanitization consumed all of it, the section still needs SOMETHING to
+// satisfy the report contract (title, sections array, section content,
+// recommendation, metrics, risks, next actions all present) -- so a
+// genuinely non-empty input that fully sanitizes down to nothing gets
+// this fallback sentence instead of true emptiness. This does not weaken
+// what gets removed above -- every pattern still runs exactly as before;
+// it only guarantees the section itself is never blank. A field whose
+// ORIGINAL content was already empty is untouched by this and still
+// returns empty (see the early return below), so
+// sanitizeReportSectionsForPresentation's own "drop a section with no
+// real content" filter keeps working for that case.
+const emptyAfterSanitizationFallback =
+  "Additional information is needed to complete this section.";
+
 // Order matters: sentence-level rewrites run FIRST, while their own
 // bracket tags/exact wording are still intact ([Unknown]/[Required:...]
 // and the timeout-disclosure sentence need to match themselves whole,
@@ -225,9 +262,10 @@ function collapseWhitespace(value: string): string {
 // doesn't get stripped in isolation, leaving an orphaned rest-of-line
 // fragment behind); then inline bracket tags (now including bare
 // [Verified]/[Derived]), the unbracketed "Verified from X" phrase,
-// standalone vocabulary, confidence scores, and bare URLs; and finally
-// any remaining raw snake_case identifier is naturalized as the last
-// polish pass.
+// standalone vocabulary, confidence scores, and bare URLs; then any
+// remaining raw snake_case identifier is naturalized as the last polish
+// pass; and finally, if a genuinely non-empty input sanitized down to
+// nothing, the schema-preservation fallback above takes its place.
 export function stripReportPresentationArtifacts(content: string): string {
   if (!content) return content;
 
@@ -246,7 +284,7 @@ export function stripReportPresentationArtifacts(content: string): string {
   sanitized = sanitized.replace(bareUrlPattern, "");
   sanitized = naturalizeSnakeCaseIdentifiers(sanitized);
 
-  return collapseWhitespace(sanitized);
+  return collapseWhitespace(sanitized) || emptyAfterSanitizationFallback;
 }
 
 // Applies both layers of the fix to an already-normalized section list,

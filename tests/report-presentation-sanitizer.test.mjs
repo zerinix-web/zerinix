@@ -417,7 +417,7 @@ test("stripReportPresentationArtifacts never mangles ordinary report prose that 
   );
 });
 
-test("sanitizeReportSectionsForPresentation drops a section that becomes fully empty after stripping (all internal artifact, no real prose), rather than rendering a blank card", () => {
+test("sanitizeReportSectionsForPresentation rewrites (never drops) a section whose content is only [Unknown][Required:x] into real, natural-language text", () => {
   const sections = sanitizeReportSectionsForPresentation([
     { field: "missingInformation", title: "Missing Information", content: "[Unknown] [Required:x]" },
     { field: "strategicFit", title: "Strategic Fit", content: "Real analysis survives." },
@@ -433,13 +433,37 @@ test("sanitizeReportSectionsForPresentation drops a section that becomes fully e
   );
 });
 
-test("sanitizeReportSectionsForPresentation drops a section that becomes fully empty after stripping non-rewritable internal artifact (e.g. a bare citation with no rewrite rule)", () => {
+test("sanitizeReportSectionsForPresentation still drops a section whose ORIGINAL content was already empty -- the schema-preservation fallback only applies when sanitization itself emptied real content, never to a field that had nothing to begin with", () => {
   const sections = sanitizeReportSectionsForPresentation([
-    { field: "someField", title: "Some Field", content: "[R1] [Asset:file.pdf]" },
+    { field: "someField", title: "Some Field", content: "" },
     { field: "strategicFit", title: "Strategic Fit", content: "Real analysis survives." },
   ]);
   assert.equal(sections.length, 1);
   assert.equal(sections[0].field, "strategicFit");
+});
+
+// NOTE: superseded by the "sanitization must preserve complete report
+// payload" turn -- a section is no longer dropped just because
+// sanitization consumed 100% of its ORIGINAL, genuinely-non-empty
+// content (confirmed live: plan-executor.ts's timeout fallback sets
+// roiAnalysis/irrAnalysis to nothing but the timeout-disclosure sentence,
+// and dropping those two fields broke Planner.tsx's hasCompletePayload
+// check -- "Report job completed without a complete report payload.").
+// The section now survives with a generic fallback sentence instead,
+// preserving the report's field-count contract. A section is still
+// dropped when its ORIGINAL content was already empty (see the sibling
+// test above, and stripReportPresentationArtifacts's own early return).
+test("sanitizeReportSectionsForPresentation keeps a section whose original content sanitizes down to nothing, replacing it with a fallback sentence rather than dropping it -- preserves the report's field-count contract", () => {
+  const sections = sanitizeReportSectionsForPresentation([
+    { field: "someField", title: "Some Field", content: "[R1] [Asset:file.pdf]" },
+    { field: "strategicFit", title: "Strategic Fit", content: "Real analysis survives." },
+  ]);
+  assert.equal(sections.length, 2);
+  assert.equal(
+    sections.find((s) => s.field === "someField").content,
+    "Additional information is needed to complete this section."
+  );
+  assert.equal(sections.find((s) => s.field === "strategicFit").content, "Real analysis survives.");
 });
 
 // --- 5. Drift checks: generation/routing/reasoning are untouched ----------
