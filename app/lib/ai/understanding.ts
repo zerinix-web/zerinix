@@ -239,8 +239,33 @@ const TIMEFRAME_PATTERN =
 // generic word like "integration", "leverage", "synergies", or
 // "valuation" alone, each of which is ordinary vocabulary in ordinary
 // business/finance prompts unrelated to acquiring a company.
-const ACQUISITION_WORKFLOW_PATTERN =
-  /\b(?:acquisitions?|acquiring|acquire\s+(?:a\s+|the\s+)?(?:company|business|firm|startup|target)|corporate acquisition|acquisition target|target company|mergers?|m\s?&\s?a\b|m\s+and\s+a\b|due diligence|buy[\s-]?outs?|post[\s-]?merger|enterprise value|ev\s*\/\s*arr|purchase price|comparable transactions?|financing structure|debt financing|şirket satın alma|satın alma hedefi|birleşme|devralma|hedef şirket)\b/i;
+//
+// CRITICAL BUG FIX -- Business Plan prompts were still generating an
+// Acquisition Due Diligence report. This pattern's result can feed into
+// reportReadiness.detectedIndustry, which plan-executor.ts then threads
+// through to expertise-profile.ts's detectDomain as its own
+// detectedDomain argument -- so a stale "acquisition" verdict here can
+// leak into expertiseProfile.domain (and the model's own instructions)
+// even after domain.ts's and expertise-profile.ts's copies of this same
+// pattern were hardened. Kept in exact lockstep with those: bare
+// "financing structure"/"debt financing" (ordinary startup-pitch
+// capital-planning vocabulary) removed as standalone triggers, and
+// "acquire"/"buy"/"purchase a [company]" now tolerate descriptive words
+// between the article and the noun instead of requiring the noun
+// immediately after "a"/"the".
+const acquisitionWorkflowCompanyNounPattern =
+  "(?:[\\w-]+[,]?\\s+){0,6}(?:company|business|firm|startup|target)";
+const ACQUISITION_WORKFLOW_PATTERN = new RegExp(
+  "\\b(?:acquisitions?|acquiring" +
+    `|acquire\\s+(?:a\\s+|the\\s+)?${acquisitionWorkflowCompanyNounPattern}` +
+    `|buy(?:ing)?\\s+(?:a\\s+|the\\s+)?${acquisitionWorkflowCompanyNounPattern}` +
+    `|purchas(?:e|ing)\\s+(?:a\\s+|the\\s+)?${acquisitionWorkflowCompanyNounPattern}` +
+    "|merg(?:e|er|ing)\\s+with" +
+    "|corporate acquisition|acquisition target|target company|mergers?|m\\s?&\\s?a\\b|m\\s+and\\s+a\\b" +
+    "|due diligence|buy[\\s-]?outs?|post[\\s-]?merger|enterprise value|ev\\s*\\/\\s*arr|purchase price" +
+    "|comparable transactions?|şirket satın alma|satın alma hedefi|birleşme|devralma|hedef şirket)\\b",
+  "i"
+);
 const LEGAL_WORKFLOW_PATTERN =
   /(?:\b(?:contract|agreement|nda|lease|terms|legal|law|lawsuit|litigation|employment law|wrongful dismissal|unfair dismissal|unpaid wages|severance|notice pay|reinstatement|mediation|limitation period)\b|sözleşme|anlaşma|kira|fesih|taraflar|hukuk|hukuki|mevzuat|dava|iş hukuku|işten çıkar|işveren|işçi|çalışan|kıdem|ihbar|ödenmeyen ücret|ödenmemiş maaş|yıllık izin|işe iade|arabuluculuk|zamanaşımı|savunma alınma|yazılı uyarı)/i;
 const CONTRACT_WORKFLOW_PATTERN =

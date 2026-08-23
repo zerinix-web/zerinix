@@ -122,6 +122,18 @@ export type FinancialModel = {
     roi: FinancialMetricModel;
   };
   revenueForecast: RevenueForecastYear[];
+  // CRITICAL FIX -- preserve user-provided facts. The raw facts a founder
+  // stated, exposed directly rather than requiring every consumer to
+  // reverse-engineer "was this user-provided?" from a metric's formula
+  // string. mrr/arr/customers/pricePerCustomer/investmentAmount already
+  // feed the metrics above (metric.confidence/formula reflect that);
+  // employees and year1CustomerTarget do not feed any calculation here
+  // (employee count drives no formula; a Year-1 target is a stated GOAL,
+  // never blended into month12Customers or any revenue metric as if it
+  // were current, actual performance -- see
+  // extractUserStatedYear1CustomerTarget) but are still real facts that
+  // must appear as User Inputs, not silently disappear.
+  userProvidedFacts: ReturnType<typeof extractUserStatedFinancials>;
 };
 
 function hashValue(value: string) {
@@ -647,7 +659,20 @@ function parseUsdAmount(rawValue: string, rawSuffix: string): number | null {
   return value;
 }
 
-const usdAmountGroup = "\\$?\\s*([\\d][\\d,]*(?:\\.\\d+)?)\\s*(k|thousand|m|million)?";
+// CRITICAL FIX -- preserve user-provided facts across a structured,
+// one-fact-per-line prompt. Confirmed live and reproduced: with a plain
+// \s* connector (which matches a newline), "Subscription price: $500\n
+// Initial investment: $1,000,000" extracted investmentAmount as 500 --
+// "$500" bled forward across the line break into matching the "initial
+// investment" label on the FOLLOWING line, misattributing one founder-
+// stated fact to a different one's label. This is the exact bug class
+// acquisition-deal-facts.ts's sameLineGap already fixed for Acquisition;
+// applied here identically so a value can only ever pair with a label
+// genuinely on the same line as it.
+const sameLineGap = "[^\\S\\r\\n]*";
+
+const usdAmountGroup =
+  `\\$?${sameLineGap}([\\d][\\d,]*(?:\\.\\d+)?)${sameLineGap}(k|thousand|m|million)?`;
 
 // Same negation vocabulary as negatedEvidenceClaimPattern above, applied
 // to the ~30 characters immediately before a matched figure -- "we don't
@@ -663,11 +688,11 @@ function hasNearbyNegation(prompt: string, index: number) {
 
 function extractLabeledUsdAmount(prompt: string, labelPattern: string): number | null {
   const valueThenLabel = new RegExp(
-    `${usdAmountGroup}\\s*(?:in\\s+|of\\s+)?(?:${labelPattern})\\b`,
+    `${usdAmountGroup}${sameLineGap}(?:in${sameLineGap}|of${sameLineGap})?(?:${labelPattern})\\b`,
     "i"
   );
   const labelThenValue = new RegExp(
-    `\\b(?:${labelPattern})\\b\\s*(?:of|is|at|was|reached|[:=-])?\\s*${usdAmountGroup}`,
+    `\\b(?:${labelPattern})\\b${sameLineGap}(?:of|is|at|was|reached|[:=-])?${sameLineGap}${usdAmountGroup}`,
     "i"
   );
 
@@ -682,15 +707,122 @@ function extractLabeledUsdAmount(prompt: string, labelPattern: string): number |
 // same claim as paying customers) and any figure immediately qualified as
 // a market-size estimate ("potential"/"target"/"addressable"/"projected"
 // customers describes an opportunity, not a real, current customer base).
+//
+// CRITICAL BUG FIX -- preserve user-provided facts. Confirmed live:
+// "Year 1 target: 200 customers" was NOT excluded, because the qualifier
+// check required the excluded word ("target") to be followed by nothing
+// but whitespace before the end of the preceding-context slice --
+// "target: " (with the colon most people actually type between a label
+// and its value) broke that anchor, so the goal figure "200" silently
+// became month12Customers as if it were the founder's real, current
+// customer count, misrepresenting a target as confirmed performance and
+// feeding a wrong number into every downstream MRR/ARR calculation. The
+// qualifier word may now be followed by a colon/dash/equals (with
+// optional surrounding whitespace) before the value, matching how a
+// label is actually punctuated in ordinary prose.
 function extractUserStatedCustomerCount(prompt: string): number | null {
-  const match = prompt.match(/\b([\d][\d,]*)\s*(?:paying\s+|active\s+|current\s+)?customers?\b/i);
+  const match = prompt.match(
+    new RegExp(`\\b([\\d][\\d,]*)${sameLineGap}(?:paying${sameLineGap}|active${sameLineGap}|current${sameLineGap})?customers?\\b`, "i")
+  );
   if (!match || typeof match.index !== "number") return null;
   if (hasNearbyNegation(prompt, match.index)) return null;
 
   const precedingContext = prompt.slice(Math.max(0, match.index - 40), match.index).toLowerCase();
-  if (/\b(?:potential|target|addressable|total addressable|estimated|projected|expected|future)\s*$/.test(precedingContext)) {
+  if (
+    // The qualifier word may be followed by a linking verb ("target IS
+    // 500 customers", "goal WAS 500") in addition to the colon/dash/
+    // equals connector above -- both are ordinary ways to phrase the
+    // same non-current-performance claim.
+    /\b(?:potential|target|addressable|total addressable|estimated|projected|expected|future)\b(?:\s+(?:is|was|of|at|reached))?\s*(?:[:=-]\s*)?$/.test(
+      precedingContext
+    )
+  ) {
     return null;
   }
+
+  return Number(match[1].replace(/,/g, ""));
+}
+
+// CRITICAL FIX -- preserve user-provided facts. A "Year 1 target" is a
+// real fact the founder stated -- it must not silently disappear just
+// because extractUserStatedCustomerCount above correctly refuses to treat
+// it as a CURRENT customer count. Extracted separately and surfaced as
+// its own labeled User Input (a stated goal, never blended into
+// month12Customers or any revenue calculation as if it were actual,
+// current performance).
+function extractUserStatedYear1CustomerTarget(prompt: string): number | null {
+  const match =
+    prompt.match(
+      new RegExp(
+        `\\b(?:year${sameLineGap}1|year${sameLineGap}one|first[\\s-]year)${sameLineGap}(?:target|goal)${sameLineGap}(?:of|is|:|=|-)?${sameLineGap}([\\d][\\d,]*)${sameLineGap}(?:paying${sameLineGap}|active${sameLineGap})?customers?\\b`,
+        "i"
+      )
+    ) ||
+    prompt.match(
+      new RegExp(
+        `\\b([\\d][\\d,]*)${sameLineGap}(?:paying${sameLineGap}|active${sameLineGap})?customers?${sameLineGap}(?:by|within)${sameLineGap}(?:the${sameLineGap})?(?:end${sameLineGap}of${sameLineGap})?(?:year${sameLineGap}1|year${sameLineGap}one|the${sameLineGap}first${sameLineGap}year)\\b`,
+        "i"
+      )
+    );
+  if (!match || typeof match.index !== "number") return null;
+  if (hasNearbyNegation(prompt, match.index)) return null;
+
+  return Number(match[1].replace(/,/g, ""));
+}
+
+// CRITICAL FIX -- preserve user-provided facts. Confirmed live: a stated
+// subscription/per-account price ("$500/month subscription price") was
+// never extracted at all -- ARPA stayed a pure benchmark formula with no
+// user-override path, so a founder's own stated price was silently
+// discarded in favor of an industry-average estimate.
+function extractUserStatedPricePerCustomer(prompt: string): number | null {
+  // Value-first, with the billing period sitting between the amount and
+  // the qualifying label ("$500/month subscription price") -- doesn't fit
+  // extractLabeledUsdAmount's plain "value ... label" adjacency, so
+  // matched directly here.
+  const valueFirst = prompt.match(
+    new RegExp(
+      `${usdAmountGroup}${sameLineGap}(?:\\/|per)${sameLineGap}(?:month|mo)\\b${sameLineGap}(?:subscription${sameLineGap}price|price${sameLineGap}per${sameLineGap}(?:customer|user|account)|monthly${sameLineGap}price)`,
+      "i"
+    )
+  );
+  if (valueFirst && typeof valueFirst.index === "number" && !hasNearbyNegation(prompt, valueFirst.index)) {
+    return parseUsdAmount(valueFirst[1], valueFirst[2] || "");
+  }
+
+  // Label-first phrasing ("subscription price of $500/month", "price per
+  // customer: $500", "monthly subscription price is $500").
+  return extractLabeledUsdAmount(
+    prompt,
+    "subscription price|price per customer|price per user|price per account|monthly subscription price|monthly price"
+  );
+}
+
+// CRITICAL FIX -- preserve user-provided facts. A stated initial
+// investment/funding amount ("$1M initial investment") had no extraction
+// or override path at all -- investmentNeeded was always a pure
+// monthlyBurn x runway + capex formula, silently discarding a founder's
+// own stated capital figure.
+function extractUserStatedInvestmentAmount(prompt: string): number | null {
+  return extractLabeledUsdAmount(
+    prompt,
+    "initial investment|seed investment|investment (?:needed|required|amount)|seeking|raising|funding (?:needed|required|amount)|capital (?:needed|required)"
+  );
+}
+
+// CRITICAL FIX -- preserve user-provided facts. Employee count had no
+// extraction at all; it does not drive an existing financial formula, but
+// it is a real fact the founder stated and must be preserved and labeled
+// as a User Input rather than silently dropped.
+function extractUserStatedEmployeeCount(prompt: string): number | null {
+  const match =
+    prompt.match(
+      new RegExp(`\\b([\\d][\\d,]*)${sameLineGap}(?:full-time${sameLineGap}|part-time${sameLineGap}|fte${sameLineGap})?employees?\\b`, "i")
+    ) ||
+    prompt.match(new RegExp(`\\bteam${sameLineGap}of${sameLineGap}([\\d][\\d,]*)\\b`, "i")) ||
+    prompt.match(new RegExp(`\\b([\\d][\\d,]*)[\\s-]person${sameLineGap}team\\b`, "i"));
+  if (!match || typeof match.index !== "number") return null;
+  if (hasNearbyNegation(prompt, match.index)) return null;
 
   return Number(match[1].replace(/,/g, ""));
 }
@@ -699,11 +831,19 @@ export function extractUserStatedFinancials(prompt: string): {
   mrr: number | null;
   arr: number | null;
   customers: number | null;
+  year1CustomerTarget: number | null;
+  pricePerCustomer: number | null;
+  investmentAmount: number | null;
+  employees: number | null;
 } {
   return {
     mrr: extractLabeledUsdAmount(prompt, "MRR|monthly recurring revenue"),
     arr: extractLabeledUsdAmount(prompt, "ARR|annual recurring revenue"),
     customers: extractUserStatedCustomerCount(prompt),
+    year1CustomerTarget: extractUserStatedYear1CustomerTarget(prompt),
+    pricePerCustomer: extractUserStatedPricePerCustomer(prompt),
+    investmentAmount: extractUserStatedInvestmentAmount(prompt),
+    employees: extractUserStatedEmployeeCount(prompt),
   };
 }
 
@@ -1009,8 +1149,11 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
   const tam = modeling.tamUsd * geoMultiplier * scopeMultiplier * marketMultiplier;
   const sam = tam * modeling.samRate;
   const som = sam * modeling.somRate;
-  const arpa = modeling.arpaMonthly * scopeMultiplier * pricingMultiplier;
   const userStated = extractUserStatedFinancials(input.prompt);
+  // A real, stated subscription/per-account price is the authoritative
+  // value -- never overwritten by the benchmark formula below (mirrors
+  // the MRR/ARR/customers precedent already established here).
+  const arpa = userStated.pricePerCustomer ?? modeling.arpaMonthly * scopeMultiplier * pricingMultiplier;
   const month12Customers =
     userStated.customers ?? Math.max(1, Math.round(modeling.month12Customers * scopeMultiplier * rampMultiplier));
   // A real, current MRR/ARR the user stated is the authoritative value --
@@ -1025,7 +1168,10 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
   const ltv = arpa * grossMargin * modeling.lifetimeMonths;
   const cacPayback = cac / Math.max(1, arpa * grossMargin);
   const monthlyBurn = modeling.monthlyBurnUsd * scopeMultiplier * burnMultiplier;
-  const investmentNeeded = monthlyBurn * modeling.targetRunwayMonths + modeling.startupCapexUsd;
+  // A real, stated initial investment/funding amount is the authoritative
+  // value -- never overwritten by the benchmark runway formula below.
+  const investmentNeeded =
+    userStated.investmentAmount ?? monthlyBurn * modeling.targetRunwayMonths + modeling.startupCapexUsd;
   const runway = investmentNeeded / monthlyBurn;
   const annualOpex = monthlyBurn * 12;
   const ebitda = arr * grossMargin - annualOpex;
@@ -1142,12 +1288,20 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
         value: arpa,
         unit: "usd",
 	        displayValue: `${formatUsd(arpa)}/month`,
-	        confidence: confidence(arpaLabel),
-	        formula: arpaFormula,
-	        assumptions: [...sharedAssumptions, `Month-12 ${customerUnit}: ${month12Customers}`],
-        benchmarkComparison: isMobility
-          ? "Uses mobility revenue-per-active-rider benchmark as the base case."
-          : "Uses industry benchmark ARPA as the base case.",
+	        // A user-stated subscription/per-account price is Verified,
+	        // never the ordinary benchmark ARPA formula.
+	        confidence: userStated.pricePerCustomer ? "High" : confidence(arpaLabel),
+	        formula: userStated.pricePerCustomer
+	          ? "User-provided (stated directly in the request)"
+	          : arpaFormula,
+	        assumptions: userStated.pricePerCustomer
+	          ? [`Actual, user-provided ${arpaLabel}: ${formatUsd(arpa)}/month`]
+	          : [...sharedAssumptions, `Month-12 ${customerUnit}: ${month12Customers}`],
+        benchmarkComparison: userStated.pricePerCustomer
+          ? `${arpaLabel} reflects the actual price supplied in the request, not a benchmark estimate.`
+          : isMobility
+            ? "Uses mobility revenue-per-active-rider benchmark as the base case."
+            : "Uses industry benchmark ARPA as the base case.",
       }),
       cac: metric({
         label: cacLabel,
@@ -1290,10 +1444,18 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
         label: "Investment Needed",
         value: investmentNeeded,
         unit: "usd",
-        confidence: confidence("Investment Needed"),
-        formula: "Monthly Burn x target runway + startup capex",
-        assumptions: [...sharedAssumptions, `Target runway: ${modeling.targetRunwayMonths} months`],
-        benchmarkComparison: "Investment need is calculated from runway and capex assumptions.",
+        // A user-stated initial investment/funding amount is Verified,
+        // never the ordinary benchmark runway-and-capex formula.
+        confidence: userStated.investmentAmount ? "High" : confidence("Investment Needed"),
+        formula: userStated.investmentAmount
+          ? "User-provided (stated directly in the request)"
+          : "Monthly Burn x target runway + startup capex",
+        assumptions: userStated.investmentAmount
+          ? [`Actual, user-provided investment amount: ${formatUsd(investmentNeeded)}`]
+          : [...sharedAssumptions, `Target runway: ${modeling.targetRunwayMonths} months`],
+        benchmarkComparison: userStated.investmentAmount
+          ? "Investment Needed reflects the actual amount supplied in the request, not a benchmark estimate."
+          : "Investment need is calculated from runway and capex assumptions.",
       }),
       roi: metric({
         label: "ROI",
@@ -1307,6 +1469,7 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
       }),
     },
     revenueForecast,
+    userProvidedFacts: userStated,
   };
 }
 

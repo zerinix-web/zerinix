@@ -49,7 +49,10 @@ import type {
   ReportValidationIntelligence,
 } from "@/app/lib/report-investment-score";
 import { readExecutiveDecisionIntelligenceSummary } from "@/app/lib/report-engine/executive-decision-intelligence-presentation";
-import { extractExecutiveDecisionFromText } from "@/app/lib/report-engine/executive-decision-brief";
+import {
+  getCanonicalDecisionLabel,
+  resolveCanonicalDecisionFromReportText,
+} from "@/app/lib/report-engine/executive-decision-vocabulary";
 import {
   detectPdfPresentationLocale,
   localizePdfPresentationLabel,
@@ -264,6 +267,21 @@ function getDashboardEvidenceLabel(level: EvidenceLevel, locale: EvidenceLocale 
 // [Assumption] tag vocabulary the AI is prompted with and
 // report-evidence-confidence.ts parses, which must stay exactly as-is.
 const financialEvidenceBadgeLabels: Partial<Record<EvidenceLevel, Record<EvidenceLocale, string>>> = {
+  // CRITICAL FIX -- "Verified" reads as an internal audit-tool label on
+  // a financial metric card. This financial-only display wrapper (see
+  // the comment above) already renames every non-verified tier; the
+  // verified tier previously had no override and fell through to the
+  // literal word. Naming it after the founder is also more informative
+  // here specifically: a founder-stated financial figure (price,
+  // investment, customer count) is what "verified" means in this
+  // context, not third-party source verification.
+  verified: {
+    English: "Founder-Confirmed",
+    Turkish: "Kurucu Onaylı",
+    German: "Vom Gründer bestätigt",
+    French: "Confirmé par le fondateur",
+    Spanish: "Confirmado por el fundador",
+  },
   derived: {
     English: "Derived",
     Turkish: "Türetilmiş",
@@ -296,6 +314,30 @@ const financialEvidenceBadgeLabels: Partial<Record<EvidenceLevel, Record<Evidenc
 
 function getFinancialEvidenceBadgeLabel(level: EvidenceLevel, locale: EvidenceLocale = "English") {
   return financialEvidenceBadgeLabels[level]?.[locale] ?? getDashboardEvidenceLabel(level, locale);
+}
+
+// CRITICAL FIX -- do not present a planning assumption as actual
+// performance. A founder-confirmed figure (evidence === "verified") is
+// shown under its plain name; anything modeled or benchmark-derived is
+// prefixed so the card title itself, not just the badge next to it,
+// makes clear this is a scenario/estimate rather than a reported
+// result. The prefix is chosen by what kind of figure it is: top-line
+// revenue metrics read "Estimated", unit-economics ratios read
+// "Planning", and forward-looking timing metrics (which are inherently
+// scenario-dependent) read "Scenario".
+function getFinancialMetricDisplayLabel(metricLabel: string, evidence: EvidenceLevel) {
+  if (evidence === "verified") {
+    return metricLabel;
+  }
+
+  const normalized = metricLabel.toLowerCase();
+  if (/revenue|\barr\b|\bmrr\b/.test(normalized)) {
+    return `Estimated ${metricLabel}`;
+  }
+  if (/runway|break-even|break even/.test(normalized)) {
+    return `Scenario ${metricLabel}`;
+  }
+  return `Planning ${metricLabel}`;
 }
 
 function EvidenceBadge({
@@ -606,19 +648,30 @@ function getDecisionSummaryItems(
     "market overview",
   ]);
   const risks = getSectionContentByFieldOrTitle(sections, ["risk", "threat"]);
-  // The new Executive Decision layer's own deterministic "Decision: TOKEN"
-  // line is read via a locale-agnostic extractor first (it matches
-  // English GO/CONDITIONAL GO/NO-GO, Turkish EVET/KOŞULLU EVET/HAYIR, and
-  // the German/French/Spanish equivalents alike); detectRecommendation's
-  // legacy PASS/HOLD/VALIDATE/REJECT heuristic is only a fallback for
-  // reports generated before this format existed.
+  // CRITICAL ARCHITECTURE FIX -- centralize executive decision
+  // vocabulary. The canonical resolver (executive-decision-vocabulary.ts)
+  // tries, in order: Acquisition's own literal call phrase, Real
+  // Estate's labeled BUY/WAIT/AVOID line, then the shared Executive
+  // Decision layer's deterministic "Decision: TOKEN" line (it matches
+  // English GO/CONDITIONAL GO/NO-GO, Turkish EVET/KOŞULLU EVET/HAYIR,
+  // and the German/French/Spanish equivalents alike) -- so every report
+  // kind's own, unmodified decision output renders as the same 4-value
+  // label here. detectRecommendation's legacy PASS/HOLD/VALIDATE/REJECT
+  // heuristic is kept only as a fallback for reports generated before
+  // any of these formats existed.
   const dashboardLocale = detectPdfPresentationLocale(fullContent);
-  const decisionSignal =
-    extractExecutiveDecisionFromText(executiveSummary)?.token.toUpperCase() ||
-    detectRecommendation(`${executiveRecommendation}\n${executiveSummary}\n${fullContent}`) ||
-    extractMetricValue(executiveRecommendation, "Decision") ||
-    extractMetricValue(executiveRecommendation, "Recommendation") ||
-    "—";
+  const resolvedDecision = resolveCanonicalDecisionFromReportText(
+    `${executiveRecommendation}\n${executiveSummary}\n${fullContent}`
+  );
+  const decisionSignal = resolvedDecision
+    ? getCanonicalDecisionLabel(
+        resolvedDecision.decision,
+        dashboardLocale === "tr" ? "Turkish" : resolvedDecision.language
+      )
+    : detectRecommendation(`${executiveRecommendation}\n${executiveSummary}\n${fullContent}`) ||
+      extractMetricValue(executiveRecommendation, "Decision") ||
+      extractMetricValue(executiveRecommendation, "Recommendation") ||
+      "—";
   const nextStep =
     extractMetricValue(executiveRecommendation, "Next Critical Action") ||
     extractMetricValue(executiveRecommendation, "Next Action") ||
@@ -826,15 +879,27 @@ function extractPercentScore(content: string, label: string) {
 }
 
 function getDecisionClasses(decision: string) {
-  if (decision === "GO" || decision === "RAISE" || decision === "BOOTSTRAP") {
+  // CRITICAL ARCHITECTURE FIX -- also recognize the centralized
+  // executive decision vocabulary's own codes and rendered labels
+  // (executive-decision-vocabulary.ts), so the "Decision" KPI card's
+  // color coding still applies now that its value is the canonical
+  // label ("Proceed with Conditions") rather than each report kind's
+  // own raw word.
+  if (decision === "GO" || decision === "RAISE" || decision === "BOOTSTRAP" || decision === "PROCEED" || decision === "Proceed") {
     return "border-emerald-300/35 bg-emerald-300/15 text-emerald-100";
   }
 
-  if (decision === "NO GO" || decision === "PIVOT") {
+  if (decision === "NO GO" || decision === "PIVOT" || decision === "REJECT" || decision === "Reject") {
     return "border-red-300/30 bg-red-300/12 text-red-100";
   }
 
-  if (decision === "WAIT") {
+  if (
+    decision === "WAIT" ||
+    decision === "PAUSE_PENDING_REVIEW" ||
+    decision === "Pause Pending Review" ||
+    decision === "PROCEED_WITH_CONDITIONS" ||
+    decision === "Proceed with Conditions"
+  ) {
     return "border-amber-300/35 bg-amber-300/15 text-amber-100";
   }
 
@@ -956,11 +1021,18 @@ function ExecutiveSummaryVisual({
     investmentScore?.totalScore ??
     extractScore(content, "AI Investment Score") ??
     extractConfidence(content);
-  const recommendation =
-    extractExecutiveDecisionFromText(content)?.token.toUpperCase() ||
-    investmentScore?.recommendation ||
-    detectRecommendation(content) ||
-    "—";
+  // CRITICAL ARCHITECTURE FIX -- centralize executive decision
+  // vocabulary (see executive-decision-vocabulary.ts). Every report
+  // kind's own, unmodified decision output is translated into the same
+  // 4-value label here, instead of showing each report kind's raw word
+  // ("GO"/"Proceed with Conditions"/"BUY") verbatim on this KPI card.
+  const resolvedDecision = resolveCanonicalDecisionFromReportText(
+    content,
+    investmentScore?.recommendation
+  );
+  const recommendation = resolvedDecision
+    ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
+    : detectRecommendation(content) || "—";
   const highlights = getExecutiveHighlights(content);
   const kpis = [
     {
@@ -1358,8 +1430,8 @@ function ReportSectionVisual({
         {!hasVerifiedEvidence ? (
           <div className="border-b border-amber-300/20 bg-amber-300/10 px-5 py-3">
             <p className="text-xs leading-5 text-amber-100/90">
-              <span className="font-semibold">No verified financial data available.</span>{" "}
-              The figures below are modeled estimates based on industry benchmarks and planning
+              <span className="font-semibold">No founder-confirmed financial data available.</span>{" "}
+              The figures below are AI planning scenarios based on industry benchmarks and planning
               assumptions, not confirmed business performance.
             </p>
           </div>
@@ -1368,7 +1440,9 @@ function ReportSectionVisual({
           {flowMetrics.map(({ metric, value, evidence }) => (
             <div key={metric} className="bg-zinc-950/80 p-4">
               <div className="flex items-start justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{metric}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                  {getFinancialMetricDisplayLabel(metric, evidence)}
+                </p>
                 <EvidenceBadge level={evidence} locale={evidenceLocale} financial />
               </div>
               <p className="mt-3 break-words text-lg font-semibold leading-6 text-white sm:truncate sm:whitespace-nowrap">
@@ -1426,26 +1500,54 @@ function ReportSectionVisual({
               Unit economics, runway and investor-readiness signals.
             </p>
           </div>
-          <span className="w-fit rounded-full border border-teal-200/20 bg-teal-200/10 px-3 py-1 text-xs font-semibold text-teal-100">
-            Live model
+          {/* CRITICAL FIX -- do not present AI benchmark estimates as
+              confirmed business performance. This badge used to read
+              "Live model" unconditionally, regardless of whether any
+              metric below was ever confirmed by the founder -- implying
+              real, current business data even when every figure is a
+              modeled industry-benchmark estimate. It now honestly
+              reflects which case applies. */}
+          <span
+            className={`w-fit rounded-full border px-3 py-1 text-xs font-semibold ${
+              hasVerifiedEvidence
+                ? "border-teal-200/20 bg-teal-200/10 text-teal-100"
+                : "border-amber-300/25 bg-amber-300/10 text-amber-100"
+            }`}
+          >
+            {hasVerifiedEvidence ? "Includes confirmed figures" : "Modeled estimate"}
           </span>
         </div>
         {!hasVerifiedEvidence ? (
           <div className="border-b border-amber-300/20 bg-amber-300/10 px-5 py-3">
             <p className="text-xs leading-5 text-amber-100/90">
-              <span className="font-semibold">No verified financial data available.</span>{" "}
-              The figures below are modeled estimates based on industry benchmarks and planning
+              <span className="font-semibold">No founder-confirmed financial data available.</span>{" "}
+              The figures below are AI planning scenarios based on industry benchmarks and planning
               assumptions, not confirmed business performance.
             </p>
           </div>
         ) : null}
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-          {dashboardMetrics.map(({ metric, value, evidence }, index) => {
+          {dashboardMetrics.map(({ metric, value, evidence }) => {
+            // CRITICAL FIX -- do not present AI benchmark estimates as
+            // confirmed business performance. This fill used to be a
+            // hardcoded, metric-unrelated array with no connection to the
+            // card it decorated -- a purely cosmetic "progress" bar that
+            // could read as a meaningful confidence/completion indicator
+            // even for a 100% benchmark-derived figure. It now tracks the
+            // metric's own real evidence tier instead of an arbitrary
+            // per-index number.
+            const evidenceFillPercent: Record<EvidenceLevel, number> = {
+              verified: 100,
+              derived: 85,
+              benchmarkDerived: 55,
+              planningAssumption: 40,
+              validationRequired: 25,
+            };
             return (
               <div key={metric.label} className="flex min-h-32 min-w-0 flex-col justify-between overflow-hidden rounded-3xl border border-white/10 bg-black/35 p-3.5 shadow-xl shadow-black/20">
                 <div className="flex items-start justify-between gap-3">
                   <p className="line-clamp-2 min-w-0 break-words text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-500">
-                    {metric.label}
+                    {getFinancialMetricDisplayLabel(metric.label, evidence)}
                   </p>
                   <EvidenceBadge level={evidence} locale={evidenceLocale} financial />
                 </div>
@@ -1455,8 +1557,8 @@ function ReportSectionVisual({
                   </p>
                   <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/10">
                     <div
-                      className="h-full rounded-full bg-teal-200/80"
-                      style={{ width: `${[78, 64, 72, 58, 70, 50, 66, 62, 54, 60, 48][index] || 60}%` }}
+                      className={`h-full rounded-full ${evidence === "verified" ? "bg-teal-200/80" : "bg-amber-300/60"}`}
+                      style={{ width: `${evidenceFillPercent[evidence]}%` }}
                     />
                   </div>
                 </div>

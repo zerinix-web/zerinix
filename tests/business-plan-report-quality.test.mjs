@@ -41,9 +41,13 @@ test("Business Plan route accepts structured Responses API parsed output", () =>
   assert.match(planRouteSource, /type === "output_text"/);
 });
 
+// NOTE: superseded by the "Business Plan final quality polish" ticket --
+// "Verified external citations..." was itself flagged as internal
+// system language ("Verified") and replaced with "External citations...".
+// See tests/business-plan-final-quality-polish-fix.test.mjs.
 test("Business Plan route repairs missing Sources / Assumptions without failing the report", () => {
   assert.match(planRouteSource, /function createSourcesAssumptionsFallback/);
-  assert.match(planRouteSource, /Verified external citations were not returned/);
+  assert.match(planRouteSource, /External citations were not returned/);
   assert.match(planRouteSource, /field === "sourcesAssumptions"/);
   assert.match(planRouteSource, /createSourcesAssumptionsFallback\(parsed\)/);
 });

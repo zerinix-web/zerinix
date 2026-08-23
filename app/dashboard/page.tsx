@@ -18,6 +18,10 @@ import {
 import { createClient } from "@/app/lib/supabase/server";
 import { dashboardTheme } from "@/app/lib/ui/dashboard-theme";
 import {
+  getCanonicalDecisionLabel,
+  resolveCanonicalDecisionFromReportText,
+} from "@/app/lib/report-engine/executive-decision-vocabulary";
+import {
   getUserPlanTier,
   loadUserUsageSummary,
 } from "@/app/lib/ai/governance";
@@ -155,10 +159,6 @@ function getDecisionSignal(report: DashboardReport | undefined) {
     return "No decision signal yet";
   }
 
-  if (report.investmentScore?.recommendation) {
-    return cleanMobileDashboardText(report.investmentScore.recommendation, 92);
-  }
-
   const recommendation = getReportSectionContent(report, [
     "executiverecommendation",
     "executive recommendation",
@@ -171,11 +171,35 @@ function getDecisionSignal(report: DashboardReport | undefined) {
     "market overview",
   ]);
   const content = `${recommendation}\n${summary}`;
+
+  // CRITICAL ARCHITECTURE FIX -- centralize executive decision
+  // vocabulary. Confirmed live: this shared reports list previously
+  // showed each report kind's own raw decision word verbatim (Business
+  // Plan's "GO"/"WAIT"/"PASS" next to Acquisition's "Proceed with
+  // Conditions"/"Reject" next to Real Estate's "BUY"/"AVOID"), so the
+  // same underlying call read as inconsistent wording across cards even
+  // when nothing was actually wrong. Every report kind's own,
+  // unmodified decision output is now translated into one canonical
+  // 4-value vocabulary (see executive-decision-vocabulary.ts) before
+  // display, so "same decision, same label" holds across every report
+  // kind on this list. Falls back to the pre-existing text-extraction
+  // heuristic only when no report kind's recognizable decision
+  // vocabulary is present at all.
+  const resolved = resolveCanonicalDecisionFromReportText(
+    content,
+    report.investmentScore?.recommendation
+  );
+  if (resolved) {
+    return getCanonicalDecisionLabel(resolved.decision, resolved.language);
+  }
+
   const explicitSignal =
     extractDashboardMetric(recommendation, "Decision") ||
     extractDashboardMetric(recommendation, "Recommendation") ||
     extractDashboardMetric(recommendation, "Investment Recommendation");
-  const keywordSignal = content.match(/\b(GO|NO GO|WAIT|PIVOT|VALIDATE|REVIEW|HOLD)\b/i)?.[1];
+  const keywordSignal = content.match(
+    /\b(Proceed with Conditions|Pause Pending Review|Reject|Conditional Go|No[- ]Go|GO|NO GO|WAIT|PIVOT|VALIDATE|REVIEW|HOLD)\b/i
+  )?.[1];
 
   return cleanMobileDashboardText(
     explicitSignal || keywordSignal || `${report.type} ready for review`,

@@ -257,8 +257,38 @@ export function createReportIntelligenceModel(context: ReportIntelligenceInput):
     benchmarkFit < 60 ? "Refine benchmark selection by industry, model, and geography." : "",
     validationReadiness < 60 ? "Run the highest-priority validation experiments before scaling." : "",
   ].filter(Boolean);
-  const overallQuality = qualityFromScore(totalScore);
-  const confidenceLevel = confidenceLevelFromScore(totalScore);
+  const rawOverallQuality = qualityFromScore(totalScore);
+  const rawConfidenceLevel = confidenceLevelFromScore(totalScore);
+
+  // CRITICAL FIX -- confidence must reflect available information and
+  // validation gaps, not just the weighted score. Business Plan reports
+  // specifically should never read "High Confidence" when none of the
+  // core financial figures (MRR/ARR/current customers/subscription
+  // price/investment amount) were ever confirmed by the founder --
+  // every number driving the decision is still a benchmark estimate at
+  // that point, regardless of how strong the rest of the analysis is.
+  // Gated to business_plan only (context.reportKind), so this never
+  // changes Market Analysis's confidence banding, which this same
+  // function also computes.
+  const businessPlanFinancialValidationFactCount =
+    context.reportKind === "business_plan"
+      ? [
+          context.userProvidedFacts.mrr,
+          context.userProvidedFacts.arr,
+          context.userProvidedFacts.customers,
+          context.userProvidedFacts.pricePerCustomer,
+          context.userProvidedFacts.investmentAmount,
+        ].filter((value) => value !== null).length
+      : null;
+  const financialValidationLimited = businessPlanFinancialValidationFactCount === 0;
+  const overallQuality: ReportQualityLevel =
+    financialValidationLimited && rawOverallQuality === "High Confidence"
+      ? "Moderate Confidence"
+      : rawOverallQuality;
+  const confidenceLevel: ReportQualityConfidenceLevel =
+    financialValidationLimited && rawConfidenceLevel === "High Confidence"
+      ? "Medium Confidence"
+      : rawConfidenceLevel;
 
   return {
     version: "report_quality_engine_v2",

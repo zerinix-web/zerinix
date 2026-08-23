@@ -695,19 +695,28 @@ export function getReportQualityBreakdown(
     return [];
   }
 
+  // CRITICAL FIX -- remove internal system language from user-facing
+  // Business Plan output. "Evidence Quality"/"Source Confidence" (and
+  // this label's own prior replacements, "Analysis Rigor"/"Data
+  // Reliability") all still read as an internal audit-tool's own
+  // scoring dimensions, not something a board-level report would label
+  // a metric card. Replaced with the natural executive equivalent of
+  // what each dimension actually measures: how complete the underlying
+  // data is, and how much confidence the plan as a whole supports given
+  // what has and hasn't been validated.
   const labels = isTurkish
     ? {
         totalScore: "Genel Kalite Skoru",
-        evidenceQuality: "Kanıt Kalitesi",
-        sourceConfidence: "Kaynak Güveni",
+        evidenceQuality: "Veri Bütünlüğü",
+        sourceConfidence: "Planlama Güveni",
         financialConsistency: "Finansal Tutarlılık",
         benchmarkFit: "Benchmark Uyumu",
         validationReadiness: "Doğrulama Hazırlığı",
       }
     : {
         totalScore: "Overall Quality Score",
-        evidenceQuality: "Evidence Quality",
-        sourceConfidence: "Source Confidence",
+        evidenceQuality: "Data Completeness",
+        sourceConfidence: "Planning Confidence",
         financialConsistency: "Financial Consistency",
         benchmarkFit: "Benchmark Fit",
         validationReadiness: "Validation Readiness",
@@ -838,13 +847,21 @@ function collectBullets(content: string, keywords: string[], fallback: string[])
     .slice(0, 3);
 }
 
+// CRITICAL FIX -- "Low Confidence" reads as a bare internal-scoring
+// verdict, not something a board-level report would say. Replaced with
+// executive language that names what the reader should actually do next
+// -- validate the report's key assumptions -- rather than a flat rating
+// with no action attached. "High"/"Moderate/Medium Confidence" are left
+// unchanged; they were not flagged as internal-sounding.
 function localizeReportQualityLevel(value: string, isTurkish: boolean) {
   if (!isTurkish) {
-    return value === "Moderate Confidence" ? "Medium Confidence" : value;
+    if (value === "Moderate Confidence") return "Medium Confidence";
+    if (value === "Low Confidence") return "Preliminary -- Key Assumptions Need Validation";
+    return value;
   }
 
   if (value === "High Confidence") return "Yüksek Güven";
-  if (value === "Low Confidence") return "Düşük Güven";
+  if (value === "Low Confidence") return "Ön Değerlendirme -- Temel Varsayımlar Doğrulanmalı";
 
   return "Orta Güven";
 }

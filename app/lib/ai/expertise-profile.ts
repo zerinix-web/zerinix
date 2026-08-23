@@ -86,12 +86,37 @@ const financeSignals =
 // domain.ts's acquisitionSignals: deliberately requires an unambiguous,
 // compound M&A phrase (never a bare generic word like "leverage" or
 // "valuation" alone, which are ordinary vocabulary in any finance/
-// business prompt). This is only the fallback path -- production always
-// supplies detectedDomain from classifyReportDomain first (see
-// createExpertiseProfileFallback below), so this keeps the fallback in
-// sync rather than being the primary defense.
-const acquisitionSignals =
-  /\b(?:acquisitions?|acquiring|acquire\s+(?:a\s+|the\s+)?(?:company|business|firm|startup|target)|corporate acquisition|acquisition target|target company|mergers?|m\s?&\s?a\b|m\s+and\s+a\b|due diligence|buy[\s-]?outs?|post[\s-]?merger|enterprise value|ev\s*\/\s*arr|purchase price|comparable transactions?|financing structure|debt financing|şirket satın alma|satın alma hedefi|birleşme|devralma|hedef şirket)\b/i;
+// business prompt).
+//
+// CRITICAL BUG FIX -- Business Plan prompts were still generating an
+// Acquisition Due Diligence report even after domain.ts's own
+// acquisitionSignals was hardened. Confirmed live: detectDomain below
+// checks this regex FIRST, unconditionally, before it ever looks at the
+// detectedDomain parameter classifyReportDomain already correctly
+// computed -- so this file's own copy of the pattern, not just
+// domain.ts's, has to be correct, or a stale "acquisition" domain still
+// gets baked into expertiseProfile.domain and spliced into the model's
+// own instructions (see formatExpertiseProfileForReportContext) even
+// when the correct business-plan code path is dispatched. This is NOT
+// "only the fallback path" in practice -- kept in exact lockstep with
+// domain.ts's acquisitionSignals, not just its intent: bare "financing
+// structure"/"debt financing" (ordinary startup-pitch capital-planning
+// vocabulary any pre-revenue venture uses) removed as standalone
+// triggers, and "acquire"/"buy"/"purchase a [company]" now tolerate
+// descriptive words between the article and the noun instead of
+// requiring the noun immediately after "a"/"the".
+const acquisitionCompanyNounPattern = "(?:[\\w-]+[,]?\\s+){0,6}(?:company|business|firm|startup|target)";
+const acquisitionSignals = new RegExp(
+  "\\b(?:acquisitions?|acquiring" +
+    `|acquire\\s+(?:a\\s+|the\\s+)?${acquisitionCompanyNounPattern}` +
+    `|buy(?:ing)?\\s+(?:a\\s+|the\\s+)?${acquisitionCompanyNounPattern}` +
+    `|purchas(?:e|ing)\\s+(?:a\\s+|the\\s+)?${acquisitionCompanyNounPattern}` +
+    "|merg(?:e|er|ing)\\s+with" +
+    "|corporate acquisition|acquisition target|target company|mergers?|m\\s?&\\s?a\\b|m\\s+and\\s+a\\b" +
+    "|due diligence|buy[\\s-]?outs?|post[\\s-]?merger|enterprise value|ev\\s*\\/\\s*arr|purchase price" +
+    "|comparable transactions?|şirket satın alma|satın alma hedefi|birleşme|devralma|hedef şirket)\\b",
+  "i"
+);
 
 const domainForbiddenTopics: Partial<
   Record<ExpertiseProfile["domain"], string[]>

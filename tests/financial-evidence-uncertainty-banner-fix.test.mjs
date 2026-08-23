@@ -79,7 +79,15 @@ for (const [name, source] of [
   ["Planner.tsx", plannerSource],
   ["page.tsx", pageSource],
 ]) {
-  test(`${name}: Unit Economics has a 'No verified financial data available' banner gated on hasVerifiedEvidence`, () => {
+  // NOTE: superseded by the "Business Plan final quality polish" ticket --
+  // the literal banner text "No verified financial data available." was
+  // itself flagged as internal-sounding language ("Verified") and
+  // replaced with "No founder-confirmed financial data available." The
+  // banner's presence/gating logic this test actually cares about is
+  // unchanged; only the wording assertion was updated. See
+  // tests/business-plan-final-quality-polish-fix.test.mjs for the full,
+  // current assertion.
+  test(`${name}: Unit Economics has a 'No founder-confirmed financial data available' banner gated on hasVerifiedEvidence`, () => {
     const fieldCheck = name === "Planner.tsx"
       ? 'field === "unitEconomics" || field === "financialAssumptions"'
       : 'normalizedTitle.includes("unit economics") || normalizedTitle.includes("financial assumptions")';
@@ -89,10 +97,10 @@ for (const [name, source] of [
 
     assert.match(block, /const hasVerifiedEvidence = flowMetrics\.some\(\(item\) => item\.(?:confidenceBadge|evidence) === "verified"\)/);
     assert.match(block, /\{!hasVerifiedEvidence \? \(/);
-    assert.match(block, /No verified financial data available\./);
+    assert.match(block, /No founder-confirmed financial data available\./);
   });
 
-  test(`${name}: Financial Dashboard has a 'No verified financial data available' banner gated on hasVerifiedEvidence`, () => {
+  test(`${name}: Financial Dashboard has a 'No founder-confirmed financial data available' banner gated on hasVerifiedEvidence`, () => {
     const fieldCheck = name === "Planner.tsx"
       ? 'field === "financialDashboard") {'
       : 'normalizedTitle.includes("financial dashboard")) {';
@@ -102,7 +110,7 @@ for (const [name, source] of [
 
     assert.match(block, /const hasVerifiedEvidence = dashboardMetrics\.some\(\(item\) => item\.(?:confidenceBadge|evidence) === "verified"\)/);
     assert.match(block, /\{!hasVerifiedEvidence \? \(/);
-    assert.match(block, /No verified financial data available\./);
+    assert.match(block, /No founder-confirmed financial data available\./);
   });
 
   test(`${name}: Scenario Analysis has a 'modeled, not measured' banner gated on hasVerifiedEvidence`, () => {

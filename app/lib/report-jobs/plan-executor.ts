@@ -1723,30 +1723,35 @@ function createSourcesAssumptionsFallback(
     "",
     reportText(
       language,
-      "Verified external citations were not returned in a complete structured form for this report. No source URLs or publisher metadata have been fabricated.",
-      "Bu rapor için doğrulanmış harici atıflar eksiksiz yapılandırılmış biçimde dönmedi. Kaynak URL'si veya yayıncı metadatası uydurulmadı."
+      "External citations were not returned in a complete structured form for this report. No source URLs or publisher metadata have been fabricated.",
+      "Bu rapor için harici atıflar eksiksiz yapılandırılmış biçimde dönmedi. Kaynak URL'si veya yayıncı metadatası uydurulmadı."
     ),
     "",
+    // CRITICAL FIX -- match the same "Founder Targets" / "AI Planning
+    // Scenarios" vocabulary used in buildCanonicalFinancialAssumptions,
+    // so this fallback reads consistently with the primary Financial
+    // Assumptions section rather than using its own internal-sounding
+    // labels ("User-provided facts", "AI assumptions").
     reportText(
       language,
-      "User-provided facts: The business context submitted by the user was treated as the planning input.",
-      "Kullanıcı tarafından sağlanan bilgiler: Kullanıcının sunduğu iş bağlamı planlama girdisi olarak ele alındı."
+      "Founder Targets: The business context submitted by the founder was treated as the planning input.",
+      "Kurucu Hedefleri: Kurucunun sunduğu iş bağlamı planlama girdisi olarak ele alındı."
     ),
     financialAssumptions
-      ? reportText(language, `AI assumptions: ${financialAssumptions}`, `AI varsayımları: ${financialAssumptions}`)
+      ? reportText(language, `AI Planning Scenarios: ${financialAssumptions}`, `AI Planlama Senaryoları: ${financialAssumptions}`)
       : reportText(
           language,
-          "AI assumptions: Financial estimates are model-derived and require validation with primary customer, pricing, and cost data.",
-          "AI varsayımları: Finansal tahminler modelden türetilmiştir ve birincil müşteri, fiyatlandırma ve maliyet verileriyle doğrulama gerektirir."
+          "AI Planning Scenarios: Financial estimates are model-derived and require validation with primary customer, pricing, and cost data.",
+          "AI Planlama Senaryoları: Finansal tahminler modelden türetilmiştir ve birincil müşteri, fiyatlandırma ve maliyet verileriyle doğrulama gerektirir."
         ),
     tamSamSom
-      ? reportText(language, `Market-derived estimates: ${tamSamSom}`, `Pazardan türetilen tahminler: ${tamSamSom}`)
+      ? reportText(language, `AI Planning Scenarios: ${tamSamSom}`, `AI Planlama Senaryoları: ${tamSamSom}`)
       : marketOpportunity
-        ? reportText(language, `Market-derived estimates: ${marketOpportunity}`, `Pazardan türetilen tahminler: ${marketOpportunity}`)
+        ? reportText(language, `AI Planning Scenarios: ${marketOpportunity}`, `AI Planlama Senaryoları: ${marketOpportunity}`)
         : reportText(
             language,
-            "Market-derived estimates: Market sizing and demand signals should be verified with current third-party data before investment decisions.",
-            "Pazardan türetilen tahminler: Pazar büyüklüğü ve talep sinyalleri yatırım kararlarından önce güncel üçüncü taraf verilerle doğrulanmalıdır."
+            "AI Planning Scenarios: Market sizing and demand signals should be verified with current third-party data before investment decisions.",
+            "AI Planlama Senaryoları: Pazar büyüklüğü ve talep sinyalleri yatırım kararlarından önce güncel üçüncü taraf verilerle doğrulanmalıdır."
           ),
   ]
     .filter(Boolean)
@@ -2467,7 +2472,7 @@ function createPlanFieldFallback(
     competitorLandscape: `Direct competitors, substitutes, and status-quo alternatives within ${industryLabel} should be mapped against this business's specific wedge. The detected ${businessModelLabel} model suggests differentiation is more likely to come from execution and distribution than from a generic feature gap.`,
     businessModel: `The detected pricing approach (${pricingModelLabel}) should map directly to the value realized by ${targetCustomerLabel}, with revenue tied to actual usage or outcomes rather than a flat assumption. Gross margin and payback need validation against this specific model before it is scaled.`,
     tamSamSom: `TAM / SAM / SOM: Market sizing requires verified category boundaries, reachable customer segments, and a defensible near-term obtainable share. Treat any missing sizing input as a validation requirement before investment.`,
-    swotAnalysis: `Strengths:\n- Focused business context and founder-controlled validation path.\nWeaknesses:\n- Evidence quality is incomplete until customer and pricing proof is collected.\nOpportunities:\n- Narrow beachhead execution can reveal a repeatable wedge.\nThreats:\n- Competitive response, CAC inflation, or weak retention can reduce investability.`,
+    swotAnalysis: `Strengths:\n- Focused business context and founder-controlled validation path.\nWeaknesses:\n- Data completeness is limited until customer and pricing proof is collected.\nOpportunities:\n- Narrow beachhead execution can reveal a repeatable wedge.\nThreats:\n- Competitive response, CAC inflation, or weak retention can reduce investability.`,
     portersFiveForces: `Within ${industryLabel}, the forces most likely to shape this business are buyer power (given the alternatives available to ${targetCustomerLabel}) and the ease of new entrants given the detected ${businessModelLabel} model. The key question is whether a defensible wedge can be built before competitive or switching pressure rises.`,
     pricingStrategy: `Pricing should anchor to the value realized by ${targetCustomerLabel} under a ${pricingModelLabel} approach, not to cost-plus assumptions. Entry packaging and expansion triggers should be tested directly with this segment before the model is locked in.`,
     goToMarketPlan: `The most efficient path to first revenue is likely a single channel reaching ${targetCustomerLabel} directly, validated with a concrete proof asset before any spend is scaled. Conditions in ${geographyLabel} should inform channel choice rather than a generic multi-channel plan.`,
@@ -2487,8 +2492,8 @@ function createPlanFieldFallback(
       ? `30 Days (${shortBusinessLabel}): Instrument retention, net revenue retention, and CAC payback on the existing paying base.\n90 Days: Formalize the upsell/cross-sell motion and prove expansion revenue.\n180 Days: Confirm sales efficiency holds while scaling acquisition spend.\n12 Months: Expand into the next-priority segment or geography from verified operating evidence.`
       : `30 Days (${shortBusinessLabel}): Validate pain, ICP, and pricing signal.\n90 Days: Secure repeatable early acquisition and delivery proof.\n180 Days: Confirm retention, payback, and operating cadence.\n12 Months: Scale only if decision thresholds are met.`,
     financialAssumptions: `Key assumptions: Revenue, gross margin, CAC, LTV, payback, burn, runway, EBITDA, break-even timing, and investment needed must come from one assumption set. Missing values require validation with primary data.`,
-    founderScore: `Founder Readiness Score: Use the decision engine to evaluate market opportunity, financial health, execution difficulty, competitive pressure, capital efficiency, technology leverage, and founder readiness. Missing evidence lowers confidence.`,
-    sourcesAssumptions: `Sources and Assumptions: Verified external citations were not returned in a complete structured form. No source URLs or publisher metadata have been fabricated. Planning inputs require validation before investment decisions.`,
+    founderScore: `Founder Readiness Score: Use the decision engine to evaluate market opportunity, financial health, execution difficulty, competitive pressure, capital efficiency, technology leverage, and founder readiness. Missing information lowers confidence.`,
+    sourcesAssumptions: `Sources and Assumptions: External citations were not returned in a complete structured form. No source URLs or publisher metadata have been fabricated. Planning inputs require validation before investment decisions.`,
   };
 
   return fallbackByField[field] || reportText(language, `${label}: This section requires validation.`, `${label}: Bu bölüm doğrulama gerektirir.`);
@@ -3720,15 +3725,89 @@ function buildCanonicalFinancialAssumptions(context: AiFinancialModelContext, la
   const consolidatedAssumptions = consolidateFinancialAssumptions(Object.values(context.metrics));
   const keyAssumptionsList = formatKeyFinancialAssumptionsList(consolidatedAssumptions, language);
 
+  // CRITICAL FIX -- preserve user-provided facts, and keep them clearly
+  // separated from Planning Assumptions. Confirmed live: "User-provided
+  // facts:" only ever listed the raw business-idea text -- a stated MRR/
+  // ARR/subscription price/investment amount/customer count/Year-1
+  // target/employee count all silently disappeared from this section even
+  // when correctly extracted (or, in the customers/investment/price
+  // cases, were never extracted at all until this fix -- see
+  // financial-model.ts's extractUserStatedFinancials). Each fact below is
+  // listed only when the founder actually stated it, reading the exact
+  // same values/labels the underlying metric already computed from --
+  // never a second, independently-recomputed number.
+  const userProvidedFactLines: string[] = [];
+  const isUserProvidedMetric = (metric: { formula: string }) =>
+    metric.formula === "User-provided (stated directly in the request)";
+  if (isUserProvidedMetric(context.metrics.mrr)) {
+    userProvidedFactLines.push(
+      reportText(language, `- MRR: ${context.metrics.mrr.displayValue}`, `- Aylık Tekrarlayan Gelir: ${context.metrics.mrr.displayValue}`)
+    );
+  }
+  if (isUserProvidedMetric(context.metrics.arr)) {
+    userProvidedFactLines.push(
+      reportText(language, `- ARR: ${context.metrics.arr.displayValue}`, `- Yıllık Tekrarlayan Gelir: ${context.metrics.arr.displayValue}`)
+    );
+  }
+  if (context.userProvidedFacts.customers !== null) {
+    userProvidedFactLines.push(
+      reportText(
+        language,
+        `- Current customers: ${context.userProvidedFacts.customers.toLocaleString("en-US")}`,
+        `- Mevcut müşteri sayısı: ${context.userProvidedFacts.customers.toLocaleString("en-US")}`
+      )
+    );
+  }
+  if (context.userProvidedFacts.year1CustomerTarget !== null) {
+    userProvidedFactLines.push(
+      reportText(
+        language,
+        `- Year 1 customer target: ${context.userProvidedFacts.year1CustomerTarget.toLocaleString("en-US")} (a stated goal, not a current customer count)`,
+        `- Yıl 1 müşteri hedefi: ${context.userProvidedFacts.year1CustomerTarget.toLocaleString("en-US")} (belirtilen bir hedeftir, mevcut müşteri sayısı değildir)`
+      )
+    );
+  }
+  if (isUserProvidedMetric(context.metrics.arpa)) {
+    userProvidedFactLines.push(
+      reportText(language, `- Subscription price: ${context.metrics.arpa.displayValue}`, `- Abonelik fiyatı: ${context.metrics.arpa.displayValue}`)
+    );
+  }
+  if (isUserProvidedMetric(context.metrics.investmentNeeded)) {
+    userProvidedFactLines.push(
+      reportText(
+        language,
+        `- Initial investment: ${context.metrics.investmentNeeded.displayValue}`,
+        `- Başlangıç yatırımı: ${context.metrics.investmentNeeded.displayValue}`
+      )
+    );
+  }
+  if (context.userProvidedFacts.employees !== null) {
+    userProvidedFactLines.push(
+      reportText(
+        language,
+        `- Team size: ${context.userProvidedFacts.employees.toLocaleString("en-US")} employees`,
+        `- Ekip büyüklüğü: ${context.userProvidedFacts.employees.toLocaleString("en-US")} çalışan`
+      )
+    );
+  }
+
   return [
     ...(keyAssumptionsList ? [keyAssumptionsList, ""] : []),
     formatFinancialConsistencyReport(context, language),
-    reportLabel(language, "User-provided facts:", "Kullanıcı tarafından sağlanan bilgiler:"),
+    // CRITICAL FIX -- two clearly separated groupings, not three
+    // ambiguous ones. "Founder Targets" is exactly and only what the
+    // founder stated; "AI Planning Scenarios" is everything the model
+    // derived or assumed on top of that (benchmark basis, pricing
+    // model, business model, margins, burn, runway, etc.) -- a reader
+    // should never have to guess which bucket a number in the middle
+    // ("Market-derived estimates") belongs to, since it's modeled
+    // either way.
+    reportLabel(language, "Founder Targets:", "Kurucu Hedefleri:"),
     reportText(language, `- Business context: ${context.normalizedBusinessIdea}`, `- İş bağlamı: ${context.normalizedBusinessIdea}`),
-    reportLabel(language, "Market-derived estimates:", "Pazardan türetilen tahminler:"),
+    ...userProvidedFactLines,
+    reportLabel(language, "AI Planning Scenarios:", "AI Planlama Senaryoları:"),
     reportText(language, `- Benchmark basis: ${context.benchmark.basis}`, `- Referans temeli: ${context.benchmark.basis}`),
     reportText(language, "- TAM/SAM/SOM values are owned by the dedicated market sizing section.", "- TAM/SAM/SOM değerleri özel pazar büyüklüğü bölümünün tek kaynağıdır."),
-    reportLabel(language, "AI assumptions:", "AI varsayımları:"),
     reportText(language, `- Pricing model: ${context.inputs.pricingModel}`, `- Fiyatlandırma modeli: ${context.inputs.pricingModel}`),
     reportText(language, `- Business model: ${context.inputs.businessModel}`, `- İş modeli: ${context.inputs.businessModel}`),
     reportText(language, `- Target customer: ${context.inputs.targetCustomer}`, `- Hedef müşteri: ${context.inputs.targetCustomer}`),
@@ -3740,7 +3819,12 @@ function buildCanonicalFinancialAssumptions(context: AiFinancialModelContext, la
     `${reportLabel(language, "- Runway", "- Finansal Pist")}: ${context.metrics.runway.displayValue}`,
     `- EBITDA: ${context.metrics.ebitda.displayValue}`,
     `${reportLabel(language, "- Break-even", "- Başabaş")}: ${context.metrics.breakEvenMonth.displayValue}`,
-    `${reportLabel(language, "- Investment Needed", "- Gerekli Yatırım")}: ${context.metrics.investmentNeeded.displayValue}`,
+    // Never duplicated here when it was user-provided -- it already
+    // appears once, correctly, under "Founder Targets:" above; an AI
+    // planning scenario is not the place for a real, stated figure.
+    ...(isUserProvidedMetric(context.metrics.investmentNeeded)
+      ? []
+      : [`${reportLabel(language, "- Investment Needed", "- Gerekli Yatırım")}: ${context.metrics.investmentNeeded.displayValue}`]),
   ].join("\n");
 }
 
