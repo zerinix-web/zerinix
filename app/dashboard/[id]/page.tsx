@@ -2046,17 +2046,38 @@ function ExecutiveSnapshotPanel({
   section,
   investmentScore,
   reportQuality,
+  isMarketIntelligence = false,
 }: {
   section: { field?: string; title: string; content: string };
   investmentScore?: ReportInvestmentScore;
   reportQuality?: ReportQualityScore;
+  isMarketIntelligence?: boolean;
 }) {
   if (!isExecutivePresentationSection(section)) {
     return null;
   }
 
   const snapshot = buildExecutiveSnapshot(section.content, investmentScore, reportQuality);
-  const labels = getReportPresentationLabels(section.content);
+  // CRITICAL FIX -- remove internal system language from user-facing
+  // Market Intelligence output. "Confidence Radar" reads as an internal
+  // diagnostic instrument name, and its dimensions (Market/Financial/
+  // Execution readiness) are drawn from investmentScore.decisionEngine
+  // -- the generic founder-viability score Market Intelligence does not
+  // evaluate, so the label itself is doubly misleading for this report
+  // kind. Only the label text is overridden here for Market
+  // Intelligence; getReportPresentationLabels itself (shared with
+  // Business Plan and Acquisition) and the underlying snapshot
+  // computation are untouched.
+  const isMarketIntelligenceTurkish = detectPdfPresentationLocale(section.content) === "tr";
+  const labels = {
+    ...getReportPresentationLabels(section.content),
+    ...(isMarketIntelligence
+      ? {
+          confidence: isMarketIntelligenceTurkish ? "Planlama Güveni" : "Planning Confidence",
+          confidenceRadar: isMarketIntelligenceTurkish ? "Karar Faktörleri" : "Decision Factors",
+        }
+      : {}),
+  };
   const reportQualityBreakdown = getReportQualityBreakdown(
     reportQuality,
     labels.reportQuality === "Rapor Kalitesi"
@@ -2689,8 +2710,20 @@ function parseCitations(rawContent: string): CitationData[] {
   return Array.from(unique.values());
 }
 
-function CitationCard({ citation }: { citation: CitationData }) {
+// CRITICAL FIX -- remove internal system language from user-facing
+// Market Intelligence output. A raw "Verified source"/"Not verified"
+// classifier readout on every source card reads as an internal
+// research-database entry, not a premium executive report's own
+// citation list. Only Market Intelligence's source list is reworded
+// (around "market validation status," per the requesting ticket's own
+// vocabulary) -- Business Plan and Acquisition, which also render this
+// component, keep the existing wording unchanged.
+function CitationCard({ citation, market = false }: { citation: CitationData; market?: boolean }) {
   const domain = getCitationDomain(citation.url, citation.organization);
+  const sourceTypeLabel =
+    market && (citation.sourceType || "Verified source") === "Verified source"
+      ? "Validated Source"
+      : citation.sourceType;
 
   return (
     <div className="rounded-2xl border border-white/10 bg-black/25 px-4 py-4 shadow-lg shadow-black/15 ring-1 ring-white/[0.02] transition duration-300 hover:border-teal-200/20 hover:bg-white/[0.035]">
@@ -2714,14 +2747,14 @@ function CitationCard({ citation }: { citation: CitationData }) {
         ) : null}
         {citation.confidence ? (
           <p>
-            <span className="text-zinc-500">Confidence</span>
+            <span className="text-zinc-500">{market ? "Validation status" : "Confidence"}</span>
             <span className="ml-2 text-zinc-200">{citation.confidence}</span>
           </p>
         ) : null}
-        {citation.sourceType ? (
+        {sourceTypeLabel ? (
           <p>
             <span className="text-zinc-500">Type</span>
-            <span className="ml-2 text-zinc-200">{citation.sourceType}</span>
+            <span className="ml-2 text-zinc-200">{sourceTypeLabel}</span>
           </p>
         ) : null}
       </div>
@@ -2736,7 +2769,7 @@ function CitationCard({ citation }: { citation: CitationData }) {
         </a>
       ) : (
         <p className="mt-3 rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2 text-xs text-zinc-500">
-          Not verified
+          {market ? "Not yet validated" : "Not verified"}
         </p>
       )}
     </div>
@@ -2746,9 +2779,11 @@ function CitationCard({ citation }: { citation: CitationData }) {
 function CitationList({
   content,
   mobile = false,
+  market = false,
 }: {
   content: string;
   mobile?: boolean;
+  market?: boolean;
 }) {
   const citations = parseCitations(content);
 
@@ -2762,6 +2797,7 @@ function CitationList({
         <CitationCard
           key={`${getCitationDomain(citation.url, citation.organization)}-${citation.sourceTitle}-${citation.publicationYear || ""}-${citation.url || ""}-${index}`}
           citation={citation}
+          market={market}
         />
       ))}
     </div>
@@ -3286,6 +3322,7 @@ export default async function ReportDetailPage({
                         <CitationList
                           key={`mobile-source-${getReportSectionKey(section)}`}
                           content={section.content}
+                          market={report.type === "Market Analysis"}
                           mobile
                         />
                       ))}
@@ -3684,6 +3721,7 @@ export default async function ReportDetailPage({
                                 section={section}
                                 investmentScore={report.investmentScore}
                                 reportQuality={report.metadata?.reportQuality}
+                                isMarketIntelligence={report.type === "Market Analysis"}
                               />
                               <ExecutiveDecisionIntelligencePanel metadata={report.metadata} />
                               {hasReportSectionVisual(section.title) &&
@@ -3752,7 +3790,10 @@ export default async function ReportDetailPage({
                                 key={getReportSectionKey(section)}
                                 className="border-t border-white/10 pt-4 first:border-t-0 first:pt-0"
                               >
-                                <CitationList content={section.content} />
+                                <CitationList
+                                  content={section.content}
+                                  market={report.type === "Market Analysis"}
+                                />
                               </div>
                             ))}
                       </div>

@@ -4325,17 +4325,38 @@ function ExecutiveSnapshotPanel({
   section,
   investmentScore,
   reportQuality,
+  isMarketIntelligence = false,
 }: {
   section: ReportSection;
   investmentScore?: ReportInvestmentScore;
   reportQuality?: ReportQualityScore;
+  isMarketIntelligence?: boolean;
 }) {
   if (!isExecutivePresentationSection(section)) {
     return null;
   }
 
   const snapshot = buildExecutiveSnapshot(section.content, investmentScore, reportQuality);
-  const labels = getReportPresentationLabels(section.content);
+  // CRITICAL FIX -- remove internal system language from user-facing
+  // Market Intelligence output. "Confidence Radar" reads as an internal
+  // diagnostic instrument name, and its dimensions (Market/Financial/
+  // Execution readiness) are drawn from investmentScore.decisionEngine
+  // -- the generic founder-viability score Market Intelligence does not
+  // evaluate, so the label itself is doubly misleading for this report
+  // kind. Only the label text is overridden here for Market
+  // Intelligence; getReportPresentationLabels itself (shared with
+  // Business Plan and Acquisition) and the underlying snapshot
+  // computation are untouched.
+  const isMarketIntelligenceTurkish = detectPdfPresentationLocale(section.content) === "tr";
+  const labels = {
+    ...getReportPresentationLabels(section.content),
+    ...(isMarketIntelligence
+      ? {
+          confidence: isMarketIntelligenceTurkish ? "Planlama Güveni" : "Planning Confidence",
+          confidenceRadar: isMarketIntelligenceTurkish ? "Karar Faktörleri" : "Decision Factors",
+        }
+      : {}),
+  };
   const reportQualityBreakdown = getReportQualityBreakdown(
     reportQuality,
     labels.reportQuality === "Rapor Kalitesi"
@@ -4967,6 +4988,7 @@ const ReportSectionCard = memo(
                   section={section}
                   investmentScore={investmentScore}
                   reportQuality={reportQuality}
+                  isMarketIntelligence={isMarketIntelligence}
                 />
               ) : null}
               {!isDomainDecisionReport &&
@@ -6607,7 +6629,7 @@ const ReportPanel = memo(function ReportPanel({
 
       {sourceSections.length > 0 ? (
         <div className="border-t border-white/10 p-4 sm:p-5">
-          <SourcesCard sections={sourceSections} legal={isLegalReport} />
+          <SourcesCard sections={sourceSections} legal={isLegalReport} market={isMarketIntelligence} />
         </div>
       ) : null}
     </section>

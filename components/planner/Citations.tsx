@@ -438,13 +438,32 @@ export function parseCitations(content: string): CitationData[] {
   return Array.from(unique.values());
 }
 
-export function Citation({ citation }: { citation?: CitationData }) {
+// CRITICAL FIX -- remove internal system language from user-facing
+// Market Intelligence output. A bare "Verified"/"Verified source" badge
+// on every source card reads as an internal research-database entry,
+// not something a premium executive report would label its own
+// citations. Only Market Intelligence's own source list is reworded
+// (around "market validation status," per the requesting ticket's own
+// vocabulary) -- Business Plan and Acquisition, which also render this
+// component, keep the existing wording unchanged.
+export function Citation({ citation, market = false }: { citation?: CitationData; market?: boolean }) {
   if (!citation) {
     return null;
   }
 
   const sourceName = getCitationSourceName(citation);
-  const trustLabel = citation.sourceType === "Verified source" && citation.url ? "Verified" : "Reference";
+  const isVerifiedSource = citation.sourceType === "Verified source" && citation.url;
+  const trustLabel = market
+    ? isVerifiedSource
+      ? "Validated"
+      : "Reference"
+    : isVerifiedSource
+      ? "Verified"
+      : "Reference";
+  const sourceTypeLabel =
+    market && (citation.sourceType || "Verified source") === "Verified source"
+      ? "Validated Source"
+      : citation.sourceType || "Verified source";
 
   return (
     <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
@@ -454,7 +473,7 @@ export function Citation({ citation }: { citation?: CitationData }) {
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <span className="rounded-full border border-teal-200/15 bg-teal-200/10 px-2.5 py-1 text-[11px] font-semibold text-teal-100">
-            {citation.sourceType || "Verified source"}
+            {sourceTypeLabel}
           </span>
           <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-zinc-300">
             {trustLabel}
@@ -478,9 +497,11 @@ export function Citation({ citation }: { citation?: CitationData }) {
 export function SourcesCard({
   sections,
   legal = false,
+  market = false,
 }: {
   sections: { content: string }[];
   legal?: boolean;
+  market?: boolean;
 }) {
   const mergedContent = sections
     .map((section) => section.content.trim())
@@ -512,15 +533,20 @@ export function SourcesCard({
                   <Citation
                     key={`${getCitationDomain(citation.url, citation.organization)}-${citation.sourceTitle}-${citation.publicationYear || ""}-${index}`}
                     citation={citation}
+                    market={market}
                   />
                 ))}
               </div>
             ) : null}
             {!legal ? (
               <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                <p className="text-sm font-semibold text-white">Methodology &amp; Assumptions</p>
+                <p className="text-sm font-semibold text-white">
+                  {market ? "Key Assumptions" : "Methodology & Assumptions"}
+                </p>
                 <p className="mt-2 text-sm leading-6 text-zinc-400">
-                  Market sizing, financial projections and KPI estimates are based on available market signals, benchmark data and planning assumptions.
+                  {market
+                    ? "Market sizing is based on available market signals and benchmark data; treat figures without a direct citation above as planning assumptions."
+                    : "Market sizing, financial projections and KPI estimates are based on available market signals, benchmark data and planning assumptions."}
                 </p>
               </div>
             ) : null}
