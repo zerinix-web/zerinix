@@ -185,9 +185,17 @@ function getDecisionSignal(report: DashboardReport | undefined) {
   // kind on this list. Falls back to the pre-existing text-extraction
   // heuristic only when no report kind's recognizable decision
   // vocabulary is present at all.
+  // CRITICAL FIX -- Market Intelligence must never fall back to
+  // investmentScore.recommendation, a generic business-viability GO/
+  // WAIT/PASS score computed by investment-score.ts that Market
+  // Intelligence does not evaluate (it has its own, more conservative
+  // ENTER/MONITOR/AVOID market-entry verdict instead). Only the
+  // report's own deterministic decision text is trusted for Market
+  // Intelligence, so a monitor-stage or avoid verdict is never
+  // overridden by an unrelated founder-viability score.
   const resolved = resolveCanonicalDecisionFromReportText(
     content,
-    report.investmentScore?.recommendation
+    report.type === "Market Analysis" ? undefined : report.investmentScore?.recommendation
   );
   if (resolved) {
     return getCanonicalDecisionLabel(resolved.decision, resolved.language);

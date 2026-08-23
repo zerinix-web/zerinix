@@ -220,8 +220,19 @@ test("a reject decision renders the identical label whether it came from Busines
 
 // --- 5. Integration: the three live-UI surfaces are wired to the module ---
 
+// NOTE: superseded by the "Market Intelligence executive language
+// polish" ticket -- passing report.investmentScore?.recommendation
+// unconditionally was itself flagged as a bug (Market Intelligence has
+// no business-viability score of its own; that field is investment-
+// score.ts's generic founder-viability GO/WAIT/PASS, wrong for MI) and
+// is now gated to skip Market Intelligence reports. See
+// tests/market-intelligence-executive-language-polish-fix.test.mjs for
+// the full, current assertion.
 test("app/dashboard/page.tsx's reports-list decision signal resolves through the centralized vocabulary before any legacy fallback", () => {
-  assert.match(dashboardListSource, /resolveCanonicalDecisionFromReportText\(\s*content,\s*report\.investmentScore\?\.recommendation\s*\)/);
+  assert.match(
+    dashboardListSource,
+    /resolveCanonicalDecisionFromReportText\(\s*content,\s*report\.type === "Market Analysis" \? undefined : report\.investmentScore\?\.recommendation\s*\)/
+  );
   assert.match(dashboardListSource, /getCanonicalDecisionLabel\(resolved\.decision, resolved\.language\)/);
 });
 
@@ -233,8 +244,14 @@ test("app/dashboard/[id]/page.tsx's Decision KPI card and Decision Signal card b
   assert.doesNotMatch(dashboardReportSource, /extractExecutiveDecisionFromText/);
 });
 
+// NOTE: superseded by the "Market Intelligence executive language
+// polish" ticket -- see the equivalent note above for
+// app/dashboard/page.tsx; the same gating was applied here.
 test("components/Planner.tsx's live Decision KPI card resolves through the centralized vocabulary (its two other extractExecutiveDecisionFromText call sites -- the decision segmented control and the PDF drawing code -- are untouched)", () => {
-  assert.match(plannerSource, /resolveCanonicalDecisionFromReportText\(\s*section\.content,\s*investmentScore\?\.recommendation\s*\)/);
+  assert.match(
+    plannerSource,
+    /resolveCanonicalDecisionFromReportText\(\s*section\.content,\s*isMarketIntelligence \? undefined : investmentScore\?\.recommendation\s*\)/
+  );
   assert.match(plannerSource, /getCanonicalDecisionLabel\(resolvedDecision\.decision, evidenceLocale\)/);
   // Untouched sites: still present, still using the original extractor.
   const remainingCallSites = plannerSource.match(/extractExecutiveDecisionFromText\(/g) || [];

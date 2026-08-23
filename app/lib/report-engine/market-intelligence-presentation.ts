@@ -222,13 +222,20 @@ function biggestOpportunity(sections: MarketSections, language: ResponseLanguage
   );
 }
 
+// CRITICAL FIX -- remove internal system language from user-facing
+// Market Intelligence output. "Verified market-size..." read as an
+// internal audit-tool qualifier rather than something an executive
+// report would say about its own data. Reworded around "data
+// availability" -- the natural executive framing of the same fact
+// (some inputs are not yet confirmed) -- without changing which
+// condition triggers this fallback or what it is a fallback for.
 function biggestRisk(sections: MarketSections, language: ResponseLanguage) {
   return (
     firstSubstantiveLine(sections.threats || "") ||
     marketText(
       language,
-      "Verified market-size and competitive endpoints remain incomplete.",
-      "Doğrulanmış pazar büyüklüğü ve rekabet uç noktaları henüz tam değil.",
+      "Data availability for market size and competitive positioning remains incomplete.",
+      "Pazar büyüklüğü ve rekabet konumlandırmasına ilişkin veri erişilebilirliği henüz tam değil.",
       "Verifizierte Marktgrößen- und Wettbewerbsdaten sind weiterhin unvollständig.",
       "Les paramètres vérifiés de taille de marché et de concurrence restent incomplets.",
       "Los parámetros verificados de tamaño de mercado y competencia siguen siendo incompletos."
@@ -586,11 +593,19 @@ function buildWhatWouldChangeThisDecision(
 ): string {
   const risk = primaryRisk.trim().replace(/[.!?]+$/, "");
 
+  // CRITICAL FIX -- remove internal system language from user-facing
+  // Market Intelligence output. A leading "Verified, independent
+  // evidence..." reads as an internal audit-tool qualifier; reworded
+  // around "validation status" -- the same underlying requirement
+  // (independently confirmed, not self-reported) in natural executive
+  // language. Only English and Turkish (this app's paired primary
+  // languages) are reworded; German/French/Spanish keep their existing
+  // wording unchanged.
   if (code === "GO") {
     return marketText(
       language,
-      `A material worsening of "${risk}", or a new, independently verified competitive threat, would be reason to revisit this decision toward a conditional stance.`,
-      `"${risk}" durumunun önemli ölçüde kötüleşmesi veya bağımsız olarak doğrulanmış yeni bir rekabet tehdidi, bu kararın koşullu bir duruşa çekilmesini gerektirir.`,
+      `A material worsening of "${risk}", or a newly confirmed competitive threat from an independent source, would be reason to revisit this decision toward a conditional stance.`,
+      `"${risk}" durumunun önemli ölçüde kötüleşmesi veya bağımsız bir kaynaktan doğrulanan yeni bir rekabet tehdidi, bu kararın koşullu bir duruşa çekilmesini gerektirir.`,
       `Eine wesentliche Verschlechterung von „${risk}" oder eine neue, unabhängig verifizierte Wettbewerbsbedrohung wäre Grund, diese Entscheidung in Richtung einer bedingten Haltung zu überdenken.`,
       `Une aggravation significative de « ${risk} », ou une nouvelle menace concurrentielle vérifiée de manière indépendante, justifierait de revoir cette décision vers une position conditionnelle.`,
       `Un deterioro importante de "${risk}", o una nueva amenaza competitiva verificada de forma independiente, justificaría revisar esta decisión hacia una postura condicional.`
@@ -600,8 +615,8 @@ function buildWhatWouldChangeThisDecision(
   if (code === "CONDITIONAL_GO") {
     return marketText(
       language,
-      `Verified, independent evidence that resolves "${risk}" would move this to a full Go; further deterioration of the same evidence would move it to No-Go.`,
-      `"${risk}" sorununu çözen doğrulanmış, bağımsız kanıtlar bu kararı tam bir EVET'e taşır; aynı kanıtın daha da kötüleşmesi ise kararı HAYIR'a taşır.`,
+      `A change in validation status for "${risk}" -- independent evidence that resolves it -- would move this to a full Go; further deterioration of the same evidence would move it to No-Go.`,
+      `"${risk}" için doğrulama durumundaki bir değişiklik -- yani sorunu çözen bağımsız kanıtlar -- bu kararı tam bir EVET'e taşır; aynı kanıtın daha da kötüleşmesi ise kararı HAYIR'a taşır.`,
       `Verifizierte, unabhängige Belege, die „${risk}" auflösen, würden dies zu einem vollständigen Go machen; eine weitere Verschlechterung derselben Belege würde es zu einem No-Go machen.`,
       `Des preuves indépendantes vérifiées résolvant « ${risk} » feraient passer cette décision à un Go complet ; une nouvelle détérioration de ces mêmes preuves la ferait passer à No-Go.`,
       `Evidencia independiente y verificada que resuelva "${risk}" convertiría esto en un Go completo; un mayor deterioro de esa misma evidencia lo convertiría en No-Go.`
@@ -610,8 +625,8 @@ function buildWhatWouldChangeThisDecision(
 
   return marketText(
     language,
-    `Verified, independent evidence that resolves "${risk}" -- such as a credible market-size source or independently confirmed competitor data -- would change this decision.`,
-    `"${risk}" sorununu çözen doğrulanmış, bağımsız kanıtlar -- örneğin güvenilir bir pazar büyüklüğü kaynağı veya bağımsız olarak doğrulanmış rakip verisi -- bu kararı değiştirir.`,
+    `A change in validation status for "${risk}" -- such as a credible market-size source or independently confirmed competitor data -- would change this decision.`,
+    `"${risk}" için doğrulama durumundaki bir değişiklik -- örneğin güvenilir bir pazar büyüklüğü kaynağı veya bağımsız olarak doğrulanmış rakip verisi -- bu kararı değiştirir.`,
     `Verifizierte, unabhängige Belege, die „${risk}" auflösen -- etwa eine glaubwürdige Marktgrößenquelle oder unabhängig bestätigte Wettbewerberdaten -- würden diese Entscheidung ändern.`,
     `Des preuves indépendantes vérifiées résolvant « ${risk} » -- telles qu'une source fiable de taille de marché ou des données concurrentielles confirmées de manière indépendante -- changeraient cette décision.`,
     `Evidencia independiente y verificada que resuelva "${risk}" -- como una fuente creíble de tamaño de mercado o datos de competidores confirmados de forma independiente -- cambiaría esta decisión.`
@@ -853,13 +868,20 @@ function identifyMarketInformationGaps(
   // Enter. Only fires when the per-dimension checks above found nothing
   // AND the decision isn't a clean GO, so a genuine high-confidence GO
   // still correctly reports zero gaps.
+  // CRITICAL FIX -- remove internal system language from user-facing
+  // Market Intelligence output. "Blended confidence score falls
+  // short..." read as a raw internal scoring readout rather than an
+  // executive explanation; reworded around "planning confidence" --
+  // the same underlying fact (the read is provisional pending more
+  // evidence) in natural business language. Only English and Turkish
+  // are reworded; German/French/Spanish keep their existing wording.
   if (gaps.length === 0 && decisionCode !== "GO") {
     gaps.push({
       weight: 0,
       text: marketText(
         language,
-        "No single evidence dimension is critically weak, but the blended confidence score falls short of a full Enter decision -- the shortfall is in overall evidence strength rather than one specific missing input. Treat this as a monitor-stage read pending stronger evidence across the board.",
-        "Tek başına kritik derecede zayıf bir kanıt boyutu yok, ancak karma güven puanı tam bir Gir kararı için yeterli değil; eksiklik tek bir belirli girdide değil, genel kanıt gücündedir. Bunu, genel olarak daha güçlü kanıt beklenen bir izleme aşaması değerlendirmesi olarak ele alın.",
+        "No single evidence dimension is critically weak, but planning confidence for this market falls short of a full Enter decision -- the shortfall is in overall evidence strength rather than one specific missing input. Treat this as an early-stage read pending stronger evidence across the board.",
+        "Tek başına kritik derecede zayıf bir kanıt boyutu yok, ancak bu pazar için planlama güveni tam bir Gir kararı için yeterli değil; eksiklik tek bir belirli girdide değil, genel kanıt gücündedir. Bunu, genel olarak daha güçlü kanıt beklenen erken aşama bir değerlendirme olarak ele alın.",
         "Keine einzelne Evidenzdimension ist kritisch schwach, aber der gemischte Konfidenzwert reicht nicht für eine vollständige Enter-Entscheidung aus -- das Defizit liegt in der Gesamtevidenzstärke, nicht in einem einzelnen fehlenden Input. Betrachten Sie dies als Einschätzung auf Beobachtungsstufe, bis insgesamt stärkere Evidenz vorliegt.",
         "Aucune dimension de preuve n'est individuellement critique, mais le score de confiance combiné n'atteint pas le seuil d'une décision Enter complète -- le déficit porte sur la solidité globale des preuves, pas sur un input manquant précis. Considérez ceci comme une lecture de stade de surveillance en attendant des preuves globalement plus solides.",
         "Ninguna dimensión de evidencia es críticamente débil por sí sola, pero la puntuación de confianza combinada no alcanza el umbral de una decisión Enter completa; el déficit está en la solidez general de la evidencia, no en un dato faltante específico. Trate esto como una lectura en etapa de monitoreo hasta contar con evidencia global más sólida."

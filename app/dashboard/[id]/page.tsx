@@ -1006,10 +1006,12 @@ function ExecutiveSummaryVisual({
   title,
   content,
   investmentScore,
+  isMarketIntelligence = false,
 }: {
   title: string;
   content: string;
   investmentScore?: ReportInvestmentScore;
+  isMarketIntelligence?: boolean;
 }) {
   if (!title.toLowerCase().includes("executive summary") && !title.toLowerCase().includes("yönetici özeti")) {
     return null;
@@ -1026,9 +1028,24 @@ function ExecutiveSummaryVisual({
   // kind's own, unmodified decision output is translated into the same
   // 4-value label here, instead of showing each report kind's raw word
   // ("GO"/"Proceed with Conditions"/"BUY") verbatim on this KPI card.
+  //
+  // CRITICAL FIX -- Market Intelligence must never fall back to
+  // investmentScore.recommendation. That field is investment-score.ts's
+  // generic business-viability GO/WAIT/PASS score -- a founder-idea
+  // scoring model Market Intelligence explicitly does not evaluate (it
+  // has its own, deliberately more conservative ENTER/MONITOR/AVOID
+  // market-entry verdict, mapped to the same shared GO/CONDITIONAL_GO/
+  // NO_GO banner text by market-intelligence-presentation.ts). Passing
+  // the generic score through here risked showing "Proceed" for a
+  // report whose real, correctly-computed verdict was a bounded pilot
+  // or an outright avoid, whenever the primary "Decision:" line
+  // extraction from this section's own text came up empty. Only the
+  // report's own deterministic decision text is ever trusted for
+  // Market Intelligence; if that is not found, the neutral legacy
+  // fallback below is used instead of a wrong, over-confident score.
   const resolvedDecision = resolveCanonicalDecisionFromReportText(
     content,
-    investmentScore?.recommendation
+    isMarketIntelligence ? undefined : investmentScore?.recommendation
   );
   const recommendation = resolvedDecision
     ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
@@ -3661,6 +3678,7 @@ export default async function ReportDetailPage({
                                 title={section.title}
                                 content={section.content}
                                 investmentScore={report.investmentScore}
+                                isMarketIntelligence={report.type === "Market Analysis"}
                               />
                               <ExecutiveSnapshotPanel
                                 section={section}

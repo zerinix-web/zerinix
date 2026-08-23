@@ -3243,9 +3243,11 @@ function KpiValueContent({ value }: { value: string }) {
 function ExecutiveSummaryVisual({
   section,
   investmentScore,
+  isMarketIntelligence = false,
 }: {
   section: ReportSection;
   investmentScore?: ReportInvestmentScore;
+  isMarketIntelligence?: boolean;
 }) {
   if (section.field !== "executiveSummary") {
     return null;
@@ -3265,9 +3267,20 @@ function ExecutiveSummaryVisual({
   // "Reject" phrase, or Real Estate's "Decision: BUY/WAIT/AVOID" line)
   // is translated into the same 4-value label here, instead of showing
   // each report kind's raw word verbatim on this KPI card.
+  //
+  // CRITICAL FIX -- Market Intelligence must never fall back to
+  // investmentScore.recommendation, investment-score.ts's generic
+  // founder-viability GO/WAIT/PASS score -- Market Intelligence has its
+  // own, deliberately more conservative ENTER/MONITOR/AVOID market-entry
+  // verdict instead (mapped to the same shared banner text by
+  // market-intelligence-presentation.ts). Only the report's own
+  // deterministic decision text is trusted for Market Intelligence, so
+  // a monitor-stage or avoid verdict is never overridden by an
+  // unrelated founder-viability score whenever this section's own text
+  // extraction comes up empty.
   const resolvedDecision = resolveCanonicalDecisionFromReportText(
     section.content,
-    investmentScore?.recommendation
+    isMarketIntelligence ? undefined : investmentScore?.recommendation
   );
   const recommendation = resolvedDecision
     ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
@@ -4882,6 +4895,7 @@ const ReportSectionCard = memo(
     index,
     investmentScore,
     isDomainDecisionReport,
+    isMarketIntelligence,
     reportQuality,
     waitingMessage,
   }: {
@@ -4889,6 +4903,7 @@ const ReportSectionCard = memo(
     index: number;
     investmentScore?: ReportInvestmentScore;
     isDomainDecisionReport: boolean;
+    isMarketIntelligence: boolean;
     reportQuality?: ReportQualityScore;
     waitingMessage: string;
   }) {
@@ -4944,6 +4959,7 @@ const ReportSectionCard = memo(
                 <ExecutiveSummaryVisual
                   section={section}
                   investmentScore={investmentScore}
+                  isMarketIntelligence={isMarketIntelligence}
                 />
               ) : null}
               {!isDomainDecisionReport ? (
@@ -5011,6 +5027,7 @@ const ReportPanel = memo(function ReportPanel({
   benchmarkFit,
   benchmarkScore,
   reportQuality,
+  isMarketIntelligence = false,
   onContinueAsChat,
   onBackToWorkspace,
 }: {
@@ -5033,6 +5050,7 @@ const ReportPanel = memo(function ReportPanel({
   benchmarkFit?: ReportBenchmarkFit;
   benchmarkScore?: ReportBenchmarkScore;
   reportQuality?: ReportQualityScore;
+  isMarketIntelligence?: boolean;
   onContinueAsChat: () => void;
   onBackToWorkspace: () => void;
 }) {
@@ -6532,6 +6550,7 @@ const ReportPanel = memo(function ReportPanel({
             index={index}
             investmentScore={investmentScore}
             isDomainDecisionReport={isDomainDecisionReport}
+            isMarketIntelligence={isMarketIntelligence}
             reportQuality={reportQuality}
             waitingMessage={waitingMessage}
           />
@@ -9483,6 +9502,7 @@ export default function Planner({
             reportQuality={
               currentReportMetadata?.reportQuality || initialReport?.metadata?.reportQuality
             }
+            isMarketIntelligence={activeReportMode === "market"}
             onContinueAsChat={continueRestrictedReportAsChat}
             onBackToWorkspace={backToWorkspaceFromReportRestriction}
           />
@@ -9729,6 +9749,7 @@ export default function Planner({
                   benchmarkFit={currentReportMetadata?.benchmarkFit || initialReport?.metadata?.benchmarkFit}
                   benchmarkScore={currentReportMetadata?.benchmarkScore || initialReport?.metadata?.benchmarkScore}
                   reportQuality={currentReportMetadata?.reportQuality || initialReport?.metadata?.reportQuality}
+                  isMarketIntelligence={activeReportMode === "market"}
                   onContinueAsChat={continueRestrictedReportAsChat}
                   onBackToWorkspace={backToWorkspaceFromReportRestriction}
                 />
