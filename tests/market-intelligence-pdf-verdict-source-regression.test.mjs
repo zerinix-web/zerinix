@@ -68,7 +68,11 @@ test("the Market Intelligence PDF cover no longer reuses the founder/business-pl
   // which Market Intelligence ever populates. Confirmed live: reusing
   // them put "Investor Ready" and a "CAC: Low / Capital efficiency: Low"
   // risk heatmap on a market-research report's cover page.
-  assert.match(pdfButtonSource, /isMarketIntelligenceReport\s*\?\s*\n?\s*localizePdfPresentationLabel\("Evidence-Based"/);
+  // NOTE: superseded by the "FINAL CLEANUP" ticket's "Evidence" ->
+  // "Validation" rename (the PDF summary tag text itself, not this guard's
+  // point -- the cover still reads its own MI-specific isMarketIntelligenceReport
+  // branch rather than falling through to the founder/business-plan snapshot).
+  assert.match(pdfButtonSource, /isMarketIntelligenceReport\s*\?\s*\n?\s*localizePdfPresentationLabel\("Validation-Based"/);
   assert.match(pdfButtonSource, /marketConfidenceScore/);
   assert.match(pdfButtonSource, /localizePdfPresentationLabel\("Top Risks", pdfLocale\)/);
   assert.match(pdfButtonSource, /localizePdfPresentationLabel\("Confidence Factors", pdfLocale\)/);

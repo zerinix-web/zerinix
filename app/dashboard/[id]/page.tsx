@@ -2137,6 +2137,19 @@ function ExecutiveSnapshotPanel({
         }
       : {}),
   };
+  // CRITICAL FIX -- one of buildConfidenceRadar's 5 dimensions is
+  // literally labeled "Evidence"/"Kanıt" (it scores competitive-evidence
+  // strength for Business Plan/Acquisition's founder-viability score).
+  // Renaming that shared dimension label itself would touch other report
+  // kinds, so only Market Intelligence's rendered copy of the array is
+  // remapped here; the underlying score computation is untouched.
+  const confidenceRadarDimensions = isMarketIntelligence
+    ? snapshot.confidenceRadar.map((dimension) =>
+        dimension.label === "Evidence" || dimension.label === "Kanıt"
+          ? { ...dimension, label: isMarketIntelligenceTurkish ? "Pazar Sinyalleri" : "Market Signals" }
+          : dimension
+      )
+    : snapshot.confidenceRadar;
   const reportQualityBreakdown = getReportQualityBreakdown(
     reportQuality,
     labels.reportQuality === "Rapor Kalitesi"
@@ -2241,7 +2254,7 @@ function ExecutiveSnapshotPanel({
             {labels.confidenceRadar}
           </p>
           <div className="mt-3 space-y-2">
-            {snapshot.confidenceRadar.map((dimension) => (
+            {confidenceRadarDimensions.map((dimension) => (
               <div key={dimension.label} className="grid grid-cols-[5.75rem_minmax(0,1fr)_2.5rem] items-center gap-2">
                 <span className="text-xs text-zinc-400">{dimension.label}</span>
                 <span className="h-2 overflow-hidden rounded-full bg-white/10">

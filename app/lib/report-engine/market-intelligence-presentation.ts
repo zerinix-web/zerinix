@@ -213,11 +213,11 @@ function biggestOpportunity(sections: MarketSections, language: ResponseLanguage
     firstSubstantiveLine(sections.opportunities || "") ||
     marketText(
       language,
-      "A defensible entry window exists but has not yet been fully evidenced.",
-      "Savunulabilir bir giriş penceresi mevcut, ancak henüz tam olarak kanıtlanmadı.",
-      "Ein verteidigbares Zeitfenster für den Markteintritt besteht, ist jedoch noch nicht vollständig belegt.",
-      "Une fenêtre d'entrée défendable existe, mais n'a pas encore été pleinement étayée par des preuves.",
-      "Existe una ventana de entrada defendible que aún no se ha justificado por completo con evidencia."
+      "A defensible entry window exists but has not yet been fully validated.",
+      "Savunulabilir bir giriş penceresi mevcut, ancak henüz tam olarak doğrulanmadı.",
+      "Ein verteidigbares Zeitfenster für den Markteintritt besteht, ist jedoch noch nicht vollständig bestätigt.",
+      "Une fenêtre d'entrée défendable existe, mais n'a pas encore été pleinement confirmée.",
+      "Existe una ventana de entrada defendible que aún no se ha confirmado por completo."
     )
   );
 }
@@ -236,9 +236,9 @@ function biggestRisk(sections: MarketSections, language: ResponseLanguage) {
       language,
       "Data availability for market size and competitive positioning remains incomplete.",
       "Pazar büyüklüğü ve rekabet konumlandırmasına ilişkin veri erişilebilirliği henüz tam değil.",
-      "Verifizierte Marktgrößen- und Wettbewerbsdaten sind weiterhin unvollständig.",
-      "Les paramètres vérifiés de taille de marché et de concurrence restent incomplets.",
-      "Los parámetros verificados de tamaño de mercado y competencia siguen siendo incompletos."
+      "Bestätigte Marktgrößen- und Wettbewerbsdaten sind weiterhin unvollständig.",
+      "Les paramètres confirmés de taille de marché et de concurrence restent incomplets.",
+      "Los parámetros confirmados de tamaño de mercado y competencia siguen siendo incompletos."
     )
   );
 }
@@ -344,11 +344,11 @@ export function buildMarketExecutiveSummary(
 
   const bottomLine = marketText(
     language,
-    `Bottom Line: ${localizedDecision}. Market confidence sits at ${confidence}/100, based on evidence coverage across market size, competition, and product demand. This is a directional market read, not a company-specific investment decision.`,
-    `Sonuç: ${localizedDecision}. Pazar güveni, pazar büyüklüğü, rekabet ve ürün talebindeki kanıt kapsamına dayanarak 100 üzerinden ${confidence} seviyesindedir. Bu, şirkete özgü bir yatırım kararı değil, yönlü bir pazar değerlendirmesidir.`,
-    `Kernaussage: ${localizedDecision}. Die Marktkonfidenz liegt bei ${confidence}/100, basierend auf der Evidenzabdeckung zu Marktgröße, Wettbewerb und Produktnachfrage. Dies ist eine richtungsweisende Markteinschätzung, keine unternehmensspezifische Investitionsentscheidung.`,
-    `Conclusion : ${localizedDecision}. La confiance de marché est de ${confidence}/100, sur la base de la couverture des preuves relatives à la taille du marché, à la concurrence et à la demande produit. Il s'agit d'une lecture directionnelle du marché, non d'une décision d'investissement propre à une entreprise.`,
-    `Conclusión: ${localizedDecision}. La confianza de mercado es de ${confidence}/100, basada en la cobertura de evidencia sobre el tamaño de mercado, la competencia y la demanda de producto. Esta es una lectura direccional del mercado, no una decisión de inversión específica de una empresa.`
+    `Bottom Line: ${localizedDecision}. Market confidence sits at ${confidence}/100, based on data coverage across market size, competition, and product demand. This is a directional market read, not a company-specific investment decision.`,
+    `Sonuç: ${localizedDecision}. Pazar güveni, pazar büyüklüğü, rekabet ve ürün talebindeki veri kapsamına dayanarak 100 üzerinden ${confidence} seviyesindedir. Bu, şirkete özgü bir yatırım kararı değil, yönlü bir pazar değerlendirmesidir.`,
+    `Kernaussage: ${localizedDecision}. Die Marktkonfidenz liegt bei ${confidence}/100, basierend auf der Datenabdeckung zu Marktgröße, Wettbewerb und Produktnachfrage. Dies ist eine richtungsweisende Markteinschätzung, keine unternehmensspezifische Investitionsentscheidung.`,
+    `Conclusion : ${localizedDecision}. La confiance de marché est de ${confidence}/100, sur la base de la couverture des données relatives à la taille du marché, à la concurrence et à la demande produit. Il s'agit d'une lecture directionnelle du marché, non d'une décision d'investissement propre à une entreprise.`,
+    `Conclusión: ${localizedDecision}. La confianza de mercado es de ${confidence}/100, basada en la cobertura de datos sobre el tamaño de mercado, la competencia y la demanda de producto. Esta es una lectura direccional del mercado, no una decisión de inversión específica de una empresa.`
   );
 
   return [
@@ -447,19 +447,19 @@ export function buildMarketEntryRecommendation(
       ),
       marketText(
         language,
-        `- What would change this: verified, independent evidence that closes the "${risk}" gap.`,
-        `- Bunu değiştirecek şey: "${risk}" boşluğunu kapatan doğrulanmış, bağımsız kanıt.`,
-        `- Was dies ändern würde: verifizierte, unabhängige Belege, die die Lücke „${risk}" schließen.`,
-        `- Ce qui changerait cela : des preuves indépendantes vérifiées comblant la lacune « ${risk} ».`,
-        `- Qué cambiaría esto: evidencia independiente y verificada que cierre la brecha "${risk}".`
+        `- What would change this: confirmed, independent data that closes the "${risk}" gap.`,
+        `- Bunu değiştirecek şey: "${risk}" boşluğunu kapatan onaylanmış, bağımsız veri.`,
+        `- Was dies ändern würde: bestätigte, unabhängige Daten, die die Lücke „${risk}" schließen.`,
+        `- Ce qui changerait cela : des données indépendantes confirmées comblant la lacune « ${risk} ».`,
+        `- Qué cambiaría esto: datos independientes y confirmados que cierren la brecha "${risk}".`
       ),
       marketText(
         language,
-        "- Reassess when: new verified data becomes available, not on a fixed calendar date.",
-        "- Yeniden değerlendirme zamanı: sabit bir takvim tarihinde değil, yeni doğrulanmış veri elde edildiğinde.",
-        "- Neu bewerten, wenn: neue verifizierte Daten verfügbar werden, nicht zu einem festen Kalenderdatum.",
-        "- Réévaluer lorsque : de nouvelles données vérifiées deviennent disponibles, pas à une date calendaire fixe.",
-        "- Reevaluar cuando: haya nuevos datos verificados disponibles, no en una fecha fija del calendario."
+        "- Reassess when: new confirmed data becomes available, not on a fixed calendar date.",
+        "- Yeniden değerlendirme zamanı: sabit bir takvim tarihinde değil, yeni onaylanmış veri elde edildiğinde.",
+        "- Neu bewerten, wenn: neue bestätigte Daten verfügbar werden, nicht zu einem festen Kalenderdatum.",
+        "- Réévaluer lorsque : de nouvelles données confirmées deviennent disponibles, pas à une date calendaire fixe.",
+        "- Reevaluar cuando: haya nuevos datos confirmados disponibles, no en una fecha fija del calendario."
       ),
     ].join("\n");
   }
@@ -475,28 +475,28 @@ export function buildMarketEntryRecommendation(
     confidence >= 65
       ? "immediately, while the current demand and competitive window holds"
       : confidence >= 40
-        ? "after closing the highest-impact evidence gap identified above"
-        : "only after verified market-size and competitive evidence improve",
+        ? "after closing the highest-impact validation gap identified above"
+        : "only after confirmed market-size and competitive data improve",
     confidence >= 65
       ? "mevcut talep ve rekabet penceresi sürerken hemen"
       : confidence >= 40
-        ? "yukarıda belirlenen en etkili kanıt boşluğu kapatıldıktan sonra"
-        : "yalnızca doğrulanmış pazar büyüklüğü ve rekabet kanıtları iyileştikten sonra",
+        ? "yukarıda belirlenen en etkili doğrulama boşluğu kapatıldıktan sonra"
+        : "yalnızca onaylanmış pazar büyüklüğü ve rekabet verileri iyileştikten sonra",
     confidence >= 65
       ? "sofort, solange das aktuelle Nachfrage- und Wettbewerbsfenster bestehen bleibt"
       : confidence >= 40
-        ? "nachdem die oben genannte wirkungsvollste Evidenzlücke geschlossen wurde"
-        : "erst nachdem sich verifizierte Marktgrößen- und Wettbewerbsdaten verbessert haben",
+        ? "nachdem die oben genannte wirkungsvollste Validierungslücke geschlossen wurde"
+        : "erst nachdem sich bestätigte Marktgrößen- und Wettbewerbsdaten verbessert haben",
     confidence >= 65
       ? "immédiatement, tant que la fenêtre actuelle de demande et de concurrence est ouverte"
       : confidence >= 40
-        ? "après avoir comblé la lacune de preuve la plus impactante identifiée ci-dessus"
-        : "seulement après l'amélioration des preuves vérifiées de taille de marché et de concurrence",
+        ? "après avoir comblé la lacune de validation la plus impactante identifiée ci-dessus"
+        : "seulement après l'amélioration des données confirmées de taille de marché et de concurrence",
     confidence >= 65
       ? "de inmediato, mientras se mantenga la ventana actual de demanda y competencia"
       : confidence >= 40
-        ? "después de cerrar la brecha de evidencia de mayor impacto identificada anteriormente"
-        : "solo después de que mejoren las evidencias verificadas de tamaño de mercado y competencia"
+        ? "después de cerrar la brecha de validación de mayor impacto identificada anteriormente"
+        : "solo después de que mejoren los datos confirmados de tamaño de mercado y competencia"
   );
 
   return [
@@ -575,11 +575,11 @@ function buildImmediateNextAction(code: ExecutiveDecisionCode, language: Respons
 
   return marketText(
     language,
-    "Do not commit budget to this market; instead, gather the missing evidence above and revisit the decision once it is resolved.",
-    "Bu pazara bütçe ayırmayın; bunun yerine yukarıdaki eksik kanıtları toplayın ve bu kanıtlar netleştiğinde kararı yeniden değerlendirin.",
-    "Verpflichten Sie kein Budget für diesen Markt; sammeln Sie stattdessen die oben genannten fehlenden Belege und überprüfen Sie die Entscheidung erneut, sobald diese vorliegen.",
-    "N'engagez pas de budget sur ce marché ; recueillez plutôt les preuves manquantes ci-dessus et réexaminez la décision une fois celles-ci obtenues.",
-    "No comprometa presupuesto en este mercado; en su lugar, reúna la evidencia faltante mencionada anteriormente y reconsidere la decisión una vez que esté disponible."
+    "Do not commit budget to this market; instead, gather the missing information above and revisit the decision once it is resolved.",
+    "Bu pazara bütçe ayırmayın; bunun yerine yukarıdaki gereken bilgileri toplayın ve bu bilgiler netleştiğinde kararı yeniden değerlendirin.",
+    "Verpflichten Sie kein Budget für diesen Markt; sammeln Sie stattdessen die oben genannten fehlenden Informationen und überprüfen Sie die Entscheidung erneut, sobald diese vorliegen.",
+    "N'engagez pas de budget sur ce marché ; recueillez plutôt les informations manquantes ci-dessus et réexaminez la décision une fois celles-ci obtenues.",
+    "No comprometa presupuesto en este mercado; en su lugar, reúna la información faltante mencionada anteriormente y reconsidere la decisión una vez que esté disponible."
   );
 }
 
@@ -606,30 +606,30 @@ function buildWhatWouldChangeThisDecision(
       language,
       `A material worsening of "${risk}", or a newly confirmed competitive threat from an independent source, would be reason to revisit this decision toward a conditional stance.`,
       `"${risk}" durumunun önemli ölçüde kötüleşmesi veya bağımsız bir kaynaktan doğrulanan yeni bir rekabet tehdidi, bu kararın koşullu bir duruşa çekilmesini gerektirir.`,
-      `Eine wesentliche Verschlechterung von „${risk}" oder eine neue, unabhängig verifizierte Wettbewerbsbedrohung wäre Grund, diese Entscheidung in Richtung einer bedingten Haltung zu überdenken.`,
-      `Une aggravation significative de « ${risk} », ou une nouvelle menace concurrentielle vérifiée de manière indépendante, justifierait de revoir cette décision vers une position conditionnelle.`,
-      `Un deterioro importante de "${risk}", o una nueva amenaza competitiva verificada de forma independiente, justificaría revisar esta decisión hacia una postura condicional.`
+      `Eine wesentliche Verschlechterung von „${risk}" oder eine neue, unabhängig bestätigte Wettbewerbsbedrohung wäre Grund, diese Entscheidung in Richtung einer bedingten Haltung zu überdenken.`,
+      `Une aggravation significative de « ${risk} », ou une nouvelle menace concurrentielle confirmée de manière indépendante, justifierait de revoir cette décision vers une position conditionnelle.`,
+      `Un deterioro importante de "${risk}", o una nueva amenaza competitiva confirmada de forma independiente, justificaría revisar esta decisión hacia una postura condicional.`
     );
   }
 
   if (code === "CONDITIONAL_GO") {
     return marketText(
       language,
-      `A change in validation status for "${risk}" -- independent evidence that resolves it -- would move this to a full Go; further deterioration of the same evidence would move it to No-Go.`,
-      `"${risk}" için doğrulama durumundaki bir değişiklik -- yani sorunu çözen bağımsız kanıtlar -- bu kararı tam bir EVET'e taşır; aynı kanıtın daha da kötüleşmesi ise kararı HAYIR'a taşır.`,
-      `Verifizierte, unabhängige Belege, die „${risk}" auflösen, würden dies zu einem vollständigen Go machen; eine weitere Verschlechterung derselben Belege würde es zu einem No-Go machen.`,
-      `Des preuves indépendantes vérifiées résolvant « ${risk} » feraient passer cette décision à un Go complet ; une nouvelle détérioration de ces mêmes preuves la ferait passer à No-Go.`,
-      `Evidencia independiente y verificada que resuelva "${risk}" convertiría esto en un Go completo; un mayor deterioro de esa misma evidencia lo convertiría en No-Go.`
+      `A change in validation status for "${risk}" -- independent data that resolves it -- would move this to a full Go; further deterioration of the same data would move it to No-Go.`,
+      `"${risk}" için doğrulama durumundaki bir değişiklik -- yani sorunu çözen bağımsız veriler -- bu kararı tam bir EVET'e taşır; aynı verinin daha da kötüleşmesi ise kararı HAYIR'a taşır.`,
+      `Bestätigte, unabhängige Daten, die „${risk}" auflösen, würden dies zu einem vollständigen Go machen; eine weitere Verschlechterung derselben Daten würde es zu einem No-Go machen.`,
+      `Des données indépendantes confirmées résolvant « ${risk} » feraient passer cette décision à un Go complet ; une nouvelle détérioration de ces mêmes données la ferait passer à No-Go.`,
+      `Datos independientes y confirmados que resuelvan "${risk}" convertirían esto en un Go completo; un mayor deterioro de esos mismos datos lo convertiría en No-Go.`
     );
   }
 
   return marketText(
     language,
     `A change in validation status for "${risk}" -- such as a credible market-size source or independently confirmed competitor data -- would change this decision.`,
-    `"${risk}" için doğrulama durumundaki bir değişiklik -- örneğin güvenilir bir pazar büyüklüğü kaynağı veya bağımsız olarak doğrulanmış rakip verisi -- bu kararı değiştirir.`,
-    `Verifizierte, unabhängige Belege, die „${risk}" auflösen -- etwa eine glaubwürdige Marktgrößenquelle oder unabhängig bestätigte Wettbewerberdaten -- würden diese Entscheidung ändern.`,
-    `Des preuves indépendantes vérifiées résolvant « ${risk} » -- telles qu'une source fiable de taille de marché ou des données concurrentielles confirmées de manière indépendante -- changeraient cette décision.`,
-    `Evidencia independiente y verificada que resuelva "${risk}" -- como una fuente creíble de tamaño de mercado o datos de competidores confirmados de forma independiente -- cambiaría esta decisión.`
+    `"${risk}" için doğrulama durumundaki bir değişiklik -- örneğin güvenilir bir pazar büyüklüğü kaynağı veya bağımsız olarak onaylanmış rakip verisi -- bu kararı değiştirir.`,
+    `Bestätigte, unabhängige Daten, die „${risk}" auflösen -- etwa eine glaubwürdige Marktgrößenquelle oder unabhängig bestätigte Wettbewerberdaten -- würden diese Entscheidung ändern.`,
+    `Des données indépendantes confirmées résolvant « ${risk} » -- telles qu'une source fiable de taille de marché ou des données concurrentielles confirmées de manière indépendante -- changeraient cette décision.`,
+    `Datos independientes y confirmados que resuelvan "${risk}" -- como una fuente creíble de tamaño de mercado o datos de competidores confirmados de forma independiente -- cambiaría esta decisión.`
   );
 }
 
@@ -648,11 +648,11 @@ function buildWhySynthesis(
   if (code === "GO") {
     return marketText(
       language,
-      `"${opportunity}" is well-supported by the available evidence and outweighs the identified risks at the current confidence level.`,
-      `"${opportunity}" mevcut kanıtlarla iyi desteklenmektedir ve şu anki güven seviyesinde belirlenen risklerden daha ağır basmaktadır.`,
-      `„${opportunity}" wird durch die verfügbaren Belege gut gestützt und überwiegt die identifizierten Risiken beim aktuellen Konfidenzniveau.`,
-      `« ${opportunity} » est bien étayé par les preuves disponibles et l'emporte sur les risques identifiés au niveau de confiance actuel.`,
-      `"${opportunity}" está bien respaldado por la evidencia disponible y supera a los riesgos identificados en el nivel de confianza actual.`
+      `"${opportunity}" is well-supported by the available data and outweighs the identified risks at the current confidence level.`,
+      `"${opportunity}" mevcut verilerle iyi desteklenmektedir ve şu anki güven seviyesinde belirlenen risklerden daha ağır basmaktadır.`,
+      `„${opportunity}" wird durch die verfügbaren Daten gut gestützt und überwiegt die identifizierten Risiken beim aktuellen Konfidenzniveau.`,
+      `« ${opportunity} » est bien étayé par les données disponibles et l'emporte sur les risques identifiés au niveau de confiance actuel.`,
+      `"${opportunity}" está bien respaldado por los datos disponibles y supera a los riesgos identificados en el nivel de confianza actual.`
     );
   }
 
@@ -669,11 +669,11 @@ function buildWhySynthesis(
 
   return marketText(
     language,
-    `"${risk}" outweighs the identified opportunity given the evidence currently available.`,
-    `Şu anda mevcut olan kanıtlar göz önüne alındığında, "${risk}" belirlenen fırsattan daha ağır basmaktadır.`,
-    `„${risk}" überwiegt die identifizierte Chance angesichts der derzeit verfügbaren Belege.`,
-    `« ${risk} » l'emporte sur l'opportunité identifiée compte tenu des preuves actuellement disponibles.`,
-    `"${risk}" supera a la oportunidad identificada dada la evidencia actualmente disponible.`
+    `"${risk}" outweighs the identified opportunity given the data currently available.`,
+    `Şu anda mevcut olan veriler göz önüne alındığında, "${risk}" belirlenen fırsattan daha ağır basmaktadır.`,
+    `„${risk}" überwiegt die identifizierte Chance angesichts der derzeit verfügbaren Daten.`,
+    `« ${risk} » l'emporte sur l'opportunité identifiée compte tenu des données actuellement disponibles.`,
+    `"${risk}" supera a la oportunidad identificada dados los datos actualmente disponibles.`
   );
 }
 
@@ -693,11 +693,11 @@ function buildConfidenceExplanation(
       factors.push(
         marketText(
           language,
-          "verified market-size data available",
-          "doğrulanmış pazar büyüklüğü verisi mevcut",
-          "verifizierte Marktgrößendaten vorhanden",
-          "données de taille de marché vérifiées disponibles",
-          "datos de tamaño de mercado verificados disponibles"
+          "confirmed market-size data available",
+          "onaylanmış pazar büyüklüğü verisi mevcut",
+          "bestätigte Marktgrößendaten vorhanden",
+          "données de taille de marché confirmées disponibles",
+          "datos de tamaño de mercado confirmados disponibles"
         )
       );
     }
@@ -705,11 +705,11 @@ function buildConfidenceExplanation(
       factors.push(
         marketText(
           language,
-          "strong, independently verified competitive evidence",
-          "güçlü, bağımsız olarak doğrulanmış rekabet kanıtı",
-          "starke, unabhängig verifizierte Wettbewerbsevidenz",
-          "preuves concurrentielles solides et vérifiées de manière indépendante",
-          "evidencia competitiva sólida y verificada de forma independiente"
+          "strong, independently confirmed competitive data",
+          "güçlü, bağımsız olarak onaylanmış rekabet verisi",
+          "starke, unabhängig bestätigte Wettbewerbsdaten",
+          "données concurrentielles solides et confirmées de manière indépendante",
+          "datos competitivos sólidos y confirmados de forma independiente"
         )
       );
     }
@@ -717,11 +717,11 @@ function buildConfidenceExplanation(
       factors.push(
         marketText(
           language,
-          "solid, independently verified product-market-fit evidence",
-          "sağlam, bağımsız olarak doğrulanmış ürün-pazar uyumu kanıtı",
-          "solide, unabhängig verifizierte Product-Market-Fit-Evidenz",
-          "preuves solides et vérifiées de manière indépendante d'adéquation produit-marché",
-          "evidencia sólida y verificada de forma independiente de ajuste producto-mercado"
+          "solid, independently confirmed product-market-fit data",
+          "sağlam, bağımsız olarak onaylanmış ürün-pazar uyumu verisi",
+          "solide, unabhängig bestätigte Product-Market-Fit-Daten",
+          "données solides et confirmées de manière indépendante d'adéquation produit-marché",
+          "datos sólidos y confirmados de forma independiente de ajuste producto-mercado"
         )
       );
     }
@@ -729,11 +729,11 @@ function buildConfidenceExplanation(
       factors.push(
         marketText(
           language,
-          "broad overall market evidence coverage",
-          "geniş kapsamlı genel pazar kanıtı",
-          "breite Gesamtmarkt-Evidenzabdeckung",
-          "large couverture globale des preuves de marché",
-          "amplia cobertura general de evidencia de mercado"
+          "broad overall market data coverage",
+          "geniş kapsamlı genel pazar verisi",
+          "breite Gesamtmarkt-Datenabdeckung",
+          "large couverture globale des données de marché",
+          "amplia cobertura general de datos de mercado"
         )
       );
     }
@@ -745,11 +745,11 @@ function buildConfidenceExplanation(
     factors.push(
       marketText(
         language,
-        "verified market size unavailable",
-        "doğrulanmış pazar büyüklüğü mevcut değil",
-        "verifizierte Marktgröße nicht verfügbar",
-        "taille de marché vérifiée indisponible",
-        "tamaño de mercado verificado no disponible"
+        "confirmed market size unavailable",
+        "onaylanmış pazar büyüklüğü mevcut değil",
+        "bestätigte Marktgröße nicht verfügbar",
+        "taille de marché confirmée indisponible",
+        "tamaño de mercado confirmado no disponible"
       )
     );
   }
@@ -757,11 +757,11 @@ function buildConfidenceExplanation(
     factors.push(
       marketText(
         language,
-        "competitive landscape evidence incomplete",
-        "rekabet ortamı kanıtı eksik",
-        "Wettbewerbsumfeld-Evidenz unvollständig",
-        "preuves du paysage concurrentiel incomplètes",
-        "evidencia del panorama competitivo incompleta"
+        "competitive landscape data incomplete",
+        "rekabet ortamı verisi eksik",
+        "Wettbewerbsumfeld-Daten unvollständig",
+        "données du paysage concurrentiel incomplètes",
+        "datos del panorama competitivo incompletos"
       )
     );
   }
@@ -769,11 +769,11 @@ function buildConfidenceExplanation(
     factors.push(
       marketText(
         language,
-        "market fit evidence limited",
-        "pazar uyumu kanıtı sınırlı",
-        "Marktanpassungs-Evidenz begrenzt",
-        "preuves d'adéquation au marché limitées",
-        "evidencia de ajuste al mercado limitada"
+        "market fit data limited",
+        "pazar uyumu verisi sınırlı",
+        "Marktanpassungs-Daten begrenzt",
+        "données d'adéquation au marché limitées",
+        "datos de ajuste al mercado limitados"
       )
     );
   }
@@ -781,11 +781,11 @@ function buildConfidenceExplanation(
     factors.push(
       marketText(
         language,
-        "overall market evidence coverage below threshold",
-        "genel pazar kanıt kapsamı eşiğin altında",
-        "Gesamtmarkt-Evidenzabdeckung unter dem Schwellenwert",
-        "couverture globale des preuves de marché sous le seuil",
-        "cobertura general de evidencia de mercado por debajo del umbral"
+        "overall market data coverage below threshold",
+        "genel pazar veri kapsamı eşiğin altında",
+        "Gesamtmarkt-Datenabdeckung unter dem Schwellenwert",
+        "couverture globale des données de marché sous le seuil",
+        "cobertura general de datos de mercado por debajo del umbral"
       )
     );
   }
@@ -807,11 +807,11 @@ function identifyMarketInformationGaps(
       weight: 0,
       text: marketText(
         language,
-        "No verified, independently-sourced market-size figure (TAM/SAM/SOM or CAGR) was found -- the sizing in this report is a modeled estimate, not a confirmed fact.",
-        "Doğrulanmış, bağımsız kaynaklı bir pazar büyüklüğü verisi (TAM/SAM/SOM veya CAGR) bulunamadı; bu rapordaki büyüklük tahmini modellenmiş bir tahmindir, doğrulanmış bir gerçek değildir.",
-        "Es wurde keine verifizierte, unabhängig belegte Marktgrößenangabe (TAM/SAM/SOM oder CAGR) gefunden -- die Größenangabe in diesem Bericht ist eine modellierte Schätzung, keine bestätigte Tatsache.",
-        "Aucun chiffre de taille de marché vérifié et issu de sources indépendantes (TAM/SAM/SOM ou TCAC) n'a été trouvé -- l'estimation de ce rapport est modélisée, non confirmée.",
-        "No se encontró una cifra de tamaño de mercado verificada y de fuentes independientes (TAM/SAM/SOM o CAGR); la estimación de este informe es modelada, no un hecho confirmado."
+        "An independently-sourced market-size figure (TAM/SAM/SOM or CAGR) was not confirmed -- the sizing in this report is a modeled estimate, not a confirmed fact.",
+        "Onaylanmış, bağımsız kaynaklı bir pazar büyüklüğü verisi (TAM/SAM/SOM veya CAGR) bulunamadı; bu rapordaki büyüklük tahmini modellenmiş bir tahmindir, onaylanmış bir gerçek değildir.",
+        "Es wurde keine bestätigte, unabhängige Marktgrößenangabe (TAM/SAM/SOM oder CAGR) gefunden -- die Größenangabe in diesem Bericht ist eine modellierte Schätzung, keine bestätigte Tatsache.",
+        "Aucun chiffre de taille de marché confirmé et issu de sources indépendantes (TAM/SAM/SOM ou TCAC) n'a été trouvé -- l'estimation de ce rapport est modélisée, non confirmée.",
+        "No se encontró una cifra de tamaño de mercado confirmada y de fuentes independientes (TAM/SAM/SOM o CAGR); la estimación de este informe es modelada, no un hecho confirmado."
       ),
     });
   }
@@ -835,11 +835,11 @@ function identifyMarketInformationGaps(
       weight: coverage.dimensions.productEvidence,
       text: marketText(
         language,
-        "Independent evidence of real market fit (customer usage, retention, or third-party reviews) is limited.",
-        "Gerçek pazar uyumuna ilişkin bağımsız kanıt (müşteri kullanımı, elde tutma oranı veya üçüncü taraf incelemeleri) sınırlıdır.",
-        "Unabhängige Belege für eine tatsächliche Marktanpassung (Kundennutzung, Kundenbindung oder Bewertungen Dritter) sind begrenzt.",
-        "Les preuves indépendantes d'une réelle adéquation au marché (utilisation client, rétention ou avis de tiers) sont limitées.",
-        "La evidencia independiente de un ajuste real al mercado (uso del cliente, retención o reseñas de terceros) es limitada."
+        "Independent validation of real market fit (customer usage, retention, or third-party reviews) is limited.",
+        "Gerçek pazar uyumuna ilişkin bağımsız doğrulama (müşteri kullanımı, elde tutma oranı veya üçüncü taraf incelemeleri) sınırlıdır.",
+        "Unabhängige Validierung einer tatsächlichen Marktanpassung (Kundennutzung, Kundenbindung oder Bewertungen Dritter) ist begrenzt.",
+        "La validation indépendante d'une réelle adéquation au marché (utilisation client, rétention ou avis de tiers) est limitée.",
+        "La validación independiente de un ajuste real al mercado (uso del cliente, retención o reseñas de terceros) es limitada."
       ),
     });
   }
@@ -849,11 +849,11 @@ function identifyMarketInformationGaps(
       weight: coverage.dimensions.marketConfidence,
       text: marketText(
         language,
-        "Overall market evidence coverage sits below the threshold for a high-confidence read -- targeted primary research (e.g. paid industry reports or direct customer interviews) would materially change this decision's confidence.",
-        "Toplam pazar kanıt kapsamı, yüksek güvenli bir değerlendirme için gereken eşiğin altındadır; hedefe yönelik birincil araştırma (örn. ücretli sektör raporları veya doğrudan müşteri görüşmeleri) bu kararın güven düzeyini önemli ölçüde değiştirebilir.",
-        "Die gesamte Marktevidenzabdeckung liegt unter dem Schwellenwert für eine belastbare Einschätzung -- gezielte Primärforschung (z. B. kostenpflichtige Branchenberichte oder direkte Kundeninterviews) würde die Konfidenz dieser Entscheidung wesentlich verändern.",
-        "La couverture globale des preuves de marché est inférieure au seuil requis pour une lecture fiable -- une recherche primaire ciblée (rapports sectoriels payants ou entretiens clients directs) modifierait sensiblement la confiance de cette décision.",
-        "La cobertura general de evidencia de mercado está por debajo del umbral necesario para una lectura de alta confianza; una investigación primaria específica (informes sectoriales de pago o entrevistas directas con clientes) cambiaría sustancialmente la confianza de esta decisión."
+        "Overall market validation coverage sits below the threshold for a high-confidence read -- targeted primary research (e.g. paid industry reports or direct customer interviews) would materially change this decision's confidence.",
+        "Toplam pazar doğrulama kapsamı, yüksek güvenli bir değerlendirme için gereken eşiğin altındadır; hedefe yönelik birincil araştırma (örn. ücretli sektör raporları veya doğrudan müşteri görüşmeleri) bu kararın güven düzeyini önemli ölçüde değiştirebilir.",
+        "Die gesamte Marktvalidierungsabdeckung liegt unter dem Schwellenwert für eine belastbare Einschätzung -- gezielte Primärforschung (z. B. kostenpflichtige Branchenberichte oder direkte Kundeninterviews) würde die Konfidenz dieser Entscheidung wesentlich verändern.",
+        "La couverture globale de validation de marché est inférieure au seuil requis pour une lecture fiable -- une recherche primaire ciblée (rapports sectoriels payants ou entretiens clients directs) modifierait sensiblement la confiance de cette décision.",
+        "La cobertura general de validación de mercado está por debajo del umbral necesario para una lectura de alta confianza; una investigación primaria específica (informes sectoriales de pago o entrevistas directas con clientes) cambiaría sustancialmente la confianza de esta decisión."
       ),
     });
   }
@@ -880,11 +880,11 @@ function identifyMarketInformationGaps(
       weight: 0,
       text: marketText(
         language,
-        "No single evidence dimension is critically weak, but planning confidence for this market falls short of a full Enter decision -- the shortfall is in overall evidence strength rather than one specific missing input. Treat this as an early-stage read pending stronger evidence across the board.",
-        "Tek başına kritik derecede zayıf bir kanıt boyutu yok, ancak bu pazar için planlama güveni tam bir Gir kararı için yeterli değil; eksiklik tek bir belirli girdide değil, genel kanıt gücündedir. Bunu, genel olarak daha güçlü kanıt beklenen erken aşama bir değerlendirme olarak ele alın.",
-        "Keine einzelne Evidenzdimension ist kritisch schwach, aber der gemischte Konfidenzwert reicht nicht für eine vollständige Enter-Entscheidung aus -- das Defizit liegt in der Gesamtevidenzstärke, nicht in einem einzelnen fehlenden Input. Betrachten Sie dies als Einschätzung auf Beobachtungsstufe, bis insgesamt stärkere Evidenz vorliegt.",
-        "Aucune dimension de preuve n'est individuellement critique, mais le score de confiance combiné n'atteint pas le seuil d'une décision Enter complète -- le déficit porte sur la solidité globale des preuves, pas sur un input manquant précis. Considérez ceci comme une lecture de stade de surveillance en attendant des preuves globalement plus solides.",
-        "Ninguna dimensión de evidencia es críticamente débil por sí sola, pero la puntuación de confianza combinada no alcanza el umbral de una decisión Enter completa; el déficit está en la solidez general de la evidencia, no en un dato faltante específico. Trate esto como una lectura en etapa de monitoreo hasta contar con evidencia global más sólida."
+        "No single validation dimension is critically weak, but planning confidence for this market falls short of a full Enter decision -- the shortfall is in overall validation strength rather than one specific missing input. Treat this as an early-stage read pending stronger validation across the board.",
+        "Tek başına kritik derecede zayıf bir doğrulama boyutu yok, ancak bu pazar için planlama güveni tam bir Gir kararı için yeterli değil; eksiklik tek bir belirli girdide değil, genel doğrulama gücündedir. Bunu, genel olarak daha güçlü doğrulama beklenen erken aşama bir değerlendirme olarak ele alın.",
+        "Keine einzelne Validierungsdimension ist kritisch schwach, aber der gemischte Konfidenzwert reicht nicht für eine vollständige Enter-Entscheidung aus -- das Defizit liegt in der Gesamtvalidierungsstärke, nicht in einem einzelnen fehlenden Input. Betrachten Sie dies als Einschätzung auf Beobachtungsstufe, bis insgesamt stärkere Validierung vorliegt.",
+        "Aucune dimension de validation n'est individuellement critique, mais le score de confiance combiné n'atteint pas le seuil d'une décision Enter complète -- le déficit porte sur la solidité globale de la validation, pas sur un input manquant précis. Considérez ceci comme une lecture de stade de surveillance en attendant une validation globalement plus solide.",
+        "Ninguna dimensión de validación es críticamente débil por sí sola, pero la puntuación de confianza combinada no alcanza el umbral de una decisión Enter completa; el déficit está en la solidez general de la validación, no en un dato faltante específico. Trate esto como una lectura en etapa de monitoreo hasta contar con validación global más sólida."
       ),
     });
   }
@@ -987,11 +987,11 @@ export function buildMarketFinalVerdictParagraph(
           )
         : marketText(
             language,
-            `The verdict is ${localizedDecision} at ${brief.confidence}% confidence. The deciding factor -- "${primaryRiskClause}" -- outweighs the identified opportunity today, so no entry, pilot, or expansion budget should be committed to this market until that specific gap is resolved with new, verified evidence.`,
-            `Karar %${brief.confidence} güvenle ${localizedDecision}: belirleyici unsur -- "${primaryRiskClause}" -- bugün belirlenen fırsattan daha ağır basmaktadır; bu nedenle bu belirli boşluk yeni ve doğrulanmış kanıtlarla çözülene kadar bu pazara giriş, pilot veya genişleme bütçesi ayrılmamalıdır.`,
-            `Das Urteil lautet mit ${brief.confidence}% Konfidenz ${localizedDecision}. Der entscheidende Faktor -- „${primaryRiskClause}" -- überwiegt die identifizierte Chance derzeit, daher sollte kein Budget für Markteintritt, Pilotprojekt oder Expansion in diesem Markt gebunden werden, bis diese spezifische Lücke durch neue, verifizierte Belege geschlossen ist.`,
-            `Le verdict est ${localizedDecision} avec ${brief.confidence}% de confiance. Le facteur déterminant -- « ${primaryRiskClause} » -- l'emporte aujourd'hui sur l'opportunité identifiée, donc aucun budget d'entrée, de pilote ou d'expansion ne doit être engagé sur ce marché jusqu'à ce que cette lacune précise soit résolue par de nouvelles preuves vérifiées.`,
-            `El veredicto es ${localizedDecision} con un ${brief.confidence}% de confianza. El factor decisivo -- "${primaryRiskClause}" -- supera hoy a la oportunidad identificada, por lo que no debe comprometerse presupuesto de entrada, piloto o expansión en este mercado hasta que esa brecha específica se resuelva con evidencia nueva y verificada.`
+            `The verdict is ${localizedDecision} at ${brief.confidence}% confidence. The deciding factor -- "${primaryRiskClause}" -- outweighs the identified opportunity today, so no entry, pilot, or expansion budget should be committed to this market until that specific gap is resolved with new, confirmed data.`,
+            `Karar %${brief.confidence} güvenle ${localizedDecision}: belirleyici unsur -- "${primaryRiskClause}" -- bugün belirlenen fırsattan daha ağır basmaktadır; bu nedenle bu belirli boşluk yeni ve onaylanmış verilerle çözülene kadar bu pazara giriş, pilot veya genişleme bütçesi ayrılmamalıdır.`,
+            `Das Urteil lautet mit ${brief.confidence}% Konfidenz ${localizedDecision}. Der entscheidende Faktor -- „${primaryRiskClause}" -- überwiegt die identifizierte Chance derzeit, daher sollte kein Budget für Markteintritt, Pilotprojekt oder Expansion in diesem Markt gebunden werden, bis diese spezifische Lücke durch neue, bestätigte Daten geschlossen ist.`,
+            `Le verdict est ${localizedDecision} avec ${brief.confidence}% de confiance. Le facteur déterminant -- « ${primaryRiskClause} » -- l'emporte aujourd'hui sur l'opportunité identifiée, donc aucun budget d'entrée, de pilote ou d'expansion ne doit être engagé sur ce marché jusqu'à ce que cette lacune précise soit résolue par de nouvelles données confirmées.`,
+            `El veredicto es ${localizedDecision} con un ${brief.confidence}% de confianza. El factor decisivo -- "${primaryRiskClause}" -- supera hoy a la oportunidad identificada, por lo que no debe comprometerse presupuesto de entrada, piloto o expansión en este mercado hasta que esa brecha específica se resuelva con datos nuevos y confirmados.`
           );
 
   return [heading, "", paragraph].join("\n");

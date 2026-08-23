@@ -4418,6 +4418,19 @@ function ExecutiveSnapshotPanel({
         }
       : {}),
   };
+  // CRITICAL FIX -- one of buildConfidenceRadar's 5 dimensions is
+  // literally labeled "Evidence"/"Kanıt" (it scores competitive-evidence
+  // strength for Business Plan/Acquisition's founder-viability score).
+  // Renaming that shared dimension label itself would touch other report
+  // kinds, so only Market Intelligence's rendered copy of the array is
+  // remapped here; the underlying score computation is untouched.
+  const confidenceRadarDimensions = isMarketIntelligence
+    ? snapshot.confidenceRadar.map((dimension) =>
+        dimension.label === "Evidence" || dimension.label === "Kanıt"
+          ? { ...dimension, label: isMarketIntelligenceTurkish ? "Pazar Sinyalleri" : "Market Signals" }
+          : dimension
+      )
+    : snapshot.confidenceRadar;
   const reportQualityBreakdown = getReportQualityBreakdown(
     reportQuality,
     labels.reportQuality === "Rapor Kalitesi"
@@ -4522,7 +4535,7 @@ function ExecutiveSnapshotPanel({
             {labels.confidenceRadar}
           </p>
           <div className="mt-3 space-y-2">
-            {snapshot.confidenceRadar.map((dimension) => (
+            {confidenceRadarDimensions.map((dimension) => (
               <div key={dimension.label} className="grid grid-cols-[5.75rem_minmax(0,1fr)_2.5rem] items-center gap-2">
                 <span className="text-xs text-zinc-400">{dimension.label}</span>
                 <span className="h-2 overflow-hidden rounded-full bg-white/10">
@@ -5585,7 +5598,27 @@ const ReportPanel = memo(function ReportPanel({
         pdf.roundedRect(margin + 21 + panelWidth, heatmapY, panelWidth, 42, 4, 4, "FD");
         pdf.setFontSize(7.2);
         pdf.setTextColor("#5eead4");
-        pdf.text(localizePdfPresentationLabel("Confidence Radar", pdfLocale).toUpperCase(), margin + 26 + panelWidth, heatmapY + 7);
+        pdf.text(
+          localizePdfPresentationLabel(
+            isMarketIntelligence ? "Confidence Factors" : "Confidence Radar",
+            pdfLocale
+          ).toUpperCase(),
+          margin + 26 + panelWidth,
+          heatmapY + 7
+        );
+        // CRITICAL FIX -- one of executiveSnapshot.confidenceRadar's 5
+        // dimensions is literally labeled "Evidence"/"Kanıt" (see
+        // buildConfidenceRadar in report-presentation.ts). Only Market
+        // Intelligence's copy of the array is remapped here; the
+        // underlying shared computation and Business Plan/Acquisition
+        // rendering are untouched.
+        const marketIntelligenceConfidenceRadarDimensions = isMarketIntelligence
+          ? executiveSnapshot.confidenceRadar.map((dimension) =>
+              dimension.label === "Evidence" || dimension.label === "Kanıt"
+                ? { ...dimension, label: pdfLocale === "tr" ? "Pazar Sinyalleri" : "Market Signals" }
+                : dimension
+            )
+          : executiveSnapshot.confidenceRadar;
         (isRealEstateReport
           ? [
               { label: "Evidence Quality", score: extractScore(fullReportContent, "Evidence Quality") },
@@ -5595,7 +5628,7 @@ const ReportPanel = memo(function ReportPanel({
               { label: "Environmental Risk", score: extractScore(fullReportContent, "Environmental and Geotechnical Risk") },
               { label: "Development Potential", score: extractScore(fullReportContent, "Development Potential") },
             ]
-          : executiveSnapshot.confidenceRadar).forEach((dimension, index) => {
+          : marketIntelligenceConfidenceRadarDimensions).forEach((dimension, index) => {
           const rowY = heatmapY + 14 + index * 5;
           const score = Math.max(0, Math.min(100, dimension.score ?? 0));
           pdf.setFontSize(6.4);
@@ -6063,7 +6096,7 @@ const ReportPanel = memo(function ReportPanel({
                 (isTurkishPdf ? "Ana risk, risk analizi bölümünde detaylandırılmıştır" : "Primary risk is detailed in the risk analysis"),
             ],
             [
-              "Missing Evidence",
+              isMarketIntelligence ? "Information Required Before Decision" : "Missing Evidence",
               missingEvidence ||
                 (isTurkishPdf
                   ? "Kararı değiştirecek nitelikte bir veri eksikliği belirtilmedi"

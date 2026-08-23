@@ -3002,7 +3002,7 @@ export function buildStandardReportPdf({
                   ? "Hukuki Analiz"
                   : "Legal Analysis"
                 : isMarketIntelligenceReport
-                  ? localizePdfPresentationLabel("Evidence-Based", pdfLocale)
+                  ? localizePdfPresentationLabel("Validation-Based", pdfLocale)
                   : localizePdfPresentationLabel("Investor Ready", pdfLocale),
           margin + 12,
           tagY,
@@ -3470,7 +3470,7 @@ export function buildStandardReportPdf({
               ? "Karar Desteği"
               : "Decision Support"
             : isMarketIntelligenceReport
-              ? localizePdfPresentationLabel("Evidence-Based", pdfLocale)
+              ? localizePdfPresentationLabel("Validation-Based", pdfLocale)
               : localizePdfPresentationLabel("Investor Ready", pdfLocale),
       ].map((label) => wrapPdfText(label, (contentWidth - 8) / 3 - 8).slice(0, 2));
       const summaryCardHeight = Math.max(
@@ -3919,7 +3919,7 @@ export function buildStandardReportPdf({
                 (isTurkishPdf ? "Ana risk, risk analizi bölümünde detaylandırılmıştır" : "Primary risk is detailed in the risk analysis"),
             ],
             [
-              "Missing Evidence",
+              isMarketIntelligenceReport ? "Information Required Before Decision" : "Missing Evidence",
               missingEvidence ||
                 (isTurkishPdf
                   ? "Kararı değiştirecek nitelikte bir veri eksikliği belirtilmedi"
