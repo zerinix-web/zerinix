@@ -189,6 +189,7 @@ import { marketFieldLabels } from "@/app/lib/report-engine/prompts/market";
 import { inferReportDomainFromFieldNames } from "@/app/lib/report-engine/domain-inference";
 import {
   isUniversalCustomerFacingSection,
+  sanitizeMarketIntelligencePresentationText,
   stripReportPresentationArtifacts,
 } from "@/app/lib/report-engine/report-presentation-sanitizer";
 import {
@@ -1957,10 +1958,68 @@ function getSectionEvidenceLevel(section: ReportSection): EvidenceLevel {
   return "planningAssumption";
 }
 
-function EvidenceBadge({ level, locale = "English" }: { level: EvidenceLevel; locale?: EvidenceLocale }) {
+// CRITICAL FIX -- remove internal system language from user-facing
+// Market Intelligence output. The bare "Verified"/"Estimated"/
+// "Assumption"/"AI Analysis" evidence-tier words (report-evidence.ts)
+// are a deliberate, tested, cross-report-kind taxonomy and are left
+// exactly as-is there -- this is a Market-Intelligence-only display
+// wrapper, the same established pattern as financialEvidenceBadgeLabels
+// above, so Business Plan and Acquisition's section badges are
+// unaffected.
+const marketEvidenceBadgeLabels: Partial<Record<EvidenceLevel, Record<EvidenceLocale, string>>> = {
+  verified: {
+    English: "Data Confirmed",
+    Turkish: "Veri Onaylandı",
+    German: "Daten bestätigt",
+    French: "Données confirmées",
+    Spanish: "Datos confirmados",
+  },
+  derived: {
+    English: "Derived",
+    Turkish: "Türetilmiş",
+    German: "Abgeleitet",
+    French: "Dérivé",
+    Spanish: "Derivado",
+  },
+  benchmarkDerived: {
+    English: "Market Support",
+    Turkish: "Pazar Desteği",
+    German: "Marktunterstützung",
+    French: "Support de marché",
+    Spanish: "Respaldo de mercado",
+  },
+  planningAssumption: {
+    English: "Key Assumption",
+    Turkish: "Temel Varsayım",
+    German: "Kernannahme",
+    French: "Hypothèse clé",
+    Spanish: "Suposición clave",
+  },
+  validationRequired: {
+    English: "Validation Status",
+    Turkish: "Doğrulama Durumu",
+    German: "Validierungsstatus",
+    French: "Statut de validation",
+    Spanish: "Estado de validación",
+  },
+};
+
+function getMarketEvidenceBadgeLabel(level: EvidenceLevel, locale: EvidenceLocale = "English") {
+  return marketEvidenceBadgeLabels[level]?.[locale] ?? getDashboardEvidenceLabel(level, locale);
+}
+
+function EvidenceBadge({
+  level,
+  locale = "English",
+  market = false,
+}: {
+  level: EvidenceLevel;
+  locale?: EvidenceLocale;
+  market?: boolean;
+}) {
   return (
     <span className={`w-fit shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${getFinancialMetricConfidenceBadgeClass(level)}`}>
-      {getDashboardEvidenceLabel(level, locale)}
+      {market ? getMarketEvidenceBadgeLabel(level, locale) : getDashboardEvidenceLabel(level, locale)}
     </span>
   );
 }
@@ -3371,7 +3430,7 @@ function ExecutiveSummaryVisual({
                   {kpi.label}
 	                </p>
 	                <div className="mt-2">
-	                  <EvidenceBadge level={kpi.evidence as EvidenceLevel} locale={evidenceLocale} />
+	                  <EvidenceBadge level={kpi.evidence as EvidenceLevel} locale={evidenceLocale} market={isMarketIntelligence} />
 	                </div>
                 <p className="mt-3 line-clamp-2 text-2xl font-semibold tracking-tight text-white">
                   {kpi.value}
@@ -3448,9 +3507,11 @@ function GaugeCircle({ label, score }: { label: string; score: number }) {
 function PremiumSectionVisual({
   section,
   investmentScore,
+  isMarketIntelligence = false,
 }: {
   section: ReportSection;
   investmentScore?: ReportInvestmentScore;
+  isMarketIntelligence?: boolean;
 }) {
   const field = section.field;
 
@@ -3502,7 +3563,7 @@ function PremiumSectionVisual({
                 </span>
               </div>
               <div className="mt-3">
-                <EvidenceBadge level={getSectionEvidenceLevel(section)} locale={evidenceLocale} />
+                <EvidenceBadge level={getSectionEvidenceLevel(section)} locale={evidenceLocale} market={isMarketIntelligence} />
               </div>
               <p className="mt-5 truncate whitespace-nowrap text-3xl font-semibold tracking-tight text-white">
                 {row.value}
@@ -4969,7 +5030,7 @@ const ReportSectionCard = memo(
                 {section.title}
               </h3>
               <div className="flex w-fit flex-wrap items-center gap-2">
-                <EvidenceBadge level={getSectionEvidenceLevel(section)} locale={sectionEvidenceLocale} />
+                <EvidenceBadge level={getSectionEvidenceLevel(section)} locale={sectionEvidenceLocale} market={isMarketIntelligence} />
                 <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
                   {sectionPdfLocale === "tr" ? "Bölüm" : "Section"} {String(index + 1).padStart(2, "0")}
                 </span>
@@ -5002,6 +5063,7 @@ const ReportSectionCard = memo(
                 <PremiumSectionVisual
                   section={section}
                   investmentScore={investmentScore}
+                  isMarketIntelligence={isMarketIntelligence}
                 />
               ) : null}
               {hasVisibleDetailsContent && section.field !== "tamSamSom" ? (
@@ -5081,22 +5143,32 @@ const ReportPanel = memo(function ReportPanel({
       return dedupeReportSections(
         reportFields
           .filter((entry) => isUniversalCustomerFacingSection(entry))
-          .map(({ field, title, icon }) => ({
-            field,
-            title,
-            icon,
-            content:
-              // stripReportPresentationArtifacts runs last -- a final
-              // defensive pass at the actual render boundary, on top of
-              // (not instead of) sanitizeReportFieldContent's own,
-              // unrelated diagnostic-routing cleanup, so this panel
-              // renders clean output even if some future caller ever
-              // passes reportData/reportFields in from a path that
-              // doesn't already filter/sanitize upstream.
-              stripReportPresentationArtifacts(
-                sanitizeReportFieldContent(field, reportData[field] || "")
-              ) || waitingMessage,
-          }))
+          .map(({ field, title, icon }) => {
+            // stripReportPresentationArtifacts runs after
+            // sanitizeReportFieldContent's own, unrelated diagnostic-
+            // routing cleanup -- a final defensive pass at the actual
+            // render boundary, so this panel renders clean output even
+            // if some future caller ever passes reportData/reportFields
+            // in from a path that doesn't already filter/sanitize
+            // upstream. CRITICAL FIX -- remove internal system language
+            // from user-facing Market Intelligence output:
+            // sanitizeMarketIntelligencePresentationText runs one
+            // further, Market-Intelligence-only pass on top of that
+            // (see its own doc comment) so this live composer view
+            // matches the persisted dashboard viewer's presentation.
+            const stripped = stripReportPresentationArtifacts(
+              sanitizeReportFieldContent(field, reportData[field] || "")
+            );
+            return {
+              field,
+              title,
+              icon,
+              content:
+                (isMarketIntelligence
+                  ? sanitizeMarketIntelligencePresentationText(stripped)
+                  : stripped) || waitingMessage,
+            };
+          })
       );
     }
 
@@ -5112,7 +5184,7 @@ const ReportPanel = memo(function ReportPanel({
           ]
         : []
     );
-  }, [reportData, reportFields, result, waitingMessage]);
+  }, [reportData, reportFields, result, waitingMessage, isMarketIntelligence]);
   const effectiveFailureMessage = failureMessage || "";
 
   const hasReportContent = !effectiveFailureMessage && sections.some(

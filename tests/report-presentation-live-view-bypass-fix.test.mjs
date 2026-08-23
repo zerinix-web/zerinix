@@ -57,10 +57,17 @@ const { extractAcquisitionDealFacts, computeAcquisitionDerivedMetrics } = await 
 // ---    now wired into every point Planner.tsx produces user-visible ----
 // ---    content -----------------------------------------------------------
 
+// NOTE: superseded by the "Remove internal intelligence language from
+// Market Intelligence reports" ticket -- sanitizeMarketIntelligence
+// PresentationText was added as a new EXPORT inside this same, existing
+// report-presentation-sanitizer.ts file (not a new file), so this
+// test's underlying intent (reuse the existing module) still holds; only
+// the exact import-statement text changed. See
+// tests/market-intelligence-remove-internal-language-fix.test.mjs.
 test("Planner.tsx imports the existing report-presentation-sanitizer module -- no new sanitizer file was created for this fix (drift check)", () => {
   assert.match(
     plannerSource,
-    /import \{\s*\n\s*isUniversalCustomerFacingSection,\s*\n\s*stripReportPresentationArtifacts,\s*\n\s*\} from "@\/app\/lib\/report-engine\/report-presentation-sanitizer";/
+    /import \{\s*\n\s*isUniversalCustomerFacingSection,\s*\n\s*sanitizeMarketIntelligencePresentationText,\s*\n\s*stripReportPresentationArtifacts,\s*\n\s*\} from "@\/app\/lib\/report-engine\/report-presentation-sanitizer";/
   );
 });
 
@@ -92,8 +99,18 @@ test("Planner.tsx filters activeReportFields (the field list ReportPanel actuall
   assert.ok(fieldsMatch, "activeReportFields is not filtered through isUniversalCustomerFacingSection");
 });
 
+// NOTE: superseded by the "Remove internal intelligence language from
+// Market Intelligence reports" ticket -- the .map() callback body was
+// restructured from a single inline expression into a block body (an
+// intermediate `stripped` variable) so a further, Market-Intelligence-
+// only sanitizeMarketIntelligencePresentationText pass could be layered
+// on top of it. stripReportPresentationArtifacts still wraps
+// sanitizeReportFieldContent's output exactly as before; only the
+// literal source shape changed. See
+// tests/market-intelligence-remove-internal-language-fix.test.mjs for
+// the full, current assertion.
 test("Planner.tsx's ReportPanel component applies a second, defensive stripReportPresentationArtifacts pass at the actual render boundary, on top of (not instead of) the unrelated sanitizeReportFieldContent diagnostic cleanup (drift check)", () => {
-  const sectionsMatch = /const sections = useMemo<ReportSection\[\]>\(\(\) => \{[\s\S]*?reportFields\s*\n\s*\.filter\(\(entry\) => isUniversalCustomerFacingSection\(entry\)\)\s*\n\s*\.map\(\(\{ field, title, icon \}\) => \(\{[\s\S]*?stripReportPresentationArtifacts\(\s*\n\s*sanitizeReportFieldContent\(field, reportData\[field\] \|\| ""\)\s*\n\s*\)/.exec(
+  const sectionsMatch = /const sections = useMemo<ReportSection\[\]>\(\(\) => \{[\s\S]*?reportFields\s*\n\s*\.filter\(\(entry\) => isUniversalCustomerFacingSection\(entry\)\)\s*\n\s*\.map\(\(\{ field, title, icon \}\) => \{[\s\S]*?const stripped = stripReportPresentationArtifacts\(\s*\n\s*sanitizeReportFieldContent\(field, reportData\[field\] \|\| ""\)\s*\n\s*\)/.exec(
     plannerSource
   );
   assert.ok(sectionsMatch, "ReportPanel's sections useMemo does not apply the defensive stripReportPresentationArtifacts pass");

@@ -304,3 +304,37 @@ export function sanitizeReportSectionsForPresentation<
     }))
     .filter((section) => section.content.trim().length > 0);
 }
+
+// CRITICAL FIX -- remove internal system language from user-facing
+// Market Intelligence output. formatExecutiveDecisionBrief
+// (executive-decision-brief.ts) bakes a "What Evidence Is Missing:"
+// heading directly into the stored report text at generation time --
+// that module is shared with Business Plan, Acquisition, and the
+// domain-analysis family, so its heading text cannot be relabeled at
+// the source without changing report generation for every report kind
+// that shares it, which is out of scope here. This is an additional,
+// Market-Intelligence-only presentation pass applied on top of the
+// universal stripReportPresentationArtifacts above -- it matches only
+// the exact, whole-line heading text that function produces (anchored,
+// so it can never partially match ordinary prose that happens to
+// mention "evidence"), and reframes it as an honest, non-alarming
+// statement of what the reader should do next rather than a bare
+// internal-audit label.
+const marketIntelligenceHeadingReplacements: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^What Evidence Is Missing:\s*$/gim, "Information Required Before Final Decision:"],
+  [/^Eksik Olan Kanıtlar:\s*$/gim, "Nihai Karardan Önce Gereken Bilgiler:"],
+  [/^Welche Belege fehlen:\s*$/gim, "Vor der endgültigen Entscheidung erforderliche Informationen:"],
+  [/^Quelles preuves manquent:\s*$/gim, "Informations requises avant la décision finale:"],
+  [/^Qué evidencia falta:\s*$/gim, "Información requerida antes de la decisión final:"],
+];
+
+export function sanitizeMarketIntelligencePresentationText(content: string): string {
+  if (!content) return content;
+
+  let sanitized = content;
+  for (const [pattern, replacement] of marketIntelligenceHeadingReplacements) {
+    sanitized = sanitized.replace(pattern, replacement);
+  }
+
+  return sanitized;
+}

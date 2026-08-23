@@ -172,10 +172,21 @@ test("ReportPdfButton.tsx never lets isSourceSectionTitle's branch actually exec
 
 // --- UI contains zero internal metadata ------------------------------------
 
+// NOTE: superseded by the "Remove internal intelligence language from
+// Market Intelligence reports" ticket -- visibleSections now also runs
+// an additional, Market-Intelligence-only sanitizeMarketIntelligence
+// PresentationText pass on top of the universal
+// stripReportPresentationArtifacts, so the exact literal map body this
+// test originally asserted no longer matches verbatim. The underlying
+// guarantee (isUniversalCustomerFacingSection filtering +
+// stripReportPresentationArtifacts sanitization on every section) is
+// unchanged and re-asserted below. See
+// tests/market-intelligence-remove-internal-language-fix.test.mjs for
+// the full, current assertion.
 test("page.tsx filters visibleSections through isUniversalCustomerFacingSection and sanitizes their content, and sourceSections is now hardcoded empty -- 'remove the Sources section entirely', not relocate it to an appendix (drift check)", () => {
   assert.match(
     pageSource,
-    /const visibleSections = uniqueReportSections\s*\n\s*\.filter\(\(section\) => isUniversalCustomerFacingSection\(section\)\)\s*\n\s*\.map\(\(section\) => \(\{\s*\n\s*\.\.\.section,\s*\n\s*content: stripReportPresentationArtifacts\(section\.content\),\s*\n\s*\}\)\)/
+    /const visibleSections = uniqueReportSections\s*\n\s*\.filter\(\(section\) => isUniversalCustomerFacingSection\(section\)\)\s*\n\s*\.map\(\(section\) => \(\{\s*\n\s*\.\.\.section,\s*\n\s*content: isMarketIntelligenceReport\s*\n\s*\? sanitizeMarketIntelligencePresentationText\(stripReportPresentationArtifacts\(section\.content\)\)\s*\n\s*: stripReportPresentationArtifacts\(section\.content\),\s*\n\s*\}\)\)/
   );
   assert.match(pageSource, /const sourceSections: typeof uniqueReportSections = \[\];/);
 });

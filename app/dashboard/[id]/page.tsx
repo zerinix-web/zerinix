@@ -74,6 +74,7 @@ import {
 } from "@/app/lib/report-engine/legal-report-rendering";
 import {
   isUniversalCustomerFacingSection,
+  sanitizeMarketIntelligencePresentationText,
   stripReportPresentationArtifacts,
 } from "@/app/lib/report-engine/report-presentation-sanitizer";
 
@@ -316,6 +317,56 @@ function getFinancialEvidenceBadgeLabel(level: EvidenceLevel, locale: EvidenceLo
   return financialEvidenceBadgeLabels[level]?.[locale] ?? getDashboardEvidenceLabel(level, locale);
 }
 
+// CRITICAL FIX -- remove internal system language from user-facing
+// Market Intelligence output. The bare "Verified"/"Estimated"/
+// "Assumption"/"AI Analysis" evidence-tier words (report-evidence.ts)
+// are a deliberate, tested, cross-report-kind taxonomy and are left
+// exactly as-is there -- this is a Market-Intelligence-only display
+// wrapper, the same established pattern as financialEvidenceBadgeLabels
+// above, so Business Plan and Acquisition's section badges are
+// unaffected.
+const marketEvidenceBadgeLabels: Partial<Record<EvidenceLevel, Record<EvidenceLocale, string>>> = {
+  verified: {
+    English: "Data Confirmed",
+    Turkish: "Veri Onaylandı",
+    German: "Daten bestätigt",
+    French: "Données confirmées",
+    Spanish: "Datos confirmados",
+  },
+  derived: {
+    English: "Derived",
+    Turkish: "Türetilmiş",
+    German: "Abgeleitet",
+    French: "Dérivé",
+    Spanish: "Derivado",
+  },
+  benchmarkDerived: {
+    English: "Market Support",
+    Turkish: "Pazar Desteği",
+    German: "Marktunterstützung",
+    French: "Support de marché",
+    Spanish: "Respaldo de mercado",
+  },
+  planningAssumption: {
+    English: "Key Assumption",
+    Turkish: "Temel Varsayım",
+    German: "Kernannahme",
+    French: "Hypothèse clé",
+    Spanish: "Suposición clave",
+  },
+  validationRequired: {
+    English: "Validation Status",
+    Turkish: "Doğrulama Durumu",
+    German: "Validierungsstatus",
+    French: "Statut de validation",
+    Spanish: "Estado de validación",
+  },
+};
+
+function getMarketEvidenceBadgeLabel(level: EvidenceLevel, locale: EvidenceLocale = "English") {
+  return marketEvidenceBadgeLabels[level]?.[locale] ?? getDashboardEvidenceLabel(level, locale);
+}
+
 // CRITICAL FIX -- do not present a planning assumption as actual
 // performance. A founder-confirmed figure (evidence === "verified") is
 // shown under its plain name; anything modeled or benchmark-derived is
@@ -344,14 +395,20 @@ function EvidenceBadge({
   level,
   locale = "English",
   financial = false,
+  market = false,
 }: {
   level: EvidenceLevel;
   locale?: EvidenceLocale;
   financial?: boolean;
+  market?: boolean;
 }) {
   return (
     <span className={`w-fit shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${getEvidenceBadgeClass(level)}`}>
-      {financial ? getFinancialEvidenceBadgeLabel(level, locale) : getDashboardEvidenceLabel(level, locale)}
+      {financial
+        ? getFinancialEvidenceBadgeLabel(level, locale)
+        : market
+          ? getMarketEvidenceBadgeLabel(level, locale)
+          : getDashboardEvidenceLabel(level, locale)}
     </span>
   );
 }
@@ -1135,7 +1192,7 @@ function ExecutiveSummaryVisual({
                   {kpi.label}
                 </p>
                 <div className="mt-2">
-                  <EvidenceBadge level={kpi.evidence} locale={evidenceLocale} />
+                  <EvidenceBadge level={kpi.evidence} locale={evidenceLocale} market={isMarketIntelligence} />
                 </div>
                 <p className="mt-3 line-clamp-2 text-2xl font-semibold tracking-tight text-white">
                   {kpi.value}
@@ -1217,10 +1274,12 @@ function ReportSectionVisual({
   title,
   content,
   investmentScore,
+  isMarketIntelligence = false,
 }: {
   title: string;
   content: string;
   investmentScore?: ReportInvestmentScore;
+  isMarketIntelligence?: boolean;
 }) {
   const normalizedTitle = title.toLowerCase();
   const evidenceLocale = getResponseLanguage(detectPdfPresentationLocale(content));
@@ -1252,7 +1311,7 @@ function ReportSectionVisual({
 	                <div className="rounded-2xl border border-white/10 bg-black/35 p-3 text-center">
 	                  <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">{bar.label}</p>
 	                  <div className="mt-2 flex justify-center">
-	                    <EvidenceBadge level={getDashboardMetricEvidence(bar.label, value, content)} locale={evidenceLocale} />
+	                    <EvidenceBadge level={getDashboardMetricEvidence(bar.label, value, content)} locale={evidenceLocale} market={isMarketIntelligence} />
 	                  </div>
 	                </div>
                 <div className="h-14 rounded-2xl border border-white/10 bg-zinc-950 p-1.5">
@@ -3073,11 +3132,14 @@ export default async function ReportDetailPage({
   // section entirely, not relocate it. stripReportPresentationArtifacts
   // is the final defensive pass against any other internal artifact
   // buildLegalReportSections' reconstruction might reintroduce.
+  const isMarketIntelligenceReport = report.type === "Market Analysis";
   const visibleSections = uniqueReportSections
     .filter((section) => isUniversalCustomerFacingSection(section))
     .map((section) => ({
       ...section,
-      content: stripReportPresentationArtifacts(section.content),
+      content: isMarketIntelligenceReport
+        ? sanitizeMarketIntelligencePresentationText(stripReportPresentationArtifacts(section.content))
+        : stripReportPresentationArtifacts(section.content),
     }))
     .filter((section) => section.content.trim().length > 0);
   const sourceSections: typeof uniqueReportSections = [];
@@ -3295,6 +3357,7 @@ export default async function ReportDetailPage({
                                 title={section.title}
                                 content={section.content}
                                 investmentScore={report.investmentScore}
+                                isMarketIntelligence={report.type === "Market Analysis"}
                               />
                             ) : null}
                           </div>
@@ -3377,7 +3440,7 @@ export default async function ReportDetailPage({
 	                <p className="text-sm text-zinc-500">Report Type</p>
 	              </div>
 	              <div className="mt-3">
-	                <EvidenceBadge level="planningAssumption" locale={reportEvidenceLocale} />
+	                <EvidenceBadge level="planningAssumption" locale={reportEvidenceLocale} market={report.type === "Market Analysis"} />
 	              </div>
 	              <p className="mt-3 text-lg font-semibold text-white">{report.type}</p>
             </div>
@@ -3387,7 +3450,7 @@ export default async function ReportDetailPage({
 	                <p className="text-sm text-zinc-500">Created</p>
 	              </div>
 	              <div className="mt-3">
-	                <EvidenceBadge level="verified" locale={reportEvidenceLocale} />
+	                <EvidenceBadge level="verified" locale={reportEvidenceLocale} market={report.type === "Market Analysis"} />
 	              </div>
 	              <p className="mt-3 text-lg font-semibold text-white">
                 {formatDate(report.createdAt)}
@@ -3399,7 +3462,7 @@ export default async function ReportDetailPage({
 	                <p className="text-sm text-zinc-500">Status</p>
 	              </div>
 	              <div className="mt-3">
-	                <EvidenceBadge level="verified" locale={reportEvidenceLocale} />
+	                <EvidenceBadge level="verified" locale={reportEvidenceLocale} market={report.type === "Market Analysis"} />
 	              </div>
 	              <p className="mt-3 text-lg font-semibold text-white">{report.status}</p>
             </div>
@@ -3412,7 +3475,7 @@ export default async function ReportDetailPage({
 	                <p className="text-sm text-zinc-500">Workspace</p>
 	              </div>
 	              <div className="mt-3">
-	                <EvidenceBadge level="verified" locale={reportEvidenceLocale} />
+	                <EvidenceBadge level="verified" locale={reportEvidenceLocale} market={report.type === "Market Analysis"} />
 	              </div>
 	              <p className="mt-3 line-clamp-2 text-lg font-semibold text-white">
                 {workspaceName}
@@ -3557,7 +3620,7 @@ export default async function ReportDetailPage({
 	                          {item.label}
 	                        </p>
 	                        <div className="mt-2">
-	                          <EvidenceBadge level={item.evidence} locale={reportEvidenceLocale} />
+	                          <EvidenceBadge level={item.evidence} locale={reportEvidenceLocale} market={report.type === "Market Analysis"} />
 	                        </div>
 	                      </div>
 	                    </div>
@@ -3690,7 +3753,7 @@ export default async function ReportDetailPage({
 	                                </span>
 	                                {!isLegalReport ? (
 	                                  <div className="mt-2">
-	                                    <EvidenceBadge level={getDashboardSectionEvidence(section)} locale={reportEvidenceLocale} />
+	                                    <EvidenceBadge level={getDashboardSectionEvidence(section)} locale={reportEvidenceLocale} market={report.type === "Market Analysis"} />
 	                                  </div>
 	                                ) : null}
 	                                <h2 className="mt-3 text-2xl font-semibold tracking-[-0.025em] text-white">
@@ -3733,6 +3796,7 @@ export default async function ReportDetailPage({
                                 title={section.title}
                                 content={section.content}
                                 investmentScore={report.investmentScore}
+                                isMarketIntelligence={report.type === "Market Analysis"}
                               />
                               {detailsContent.trim() ? (
                                 <>
