@@ -21,7 +21,10 @@ import {
   normalizeSelectedAnalysisMode,
   resolveExpertiseProfile,
 } from "@/app/lib/ai/expertise-profile";
-import { classifyReportDomain } from "@/app/lib/report-engine/domain";
+import {
+  applyPromptIntentModeOverride,
+  classifyReportDomain,
+} from "@/app/lib/report-engine/domain";
 import {
   createDynamicReportPlanFallback,
   resolveDynamicReportPlan,
@@ -380,9 +383,10 @@ export async function POST(req: Request) {
 
   // First layer of ZERINIX document intelligence: a confidently detected
   // attachment category can override the selected analysis mode before
-  // anything else reads body.analysisMode. This is the only place this
-  // runs, so every downstream read of body.analysisMode (expertise
-  // profile, report plan, research plan, market-mode dispatch) sees the
+  // anything else reads body.analysisMode. This and the prompt-intent
+  // override immediately below are the only two places this runs, so
+  // every downstream read of body.analysisMode (expertise profile,
+  // report plan, research plan, market-mode dispatch) sees the
   // corrected value. Only legal_document forces a change (into "chat" /
   // Strategic Advisory) -- every other category and every case below the
   // confidence threshold leaves body.analysisMode untouched.
@@ -395,6 +399,24 @@ export async function POST(req: Request) {
   });
   if (documentAwareRouting.overridden) {
     body.analysisMode = documentAwareRouting.selectedMode;
+  }
+  // CRITICAL BUG FIX -- Market Intelligence prompts routed to Business
+  // Plan. An unambiguous Market-Intelligence-intent prompt ("evaluate
+  // the market", "assess market opportunity", "before entering a
+  // market", or the user literally naming a Market Intelligence
+  // Report) submitted under the "plan" (Business Idea Validation) card
+  // is corrected to "market" here, before anything downstream reads
+  // body.analysisMode -- see applyPromptIntentModeOverride's own
+  // documentation for the exact, deliberately conservative matching
+  // rules. Never touches "market"/"chat" selections, acquisition
+  // prompts, or a prompt that also carries a genuine Business Plan
+  // execution signal.
+  const promptIntentRouting = applyPromptIntentModeOverride({
+    selectedMode: body.analysisMode,
+    prompt: typeof body.prompt === "string" ? body.prompt : "",
+  });
+  if (promptIntentRouting.overridden) {
+    body.analysisMode = promptIntentRouting.selectedMode;
   }
   // Second layer of ZERINIX Legal Intelligence: for a confidently detected
   // legal_document / legal_case_analysis attachment, generate a

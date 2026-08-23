@@ -104,6 +104,50 @@ const explicitBusinessReportSignals =
 const ventureCreationSignals =
   /\b(startup|new venture|launch (?:a |the )?(?:business|company|app|application|platform)|build (?:a |the )?(?:business|company|app|application|platform)|is it (?:worth|sensible to)\s+(?:starting|building|launching)|should i (?:start|build|launch)|does it make sense to (?:start|build|launch)|founder|iş fikri|girişim|kurmak istiyorum|şirket kur|uygulama kur|platform kur)\b|\b(?:kurmak|açmak|başlatmak|kurmayı|açmayı|başlatmayı)\s+(?:istiyorum|düşünüyorum|planlıyorum|mantıklı\s*mı|kârlı\s*mı|karlı\s*mı|iyi\s*(?:bir\s*)?fikir\s*mi|mantıklı\s*olur\s*mu)/i;
 
+// CRITICAL BUG FIX -- Market Intelligence prompts routed to Business
+// Plan. Confirmed live: "I want to evaluate the European AI
+// cybersecurity market before launching a new B2B security product...
+// Create a Market Intelligence Report." unambiguously asks to evaluate
+// a market's attractiveness, not to build/price/launch a company --
+// used by applyPromptIntentModeOverride below. Requires a specific verb
+// (evaluate/assess/research/analyze/understand) paired with a
+// market/industry noun, "competitor(s) analysis"/"analyze competitors",
+// "market opportunity"/"attractiveness"/etc, or the user literally
+// naming the report they want, so a prompt that merely mentions
+// "market" in passing (e.g. "a startup targeting the healthcare
+// market") never matches -- the same unambiguous-compound-phrase
+// philosophy as acquisitionSignals above.
+//
+// CRITICAL FIX -- Market Intelligence intent must win priority over
+// generic launch/build/product-idea language elsewhere in the same
+// prompt. Confirmed live: "I want to evaluate the European AI
+// cybersecurity market before launching a new B2B security product."
+// still misrouted to Business Plan even after this signal was added,
+// because the countersignal check below used to reuse the broad,
+// general-purpose ventureCreationSignals/explicitBusinessReportSignals
+// (which match on bare "startup"/"founder"/"launch a business" words) --
+// any incidental mention of one of those words anywhere in an otherwise
+// clearly market-research-focused prompt silently blocked the override.
+// The countersignal below is now scoped to only the specific,
+// unambiguous execution-planning phrases that actually signal Business
+// Plan intent, so a bare "launching"/"building"/"product idea"/"before
+// entering" elsewhere in the prompt can never block a genuine Market
+// Intelligence signal.
+const marketIntelligenceIntentSignals =
+  /\b(?:evaluate|assess|research|analyz(?:e|ing|es)|understand(?:ing)?)\s+(?:the\s+|this\s+|a\s+|our\s+|whether\s+)?(?:[a-z][\w-]*\s+){0,4}(?:market|industry)\b|\bmarket\s+(?:opportunity|attractiveness|sizing|research|analysis|entry)\b|\bcompetitors?\s+analysis\b|\banalyz(?:e|ing|es)\s+(?:the\s+|our\s+|potential\s+)?competitors?\b|\bbefore\s+entering\s+(?:the\s+|a\s+|this\s+)?market\b|\bmarket\s+intelligence\s+report\b|\bmarket\s+research\s+report\b/i;
+
+// Countersignal: an unambiguous Business Plan EXECUTION-intent phrase
+// (create a business plan / build company strategy / operating plan /
+// financial forecast / GTM execution roadmap / startup execution), not
+// a generic venture-launch word. A prompt that genuinely mixes both
+// intents ("evaluate the market, then create a business plan") is left
+// exactly as the user selected rather than guessed at; a prompt that
+// merely mentions "launching"/"building"/a "product idea" alongside
+// real Market Intelligence intent is not blocked by this check, per the
+// fix above.
+const businessPlanExecutionIntentSignals =
+  /\bcreate\s+(?:a\s+|the\s+|my\s+|our\s+)?business\s+plan\b|\bbuild(?:ing)?\s+(?:a\s+|the\s+|my\s+|our\s+)?company\s+strategy\b|\boperating\s+plan\b|\bfinancial\s+forecast(?:s|ing)?\b|\b(?:gtm|go[\s-]to[\s-]market)\s+execution\s+roadmap\b|\bstartup\s+execution\b|\bbusiness\s+plan\s+report\b|\bbusiness\s+idea\s+validation\s+report\b/i;
+
 const specializedDomainSignals: Array<[Exclude<ReportDomain, "business" | "real_estate">, RegExp]> = [
   ["legal", /\b(contract|agreement|clause|legal|compliance|liability|indemnity|termination|governing law|sözleşme|hukuk|uyum|sorumluluk|tazminat|fesih)\b/i],
   ["accounting", /\b(accounting|invoice|ledger|trial balance|tax|vat|ifrs|gaap|muhasebe|fatura|vergi|kdv|defter)\b/i],
@@ -258,4 +302,81 @@ export function resolveReportDomainForSelectedMode({
   }
 
   return "business";
+}
+
+// Local copy of app/lib/ai/expertise-profile.ts's mode type/normalizer,
+// duplicated rather than imported so this file keeps its existing
+// guarantee of carrying no runtime "@/" imports of its own -- several
+// existing tests import domain.ts directly (no alias-resolution step)
+// relying on exactly that. Kept intentionally tiny (3 literal values,
+// covered by a drift-check test against the real definition) so it
+// cannot silently diverge unnoticed.
+const localSelectedAnalysisModeValues = ["plan", "market", "chat"] as const;
+type LocalSelectedAnalysisMode = (typeof localSelectedAnalysisModeValues)[number];
+function normalizeLocalSelectedAnalysisMode(value: unknown): LocalSelectedAnalysisMode {
+  return localSelectedAnalysisModeValues.includes(value as LocalSelectedAnalysisMode)
+    ? (value as LocalSelectedAnalysisMode)
+    : "chat";
+}
+
+export type PromptIntentModeOverrideResult = {
+  selectedMode: LocalSelectedAnalysisMode;
+  overridden: boolean;
+};
+
+// CRITICAL BUG FIX -- Market Intelligence prompts routed to Business
+// Plan. Market Intelligence ("market") and Business Idea Validation
+// ("plan") are two separate, explicitly user-selected cards with no
+// free-text classification between them anywhere in the request
+// pipeline -- every downstream function (resolveReportDomainForSelectedMode
+// above, expertise-profile.ts, understanding.ts) simply trusts whatever
+// selectedMode it is handed. This is the one place that corrects an
+// unambiguous mismatch before anything downstream reads analysisMode,
+// mirroring applyDocumentAwareModeOverride's own document-based
+// correction (app/lib/ai/document-intelligence.ts) -- same design, text
+// intent instead of an attachment category.
+//
+// Deliberately conservative, matching acquisitionSignals' own
+// philosophy: only overrides when Market Intelligence intent is
+// unambiguous (a specific verb+market/industry/competitor phrase, an
+// explicit "before entering a market" framing, or the user literally
+// naming the report they want), and never when an acquisition signal or
+// a genuine Business Plan EXECUTION-intent signal is also present -- a
+// prompt that mixes both intents is left exactly as selected rather
+// than guessed at. Market Intelligence intent takes priority over
+// generic launch/build/product-idea language elsewhere in the prompt --
+// the countersignal check deliberately does NOT reuse the broad,
+// general-purpose ventureCreationSignals/explicitBusinessReportSignals
+// (which match on bare "startup"/"founder"/"launch a business" words)
+// for exactly that reason; see businessPlanExecutionIntentSignals'
+// own comment. Only ever corrects "plan" -> "market"; "market" and
+// "chat" selections are always returned unchanged, and this can never
+// affect Acquisition routing (excluded outright) or the Business Plan
+// pipeline's own logic (report generation itself is untouched).
+export function applyPromptIntentModeOverride({
+  selectedMode,
+  prompt,
+}: {
+  selectedMode: unknown;
+  prompt: string;
+}): PromptIntentModeOverrideResult {
+  const normalizedMode = normalizeLocalSelectedAnalysisMode(selectedMode);
+
+  if (normalizedMode !== "plan") {
+    return { selectedMode: normalizedMode, overridden: false };
+  }
+
+  if (acquisitionSignals.test(prompt)) {
+    return { selectedMode: normalizedMode, overridden: false };
+  }
+
+  if (!marketIntelligenceIntentSignals.test(prompt)) {
+    return { selectedMode: normalizedMode, overridden: false };
+  }
+
+  if (businessPlanExecutionIntentSignals.test(prompt)) {
+    return { selectedMode: normalizedMode, overridden: false };
+  }
+
+  return { selectedMode: "market", overridden: true };
 }
