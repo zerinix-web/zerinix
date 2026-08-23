@@ -1854,11 +1854,20 @@ function extractCompetitorRows(content: string) {
       };
 
       rows.push({
-        company: cleanPdfExecutiveText(read(["company", "competitor", "rakip"]), 44),
-        positioning: cleanPdfExecutiveText(read(["position", "konum"]), 88),
+        // CRITICAL FIX -- restore Market Intelligence's structured PDF
+        // presentation. Market Intelligence's competitiveLandscape table
+        // (market-intelligence-graph.ts) uses "Vendor" for the company
+        // column and "Market Relevance"/"Confidence" in place of a
+        // "Threat" column -- neither previously matched, so this table
+        // rendered with empty Company/Threat cells for Market
+        // Intelligence even when the "competitor" title check below
+        // fired. Added as additional keys, not replacements, so Business
+        // Plan/Acquisition's existing column matches are unchanged.
+        company: cleanPdfExecutiveText(read(["company", "competitor", "vendor", "rakip"]), 44),
+        positioning: cleanPdfExecutiveText(read(["position", "category", "konum"]), 88),
         strengths: cleanPdfExecutiveText(read(["strength", "güç"]), 76),
         weaknesses: cleanPdfExecutiveText(read(["weakness", "zayıf"]), 76),
-        threat: cleanPdfExecutiveText(read(["threat", "risk"]), 64),
+        threat: cleanPdfExecutiveText(read(["threat", "risk", "market relevance", "confidence"]), 64),
       });
     });
 
@@ -3953,7 +3962,7 @@ export function buildStandardReportPdf({
           return 65;
         }
 
-        if (normalizedTitle.includes("competitor")) {
+        if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {
           const rows = extractCompetitorRows(content);
           const columns = [
             { label: localizePdfPresentationLabel("Company", pdfLocale), width: bodyWidth * 0.19 },
@@ -4321,7 +4330,7 @@ export function buildStandardReportPdf({
           return 26;
         }
 
-        if (normalizedTitle.includes("competitor")) {
+        if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {
           const rows = extractCompetitorRows(section.content);
           return 8 + Math.max(1, rows.length) * 15 + 4;
         }
