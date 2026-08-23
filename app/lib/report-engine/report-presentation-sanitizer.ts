@@ -321,11 +321,42 @@ export function sanitizeReportSectionsForPresentation<
 // statement of what the reader should do next rather than a bare
 // internal-audit label.
 const marketIntelligenceHeadingReplacements: ReadonlyArray<readonly [RegExp, string]> = [
-  [/^What Evidence Is Missing:\s*$/gim, "Information Required Before Final Decision:"],
-  [/^Eksik Olan Kanıtlar:\s*$/gim, "Nihai Karardan Önce Gereken Bilgiler:"],
-  [/^Welche Belege fehlen:\s*$/gim, "Vor der endgültigen Entscheidung erforderliche Informationen:"],
-  [/^Quelles preuves manquent:\s*$/gim, "Informations requises avant la décision finale:"],
-  [/^Qué evidencia falta:\s*$/gim, "Información requerida antes de la decisión final:"],
+  [/^What Evidence Is Missing:\s*$/gim, "Information Required Before Decision:"],
+  [/^Eksik Olan Kanıtlar:\s*$/gim, "Karardan Önce Gereken Bilgiler:"],
+  [/^Welche Belege fehlen:\s*$/gim, "Vor der Entscheidung erforderliche Informationen:"],
+  [/^Quelles preuves manquent:\s*$/gim, "Informations requises avant la décision:"],
+  [/^Qué evidencia falta:\s*$/gim, "Información requerida antes de la decisión:"],
+];
+
+// CRITICAL FIX -- a bracketed evidence-ID citation list ("Evidence:
+// [R1], [R2]") has its bracket tags already removed by the universal
+// stripReportPresentationArtifacts above (citationBracketTagPattern),
+// but that leaves a dangling, broken-looking "Evidence: ," or
+// "Evidence: , ," fragment behind -- confirmed live. Market
+// Intelligence's own market-intelligence-graph.ts is the only producer
+// of this exact "| Evidence: [ids]" shape, so removing the whole
+// dangling fragment here (rather than just relabeling it, since its
+// content is already gone) is honest: no information is hidden that
+// wasn't already stripped by the universal pass.
+const marketIntelligenceDanglingEvidenceLabelPattern = /\s*\|\s*Evidence:\s*(?:,\s*)*(?=\||$)/gim;
+
+// CRITICAL FIX -- "Some external sources could not be verified..." reads
+// as an internal audit disclosure rather than an executive statement of
+// what to do next. Multiple trailing clauses exist across this
+// codebase's generation-time fallback text ("...so this section does
+// not contain a definitive conclusion." / "...so the affected sections
+// are not definitive." / "...so this field is not definitive."); all are
+// replaced with the ticket's own single, canonical sentence regardless
+// of which trailing clause was generated.
+const marketIntelligenceUnverifiedSourcesReplacements: ReadonlyArray<readonly [RegExp, string]> = [
+  [
+    /Some external sources could not be verified,?\s*so[^.]*\./gi,
+    "Some assumptions require additional validation before a final conclusion.",
+  ],
+  [
+    /Bazı dış kaynaklar doğrulanamadığı için[^.]*\./gi,
+    "Bazı varsayımlar nihai bir sonuca varılmadan önce ek doğrulama gerektiriyor.",
+  ],
 ];
 
 export function sanitizeMarketIntelligencePresentationText(content: string): string {
@@ -335,6 +366,10 @@ export function sanitizeMarketIntelligencePresentationText(content: string): str
   for (const [pattern, replacement] of marketIntelligenceHeadingReplacements) {
     sanitized = sanitized.replace(pattern, replacement);
   }
+  for (const [pattern, replacement] of marketIntelligenceUnverifiedSourcesReplacements) {
+    sanitized = sanitized.replace(pattern, replacement);
+  }
+  sanitized = sanitized.replace(marketIntelligenceDanglingEvidenceLabelPattern, "");
 
   return sanitized;
 }

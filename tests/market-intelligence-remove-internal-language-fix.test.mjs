@@ -34,7 +34,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 //    additive, Market-Intelligence-only text pass
 //    (sanitizeMarketIntelligencePresentationText, added to the existing
 //    report-presentation-sanitizer.ts module) reframes it as
-//    "Information Required Before Final Decision:" wherever it appears
+//    "Information Required Before Decision:" wherever it appears
 //    in a Market Intelligence report's content, matched only as an
 //    exact, anchored whole-line heading (in all 5 supported languages)
 //    so it can never partially match ordinary prose that happens to
@@ -52,7 +52,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 //    the sanitizer uses, reproduced below.
 //
 // 3. Honesty preserved: the reframed heading names what the reader
-//    should do next ("Information Required Before Final Decision")
+//    should do next ("Information Required Before Decision")
 //    rather than a bare internal-audit label ("What Evidence Is
 //    Missing"), without softening or hiding the underlying gap list
 //    itself -- the gap items that follow the heading are untouched.
@@ -110,7 +110,7 @@ test("sanitizeMarketIntelligencePresentationText reframes 'What Evidence Is Miss
 
   const sanitized = sanitizeMarketIntelligencePresentationText(content);
   assert.doesNotMatch(sanitized, /What Evidence Is Missing:/);
-  assert.match(sanitized, /Information Required Before Final Decision:/);
+  assert.match(sanitized, /Information Required Before Decision:/);
   // The gap items themselves are untouched -- only the heading changes.
   assert.match(sanitized, /Direct category CAGR figures from a primary industry report/);
   assert.match(sanitized, /Independent competitor pricing confirmation/);
@@ -122,11 +122,11 @@ test("sanitizeMarketIntelligencePresentationText reframes 'What Evidence Is Miss
 
 test("sanitizeMarketIntelligencePresentationText covers all 5 supported languages' exact heading text", () => {
   const cases = [
-    ["What Evidence Is Missing:", "Information Required Before Final Decision:"],
-    ["Eksik Olan Kanıtlar:", "Nihai Karardan Önce Gereken Bilgiler:"],
-    ["Welche Belege fehlen:", "Vor der endgültigen Entscheidung erforderliche Informationen:"],
-    ["Quelles preuves manquent:", "Informations requises avant la décision finale:"],
-    ["Qué evidencia falta:", "Información requerida antes de la decisión final:"],
+    ["What Evidence Is Missing:", "Information Required Before Decision:"],
+    ["Eksik Olan Kanıtlar:", "Karardan Önce Gereken Bilgiler:"],
+    ["Welche Belege fehlen:", "Vor der Entscheidung erforderliche Informationen:"],
+    ["Quelles preuves manquent:", "Informations requises avant la décision:"],
+    ["Qué evidencia falta:", "Información requerida antes de la decisión:"],
   ];
   for (const [original, expected] of cases) {
     const sanitized = sanitizeMarketIntelligencePresentationText(`Intro line\n${original}\nGap 1.`);
@@ -291,7 +291,7 @@ test("market analysis logic, TAM/SAM/SOM calculations, and competitor analysis p
     marketPresentationSource,
     /decision === "ENTER" \? "GO" : decision === "MONITOR" \? "CONDITIONAL_GO" : "NO_GO"/
   );
-  assert.doesNotMatch(marketPresentationSource, /marketEvidenceBadgeLabels|Information Required Before Final Decision/);
+  assert.doesNotMatch(marketPresentationSource, /marketEvidenceBadgeLabels|Information Required Before Decision/);
 
   const marketPromptSource = readFileSync(
     new URL("../app/lib/report-engine/prompts/market.ts", import.meta.url),

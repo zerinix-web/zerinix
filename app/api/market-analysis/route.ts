@@ -624,19 +624,28 @@ function enforceMarketReportLanguage(
 // in app/lib/report-engine/market-intelligence-presentation.ts, which never
 // touches investmentScore and never evaluates a founder.
 
+// CRITICAL FIX -- remove research infrastructure sections from the
+// customer-facing report. marketInfrastructure lists government/
+// regulator/standards-body entities discovered during research --
+// useful internally, but appending it into the customer's own Market
+// Overview section under a "Market Infrastructure" heading read as
+// leaked research scaffolding, not market analysis. The underlying
+// graph.vendorIntelligence.marketInfrastructure data and its
+// confidence/discovery role are computed exactly as before (this
+// module's own analysis logic is untouched) -- this only stops that
+// already-computed content from being appended to a customer-visible
+// field. marketInfrastructure is destructured out and discarded rather
+// than spread onto the report, since it is not itself a MarketReportField.
 function applySharedMarketGraph(
   report: Record<MarketReportField, string>,
   graph: MarketIntelligenceGraph,
   language: ResponseLanguage
 ) {
   const projection = projectMarketIntelligenceGraphToReport(graph, language);
-  const { marketInfrastructure, ...reportFieldsFromGraph } = projection;
+  const { marketInfrastructure: _marketInfrastructure, ...reportFieldsFromGraph } = projection;
   return {
     ...report,
     ...reportFieldsFromGraph,
-    marketOverview: marketInfrastructure
-      ? `${report.marketOverview}\n\n${marketInfrastructure}`.trim()
-      : report.marketOverview,
   };
 }
 
