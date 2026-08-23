@@ -5234,11 +5234,35 @@ const ReportPanel = memo(function ReportPanel({
     reportDomain === "operations" ||
     reportDomain === "procurement" ||
     reportDomain === "acquisition";
+  // CRITICAL FIX -- PDF export used the wrong report payload after Market
+  // Intelligence generation. isLegalRenderableReport has its own explicit,
+  // type-based exemptions for Real Estate/Acquisition/Market Analysis
+  // (see that function's own comments) -- but this call site always
+  // passed the literal placeholder "Strategic Report" instead of this
+  // report's actual type, so none of those exemptions could ever fire
+  // here specifically. Confirmed live: a Market Intelligence prompt that
+  // merely contains the bare word "legal" (e.g. "I want a Market
+  // Intelligence analysis, not a legal analysis.") matched
+  // isLegalRenderableReport's fallback keyword heuristic and produced a
+  // Legal Assessment Report PDF (Material Facts and nothing else) even
+  // though the on-screen render -- which reads reportTitle/isMarketIntelligence
+  // directly, not this function -- correctly showed the Market
+  // Intelligence report. Passing the real type (mirroring exactly what
+  // ReportPdfButton.tsx and page.tsx already pass via the full saved
+  // report object) lets the exemptions this function already has work as
+  // intended for the live/in-progress view too.
+  const legalRenderableReportType = isRealEstateReport
+    ? "Real Estate Investment Analysis"
+    : reportDomain === "acquisition"
+      ? "Acquisition Due Diligence Report"
+      : isMarketIntelligence
+        ? "Market Analysis"
+        : "Strategic Report";
   const isLegalReport =
     reportDomain === "legal" ||
     (!isKnownNonLegalSpecializedDomain &&
       isLegalRenderableReport({
-        type: "Strategic Report",
+        type: legalRenderableReportType,
         title: reportTitle,
         prompt: sourcePrompt || "",
         sections,
