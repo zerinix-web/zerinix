@@ -35,8 +35,48 @@ type ReportDomainAsset = {
 // valuation" pitch must never be misrouted here). "purchase price" and
 // "enterprise value"/"EV/ARR" are kept as standalone triggers since they
 // are not ordinarily used outside a company-sale context.
-const acquisitionSignals =
-  /\b(?:acquisitions?|acquiring|acquire\s+(?:a\s+|the\s+)?(?:company|business|firm|startup|target)|corporate acquisition|acquisition target|target company|mergers?|m\s?&\s?a\b|m\s+and\s+a\b|due diligence|buy[\s-]?outs?|post[\s-]?merger|enterprise value|ev\s*\/\s*arr|purchase price|comparable transactions?|financing structure|debt financing|şirket satın alma|satın alma hedefi|birleşme|devralma|hedef şirket)\b/i;
+//
+// CRITICAL BUG FIX -- Business Plan prompts were being routed to
+// Acquisition. Confirmed live: a Business Idea Validation prompt
+// launching a new B2B AI cybersecurity platform, once it went on to
+// describe its own funding plans ("...our financing structure includes
+// $2M in seed funding and some debt financing"), matched "financing
+// structure"/"debt financing" below -- both are ordinary startup-pitch
+// capital-planning vocabulary, not unambiguous M&A signals (a
+// pre-revenue venture routinely discusses its own financing structure
+// with zero relation to acquiring another company) -- and was
+// misclassified as an acquisition report. Both removed as standalone
+// triggers; "purchase price" and "enterprise value"/"EV/ARR" above stay,
+// since (unlike "financing structure") they are not ordinarily used
+// outside a company-sale context.
+//
+// Separately, confirmed live: "acquire a cybersecurity SaaS company" (an
+// entirely ordinary, unambiguous way to state acquisition intent) did
+// NOT match the "acquire ... company" pattern at all, because it required
+// the company-type noun to sit immediately after "a"/"the" with no
+// descriptive words in between -- real prompts almost always have some
+// (sector, size, or quality descriptors) before the noun. The pattern
+// now tolerates up to six descriptive words between the article and the
+// noun, and the same "buy"/"purchase a [company]" and "merge with"
+// phrasings named in the acquisition-intent requirement are added
+// alongside "acquire", all scoped to the same company-type-noun
+// requirement so a bare "buy"/"purchase" (ordinary e-commerce/pricing
+// vocabulary in any business prompt) never triggers on its own.
+// Each descriptive word may carry trailing punctuation ("well-established,
+// profitable AI-powered ... company") without breaking the match -- a
+// modifier list separated by commas is completely ordinary English.
+const acquisitionCompanyNounPattern = "(?:[\\w-]+[,]?\\s+){0,6}(?:company|business|firm|startup|target)";
+const acquisitionSignals = new RegExp(
+  "\\b(?:acquisitions?|acquiring" +
+    `|acquire\\s+(?:a\\s+|the\\s+)?${acquisitionCompanyNounPattern}` +
+    `|buy(?:ing)?\\s+(?:a\\s+|the\\s+)?${acquisitionCompanyNounPattern}` +
+    `|purchas(?:e|ing)\\s+(?:a\\s+|the\\s+)?${acquisitionCompanyNounPattern}` +
+    "|merg(?:e|er|ing)\\s+with" +
+    "|corporate acquisition|acquisition target|target company|mergers?|m\\s?&\\s?a\\b|m\\s+and\\s+a\\b" +
+    "|due diligence|buy[\\s-]?outs?|post[\\s-]?merger|enterprise value|ev\\s*\\/\\s*arr|purchase price" +
+    "|comparable transactions?|şirket satın alma|satın alma hedefi|birleşme|devralma|hedef şirket)\\b",
+  "i"
+);
 
 const realEstateSignals =
   /(?:\b(?:real[\s-]?estate|property|properties|land|parcel|plot|title deed|deed|land registry|registry document|cadastral|cadastre|zoning|land use|planning permission|development potential|comparable sale|comparable listing|mortgage|easement|right of way|freehold|leasehold)\b|tapu(?:ya|yu|nun|da|dan)?|tapu senedi|arsa(?:ya|yı|nın|da|dan)?|arazi(?:ye|yi|nin|de|den)?|parsel(?:e|i|in|de|den)?|pafta|\bada\b|gayrimenkul(?:e|ü|ün|de|den)?|taşınmaz(?:a|ı|ın|da|dan)?|imar(?:ı|ın|da|dan)?|kadastro|emlak|kira|konut|daire|bina(?:sı|yı|nın|da|dan)?|ofis(?:i|in|te|ten)?|ofis binası|ticari bina|iş merkezi|plaza|mülkiyet|irtifak|şerh|ipotek)/i;
