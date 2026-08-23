@@ -148,6 +148,23 @@ const marketIntelligenceIntentSignals =
 const businessPlanExecutionIntentSignals =
   /\bcreate\s+(?:a\s+|the\s+|my\s+|our\s+)?business\s+plan\b|\bbuild(?:ing)?\s+(?:a\s+|the\s+|my\s+|our\s+)?company\s+strategy\b|\boperating\s+plan\b|\bfinancial\s+forecast(?:s|ing)?\b|\b(?:gtm|go[\s-]to[\s-]market)\s+execution\s+roadmap\b|\bstartup\s+execution\b|\bbusiness\s+plan\s+report\b|\bbusiness\s+idea\s+validation\s+report\b/i;
 
+// CRITICAL FIX -- Market Intelligence prompts routed to Legal Assessment.
+// A superset of marketIntelligenceIntentSignals above, used only by
+// classifyReportDomain's own legal-priority guard below (never by
+// applyPromptIntentModeOverride, whose existing "plan" -> "market" mode
+// behavior is deliberately left untouched by this fix). Confirmed live:
+// "I want a Market Intelligence analysis, not a legal analysis." did not
+// match marketIntelligenceIntentSignals at all (it requires "market
+// intelligence REPORT", not "analysis"), so this adds a bare "market
+// intelligence" alternative plus the report's own named triggers
+// (TAM/SAM/SOM, entry strategy) -- still never a bare "market"/"industry"
+// word alone.
+const marketIntelligenceLegalPriorityPattern = new RegExp(
+  marketIntelligenceIntentSignals.source +
+    "|\\bmarket\\s+intelligence\\b|\\btam\\s*\\/\\s*sam\\s*\\/\\s*som\\b|\\bentry\\s+strategy\\b",
+  "i"
+);
+
 const specializedDomainSignals: Array<[Exclude<ReportDomain, "business" | "real_estate">, RegExp]> = [
   ["legal", /\b(contract|agreement|clause|legal|compliance|liability|indemnity|termination|governing law|sözleşme|hukuk|uyum|sorumluluk|tazminat|fesih)\b/i],
   ["accounting", /\b(accounting|invoice|ledger|trial balance|tax|vat|ifrs|gaap|muhasebe|fatura|vergi|kdv|defter)\b/i],
@@ -198,6 +215,23 @@ export function classifyReportDomain(
       explicitBusinessReportSignals.test(prompt) ||
       ventureCreationSignals.test(prompt)
     ) {
+      return "business";
+    }
+
+    // CRITICAL FIX -- Market Intelligence prompts routed to Legal
+    // Assessment. Confirmed live: "I want a Market Intelligence analysis,
+    // not a legal analysis." and "Evaluate AI legal compliance software
+    // market for SMEs" both contain the bare word "legal" and neither
+    // matched explicitBusinessReportSignals/ventureCreationSignals above,
+    // so specializedDomainSignals' unconditional "legal" entry claimed
+    // them before classifyReportDomain had any concept of Market
+    // Intelligence intent at all. Checked at the same priority position
+    // as the business-report/venture-creation check immediately above
+    // (ahead of every specializedDomainSignals entry, including finance).
+    // See marketIntelligenceLegalPriorityPattern's own comment for why
+    // this uses a superset of marketIntelligenceIntentSignals rather than
+    // that pattern directly.
+    if (marketIntelligenceLegalPriorityPattern.test(prompt)) {
       return "business";
     }
 

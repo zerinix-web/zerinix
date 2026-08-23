@@ -302,6 +302,30 @@ const MARKETING_WORKFLOW_PATTERN =
 // here, not just implicit venture-launch phrasing.
 const BUSINESS_WORKFLOW_PATTERN =
   /\b(?:business idea|business plan|investor[\s-]?grade business (?:plan|report)|business idea validation|startup|launch|founder|build a|start a business|is it (?:worth|sensible to)\s+(?:starting|building|launching)|should i (?:start|build|launch)|does it make sense to (?:start|build|launch)|iş fikri|iş planı|yatırımcı(?:\s+seviyesinde)? iş planı|girişim|kurmak istiyorum|şirket kur)\b|\b(?:kurmak|açmak|başlatmak|kurmayı|açmayı|başlatmayı)\s+(?:istiyorum|düşünüyorum|planlıyorum|mantıklı\s*mı|kârlı\s*mı|karlı\s*mı|iyi\s*(?:bir\s*)?fikir\s*mi|mantıklı\s*olur\s*mu)/i;
+// CRITICAL FIX -- Market Intelligence prompts routed to Legal Assessment.
+// Confirmed live: "I want a Market Intelligence analysis, not a legal
+// analysis." and "Evaluate AI legal compliance software market for SMEs"
+// both contain the bare word "legal" (as an explicit negation, or as the
+// venture's own regulated-sector subject matter) and neither matched
+// BUSINESS_WORKFLOW_PATTERN above, so LEGAL_WORKFLOW_PATTERN claimed them
+// unconditionally -- selectAnalysisWorkflow had no Market Intelligence
+// concept at all. Same class of bug the isVentureEvaluation guard above
+// already exists to prevent for Business Plan intent (see
+// BUSINESS_WORKFLOW_PATTERN's own comment); this closes the identical gap
+// for the Market Intelligence product. Requires an unambiguous compound
+// market-research phrase or one of the report's own named triggers
+// (Market Intelligence, TAM/SAM/SOM, entry strategy, competitors
+// analysis) -- never a bare "market" or "industry" alone, each of which
+// is ordinary vocabulary any legal, finance, or real-estate prompt could
+// use with nothing to do with a market-research request. Mirrors
+// domain.ts's own marketIntelligenceIntentSignals philosophy and pattern.
+// Gated by the same hasLegalCaseInHandSignal check the venture-evaluation
+// guard above already uses, so a prompt with a genuine legal matter in
+// hand (a stated deadline, or "on behalf of my employer") is never
+// blocked from routing to Legal Assessment just because it also mentions
+// a market/competitor/TAM-SAM-SOM concept in passing.
+const MARKET_INTELLIGENCE_WORKFLOW_PATTERN =
+  /\bmarket\s+intelligence\b|\bmarket\s+(?:opportunity|attractiveness|sizing|research|analysis|entry)\b|\b(?:evaluate|assess|research|analyz(?:e|ing|es)|understand(?:ing)?)\s+(?:the\s+|this\s+|a\s+|our\s+|whether\s+)?(?:[a-z][\w-]*\s+){0,4}(?:market|industry)\b|\bcompetitors?\s+analysis\b|\banalyz(?:e|ing|es)\s+(?:the\s+|our\s+|potential\s+)?competitors?\b|\btam\s*\/\s*sam\s*\/\s*som\b|\bentry\s+strategy\b/i;
 const LEGAL_DEADLINE_PATTERN =
   /(?:\b(?:deadline|filing date|hearing date|mediation date|limitation deadline|signing date)\b|son tarih|dava açma süresi|başvuru süresi|duruşma tarihi|arabuluculuk tarihi|zamanaşımı tarihi|imza tarihi)/i;
 const LEGAL_PERSPECTIVE_PATTERN =
@@ -364,6 +388,15 @@ export function selectAnalysisWorkflow({
     LEGAL_DEADLINE_PATTERN.test(combined) || LEGAL_PERSPECTIVE_PATTERN.test(combined);
 
   if (isVentureEvaluation && !hasLegalCaseInHandSignal) {
+    return "business";
+  }
+
+  // Checked ahead of LEGAL_WORKFLOW_PATTERN, same priority position and
+  // hasLegalCaseInHandSignal gating as isVentureEvaluation above -- see
+  // MARKET_INTELLIGENCE_WORKFLOW_PATTERN's own comment.
+  const isMarketIntelligenceEvaluation = MARKET_INTELLIGENCE_WORKFLOW_PATTERN.test(combined);
+
+  if (isMarketIntelligenceEvaluation && !hasLegalCaseInHandSignal) {
     return "business";
   }
 
