@@ -137,9 +137,9 @@ test("page.tsx and Planner.tsx: Business Plan/Acquisition still see the real Fou
 
 // --- 2. TAM/SAM/SOM: never removed, per-layer Validation Needed ----------
 
-test("page.tsx and Planner.tsx: TAM/SAM/SOM is never removed -- each of the three layers is independent, and only falls back to a combined empty state when none of the three exist", () => {
+test("page.tsx and Planner.tsx: TAM/SAM/SOM is never removed -- the visual stack always renders (no whole-card early return), and each of the three layers independently shows a real value or its own 'Validation Needed' state", () => {
   for (const source of [pageSource, plannerSource]) {
-    assert.match(source, /if \(maxMagnitude === 0\)/);
+    assert.doesNotMatch(source, /if \(maxMagnitude === 0\)/);
     assert.match(source, /Validation Needed/);
   }
 });

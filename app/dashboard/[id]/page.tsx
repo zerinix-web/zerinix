@@ -248,6 +248,19 @@ function parseMonetaryMagnitude(value: string) {
   return num * multiplier;
 }
 
+// tamSamSom's own prompt requires a "named scaling assumption" and
+// calculation basis stated as prose next to each layer's own figure
+// (e.g. "TAM (Germany, 2026) ~= EUR200-800 million [Estimated], based on
+// population share of the OECD benchmark..."). This reads that real
+// sentence back out -- the same "sentence containing the label" technique
+// extractForceImplication uses for Porter's Five Forces -- rather than
+// fabricating a generic assumption line when none exists.
+function extractMarketSizeAssumption(content: string, label: string) {
+  const match = content.match(new RegExp(`[^.\\n]*\\b${label}\\b[^.\\n]*\\.`, "i"));
+
+  return match ? match[0].trim().replace(/^[-*•]\s+/, "") : "";
+}
+
 function formatMetricCardValue(value: string) {
   const cleanValue = value.trim().replace(/\*\*/g, "");
 
@@ -1560,27 +1573,20 @@ function ReportSectionVisual({
     const values = bars.map((bar) => extractMetricValueFromAliases(content, bar.aliases));
     const magnitudes = values.map((value) => parseMonetaryMagnitude(value));
     const maxMagnitude = Math.max(0, ...magnitudes.filter((magnitude): magnitude is number => magnitude !== null));
-    const explanation = extractFirstInsight(content);
-
-    if (maxMagnitude === 0) {
-      return (
-        <div className="mb-5 rounded-[2rem] border border-dashed border-white/15 bg-black/20 p-5">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
-            Market Sizing Blocks
-          </p>
-          <div className="mt-4 flex items-center gap-3">
-            <span className="h-2 w-2 rounded-full bg-amber-300" />
-            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-amber-200">
-              Validation Needed
-            </p>
-          </div>
-          <p className="mt-3 text-sm leading-6 text-zinc-400">
-            No defensible TAM, SAM, or SOM figure could be established for this scope. See the analysis
-            below for what would close the gap.
-          </p>
-        </div>
-      );
-    }
+    // Per-layer assumption text -- the tamSamSom prompt requires a "named
+    // scaling assumption" and calculation basis for every layer it
+    // estimates, stated as prose next to that layer's own figure, so this
+    // reads the real sentence back out (same "sentence containing the
+    // label" technique extractForceImplication uses for Porter's Five
+    // Forces) rather than fabricating a generic assumption line.
+    const assumptions = bars.map((bar) => extractMarketSizeAssumption(content, bar.label));
+    // This is now the ONLY explanatory line ZERINIX renders for this
+    // section -- previously the visual repeated the same
+    // extractFirstInsight() snippet the section's own ExecutiveInsightBanner
+    // already showed just above it. Only surfaced when at least one layer
+    // is still unresolved (a fully-populated stack needs no extra caveat;
+    // the assumption line under each real value already covers it).
+    const hasUnresolvedLayer = magnitudes.some((magnitude) => magnitude === null);
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.12),transparent_30%),rgba(255,255,255,0.025)] p-5">
@@ -1598,41 +1604,49 @@ function ReportSectionVisual({
             const value = values[index];
             const magnitude = magnitudes[index];
             const width = magnitude !== null ? `${Math.max(8, (magnitude / maxMagnitude) * 100)}%` : null;
+            const assumption = assumptions[index];
 
             return (
-              <div key={bar.label} className="grid items-center gap-3 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(7rem,auto)]">
-	                <div className="rounded-2xl border border-white/10 bg-black/35 p-3 text-center">
-	                  <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">{bar.label}</p>
-	                  <div className="mt-2 flex justify-center">
-	                    <EvidenceBadge level={getDashboardMetricEvidence(bar.label, value, content)} locale={evidenceLocale} market={isMarketIntelligence} />
-	                  </div>
-	                </div>
-                {width ? (
-                  <div className="h-14 rounded-2xl border border-white/10 bg-zinc-950 p-1.5">
-                    <div
-                      className={`h-full rounded-[1.1rem] bg-gradient-to-r ${bar.color} shadow-lg shadow-teal-950/20`}
-                      style={{ width }}
-                    />
+              <div key={bar.label} className="space-y-2">
+                <div className="grid items-center gap-3 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(7rem,auto)]">
+                  <div className="rounded-2xl border border-white/10 bg-black/35 p-3 text-center">
+                    <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">{bar.label}</p>
+                    <div className="mt-2 flex justify-center">
+                      <EvidenceBadge level={getDashboardMetricEvidence(bar.label, value, content)} locale={evidenceLocale} market={isMarketIntelligence} />
+                    </div>
                   </div>
-                ) : (
-                  <div className="flex h-14 items-center rounded-2xl border border-dashed border-white/15 bg-black/20 px-4">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" />
-                    <span className="ml-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">
-                      Validation Needed
-                    </span>
-                  </div>
-                )}
-                {value ? (
-                  <p className="min-w-0 whitespace-normal rounded-2xl border border-white/10 bg-black/35 px-3 py-2 text-left text-sm font-semibold text-white [overflow-wrap:anywhere] sm:truncate sm:whitespace-nowrap sm:text-right">
-                    {formatMetricCardValue(value)}
-                  </p>
+                  {width ? (
+                    <div className="h-14 rounded-2xl border border-white/10 bg-zinc-950 p-1.5">
+                      <div
+                        className={`h-full rounded-[1.1rem] bg-gradient-to-r ${bar.color} shadow-lg shadow-teal-950/20`}
+                        style={{ width }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex h-14 items-center rounded-2xl border border-dashed border-white/15 bg-black/20 px-4">
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" />
+                      <span className="ml-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">
+                        Validation Needed
+                      </span>
+                    </div>
+                  )}
+                  {value ? (
+                    <p className="min-w-0 whitespace-normal rounded-2xl border border-white/10 bg-black/35 px-3 py-2 text-left text-sm font-semibold text-white [overflow-wrap:anywhere] sm:truncate sm:whitespace-nowrap sm:text-right">
+                      {formatMetricCardValue(value)}
+                    </p>
+                  ) : null}
+                </div>
+                {value && assumption ? (
+                  <p className="line-clamp-2 pl-1 text-xs leading-5 text-zinc-500 sm:pl-[4.75rem]">{assumption}</p>
                 ) : null}
               </div>
             );
           })}
         </div>
-        {explanation ? (
-          <p className="mt-5 border-t border-white/10 pt-4 text-sm leading-6 text-zinc-400">{explanation}</p>
+        {hasUnresolvedLayer ? (
+          <p className="mt-5 border-t border-white/10 pt-4 text-sm leading-6 text-zinc-400">
+            Additional market validation is required before sizing can be confirmed.
+          </p>
         ) : null}
       </div>
     );
@@ -4171,6 +4185,14 @@ export default async function ReportDetailPage({
                           readFounderReadinessScoreValue(report.investmentScore)
                         )
                       : section.content;
+                  // TAM/SAM/SOM's visual already surfaces every value plus its
+                  // own per-layer assumption text -- the full raw paragraph is
+                  // methodology detail, not primary content, so on mobile it
+                  // stays behind its own nested disclosure instead of always
+                  // being fully expanded right under the visual (matching the
+                  // desktop AnalysisNotes treatment). Every other section type
+                  // is unchanged.
+                  const isTamSamSomSection = section.field === "tamSamSom";
 
                   return (
                     <div
@@ -4195,9 +4217,15 @@ export default async function ReportDetailPage({
                             ) : null}
                           </div>
                           {detailsContent.trim() ? (
-                            <div className="min-w-0 rounded-[1.25rem] border border-white/[0.12] bg-black/30 p-3.5 shadow-inner shadow-black/20">
-                              <ReportText content={detailsContent} mobile />
-                            </div>
+                            isTamSamSomSection ? (
+                              <AnalysisNotes compact label={getReportPresentationLabels(section.content).details}>
+                                <ReportText content={detailsContent} mobile />
+                              </AnalysisNotes>
+                            ) : (
+                              <div className="min-w-0 rounded-[1.25rem] border border-white/[0.12] bg-black/30 p-3.5 shadow-inner shadow-black/20">
+                                <ReportText content={detailsContent} mobile />
+                              </div>
+                            )
                           ) : null}
                           <CopySectionButton content={section.content} />
                         </div>
@@ -4628,7 +4656,8 @@ export default async function ReportDetailPage({
                               ) : null}
                               {hasReportSectionVisual(section.title) &&
                               !section.title.toLowerCase().includes("executive summary") &&
-                              !isFinancialDashboard ? (
+                              !isFinancialDashboard &&
+                              section.field !== "tamSamSom" ? (
                                 <ExecutiveInsightBanner content={section.content} />
                               ) : null}
                               <ReportSectionVisual
@@ -4637,16 +4666,22 @@ export default async function ReportDetailPage({
                                 investmentScore={report.investmentScore}
                                 isMarketIntelligence={report.type === "Market Analysis"}
                               />
+                              {/* TAM/SAM/SOM's own per-layer assumption text (in the
+                                  visual above) already covers what SectionTakeaway
+                                  would otherwise repeat -- only the full raw
+                                  methodology stays available, and only inside the
+                                  collapsed AnalysisNotes disclosure below, never as
+                                  always-visible body text. */}
+                              {detailsContent.trim() && section.field !== "tamSamSom" ? (
+                                <SectionTakeaway content={detailsContent} />
+                              ) : null}
                               {detailsContent.trim() ? (
-                                <>
-                                  <SectionTakeaway content={detailsContent} />
-                                  <AnalysisNotes
-                                    compact
-                                    label={isFinancialDashboard ? "Metric Details" : presentationLabels.details}
-                                  >
-                                    <ReportText content={detailsContent} />
-                                  </AnalysisNotes>
-                                </>
+                                <AnalysisNotes
+                                  compact
+                                  label={isFinancialDashboard ? "Metric Details" : presentationLabels.details}
+                                >
+                                  <ReportText content={detailsContent} />
+                                </AnalysisNotes>
                               ) : null}
                               </>}
                         </div>

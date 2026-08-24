@@ -3928,10 +3928,13 @@ export function buildStandardReportPdf({
             samMagnitude >= somMagnitude;
 
           if (!isCoherentlyNested) {
+            // Same wording as the on-screen "Validation Needed" state (see
+            // page.tsx/Planner.tsx's ReportSectionVisual/PremiumSectionVisual)
+            // -- PDF must match the UI, not show its own bespoke explanation.
             const explanationText =
               pdfLocale === "tr"
-                ? "Hesaplanamadı — gerekli veri eksik. TAM / SAM / SOM için doğrulanmış veya tutarlı bir şekilde iç içe geçmiş (TAM ≥ SAM ≥ SOM) rakamlar bulunamadığından yanıltıcı bir grafik yerine bu açıklama gösterilmektedir."
-                : "Could not be calculated — required data is missing. No verified or logically nested (TAM ≥ SAM ≥ SOM) figures were available for TAM / SAM / SOM, so this explanation is shown instead of a misleading chart.";
+                ? "Boyutlandırmanın doğrulanabilmesi için ek pazar doğrulaması gereklidir."
+                : "Additional market validation is required before sizing can be confirmed.";
             pdf.setFontSize(7.6);
             pdf.setTextColor("#a1a1aa");
             pdf.text(
@@ -4928,7 +4931,26 @@ export function buildStandardReportPdf({
           drawSectionVisual(section, y);
           y += cardHeight + minSectionGap;
 
-          if (hasBodyText) {
+          // Recomputes the same coherence check drawSectionVisual's own
+          // TAM/SAM/SOM branch already used to decide circles vs. an
+          // honest "Additional market validation is required..." message
+          // -- when that message was drawn, the commentary/insight body
+          // text below would just be a second, redundant explanation
+          // stacked under it (this ticket's own "no duplicated TAM/SAM/SOM
+          // sections, no empty large spaces" requirement). Only draw the
+          // body text when the visual actually drew real circles, where it
+          // is genuine supplementary methodology detail, not a duplicate.
+          const tamSamSomMagnitudes = getTamRows(getTamVisualContent(section.content), section.content).map((row) =>
+            parseMarketSizeMagnitude(row.value)
+          );
+          const isTamSamSomCoherentlyNested =
+            tamSamSomMagnitudes[0] !== null &&
+            tamSamSomMagnitudes[1] !== null &&
+            tamSamSomMagnitudes[2] !== null &&
+            tamSamSomMagnitudes[0] >= tamSamSomMagnitudes[1] &&
+            tamSamSomMagnitudes[1] >= tamSamSomMagnitudes[2];
+
+          if (hasBodyText && isTamSamSomCoherentlyNested) {
             let bodyLineIndex = 0;
 
             while (bodyLineIndex < bodyLines.length) {

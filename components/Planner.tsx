@@ -1633,27 +1633,41 @@ function extractMarketLevelDescription(content: string, label: string) {
   return cleanExecutiveText(description || `${label} validation requires verified market data.`, 140);
 }
 
+// tamSamSom's own prompt requires a "named scaling assumption" and
+// calculation basis stated as prose next to each layer's own figure. This
+// reads that real sentence back out -- the same "sentence containing the
+// label" technique extractForceImplication uses for Porter's Five Forces
+// -- rather than fabricating one. extractMarketLevelDescription (above)
+// deliberately strips out anything after an "assumption:"/"confidence:"
+// label, so it cannot supply this on its own; used only as the fallback
+// when no full assumption sentence is present.
+function extractMarketSizeAssumption(content: string, label: string) {
+  const match = content.match(new RegExp(`[^.\\n]*\\b${label}\\b[^.\\n]*\\.`, "i"));
+
+  return match ? match[0].trim().replace(/^[-*•]\s+/, "") : "";
+}
+
 function getReportMarketRows(content: string) {
   return [
     {
       label: "TAM",
       name: "Total Addressable Market",
       value: extractMarketSizeValue(content, "TAM") || "NO DATA",
-      description: extractMarketLevelDescription(content, "TAM"),
+      description: extractMarketSizeAssumption(content, "TAM") || extractMarketLevelDescription(content, "TAM"),
       tone: "from-teal-200 to-cyan-100",
     },
     {
       label: "SAM",
       name: "Serviceable Available Market",
       value: extractMarketSizeValue(content, "SAM") || "NO DATA",
-      description: extractMarketLevelDescription(content, "SAM"),
+      description: extractMarketSizeAssumption(content, "SAM") || extractMarketLevelDescription(content, "SAM"),
       tone: "from-teal-400 to-teal-200",
     },
     {
       label: "SOM",
       name: "Serviceable Obtainable Market",
       value: extractMarketSizeValue(content, "SOM") || "—",
-      description: extractMarketLevelDescription(content, "SOM"),
+      description: extractMarketSizeAssumption(content, "SOM") || extractMarketLevelDescription(content, "SOM"),
       tone: "from-emerald-400 to-teal-300",
     },
   ];
@@ -3773,26 +3787,10 @@ function PremiumSectionVisual({
     // combined empty state when NONE of the three could be established.
     const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value));
     const maxMagnitude = Math.max(0, ...magnitudes.filter((magnitude): magnitude is number => magnitude !== null));
-
-    if (maxMagnitude === 0) {
-      return (
-        <div className="mb-5 rounded-[2rem] border border-dashed border-white/15 bg-black/20 p-5">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
-            Market Sizing Stack
-          </p>
-          <div className="mt-4 flex items-center gap-3">
-            <span className="h-2 w-2 rounded-full bg-amber-300" />
-            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-amber-200">
-              Validation Needed
-            </p>
-          </div>
-          <p className="mt-3 text-sm leading-6 text-zinc-400">
-            No defensible TAM, SAM, or SOM figure could be established for this scope. See the analysis
-            below for what would close the gap.
-          </p>
-        </div>
-      );
-    }
+    // Only remaining explanatory line for this section -- shown when at
+    // least one layer is still unresolved; a fully-populated stack needs
+    // no extra caveat beyond each real layer's own assumption text.
+    const hasUnresolvedLayer = magnitudes.some((magnitude) => magnitude === null);
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.12),transparent_30%),rgba(255,255,255,0.025)] p-5">
@@ -3856,6 +3854,11 @@ function PremiumSectionVisual({
             );
           })}
         </div>
+        {hasUnresolvedLayer ? (
+          <p className="mt-5 border-t border-white/10 pt-4 text-sm leading-6 text-zinc-400">
+            Additional market validation is required before sizing can be confirmed.
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -5861,16 +5864,21 @@ const ReportSectionCard = memo(
                   isMarketIntelligence={isMarketIntelligence}
                 />
               ) : null}
+              {/* TAM/SAM/SOM's own per-layer assumption text (in the visual
+                  above) already covers what SectionTakeaway would otherwise
+                  repeat -- only the full raw methodology stays available,
+                  and only inside the collapsed AnalysisNotes disclosure
+                  below, never as always-visible body text. */}
               {hasVisibleDetailsContent && section.field !== "tamSamSom" ? (
-                <>
-                  <SectionTakeaway content={detailsContent} />
-                  <AnalysisNotes
-                    compact
-                    label={isFinancialDashboard ? "Metric Details" : presentationLabels.details}
-                  >
-                    <MarkdownRenderer content={detailsContent} />
-                  </AnalysisNotes>
-                </>
+                <SectionTakeaway content={detailsContent} />
+              ) : null}
+              {hasVisibleDetailsContent ? (
+                <AnalysisNotes
+                  compact
+                  label={isFinancialDashboard ? "Metric Details" : presentationLabels.details}
+                >
+                  <MarkdownRenderer content={detailsContent} />
+                </AnalysisNotes>
               ) : null}
             </div>
           </div>
@@ -6732,10 +6740,14 @@ const ReportPanel = memo(function ReportPanel({
             samMagnitude >= somMagnitude;
 
           if (!isCoherentlyNested) {
+            // Same wording as the on-screen "Validation Needed" state (see
+            // PremiumSectionVisual's own tamSamSom branch above) -- the
+            // exported PDF must match the UI, not show its own bespoke
+            // explanation.
             const explanationText =
               pdfLocale === "tr"
-                ? "Hesaplanamadı — gerekli veri eksik. TAM / SAM / SOM için doğrulanmış veya tutarlı bir şekilde iç içe geçmiş (TAM ≥ SAM ≥ SOM) rakamlar bulunamadığından yanıltıcı bir grafik yerine bu açıklama gösterilmektedir."
-                : "Could not be calculated — required data is missing. No verified or logically nested (TAM ≥ SAM ≥ SOM) figures were available for TAM / SAM / SOM, so this explanation is shown instead of a misleading chart.";
+                ? "Boyutlandırmanın doğrulanabilmesi için ek pazar doğrulaması gereklidir."
+                : "Additional market validation is required before sizing can be confirmed.";
             pdf.setFontSize(7.6);
             pdf.setTextColor("#a1a1aa");
             pdf.text(

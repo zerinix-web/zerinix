@@ -98,18 +98,18 @@ test("page.tsx: parseMonetaryMagnitude correctly parses real currency figures, i
   assert.equal(fn("no figure here"), null);
 });
 
-test("page.tsx: TAM/SAM/SOM renders a premium 'Validation Needed' empty state (not fake bars) when no figures can be established", () => {
-  assert.match(pageSource, /maxMagnitude === 0/);
-  assert.match(pageSource, /No defensible TAM, SAM, or SOM figure could be established for this scope/);
+test("page.tsx: TAM/SAM/SOM renders a premium 'Validation Needed' empty state per layer (not fake bars) when no figures can be established -- the visual stack itself is never replaced by a combined empty card", () => {
+  assert.doesNotMatch(pageSource, /if \(maxMagnitude === 0\)/);
+  assert.match(pageSource, /Additional market validation is required before sizing can be confirmed\./);
 });
 
 test("page.tsx: a single missing TAM/SAM/SOM layer shows 'Validation Needed', not a fabricated bar width", () => {
   assert.match(pageSource, /const width = magnitude !== null \? `\$\{Math\.max\(8, \(magnitude \/ maxMagnitude\) \* 100\)\}%` : null;/);
 });
 
-test("page.tsx: TAM/SAM/SOM now shows a real market-size explanation excerpt below the bars", () => {
-  assert.match(pageSource, /const explanation = extractFirstInsight\(content\);/);
-  assert.match(pageSource, /\{explanation\}/);
+test("page.tsx: TAM/SAM/SOM shows a real per-layer assumption excerpt under each populated bar, read from that layer's own generated sentence", async () => {
+  assert.match(pageSource, /const assumptions = bars\.map\(\(bar\) => extractMarketSizeAssumption\(content, bar\.label\)\);/);
+  assert.match(pageSource, /\{value && assumption \? \(/);
 });
 
 test("Planner.tsx: the on-screen TAM/SAM/SOM visual now reuses parseMarketSizeMagnitude (already correct in the PDF export) instead of a static bar-width array, plus a coherence check and a real explanation via row.description", () => {
