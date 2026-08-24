@@ -1810,10 +1810,15 @@ function extractMarketIntelligenceCompetitorRows(content: string) {
       position: read(cells, ["segment", "ai capability", "position", "positioning"]),
       strengths: read(cells, ["strength"]),
       weaknesses: read(cells, ["weakness"]),
-      relevance: read(cells, ["market relevance", "relevance", "confidence"]),
+      relevance: read(cells, ["market relevance"]),
+      // "Validation Status" reads the same Confidence classification
+      // market-intelligence-graph.ts already computes per row (how many
+      // independent sources back this entry) -- a distinct signal from
+      // Market Relevance, never conflated with it.
+      validationStatus: read(cells, ["confidence"]),
     }))
     .filter((row) => row.vendor || row.strengths || row.weaknesses)
-    .slice(0, 6);
+    .slice(0, 20);
 }
 
 // Strategic Recommendations is inherently a list -- each real
@@ -1862,15 +1867,35 @@ function extractRecommendationSignals(line: string) {
   const timeframe = line.match(
     /\b\d+[\s-](?:day|days|week|weeks|month|months|gün|hafta|ay)\b|\bQ[1-4]\b|\b(?:this|next)\s+quarter\b/i
   )?.[0];
-  const metric = line.match(/\d+(?:[.,]\d+)?\s*%|[€$₺]\s*\d+(?:[.,]\d+)*(?:\s*[kKmMbB])?/)?.[0];
+  // Budget (a spend ceiling) and success metric (a KPI/countable target)
+  // are distinct signals strategicRecommendations' own prompt requires
+  // separately -- kept apart here rather than one shared "metric" match,
+  // so a line naming both (e.g. "$50K budget ... targeting 10 paying
+  // pilots") surfaces both instead of only whichever pattern matched
+  // first.
+  const budget = line.match(/[€$₺]\s*\d+(?:[.,]\d+)*(?:\s*[kKmMbB])?/)?.[0];
+  const metric =
+    line.match(/\d+(?:[.,]\d+)?\s*%/)?.[0] ||
+    line.match(/\b\d+\s+(?:paying\s+)?(?:pilots?|customers?|interviews?|conversions?|sign-?ups?|users?|leads?|deals?)\b/i)?.[0];
   const owner =
     line.match(new RegExp(`\\b(?:owned by|led by|driven by|owner:)\\s+(?:the\\s+)?(${recommendationOwnerRolePattern})\\b`, "i"))?.[1] ||
     line.match(new RegExp(`\\b(${recommendationOwnerRolePattern})\\b`, "i"))?.[1];
+  // Decision Gate -- the checkpoint that determines whether to continue,
+  // e.g. "... before committing further budget"/"before scaling
+  // further". strategicRecommendations' own prompt requires a "numeric
+  // or evidence-based success criterion that determines whether to
+  // continue" for each action, so this phrasing is a real, expected
+  // shape -- never fabricated when absent.
+  const gate = line.match(
+    /\bbefore\s+(?:committing\s+(?:further\s+)?(?:budget|spend)|scaling(?:\s+further)?|the\s+next\s+decision|proceeding|expanding|the\s+next\s+phase)\b[^.]*/i
+  )?.[0];
 
   return {
     timeframe: timeframe?.trim() || "",
     metric: metric?.trim() || "",
+    budget: budget?.trim() || "",
     owner: owner?.trim() || "",
+    gate: gate?.trim() || "",
   };
 }
 
@@ -1919,6 +1944,27 @@ function extractForceIntensity(content: string, force: string) {
   }
 
   return null;
+}
+
+// Porter's Five Forces' own prompt requires "a qualitative assessment
+// and ONE MARKET IMPLICATION for each force" -- this reads that real
+// sentence back out of the generated text (the same sentence
+// extractForceIntensity reads the intensity word from) to show as the
+// card's investor interpretation, rather than only a bare intensity
+// label. Returns "" (never a fabricated implication) when the force
+// isn't discussed in its own sentence.
+function extractForceImplication(content: string, force: string) {
+  const aliases = forceAliases[force] || [force];
+
+  for (const alias of aliases) {
+    const match = content.match(new RegExp(`[^.\\n]*\\b(?:${alias})\\b[^.\\n]*\\.`, "i"));
+
+    if (match) {
+      return match[0].trim().replace(/^[-*•]\s+/, "");
+    }
+  }
+
+  return "";
 }
 
 function extractRoadmapAction(content: string, step: string) {
@@ -3711,26 +3757,24 @@ function PremiumSectionVisual({
   if (field === "tamSamSom") {
     const rows = getReportMarketRows(section.content);
     // CRITICAL FIX -- do not reintroduce old fake-data behavior, and
-    // match the exported PDF's own already-correct treatment (see
-    // downloadPdf's own tamSamSom branch, which already uses
-    // parseMarketSizeMagnitude for real proportional sizing and a
-    // coherence check) -- the on-screen visual had drifted out of sync
-    // with it, still using a static [100, 68, 36] bar-width array
-    // regardless of the real figures. TAM is expected to be the largest
-    // of the three by definition, so a coherent report has TAM >= SAM >=
-    // SOM; when that doesn't hold (missing or logically inconsistent
-    // figures), a premium empty state renders instead of a misleading
-    // chart, exactly like the PDF already does.
+    // never remove the visual component (this ticket's own explicit
+    // requirement) -- match the exported PDF's own already-correct
+    // treatment (see downloadPdf's own tamSamSom branch, which already
+    // uses parseMarketSizeMagnitude for real proportional sizing) -- the
+    // on-screen visual had drifted out of sync with it, still using a
+    // static [100, 68, 36] bar-width array regardless of the real
+    // figures. Each of TAM/SAM/SOM is now independent: a layer with a
+    // real extractable value gets a real proportional bar (scaled
+    // against whichever layer has the largest magnitude); a layer with
+    // no extractable value shows its own "Validation Needed" state
+    // instead of a fabricated bar -- never an all-or-nothing gate that
+    // would hide two genuinely available figures just because a third
+    // one is missing. The whole component only falls back to a single
+    // combined empty state when NONE of the three could be established.
     const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value));
-    const [tamMagnitude, samMagnitude, somMagnitude] = magnitudes;
-    const isCoherentlyNested =
-      tamMagnitude !== null &&
-      samMagnitude !== null &&
-      somMagnitude !== null &&
-      tamMagnitude >= samMagnitude &&
-      samMagnitude >= somMagnitude;
+    const maxMagnitude = Math.max(0, ...magnitudes.filter((magnitude): magnitude is number => magnitude !== null));
 
-    if (!isCoherentlyNested) {
+    if (maxMagnitude === 0) {
       return (
         <div className="mb-5 rounded-[2rem] border border-dashed border-white/15 bg-black/20 p-5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
@@ -3743,14 +3787,12 @@ function PremiumSectionVisual({
             </p>
           </div>
           <p className="mt-3 text-sm leading-6 text-zinc-400">
-            No verified or logically nested (TAM ≥ SAM ≥ SOM) figures were available for TAM / SAM /
-            SOM. See the analysis below for what would close the gap.
+            No defensible TAM, SAM, or SOM figure could be established for this scope. See the analysis
+            below for what would close the gap.
           </p>
         </div>
       );
     }
-
-    const maxMagnitude = Math.max(...magnitudes.filter((magnitude): magnitude is number => magnitude !== null));
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.12),transparent_30%),rgba(255,255,255,0.025)] p-5">
@@ -3766,37 +3808,53 @@ function PremiumSectionVisual({
           <div className="hidden h-16 w-16 rounded-full border border-teal-200/20 bg-teal-200/10 sm:block" />
         </div>
         <div className="grid gap-3 lg:grid-cols-3">
-          {rows.map((row, index) => (
-            <div
-              key={row.label}
-              className="grid min-h-44 gap-3 rounded-3xl border border-white/10 bg-black/35 p-4 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(7rem,auto)] lg:block"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
-                    {row.label}
-                  </p>
-                  <p className="mt-1 text-sm font-medium text-zinc-300">{row.name}</p>
+          {rows.map((row, index) => {
+            const magnitude = magnitudes[index];
+
+            return (
+              <div
+                key={row.label}
+                className="grid min-h-44 gap-3 rounded-3xl border border-white/10 bg-black/35 p-4 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(7rem,auto)] lg:block"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
+                      {row.label}
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-zinc-300">{row.name}</p>
+                  </div>
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-400">
+                    Layer {index + 1}
+                  </span>
                 </div>
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-400">
-                  Layer {index + 1}
-                </span>
+                {magnitude !== null ? (
+                  <>
+                    <div className="mt-3">
+                      <EvidenceBadge level={getSectionEvidenceLevel(section)} locale={evidenceLocale} market={isMarketIntelligence} />
+                    </div>
+                    <p className="mt-5 truncate whitespace-nowrap text-3xl font-semibold tracking-tight text-white">
+                      {row.value}
+                    </p>
+                    <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+                      <div
+                        className={`h-full rounded-full bg-gradient-to-r ${row.tone}`}
+                        style={{ width: `${Math.max(8, (magnitude / maxMagnitude) * 100)}%` }}
+                      />
+                    </div>
+                    <p className="mt-3 line-clamp-2 text-xs leading-5 text-zinc-500">{row.description}</p>
+                  </>
+                ) : (
+                  <div className="mt-3 flex flex-1 flex-col items-start justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-black/20 p-3">
+                    <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" />
+                      Validation Needed
+                    </span>
+                    <p className="line-clamp-2 text-xs leading-5 text-zinc-500">{row.description}</p>
+                  </div>
+                )}
               </div>
-              <div className="mt-3">
-                <EvidenceBadge level={getSectionEvidenceLevel(section)} locale={evidenceLocale} market={isMarketIntelligence} />
-              </div>
-              <p className="mt-5 truncate whitespace-nowrap text-3xl font-semibold tracking-tight text-white">
-                {row.value}
-              </p>
-              <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
-                <div
-                  className={`h-full rounded-full bg-gradient-to-r ${row.tone}`}
-                  style={{ width: `${Math.max(8, ((magnitudes[index] ?? 0) / maxMagnitude) * 100)}%` }}
-                />
-              </div>
-              <p className="mt-3 line-clamp-2 text-xs leading-5 text-zinc-500">{row.description}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     );
@@ -4090,25 +4148,27 @@ if (field === "swotAnalysis") {
             Competitive Landscape
           </p>
           <p className="mt-2 text-sm text-zinc-400">
-            Vendors, category, position, strengths, weaknesses and market relevance from the generated
-            analysis.
+            Vendors, category, position, strengths, weaknesses, market relevance and validation status
+            from the generated analysis.
           </p>
         </div>
         {rows.length > 0 ? (
           <div className="overflow-x-auto">
-            <div className="min-w-[880px]">
-              <div className="grid grid-cols-[0.9fr_0.8fr_0.9fr_1.1fr_1.1fr_0.8fr] gap-px bg-white/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                {["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance"].map((label) => (
-                  <div key={label} className="bg-zinc-950/80 px-4 py-3">
-                    {label}
-                  </div>
-                ))}
+            <div className="min-w-[1020px]">
+              <div className="grid grid-cols-[0.85fr_0.75fr_0.85fr_1fr_1fr_0.75fr_0.85fr] gap-px bg-white/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                {["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Validation"].map(
+                  (label) => (
+                    <div key={label} className="bg-zinc-950/80 px-4 py-3">
+                      {label}
+                    </div>
+                  )
+                )}
               </div>
               <div className="grid gap-px bg-white/10">
                 {rows.map((row, index) => (
                   <div
                     key={`${row.vendor}-${index}`}
-                    className="grid grid-cols-[0.9fr_0.8fr_0.9fr_1.1fr_1.1fr_0.8fr] bg-black/35 text-sm leading-6 text-zinc-300"
+                    className="grid grid-cols-[0.85fr_0.75fr_0.85fr_1fr_1fr_0.75fr_0.85fr] bg-black/35 text-sm leading-6 text-zinc-300"
                   >
                     <div className="px-4 py-4 font-semibold text-white">{row.vendor || "—"}</div>
                     <div className="px-4 py-4">{row.category || "—"}</div>
@@ -4119,6 +4179,17 @@ if (field === "swotAnalysis") {
                       <span className="rounded-full border border-teal-200/20 bg-teal-200/10 px-2.5 py-1 text-xs font-semibold text-teal-100">
                         {row.relevance || "—"}
                       </span>
+                    </div>
+                    <div className="px-4 py-4">
+                      {row.validationStatus ? (
+                        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-semibold text-zinc-300">
+                          {row.validationStatus}
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-2.5 py-1 text-xs font-semibold text-amber-200">
+                          Validation Needed
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -4132,6 +4203,7 @@ if (field === "swotAnalysis") {
             </p>
           </div>
         )}
+        <MarketMap rows={rows} />
       </div>
     );
   }
@@ -4147,10 +4219,11 @@ if (field === "swotAnalysis") {
         {items.length > 0 ? (
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {items.map((item, index) => {
-              const { timeframe, metric, owner } = extractRecommendationSignals(item);
+              const { timeframe, metric, budget, owner, gate } = extractRecommendationSignals(item);
               const fields = [
                 { label: "Owner", value: owner },
                 { label: "Timeline", value: timeframe },
+                { label: "Budget", value: budget },
                 { label: "Success Metric", value: metric },
               ].filter((field) => field.value);
 
@@ -4166,7 +4239,7 @@ if (field === "swotAnalysis") {
                     </div>
                   </div>
                   {fields.length > 0 ? (
-                    <div className="mt-3 grid grid-cols-3 gap-2 border-t border-white/10 pt-3">
+                    <div className="mt-3 grid grid-cols-2 gap-2 border-t border-white/10 pt-3">
                       {fields.map((field) => (
                         <div key={field.label}>
                           <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
@@ -4175,6 +4248,14 @@ if (field === "swotAnalysis") {
                           <p className="mt-1 truncate text-xs font-semibold text-teal-100">{field.value}</p>
                         </div>
                       ))}
+                    </div>
+                  ) : null}
+                  {gate ? (
+                    <div className={fields.length > 0 ? "mt-3" : "mt-3 border-t border-white/10 pt-3"}>
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                        Decision Gate
+                      </p>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-amber-200">{gate}</p>
                     </div>
                   ) : null}
                 </div>
@@ -4598,6 +4679,7 @@ if (field === "swotAnalysis") {
         <div className="grid gap-3 sm:grid-cols-2">
           {forces.map((force) => {
             const intensity = extractForceIntensity(section.content, force);
+            const implication = extractForceImplication(section.content, force);
 
             return (
               <div key={force} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
@@ -4617,6 +4699,11 @@ if (field === "swotAnalysis") {
                     Not specified
                   </p>
                 )}
+                {implication ? (
+                  <p className="mt-3 line-clamp-3 border-t border-white/10 pt-3 text-xs leading-5 text-zinc-400">
+                    {implication}
+                  </p>
+                ) : null}
               </div>
             );
           })}
@@ -4670,6 +4757,191 @@ if (field === "swotAnalysis") {
   }
 
   return null;
+}
+
+// Positions a vendor on the "Enterprise <-> SME focus" and "Broad
+// platform <-> Specialized solution" axes using ONLY keywords already
+// present in that vendor's own generated category/position/strengths/
+// weaknesses text -- never a fabricated coordinate. A vendor is placed
+// only when BOTH axes have a detectable signal; a vendor with signal on
+// just one axis (or neither) is omitted from the map entirely rather
+// than guessing the other coordinate, per this ticket's own "do not
+// fabricate placement" requirement. It still appears in the competitor
+// table above regardless.
+function inferMarketMapPosition(row: {
+  category: string;
+  position: string;
+  strengths: string;
+  weaknesses: string;
+}) {
+  // Deliberately reads only category/position, not strengths/weaknesses --
+  // confirmed live, a weakness like "Limited enterprise features" false-
+  // positived the word "enterprise" as if it were this vendor's target
+  // segment, when it actually describes the OPPOSITE (a gap in enterprise
+  // capability). category/position state the vendor's actual market
+  // focus directly, without that negation risk.
+  const text = `${row.category} ${row.position}`.toLowerCase();
+
+  let x: number | null = null;
+  if (/\benterprise\b/.test(text)) {
+    x = 78;
+  } else if (/\b(?:sme|smb|small business|mid-market|midmarket|small and medium)\b/.test(text)) {
+    x = 22;
+  }
+
+  let y: number | null = null;
+  if (/\b(?:platform|suite|end-to-end|broad(?:-based)?)\b/.test(text)) {
+    y = 22;
+  } else if (/\b(?:specialized|specialised|niche|point solution|focused|narrow)\b/.test(text)) {
+    y = 78;
+  }
+
+  return x !== null && y !== null ? { x, y } : null;
+}
+
+function MarketMap({
+  rows,
+}: {
+  rows: Array<{ vendor: string; category: string; position: string; strengths: string; weaknesses: string }>;
+}) {
+  const placements = rows
+    .map((row) => {
+      const coordinates = inferMarketMapPosition(row);
+      return coordinates ? { vendor: row.vendor || "Vendor", ...coordinates } : null;
+    })
+    .filter((placement): placement is { vendor: string; x: number; y: number } => placement !== null);
+
+  return (
+    <div className="border-t border-white/10 p-5">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">Market Map</p>
+      {placements.length >= 2 ? (
+        <>
+          <p className="mt-2 text-sm text-zinc-400">
+            Positioning inferred from each vendor&rsquo;s own generated description -- vendors without a clear
+            signal on both axes are omitted rather than guessed.
+          </p>
+          <div className="relative mt-5 h-64 rounded-3xl border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.035),rgba(94,234,212,0.07))]">
+            <div className="absolute left-1/2 top-0 h-full w-px bg-white/10" />
+            <div className="absolute left-0 top-1/2 h-px w-full bg-white/10" />
+            <span className="absolute left-2 top-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+              Broad platform
+            </span>
+            <span className="absolute bottom-2 left-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+              Specialized
+            </span>
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-right text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+              Enterprise
+            </span>
+            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+              SME
+            </span>
+            {placements.map((placement) => (
+              <div
+                key={placement.vendor}
+                className="absolute -translate-x-1/2 -translate-y-1/2"
+                style={{ left: `${placement.x}%`, top: `${placement.y}%` }}
+              >
+                <div className="h-3 w-3 rounded-full bg-teal-200 shadow-[0_0_16px_rgba(94,234,212,0.6)]" />
+                <p className="mt-2 max-w-24 rounded-full border border-white/10 bg-black/70 px-2 py-1 text-center text-[10px] font-semibold leading-4 text-teal-100 sm:max-w-none sm:whitespace-nowrap">
+                  {placement.vendor}
+                </p>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="mt-5 rounded-3xl border border-dashed border-white/15 bg-black/20 p-6 text-center">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">Validation Needed</p>
+          <p className="mt-2 text-sm text-zinc-400">
+            Not enough competitors have a clear category or positioning signal on both axes to plot a reliable
+            market map yet.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Market Metrics dashboard -- combines real signals already generated
+// across several Market Intelligence sections (marketSize, cagr,
+// customerSegments, threats) into one premium tile grid, rather than
+// leaving each as a separate full-width card. Every tile is read from
+// real content: Market Growth is a directional word (Growing/Declining)
+// only when the generated text actually says so; Adoption Signal reads
+// customerSegments' own "adoption maturity" language (its prompt
+// explicitly asks for it); Risk Level reads a qualitative risk word near
+// "risk" in threats, the same bounded-window technique
+// extractForceIntensity already uses for Porter's Five Forces. A tile
+// with no detectable signal shows "Validation Needed", never a
+// fabricated value.
+function extractMarketGrowthTrend(marketSizeContent: string, cagrContent: string) {
+  const combined = `${marketSizeContent} ${cagrContent}`;
+  if (/\b(?:growing|growth|expand(?:ing)?|increasing|accelerating)\b/i.test(combined)) {
+    return "Growing";
+  }
+  if (/\b(?:declin(?:e|ing)|shrink(?:ing)?|contracting|slowing)\b/i.test(combined)) {
+    return "Declining";
+  }
+  return "";
+}
+
+function extractAdoptionSignal(customerSegmentsContent: string) {
+  return (
+    customerSegmentsContent.match(/adoption\s+(?:maturity|stage|signal)[^.\n]*\./i)?.[0]?.trim() ||
+    customerSegmentsContent.match(/\b(?:early adopters?|early majority|late majority|mainstream adoption)\b[^.\n]*\./i)?.[0]?.trim() ||
+    ""
+  );
+}
+
+function extractRiskLevel(threatsContent: string) {
+  const match = threatsContent.match(/\b(high|significant|severe|moderate|medium|low|limited|minimal)\b[^.\n]{0,40}\brisk\b/i);
+  if (!match) return "";
+  const word = match[1].toLowerCase();
+  if (/high|significant|severe/.test(word)) return "High";
+  if (/moderate|medium/.test(word)) return "Moderate";
+  return "Low";
+}
+
+function MarketMetricsDashboard({ sections }: { sections: ReportSection[] }) {
+  const findContent = (field: string) => sections.find((section) => section.field === field)?.content || "";
+  const marketSizeContent = findContent("marketSize");
+  const cagrContent = findContent("cagr");
+  const customerSegmentsContent = findContent("customerSegments");
+  const threatsContent = findContent("threats");
+
+  const tiles = [
+    { label: "Market Growth Signal", value: extractMarketGrowthTrend(marketSizeContent, cagrContent) },
+    { label: "CAGR", value: extractHeadlineCagrValue(cagrContent) },
+    { label: "Customer Segment", value: extractFirstInsight(customerSegmentsContent) },
+    { label: "Adoption Signal", value: extractAdoptionSignal(customerSegmentsContent) },
+    { label: "Risk Level", value: extractRiskLevel(threatsContent) },
+  ];
+
+  if (tiles.every((tile) => !tile.value)) {
+    return null;
+  }
+
+  return (
+    <div className="mb-5 rounded-[2rem] border border-white/10 bg-white/[0.025] p-5">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+        Market Metrics
+      </p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {tiles.map((tile) => (
+          <div key={tile.label} className="rounded-2xl border border-white/10 bg-black/25 p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">{tile.label}</p>
+            {tile.value ? (
+              <p className="mt-2 line-clamp-2 text-sm font-semibold text-white">{tile.value}</p>
+            ) : (
+              <p className="mt-2 text-xs font-semibold uppercase tracking-[0.1em] text-amber-200">
+                Validation Needed
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // CRITICAL FIX -- restore Market Intelligence's SWOT-equivalent
@@ -4917,6 +5189,20 @@ function ExecutiveSnapshotPanel({
     reportQuality,
     labels.reportQuality === "Rapor Kalitesi"
   );
+  // CRITICAL FIX -- Executive Decision Center. The Founder Readiness
+  // gauge reads investmentScore.decisionEngine, the founder-viability
+  // score Market Intelligence never computes (report-isolation policy:
+  // MI's own prompts "must never mention a founder ... or any
+  // startup-readiness concept") -- so it always showed an empty/
+  // meaningless gauge for this report kind. Replaced with a Market
+  // Signal gauge for MI, reusing the SAME already-computed "Market"
+  // confidenceRadar dimension shown a few lines below (not a new
+  // calculation) -- a real, MI-appropriate figure instead of a
+  // structurally-inapplicable one. Business Plan/Acquisition's founder
+  // gauge is completely untouched.
+  const marketSignalDimension = isMarketIntelligence
+    ? confidenceRadarDimensions.find((dimension) => dimension.label === "Market" || dimension.label === "Pazar") ?? null
+    : null;
   const groups = [
     { label: labels.why, items: snapshot.why },
     { label: labels.mainRisks, items: snapshot.risks },
@@ -4950,11 +5236,25 @@ function ExecutiveSnapshotPanel({
           value={snapshot.confidenceScore}
           display={snapshot.confidence}
         />
-        <SnapshotGauge
-          label={labels.founderScoreGauge}
-          value={snapshot.founderScoreValue}
-          display={snapshot.founderScore}
-        />
+        {isMarketIntelligence ? (
+          <SnapshotGauge
+            label={isMarketIntelligenceTurkish ? "Pazar Sinyali" : "Market Signal"}
+            value={marketSignalDimension?.score ?? null}
+            display={
+              marketSignalDimension?.score === null || marketSignalDimension?.score === undefined
+                ? isMarketIntelligenceTurkish
+                  ? "Doğrulama Gerekli"
+                  : "Validation Needed"
+                : `${marketSignalDimension.score}%`
+            }
+          />
+        ) : (
+          <SnapshotGauge
+            label={labels.founderScoreGauge}
+            value={snapshot.founderScoreValue}
+            display={snapshot.founderScore}
+          />
+        )}
         <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
             {labels.riskLevel}
@@ -7181,6 +7481,7 @@ const ReportPanel = memo(function ReportPanel({
           />
         ) : null}
 
+        {isMarketIntelligence ? <MarketMetricsDashboard sections={sections} /> : null}
         {isMarketIntelligence ? <MarketForcesQuadrant sections={sections} /> : null}
 
         {visibleSections.map((section, index) => (

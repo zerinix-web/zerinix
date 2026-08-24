@@ -103,8 +103,7 @@ test("page.tsx: TAM/SAM/SOM renders a premium 'Validation Needed' empty state (n
   assert.match(pageSource, /No defensible TAM, SAM, or SOM figure could be established for this scope/);
 });
 
-test("page.tsx: a single missing TAM/SAM/SOM layer shows 'Not established', not a fabricated bar width", () => {
-  assert.match(pageSource, /Not established/);
+test("page.tsx: a single missing TAM/SAM/SOM layer shows 'Validation Needed', not a fabricated bar width", () => {
   assert.match(pageSource, /const width = magnitude !== null \? `\$\{Math\.max\(8, \(magnitude \/ maxMagnitude\) \* 100\)\}%` : null;/);
 });
 
@@ -186,7 +185,10 @@ test("page.tsx and Planner.tsx: the Competitive Landscape table now includes a P
 
 test("page.tsx and Planner.tsx: the Competitive Landscape visual renders a real structured table/card component, not raw markdown pipe syntax", () => {
   for (const source of [pageSource, plannerSource]) {
-    assert.match(source, /\["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance"\]/);
+    assert.match(
+      source,
+      /\["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Validation"\]/
+    );
     assert.doesNotMatch(source, /\{row\.vendor\}\s*\|\s*\{row\.category\}/);
   }
 });

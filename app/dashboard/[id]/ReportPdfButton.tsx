@@ -1877,6 +1877,131 @@ function extractForceIntensity(content: string, force: string) {
   return null;
 }
 
+// Market Map -- deliberately reads only the row's own positioning/category
+// text, never strengths/weaknesses: a weakness like "Limited enterprise
+// features" would otherwise false-positive the word "enterprise" as this
+// vendor's target segment when it actually describes the opposite (a gap
+// in enterprise capability). Never fabricates a placement -- a vendor
+// missing a clear signal on either axis is simply omitted.
+function inferMarketMapPosition(row: { company: string; positioning: string }) {
+  const text = (row.positioning || "").toLowerCase();
+
+  let x: number | null = null;
+  if (/\benterprise\b/.test(text)) {
+    x = 78;
+  } else if (/\b(?:sme|smb|small business|mid-market|midmarket|small and medium)\b/.test(text)) {
+    x = 22;
+  }
+
+  let y: number | null = null;
+  if (/\b(?:platform|suite|end-to-end|broad(?:-based)?)\b/.test(text)) {
+    y = 22;
+  } else if (/\b(?:specialized|specialised|niche|point solution|focused|narrow)\b/.test(text)) {
+    y = 78;
+  }
+
+  return x !== null && y !== null ? { x, y } : null;
+}
+
+function extractHeadlineCagrValue(content: string) {
+  const match = (content || "").match(
+    /\d+(?:[.,]\d+)?(?:\s*[-–—]\s*\d+(?:[.,]\d+)?)?\s*%/
+  );
+
+  return match ? match[0].replace(/\s+/g, " ").trim() : "";
+}
+
+function extractMarketGrowthTrend(marketSizeContent: string, cagrContent: string) {
+  const combined = `${marketSizeContent} ${cagrContent}`;
+  if (/\b(?:growing|growth|expand(?:ing)?|increasing|accelerating)\b/i.test(combined)) {
+    return "Growing";
+  }
+  if (/\b(?:declin(?:e|ing)|shrink(?:ing)?|contracting|slowing)\b/i.test(combined)) {
+    return "Declining";
+  }
+  return "";
+}
+
+function extractAdoptionSignal(customerSegmentsContent: string) {
+  return (
+    customerSegmentsContent.match(/adoption\s+(?:maturity|stage|signal)[^.\n]*\./i)?.[0]?.trim() ||
+    customerSegmentsContent.match(/\b(?:early adopters?|early majority|late majority|mainstream adoption)\b[^.\n]*\./i)?.[0]?.trim() ||
+    ""
+  );
+}
+
+function extractRiskLevel(threatsContent: string) {
+  const match = threatsContent.match(/\b(high|significant|severe|moderate|medium|low|limited|minimal)\b[^.\n]{0,40}\brisk\b/i);
+  if (!match) return "";
+  const word = match[1].toLowerCase();
+  if (/high|significant|severe/.test(word)) return "High";
+  if (/moderate|medium/.test(word)) return "Moderate";
+  return "Low";
+}
+
+// Strategic Recommendations is inherently a list -- each real recommendation
+// line is rendered as its own card, rather than one long paragraph block.
+// Falls back to sentence-splitting when the content has no bullet/numbered
+// markers.
+function extractRecommendationItems(content: string) {
+  const source = content || "";
+  const bulletLines = source
+    .split("\n")
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^[-*•]\s+/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .replace(/\*\*/g, "")
+        .trim()
+    )
+    .filter((line) => line.length > 8);
+
+  if (bulletLines.length > 0) {
+    return bulletLines.slice(0, 8);
+  }
+
+  return source
+    .replace(/\*\*/g, "")
+    .split(/(?<=[.!?])\s+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 8)
+    .slice(0, 4);
+}
+
+// Best-effort inline signal extraction for a single recommendation line --
+// strategicRecommendations' own prompt requires each First-90-Days action
+// to name owners, a KPI, a success criterion, and a budget/spend ceiling
+// as prose, not as machine-parseable "Owner: X" labels, so this surfaces
+// only the signals that can be confidently read back out of that prose,
+// never fabricating a value when the line does not genuinely contain one.
+const recommendationOwnerRolePattern =
+  "(?:CEO|CMO|CFO|COO|CTO|CPO|VP of \\w+|Head of \\w+|(?:regional|country|global) (?:GM|general manager)|product (?:lead|manager|owner)|growth (?:lead|manager)|sales (?:lead|manager)|marketing (?:lead|manager)|founder)";
+
+function extractRecommendationSignals(line: string) {
+  const timeframe = line.match(
+    /\b\d+[\s-](?:day|days|week|weeks|month|months|gün|hafta|ay)\b|\bQ[1-4]\b|\b(?:this|next)\s+quarter\b/i
+  )?.[0];
+  const budget = line.match(/[€$₺]\s*\d+(?:[.,]\d+)*(?:\s*[kKmMbB])?/)?.[0];
+  const metric =
+    line.match(/\d+(?:[.,]\d+)?\s*%/)?.[0] ||
+    line.match(/\b\d+\s+(?:paying\s+)?(?:pilots?|customers?|interviews?|conversions?|sign-?ups?|users?|leads?|deals?)\b/i)?.[0];
+  const owner =
+    line.match(new RegExp(`\\b(?:owned by|led by|driven by|owner:)\\s+(?:the\\s+)?(${recommendationOwnerRolePattern})\\b`, "i"))?.[1] ||
+    line.match(new RegExp(`\\b(${recommendationOwnerRolePattern})\\b`, "i"))?.[1];
+  const gate = line.match(
+    /\bbefore\s+(?:committing\s+(?:further\s+)?(?:budget|spend)|scaling(?:\s+further)?|the\s+next\s+decision|proceeding|expanding|the\s+next\s+phase)\b[^.]*/i
+  )?.[0];
+
+  return {
+    timeframe: timeframe?.trim() || "",
+    metric: metric?.trim() || "",
+    budget: budget?.trim() || "",
+    owner: owner?.trim() || "",
+    gate: gate?.trim() || "",
+  };
+}
+
 function extractCompetitorRows(content: string) {
   const normalized = normalizePdfText(content).replace(/\*\*/g, "");
   const rows: Array<{
@@ -3582,6 +3707,14 @@ export function buildStandardReportPdf({
       const tamCircleVisualHeight = tamCircleMaxRadius * 2 + 8;
       const getTamVisualHeight = () => tamCircleVisualHeight;
 
+      // Fixed footprints for the Market Metrics dashboard and Strategic
+      // Recommendation cards below -- shared between drawSectionVisual
+      // (drawing) and getVisualHeight (pagination budgeting) so the two
+      // never disagree on how much space either visual needs.
+      const marketMetricsDashboardHeight = 30;
+      const recommendationCardHeight = 36;
+      const recommendationCardGap = 3;
+
       const getTamVisualContent = (content: string) =>
         (["TAM", "SAM", "SOM"] as const)
           .map((label) => {
@@ -4021,6 +4154,13 @@ export function buildStandardReportPdf({
           ];
           const headerHeight = 8;
           const rowHeight = 15;
+          // Market Map is a Market Intelligence-specific visual (its axes
+          // -- Enterprise<->SME, Broad platform<->Specialized -- read the
+          // vendor-positioning vocabulary market-intelligence-graph.ts
+          // generates); Business Plan/Acquisition's generic "competitor"
+          // section keeps its existing table-only rendering untouched.
+          const marketMapGap = isMarketIntelligenceReport ? 8 : 0;
+          const marketMapHeight = isMarketIntelligenceReport ? 50 : 0;
           let x = bodyX;
 
           pdf.setFillColor("#101113");
@@ -4033,13 +4173,93 @@ export function buildStandardReportPdf({
             x += column.width;
           });
 
+          // Market Map -- positions vendors on Enterprise<->SME (x) and
+          // Broad platform<->Specialized (y) axes, read only from each
+          // row's own category/positioning text (see
+          // inferMarketMapPosition's own comment on why strengths/
+          // weaknesses are deliberately excluded). Never fabricates a
+          // placement: a report with fewer than 2 confidently-placeable
+          // vendors gets an honest "Validation Needed" state instead of a
+          // sparse or guessed chart.
+          const drawMarketMap = (mapY: number) => {
+            const placements = rows
+              .map((row) => {
+                const coordinates = inferMarketMapPosition(row);
+                return coordinates ? { vendor: row.company || "Vendor", ...coordinates } : null;
+              })
+              .filter((placement): placement is { vendor: string; x: number; y: number } => placement !== null);
+
+            pdf.setFontSize(7.2);
+            pdf.setTextColor("#5eead4");
+            pdf.text(localizePdfPresentationLabel("MARKET MAP", pdfLocale), bodyX, mapY - 2);
+
+            pdf.setFillColor("#101113");
+            pdf.setDrawColor("#27272a");
+            pdf.roundedRect(bodyX, mapY, bodyWidth, marketMapHeight, 3, 3, "FD");
+
+            if (placements.length < 2) {
+              pdf.setFontSize(6.2);
+              pdf.setTextColor("#fbbf24");
+              pdf.text(localizePdfPresentationLabel("VALIDATION NEEDED", pdfLocale), bodyX + 5, mapY + 9);
+              pdf.setFontSize(6);
+              pdf.setTextColor("#a1a1aa");
+              pdf.text(
+                wrapPdfText(
+                  localizePdfPresentationText(
+                    "Not enough competitors have a clear category or positioning signal on both axes to plot a reliable market map yet.",
+                    pdfLocale
+                  ),
+                  bodyWidth - 10
+                ),
+                bodyX + 5,
+                mapY + 15,
+                { lineHeightFactor: 1.3, maxWidth: bodyWidth - 10 }
+              );
+              return;
+            }
+
+            const mapInnerX = bodyX + 6;
+            const mapInnerY = mapY + 6;
+            const mapInnerWidth = bodyWidth - 12;
+            const mapInnerHeight = marketMapHeight - 12;
+
+            pdf.setDrawColor("#27272a");
+            pdf.line(mapInnerX + mapInnerWidth / 2, mapInnerY, mapInnerX + mapInnerWidth / 2, mapInnerY + mapInnerHeight);
+            pdf.line(mapInnerX, mapInnerY + mapInnerHeight / 2, mapInnerX + mapInnerWidth, mapInnerY + mapInnerHeight / 2);
+            pdf.setFontSize(5);
+            pdf.setTextColor("#71717a");
+            pdf.text(localizePdfPresentationLabel("Broad platform", pdfLocale), mapInnerX + 1, mapInnerY + 3.6);
+            pdf.text(localizePdfPresentationLabel("Specialized", pdfLocale), mapInnerX + 1, mapInnerY + mapInnerHeight - 1);
+            pdf.text(localizePdfPresentationLabel("SME", pdfLocale), mapInnerX + 1, mapInnerY + mapInnerHeight / 2 - 1);
+            const enterpriseLabelWidth = pdf.getTextWidth(localizePdfPresentationLabel("Enterprise", pdfLocale));
+            pdf.text(
+              localizePdfPresentationLabel("Enterprise", pdfLocale),
+              mapInnerX + mapInnerWidth - enterpriseLabelWidth - 1,
+              mapInnerY + mapInnerHeight / 2 - 1
+            );
+
+            placements.forEach((placement) => {
+              const dotX = mapInnerX + (placement.x / 100) * mapInnerWidth;
+              const dotY = mapInnerY + (placement.y / 100) * mapInnerHeight;
+
+              pdf.setFillColor("#5eead4");
+              pdf.circle(dotX, dotY, 1.6, "F");
+              pdf.setFontSize(5.2);
+              pdf.setTextColor("#ccfbf1");
+              drawSingleLine(placement.vendor, dotX + 2.6, dotY + 1.2, 24, 5.2, 4);
+            });
+          };
+
           if (rows.length === 0) {
             pdf.setFontSize(6.2);
             pdf.setTextColor("#a1a1aa");
             pdf.text(localizePdfPresentationText("See the Competitive Landscape section for full competitor detail.", pdfLocale), bodyX + 3, visualY + 14, {
               maxWidth: bodyWidth - 6,
             });
-            return headerHeight + rowHeight + 4;
+            if (isMarketIntelligenceReport) {
+              drawMarketMap(visualY + headerHeight + rowHeight + 4 + marketMapGap);
+            }
+            return headerHeight + rowHeight + 4 + marketMapGap + marketMapHeight;
           }
 
           rows.forEach((row, rowIndex) => {
@@ -4061,7 +4281,162 @@ export function buildStandardReportPdf({
             });
           });
 
-          return headerHeight + Math.max(1, rows.length) * rowHeight + 4;
+          if (isMarketIntelligenceReport) {
+            drawMarketMap(visualY + headerHeight + Math.max(1, rows.length) * rowHeight + 4 + marketMapGap);
+          }
+          return headerHeight + Math.max(1, rows.length) * rowHeight + 4 + marketMapGap + marketMapHeight;
+        }
+
+        // Market Metrics dashboard -- combines real signals already
+        // generated across several Market Intelligence sections
+        // (marketSize, cagr, customerSegments, threats) into one premium
+        // tile grid rather than leaving each as a separate plain-text
+        // section. Every tile reads real content only; a tile with no
+        // detectable signal shows "Validation Needed", never a fabricated
+        // value.
+        if (isMarketIntelligenceReport && field === "marketSize") {
+          const cagrContent = pdfSections.find((candidate) => candidate.field === "cagr")?.content || "";
+          const customerSegmentsContent = pdfSections.find((candidate) => candidate.field === "customerSegments")?.content || "";
+          const threatsContent = pdfSections.find((candidate) => candidate.field === "threats")?.content || "";
+
+          const tiles = [
+            { label: "Market Growth Signal", value: extractMarketGrowthTrend(content, cagrContent) },
+            { label: "CAGR", value: extractHeadlineCagrValue(cagrContent) },
+            { label: "Customer Segment", value: extractKeywordInsight(customerSegmentsContent, []) },
+            { label: "Adoption Signal", value: extractAdoptionSignal(customerSegmentsContent) },
+            { label: "Risk Level", value: extractRiskLevel(threatsContent) },
+          ];
+          const columns = tiles.length;
+          const itemWidth = (bodyWidth - (columns - 1) * 3) / columns;
+          const itemHeight = marketMetricsDashboardHeight - 6;
+
+          pdf.setFontSize(7.2);
+          pdf.setTextColor("#5eead4");
+          pdf.text(localizePdfPresentationLabel("MARKET METRICS", pdfLocale), bodyX, visualY - 2);
+
+          tiles.forEach((tile, index) => {
+            const x = bodyX + index * (itemWidth + 3);
+
+            pdf.setFillColor("#18181b");
+            pdf.setDrawColor("#27272a");
+            pdf.roundedRect(x, visualY, itemWidth, itemHeight, 2.5, 2.5, "FD");
+            pdf.setFontSize(5.2);
+            pdf.setTextColor("#71717a");
+            const labelLines = wrapPdfText(localizePdfPresentationLabel(tile.label, pdfLocale), itemWidth - 4).slice(0, 2);
+            pdf.text(labelLines, x + 2, visualY + 3.6, {
+              lineHeightFactor: 1.05,
+              maxWidth: itemWidth - 4,
+            });
+            const valueY = visualY + 3.6 + labelLines.length * 3.1 + 3;
+            if (tile.value) {
+              pdf.setFontSize(5.6);
+              pdf.setTextColor("#f4f4f5");
+              pdf.text(truncatePdfCellLines(wrapPdfText(tile.value, itemWidth - 4), 3), x + 2, valueY, {
+                lineHeightFactor: 1.15,
+                maxWidth: itemWidth - 4,
+              });
+            } else {
+              pdf.setFontSize(5);
+              pdf.setTextColor("#fbbf24");
+              pdf.text(localizePdfPresentationLabel("VALIDATION NEEDED", pdfLocale), x + 2, valueY, { maxWidth: itemWidth - 4 });
+            }
+          });
+
+          return marketMetricsDashboardHeight;
+        }
+
+        // Strategic Recommendations is inherently a list -- rendered as
+        // Action/Owner/Timeline/Budget/Success Metric/Decision Gate
+        // cards rather than one long paragraph block. Each card's signals
+        // are read directly out of this recommendation's own generated
+        // sentence (extractRecommendationSignals never fabricates a value
+        // it cannot find). The section's full prose still renders below
+        // this visual, unchanged.
+        if (isMarketIntelligenceReport && normalizedTitle.includes("strategic recommendation")) {
+          const items = extractRecommendationItems(content).slice(0, 4);
+
+          if (items.length === 0) {
+            return 0;
+          }
+
+          const columns = 2;
+          const cardGap = recommendationCardGap;
+          const cardHeight = recommendationCardHeight;
+          const cardWidth = (bodyWidth - (columns - 1) * cardGap) / columns;
+          const rowCount = Math.ceil(items.length / columns);
+
+          items.forEach((item, index) => {
+            const { timeframe, metric, budget, owner, gate } = extractRecommendationSignals(item);
+            const col = index % columns;
+            const row = Math.floor(index / columns);
+            const x = bodyX + col * (cardWidth + cardGap);
+            const cardY = visualY + row * (cardHeight + cardGap);
+
+            pdf.setFillColor("#18181b");
+            pdf.setDrawColor("#27272a");
+            pdf.roundedRect(x, cardY, cardWidth, cardHeight, 2.5, 2.5, "FD");
+
+            pdf.setFillColor("#042f2e");
+            pdf.setDrawColor("#5eead4");
+            pdf.circle(x + 6, cardY + 6, 3, "FD");
+            pdf.setFontSize(5.6);
+            pdf.setTextColor("#ccfbf1");
+            pdf.text(String(index + 1), x + 4.7, cardY + 7.4);
+
+            pdf.setFontSize(5.2);
+            pdf.setTextColor("#71717a");
+            pdf.text(localizePdfPresentationLabel("ACTION", pdfLocale), x + 11, cardY + 4);
+            pdf.setFontSize(6);
+            pdf.setTextColor("#e4e4e7");
+            const actionLines = truncatePdfCellLines(
+              wrapPdfText(localizePdfPresentationText(item, pdfLocale), cardWidth - 13),
+              2
+            );
+            pdf.text(actionLines, x + 11, cardY + 7.8, {
+              lineHeightFactor: 1.15,
+              maxWidth: cardWidth - 13,
+            });
+
+            const fields = (
+              [
+                ["Owner", owner],
+                ["Timeline", timeframe],
+                ["Budget", budget],
+                ["Success Metric", metric],
+              ] as const
+            ).filter(([, value]) => value);
+
+            const fieldsTopY = cardY + 7.8 + actionLines.length * 3.3 + 2.5;
+            const fieldColWidth = (cardWidth - 6) / 2;
+
+            if (fields.length > 0) {
+              pdf.setDrawColor("#27272a");
+              pdf.line(x + 3, fieldsTopY - 1.6, x + cardWidth - 3, fieldsTopY - 1.6);
+
+              fields.slice(0, 4).forEach(([label, value], fieldIndex) => {
+                const fx = x + 3 + (fieldIndex % 2) * fieldColWidth;
+                const fy = fieldsTopY + Math.floor(fieldIndex / 2) * 5.6;
+
+                pdf.setFontSize(4.4);
+                pdf.setTextColor("#71717a");
+                pdf.text(localizePdfPresentationLabel(label, pdfLocale).toUpperCase(), fx, fy);
+                pdf.setFontSize(5.2);
+                pdf.setTextColor("#5eead4");
+                drawSingleLine(value, fx, fy + 2.8, fieldColWidth - 2, 5.2, 4);
+              });
+            }
+
+            if (gate) {
+              pdf.setFontSize(4.4);
+              pdf.setTextColor("#71717a");
+              pdf.text(localizePdfPresentationLabel("DECISION GATE", pdfLocale), x + 3, cardY + cardHeight - 5.4);
+              pdf.setFontSize(5);
+              pdf.setTextColor("#fbbf24");
+              drawSingleLine(gate, x + 3, cardY + cardHeight - 2, cardWidth - 6, 5, 4);
+            }
+          });
+
+          return rowCount * cardHeight + Math.max(0, rowCount - 1) * cardGap;
         }
 
         // Acquisition Due Diligence's own postMergerIntegrationPlan field
@@ -4385,7 +4760,9 @@ export function buildStandardReportPdf({
 
         if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {
           const rows = extractCompetitorRows(section.content);
-          return 8 + Math.max(1, rows.length) * 15 + 4;
+          const marketMapGap = isMarketIntelligenceReport ? 8 : 0;
+          const marketMapHeight = isMarketIntelligenceReport ? 50 : 0;
+          return 8 + Math.max(1, rows.length) * 15 + 4 + marketMapGap + marketMapHeight;
         }
 
         if (section.field !== "postMergerIntegrationPlan" && normalizedTitle.includes("roadmap")) {
@@ -4402,6 +4779,19 @@ export function buildStandardReportPdf({
 
         if (normalizedTitle.includes("executive recommendation")) {
           return 48;
+        }
+
+        if (isMarketIntelligenceReport && section.field === "marketSize") {
+          return marketMetricsDashboardHeight;
+        }
+
+        if (isMarketIntelligenceReport && normalizedTitle.includes("strategic recommendation")) {
+          const items = extractRecommendationItems(section.content).slice(0, 4);
+          if (items.length === 0) {
+            return 0;
+          }
+          const rows = Math.ceil(items.length / 2);
+          return rows * recommendationCardHeight + Math.max(0, rows - 1) * recommendationCardGap;
         }
 
         return /founder score|founder readiness|scenario|roadmap|competitor|porter|kpi|risk|unit economics/i.test(section.title)
