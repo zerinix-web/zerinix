@@ -56,11 +56,21 @@ function extractFunctionSource(source, functionName) {
   return match[0];
 }
 
+// NOTE: superseded by the "true investor-grade visual components" ticket
+// -- extractRecommendationSignals now also extracts a best-effort Owner
+// (see tests/market-intelligence-investor-grade-visuals.test.mjs), which
+// depends on a preceding recommendationOwnerRolePattern const not
+// captured by extractFunctionSource alone. Pulled in here too so this
+// file's own pre-existing timeframe/metric assertions keep working.
 async function compileFunction(source, functionName) {
   const raw = extractFunctionSource(source, functionName);
+  const dependency =
+    functionName === "extractRecommendationSignals"
+      ? source.match(/const recommendationOwnerRolePattern =[\s\S]*?;/)?.[0]
+      : null;
   const dir = mkdtempSync(join(tmpdir(), "zerinix-premium-fn-"));
   const outPath = join(dir, `${functionName}.ts`);
-  writeFileSync(outPath, `export ${raw}\n`);
+  writeFileSync(outPath, `${dependency ? `${dependency}\n` : ""}export ${raw}\n`);
   const mod = await import(pathToFileURL(outPath).href);
   return mod[functionName];
 }

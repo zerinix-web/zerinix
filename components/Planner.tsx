@@ -1806,7 +1806,8 @@ function extractMarketIntelligenceCompetitorRows(content: string) {
     .map((row) => row.split("|").slice(1, -1).map((cell) => cell.trim()))
     .map((cells) => ({
       vendor: read(cells, ["vendor", "company", "competitor"]),
-      category: read(cells, ["category", "segment"]),
+      category: read(cells, ["category"]),
+      position: read(cells, ["segment", "ai capability", "position", "positioning"]),
       strengths: read(cells, ["strength"]),
       weaknesses: read(cells, ["weakness"]),
       relevance: read(cells, ["market relevance", "relevance", "confidence"]),
@@ -1848,22 +1849,76 @@ function extractRecommendationItems(content: string) {
 
 // Best-effort inline signal extraction for a single recommendation line --
 // strategicRecommendations' own prompt requires each First-90-Days action
-// to name a KPI, a success criterion, and a budget/spend ceiling as
-// prose, not as machine-parseable "Owner: X" labels, so this surfaces
+// to name owners, a KPI, a success criterion, and a budget/spend ceiling
+// as prose, not as machine-parseable "Owner: X" labels, so this surfaces
 // only the signals that can be confidently read back out of that prose
-// (a timeframe, a percentage/numeric KPI) as small badges -- it never
-// fabricates an "Owner" or "Timeline" value when the line does not
-// genuinely contain one.
+// (an owner role/title, a timeframe, a percentage/numeric KPI) as small
+// badges -- it never fabricates a value when the line does not genuinely
+// contain one.
+const recommendationOwnerRolePattern =
+  "(?:CEO|CMO|CFO|COO|CTO|CPO|VP of \\w+|Head of \\w+|(?:regional|country|global) (?:GM|general manager)|product (?:lead|manager|owner)|growth (?:lead|manager)|sales (?:lead|manager)|marketing (?:lead|manager)|founder)";
+
 function extractRecommendationSignals(line: string) {
   const timeframe = line.match(
     /\b\d+[\s-](?:day|days|week|weeks|month|months|gün|hafta|ay)\b|\bQ[1-4]\b|\b(?:this|next)\s+quarter\b/i
   )?.[0];
   const metric = line.match(/\d+(?:[.,]\d+)?\s*%|[€$₺]\s*\d+(?:[.,]\d+)*(?:\s*[kKmMbB])?/)?.[0];
+  const owner =
+    line.match(new RegExp(`\\b(?:owned by|led by|driven by|owner:)\\s+(?:the\\s+)?(${recommendationOwnerRolePattern})\\b`, "i"))?.[1] ||
+    line.match(new RegExp(`\\b(${recommendationOwnerRolePattern})\\b`, "i"))?.[1];
 
   return {
     timeframe: timeframe?.trim() || "",
     metric: metric?.trim() || "",
+    owner: owner?.trim() || "",
   };
+}
+
+// CRITICAL FIX -- do not reintroduce old fake-data behavior. Porter's
+// Five Forces' intensity bars were a static, hardcoded array
+// ([72, 54, 66, 48, 60]) -- identical for every report regardless of the
+// generated content, which the section's own prompt explicitly instructs
+// to give "a qualitative assessment ... for each force". This reads that
+// real qualitative assessment (high/moderate/low and their synonyms)
+// back out of the text near each force's own name, scoped to a bounded
+// window so an intensity word describing a DIFFERENT force can't bleed
+// into this one's reading. Returns null (never a guessed number) when no
+// such signal is present for that force.
+const forceAliases: Record<string, string[]> = {
+  Rivalry: ["rivalry", "competitive rivalry", "rekabet yoğunluğu"],
+  Entrants: ["threat of (?:new )?entr(?:y|ants)", "new entrants", "barriers? to entry", "giriş engeli"],
+  "Buyer Power": ["buyer power", "bargaining power of buyers", "alıcı gücü"],
+  Buyer: ["buyer power", "bargaining power of buyers", "alıcı gücü"],
+  "Supplier Power": ["supplier power", "bargaining power of suppliers", "tedarikçi gücü"],
+  Supplier: ["supplier power", "bargaining power of suppliers", "tedarikçi gücü"],
+  Substitutes: ["threat of substitutes?", "substitute products?", "ikame ürün"],
+};
+
+function extractForceIntensity(content: string, force: string) {
+  const aliases = forceAliases[force] || [force];
+
+  for (const alias of aliases) {
+    const match = content.match(
+      new RegExp(
+        `(?:${alias})[^.\\n]{0,70}?\\b(high|strong|significant|intense|severe|yüksek|güçlü|moderate|medium|orta|low|weak|limited|minimal|düşük|zayıf)\\b`,
+        "i"
+      )
+    );
+
+    if (match) {
+      const word = match[1].toLowerCase();
+
+      if (/high|strong|significant|intense|severe|yüksek|güçlü/.test(word)) {
+        return { level: "High", width: 82 };
+      }
+      if (/moderate|medium|orta/.test(word)) {
+        return { level: "Moderate", width: 55 };
+      }
+      return { level: "Low", width: 28 };
+    }
+  }
+
+  return null;
 }
 
 function extractRoadmapAction(content: string, step: string) {
@@ -3655,6 +3710,47 @@ function PremiumSectionVisual({
 
   if (field === "tamSamSom") {
     const rows = getReportMarketRows(section.content);
+    // CRITICAL FIX -- do not reintroduce old fake-data behavior, and
+    // match the exported PDF's own already-correct treatment (see
+    // downloadPdf's own tamSamSom branch, which already uses
+    // parseMarketSizeMagnitude for real proportional sizing and a
+    // coherence check) -- the on-screen visual had drifted out of sync
+    // with it, still using a static [100, 68, 36] bar-width array
+    // regardless of the real figures. TAM is expected to be the largest
+    // of the three by definition, so a coherent report has TAM >= SAM >=
+    // SOM; when that doesn't hold (missing or logically inconsistent
+    // figures), a premium empty state renders instead of a misleading
+    // chart, exactly like the PDF already does.
+    const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value));
+    const [tamMagnitude, samMagnitude, somMagnitude] = magnitudes;
+    const isCoherentlyNested =
+      tamMagnitude !== null &&
+      samMagnitude !== null &&
+      somMagnitude !== null &&
+      tamMagnitude >= samMagnitude &&
+      samMagnitude >= somMagnitude;
+
+    if (!isCoherentlyNested) {
+      return (
+        <div className="mb-5 rounded-[2rem] border border-dashed border-white/15 bg-black/20 p-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+            Market Sizing Stack
+          </p>
+          <div className="mt-4 flex items-center gap-3">
+            <span className="h-2 w-2 rounded-full bg-amber-300" />
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-amber-200">
+              Validation Needed
+            </p>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-zinc-400">
+            No verified or logically nested (TAM ≥ SAM ≥ SOM) figures were available for TAM / SAM /
+            SOM. See the analysis below for what would close the gap.
+          </p>
+        </div>
+      );
+    }
+
+    const maxMagnitude = Math.max(...magnitudes.filter((magnitude): magnitude is number => magnitude !== null));
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.12),transparent_30%),rgba(255,255,255,0.025)] p-5">
@@ -3695,9 +3791,10 @@ function PremiumSectionVisual({
               <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
                 <div
                   className={`h-full rounded-full bg-gradient-to-r ${row.tone}`}
-                  style={{ width: `${[100, 68, 36][index]}%` }}
+                  style={{ width: `${Math.max(8, ((magnitudes[index] ?? 0) / maxMagnitude) * 100)}%` }}
                 />
               </div>
+              <p className="mt-3 line-clamp-2 text-xs leading-5 text-zinc-500">{row.description}</p>
             </div>
           ))}
         </div>
@@ -3993,14 +4090,15 @@ if (field === "swotAnalysis") {
             Competitive Landscape
           </p>
           <p className="mt-2 text-sm text-zinc-400">
-            Vendors, category, strengths, weaknesses and market relevance from the generated analysis.
+            Vendors, category, position, strengths, weaknesses and market relevance from the generated
+            analysis.
           </p>
         </div>
         {rows.length > 0 ? (
           <div className="overflow-x-auto">
-            <div className="min-w-[760px]">
-              <div className="grid grid-cols-[1fr_1fr_1.2fr_1.2fr_0.9fr] gap-px bg-white/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                {["Vendor", "Category", "Strengths", "Weaknesses", "Relevance"].map((label) => (
+            <div className="min-w-[880px]">
+              <div className="grid grid-cols-[0.9fr_0.8fr_0.9fr_1.1fr_1.1fr_0.8fr] gap-px bg-white/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                {["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance"].map((label) => (
                   <div key={label} className="bg-zinc-950/80 px-4 py-3">
                     {label}
                   </div>
@@ -4010,10 +4108,11 @@ if (field === "swotAnalysis") {
                 {rows.map((row, index) => (
                   <div
                     key={`${row.vendor}-${index}`}
-                    className="grid grid-cols-[1fr_1fr_1.2fr_1.2fr_0.9fr] bg-black/35 text-sm leading-6 text-zinc-300"
+                    className="grid grid-cols-[0.9fr_0.8fr_0.9fr_1.1fr_1.1fr_0.8fr] bg-black/35 text-sm leading-6 text-zinc-300"
                   >
                     <div className="px-4 py-4 font-semibold text-white">{row.vendor || "—"}</div>
                     <div className="px-4 py-4">{row.category || "—"}</div>
+                    <div className="px-4 py-4">{row.position || "—"}</div>
                     <div className="px-4 py-4">{row.strengths || "—"}</div>
                     <div className="px-4 py-4">{row.weaknesses || "—"}</div>
                     <div className="px-4 py-4">
@@ -4048,30 +4147,36 @@ if (field === "swotAnalysis") {
         {items.length > 0 ? (
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {items.map((item, index) => {
-              const { timeframe, metric } = extractRecommendationSignals(item);
+              const { timeframe, metric, owner } = extractRecommendationSignals(item);
+              const fields = [
+                { label: "Owner", value: owner },
+                { label: "Timeline", value: timeframe },
+                { label: "Success Metric", value: metric },
+              ].filter((field) => field.value);
 
               return (
-                <div key={index} className="flex gap-3 rounded-2xl border border-white/10 bg-black/25 p-4">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-teal-200/30 bg-teal-200/10 text-xs font-semibold text-teal-100">
-                    {index + 1}
-                  </span>
-                  <div className="min-w-0">
-                    {timeframe || metric ? (
-                      <div className="mb-2 flex flex-wrap gap-1.5">
-                        {timeframe ? (
-                          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-zinc-400">
-                            {timeframe}
-                          </span>
-                        ) : null}
-                        {metric ? (
-                          <span className="rounded-full border border-teal-200/20 bg-teal-200/10 px-2 py-0.5 text-[10px] font-semibold text-teal-100">
-                            {metric}
-                          </span>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <p className="text-sm leading-6 text-zinc-300">{item}</p>
+                <div key={index} className="rounded-2xl border border-white/10 bg-black/25 p-4">
+                  <div className="flex gap-3">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-teal-200/30 bg-teal-200/10 text-xs font-semibold text-teal-100">
+                      {index + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Action</p>
+                      <p className="mt-1 text-sm leading-6 text-zinc-300">{item}</p>
+                    </div>
                   </div>
+                  {fields.length > 0 ? (
+                    <div className="mt-3 grid grid-cols-3 gap-2 border-t border-white/10 pt-3">
+                      {fields.map((field) => (
+                        <div key={field.label}>
+                          <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                            {field.label}
+                          </p>
+                          <p className="mt-1 truncate text-xs font-semibold text-teal-100">{field.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
@@ -4491,18 +4596,30 @@ if (field === "swotAnalysis") {
           })}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          {forces.map((force, index) => (
-            <div key={force} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
-              <p className="text-sm font-semibold text-white">{force}</p>
-              <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-800">
-                <div
-                  className="h-full rounded-full bg-teal-200/75"
-                  style={{ width: `${[72, 54, 66, 48, 60][index]}%` }}
-                />
+          {forces.map((force) => {
+            const intensity = extractForceIntensity(section.content, force);
+
+            return (
+              <div key={force} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
+                <p className="text-sm font-semibold text-white">{force}</p>
+                {intensity ? (
+                  <>
+                    <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-800">
+                      <div
+                        className="h-full rounded-full bg-teal-200/75"
+                        style={{ width: `${intensity.width}%` }}
+                      />
+                    </div>
+                    <p className="mt-2 text-xs text-zinc-500">{intensity.level} intensity</p>
+                  </>
+                ) : (
+                  <p className="mt-4 text-xs font-semibold uppercase tracking-[0.12em] text-amber-200">
+                    Not specified
+                  </p>
+                )}
               </div>
-              <p className="mt-2 text-xs text-zinc-500">Force intensity</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     );
@@ -6551,7 +6668,12 @@ const ReportPanel = memo(function ReportPanel({
             const dotY = centerY + Math.sin(angle) * 20;
             const cardX = bodyX + visualWidth * 0.58;
             const cardY = visualY + index * 8;
-            const score = [72, 54, 66, 48, 60][index];
+            // CRITICAL FIX -- do not reintroduce old fake-data behavior.
+            // This used to be a static [72, 54, 66, 48, 60] array,
+            // identical for every report -- see extractForceIntensity's
+            // own comment for why a real per-force reading is used
+            // instead, mirroring the on-screen visual above.
+            const score = extractForceIntensity(section.content, force)?.width ?? 0;
 
             pdf.setDrawColor("#5eead4");
             pdf.line(centerX, centerY, dotX, dotY);

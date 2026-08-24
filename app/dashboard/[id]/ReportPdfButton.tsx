@@ -1829,6 +1829,54 @@ function parseInlineCompetitorField(line: string, label: string) {
   return match?.[1]?.trim() || "";
 }
 
+// CRITICAL FIX -- do not reintroduce old fake-data behavior. Porter's
+// Five Forces' PDF intensity bars were a static, hardcoded array
+// ([72, 54, 66, 48, 60]) -- identical for every report regardless of the
+// generated content, which the section's own prompt explicitly instructs
+// to give "a qualitative assessment ... for each force". This reads that
+// real qualitative assessment (high/moderate/low and their synonyms)
+// back out of the text near each force's own name, scoped to a bounded
+// window so an intensity word describing a DIFFERENT force can't bleed
+// into this one's reading. Returns null (never a guessed number) when no
+// such signal is present for that force. Mirrors page.tsx/Planner.tsx's
+// own on-screen copies of this same function.
+const forceAliases: Record<string, string[]> = {
+  Rivalry: ["rivalry", "competitive rivalry", "rekabet yoğunluğu"],
+  Entrants: ["threat of (?:new )?entr(?:y|ants)", "new entrants", "barriers? to entry", "giriş engeli"],
+  "Buyer Power": ["buyer power", "bargaining power of buyers", "alıcı gücü"],
+  Buyer: ["buyer power", "bargaining power of buyers", "alıcı gücü"],
+  "Supplier Power": ["supplier power", "bargaining power of suppliers", "tedarikçi gücü"],
+  Supplier: ["supplier power", "bargaining power of suppliers", "tedarikçi gücü"],
+  Substitutes: ["threat of substitutes?", "substitute products?", "ikame ürün"],
+};
+
+function extractForceIntensity(content: string, force: string) {
+  const aliases = forceAliases[force] || [force];
+
+  for (const alias of aliases) {
+    const match = content.match(
+      new RegExp(
+        `(?:${alias})[^.\\n]{0,70}?\\b(high|strong|significant|intense|severe|yüksek|güçlü|moderate|medium|orta|low|weak|limited|minimal|düşük|zayıf)\\b`,
+        "i"
+      )
+    );
+
+    if (match) {
+      const word = match[1].toLowerCase();
+
+      if (/high|strong|significant|intense|severe|yüksek|güçlü/.test(word)) {
+        return { level: "High", width: 82 };
+      }
+      if (/moderate|medium|orta/.test(word)) {
+        return { level: "Moderate", width: 55 };
+      }
+      return { level: "Low", width: 28 };
+    }
+  }
+
+  return null;
+}
+
 function extractCompetitorRows(content: string) {
   const normalized = normalizePdfText(content).replace(/\*\*/g, "");
   const rows: Array<{
@@ -4060,7 +4108,12 @@ export function buildStandardReportPdf({
             const dotY = centerY + Math.sin(angle) * 20;
             const cardX = bodyX + bodyWidth * 0.58;
             const cardY = visualY + index * 8;
-            const score = [72, 54, 66, 48, 60][index];
+            // CRITICAL FIX -- do not reintroduce old fake-data behavior.
+            // This used to be a static [72, 54, 66, 48, 60] array,
+            // identical for every report -- see extractForceIntensity's
+            // own comment for why a real per-force reading is used
+            // instead.
+            const score = extractForceIntensity(content, force)?.width ?? 0;
 
             pdf.setDrawColor("#5eead4");
             pdf.line(centerX, centerY, dotX, dotY);
