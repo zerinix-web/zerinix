@@ -4185,6 +4185,32 @@ if (field === "swotAnalysis") {
   if (field === "competitiveLandscape") {
     const rows = extractMarketIntelligenceCompetitorRows(section.content);
 
+    // No competitor data validated at all -- a large empty table shell
+    // (header row with nothing under it) stacked on top of MarketMap's
+    // own separate "Validation Needed" box was two empty states for the
+    // same problem. Show one clean validation card instead, matching the
+    // same premium empty-state language used elsewhere (TAM/SAM/SOM,
+    // Market Metrics), and skip MarketMap entirely -- it has nothing to
+    // plot with zero rows.
+    if (rows.length === 0) {
+      return (
+        <div className="mb-5 rounded-[2rem] border border-dashed border-white/15 bg-black/20 p-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+            Competitive Landscape
+          </p>
+          <div className="mt-4 flex items-center gap-3">
+            <span className="h-2 w-2 rounded-full bg-amber-300" />
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-amber-200">
+              Validation Needed
+            </p>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-zinc-400">
+            No competitor data could be validated for this market yet.
+          </p>
+        </div>
+      );
+    }
+
     return (
       <div className="mb-5 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.025]">
         <div className="border-b border-white/10 p-5">
@@ -4196,57 +4222,49 @@ if (field === "swotAnalysis") {
             from the generated analysis.
           </p>
         </div>
-        {rows.length > 0 ? (
-          <div className="overflow-x-auto">
-            <div className="min-w-[1020px]">
-              <div className="grid grid-cols-[0.85fr_0.75fr_0.85fr_1fr_1fr_0.75fr_0.85fr] gap-px bg-white/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                {["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Validation"].map(
-                  (label) => (
-                    <div key={label} className="bg-zinc-950/80 px-4 py-3">
-                      {label}
-                    </div>
-                  )
-                )}
-              </div>
-              <div className="grid gap-px bg-white/10">
-                {rows.map((row, index) => (
-                  <div
-                    key={`${row.vendor}-${index}`}
-                    className="grid grid-cols-[0.85fr_0.75fr_0.85fr_1fr_1fr_0.75fr_0.85fr] bg-black/35 text-sm leading-6 text-zinc-300"
-                  >
-                    <div className="px-4 py-4 font-semibold text-white">{row.vendor || "—"}</div>
-                    <div className="px-4 py-4">{row.category || "—"}</div>
-                    <div className="px-4 py-4">{row.position || "—"}</div>
-                    <div className="px-4 py-4">{row.strengths || "—"}</div>
-                    <div className="px-4 py-4">{row.weaknesses || "—"}</div>
-                    <div className="px-4 py-4">
-                      <span className="rounded-full border border-teal-200/20 bg-teal-200/10 px-2.5 py-1 text-xs font-semibold text-teal-100">
-                        {row.relevance || "—"}
-                      </span>
-                    </div>
-                    <div className="px-4 py-4">
-                      {row.validationStatus ? (
-                        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-semibold text-zinc-300">
-                          {row.validationStatus}
-                        </span>
-                      ) : (
-                        <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-2.5 py-1 text-xs font-semibold text-amber-200">
-                          Validation Needed
-                        </span>
-                      )}
-                    </div>
+        <div className="overflow-x-auto">
+          <div className="min-w-[1020px]">
+            <div className="grid grid-cols-[0.85fr_0.75fr_0.85fr_1fr_1fr_0.75fr_0.85fr] gap-px bg-white/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+              {["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Validation"].map(
+                (label) => (
+                  <div key={label} className="bg-zinc-950/80 px-4 py-3">
+                    {label}
                   </div>
-                ))}
-              </div>
+                )
+              )}
+            </div>
+            <div className="grid gap-px bg-white/10">
+              {rows.map((row, index) => (
+                <div
+                  key={`${row.vendor}-${index}`}
+                  className="grid grid-cols-[0.85fr_0.75fr_0.85fr_1fr_1fr_0.75fr_0.85fr] bg-black/35 text-sm leading-6 text-zinc-300"
+                >
+                  <div className="px-4 py-4 font-semibold text-white">{row.vendor || "—"}</div>
+                  <div className="px-4 py-4">{row.category || "—"}</div>
+                  <div className="px-4 py-4">{row.position || "—"}</div>
+                  <div className="px-4 py-4">{row.strengths || "—"}</div>
+                  <div className="px-4 py-4">{row.weaknesses || "—"}</div>
+                  <div className="px-4 py-4">
+                    <span className="rounded-full border border-teal-200/20 bg-teal-200/10 px-2.5 py-1 text-xs font-semibold text-teal-100">
+                      {row.relevance || "—"}
+                    </span>
+                  </div>
+                  <div className="px-4 py-4">
+                    {row.validationStatus ? (
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-semibold text-zinc-300">
+                        {row.validationStatus}
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-2.5 py-1 text-xs font-semibold text-amber-200">
+                        Validation Needed
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
-        ) : (
-          <div className="flex min-h-36 items-center justify-center p-6 text-center">
-            <p className="max-w-md text-sm leading-6 text-zinc-400">
-              See the Competitive Landscape section for full competitor detail.
-            </p>
-          </div>
-        )}
+        </div>
         <MarketMap rows={rows} />
       </div>
     );
@@ -5081,6 +5099,23 @@ function hasPremiumSectionVisual(section: ReportSection) {
   );
 }
 
+// FINAL REPORT PRESENTATION CLEANUP -- these fields already get their own
+// premium visual card (ExecutiveSummaryVisual, MarketForcesQuadrant, the
+// TAM/SAM/SOM bars, or the Strategic Recommendation action cards), so the
+// generic ExecutiveInsightBanner/SectionTakeaway snippets would only repeat
+// the same summary a second (or third) time. Full raw text/methodology
+// stays available for all of them, but only inside the collapsed
+// AnalysisNotes disclosure -- never as a second always-visible summary.
+const cardFirstReportFields = new Set([
+  "executiveSummary",
+  "marketDrivers",
+  "barriers",
+  "opportunities",
+  "threats",
+  "tamSamSom",
+  "strategicRecommendations",
+]);
+
 function getReportArticleClass(section: ReportSection) {
   const base =
     "relative min-h-[220px] overflow-hidden rounded-[1.75rem] border p-5 shadow-xl shadow-black/30";
@@ -5893,24 +5928,30 @@ const ReportSectionCard = memo(
               ) : null}
               {!isDomainDecisionReport &&
               hasPremiumSectionVisual(section) &&
-              section.field !== "executiveSummary" &&
               section.field !== "financialDashboard" &&
-              section.field !== "tamSamSom" ? (
+              !cardFirstReportFields.has(section.field ?? "") ? (
                 <ExecutiveInsightBanner section={section} />
               ) : null}
-              {!isDomainDecisionReport ? (
+              {/* ExecutiveSummaryVisual (above) is already the dedicated
+                  Executive Summary card -- PremiumSectionVisual's own
+                  executiveSummary branch draws a second, different
+                  "Executive Decision" card for the exact same section, so
+                  it is skipped here rather than stacking two visual cards
+                  for one section. */}
+              {!isDomainDecisionReport && section.field !== "executiveSummary" ? (
                 <PremiumSectionVisual
                   section={section}
                   investmentScore={investmentScore}
                   isMarketIntelligence={isMarketIntelligence}
                 />
               ) : null}
-              {/* TAM/SAM/SOM's own per-layer assumption text (in the visual
-                  above) already covers what SectionTakeaway would otherwise
-                  repeat -- only the full raw methodology stays available,
-                  and only inside the collapsed AnalysisNotes disclosure
-                  below, never as always-visible body text. */}
-              {hasVisibleDetailsContent && section.field !== "tamSamSom" ? (
+              {/* Card-first sections (see cardFirstReportFields) already
+                  surface their own summary via a dedicated visual card --
+                  a generic SectionTakeaway here would only repeat it. Full
+                  raw methodology stays available for every section, but
+                  only inside the collapsed AnalysisNotes disclosure below,
+                  never as always-visible body text. */}
+              {hasVisibleDetailsContent && !cardFirstReportFields.has(section.field ?? "") ? (
                 <SectionTakeaway content={detailsContent} />
               ) : null}
               {hasVisibleDetailsContent ? (

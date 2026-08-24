@@ -88,33 +88,37 @@ async function compileFunction(source, functionName) {
 
 // --- 1. TAM/SAM/SOM renders once (no duplicate insight snippet) ----------
 
-test("page.tsx: the TAM/SAM/SOM section no longer shows a duplicate ExecutiveInsightBanner/SectionTakeaway snippet above the visual", () => {
+test("page.tsx: the TAM/SAM/SOM section no longer shows a duplicate ExecutiveInsightBanner/SectionTakeaway snippet above the visual -- tamSamSom is one of the cardFirstReportFields excluded from both (a later ticket generalized this same exclusion to Executive Summary/Market Drivers/Barriers/Opportunities/Threats/Strategic Recommendations too)", () => {
+  assert.match(pageSource, /const cardFirstReportFields = new Set\(\[/);
+  assert.match(pageSource, /"tamSamSom",/);
   assert.match(
     pageSource,
-    /!isFinancialDashboard &&\s*\n\s*section\.field !== "tamSamSom" \? \(\s*\n\s*<ExecutiveInsightBanner/
+    /!isFinancialDashboard &&\s*\n\s*!cardFirstReportFields\.has\(section\.field \?\? ""\) \? \(\s*\n\s*<ExecutiveInsightBanner/
   );
   assert.match(
     pageSource,
-    /detailsContent\.trim\(\) && section\.field !== "tamSamSom" \? \(\s*\n\s*<SectionTakeaway/
+    /detailsContent\.trim\(\) && !cardFirstReportFields\.has\(section\.field \?\? ""\) \? \(\s*\n\s*<SectionTakeaway/
   );
 });
 
-test("Planner.tsx: the TAM/SAM/SOM section no longer shows a duplicate ExecutiveInsightBanner/SectionTakeaway snippet above the visual", () => {
+test("Planner.tsx: the TAM/SAM/SOM section no longer shows a duplicate ExecutiveInsightBanner/SectionTakeaway snippet above the visual -- tamSamSom is one of the cardFirstReportFields excluded from both", () => {
+  assert.match(plannerSource, /const cardFirstReportFields = new Set\(\[/);
+  assert.match(plannerSource, /"tamSamSom",/);
   assert.match(
     plannerSource,
-    /section\.field !== "financialDashboard" &&\s*\n\s*section\.field !== "tamSamSom" \? \(\s*\n\s*<ExecutiveInsightBanner/
+    /section\.field !== "financialDashboard" &&\s*\n\s*!cardFirstReportFields\.has\(section\.field \?\? ""\) \? \(\s*\n\s*<ExecutiveInsightBanner/
   );
   assert.match(
     plannerSource,
-    /hasVisibleDetailsContent && section\.field !== "tamSamSom" \? \(\s*\n\s*<SectionTakeaway/
+    /hasVisibleDetailsContent && !cardFirstReportFields\.has\(section\.field \?\? ""\) \? \(\s*\n\s*<SectionTakeaway/
   );
 });
 
-test("page.tsx: mobile TAM/SAM/SOM no longer shows the full raw paragraph always-expanded next to the visual -- it moves into a collapsed AnalysisNotes disclosure", () => {
-  assert.match(pageSource, /const isTamSamSomSection = section\.field === "tamSamSom";/);
+test("page.tsx: mobile TAM/SAM/SOM no longer shows the full raw paragraph always-expanded next to the visual -- it moves into a collapsed AnalysisNotes disclosure (now via the general isCardFirstSection gate, not a tamSamSom-only special case)", () => {
+  assert.match(pageSource, /const isCardFirstSection = cardFirstReportFields\.has\(section\.field \?\? ""\);/);
   assert.match(
     pageSource,
-    /isTamSamSomSection \? \(\s*\n\s*<AnalysisNotes compact label=\{getReportPresentationLabels\(section\.content\)\.details\}>/
+    /isCardFirstSection \? \(\s*\n\s*<AnalysisNotes compact label=\{getReportPresentationLabels\(section\.content\)\.details\}>/
   );
 });
 

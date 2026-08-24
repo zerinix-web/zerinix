@@ -169,9 +169,11 @@ test("Planner.tsx: the Competitive Landscape and Strategic Recommendations visua
   assert.match(gateMatch[0], /section\.field === "strategicRecommendations"/);
 });
 
-test("the new visual branches never regress to a bare text dump when real data is present -- an empty extraction result still falls back to visible content, never a silently blank card", () => {
-  assert.match(pageSource, /See the Competitive Landscape section for full competitor detail\./);
-  assert.match(plannerSource, /See the Competitive Landscape section for full competitor detail\./);
+test("the new visual branches never regress to a silently blank card -- an empty competitor extraction falls back to a single, clean 'Validation Needed' state (not a bare empty table shell stacked with a second empty MarketMap state)", () => {
+  for (const source of [pageSource, plannerSource]) {
+    assert.match(source, /if \(rows\.length === 0\) \{\s*\n\s*return \(\s*\n\s*<div className="mb-5 rounded-\[2rem\] border border-dashed border-white\/15 bg-black\/20 p-5">/);
+    assert.match(source, /No competitor data could be validated for this market yet\./);
+  }
 });
 
 test("the existing Business Plan/Acquisition competitor visual (field 'competitorLandscape'/'competitorAnalysis') is untouched by the new Market Intelligence branch -- both are separate, additive branches", () => {
