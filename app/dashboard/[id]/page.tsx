@@ -261,6 +261,17 @@ function extractMarketSizeAssumption(content: string, label: string) {
   return match ? match[0].trim().replace(/^[-*•]\s+/, "") : "";
 }
 
+// tamSamSom's own prompt allows a transparent, benchmark-derived estimate
+// when no verified local figure exists, explicitly requiring every such
+// figure be labeled "[Estimated]" and "never presented as verified". This
+// reads that real marker back out of the layer's own sentence, rather than
+// assuming estimated status.
+function isMarketSizeEstimated(content: string, label: string) {
+  const sentence = extractMarketSizeAssumption(content, label);
+
+  return /\[Estimated\]/i.test(sentence) || /\bPlanning Estimate\b/i.test(sentence);
+}
+
 function formatMetricCardValue(value: string) {
   const cleanValue = value.trim().replace(/\*\*/g, "");
 
@@ -1573,20 +1584,41 @@ function ReportSectionVisual({
     const values = bars.map((bar) => extractMetricValueFromAliases(content, bar.aliases));
     const magnitudes = values.map((value) => parseMonetaryMagnitude(value));
     const maxMagnitude = Math.max(0, ...magnitudes.filter((magnitude): magnitude is number => magnitude !== null));
-    // Per-layer assumption text -- the tamSamSom prompt requires a "named
-    // scaling assumption" and calculation basis for every layer it
-    // estimates, stated as prose next to that layer's own figure, so this
-    // reads the real sentence back out (same "sentence containing the
-    // label" technique extractForceImplication uses for Porter's Five
-    // Forces) rather than fabricating a generic assumption line.
-    const assumptions = bars.map((bar) => extractMarketSizeAssumption(content, bar.label));
-    // This is now the ONLY explanatory line ZERINIX renders for this
-    // section -- previously the visual repeated the same
-    // extractFirstInsight() snippet the section's own ExecutiveInsightBanner
-    // already showed just above it. Only surfaced when at least one layer
-    // is still unresolved (a fully-populated stack needs no extra caveat;
-    // the assumption line under each real value already covers it).
-    const hasUnresolvedLayer = magnitudes.some((magnitude) => magnitude === null);
+    // CRITICAL FIX -- TAM/SAM/SOM must always be logically nested
+    // (TAM >= SAM >= SOM). Each bar previously showed its own extracted
+    // value fully independently, which could produce an investor-facing
+    // contradiction: TAM "Validation Needed" while SAM/SOM still showed
+    // calculated numbers with no verified anchor to size them against. A
+    // layer's value is now only ever displayed once every layer above it
+    // in the hierarchy is ALSO resolved and correctly nested -- a layer
+    // blocked by an unresolved parent shows "Pending <Parent> Validation"
+    // instead of a bare "Validation Needed", so the reader can see exactly
+    // which upstream figure is holding it back. A layer that has its own
+    // value but fails the nesting check against an otherwise-resolved
+    // parent (e.g. a SAM larger than its own TAM) falls back to the
+    // generic "Validation Needed" -- that is this layer's own data
+    // problem, not a cascade from above.
+    const tamResolved = magnitudes[0] !== null;
+    const samResolved = tamResolved && magnitudes[1] !== null && magnitudes[1] <= (magnitudes[0] as number);
+    const somResolved = samResolved && magnitudes[2] !== null && magnitudes[2] <= (magnitudes[1] as number);
+    const resolved = [tamResolved, samResolved, somResolved];
+    const pendingLabels: Array<string | null> = [
+      null,
+      !tamResolved ? "Pending TAM Validation" : null,
+      !samResolved ? "Pending SAM Validation" : null,
+    ];
+    // Planning Estimate -- when the model used tamSamSom's benchmark-
+    // derived estimate path (all three figures marked [Estimated] rather
+    // than verified), each resolved layer gets a clear, non-fabricated
+    // "Planning Estimate / Not Verified" tag instead of silently
+    // presenting an estimate as a verified figure.
+    const estimated = bars.map((bar, index) => resolved[index] && isMarketSizeEstimated(content, bar.label));
+    // Only remaining explanatory line for this section -- shown when at
+    // least one layer is still unresolved (a fully-nested stack needs no
+    // extra caveat). Formulas, calculation methodology, and assumptions
+    // live only in this section's own expandable Details/Methodology
+    // disclosure below the visual, never inline here.
+    const hasUnresolvedLayer = resolved.some((isResolved) => !isResolved);
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.12),transparent_30%),rgba(255,255,255,0.025)] p-5">
@@ -1603,41 +1635,44 @@ function ReportSectionVisual({
           {bars.map((bar, index) => {
             const value = values[index];
             const magnitude = magnitudes[index];
-            const width = magnitude !== null ? `${Math.max(8, (magnitude / maxMagnitude) * 100)}%` : null;
-            const assumption = assumptions[index];
+            const isResolved = resolved[index];
+            const width = isResolved && magnitude !== null ? `${Math.max(8, (magnitude / maxMagnitude) * 100)}%` : null;
+            const isEstimated = estimated[index];
 
             return (
-              <div key={bar.label} className="space-y-2">
-                <div className="grid items-center gap-3 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(7rem,auto)]">
-                  <div className="rounded-2xl border border-white/10 bg-black/35 p-3 text-center">
-                    <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">{bar.label}</p>
-                    <div className="mt-2 flex justify-center">
-                      <EvidenceBadge level={getDashboardMetricEvidence(bar.label, value, content)} locale={evidenceLocale} market={isMarketIntelligence} />
-                    </div>
+              <div key={bar.label} className="grid items-center gap-3 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(7rem,auto)]">
+                <div className="rounded-2xl border border-white/10 bg-black/35 p-3 text-center">
+                  <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">{bar.label}</p>
+                  <div className="mt-2 flex justify-center">
+                    <EvidenceBadge level={getDashboardMetricEvidence(bar.label, isResolved ? value : "", content)} locale={evidenceLocale} market={isMarketIntelligence} />
                   </div>
-                  {width ? (
-                    <div className="h-14 rounded-2xl border border-white/10 bg-zinc-950 p-1.5">
-                      <div
-                        className={`h-full rounded-[1.1rem] bg-gradient-to-r ${bar.color} shadow-lg shadow-teal-950/20`}
-                        style={{ width }}
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex h-14 items-center rounded-2xl border border-dashed border-white/15 bg-black/20 px-4">
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" />
-                      <span className="ml-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">
-                        Validation Needed
-                      </span>
-                    </div>
-                  )}
-                  {value ? (
-                    <p className="min-w-0 whitespace-normal rounded-2xl border border-white/10 bg-black/35 px-3 py-2 text-left text-sm font-semibold text-white [overflow-wrap:anywhere] sm:truncate sm:whitespace-nowrap sm:text-right">
+                </div>
+                {width ? (
+                  <div className="h-14 rounded-2xl border border-white/10 bg-zinc-950 p-1.5">
+                    <div
+                      className={`h-full rounded-[1.1rem] bg-gradient-to-r ${bar.color} shadow-lg shadow-teal-950/20`}
+                      style={{ width }}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex h-14 items-center rounded-2xl border border-dashed border-white/15 bg-black/20 px-4">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" />
+                    <span className="ml-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">
+                      {pendingLabels[index] || "Validation Needed"}
+                    </span>
+                  </div>
+                )}
+                {isResolved ? (
+                  <div className="min-w-0 space-y-1 text-left sm:text-right">
+                    <p className="whitespace-normal rounded-2xl border border-white/10 bg-black/35 px-3 py-2 text-sm font-semibold text-white [overflow-wrap:anywhere] sm:truncate sm:whitespace-nowrap">
                       {formatMetricCardValue(value)}
                     </p>
-                  ) : null}
-                </div>
-                {value && assumption ? (
-                  <p className="line-clamp-2 pl-1 text-xs leading-5 text-zinc-500 sm:pl-[4.75rem]">{assumption}</p>
+                    {isEstimated ? (
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-200/80">
+                        Planning Estimate / Not Verified
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             );

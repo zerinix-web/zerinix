@@ -167,7 +167,7 @@ test("the TAM/SAM/SOM visualization badge is wired to isMarketIntelligence in bo
   assert.match(dashboardReportSource, /function ReportSectionVisual\(\{[\s\S]{0,300}isMarketIntelligence\??\s*:\s*boolean/);
   assert.match(
     dashboardReportSource,
-    /getDashboardMetricEvidence\(bar\.label, value, content\)\} locale=\{evidenceLocale\} market=\{isMarketIntelligence\}/
+    /getDashboardMetricEvidence\(bar\.label, isResolved \? value : "", content\)\} locale=\{evidenceLocale\} market=\{isMarketIntelligence\}/
   );
   assert.match(plannerSource, /function PremiumSectionVisual\(\{[\s\S]{0,300}isMarketIntelligence\??\s*:\s*boolean/);
 });

@@ -135,9 +135,9 @@ test("page.tsx and Planner.tsx: the whole-card 'maxMagnitude === 0' early return
   }
 });
 
-test("page.tsx and Planner.tsx: a missing layer shows 'Validation Needed' (never a long paragraph), and the exact short explanation appears once below the visual when any layer is unresolved", () => {
+test("page.tsx and Planner.tsx: an unresolved layer shows 'Validation Needed' (never a long paragraph), and the exact short explanation appears once below the visual when any layer is unresolved", () => {
   for (const source of [pageSource, plannerSource]) {
-    assert.match(source, /const hasUnresolvedLayer = magnitudes\.some\(\(magnitude\) => magnitude === null\);/);
+    assert.match(source, /const hasUnresolvedLayer = resolved\.some\(\(isResolved\) => !isResolved\);/);
     assert.match(
       source,
       /hasUnresolvedLayer \? \(\s*\n\s*<p className="mt-5 border-t border-white\/10 pt-4 text-sm leading-6 text-zinc-400">\s*\n\s*Additional market validation is required before sizing can be confirmed\.\s*\n\s*<\/p>\s*\n\s*\) : null/
@@ -145,10 +145,10 @@ test("page.tsx and Planner.tsx: a missing layer shows 'Validation Needed' (never
   }
 });
 
-test("page.tsx: each bar independently renders its own amber 'Validation Needed' row (never a fabricated bar width) whenever that layer's magnitude is null -- the per-layer branch is unconditional, not gated behind the removed whole-card check", () => {
+test("page.tsx: each bar independently renders its own amber 'Validation Needed' row (never a fabricated bar width) whenever that layer is not resolved -- the per-layer branch is unconditional, not gated behind the removed whole-card check", () => {
   assert.match(
     pageSource,
-    /const width = magnitude !== null \? `\$\{Math\.max\(8, \(magnitude \/ maxMagnitude\) \* 100\)\}%` : null;/
+    /const width = isResolved && magnitude !== null \? `\$\{Math\.max\(8, \(magnitude \/ maxMagnitude\) \* 100\)\}%` : null;/
   );
   assert.match(pageSource, /\{width \? \(/);
   assert.match(pageSource, /Validation Needed\s*\n\s*<\/span>/);
@@ -185,12 +185,12 @@ test("Planner.tsx: extractMarketSizeAssumption exists and getReportMarketRows pr
   );
 });
 
-test("page.tsx: a populated layer shows its real value and, when present, its real assumption sentence -- never the removed duplicate extractFirstInsight() explanation", () => {
+test("page.tsx: a populated layer shows only its real value plus its resolved/estimated status -- never the removed duplicate extractFirstInsight() explanation, and never an inline assumption/methodology snippet (moved to the expandable Details disclosure per this ticket's requirement 3)", () => {
   assert.doesNotMatch(pageSource, /const explanation = extractFirstInsight\(content\);/);
-  assert.match(pageSource, /const assumptions = bars\.map\(\(bar\) => extractMarketSizeAssumption\(content, bar\.label\)\);/);
+  assert.doesNotMatch(pageSource, /\{value && assumption \? \(/);
   assert.match(
     pageSource,
-    /\{value && assumption \? \(\s*\n\s*<p className="line-clamp-2 pl-1 text-xs leading-5 text-zinc-500 sm:pl-\[4\.75rem\]">\{assumption\}<\/p>/
+    /\{isResolved \? \(\s*\n\s*<div className="min-w-0 space-y-1 text-left sm:text-right">/
   );
 });
 

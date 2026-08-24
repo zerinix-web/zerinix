@@ -103,20 +103,25 @@ test("page.tsx: TAM/SAM/SOM renders a premium 'Validation Needed' empty state pe
   assert.match(pageSource, /Additional market validation is required before sizing can be confirmed\./);
 });
 
-test("page.tsx: a single missing TAM/SAM/SOM layer shows 'Validation Needed', not a fabricated bar width", () => {
-  assert.match(pageSource, /const width = magnitude !== null \? `\$\{Math\.max\(8, \(magnitude \/ maxMagnitude\) \* 100\)\}%` : null;/);
+test("page.tsx: a single missing TAM/SAM/SOM layer shows 'Validation Needed', not a fabricated bar width -- and a layer is now only resolved when its whole parent chain is also resolved and nested", () => {
+  assert.match(
+    pageSource,
+    /const width = isResolved && magnitude !== null \? `\$\{Math\.max\(8, \(magnitude \/ maxMagnitude\) \* 100\)\}%` : null;/
+  );
+  assert.match(pageSource, /const samResolved = tamResolved && magnitudes\[1\] !== null && magnitudes\[1\] <= \(magnitudes\[0\] as number\);/);
+  assert.match(pageSource, /const somResolved = samResolved && magnitudes\[2\] !== null && magnitudes\[2\] <= \(magnitudes\[1\] as number\);/);
 });
 
-test("page.tsx: TAM/SAM/SOM shows a real per-layer assumption excerpt under each populated bar, read from that layer's own generated sentence", async () => {
-  assert.match(pageSource, /const assumptions = bars\.map\(\(bar\) => extractMarketSizeAssumption\(content, bar\.label\)\);/);
-  assert.match(pageSource, /\{value && assumption \? \(/);
+test("page.tsx: TAM/SAM/SOM no longer shows a per-layer assumption excerpt inline in the main visual -- methodology/assumptions live only in the section's own expandable Details disclosure", async () => {
+  assert.doesNotMatch(pageSource, /const assumptions = bars\.map\(\(bar\) => extractMarketSizeAssumption\(content, bar\.label\)\);/);
+  assert.doesNotMatch(pageSource, /\{value && assumption \? \(/);
 });
 
-test("Planner.tsx: the on-screen TAM/SAM/SOM visual now reuses parseMarketSizeMagnitude (already correct in the PDF export) instead of a static bar-width array, plus a coherence check and a real explanation via row.description", () => {
+test("Planner.tsx: the on-screen TAM/SAM/SOM visual reuses parseMarketSizeMagnitude (already correct in the PDF export) instead of a static bar-width array, with a per-layer cascading nesting check -- row.description is no longer rendered inline (moved out per the 'main report shows only the visual stack' requirement)", () => {
   assert.match(plannerSource, /const magnitudes = rows\.map\(\(row\) => parseMarketSizeMagnitude\(row\.value\)\);/);
-  assert.match(plannerSource, /tamMagnitude >= samMagnitude/);
-  assert.match(plannerSource, /samMagnitude >= somMagnitude/);
-  assert.match(plannerSource, /<p className="mt-3 line-clamp-2 text-xs leading-5 text-zinc-500">\{row\.description\}<\/p>/);
+  assert.match(plannerSource, /const samResolved = tamResolved && magnitudes\[1\] !== null && magnitudes\[1\] <= \(magnitudes\[0\] as number\);/);
+  assert.match(plannerSource, /const somResolved = samResolved && magnitudes\[2\] !== null && magnitudes\[2\] <= \(magnitudes\[1\] as number\);/);
+  assert.doesNotMatch(plannerSource, /<p className="mt-3 line-clamp-2 text-xs leading-5 text-zinc-500">\{row\.description\}<\/p>/);
 });
 
 // --- 2. Porter's Five Forces: real intensity, keeps the radar -------------

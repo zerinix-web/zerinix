@@ -1647,6 +1647,17 @@ function extractMarketSizeAssumption(content: string, label: string) {
   return match ? match[0].trim().replace(/^[-*•]\s+/, "") : "";
 }
 
+// tamSamSom's own prompt allows a transparent, benchmark-derived estimate
+// when no verified local figure exists, explicitly requiring every such
+// figure be labeled "[Estimated]" and "never presented as verified". This
+// reads that real marker back out of the layer's own sentence, rather than
+// assuming estimated status.
+function isMarketSizeEstimated(content: string, label: string) {
+  const sentence = extractMarketSizeAssumption(content, label);
+
+  return /\[Estimated\]/i.test(sentence) || /\bPlanning Estimate\b/i.test(sentence);
+}
+
 function getReportMarketRows(content: string) {
   return [
     {
@@ -3787,10 +3798,35 @@ function PremiumSectionVisual({
     // combined empty state when NONE of the three could be established.
     const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value));
     const maxMagnitude = Math.max(0, ...magnitudes.filter((magnitude): magnitude is number => magnitude !== null));
+    // CRITICAL FIX -- TAM/SAM/SOM must always be logically nested
+    // (TAM >= SAM >= SOM). Each row previously showed its own extracted
+    // value fully independently, which could produce an investor-facing
+    // contradiction: TAM "Validation Needed" while SAM/SOM still showed
+    // calculated numbers with no verified anchor to size them against. A
+    // row's value is now only ever displayed once every row above it in
+    // the hierarchy is ALSO resolved and correctly nested -- a row
+    // blocked by an unresolved parent shows "Pending <Parent> Validation"
+    // instead of a bare "Validation Needed". A row that has its own value
+    // but fails the nesting check against an otherwise-resolved parent
+    // falls back to the generic "Validation Needed" -- that is this row's
+    // own data problem, not a cascade from above.
+    const tamResolved = magnitudes[0] !== null;
+    const samResolved = tamResolved && magnitudes[1] !== null && magnitudes[1] <= (magnitudes[0] as number);
+    const somResolved = samResolved && magnitudes[2] !== null && magnitudes[2] <= (magnitudes[1] as number);
+    const resolved = [tamResolved, samResolved, somResolved];
+    const pendingLabels: Array<string | null> = [
+      null,
+      !tamResolved ? "Pending TAM Validation" : null,
+      !samResolved ? "Pending SAM Validation" : null,
+    ];
+    // Planning Estimate -- see isMarketSizeEstimated's own comment.
+    const estimated = rows.map((row, index) => resolved[index] && isMarketSizeEstimated(section.content, row.label));
     // Only remaining explanatory line for this section -- shown when at
-    // least one layer is still unresolved; a fully-populated stack needs
-    // no extra caveat beyond each real layer's own assumption text.
-    const hasUnresolvedLayer = magnitudes.some((magnitude) => magnitude === null);
+    // least one row is still unresolved (a fully-nested stack needs no
+    // extra caveat). Formulas, calculation methodology, and assumptions
+    // live only in this section's own expandable Details/Methodology
+    // disclosure below the visual, never inline here.
+    const hasUnresolvedLayer = resolved.some((isResolved) => !isResolved);
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.12),transparent_30%),rgba(255,255,255,0.025)] p-5">
@@ -3808,6 +3844,8 @@ function PremiumSectionVisual({
         <div className="grid gap-3 lg:grid-cols-3">
           {rows.map((row, index) => {
             const magnitude = magnitudes[index];
+            const isResolved = resolved[index];
+            const isEstimated = estimated[index];
 
             return (
               <div
@@ -3825,7 +3863,7 @@ function PremiumSectionVisual({
                     Layer {index + 1}
                   </span>
                 </div>
-                {magnitude !== null ? (
+                {isResolved && magnitude !== null ? (
                   <>
                     <div className="mt-3">
                       <EvidenceBadge level={getSectionEvidenceLevel(section)} locale={evidenceLocale} market={isMarketIntelligence} />
@@ -3839,15 +3877,18 @@ function PremiumSectionVisual({
                         style={{ width: `${Math.max(8, (magnitude / maxMagnitude) * 100)}%` }}
                       />
                     </div>
-                    <p className="mt-3 line-clamp-2 text-xs leading-5 text-zinc-500">{row.description}</p>
+                    {isEstimated ? (
+                      <p className="mt-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-200/80">
+                        Planning Estimate / Not Verified
+                      </p>
+                    ) : null}
                   </>
                 ) : (
                   <div className="mt-3 flex flex-1 flex-col items-start justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-black/20 p-3">
                     <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">
                       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" />
-                      Validation Needed
+                      {pendingLabels[index] || "Validation Needed"}
                     </span>
-                    <p className="line-clamp-2 text-xs leading-5 text-zinc-500">{row.description}</p>
                   </div>
                 )}
               </div>
@@ -6775,11 +6816,16 @@ const ReportPanel = memo(function ReportPanel({
 
           rows.forEach(({ label, color, value }, index) => {
             const rowY = visualY + 2 + index * legendRowHeight;
+            const isEstimated = isMarketSizeEstimated(section.content, label);
             pdf.setFillColor(color);
             pdf.roundedRect(legendX, rowY, 7, 4.4, 1.5, 1.5, "F");
             pdf.setFontSize(7.2);
-            pdf.setTextColor("#a1a1aa");
-            pdf.text(label, legendX + 10, rowY + 3.8);
+            pdf.setTextColor(isEstimated ? "#fbbf24" : "#a1a1aa");
+            pdf.text(
+              isEstimated ? `${label} · ${localizePdfPresentationLabel("Planning Estimate", pdfLocale)}` : label,
+              legendX + 10,
+              rowY + 3.8
+            );
             pdf.setTextColor("#ccfbf1");
             drawSingleLine(value || "—", legendX + 10, rowY + 9.4, legendWidth - 10, 8, 5, false);
           });

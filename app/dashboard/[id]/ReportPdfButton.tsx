@@ -1297,6 +1297,18 @@ function parseMarketSizeMagnitude(value: string): number | null {
   return numeric * multiplier;
 }
 
+// tamSamSom's own prompt allows a transparent, benchmark-derived estimate
+// when no verified local figure exists, explicitly requiring every such
+// figure be labeled "[Estimated]" and "never presented as verified". This
+// reads that real marker back out of the layer's own sentence (matching
+// page.tsx/Planner.tsx's own isMarketSizeEstimated), rather than assuming
+// estimated status.
+function isMarketSizeEstimated(content: string, label: string) {
+  const sentence = content.match(new RegExp(`[^.\\n]*\\b${label}\\b[^.\\n]*\\.`, "i"))?.[0] || "";
+
+  return /\[Estimated\]/i.test(sentence) || /\bPlanning Estimate\b/i.test(sentence);
+}
+
 const tamCircleMaxRadius = 17;
 const tamCircleMinRadius = 4;
 const tamCircleDefaultRadii = [tamCircleMaxRadius, 12.5, tamCircleMinRadius + 4] as const;
@@ -3962,11 +3974,16 @@ export function buildStandardReportPdf({
 
           rows.forEach(({ label, color, value }, index) => {
             const rowY = visualY + 2 + index * legendRowHeight;
+            const isEstimated = isMarketSizeEstimated(content, label);
             pdf.setFillColor(color);
             pdf.roundedRect(legendX, rowY, 7, 4.4, 1.5, 1.5, "F");
             pdf.setFontSize(7.2);
-            pdf.setTextColor("#a1a1aa");
-            pdf.text(label, legendX + 10, rowY + 3.8);
+            pdf.setTextColor(isEstimated ? "#fbbf24" : "#a1a1aa");
+            pdf.text(
+              isEstimated ? `${label} · ${localizePdfPresentationLabel("Planning Estimate", pdfLocale)}` : label,
+              legendX + 10,
+              rowY + 3.8
+            );
             pdf.setTextColor("#ccfbf1");
             drawSingleLine(value || "—", legendX + 10, rowY + 9.4, legendWidth - 10, 8, 5, false);
           });
