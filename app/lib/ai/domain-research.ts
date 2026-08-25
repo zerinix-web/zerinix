@@ -1404,8 +1404,16 @@ export function buildTaskStageQueries({
     regional_development: "regional investment projects development infrastructure bölgesel yatırım proje gelişim",
     geospatial_context: "map coordinates satellite cadastral geography harita koordinat uydu kadastro",
     competitors: "multiple independent competitors vendors major players positioning market share",
-    market_demand: "market demand adoption customer usage official statistics industry association",
-    market_size: "market size TAM SAM SOM CAGR forecast methodology geography year currency",
+    // REQUIRED RESEARCH HIERARCHY (evidence-first market-sizing engine):
+    // biases the SAME query budget toward the source types
+    // market-intelligence-graph.ts's buildPlanningEstimate actually ranks
+    // highest -- government/statistical, regulatory or financial filings,
+    // industry associations, and credible market research -- plus the
+    // population/business-count and pricing data the bottom-up method
+    // needs. This does not add any new search calls; it only changes what
+    // the existing market_demand/market_size tasks ask for.
+    market_demand: "market demand adoption customer usage official statistics government census bureau industry association addressable business population establishment count small business count",
+    market_size: "market size TAM SAM SOM CAGR forecast methodology geography year currency government statistics official census regulatory filing annual report investor disclosure industry association market research report segment share serviceable addressable obtainable penetration rate win rate",
     industry_structure: "industry trends regulation switching costs entry barriers buyer behavior",
     product_evidence: "competitor products pricing features integrations deployment official pages",
     company_evidence: "company annual report SEC filing investor relations primary disclosure",

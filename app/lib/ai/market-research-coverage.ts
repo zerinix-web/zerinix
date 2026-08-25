@@ -134,7 +134,7 @@ export function classifyMarketEvidenceSource(
 
   if (
     /(?:^|\.)(?:gov|mil)(?:\.|$)|\.gov\.[a-z]{2}$|europa\.eu$/.test(domain) ||
-    /\b(?:census|bureau of labor statistics|official statistics|statistical office|central bank|regulator)\b/.test(identity)
+    /\b(?:census|bureau of labor statistics|official[ _]statistics|statistical[ _]office|central bank|regulator)\b/.test(identity)
   ) return "government_statistics";
   if (
     /\b(?:sec\.gov|10-k|10-q|annual report|financial[ _]filing|official[ _]filing|investor relations|audited statement)\b/.test(identity)
@@ -146,7 +146,7 @@ export function classifyMarketEvidenceSource(
   if (/\b(?:association|institute|foundation|council|alliance|society|professional[ _]standard)\b/.test(identity)) {
     return "industry_association";
   }
-  if (/\b(?:market research|industry report|market data|research report|forecast)\b/.test(identity)) {
+  if (/\b(?:market[ _]research|industry[ _]report|market[ _]data|research[ _]report|forecast)\b/.test(identity)) {
     return "market_research";
   }
   if (/\b(?:news|journal|review|times|reuters|bloomberg|forbes|technology|financial publication)\b/.test(identity)) {
@@ -155,7 +155,7 @@ export function classifyMarketEvidenceSource(
   return "other";
 }
 
-function freshness(item: DomainResearchEvidence) {
+export function freshness(item: DomainResearchEvidence) {
   if (!item.publishedDate) return 50;
   const published = Date.parse(item.publishedDate);
   if (!Number.isFinite(published)) return 45;

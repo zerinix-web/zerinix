@@ -7,9 +7,12 @@ import {
   calculateMarketOverallConfidence,
   calculatePlanningEstimateConfidence,
   classifyMarketConfidence,
+  classifyMarketEvidenceSource,
   evaluateMarketResearchCoverage,
+  freshness,
   type MarketConfidenceLevel,
   type MarketResearchCoverage,
+  type MarketSourceClass,
 } from "./market-research-coverage.ts";
 import {
   sanitizeResearchPublisher,
@@ -21,7 +24,7 @@ import {
 import { isImplausibleCompetitorName } from "./vendor-discovery.ts";
 
 export const MARKET_INTELLIGENCE_GRAPH_VERSION =
-  "market-intelligence-graph-v4" as const;
+  "market-intelligence-graph-v5" as const;
 
 export type MarketIntelligenceSource = {
   evidenceId: string;
@@ -47,6 +50,23 @@ export type MarketIntelligenceCompetitor = {
   evidenceIds: string[];
 };
 
+// How the TAM figure was actually produced -- retained for calculation
+// traceability and so the rendered report can name its own method rather
+// than presenting every estimate as if it used the same approach.
+export type MarketSizingMethod =
+  | "topDown"
+  | "bottomUp"
+  | "triangulated";
+
+// SUPPORTED ESTIMATE: multiple hierarchy-ranked evidence items agree (a
+// single high-authority source, or top-down/bottom-up triangulation that
+// converged). DIRECTIONAL: only one thin/lower-authority evidence item
+// was available, or the underlying methods materially disagreed and had
+// to be reconciled into a wide range. Never "Verified" -- that tier is
+// reserved for graph.verifiedMarketSize, which this estimate type is
+// never blended with (see the buildMarketIntelligenceGraph comment).
+export type MarketSizingEvidenceTier = "supportedEstimate" | "directional";
+
 export type MarketPlanningEstimate = {
   classification: "Estimated";
   tam: string;
@@ -58,6 +78,36 @@ export type MarketPlanningEstimate = {
   confidence: number;
   confidenceLevel: MarketConfidenceLevel;
   basis: "source_based";
+  // Calculation traceability (REQUIRED RESEARCH HIERARCHY / CALCULATION
+  // TRACEABILITY) -- additive fields so a JSON round-trip of an older
+  // cached graph still satisfies this type structurally; consumers that
+  // only read tam/sam/som/formula/confidence are unaffected.
+  method: MarketSizingMethod;
+  tier: MarketSizingEvidenceTier;
+  geography: string;
+  year: string;
+  marketDefinition: string;
+  // Set when top-down and bottom-up estimates were both computable but
+  // diverged materially -- the rendered range already reflects this, but
+  // the flag/note let callers (tests, future report-engine consumers)
+  // detect and surface the disagreement explicitly rather than silently
+  // averaging it away.
+  conflicting: boolean;
+  conflictNote: string;
+  // Whether the serviceable-share (TAM -> SAM) ratio came from real
+  // evidence about this market's addressable segment, or is the
+  // disclosed default assumption used when no such evidence exists.
+  samMethod: "evidenceDerived" | "defaultAssumption";
+  // SOM must never be an invented percentage of SAM (see SOM section of
+  // the ticket). When no defensible bottom-up obtainable-share inputs
+  // exist, som holds a non-numeric "pending" explanation instead of a
+  // fabricated figure, and somStatus records that honestly.
+  somStatus: "calculated" | "pending";
+  // True when the evidence backing the TAM figure is, on average, more
+  // than 3 years old (see the shared freshness() bands in
+  // market-research-coverage.ts) -- the rendered estimate must label its
+  // year and avoid implying the figure is current.
+  stale: boolean;
 };
 
 export type MarketIntelligenceGraph = {
@@ -191,12 +241,28 @@ function concise(value: string, maximum = 240) {
   return `${normalized.slice(0, maximum - 1).trim()}…`;
 }
 
+// CRITICAL FIX -- confirmed live: the prior single-group pattern
+// (`\d+(?:[.,]\d+)?`) both mis-parsed and truncated real thousands-
+// grouped figures. "40,000 addressable buyers" matched digits="40" +
+// one optional "[.,]\d+" group=",000", then blindly replaced the FIRST
+// comma with a decimal point -- "40,000" became "40.000" = 40, not
+// 40000, silently shrinking a bottom-up TAM calculation by a factor of
+// 1000. A three-group figure like "1,234,567" was truncated even worse:
+// the single optional group could only ever capture one ",NNN" segment,
+// leaving ",567" outside the match entirely. The thousands-grouped
+// alternative below is tried first and, when it matches, every comma is
+// stripped (never reinterpreted as a decimal); the plain alternative
+// (unchanged from before) still exists for a lone value with no
+// thousands grouping, including the rarer single-comma-as-decimal case
+// (e.g. "2,5" in some non-US evidence text).
 function extractNumber(value: string) {
   const match = value.match(
-    /([$€£₺])?\s*(\d+(?:[.,]\d+)?)\s*(thousand|million|billion|trillion|[kmbt])?\b/i
+    /([$€£₺])?\s*(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?)\s*(thousand|million|billion|trillion|[kmbt])?\b/i
   );
   if (!match) return null;
-  const raw = match[2].replace(",", ".");
+  const rawDigits = match[2];
+  const isThousandsGrouped = /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(rawDigits);
+  const raw = isThousandsGrouped ? rawDigits.replace(/,/g, "") : rawDigits.replace(",", ".");
   const numeric = Number(raw);
   if (!Number.isFinite(numeric)) return null;
   const unit = (match[3] || "").toLowerCase();
@@ -260,6 +326,102 @@ function extractGeographyLabel(text: string) {
   return "Regional";
 }
 
+function clampScore(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+// Ranks each MarketSourceClass against the REQUIRED RESEARCH HIERARCHY
+// (official government/statistical, regulatory/financial filings,
+// industry associations, credible market research, company primary
+// disclosures, general credible publications). Lower rank = stronger
+// authority. Used only to pick the BEST candidate among several that all
+// independently support a usable figure -- it never lowers the bar for
+// what counts as usable evidence in the first place (every candidate
+// considered here already passed isVerified + the confidence floor).
+const sourceAuthorityRank: Record<MarketSourceClass, number> = {
+  government_statistics: 1,
+  financial_filing: 2,
+  industry_association: 3,
+  market_research: 4,
+  company_primary: 5,
+  credible_publication: 6,
+  other: 7,
+};
+
+function isHighAuthoritySource(item: DomainResearchEvidence) {
+  const authorityClass = classifyMarketEvidenceSource(item);
+  return sourceAuthorityRank[authorityClass] <= 4;
+}
+
+// Best-first ordering across the hierarchy: strongest source class first,
+// then higher confidence, then fresher. Never reorders on amount/size --
+// picking "the biggest number" would be exactly the fabrication risk this
+// engine exists to avoid.
+function rankEvidenceCandidates(candidates: readonly DomainResearchEvidence[]) {
+  return [...candidates].sort((left, right) => {
+    const authorityDelta =
+      sourceAuthorityRank[classifyMarketEvidenceSource(left)] -
+      sourceAuthorityRank[classifyMarketEvidenceSource(right)];
+    if (authorityDelta !== 0) return authorityDelta;
+    const confidenceDelta =
+      calculateEvidenceConfidence(right) - calculateEvidenceConfidence(left);
+    if (confidenceDelta !== 0) return confidenceDelta;
+    return freshness(right) - freshness(left);
+  });
+}
+
+function extractEvidenceYear(item: DomainResearchEvidence) {
+  const published = Date.parse(item.publishedDate || "");
+  if (Number.isFinite(published)) {
+    const year = new Date(published).getUTCFullYear();
+    if (year >= 2000 && year <= new Date().getUTCFullYear() + 1) {
+      return String(year);
+    }
+  }
+  const match = evidenceText(item).match(/\b(20[0-3]\d)\b/);
+  return match ? match[1] : "Not stated in evidence";
+}
+
+// A percentage claim that describes what SHARE of a broader figure is
+// actually serviceable/addressable for this specific product, geography,
+// or customer segment -- e.g. "the cloud-based segment represents 38% of
+// the total market" or "SMBs account for approximately 30% of buyers".
+// Deliberately distinct from a growth-rate percentage (cagr already owns
+// that pattern) and from a generic market-share-of-a-named-competitor
+// claim (vendor-intelligence.ts owns that).
+function extractServiceableSharePercent(item: DomainResearchEvidence) {
+  const text = evidenceText(item);
+  if (!/segment|serviceable|addressable|sub-?market|vertical|niche|smb|enterprise|mid-?market/i.test(text)) {
+    return null;
+  }
+  const match = text.match(/(\d{1,2}(?:\.\d+)?)\s*%/);
+  if (!match) return null;
+  const percent = Number(match[1]);
+  return Number.isFinite(percent) && percent > 0 && percent < 100 ? percent / 100 : null;
+}
+
+// A percentage or share claim that describes a REALISTIC obtainable/
+// penetration/win rate within a planning horizon -- e.g. "new entrants
+// typically capture 1-3% of the serviceable market in their first three
+// years" or "average vendor win rate in competitive RFPs is 8%". This is
+// deliberately a high bar: most general market research never states
+// this for a specific business, which is exactly why SOM defaults to
+// "pending" rather than a fabricated percentage when it is absent.
+function extractObtainableSharePercent(item: DomainResearchEvidence) {
+  const text = evidenceText(item);
+  if (
+    !/obtainable|penetration.rate|win.rate|conversion.rate|capture.rate|market.share.(?:gain|capture)|first.year.share|adoption.rate/i.test(
+      text
+    )
+  ) {
+    return null;
+  }
+  const match = text.match(/(\d{1,2}(?:\.\d+)?)\s*%/);
+  if (!match) return null;
+  const percent = Number(match[1]);
+  return Number.isFinite(percent) && percent > 0 && percent < 50 ? percent / 100 : null;
+}
+
 function buildPlanningEstimate(
   evidence: readonly DomainResearchEvidence[]
 ): MarketPlanningEstimate | null {
@@ -270,87 +432,234 @@ function buildPlanningEstimate(
       item.claim.trim() &&
       item.value.trim()
   );
-  const explicitSize = sourceBacked.find(
-    (item) =>
-      /market.size|tam|addressable.market|market.value/i.test(evidenceText(item)) &&
-      extractMarketAmount(`${item.claim} ${item.value}`)
-  );
-  const buyerPopulation = sourceBacked.find(
-    (item) =>
-      /business.population|buyer.population|addressable.customer|number.of.business|establishment|small.business/i.test(
-        evidenceText(item)
-      ) && extractNumber(`${item.claim} ${item.value}`)
-  );
-  const annualPricing = sourceBacked.find(
-    (item) =>
-      /pricing|subscription|per.month|per.year|annual.price|monthly.price/i.test(
-        evidenceText(item)
-      ) && extractNumber(`${item.claim} ${item.value}`)
-  );
 
-  let tamAmount = 0;
-  let currency = "$";
-  let basis = "";
-  let tamLow = 0;
-  let tamHigh = 0;
-  const evidenceIds: string[] = [];
+  // --- Tier 1: top-down -- every candidate market-size figure for this
+  // exact target (not just the first one encountered), ranked by the
+  // required research hierarchy so a government/regulatory/association
+  // figure is preferred over a lower-authority one when several exist.
+  const topDownCandidates = rankEvidenceCandidates(
+    sourceBacked.filter(
+      (item) =>
+        /market.size|tam|addressable.market|market.value/i.test(evidenceText(item)) &&
+        extractMarketAmount(`${item.claim} ${item.value}`)
+    )
+  );
+  const topDownBest = topDownCandidates[0] || null;
+  const topDownAmount = topDownBest
+    ? extractMarketAmount(`${topDownBest.claim} ${topDownBest.value}`)
+    : null;
 
-  if (explicitSize) {
-    const numeric = extractMarketAmount(
-      `${explicitSize.claim} ${explicitSize.value}`
-    );
-    if (!numeric) return null;
-    tamAmount = numeric.amount;
-    tamLow = tamAmount;
-    tamHigh = tamAmount;
-    currency = numeric.currency || "$";
-    basis = `TAM planning baseline uses ${numeric.token} from [${explicitSize.id}].`;
-    evidenceIds.push(explicitSize.id);
-  } else if (buyerPopulation && annualPricing) {
-    const buyers = extractNumber(`${buyerPopulation.claim} ${buyerPopulation.value}`);
-    const pricing = extractNumber(`${annualPricing.claim} ${annualPricing.value}`);
-    if (!buyers || !pricing) return null;
-    const pricingText = evidenceText(annualPricing);
-    const annualizedPrice = /per.month|monthly/i.test(pricingText)
-      ? pricing.amount * 12
-      : pricing.amount;
-    tamAmount = buyers.amount * annualizedPrice;
-    tamLow = tamAmount;
-    tamHigh = tamAmount;
-    currency = pricing.currency || "$";
-    basis = `TAM = addressable buyers from [${buyerPopulation.id}] × annualized price from [${annualPricing.id}].`;
-    evidenceIds.push(buyerPopulation.id, annualPricing.id);
+  // --- Tier 2: bottom-up -- best available addressable-buyer-population
+  // figure x best available annualized price, each independently ranked
+  // by authority rather than "whichever appeared first in the evidence
+  // array".
+  const buyerPopulationCandidates = rankEvidenceCandidates(
+    sourceBacked.filter(
+      (item) =>
+        /business.population|buyer.population|addressable.customer|number.of.business|establishment|small.business/i.test(
+          evidenceText(item)
+        ) && extractNumber(`${item.claim} ${item.value}`)
+    )
+  );
+  const annualPricingCandidates = rankEvidenceCandidates(
+    sourceBacked.filter(
+      (item) =>
+        /pricing|subscription|per.month|per.year|annual.price|monthly.price/i.test(
+          evidenceText(item)
+        ) && extractNumber(`${item.claim} ${item.value}`)
+    )
+  );
+  const buyerPopulation = buyerPopulationCandidates[0] || null;
+  const annualPricing = annualPricingCandidates[0] || null;
+  const bottomUpInputs =
+    buyerPopulation && annualPricing
+      ? {
+          buyers: extractNumber(`${buyerPopulation.claim} ${buyerPopulation.value}`),
+          pricing: extractNumber(`${annualPricing.claim} ${annualPricing.value}`),
+        }
+      : null;
+  const bottomUpAmount =
+    bottomUpInputs?.buyers && bottomUpInputs.pricing
+      ? bottomUpInputs.buyers.amount *
+        (/per.month|monthly/i.test(evidenceText(annualPricing!))
+          ? bottomUpInputs.pricing.amount * 12
+          : bottomUpInputs.pricing.amount)
+      : null;
+
+  if (
+    (!topDownAmount || !Number.isFinite(topDownAmount.amount) || topDownAmount.amount <= 0) &&
+    (!bottomUpAmount || !Number.isFinite(bottomUpAmount) || bottomUpAmount <= 0)
+  ) {
+    // True last resort: neither a direct hierarchy-ranked figure nor a
+    // defensible bottom-up calculation could be built from the gathered
+    // evidence. Falls through to the honest "unavailable"/model-authored
+    // adjacent-benchmark path in projectMarketIntelligenceGraphToReport.
+    return null;
   }
 
-  if (!Number.isFinite(tamAmount) || tamAmount <= 0) return null;
-  const samLow = tamLow * 0.25;
-  const samHigh = tamHigh * 0.25;
-  const somLow = samLow * 0.02;
-  const somHigh = samHigh * 0.02;
-  const supporting = sourceBacked.filter((item) => evidenceIds.includes(item.id));
-  const confidence = calculatePlanningEstimateConfidence(
-    supporting,
-    false
+  const hasTopDown = Boolean(topDownAmount && topDownAmount.amount > 0);
+  const hasBottomUp = Boolean(bottomUpAmount && bottomUpAmount > 0);
+  const currency =
+    (hasTopDown ? topDownAmount!.currency : "") ||
+    (hasBottomUp ? bottomUpInputs!.pricing!.currency : "") ||
+    "$";
+
+  let tamLow: number;
+  let tamHigh: number;
+  let method: MarketSizingMethod;
+  let tier: MarketSizingEvidenceTier;
+  let conflicting = false;
+  let conflictNote = "";
+  let basis = "";
+  const evidenceIds: string[] = [];
+  let anchorEvidence: DomainResearchEvidence;
+
+  if (hasTopDown && hasBottomUp) {
+    const low = Math.min(topDownAmount!.amount, bottomUpAmount!);
+    const high = Math.max(topDownAmount!.amount, bottomUpAmount!);
+    const ratio = high / Math.max(low, 1);
+    tamLow = low;
+    tamHigh = high;
+    method = "triangulated";
+    conflicting = ratio > 2.5;
+    tier = conflicting ? "directional" : "supportedEstimate";
+    basis = `Top-down figure ${formatAmount(topDownAmount!.amount, currency)} from [${topDownBest!.id}] triangulated against bottom-up estimate ${formatAmount(bottomUpAmount!, currency)} (addressable buyers [${buyerPopulation!.id}] × annualized price [${annualPricing!.id}]).`;
+    conflictNote = conflicting
+      ? `Top-down and bottom-up methods diverge by ${ratio.toFixed(1)}x (${formatAmount(topDownAmount!.amount, currency)} vs ${formatAmount(bottomUpAmount!, currency)}); the range below spans both rather than silently choosing one.`
+      : "";
+    evidenceIds.push(topDownBest!.id, buyerPopulation!.id, annualPricing!.id);
+    anchorEvidence = topDownBest!;
+  } else if (hasTopDown) {
+    tamLow = topDownAmount!.amount;
+    tamHigh = topDownAmount!.amount;
+    method = "topDown";
+    tier = isHighAuthoritySource(topDownBest!) ? "supportedEstimate" : "directional";
+    basis = `TAM planning baseline uses ${topDownAmount!.token} from [${topDownBest!.id}] (${classifyMarketEvidenceSource(topDownBest!).replace(/_/g, " ")}).`;
+    evidenceIds.push(topDownBest!.id);
+    anchorEvidence = topDownBest!;
+  } else {
+    tamLow = bottomUpAmount!;
+    tamHigh = bottomUpAmount!;
+    method = "bottomUp";
+    tier = isHighAuthoritySource(buyerPopulation!) ? "supportedEstimate" : "directional";
+    basis = `TAM = addressable buyers from [${buyerPopulation!.id}] (${classifyMarketEvidenceSource(buyerPopulation!).replace(/_/g, " ")}) × annualized price from [${annualPricing!.id}].`;
+    evidenceIds.push(buyerPopulation!.id, annualPricing!.id);
+    anchorEvidence = buyerPopulation!;
+  }
+
+  const tamSupporting = sourceBacked.filter((item) => evidenceIds.includes(item.id));
+  const staleAverageFreshness =
+    tamSupporting.reduce((sum, item) => sum + freshness(item), 0) /
+    Math.max(1, tamSupporting.length);
+  const stale = staleAverageFreshness <= 58;
+
+  // --- SAM: evidence-derived serviceable share when the research surfaced
+  // a real segment/geography narrowing percentage; otherwise the disclosed
+  // default, never silently presented as if it were evidence-based.
+  const serviceableShareEvidence = rankEvidenceCandidates(sourceBacked).find((item) =>
+    extractServiceableSharePercent(item) !== null
   );
+  const serviceableSharePercent = serviceableShareEvidence
+    ? extractServiceableSharePercent(serviceableShareEvidence)!
+    : 0.25;
+  const samMethod: "evidenceDerived" | "defaultAssumption" = serviceableShareEvidence
+    ? "evidenceDerived"
+    : "defaultAssumption";
+  const samLow = tamLow * serviceableSharePercent;
+  const samHigh = tamHigh * serviceableSharePercent;
+  if (serviceableShareEvidence) evidenceIds.push(serviceableShareEvidence.id);
+
+  // --- SOM: only ever a real figure when the evidence itself states a
+  // defensible obtainable/penetration/win-rate percentage. No fallback
+  // percentage is invented -- an undefended SOM stays honestly pending,
+  // which the existing TAM/SAM/SOM cascade (page.tsx/Planner.tsx) already
+  // renders as "Validation Needed" for that layer alone once its value
+  // text carries no parseable number.
+  const obtainableShareEvidence = rankEvidenceCandidates(sourceBacked).find((item) =>
+    extractObtainableSharePercent(item) !== null
+  );
+  const obtainableSharePercent = obtainableShareEvidence
+    ? extractObtainableSharePercent(obtainableShareEvidence)!
+    : null;
+  const somStatus: "calculated" | "pending" = obtainableSharePercent ? "calculated" : "pending";
+  if (obtainableShareEvidence) evidenceIds.push(obtainableShareEvidence.id);
+
+  const baseConfidence = calculatePlanningEstimateConfidence(tamSupporting, false);
+  let confidence = baseConfidence;
+  if (method === "triangulated" && !conflicting) confidence += 8;
+  if (conflicting) confidence -= 15;
+  if (stale) confidence -= 10;
+  if (samMethod === "defaultAssumption") confidence -= 6;
+  confidence = clampScore(confidence);
+
   const range = (low: number, high: number) =>
     low === high
       ? formatAmount(low, currency)
       : `${formatAmount(low, currency)}–${formatAmount(high, currency)}`;
 
+  const formulaParts = [basis];
+  if (samMethod === "evidenceDerived") {
+    formulaParts.push(
+      `SAM = TAM × ${Math.round(serviceableSharePercent * 100)}% serviceable-share evidence from [${serviceableShareEvidence!.id}].`
+    );
+  } else {
+    formulaParts.push("SAM = TAM × 25% disclosed default serviceable-share assumption (no segment-narrowing evidence found).");
+  }
+  if (somStatus === "calculated") {
+    formulaParts.push(
+      `SOM = SAM × ${Math.round(obtainableSharePercent! * 100)}% obtainable-share evidence from [${obtainableShareEvidence!.id}].`
+    );
+  } else {
+    formulaParts.push(
+      "SOM left pending: no defensible obtainable-share, penetration-rate, or win-rate evidence was found for this market -- an invented percentage was not substituted."
+    );
+  }
+  if (conflictNote) formulaParts.push(conflictNote);
+  if (stale) {
+    formulaParts.push(
+      `Evidence backing this estimate is dated ${extractEvidenceYear(anchorEvidence)} or earlier; treat the figure as a historical baseline, not current market size.`
+    );
+  }
+
+  const assumptions = [
+    samMethod === "evidenceDerived"
+      ? `[Evidence] Serviceable share of ${Math.round(serviceableSharePercent * 100)}% is based on segment/geography evidence, not a default.`
+      : "[Assumption] Serviceable share is 25% until segment and geography data are validated.",
+  ];
+  if (somStatus === "pending") {
+    assumptions.push(
+      "[Gap] Obtainable share (SOM) requires evidence of realistic penetration rate, win rate, or reachable-account capacity -- none was found, so SOM is reported as pending rather than assumed."
+    );
+  } else {
+    assumptions.push(
+      `[Evidence] Obtainable share of ${Math.round(obtainableSharePercent! * 100)}% is based on penetration/win-rate evidence, not a default.`
+    );
+  }
+
   return {
     classification: "Estimated",
     tam: range(tamLow, tamHigh),
     sam: range(samLow, samHigh),
-    som: range(somLow, somHigh),
-    formula: `${basis} SAM = TAM × 25% serviceable-share assumption. SOM = SAM × 2% obtainable-share assumption.`,
-    assumptions: [
-      "[Assumption] Serviceable share is 25% until segment and geography data are validated.",
-      "[Assumption] Obtainable share is 2% of SAM until paid conversion and capacity are validated.",
-    ],
+    som:
+      somStatus === "calculated"
+        ? range(samLow * obtainableSharePercent!, samHigh * obtainableSharePercent!)
+        : "realistic obtainable-share evidence (penetration rate, win rate, or reachable-account capacity) was not found for this market.",
+    formula: formulaParts.join(" "),
+    assumptions,
     evidenceIds: [...new Set(evidenceIds)],
     confidence,
     confidenceLevel: classifyMarketConfidence(confidence),
     basis: "source_based",
+    method,
+    tier,
+    geography: extractGeographyLabel(evidenceText(anchorEvidence)),
+    year: extractEvidenceYear(anchorEvidence),
+    marketDefinition: concise(anchorEvidence.claim || anchorEvidence.value, 160),
+    conflicting,
+    conflictNote,
+    samMethod,
+    somStatus,
+    stale,
   };
 }
 
@@ -1398,11 +1707,29 @@ export function projectMarketIntelligenceGraphToReport(
     // real material to build from.
   } else if (graph.planningEstimate) {
     const estimate = graph.planningEstimate;
+    // Method/tier/scope descriptor -- additive, English-only free text
+    // matching the existing precedent already set by formula/basis/
+    // assumptions below (none of which have ever been localized, since
+    // they are calculation traceability for a specific report, not fixed
+    // UI copy). Lets a reader see HOW the figure was produced (top-down,
+    // bottom-up, or triangulated), how strongly evidenced it is
+    // (Supported Estimate vs Directional / Proxy), and its year/geography
+    // without opening a separate disclosure.
+    const methodLabel =
+      estimate.method === "triangulated"
+        ? "Triangulated (top-down + bottom-up)"
+        : estimate.method === "topDown"
+          ? "Top-down"
+          : "Bottom-up";
+    const tierLabel =
+      estimate.tier === "supportedEstimate" ? "Supported Estimate" : "Directional / Proxy";
+    const somTag = estimate.somStatus === "calculated" ? copy.estimatedTag : "Validation Needed";
     projection.tamSamSom = [
       copy.planningEstimateTitle,
+      `Method: ${methodLabel} | Tier: ${tierLabel} | Geography: ${estimate.geography} | Year: ${estimate.year} | Scope: ${estimate.marketDefinition}`,
       `TAM [${copy.estimatedTag}]: ${estimate.tam}`,
       `SAM [${copy.estimatedTag}]: ${estimate.sam}`,
-      `SOM [${copy.estimatedTag}]: ${estimate.som}`,
+      `SOM [${somTag}]: ${estimate.som}`,
       `${copy.formulaLabel}: ${estimate.formula}`,
       ...estimate.assumptions,
       `${copy.confidenceLabel}: ${estimate.confidence}/100 (${estimate.confidenceLevel}) | ${copy.basisLabel}: ${estimate.basis} | ${copy.evidenceLabel}: ${estimate.evidenceIds.map((id) => `[${id}]`).join(", ") || copy.assumptionOnlyScenario}`,
@@ -1421,7 +1748,7 @@ export function projectMarketIntelligenceGraphToReport(
     // figure as-is. Mirrors tamSamSom's own [Estimated] tagging exactly.
     projection.marketSize = [
       copy.planningEstimateTitle,
-      `- [${copy.estimatedTag}] ${copy.marketSizePlanningEstimateLine}: ${estimate.tam} | ${copy.basisLabel}: ${estimate.basis} | ${copy.confidenceLabel}: ${estimate.confidence}/100 (${estimate.confidenceLevel}) | ${copy.evidenceLabel}: ${estimate.evidenceIds.map((id) => `[${id}]`).join(", ") || copy.assumptionOnlyScenario}`,
+      `- [${copy.estimatedTag}] ${copy.marketSizePlanningEstimateLine}: ${estimate.tam} | Method: ${methodLabel} (${tierLabel}) | Geography: ${estimate.geography} | Year: ${estimate.year} | ${copy.basisLabel}: ${estimate.basis} | ${copy.confidenceLabel}: ${estimate.confidence}/100 (${estimate.confidenceLevel}) | ${copy.evidenceLabel}: ${estimate.evidenceIds.map((id) => `[${id}]`).join(", ") || copy.assumptionOnlyScenario}`,
     ].join("\n");
   } else if (graph.adjacentBenchmarks.length === 0) {
     // Only forced to the flat "unavailable" notice when there is truly

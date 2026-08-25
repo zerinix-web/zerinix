@@ -199,7 +199,17 @@ test("chat and Market Intelligence report can consume one lossless final researc
   assert.ok(graph.planningEstimate, "source-backed planning estimate expected");
   assert.match(graph.planningEstimate.tam, /\$8\.4B/);
   assert.match(graph.planningEstimate.formula, /\[R11\]/);
-  assert.ok(graph.planningEstimate.assumptions.every((item) => /\[Assumption\]/.test(item)));
+  // Evidence-first market-sizing engine: SAM's assumption is tagged
+  // [Assumption] only when no real serviceable-share evidence was found
+  // (true for this fixture -- it has a market forecast and competitors,
+  // not a segment-share breakdown), and SOM is now honestly tagged [Gap]
+  // rather than a fabricated default percentage when no obtainable-share/
+  // penetration-rate/win-rate evidence exists (also true here).
+  assert.ok(graph.planningEstimate.assumptions.every((item) => /\[Assumption\]|\[Gap\]|\[Evidence\]/.test(item)));
+  assert.ok(graph.planningEstimate.assumptions.some((item) => /\[Assumption\]/.test(item)), "default SAM assumption expected");
+  assert.ok(graph.planningEstimate.assumptions.some((item) => /\[Gap\]/.test(item)), "SOM should be an honest gap, not a fabricated percentage, for this fixture");
+  assert.equal(graph.planningEstimate.somStatus, "pending");
+  assert.doesNotMatch(graph.planningEstimate.som, /\d/, "a pending SOM must never carry a fabricated numeric figure");
   assert.equal(graph.verifiedMarketSize.length, 0, "a market forecast is not a verified endpoint");
   assert.ok(graph.cagr.some((item) => item.evidenceIds.includes("R12")));
 
@@ -245,7 +255,11 @@ test("chat and Market Intelligence report can consume one lossless final researc
   assert.match(reportProjection.marketInfrastructure, /AICPA/);
   assert.match(reportProjection.tamSamSom, /TAM \[Estimated\]: \$8\.4B/);
   assert.match(reportProjection.tamSamSom, /SAM \[Estimated\]/);
-  assert.match(reportProjection.tamSamSom, /SOM \[Estimated\]/);
+  // SOM is honestly reported as pending (not a fabricated percentage of
+  // SAM) since this fixture carries no penetration-rate/win-rate evidence
+  // -- see the evidence-first market-sizing engine's SOM section.
+  assert.match(reportProjection.tamSamSom, /SOM \[Validation Needed\]/);
+  assert.doesNotMatch(reportProjection.tamSamSom, /SOM \[Estimated\]/);
   assert.match(reportProjection.sources, /https:\/\/www\.xero\.com\/us\/accounting-software/);
   assert.doesNotMatch(reportProjection.competitiveLandscape, /No validated competitors|None present/i);
   assert.doesNotMatch(
