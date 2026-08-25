@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "node --test tests/*.test.mjs",
     "mobile:sync": "cap sync",
+    "mobile:sync:production": "NEXT_PUBLIC_APP_URL=https://zerinix.com cap sync",
     "mobile:ios": "cap open ios",
     "mobile:android": "cap open android"
   },
