@@ -118,18 +118,15 @@ test("page.tsx: Executive Summary was never affected by the two-card bug (Report
 
 // --- 3. Methodology/formulas/assumptions stay in collapsed Details --------
 
-test("page.tsx mobile: every card-first section's raw paragraph (methodology/formulas/assumptions/source explanations) is collapsed into AnalysisNotes, not always-visible -- generalized from the tamSamSom-only special case", () => {
+// A later ticket ("FINAL CLEANUP -- remove all redundant DETAILS
+// duplication") superseded the "collapse into AnalysisNotes" treatment
+// below with full removal: card-first sections' own extraction was
+// enriched to capture the COMPLETE remaining prose/bullets (not a capped
+// teaser), making even a collapsed raw-text disclosure fully redundant.
+// See tests/market-intelligence-final-cleanup-details-duplication.test.mjs
+// for the current, superseding behavior.
+test("page.tsx mobile: every card-first section's raw paragraph is gated on isCardFirstSection (regression guard on the underlying flag this file's own tests, and the later ticket's, both depend on)", () => {
   assert.match(pageSource, /const isCardFirstSection = cardFirstReportFields\.has\(section\.field \?\? ""\);/);
-  assert.match(
-    pageSource,
-    /isCardFirstSection \? \(\s*\n\s*<AnalysisNotes compact label=\{getReportPresentationLabels\(section\.content\)\.details\}>\s*\n\s*<ReportText content=\{detailsContent\} mobile \/>\s*\n\s*<\/AnalysisNotes>/
-  );
-});
-
-test("desktop (page.tsx) and Planner.tsx: AnalysisNotes itself is never excluded for card-first sections -- only the duplicate insight-snippet components are gated, methodology stays reachable", () => {
-  for (const source of [pageSource, plannerSource]) {
-    assert.match(source, /hasVisibleDetailsContent \? \(\s*\n\s*<AnalysisNotes|detailsContent\.trim\(\) \? \(\s*\n\s*<AnalysisNotes/);
-  }
 });
 
 // --- 4. Competitive Landscape: clean validation card, not empty sections --
@@ -138,7 +135,7 @@ test("page.tsx and Planner.tsx: an empty Competitive Landscape (0 validated comp
   for (const source of [pageSource, plannerSource]) {
     assert.match(
       source,
-      /if \(rows\.length === 0\) \{\s*\n\s*return \(\s*\n\s*<div className="mb-5 rounded-\[2rem\] border border-dashed border-white\/15 bg-black\/20 p-5">/
+      /if \(rows\.length === 0\) \{[\s\S]*?<div className="mb-5 rounded-\[2rem\] border border-dashed border-white\/15 bg-black\/20 p-5">/
     );
     assert.match(source, /No competitor data could be validated for this market yet\./);
     // The old two-stacked-empty-states markup (empty table shell +

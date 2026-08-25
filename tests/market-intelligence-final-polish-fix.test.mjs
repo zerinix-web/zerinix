@@ -134,14 +134,26 @@ test("both app/dashboard/[id]/page.tsx CitationList call sites pass market={repo
 
 // --- 4. Decision-vocabulary consistency is intact (drift check) -----------
 
-test("the Market Intelligence investmentScore-fallback gate (from the prior polish ticket) is still in place, untouched by this ticket", () => {
+// CRITICAL FIX -- superseded by a later ticket ("Fix the canonical
+// decision consistency bug"): Market Intelligence now resolves through
+// resolveMarketIntelligenceExecutiveDecision instead of routing an
+// isMarketIntelligence-guarded `undefined` through
+// resolveCanonicalDecisionFromReportText's own detectRecommendation
+// fallback (that fallback's full-content keyword scan matched "GO" inside
+// "Go-to-Market" -- see market-intelligence-decision-confidence-sync.test.mjs
+// for that fix's own dedicated coverage). Business Plan/Acquisition/Real
+// Estate still resolve through resolveCanonicalDecisionFromReportText
+// exactly as before -- this gate's investmentScore guard is preserved for
+// those report kinds, just no longer reachable for Market Intelligence at
+// all (a stronger guarantee than routing `undefined` through it).
+test("Market Intelligence no longer reaches resolveCanonicalDecisionFromReportText's own fallback at all -- it resolves through resolveMarketIntelligenceExecutiveDecision instead; Business Plan/Acquisition/Real Estate's own resolveCanonicalDecisionFromReportText call (and its investmentScore guard) is untouched", () => {
   assert.match(
     dashboardReportSource,
-    /resolveCanonicalDecisionFromReportText\(\s*content,\s*isMarketIntelligence \? undefined : investmentScore\?\.recommendation\s*\)/
+    /const resolvedDecision = isMarketIntelligence\s*\n\s*\? null\s*\n\s*: resolveCanonicalDecisionFromReportText\(content, investmentScore\?\.recommendation\)/
   );
   assert.match(
     plannerSource,
-    /resolveCanonicalDecisionFromReportText\(\s*section\.content,\s*isMarketIntelligence \? undefined : investmentScore\?\.recommendation\s*\)/
+    /const resolvedDecision = isMarketIntelligence\s*\n\s*\? null\s*\n\s*: resolveCanonicalDecisionFromReportText\(section\.content, investmentScore\?\.recommendation\)/
   );
 });
 

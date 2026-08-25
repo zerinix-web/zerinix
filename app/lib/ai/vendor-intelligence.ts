@@ -134,6 +134,27 @@ export type VendorCoverage = {
   reason: string;
 };
 
+// A candidate that is genuinely relevant to this market (passed
+// assessMarketRelevance -- not an implementation partner, marketplace,
+// distributor, media company, or advisory firm) and has at least one
+// qualifying piece of evidence naming it, but does not clear
+// validateVendorCandidate's stricter multi-path independent-corroboration
+// bar required for `vendors` (direct, comparable competitors). Distinct
+// from a validated vendor -- never eligible for the competitor table or a
+// "validated competitor" claim -- and distinct from being dropped
+// entirely: real, evidence-named companies operating in or near this
+// market must be surfaced honestly as such (see market-intelligence-
+// graph.ts's majorPlayers fallback), not silently discarded just because
+// they don't meet the direct-competitor bar, and never upgraded to one.
+export type AdjacentMarketPlayer = {
+  name: string;
+  evidenceIds: string[];
+  evidenceCount: number;
+  confidence: number;
+  confidenceLevel: MarketConfidenceLevel;
+  reason: string;
+};
+
 export type VendorIntelligenceGraph = {
   taxonomy: {
     productCategory: string;
@@ -144,6 +165,7 @@ export type VendorIntelligenceGraph = {
     aliases: string[];
   };
   vendors: VendorIntelligence[];
+  adjacentPlayers: AdjacentMarketPlayer[];
   entities: ClassifiedOrganizationEntity[];
   marketInfrastructure: ClassifiedOrganizationEntity[];
   evidenceProviders: ClassifiedOrganizationEntity[];
@@ -382,6 +404,7 @@ export function buildVendorIntelligenceGraph(
 
   const relevantEvidenceIds = new Set<string>();
   const acceptedEvidenceIds = new Set<string>();
+  const adjacentPlayerCandidates: AdjacentMarketPlayer[] = [];
 
   const vendors = [...aggregatedCandidates.values()]
     .flatMap((candidate) => {
@@ -464,7 +487,40 @@ export function buildVendorIntelligenceGraph(
           ? `Validated commercial vendor via ${validation.validationPath.replace(/_/g, " ")}.`
           : preliminaryClassification.reason,
       });
-      if (!isValidatedVendor) return [];
+      if (!isValidatedVendor) {
+        // Adjacent/relevant-industry-player tier -- genuinely relevant to
+        // this market (assessMarketRelevance passed, so not an
+        // implementation partner/marketplace/distributor/media/advisory
+        // firm) and named in at least one qualifying piece of evidence,
+        // but not independently corroborated enough to be a validated,
+        // directly comparable competitor (validateVendorCandidate failed).
+        // Captured here -- never as a `vendors` entry, never eligible for
+        // the competitor table or eligibleForMajorPlayers -- so real
+        // evidence about a named player is surfaced honestly instead of
+        // being silently discarded merely because Competitive Landscape
+        // has no validated direct competitors to show.
+        if (
+          preliminaryClassification.entityType === "commercial_vendor" &&
+          relevance.relevant &&
+          qualifyingItems.length > 0 &&
+          !isImplausibleCompetitorName(candidate.canonicalName)
+        ) {
+          const evidenceIds = unique(qualifyingItems.map((item) => item.id));
+          const confidence = Math.round(
+            qualifyingItems.reduce((sum, item) => sum + calculateEvidenceConfidence(item), 0) /
+              Math.max(1, qualifyingItems.length)
+          );
+          adjacentPlayerCandidates.push({
+            name: candidate.canonicalName,
+            evidenceIds,
+            evidenceCount: evidenceIds.length,
+            confidence,
+            confidenceLevel: classifyMarketConfidence(confidence),
+            reason: relevance.reason,
+          });
+        }
+        return [];
+      }
 
       for (const item of qualifyingItems) acceptedEvidenceIds.add(item.id);
 
@@ -667,6 +723,14 @@ export function buildVendorIntelligenceGraph(
       aliases: profile.aliases,
     },
     vendors,
+    adjacentPlayers: adjacentPlayerCandidates
+      .sort(
+        (left, right) =>
+          right.confidence - left.confidence ||
+          right.evidenceCount - left.evidenceCount ||
+          left.name.localeCompare(right.name)
+      )
+      .slice(0, 15),
     entities,
     marketInfrastructure: entities.filter((entity) =>
       infrastructureTypes.has(entity.entityType)

@@ -468,6 +468,128 @@ test("11. with no verified size, no defensible planning-estimate inputs, and no 
   assert.doesNotMatch(projection.tamSamSom, /\$\d/, "must never contain a fabricated dollar figure");
 });
 
+test("10b. projection.marketSize mirrors the planning estimate as a deterministic [Estimated] aggregate figure, never a bare per-buyer price", () => {
+  const prompt = "Market Intelligence report on the fleet telematics market.";
+  const fixture = [
+    {
+      id: "R1",
+      field: "market_size",
+      claim: "There are approximately 400,000 addressable mid-market businesses in the target region.",
+      value: "400,000 addressable businesses",
+      label: "Verified from external source",
+      sourceTitle: "Business population statistics",
+      publisher: "Regional Statistics Office",
+      url: "https://statsoffice.gov/business-population",
+      sourceType: "government/statistical source",
+      confidence: 80,
+      qualityScore: 80,
+      publishedDate: "2026-01-01",
+      lastChecked: checkedAt,
+      supportingData: [],
+    },
+    {
+      id: "R2",
+      field: "pricing_models",
+      claim: "Typical subscription pricing is $50 per month per vehicle.",
+      value: "$50 per month",
+      label: "Verified from external source",
+      sourceTitle: "Vendor pricing page",
+      publisher: "Fleet Vendor",
+      url: "https://fleetvendor.com/pricing",
+      sourceType: "official company source",
+      confidence: 80,
+      qualityScore: 80,
+      publishedDate: "2026-01-01",
+      lastChecked: checkedAt,
+      supportingData: [],
+    },
+  ];
+  const graph = buildMarketIntelligenceGraph({ evidence: fixture }, prompt);
+  assert.ok(graph.planningEstimate, "expected a source-based planning estimate to be built from defensible inputs");
+  const projection = projectMarketIntelligenceGraphToReport(graph, "English");
+  assert.match(projection.marketSize, /Planning Estimate/);
+  assert.match(projection.marketSize, /\[Estimated\]/);
+  assert.match(
+    projection.marketSize,
+    new RegExp(graph.planningEstimate.tam.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    "marketSize must be derived from the same genuine aggregate TAM figure as tamSamSom, never a separately fabricated number"
+  );
+  assert.doesNotMatch(
+    projection.marketSize,
+    /^\$50 per month$/,
+    "must never collapse to the bare per-buyer pricing figure alone"
+  );
+  assert.doesNotMatch(
+    projection.marketSize,
+    /\$50 per month per vehicle/,
+    "must never surface the raw per-buyer price as the market-size figure"
+  );
+});
+
+test("11b. projection.marketSize stays the explicit deterministic unavailable notice -- never fabricated, never leaks raw per-buyer pricing prose -- when nothing defensible is available", () => {
+  const prompt = "Market Intelligence report on an obscure niche market.";
+  const fixture = [
+    {
+      id: "R1",
+      field: "market_overview",
+      claim: "General commentary about the market with no numeric size figure.",
+      value: "",
+      label: "Verified from external source",
+      sourceTitle: "General overview",
+      publisher: "Some Site",
+      url: "https://somesite.com/overview",
+      sourceType: "credible publication",
+      confidence: 60,
+      qualityScore: 60,
+      publishedDate: "2026-01-01",
+      lastChecked: checkedAt,
+      supportingData: [],
+    },
+  ];
+  const graph = buildMarketIntelligenceGraph({ evidence: fixture }, prompt);
+  assert.equal(graph.planningEstimate, null);
+  assert.equal(graph.adjacentBenchmarks.length, 0);
+  const projection = projectMarketIntelligenceGraphToReport(graph, "English");
+  assert.equal(
+    projection.marketSize,
+    "A defensible aggregate market-size figure could not be established for this market. No verified local figure, comparable benchmark, or sufficient buyer-population-and-pricing data was available to build one. Per-customer figures such as pricing, ARPA, ACV, or willingness-to-pay evidence found during research describe an individual buyer's spend, not the total market, and were never substituted here as a market-size figure."
+  );
+  assert.match(projection.marketSize, /could not be established/i);
+  assert.doesNotMatch(projection.marketSize, /\$\d/, "must never contain a fabricated dollar figure");
+});
+
+test("10c. verified-market-size branch still leaves marketSize as the headline verified figure (no regression from the new planning-estimate/unavailable branches)", () => {
+  const prompt = "Market Intelligence report on the fleet telematics market.";
+  const fixture = [
+    {
+      id: "R1",
+      field: "market_size",
+      claim: "The U.S. fleet telematics market size is $4.2 billion in annual revenue, per official government statistics.",
+      value: "$4.2 billion",
+      label: "Verified from external source",
+      sourceTitle: "Official government market-size statistics",
+      publisher: "Regional Statistics Office",
+      url: "https://statsoffice.gov/fleet-telematics-market-size",
+      sourceType: "official_statistics",
+      authorityLevel: "primary",
+      confidence: 85,
+      qualityScore: 85,
+      publishedDate: "2026-01-01",
+      lastChecked: checkedAt,
+      supportingData: [],
+    },
+  ];
+  const graph = buildMarketIntelligenceGraph({ evidence: fixture }, prompt);
+  assert.ok(graph.verifiedMarketSize.length > 0, "expected a verified market-size item to be recognized");
+  const projection = projectMarketIntelligenceGraphToReport(graph, "English");
+  assert.doesNotMatch(
+    projection.marketSize,
+    /could not be established/i,
+    "a genuinely verified market size must never be downgraded to the unavailable notice"
+  );
+  assert.match(projection.marketSize, /\$4\.2 billion/);
+});
+
 // -----------------------------------------------------------------------
 // 12. Market Intelligence remains correctly routed (no legal-report
 //     regression)

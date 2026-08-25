@@ -15,9 +15,14 @@ test("tamSamSom is excluded from cross-section paragraph dedup, alongside strate
   // replaced the ENTIRE tamSamSom section with a bare "See Market Size for
   // the established premise" cross-reference, discarding the section's
   // real SAM/SOM breakdown.
+  // A later ticket ("MARKET INTELLIGENCE -- ROOT-CAUSE DATA PIPELINE
+  // REPAIR") added executiveSummary to this same exclusion list for the
+  // identical reason (its own fixed-count "What Evidence Is Missing" list
+  // was being silently emptied by the same dedup pass) -- the assertion
+  // below allows either the original two-field list or the extended one.
   assert.match(
     routeSource,
-    /excludedFields:\s*\["strategicRecommendations",\s*"tamSamSom"\]/
+    /excludedFields:\s*\["strategicRecommendations",\s*"tamSamSom"(?:,\s*"executiveSummary")?\]/
   );
 });
 

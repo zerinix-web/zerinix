@@ -2976,7 +2976,49 @@ This is stage ${stageIndex + 1} of ${selectedStages.length}. Do not treat the ab
                 legal_evidence_preservation: legalIssueSignals.legal_evidence_preservation,
                 legal_case_law: legalIssueSignals.legal_case_law,
               };
+              const matchesNativeSourceFieldSignal = (field: string) => {
+                const signal = nativeSourceFieldSignals[field];
+                return Boolean(
+                  signal && (signal.test(sourceIdentity) || signal.test(sourceIdentityAsciiFolded))
+                );
+              };
+              // CRITICAL FIX -- confirmed live (root-cause pipeline
+              // repair): market_size's own regex (market size/tam/sam/
+              // som/cagr/forecast/market value) is broad enough to also
+              // match a genuine ADJACENT-market benchmark citation (e.g.
+              // "the European legal tech market size is forecast to
+              // reach..." matches both market_size and global_benchmark)
+              // -- and since market_size's task sits earlier in the fixed
+              // task array below, first-match-wins .find() always chose
+              // it, silently routing real benchmark evidence into
+              // graph.verifiedMarketSize's authority-gated bucket (which
+              // almost always then rejects it -- see
+              // isAuthoritativeObservedMarketSize in
+              // market-intelligence-graph.ts) instead of
+              // graph.adjacentBenchmarks, where the report's own Planning
+              // Estimate pathway exists specifically to use it -- so
+              // usable market-sizing evidence disappeared from the report
+              // entirely rather than powering the honest, clearly-labeled
+              // estimate the pipeline already knows how to produce. This
+              // resolves ONLY that specific collision -- a candidate that
+              // ALSO independently matches a genuine regional/global
+              // benchmark signal is routed there instead -- so it never
+              // widens what counts as benchmark evidence beyond what this
+              // exact task list already defines, and every other field
+              // collision this same first-match-wins selection already
+              // handled (including the "confirmed live" competitors/
+              // vendor_discovery fix documented above) is completely
+              // unaffected.
+              let benchmarkOverrideTask: (typeof request.tasks)[number] | undefined;
+              if (matchesNativeSourceFieldSignal("market_size")) {
+                if (matchesNativeSourceFieldSignal("global_benchmark")) {
+                  benchmarkOverrideTask = request.tasks.find((candidate) => candidate.field === "global_benchmark");
+                } else if (matchesNativeSourceFieldSignal("regional_benchmark")) {
+                  benchmarkOverrideTask = request.tasks.find((candidate) => candidate.field === "regional_benchmark");
+                }
+              }
               const task =
+                benchmarkOverrideTask ||
                 request.tasks.find((candidate) => {
                   const signal = nativeSourceFieldSignals[candidate.field];
                   return (

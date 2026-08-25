@@ -28,6 +28,12 @@ export type MobileConversationMessage = {
   role: "user" | "assistant";
   content: string;
   status?: "streaming" | "complete" | "failed";
+  // Optional because this type also covers lighter-weight message shapes
+  // elsewhere -- the real ChatMessage objects Planner.tsx actually passes
+  // through `messages` already carry this field; it was just never
+  // declared here. Lets renderMessageContent tell a completed report-
+  // generation message apart from an ordinary chat reply.
+  mode?: string;
 };
 
 export type MobileComposerAttachment = {

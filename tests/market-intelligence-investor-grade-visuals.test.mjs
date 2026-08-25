@@ -66,6 +66,16 @@ function extractFunctionSource(source, functionName) {
 const functionDependencies = {
   extractForceIntensity: /const forceAliases: Record<string, string\[\]> = \{[\s\S]*?\n\};/,
   extractRecommendationSignals: /const recommendationOwnerRolePattern =[\s\S]*?;/,
+  // A later ticket ("RESTORE PREMIUM ANALYTICAL DEPTH") split
+  // extractMarketIntelligenceCompetitorRows into a 3-tier fallback chain
+  // (table -> flattened bullets -> Major Players' own bullets), each its
+  // own helper function; a still-later ticket ("MARKET INTELLIGENCE --
+  // ROOT-CAUSE DATA PIPELINE REPAIR") added isImplausibleCompetitorName
+  // OnScreen/...Pdf right before this chain (each tier now calls it) --
+  // all of these must compile alongside the main function for this
+  // isolated module to run.
+  extractMarketIntelligenceCompetitorRows:
+    /function isImplausibleCompetitorName(?:OnScreen|Pdf)\([\s\S]*?\nfunction extractMarketIntelligenceCompetitorRowsFromTable\([\s\S]*?\n\}/,
 };
 
 async function compileFunction(source, functionName) {
@@ -117,11 +127,14 @@ test("page.tsx: TAM/SAM/SOM no longer shows a per-layer assumption excerpt inlin
   assert.doesNotMatch(pageSource, /\{value && assumption \? \(/);
 });
 
-test("Planner.tsx: the on-screen TAM/SAM/SOM visual reuses parseMarketSizeMagnitude (already correct in the PDF export) instead of a static bar-width array, with a per-layer cascading nesting check -- row.description is no longer rendered inline (moved out per the 'main report shows only the visual stack' requirement)", () => {
+test("Planner.tsx: the on-screen TAM/SAM/SOM visual reuses parseMarketSizeMagnitude (already correct in the PDF export) instead of a static bar-width array, with a per-layer cascading nesting check -- row.description (the real planning-assumption/sizing-explanation text) is rendered inline again per the later 'user must immediately see ... sizing explanation without opening DETAILS' requirement", () => {
   assert.match(plannerSource, /const magnitudes = rows\.map\(\(row\) => parseMarketSizeMagnitude\(row\.value\)\);/);
   assert.match(plannerSource, /const samResolved = tamResolved && magnitudes\[1\] !== null && magnitudes\[1\] <= \(magnitudes\[0\] as number\);/);
   assert.match(plannerSource, /const somResolved = samResolved && magnitudes\[2\] !== null && magnitudes\[2\] <= \(magnitudes\[1\] as number\);/);
-  assert.doesNotMatch(plannerSource, /<p className="mt-3 line-clamp-2 text-xs leading-5 text-zinc-500">\{row\.description\}<\/p>/);
+  // A later ticket ("RESTORE PREMIUM ANALYTICAL DEPTH") removed the
+  // line-clamp-2 here -- a real, single-sentence methodology/assumption
+  // explanation could still run long enough to get cut off at that width.
+  assert.match(plannerSource, /<p className="mt-3 text-xs leading-5 text-zinc-500">\{row\.description\}<\/p>/);
 });
 
 // --- 2. Porter's Five Forces: real intensity, keeps the radar -------------

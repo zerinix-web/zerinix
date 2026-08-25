@@ -602,6 +602,11 @@ type MarketGraphCopyKey =
   | "formulaLabel"
   | "confidenceLabel"
   | "tamSamSomUnavailable"
+  | "marketSizeUnavailable"
+  | "marketSizePlanningEstimateLine"
+  | "adjacentPlayersTitle"
+  | "adjacentPlayersIntro"
+  | "adjacentPlayerValidationGapLabel"
   | "tableHeader"
   | "notEstablished"
   | "notPubliclyValidated"
@@ -649,6 +654,13 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     confidenceLabel: "Confidence",
     tamSamSomUnavailable:
       "A verified market-size figure (TAM / SAM / SOM) could not be established for this market. No comparable local, regional, or global benchmark was available to build a labeled estimate from, and the available data on buyer population and pricing was not sufficient together to construct one either. This gap reflects a lack of published data for this specific scope, not the size of the opportunity. The number of vendors identified was not used on its own to fabricate a market-size figure.",
+    marketSizeUnavailable:
+      "A defensible aggregate market-size figure could not be established for this market. No verified local figure, comparable benchmark, or sufficient buyer-population-and-pricing data was available to build one. Per-customer figures such as pricing, ARPA, ACV, or willingness-to-pay evidence found during research describe an individual buyer's spend, not the total market, and were never substituted here as a market-size figure.",
+    marketSizePlanningEstimateLine: "Market Size",
+    adjacentPlayersTitle: "Relevant Industry Players — Not Independently Validated as Direct Competitors",
+    adjacentPlayersIntro:
+      "These companies are named in available evidence as active in or adjacent to this market, but current evidence does not independently corroborate them as directly comparable competitors. See Competitive Landscape for direct-competitor validation status.",
+    adjacentPlayerValidationGapLabel: "Not independently validated as a direct competitor from current evidence",
     // CRITICAL FIX -- the prior column header named a raw internal audit
     // metric on a customer-facing competitor comparison table; the new
     // header states the same fact (how many independent sources back
@@ -702,6 +714,13 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     confidenceLabel: "Güven",
     tamSamSomUnavailable:
       "Bu pazar için doğrulanmış bir TAM / SAM / SOM rakamı belirlenemedi. Etiketli bir tahmin oluşturmak için karşılaştırılabilir yerel, bölgesel veya küresel bir referans veri bulunamadı; alıcı nüfusu ve fiyatlandırmaya dair mevcut veriler de birlikte yeterli değildi. Bu boşluk, fırsatın büyüklüğünü değil, bu kapsam için yayımlanmış veri eksikliğini yansıtır. Tespit edilen tedarikçi sayısı tek başına bir pazar büyüklüğü rakamı üretmek için kullanılmamıştır.",
+    marketSizeUnavailable:
+      "Bu pazar için savunulabilir bir toplam pazar büyüklüğü rakamı belirlenemedi. Doğrulanmış bir yerel rakam, karşılaştırılabilir bir referans veri veya yeterli alıcı nüfusu ve fiyatlandırma verisi bulunamadı. Araştırma sırasında bulunan fiyatlandırma, ARPA, yıllık sözleşme değeri veya ödeme isteği gibi müşteri başına rakamlar, tek bir alıcının harcamasını yansıtır, toplam pazarı değil; burada pazar büyüklüğü rakamı olarak asla yerine konmamıştır.",
+    marketSizePlanningEstimateLine: "Pazar Büyüklüğü",
+    adjacentPlayersTitle: "İlgili Sektör Oyuncuları — Doğrudan Rakip Olarak Bağımsız Şekilde Doğrulanmamıştır",
+    adjacentPlayersIntro:
+      "Bu şirketler mevcut kanıtlarda bu pazarda veya bu pazara yakın alanlarda faaliyet gösterdiği belirtilen şirketlerdir; ancak mevcut kanıtlar bunları doğrudan karşılaştırılabilir rakipler olarak bağımsız şekilde doğrulamamaktadır. Doğrudan rakip doğrulama durumu için Rekabet Ortamı bölümüne bakın.",
+    adjacentPlayerValidationGapLabel: "Mevcut kanıtlarla doğrudan bir rakip olarak bağımsız şekilde doğrulanmamıştır",
     tableHeader:
       "| Tedarikçi | Ana Şirket | Kategori | Segment | Yapay Zeka Yeteneği | Temel Kullanım Alanları | Fiyatlandırma Modeli | Güçlü Yönler | Zayıf Yönler | Doğrulama Sayısı | Güven | Pazar Uygunluğu |",
     notEstablished: "Kamuya açık kaynaklarda belirtilmemiş",
@@ -750,6 +769,13 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     confidenceLabel: "Konfidenz",
     tamSamSomUnavailable:
       "Für diesen Markt konnte kein verifizierter TAM-/SAM-/SOM-Wert ermittelt werden. Es lag weder ein vergleichbarer lokaler, regionaler oder globaler Referenzwert vor, um daraus eine gekennzeichnete Schätzung abzuleiten, noch reichten die verfügbaren Daten zu Käuferpopulation und Preisgestaltung gemeinsam aus, um eine eigene Schätzung zu erstellen. Diese Lücke spiegelt das Fehlen veröffentlichter Daten für diesen konkreten Rahmen wider, nicht die Größe der Chance. Die Anzahl der identifizierten Anbieter allein wurde nicht verwendet, um eine Marktgröße zu erfinden.",
+    marketSizeUnavailable:
+      "Für diesen Markt konnte keine belastbare aggregierte Marktgröße ermittelt werden. Es lag weder ein verifizierter lokaler Wert noch ein vergleichbarer Referenzwert oder ausreichende Daten zu Käuferpopulation und Preisgestaltung vor. Kennzahlen pro Kunde wie Preisgestaltung, ARPA, Vertragswert oder Zahlungsbereitschaft aus der Recherche spiegeln die Ausgaben eines einzelnen Käufers wider, nicht den Gesamtmarkt, und wurden hier nie als Marktgröße eingesetzt.",
+    marketSizePlanningEstimateLine: "Marktgröße",
+    adjacentPlayersTitle: "Relevante Branchenakteure — nicht unabhängig als direkte Wettbewerber validiert",
+    adjacentPlayersIntro:
+      "Diese Unternehmen werden in den verfügbaren Nachweisen als in diesem Markt oder angrenzend daran aktiv genannt, aber die verfügbaren Nachweise bestätigen sie nicht unabhängig als direkt vergleichbare Wettbewerber. Den Validierungsstatus direkter Wettbewerber finden Sie unter Wettbewerbsumfeld.",
+    adjacentPlayerValidationGapLabel: "Mit den aktuellen Nachweisen nicht unabhängig als direkter Wettbewerber validiert",
     tableHeader:
       "| Anbieter | Muttergesellschaft | Kategorie | Segment | KI-Fähigkeit | Wichtigste Anwendungsfälle | Preismodell | Stärken | Schwächen | Validierungsanzahl | Konfidenz | Marktrelevanz |",
     notEstablished: "In öffentlichen Quellen nicht angegeben",
@@ -798,6 +824,13 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     confidenceLabel: "Confiance",
     tamSamSomUnavailable:
       "Aucun chiffre TAM / SAM / SOM vérifié n'a pu être établi pour ce marché. Aucune référence locale, régionale ou mondiale comparable n'était disponible pour construire une estimation clairement indiquée, et les données disponibles sur la population d'acheteurs et la tarification n'étaient pas non plus suffisantes ensemble pour en construire une. Cet écart reflète l'absence de données publiées pour ce périmètre précis, et non la taille de l'opportunité. Le nombre de fournisseurs identifiés seul n'a pas été utilisé pour fabriquer un chiffre de taille de marché.",
+    marketSizeUnavailable:
+      "Aucun chiffre de taille de marché agrégé et défendable n'a pu être établi pour ce marché. Aucun chiffre local vérifié, référence comparable, ou données suffisantes sur la population d'acheteurs et la tarification n'étaient disponibles. Les chiffres par client tels que la tarification, l'ARPA, la valeur contractuelle annuelle ou la disposition à payer identifiés durant la recherche reflètent la dépense d'un seul acheteur, pas le marché total, et n'ont jamais été substitués ici comme taille de marché.",
+    marketSizePlanningEstimateLine: "Taille du marché",
+    adjacentPlayersTitle: "Acteurs sectoriels pertinents — non validés indépendamment comme concurrents directs",
+    adjacentPlayersIntro:
+      "Ces entreprises sont citées dans les preuves disponibles comme actives dans ce marché ou à proximité, mais les preuves disponibles ne les corroborent pas de manière indépendante comme des concurrents directement comparables. Consultez la section Paysage concurrentiel pour le statut de validation des concurrents directs.",
+    adjacentPlayerValidationGapLabel: "Non validé de manière indépendante comme concurrent direct avec les preuves actuelles",
     tableHeader:
       "| Fournisseur | Société mère | Catégorie | Segment | Capacité IA | Cas d'usage clés | Modèle tarifaire | Forces | Faiblesses | Nombre de validations | Confiance | Pertinence pour le marché |",
     notEstablished: "Non indiqué dans les sources publiques",
@@ -846,6 +879,13 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     confidenceLabel: "Confianza",
     tamSamSomUnavailable:
       "No se pudo establecer una cifra verificada de TAM / SAM / SOM para este mercado. No había una referencia local, regional o global comparable para construir una estimación claramente etiquetada, y los datos disponibles sobre población de compradores y precios tampoco fueron suficientes en conjunto para construir una. Esta brecha refleja la falta de datos publicados para este alcance específico, no el tamaño de la oportunidad. El número de proveedores identificados por sí solo no se utilizó para fabricar una cifra de tamaño de mercado.",
+    marketSizeUnavailable:
+      "No se pudo establecer una cifra de tamaño de mercado agregada y defendible para este mercado. No había una cifra local verificada, una referencia comparable, ni datos suficientes sobre población de compradores y precios. Las cifras por cliente como precios, ARPA, valor de contrato anual o disposición a pagar encontradas durante la investigación reflejan el gasto de un solo comprador, no el mercado total, y nunca se sustituyeron aquí como tamaño de mercado.",
+    marketSizePlanningEstimateLine: "Tamaño del mercado",
+    adjacentPlayersTitle: "Actores del sector relevantes — no validados de forma independiente como competidores directos",
+    adjacentPlayersIntro:
+      "Estas empresas se mencionan en la evidencia disponible como activas en este mercado o cerca de él, pero la evidencia disponible no las corrobora de forma independiente como competidores directamente comparables. Consulte la sección Panorama competitivo para conocer el estado de validación de los competidores directos.",
+    adjacentPlayerValidationGapLabel: "No validado de forma independiente como competidor directo con la evidencia actual",
     tableHeader:
       "| Proveedor | Empresa matriz | Categoría | Segmento | Capacidad de IA | Casos de uso clave | Modelo de precios | Fortalezas | Debilidades | Cantidad de validación | Confianza | Relevancia para el mercado |",
     notEstablished: "No indicado en fuentes públicas",
@@ -1200,22 +1240,80 @@ export function projectMarketIntelligenceGraphToReport(
       ...competitorLines,
       ...pricingLines,
     ].join("\n");
+    // CRITICAL FIX -- confirmed live (root-cause pipeline repair): this
+    // sentence used to bake rankingScore/overallVendorScore -- internal
+    // research-ranking metadata used only for sorting/eligibility
+    // elsewhere in this file, never a metric a reader asked for -- directly
+    // into customer-facing prose ("ranking 73/100", "overall score
+    // 32/100"). Confidence LEVEL stays (it is already the same
+    // intentional, customer-facing "how well-evidenced is this" signal
+    // every other list in this file shows), but rankingScore/
+    // overallVendorScore are now internal-only: still computed and still
+    // used for `eligibleForMajorPlayers`/sorting above, just never
+    // interpolated into this displayed sentence. The raw [R#] evidence-id
+    // citation tags are also no longer written into this sentence at all
+    // -- they were never meant to survive to the customer (the render-
+    // time sanitizer's own citationBracketTagPattern explicitly targets
+    // `R\d+` for removal, same as every other internal reference tag),
+    // but stripping them individually by regex left a stray "; ,)"
+    // wherever a bracket ended up alone on its side of that pass -- the
+    // literal "Medium;,," garble. Never writing internal-only reference
+    // IDs into the customer sentence in the first place is the structural
+    // fix; it does not depend on a downstream regex being perfect.
     projection.majorPlayers = [
       copy.majorPlayersTitle,
       ...renderableVendors
         .filter((vendor) => vendor.eligibleForMajorPlayers)
         .map(
           (vendor) =>
-            `- ${vendor.name} (${vendor.majorPlayerLabel}): ${vendor.classifications.join(", ")}; ${copy.targetCustomerLabel.toLowerCase()}: ${localizeVendorFallbackText(vendor.targetCustomer, copy)} (${copy.rankingLabel.toLowerCase()} ${vendor.rankingScore}/100; ${copy.overallScoreLabel.toLowerCase()} ${vendor.overallVendorScore}/100; ${copy.confidenceLabel.toLowerCase()} ${vendor.confidence}/100 ${vendor.confidenceLevel}; ${vendor.evidenceSources.map((id) => `[${id}]`).join(", ")})`
-      ),
+            `- ${vendor.name} (${vendor.majorPlayerLabel}): ${vendor.classifications.join(", ")}; ${copy.targetCustomerLabel.toLowerCase()}: ${localizeVendorFallbackText(vendor.targetCustomer, copy)} (${copy.confidenceLabel.toLowerCase()}: ${vendor.confidence}/100 ${vendor.confidenceLevel})`
+        ),
     ].join("\n");
     if (!renderableVendors.some((vendor) => vendor.eligibleForMajorPlayers)) {
       projection.majorPlayers = copy.insufficientMajorPlayers;
     }
   } else {
     const coverageDescription = describeCompetitiveCoverage(copyLanguage(language), vendorCoverage);
+    // CRITICAL FIX -- confirmed live (root-cause repair): with no
+    // validated *direct* competitor, this branch used to force
+    // majorPlayers to the exact same "no competitor data validated" text
+    // as competitiveLandscape -- discarding any real evidence about
+    // companies genuinely relevant to this market that simply didn't
+    // clear the stricter multi-source direct-competitor bar (see
+    // vendor-intelligence.ts's adjacentPlayers -- captured from the same
+    // discovery pass, never a lower evidence bar invented after the
+    // fact). Competitive Landscape correctly stays "Validation Needed"
+    // (no direct competitor was validated), but Major Players now
+    // honestly labels and lists these adjacent/relevant players instead
+    // of either fabricating direct-competitor status for them or
+    // silently dropping real evidence just to avoid the contradiction.
+    // Never upgrades an adjacent player into a direct competitor: this
+    // list is built from graph.vendorIntelligence.adjacentPlayers only,
+    // the exact same set (and exclusions) computed once during discovery.
     projection.competitiveLandscape = coverageDescription;
-    projection.majorPlayers = coverageDescription;
+
+    const adjacentPlayers = graph.vendorIntelligence.adjacentPlayers.filter(
+      (player) => !isImplausibleCompetitorName(player.name)
+    );
+
+    projection.majorPlayers =
+      adjacentPlayers.length > 0
+        ? [
+            copy.adjacentPlayersTitle,
+            copy.adjacentPlayersIntro,
+            // Raw [R#] evidence-id citation tags are deliberately not
+            // interpolated into this prose line -- the render-time
+            // sanitizer strips them from customer-facing sentences (see
+            // the majorPlayers vendor bullet's own comment above), which
+            // would otherwise leave a dangling ", ," garble. Confidence
+            // and the same evidence-based relevance reason already used
+            // for validated vendors are the customer-facing signal here.
+            ...adjacentPlayers.map(
+              (player) =>
+                `- ${player.name}: ${localizeMarketRelevanceReason(player.reason, copy)} (${copy.confidenceLabel.toLowerCase()}: ${player.confidence}/100 ${player.confidenceLevel}) — ${copy.adjacentPlayerValidationGapLabel}.`
+            ),
+          ].join("\n")
+        : coverageDescription;
   }
 
   if (graph.verifiedMarketSize.length > 0) {
@@ -1254,6 +1352,22 @@ export function projectMarketIntelligenceGraphToReport(
       ...estimate.assumptions,
       `${copy.confidenceLabel}: ${estimate.confidence}/100 (${estimate.confidenceLevel}) | ${copy.basisLabel}: ${estimate.basis} | ${copy.evidenceLabel}: ${estimate.evidenceIds.map((id) => `[${id}]`).join(", ") || copy.assumptionOnlyScenario}`,
     ].join("\n");
+    // CRITICAL FIX -- confirmed live (root-cause repair): marketSize was
+    // NEVER set in this branch, so it silently kept whatever raw,
+    // unstructured prose the model wrote for the marketSize field --
+    // including, in the reported live defect, a per-buyer annual
+    // pricing/ARPA figure the model mentioned as a planning reference,
+    // rendered verbatim as if it were the total market size. estimate.tam
+    // is always a genuine AGGREGATE figure here (buildPlanningEstimate
+    // only ever sets it from an explicit sourced market-size claim, or
+    // from addressable-buyer-population multiplied by annualized pricing
+    // -- never a bare per-buyer price on its own), so deriving marketSize
+    // from it deterministically is safe and can never leak a per-customer
+    // figure as-is. Mirrors tamSamSom's own [Estimated] tagging exactly.
+    projection.marketSize = [
+      copy.planningEstimateTitle,
+      `- [${copy.estimatedTag}] ${copy.marketSizePlanningEstimateLine}: ${estimate.tam} | ${copy.basisLabel}: ${estimate.basis} | ${copy.confidenceLabel}: ${estimate.confidence}/100 (${estimate.confidenceLevel}) | ${copy.evidenceLabel}: ${estimate.evidenceIds.map((id) => `[${id}]`).join(", ") || copy.assumptionOnlyScenario}`,
+    ].join("\n");
   } else if (graph.adjacentBenchmarks.length === 0) {
     // Only forced to the flat "unavailable" notice when there is truly
     // nothing to reason from -- no verified local figure, no source-based
@@ -1265,6 +1379,18 @@ export function projectMarketIntelligenceGraphToReport(
     // exactly the "insufficient evidence instead of the strongest
     // available analysis" failure mode this exists to prevent.
     projection.tamSamSom = copy.tamSamSomUnavailable;
+    // CRITICAL FIX -- confirmed live (root-cause repair): same principle
+    // applied to marketSize -- when there is truly nothing to build a
+    // defensible aggregate figure from, the headline Market Size value
+    // must be a deterministic "unavailable" notice, never whatever raw
+    // prose the model happened to write (which, per the ticket's own
+    // reported defect, can describe a per-buyer pricing/ARPA figure
+    // without ever stating a real market-size total). This is what
+    // guarantees Market Size can never disagree with TAM/SAM/SOM's own
+    // "validation needed" state for the exact same underlying evidence
+    // gap, and structurally rules out an ARPA/ACV/WTP figure ever
+    // reaching the Market Size field again.
+    projection.marketSize = copy.marketSizeUnavailable;
   }
 
   if (graph.cagr.length > 0) {

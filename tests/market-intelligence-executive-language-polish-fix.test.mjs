@@ -62,19 +62,31 @@ test("app/dashboard/page.tsx's reports-list decision signal skips the investment
   );
 });
 
-function sliceFrom(source, marker, length = 2200) {
+function sliceFrom(source, marker, length = 3200) {
   const startIndex = source.indexOf(marker);
   if (startIndex === -1) return "";
   return source.slice(startIndex, startIndex + length);
 }
 
-test("app/dashboard/[id]/page.tsx's ExecutiveSummaryVisual accepts an isMarketIntelligence flag and skips the investmentScore fallback when set", () => {
+// CRITICAL FIX -- superseded by a later ticket ("Fix the canonical
+// decision consistency bug"): Market Intelligence now resolves through
+// resolveMarketIntelligenceExecutiveDecision instead of routing
+// `undefined` through resolveCanonicalDecisionFromReportText -- see
+// market-intelligence-decision-confidence-sync.test.mjs for that fix's
+// own dedicated coverage. The isMarketIntelligence flag and its
+// investmentScore isolation are preserved, just implemented via a
+// dedicated marketDecision branch instead.
+test("app/dashboard/[id]/page.tsx's ExecutiveSummaryVisual accepts an isMarketIntelligence flag and never reaches resolveCanonicalDecisionFromReportText's own investmentScore fallback when set", () => {
   const fnBody = sliceFrom(dashboardReportSource, "function ExecutiveSummaryVisual({");
   assert.ok(fnBody, "ExecutiveSummaryVisual not found");
   assert.match(fnBody, /isMarketIntelligence\??\s*:\s*boolean/);
   assert.match(
     fnBody,
-    /resolveCanonicalDecisionFromReportText\(\s*content,\s*isMarketIntelligence \? undefined : investmentScore\?\.recommendation\s*\)/
+    /const marketDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecision\(content, evidenceLocale\)\s*\n\s*: null;/
+  );
+  assert.match(
+    fnBody,
+    /const resolvedDecision = isMarketIntelligence\s*\n\s*\? null\s*\n\s*: resolveCanonicalDecisionFromReportText\(content, investmentScore\?\.recommendation\)/
   );
   assert.match(
     dashboardReportSource,
@@ -88,7 +100,7 @@ test("components/Planner.tsx's ExecutiveSummaryVisual accepts an isMarketIntelli
   assert.match(fnBody, /isMarketIntelligence\??\s*:\s*boolean/);
   assert.match(
     fnBody,
-    /resolveCanonicalDecisionFromReportText\(\s*section\.content,\s*isMarketIntelligence \? undefined : investmentScore\?\.recommendation\s*\)/
+    /const marketDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecision\(section\.content, evidenceLocale\)\s*\n\s*: null;/
   );
   // Threaded: ReportPanel receives isMarketIntelligence from its two call
   // sites (activeReportMode === "market"), passes it to ReportSectionCard,

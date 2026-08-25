@@ -8,9 +8,12 @@
 // three useState calls are local UI-only state (edit mode, edit
 // draft, copy-confirmation) that never reach into Planner's own
 // component state -- only the 4 callback/data props passed in
-// (message, onEdit, onSaveEdit, onRegenerate). Only ChatMessages is
-// exported: ChatMessageBubble's one and only call site already lived
-// inside ChatMessages in Planner.tsx, so it stays private here too.
+// (message, onEdit, onSaveEdit, onRegenerate). ChatMessageBubble's one
+// and only call site already lived inside ChatMessages in Planner.tsx,
+// so it stays private here too. getReportCompletionHeadline is also
+// exported -- Planner.tsx's own mobile message renderer needs the
+// identical "completed report message shows only its title line" logic
+// (see its own doc comment below) and this is its single source.
 
 import { memo, useState } from "react";
 import {
@@ -25,6 +28,29 @@ import {
 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/planner/MarkdownRenderer";
 import type { ChatMessage } from "@/components/Planner";
+
+// CRITICAL FIX -- confirmed live: a completed Market Intelligence report's
+// assistant message content is getReportMarkdown's full dump -- "##
+// {Title}\n\n### {Section}\n{full section text}" repeated for every field,
+// including TAM / SAM / SOM and Porter's Five Forces -- rendered here in
+// full, in the same conversation view as the premium ReportPanel that
+// presents the exact same data as structured cards immediately below.
+// That produced two full, independent copies of the entire report on one
+// page: the polished premium cards, and a second long-form plain-text
+// version underneath, section headings and all. The underlying message
+// content is never touched -- editing/copying/regenerate still operate on
+// the complete real markdown (needed so the chat retains full context for
+// follow-up turns and so "Continue Analysis" round-trips work), and
+// nothing here changes what page.tsx's persisted dashboard view renders
+// (it never reads chat messages at all). Only the INLINE render for this
+// one message shape changes: a completed report-generation message shows
+// just its own title line -- the premium cards below are the sole
+// authoritative presentation of everything past that line.
+export function getReportCompletionHeadline(content: string) {
+  const titleLine = (content || "").split("\n").find((line) => line.trim());
+
+  return titleLine && /^\s*#{1,2}\s+\S/.test(titleLine) ? titleLine : content;
+}
 
 const ChatMessageBubble = memo(function ChatMessageBubble({
   message,
@@ -41,6 +67,14 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const [copied, setCopied] = useState(false);
+  // Market Intelligence only, per this ticket's scope -- Business Plan/
+  // Acquisition/Real Estate/domain reports (all mode === "plan") keep
+  // their existing chat-message presentation completely unchanged.
+  const isCompletedMarketReportMessage =
+    !isUser && message.mode === "market" && message.status === "complete";
+  const displayContent = isCompletedMarketReportMessage
+    ? getReportCompletionHeadline(message.content)
+    : message.content;
 
   async function copyMessage() {
     await navigator.clipboard.writeText(message.content);
@@ -150,7 +184,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
         ) : (
           <div className={message.status === "streaming" ? "min-h-28" : undefined}>
             <MarkdownRenderer
-              content={message.content}
+              content={displayContent}
               streaming={message.status === "streaming"}
             />
           </div>

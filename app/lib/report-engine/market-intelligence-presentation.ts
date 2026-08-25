@@ -160,6 +160,44 @@ export function buildPreGenerationVerdictContext(
 // verdict). Splitting on the inline "(N)" markers and trimming each
 // fragment to its first sentence keeps every extraction a single,
 // quotable point regardless of which style the model used.
+// CRITICAL FIX -- confirmed live: numbered-list markers only had to
+// match the exact "(N)" shape to be treated as a split boundary --
+// confirmed live artifact "Why: The opportunity -- "1) ..." shows the
+// model also writes bare "1)"/"1." markers, sometimes immediately after
+// an opening quote (a quoted inline enumeration embedded mid-sentence,
+// e.g. `The opportunity -- "1) X; 2) Y"`). None of those matched the
+// old parens-only pattern, so the marker (and its leading quote/dash)
+// stayed glued to the fragment instead of being split away, and that raw
+// fragment -- ending mid-list, still carrying its dangling quote --
+// could be selected as "the" point. Every enumeration-marker shape is
+// now a split boundary, and a stray leading/trailing quote character
+// left over at a boundary is stripped from the resulting fragment.
+// CRITICAL FIX -- confirmed live: the terminal-punctuation match below
+// has no abbreviation awareness, so a mid-sentence abbreviation like
+// "U.S." was misread as a sentence end -- "Construction firms in the
+// U.S. are actively seeking..." was cut down to "Construction firms in
+// the U." Mirrors report-presentation.ts's own splitSentences fix for
+// the identical bug class: protect a known abbreviation's periods with a
+// sentinel before matching, then restore them.
+const SENTENCE_BOUNDARY_ABBREVIATIONS = [
+  "U.S.", "U.K.", "U.N.", "E.U.", "U.A.E.",
+  "e.g.", "i.e.", "etc.", "vs.", "cf.",
+  "Inc.", "Corp.", "Ltd.", "Co.", "LLC.",
+  "Dr.", "Mr.", "Mrs.", "Ms.", "Jr.", "Sr.", "St.", "Prof.", "Ph.D.",
+  "a.m.", "p.m.", "No.", "approx.",
+];
+
+function protectSentenceBoundaryAbbreviations(value: string): string {
+  return SENTENCE_BOUNDARY_ABBREVIATIONS.reduce((acc, abbreviation) => {
+    const escaped = abbreviation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return acc.replace(new RegExp(escaped, "g"), abbreviation.replace(/\./g, "\u0000"));
+  }, value);
+}
+
+function restoreSentenceBoundaryAbbreviations(value: string): string {
+  return value.replace(/\u0000/g, ".");
+}
+
 function splitIntoCandidateSentences(content: string): string[] {
   return (content || "")
     .split("\n")
@@ -167,22 +205,24 @@ function splitIntoCandidateSentences(content: string): string[] {
       line
         .replace(/^[-*•]\s*/, "")
         .replace(/^#{1,6}\s*/, "")
-        .split(/\s*\(\d+\)\s*/)
+        .split(/\s*["'“”‘’(]?\d{1,2}[).]\s*/)
     )
-    .map((item) => item.trim())
+    .map((item) => item.trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, "").trim())
     .filter(Boolean)
     .map((item) => {
       // Drop a short "Label:" lead-in (e.g. "Temel tehditler:") that
       // precedes the first numbered point in the same paragraph.
       const withoutLeadIn = item.replace(/^[^:]{0,40}:\s*/, "").trim() || item;
-      const sentenceMatch = withoutLeadIn.match(/^[^.!?]*[.!?]/);
-      return (sentenceMatch ? sentenceMatch[0] : withoutLeadIn).trim();
+      const protectedText = protectSentenceBoundaryAbbreviations(withoutLeadIn);
+      const sentenceMatch = protectedText.match(/^[^.!?]*[.!?]/);
+      const matched = sentenceMatch ? sentenceMatch[0] : protectedText;
+      return restoreSentenceBoundaryAbbreviations(matched).trim();
     });
 }
 
-// Two heading/lead-in shapes that are never a genuine point worth quoting
-// as "the" risk/opportunity/driver -- the real substance is in whatever
-// follows them, not in the line itself:
+// Three heading/lead-in/dangling-fragment shapes that are never a genuine
+// point worth quoting as "the" risk/opportunity/driver -- the real
+// substance is in whatever follows them, not in the line itself:
 // 1) A numbered sub-heading with no content of its own, e.g. "1) Yüksek
 //    rekabet ve düşük giriş bariyerleri" -- real sentences in this
 //    codebase's report prose always end in terminal punctuation, so a
@@ -191,8 +231,14 @@ function splitIntoCandidateSentences(content: string): string[] {
 //    bulunan riskler ve tehditler şunlardır:" -- a trailing colon always
 //    introduces what follows; it is never itself a complete point,
 //    regardless of length or numbering.
+// 3) CRITICAL FIX -- confirmed live: a lead-in fragment left dangling by
+//    an enumeration-marker split (e.g. "The opportunity --" once its own
+//    "1) ..." marker and quote are correctly split away above) ends in a
+//    dash/colon/quote with nothing after it -- never a complete,
+//    quotable point on its own, regardless of length.
 function isHeadingOnlyLine(item: string): boolean {
   if (/:$/.test(item)) return true;
+  if (/[-–—"'“”‘’]\s*$/.test(item)) return true;
   return /^\(?\d{1,2}[).]\s+\S/.test(item) && !/[.!?…]$/.test(item);
 }
 

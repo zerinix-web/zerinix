@@ -248,9 +248,17 @@ test("app/dashboard/[id]/page.tsx's Decision KPI card and Decision Signal card b
 // polish" ticket -- see the equivalent note above for
 // app/dashboard/page.tsx; the same gating was applied here.
 test("components/Planner.tsx's live Decision KPI card resolves through the centralized vocabulary (its two other extractExecutiveDecisionFromText call sites -- the decision segmented control and the PDF drawing code -- are untouched)", () => {
+  // CRITICAL FIX -- superseded by a later ticket ("Fix the canonical
+  // decision consistency bug"): Market Intelligence now resolves through
+  // resolveMarketIntelligenceExecutiveDecision instead of
+  // resolveCanonicalDecisionFromReportText's own detectRecommendation
+  // fallback -- see market-intelligence-decision-confidence-sync.test.mjs
+  // for that fix's own dedicated coverage. Business Plan/Acquisition/Real
+  // Estate still resolve through resolveCanonicalDecisionFromReportText
+  // exactly as before.
   assert.match(
     plannerSource,
-    /resolveCanonicalDecisionFromReportText\(\s*section\.content,\s*isMarketIntelligence \? undefined : investmentScore\?\.recommendation\s*\)/
+    /resolveCanonicalDecisionFromReportText\(section\.content, investmentScore\?\.recommendation\)/
   );
   assert.match(plannerSource, /getCanonicalDecisionLabel\(resolvedDecision\.decision, evidenceLocale\)/);
   // Untouched sites: still present, still using the original extractor.
@@ -272,12 +280,24 @@ test("getDecisionClasses in both dashboard files and Planner.tsx still colors th
 // --- 6. Do not change: report generation, financial calculations, --------
 // --- routing, PDF layout ---------------------------------------------------
 
-test("ReportPdfButton.tsx (PDF layout) is untouched by this fix (drift check)", () => {
+// CRITICAL FIX -- superseded by a later ticket ("Fix the remaining
+// canonical-data consistency and PDF export defects"): PDF layout was
+// deliberately NOT untouched there -- a live-confirmed defect (PDF cover
+// showing "GO" while the PDF Executive Summary card showed a blank "—"
+// and the web report showed a third, different decision, all for the
+// same report) traced directly to the PDF cover/card NOT using this
+// canonical resolver, unlike the web dashboard. ReportPdfButton.tsx now
+// deliberately imports resolveCanonicalDecisionFromReportText/
+// getCanonicalDecisionLabel from this module for its cover badge and
+// Executive Summary card, matching the web's own ExecutiveSummaryVisual
+// -- see tests/market-intelligence-decision-confidence-sync.test.mjs for
+// that fix's own dedicated coverage.
+test("ReportPdfButton.tsx (PDF layout) now deliberately imports the canonical decision vocabulary for its cover badge and Executive Summary card (see market-intelligence-decision-confidence-sync.test.mjs)", () => {
   const pdfSource = readFileSync(
     new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url),
     "utf8"
   );
-  assert.doesNotMatch(pdfSource, /executive-decision-vocabulary/);
+  assert.match(pdfSource, /from "@\/app\/lib\/report-engine\/executive-decision-vocabulary"/);
 });
 
 test("report generation prompts, financial calculations, and domain routing are untouched (drift check)", async () => {

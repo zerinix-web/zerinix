@@ -97,6 +97,16 @@ const functionDependencies = {
   extractForceIntensity: /const forceAliases: Record<string, string\[\]> = \{[\s\S]*?\n\};/,
   extractForceImplication: /const forceAliases: Record<string, string\[\]> = \{[\s\S]*?\n\};/,
   extractRecommendationSignals: /const recommendationOwnerRolePattern =[\s\S]*?;/,
+  // A later ticket ("RESTORE PREMIUM ANALYTICAL DEPTH") split
+  // extractMarketIntelligenceCompetitorRows into a 3-tier fallback chain
+  // (table -> flattened bullets -> Major Players' own bullets), each its
+  // own helper function; a still-later ticket ("MARKET INTELLIGENCE --
+  // ROOT-CAUSE DATA PIPELINE REPAIR") added isImplausibleCompetitorName
+  // OnScreen/...Pdf right before this chain (each tier now calls it) --
+  // all of these must compile alongside the main function for this
+  // isolated module to run.
+  extractMarketIntelligenceCompetitorRows:
+    /function isImplausibleCompetitorName(?:OnScreen|Pdf)\([\s\S]*?\nfunction extractMarketIntelligenceCompetitorRowsFromTable\([\s\S]*?\n\}/,
 };
 
 async function compileFunction(source, functionName) {
@@ -392,22 +402,32 @@ test("validation rules and the report-isolation policy (Market Intelligence neve
 // established per-file-duplication convention -- page.tsx, Planner.tsx,
 // and ReportPdfButton.tsx never share these functions).
 
-test("ReportPdfButton.tsx: inferMarketMapPosition reads only the competitor row's own company/positioning text, never fabricating a coordinate for a missing axis", async () => {
-  const fn = await compileFunction(pdfButtonSource, "inferMarketMapPosition");
+// A later ticket ("Premium Report Presentation Deduplication Audit & Fix")
+// superseded this company/positioning-shaped inferMarketMapPosition: the
+// Market Map now always reads the MI-specific extractMarketIntelligenceCompetitorRows
+// rows (category/position shape) rather than the generic extractor's rows
+// -- the old function became dead code (the map was already MI-only) and
+// was removed. See
+// tests/market-intelligence-competitive-landscape-pdf-parity.test.mjs for
+// the current, superseding behavior (inferMarketIntelligenceMarketMapPosition).
+test("ReportPdfButton.tsx: inferMarketIntelligenceMarketMapPosition reads only the competitor row's own category/position text, never fabricating a coordinate for a missing axis", async () => {
+  const fn = await compileFunction(pdfButtonSource, "inferMarketIntelligenceMarketMapPosition");
 
-  assert.deepEqual(fn({ company: "Acme AI", positioning: "Enterprise, broad end-to-end platform" }), { x: 78, y: 22 });
-  assert.deepEqual(fn({ company: "Nimbus", positioning: "SME-focused, specialized niche tool" }), { x: 22, y: 78 });
-  assert.equal(fn({ company: "Vague Co", positioning: "General purpose software" }), null);
+  assert.deepEqual(fn({ category: "Acme AI", position: "Enterprise, broad end-to-end platform" }), { x: 78, y: 22 });
+  assert.deepEqual(fn({ category: "Nimbus", position: "SME-focused, specialized niche tool" }), { x: 22, y: 78 });
+  assert.equal(fn({ category: "Vague Co", position: "General purpose software" }), null);
 });
 
 test("ReportPdfButton.tsx: draws a Market Map beneath the competitor table for Market Intelligence reports, with an honest Validation Needed fallback when fewer than 2 vendors can be placed -- never for other report types", () => {
   assert.match(pdfButtonSource, /const drawMarketMap = \(mapY: number\) => \{/);
   assert.match(pdfButtonSource, /placements\.length < 2\) \{[\s\S]{0,40}pdf\.setFontSize\(6\.2\);[\s\S]{0,200}VALIDATION NEEDED/);
-  assert.match(pdfButtonSource, /if \(isMarketIntelligenceReport\) \{\s*\n\s*drawMarketMap\(/);
-  // Business Plan/Acquisition's generic competitor table reserves zero
-  // extra height for the map -- it is a Market-Intelligence-only visual.
-  assert.match(pdfButtonSource, /const marketMapGap = isMarketIntelligenceReport \? 8 : 0;/);
-  assert.match(pdfButtonSource, /const marketMapHeight = isMarketIntelligenceReport \? 50 : 0;/);
+  assert.match(pdfButtonSource, /if \(isMarketIntelligenceReport\) \{/);
+  // The Market Map is only ever drawn inside the isMarketIntelligenceReport
+  // branch now (a real fork, not a ternary height addend) -- Business
+  // Plan/Acquisition's generic competitor table below it never reserves
+  // Market Map height at all.
+  assert.match(pdfButtonSource, /const marketMapGap = 8;/);
+  assert.match(pdfButtonSource, /const marketMapHeight = 50;/);
 });
 
 test("ReportPdfButton.tsx: extractMarketGrowthTrend, extractAdoptionSignal, extractRiskLevel, and extractHeadlineCagrValue read real signals only, matching page.tsx/Planner.tsx's on-screen behavior", async () => {

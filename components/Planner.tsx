@@ -113,7 +113,6 @@ import {
   localizePdfReportSections,
   normalizePdfCanonicalTamSamSomContent,
   normalizePdfFinancialSectionContent,
-  normalizePdfTamSamSomBodyContent,
   normalizePdfTamSamSomOwnershipContent,
   normalizePdfText,
   normalizePdfSourceContent,
@@ -149,6 +148,7 @@ import {
 import {
   getCanonicalDecisionLabel,
   resolveCanonicalDecisionFromReportText,
+  resolveMarketIntelligenceExecutiveDecision,
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
 import {
   SourcesCard,
@@ -156,7 +156,7 @@ import {
   parseCitations,
 } from "@/components/planner/Citations";
 import { MarkdownRenderer } from "@/components/planner/MarkdownRenderer";
-import { ChatMessages } from "@/components/planner/ChatMessages";
+import { ChatMessages, getReportCompletionHeadline } from "@/components/planner/ChatMessages";
 import { BenchmarkIntelligencePanel } from "@/components/planner/BenchmarkIntelligencePanel";
 import {
   classifyReportDomain,
@@ -1494,6 +1494,20 @@ function extractMetricValueFromAliases(
   return "";
 }
 
+// A labeled block (e.g. the text captured after "Top 3 Risks:") is often
+// a multi-item bulleted/numbered list, not a single sentence -- too long
+// for a compact KPI tile. Takes just the first real item, stripping its
+// own bullet/number marker, rather than displaying the whole block
+// verbatim or an arbitrary substring of it.
+function takeFirstListItem(value: string) {
+  const firstLine = value
+    .split(/\n+/)
+    .map((line) => line.trim().replace(/^[-*•]\s*/, "").replace(/^\(?\d{1,2}[).]\s*/, ""))
+    .find(Boolean);
+
+  return firstLine || value.trim();
+}
+
 function extractStrictMetricValueFromAliases(
   content: string,
   aliases: string[] | readonly string[]
@@ -1787,14 +1801,90 @@ function extractCompetitorRows(content: string) {
 // and the caller falls back to a premium "Validation Needed" empty state
 // when nothing is found, per this ticket's explicit requirement not to
 // paper over missing data with invented figures.
+// CRITICAL FIX -- confirmed live (root-cause pipeline repair): this
+// regex never recognized "£" (only €/$/₺), nor a spelled-out currency
+// CODE ("USD 1.2 billion") -- a correctly-generated, correctly-sourced
+// GBP or code-labeled figure would silently render "Validation Needed"
+// purely because of currency notation, not because evidence was
+// missing. Tolerates the same common codes already added for TAM/SAM/SOM
+// elsewhere in this file.
+// CRITICAL FIX -- confirmed live: a pricing/ARPA/per-customer dollar
+// figure mentioned in marketSize's own free-flowing prose (e.g. "SMB
+// customers typically pay $2K-$10K annually") was being grabbed as if it
+// were the section's headline TOTAL MARKET SIZE figure -- this function
+// used to match the FIRST dollar amount found anywhere in the content
+// with no awareness of what that figure actually represents. A
+// pricing/ARPA/ACV figure must never be classified or rendered as total
+// market size. Any candidate whose immediate surrounding text names it
+// as a pricing/per-customer/contract-value figure is now skipped; when
+// every candidate is excluded, the caller correctly falls back to its
+// "Validation Needed" state, matching TAM/SAM/SOM's own already-correct
+// behavior for the same report. Mirrors page.tsx's identical fix.
+const marketSizeExclusionContext =
+  /\b(?:ARPA|ACV|WTP|average revenue per (?:account|customer|user|buyer)|revenue per (?:account|customer|user|buyer)|per[\s-](?:customer|user|seat|account|buyer|month|mo)\b|\/\s*(?:user|month|mo|seat|customer|buyer)\b|pricing|price point|price range|subscription (?:price|fee|cost|tier)|contract value|\bACV\b|\bCAC\b|\bLTV\b|willing(?:ness)? to pay|customers?\s+(?:typically\s+)?(?:pay|spend|purchase)|SMBs?\s+(?:typically\s+)?(?:pay|spend|purchase)|buyers?\s+(?:typically\s+)?(?:pay|spend|purchase)|annual (?:revenue|spend|contract|purchase) per|per[\s-]buyer)\b/i;
+// CRITICAL FIX -- confirmed live (root-cause repair, ticket 2): the
+// negative exclusion list above is fundamentally open-ended -- it has to
+// anticipate every possible way the model might describe a non-market-
+// size figure (pricing, ARPA, ACV, willingness-to-pay, "per-buyer
+// purchase", ...), and a live report still leaked a per-buyer figure
+// worded in a way the exclusion list didn't yet cover. This is not a
+// case that can be closed by continuing to add more exclusion keywords.
+// A candidate figure is now REQUIRED to sit near genuine, positive
+// market-sizing language ("market size", "total addressable market",
+// "market is valued/worth/estimated at", "TAM of", ...) -- a small,
+// closed vocabulary -- in addition to passing the exclusion check.
+// Whenever this restored one canonical field: the graph-projection layer
+// (market-intelligence-graph.ts) now deterministically sets marketSize
+// itself whenever no verified figure exists (a computed planning
+// estimate, or an explicit "unavailable" notice) -- this presentation-
+// layer check only remains as defense-in-depth for the narrow residual
+// case where the model's own raw prose is trusted verbatim (adjacent
+// benchmarks exist but no computable estimate). Fails closed: if nothing
+// passes BOTH checks, no figure is ever guessed. Mirrors page.tsx's
+// identical fix.
+const marketSizePositiveContext =
+  /\b(?:market size|total addressable market|serviceable addressable market|serviceable obtainable market|addressable market|market (?:opportunity|value)|\bTAM\b|\bSAM\b|\bSOM\b|industry size|(?:is|was|remains)\s+(?:valued|worth|estimated|sized)\s+at)\b/i;
+
 function extractHeadlineMonetaryValue(content: string) {
   const unitWord = "(?:thousand|million|billion|trillion)";
-  const bound = `[€$₺]\\s*\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT]\\b|\\s+${unitWord}\\b)?`;
-  const match = (content || "").match(
-    new RegExp(`${bound}(?:\\s*[-–—]\\s*(?:[€$₺]\\s*)?\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT]\\b|\\s+${unitWord}\\b)?)?`, "i")
+  const currencyToken = "(?:[€$₺£]|(?:USD|EUR|GBP|TRY|CAD|AUD|CHF|JPY)\\b)";
+  const bound = `${currencyToken}\\s*\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT]\\b|\\s+${unitWord}\\b)?`;
+  const pattern = new RegExp(
+    `${bound}(?:\\s*[-–—]\\s*(?:${currencyToken}\\s*)?\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT]\\b|\\s+${unitWord}\\b)?)?`,
+    "gi"
   );
+  const text = content || "";
 
-  return match ? match[0].replace(/\s+/g, " ").trim() : "";
+  for (const match of text.matchAll(pattern)) {
+    const matchIndex = match.index ?? 0;
+    // Trailing window is deliberately short (just enough for a directly
+    // attached qualifier like "$2K-$10K annually (ARPA)" or "$2K-$10K
+    // per customer") -- a longer trailing window risked reaching into
+    // the START of the NEXT, unrelated sentence (e.g. a genuine market-
+    // size figure immediately followed by a separate sentence about
+    // per-customer pricing) and excluding a perfectly valid market-size
+    // figure because of context that describes a different number
+    // entirely. The leading window stays generous since a pricing/ARPA
+    // label almost always precedes the figure it describes.
+    const exclusionWindow = text.slice(Math.max(0, matchIndex - 80), matchIndex + match[0].length + 20);
+
+    if (marketSizeExclusionContext.test(exclusionWindow)) {
+      continue;
+    }
+
+    // The positive-confirmation window is wider (market-sizing language
+    // often opens the sentence, well before the figure itself: "The
+    // total addressable market for X in the U.S. is estimated at $Y").
+    const positiveWindow = text.slice(Math.max(0, matchIndex - 150), matchIndex + match[0].length + 60);
+
+    if (!marketSizePositiveContext.test(positiveWindow)) {
+      continue;
+    }
+
+    return match[0].replace(/\s+/g, " ").trim();
+  }
+
+  return "";
 }
 
 function extractHeadlineCagrValue(content: string) {
@@ -1805,7 +1895,248 @@ function extractHeadlineCagrValue(content: string) {
   return match ? match[0].replace(/\s+/g, " ").trim() : "";
 }
 
-function extractMarketIntelligenceCompetitorRows(content: string) {
+// CRITICAL FIX -- confirmed live: app/lib/report-engine/markdown-table-
+// flattening.ts's flattenMarkdownTables runs on every Market Intelligence
+// field (including competitiveLandscape) before the deterministic graph
+// projection is spliced back in; when that graph splice is unavailable
+// for a given generation (e.g. a cached response with no preserved
+// research graph), the flattened "- Vendor — Category: X; Strengths: Y;
+// ..." bullet shape is what actually reaches this section's content --
+// never restored back into a "| a | b | c |" table. The table-only parser
+// below then saw zero table rows and reported "Validation Needed" even
+// though the report plainly names real, evidence-backed vendors. This
+// fallback reads that exact flattened shape (the same header vocabulary
+// the deterministic table uses, now as "Header: Value" pairs instead of
+// cells) so the premium card consumes the SAME underlying vendor data
+// either way, without fabricating anything new.
+//
+// CRITICAL FIX -- confirmed live (root-cause pipeline repair): none of
+// the three competitor-row extraction tiers below validated that a
+// captured "vendor" string actually LOOKS like a company/product name --
+// so when the underlying competitiveLandscape text was un-gated model
+// prose (e.g. this exact cache-degraded path), an entire evidence/
+// citation sentence like "Pricing evidence: Westlaw Edge charges
+// $89-$450/user/month..." could be captured whole as a "vendor name" -- a
+// structural parsing failure, not a data problem. Mirrors vendor-
+// discovery.ts's own isImplausibleCompetitorName heuristic (length/word-
+// count bounds, markdown/parser-artifact characters, instruction-leading
+// verbs) plus an explicit reject for the specific evidence/citation-label
+// prefixes this exact failure mode produces (never a real company name).
+// Applied as a per-row VENDOR-field gate only -- an implausible vendor is
+// treated as missing, not fabricated; any other real fields the row
+// captured survive untouched, and the row is only dropped entirely when
+// nothing real remains.
+function isImplausibleCompetitorNameOnScreen(name: string) {
+  const trimmed = (name || "").trim();
+
+  if (!trimmed) return true;
+  if (trimmed.length > 60) return true;
+  if (trimmed.includes("...") || trimmed.includes("…")) return true;
+  if (/[[\]{}`|]|https?:\/\/|www\.|\.(?:com|org|net|edu|gov|io)\b/i.test(trimmed)) return true;
+  if (
+    /^(?:conduct|analyz[e]?|generate|write|provide|summarize|summarise|explain|list|identify|assess|evaluate|create|perform|produce|research|describe|compare|review|investigate|determine|prepare|draft|compile|outline)\b/i.test(
+      trimmed
+    )
+  )
+    return true;
+  if (
+    /^(?:pricing evidence|market relevance|confidence|validation(?:\s+status)?|evidence|source|citation|methodology|assumption|coverage|note|reference)\s*:/i.test(
+      trimmed
+    )
+  )
+    return true;
+  if (trimmed.split(/\s+/).length > 6) return true;
+
+  return false;
+}
+
+function extractFlattenedMarketIntelligenceCompetitorRows(content: string) {
+  const normalized = (content || "").replace(/\*\*/g, "");
+  const bulletLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^-\s+\S/.test(line));
+
+  const read = (fieldMap: Array<[string, string]>, keys: string[]) => {
+    for (const [key, value] of fieldMap) {
+      if (keys.some((k) => key.includes(k))) return value;
+    }
+    return "";
+  };
+
+  return bulletLines
+    .map((line) => {
+      const withoutBullet = line.replace(/^-\s+/, "");
+      const emDashIndex = withoutBullet.indexOf(" — ");
+      const vendor = (emDashIndex >= 0 ? withoutBullet.slice(0, emDashIndex) : withoutBullet).trim();
+      const fieldsText = emDashIndex >= 0 ? withoutBullet.slice(emDashIndex + 3) : "";
+      const fieldMap = fieldsText
+        .split("; ")
+        .map((pair): [string, string] | null => {
+          const colonIndex = pair.indexOf(": ");
+          return colonIndex < 0
+            ? null
+            : [pair.slice(0, colonIndex).trim().toLowerCase(), pair.slice(colonIndex + 2).trim()];
+        })
+        .filter((pair): pair is [string, string] => pair !== null);
+
+      return {
+        vendor,
+        category: read(fieldMap, ["category"]),
+        position: read(fieldMap, ["segment", "ai capability", "position", "positioning"]),
+        strengths: read(fieldMap, ["strength"]),
+        weaknesses: read(fieldMap, ["weakness"]),
+        relevance: read(fieldMap, ["market relevance"]),
+        validationStatus: read(fieldMap, ["confidence"]),
+      };
+    })
+    .map((row) => ({ ...row, vendor: isImplausibleCompetitorNameOnScreen(row.vendor) ? "" : row.vendor }))
+    .filter((row) => row.vendor || row.strengths || row.weaknesses)
+    .slice(0, 20);
+}
+
+// CRITICAL FIX -- confirmed live: Competitive Landscape's table has a
+// narrow, brittle format requirement (an unbroken "| a | b | c |" block),
+// while Major Players' bullet list (built from the exact same
+// evidence-backed vendor set -- see market-intelligence-graph.ts's
+// projectMarketIntelligenceGraphToReport, which always sets both fields
+// from the same renderableVendors array together) tolerates almost any
+// shape, since the generic bullet extractor used elsewhere just needs a
+// line starting with "-". That asymmetry let a real, live contradiction
+// through: Competitive Landscape showing "Validation Needed" while Major
+// Players, immediately below, named real vendors (e.g. "Autodesk
+// Construction Cloud") from that identical vendor set. This reads Major
+// Players' own real bullet line shape ("- Vendor (Label): Classifications;
+// target customer: X (ranking: N/100; overall score: N/100; confidence:
+// N/100 Level; [ids])") as a last-resort source of the SAME authoritative
+// vendor data, rather than a fabricated stand-in -- vendor/category/
+// position map directly from real text; strengths/weaknesses/relevance
+// stay empty since Major Players' own format never states them.
+function extractMarketIntelligenceCompetitorRowsFromMajorPlayers(majorPlayersContent: string) {
+  const normalized = (majorPlayersContent || "").replace(/\*\*/g, "");
+  const bulletLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^-\s+\S/.test(line));
+
+  return bulletLines
+    .map((line) => {
+      const match = line.match(/^-\s+(.+?)\s+\(([^)]+)\):\s*([^;]+);[^:]*:\s*([^(]+)\(([^)]*)\)/);
+
+      if (!match) {
+        return null;
+      }
+
+      const [, vendor, majorPlayerLabel, classifications, , metrics] = match;
+      const confidenceMatch = metrics.match(/confidence[^:]*:\s*([^;]+)/i);
+
+      return {
+        vendor: vendor.trim(),
+        category: majorPlayerLabel.trim(),
+        position: classifications.trim(),
+        strengths: "",
+        weaknesses: "",
+        relevance: "",
+        validationStatus: confidenceMatch?.[1]?.trim() || "",
+      };
+    })
+    .filter(
+      (row): row is NonNullable<typeof row> =>
+        row !== null && Boolean(row.vendor) && !isImplausibleCompetitorNameOnScreen(row.vendor)
+    )
+    .slice(0, 20);
+}
+
+// CRITICAL FIX -- confirmed live: real Major Players content can be
+// grouped/prose bullets with no parenthetical label immediately after the
+// name at all (e.g. "- Thomson Reuters / CoCounsel / Westlaw Edge:
+// AI-powered legal research and contract platform..."), which fails the
+// row extractor above at its very first capture boundary (it requires
+// "Name (Label): ..."). That produced a real, live contradiction: this
+// section's own table said "no competitor data could be validated" while
+// Major Players, immediately below, named real, validated vendors. This is
+// a 4th, last-resort tier: it never fabricates category/position/
+// strengths/weaknesses (an empty cell would misrepresent unknown structure
+// as verified-absent) -- it extracts ONLY the plausible name segment(s)
+// from each bullet, splitting a grouped "A / B / C" entry into separate
+// candidate names, and returns names alone. Callers must render this as
+// its own distinct state (validated identities, but not enough structure
+// for a comparison matrix) rather than blending it into the full-row
+// table. Mirrors page.tsx's own extractMarketIntelligenceCompetitorNamesOnly.
+function extractMarketIntelligenceCompetitorNamesOnly(majorPlayersContent: string) {
+  const normalized = (majorPlayersContent || "").replace(/\*\*/g, "");
+  const bulletLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^-\s+\S/.test(line));
+
+  const names: string[] = [];
+
+  for (const line of bulletLines) {
+    // Strip URLs before splitting on ":" -- a bare "https://" scheme's own
+    // colon would otherwise be mistaken for the name/label separator,
+    // leaving a bogus "https" candidate.
+    const withoutBullet = line.replace(/^-\s+/, "").replace(/https?:\/\/\S+/gi, "");
+    const nameSegment = withoutBullet.split(/\s*[:(]|\s+—\s+/)[0]?.trim() || "";
+
+    if (!nameSegment) continue;
+
+    const candidates = nameSegment
+      .split(/\s*\/\s*|,\s*/)
+      .map((candidate) => candidate.trim())
+      .filter(Boolean);
+
+    for (const candidate of candidates) {
+      // isImplausibleCompetitorNameOnScreen's evidence/label-phrase reject
+      // ("market relevance:", "confidence:", ...) only fires when the
+      // colon is still attached -- nameSegment already stripped it during
+      // the name/label split above, so re-attach one here purely for this
+      // check (never part of the stored name itself).
+      if (!isImplausibleCompetitorNameOnScreen(`${candidate}:`) && !names.includes(candidate)) {
+        names.push(candidate);
+      }
+    }
+  }
+
+  // CRITICAL FIX -- confirmed live: real Major Players content is not
+  // always bulleted at all -- when the deterministic graph splice that
+  // normally produces the "- Vendor (Label): ..." bulleted shape isn't
+  // applied (e.g. a cached research bundle with no preserved graph),
+  // whatever the model itself wrote for this field can be a single prose
+  // paragraph naming vendors inline (e.g. "Evidence-supported major
+  // players in this market include Procore, Autodesk Construction Cloud,
+  // OpenSpace, and Buildots..."), with no bullet markers for the tier
+  // above to split on at all -- reproducing the exact reported
+  // contradiction (Competitive Landscape saying no data validated while
+  // Major Players plainly names real vendors). Only tried when the
+  // bulleted tier found nothing; extracts names from the SAME
+  // "include/such as/like/named" list-introducing shape prose lists
+  // almost always use, never fabricating category/position/strengths/
+  // weaknesses here either. Mirrors page.tsx's identical fix.
+  if (names.length === 0) {
+    const proseWithoutUrls = normalized.replace(/https?:\/\/\S+/gi, "");
+    const listMatch = proseWithoutUrls.match(
+      /\b(?:include|includes|including|such as|like|named)\s+((?:[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})(?:\s*,\s*(?:and\s+)?[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})*(?:\s+and\s+[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})?)/
+    );
+
+    if (listMatch?.[1]) {
+      const candidates = listMatch[1]
+        .split(/\s*,\s*|\s+and\s+/)
+        .map((candidate) => candidate.replace(/^and\s+/i, "").trim())
+        .filter(Boolean);
+
+      for (const candidate of candidates) {
+        if (!isImplausibleCompetitorNameOnScreen(`${candidate}:`) && !names.includes(candidate)) {
+          names.push(candidate);
+        }
+      }
+    }
+  }
+
+  return names.slice(0, 20);
+}
+
+function extractMarketIntelligenceCompetitorRowsFromTable(content: string) {
   const normalized = (content || "").replace(/\*\*/g, "");
   const tableRows = normalized
     .split("\n")
@@ -1842,8 +2173,53 @@ function extractMarketIntelligenceCompetitorRows(content: string) {
       // Market Relevance, never conflated with it.
       validationStatus: read(cells, ["confidence"]),
     }))
+    // Defense-in-depth: the deterministic table is already filtered
+    // server-side (isImplausibleCompetitorName), but this render-time
+    // check never trusts that alone -- the same evidence-sentence-as-
+    // vendor failure mode is possible here too if a model ever writes
+    // its own "| a | b | c |" table without going through the graph.
+    .map((row) => ({ ...row, vendor: isImplausibleCompetitorNameOnScreen(row.vendor) ? "" : row.vendor }))
     .filter((row) => row.vendor || row.strengths || row.weaknesses)
     .slice(0, 20);
+}
+
+// Tries, in order: the real table, the flattened-bullet shape, then Major
+// Players' own bullet list (see its own comment above) -- the first tier
+// to produce any real rows wins. Every tier reads only content already
+// present in the payload; none fabricates a vendor.
+function extractMarketIntelligenceCompetitorRows(content: string, majorPlayersContent = "") {
+  const tableRows = extractMarketIntelligenceCompetitorRowsFromTable(content);
+  if (tableRows.length > 0) {
+    return tableRows;
+  }
+
+  const flattenedRows = extractFlattenedMarketIntelligenceCompetitorRows(content);
+  if (flattenedRows.length > 0) {
+    return flattenedRows;
+  }
+
+  return extractMarketIntelligenceCompetitorRowsFromMajorPlayers(majorPlayersContent);
+}
+
+// CRITICAL FIX -- confirmed live (root-cause pipeline repair): a
+// section-intro/label line the model writes before its real numbered
+// actions (e.g. "First 90 Days (three actions with owners, budgets,
+// KPIs, and success criteria):", closely echoing this field's own prompt
+// wording -- a known LLM failure mode) or the deterministic "Market Entry
+// Recommendation"/"Why Entry Is Not Recommended Now" heading route.ts
+// appends were both being treated as if they were themselves real
+// recommendation sentences, rendering a fake "Action" card with prompt/
+// heading scaffolding instead of real content. Mirrors market-
+// intelligence-presentation.ts's own isHeadingOnlyLine heuristic (a line
+// ending in ":" is a label, not a sentence) plus an explicit reject for
+// the two known deterministic heading strings.
+function isRecommendationHeadingLine(item: string) {
+  if (/:$/.test(item)) return true;
+  if (/^(?:first\s+90\s*-?\s*days?|market entry recommendation|why entry is not recommended now)\b/i.test(item)) {
+    return true;
+  }
+
+  return false;
 }
 
 // Strategic Recommendations is inherently a list -- each real
@@ -1863,7 +2239,7 @@ function extractRecommendationItems(content: string) {
         .replace(/\*\*/g, "")
         .trim()
     )
-    .filter((line) => line.length > 8);
+    .filter((line) => line.length > 8 && !isRecommendationHeadingLine(line));
 
   if (bulletLines.length > 0) {
     return bulletLines.slice(0, 8);
@@ -2181,10 +2557,18 @@ function getSectionEvidenceLevel(section: ReportSection): EvidenceLevel {
     return "verified";
   }
 
-  if (section.field === "tamSamSom" || section.field === "financialDashboard" || section.field === "unitEconomics") {
+  // TAM/SAM/SOM gets its own canonical cascade-based derivation (see
+  // resolveTamSamSomCascade's own comment) -- split out from
+  // financialDashboard/unitEconomics below, which keep their prior,
+  // unrelated Gross Margin-based derivation unchanged.
+  if (section.field === "tamSamSom") {
+    return getTamSamSomSectionEvidence(section.content);
+  }
+
+  if (section.field === "financialDashboard" || section.field === "unitEconomics") {
     return inferEvidenceLevel({
       label: section.title,
-      value: extractMetricValue(section.content, "Gross Margin") || extractMetricValue(section.content, "TAM") || section.title,
+      value: extractMetricValue(section.content, "Gross Margin") || section.title,
       context: section.content,
     });
   }
@@ -2288,9 +2672,32 @@ function isMarketSizeValueMeaningful(value: string) {
 
 function extractMarketSizeValue(content: string, label: string) {
   const escapedLabel = escapeRegExp(label);
-  const direct = normalizePdfText(content).match(
-    new RegExp(`\\b${escapedLabel}\\b\\s*[:\\-–—]?\\s*((?:[<>~≈]?\\s*)?[€$₺]?\\s*\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT%])?)`, "i")
-  )?.[1];
+  // CRITICAL FIX -- confirmed live: market-intelligence-graph.ts's own
+  // deterministic "Planning Estimate" backend writes each layer as
+  // "TAM [Estimated]: $2.4M" -- a bracketed classification tag sitting
+  // between the label and its value that this regex previously could not
+  // see past (it required the value immediately after an optional
+  // colon), silently reading such reports as if TAM/SAM/SOM had never
+  // been stated -- the chart showed "Validation Needed" for a layer while
+  // the report's own text plainly stated a dollar figure two words later.
+  //
+  // CRITICAL FIX -- confirmed live (second gap): the model's own natural
+  // prose also writes "TAM (Total Addressable Market): USD 1.45B" -- a
+  // parenthetical expansion of the label, and a 3-letter currency CODE
+  // (USD/EUR/...) instead of a symbol -- neither of which the old narrow
+  // "value must start immediately after the colon with an optional
+  // symbol" pattern could match, so it fell through to the same
+  // "Validation Needed" state a second, different way. Now tolerates an
+  // optional "(...)" label expansion (in addition to the existing
+  // "[...]" tag), and captures the REST of the line rather than trying to
+  // enumerate every currency notation up front -- compactPdfMetricValue
+  // (unchanged) still does the actual numeric narrowing below, exactly as
+  // it already did for the extractMetricValue fallback path.
+  const direct = normalizePdfText(content)
+    .replace(/\*\*/g, "")
+    .match(
+      new RegExp(`\\b${escapedLabel}\\b\\s*(?:\\([^)\\n]{0,80}\\)\\s*)?(?:\\[[^\\]\\n]{0,40}\\]\\s*)?[:\\-–—]\\s*([^\\n]*)`, "i")
+    )?.[1];
 
   const value = compactPdfMetricValue(direct || extractMetricValue(content, label));
 
@@ -2313,6 +2720,50 @@ function parseMarketSizeMagnitude(value: string): number | null {
     unit === "t" ? 1e12 : unit === "b" ? 1e9 : unit === "m" ? 1e6 : unit === "k" ? 1e3 : 1;
 
   return numeric * multiplier;
+}
+
+const tamSamSomBarLabels = ["TAM", "SAM", "SOM"] as const;
+
+// CRITICAL FIX -- confirmed live: the TAM/SAM/SOM per-layer bar visual
+// (below) and the section-level evidence badge (getSectionEvidenceLevel)
+// used two independent derivations that could disagree. The badge fell
+// back to a naive keyword scan (inferEvidenceLevel) whose "value" input
+// was the section's own static title whenever no metric line matched --
+// and the honest "insufficient evidence" notice copy (market-intelligence-graph.ts)
+// itself contains the word "verified" ("A verified market-size figure ...
+// could not be established"), which that keyword scan read as a positive
+// signal and returned "Data Confirmed" even though TAM/SAM/SOM were all
+// unresolved. Both now derive from this single, deterministic cascade so
+// they can never diverge again: a layer only counts as resolved once
+// every layer above it in the TAM >= SAM >= SOM hierarchy is also
+// resolved, exactly mirroring the nesting rule the bar visual has always
+// enforced.
+function resolveTamSamSomCascade(content: string) {
+  const values = tamSamSomBarLabels.map((label) => extractMarketSizeValue(content, label));
+  const magnitudes = values.map((value) => parseMarketSizeMagnitude(value));
+  const tamResolved = magnitudes[0] !== null;
+  const samResolved = tamResolved && magnitudes[1] !== null && magnitudes[1] <= (magnitudes[0] as number);
+  const somResolved = samResolved && magnitudes[2] !== null && magnitudes[2] <= (magnitudes[1] as number);
+  const allResolved = tamResolved && samResolved && somResolved;
+  const anyEstimated =
+    allResolved && tamSamSomBarLabels.some((label) => isMarketSizeEstimated(content, label));
+
+  return { values, magnitudes, tamResolved, samResolved, somResolved, allResolved, anyEstimated };
+}
+
+// A section must never show "Data Confirmed" when TAM, SAM, or SOM is
+// unresolved, pending its parent's validation, or only ever reached an
+// [Estimated]/Planning Estimate figure -- a resolved-but-estimated stack
+// is a planning estimate, not verified data, and must not read as
+// confirmed either.
+function getTamSamSomSectionEvidence(content: string): EvidenceLevel {
+  const cascade = resolveTamSamSomCascade(content);
+
+  if (!cascade.allResolved) {
+    return "validationRequired";
+  }
+
+  return cascade.anyEstimated ? "benchmarkDerived" : "verified";
 }
 
 const tamCircleMaxRadius = 17;
@@ -2667,6 +3118,132 @@ function extractBullets(content: string, fallback: string) {
     .slice(0, 2);
 }
 
+// FINAL PREMIUM REPORT RESTORATION -- Market Drivers/Barriers/
+// Opportunities/Threats/Customer Segments/Major Players have no separate
+// "methodology" the way TAM/SAM/SOM's formulas or Strategic
+// Recommendations' owner/budget do -- their generated content IS the
+// primary insight, so it must be visible without opening Details, not
+// collapsed away. Deliberately strict (no sentence-splitting fallback,
+// unlike extractBullets): only lines that already carry a real bullet/
+// numbered marker in the model's own output count as "multiple items" --
+// never fabricated by chopping prose into fake list items. Capped
+// generously (8, not the old 4) so a genuinely longer ranked list is
+// never silently cut -- this card is now the section's ONLY presentation
+// (no more "Details" underneath to fall back on for the rest).
+function extractRealBulletLines(content: string, limit = 8) {
+  return (content || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^[-*•]\s+/.test(line) || /^\d+[.)]\s+/.test(line))
+    .map((line) =>
+      line
+        .replace(/^[-*•]\s+/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .replace(/\*\*/g, "")
+        .trim()
+    )
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+// The "main explanation" paragraph shown alongside the Key Takeaway --
+// genuinely different text, not a restatement. getSectionTakeaway already
+// returns the content's first sentence (normalized through its own,
+// separate text-cleaning pipeline, and truncated with "..." past 220
+// chars) -- a literal string-match-and-remove against that value would
+// silently fail whenever either of those differ from this function's own
+// cleaning, leaving the "removed" sentence back in and restating it here.
+// Skipping by INDEX instead is robust regardless of any such mismatch:
+// whenever a takeaway was found at all, it corresponds to this content's
+// own first sentence, so the explanation simply starts one sentence later.
+// Bullet-marked lines are excluded from the sentence pool -- those are
+// surfaced separately by extractRealBulletLines, and including them here
+// too would show the same list item twice. Deliberately UNCAPPED (no
+// sentence-count or character-length ceiling): this card is now this
+// section's complete, only presentation, so it must carry every remaining
+// sentence, not a truncated teaser, or real analysis would be silently
+// lost now that there is no "Details" disclosure left to fall back on.
+function extractSectionMainExplanation(content: string, takeaway: string) {
+  const cleaned = (content || "").replace(/\*\*/g, "").replace(/^#{1,6}\s+.*$/gm, "");
+  const proseOnly = cleaned
+    .split("\n")
+    .filter((line) => !/^\s*(?:[-*•]|\d+[.)])\s+/.test(line))
+    .join(" ");
+  const sentences = proseOnly
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim().replace(/^[-*•]\s+/, ""))
+    .filter((sentence) => sentence.length > 20);
+  const startIndex = takeaway ? 1 : 0;
+
+  return sentences.slice(startIndex).join(" ");
+}
+
+// FINAL PREMIUM REPORT RESTORATION -- these fields have no separate
+// "methodology," their generated prose IS the primary insight, and
+// downloadPdf's own visualFields (checked at drawPdfVisual/
+// getPdfVisualHeight's own early-return guards) previously never listed
+// them, so this PDF path drew NO visual at all for them -- not even the
+// Key Takeaway box the on-screen PremiumSectionVisual now shows. This is
+// that same highlighted Key Takeaway box, mirrored into this PDF path;
+// the full body prose still draws below it unchanged (PDF has no
+// "collapsed Details" to defer to, so nothing is shortened).
+const pdfKeyTakeawayCardFields = new Set([
+  "marketDrivers",
+  "barriers",
+  "opportunities",
+  "threats",
+  "customerSegments",
+  "majorPlayers",
+  "regionalAnalysis",
+  "industryTrends",
+  "marketSegmentation",
+]);
+
+// FINAL CLEANUP -- every field whose PDF visual (drawPdfVisual) is now
+// enriched enough to be this section's COMPLETE presentation: TAM/SAM/SOM
+// shows every layer's own real assumption sentence, Porter's shows every
+// force's own real implication sentence, and Executive Summary/
+// Competitive Landscape/Strategic Recommendations each already have their
+// own dedicated, complete card. Drawing the raw section paragraph a
+// second time below any of these would only repeat what the visual
+// already fully communicates -- matches page.tsx's/this file's own
+// on-screen cardFirstReportFields gate exactly, so web and PDF share the
+// same presentation hierarchy.
+//
+// CRITICAL FIX -- confirmed live: marketSize/cagr were previously listed
+// here too, on the assumption (per this comment's own prior text) that
+// they "already have their own dedicated, complete card" -- but neither
+// field is even in this file's own visualFields set below, so
+// drawPdfVisual/getPdfVisualHeight never drew anything for them at all.
+// With body text also suppressed, both sections rendered completely
+// empty in this PDF export. Removed from this set so both fall back to
+// the SAME "full body prose" treatment the pdfKeyTakeawayCardFields group
+// above already uses successfully -- restoring their real evidence/
+// reasoning text, never re-fabricating anything, and matching the
+// equivalent restore already made on-screen and in ReportPdfButton.tsx.
+//
+// CRITICAL FIX -- confirmed live (root-cause repair): `...pdfKeyTakeawayCardFields`
+// was ALSO spread into this set until now -- directly contradicting the
+// comment on pdfKeyTakeawayCardFields itself (above), which explicitly
+// promises "the full body prose still draws below it unchanged" for
+// exactly those 9 fields (marketDrivers/barriers/opportunities/threats/
+// customerSegments/majorPlayers/regionalAnalysis/industryTrends/
+// marketSegmentation). In reality the spread forced sectionBodyContent to
+// "" for every one of them too, so the ONLY thing that ever rendered was
+// the 3-line-capped Key Takeaway box -- for majorPlayers specifically,
+// this collapsed a full list of real named vendors (Thomson Reuters/
+// CoCounsel/Westlaw Edge, LexisNexis/Lexis+ AI, Evisort, Fastcase,
+// Litera/Kira, ...) down to a single truncated fragment of its own first
+// sentence. Removed so all 9 fields get their real body prose back,
+// matching what the surrounding comment always claimed was already true.
+const pdfCompleteVisualFields = new Set([
+  "executiveSummary",
+  "tamSamSom",
+  "strategicRecommendations",
+  "portersFiveForces",
+  "competitiveLandscape",
+]);
+
 function extractSwotBullets(content: string, label: string, fallbackContent = content) {
   const aliases = swotLabelAliases[label] || [label];
   const allSwotAliases = Object.values(swotLabelAliases).flat();
@@ -2991,6 +3568,25 @@ function getPdfTocEntryTitle(section: ReportSection, locale: PdfLocale) {
   return section.title;
 }
 
+// The Competitive Landscape/competitor visual above already renders every
+// row of market-intelligence-graph.ts's markdown table as a real table --
+// without this, the section's own raw body text (drawn below the visual,
+// same as every other section) would dump that SAME markdown table a
+// second time as literal, unformatted "| Vendor | Category | ... |" pipe
+// syntax. Strips only table row/separator lines, keeping any genuine
+// surrounding commentary the model wrote outside the table.
+function stripPdfMarkdownTableLines(content: string) {
+  return content
+    .split("\n")
+    .filter((line) => {
+      const trimmed = line.trim();
+      return !(trimmed.startsWith("|") && trimmed.endsWith("|"));
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function removeDuplicateVisualText(title: string, content: string) {
   const financialContent = normalizePdfFinancialSectionContent(content, { title });
 
@@ -3008,9 +3604,15 @@ function removeDuplicateVisualText(title: string, content: string) {
     return "";
   }
 
-  return removeDuplicatePdfExecutiveInsightText(
+  const cleaned = removeDuplicatePdfExecutiveInsightText(
     normalizePdfTamSamSomOwnershipContent(financialContent, { title })
   );
+
+  if (normalizedTitle.includes("competitive landscape") || normalizedTitle.includes("competitor")) {
+    return stripPdfMarkdownTableLines(cleaned);
+  }
+
+  return cleaned;
 }
 
 function isTamSamSomTitle(title: string) {
@@ -3161,8 +3763,16 @@ function formatPdfReadableContent(
     return formatPdfCitationContent(section.content, realEstate);
   }
 
-  if (section.field === "tamSamSom" || isTamSamSomTitle(section.title)) {
-    return cleanPdfEvidenceMetadataText(normalizePdfTamSamSomBodyContent(section.content));
+  // FINAL CLEANUP -- these fields' visuals (drawPdfVisual) are now each
+  // section's COMPLETE presentation (see pdfCompleteVisualFields' own
+  // comment) -- their raw paragraph never draws a second time below the
+  // visual. Every other section keeps its existing body text, unchanged.
+  if (
+    pdfCompleteVisualFields.has(section.field ?? "") ||
+    section.field === "tamSamSom" ||
+    isTamSamSomTitle(section.title)
+  ) {
+    return "";
   }
 
   const content = removeDuplicateVisualText(
@@ -3375,15 +3985,7 @@ function extractKeywordInsight(content: string, keywords: string[]) {
   );
 }
 
-function getExecutiveHighlights(content: string) {
-  const candidates = [
-    extractKeywordInsight(content, ["decision", "recommendation", "karar", "tavsiye"]),
-    extractKeywordInsight(content, ["opportunity", "market", "pazar", "tam", "sam", "som"]),
-    extractKeywordInsight(content, ["risk", "threat", "tehdit"]),
-    extractKeywordInsight(content, ["next action", "critical action", "action", "validate", "aksiyon", "doğrula"]),
-    extractKeywordInsight(content, ["validation", "evidence", "confidence", "doğrulama", "kanıt", "güven"]),
-    extractFirstInsight(content),
-  ];
+function dedupeHighlightCandidates(candidates: string[]) {
   const seen = new Set<string>();
 
   return candidates
@@ -3408,6 +4010,41 @@ function getExecutiveHighlights(content: string) {
       return true;
     })
     .slice(0, 5);
+}
+
+// CRITICAL FIX -- confirmed live: Market Intelligence's deterministic
+// Executive Decision banner has real, clearly labeled Why/Top 3 Risks/
+// Immediate Next Action/What Evidence Is Missing fields -- the generic
+// keyword search below (built for Business Plan's free-flowing prose)
+// ignores that structure entirely, and its own fallback
+// (extractKeywordInsight's `lines[0]`, used whenever a keyword isn't
+// found anywhere in the section) can surface a completely unrelated
+// opening line as if it were "the risk" or "the next action". Sources
+// highlights from the SAME locale-agnostic labeled fields the PDF's own
+// Executive Decision card already reads, never a keyword scan of
+// arbitrary prose. Mirrors page.tsx's identical fix.
+function getMarketIntelligenceExecutiveHighlights(content: string) {
+  const candidates = [
+    extractMetricValueFromAliases(content, localizedLabelVariants("why")),
+    takeFirstListItem(extractMetricValueFromAliases(content, localizedLabelVariants("topRisks"))),
+    extractMetricValueFromAliases(content, localizedLabelVariants("immediateNextAction")),
+    takeFirstListItem(extractMetricValueFromAliases(content, localizedLabelVariants("missingEvidence"))),
+  ];
+
+  return dedupeHighlightCandidates(candidates);
+}
+
+function getExecutiveHighlights(content: string) {
+  const candidates = [
+    extractKeywordInsight(content, ["decision", "recommendation", "karar", "tavsiye"]),
+    extractKeywordInsight(content, ["opportunity", "market", "pazar", "tam", "sam", "som"]),
+    extractKeywordInsight(content, ["risk", "threat", "tehdit"]),
+    extractKeywordInsight(content, ["next action", "critical action", "action", "validate", "aksiyon", "doğrula"]),
+    extractKeywordInsight(content, ["validation", "evidence", "confidence", "doğrulama", "kanıt", "güven"]),
+    extractFirstInsight(content),
+  ];
+
+  return dedupeHighlightCandidates(candidates);
 }
 
 function extractPercentScore(content: string, label: string) {
@@ -3564,10 +4201,19 @@ function ExecutiveSummaryVisual({
 
   const evidenceLocale = getResponseLanguage(detectPdfPresentationLocale(section.content));
 
-  const score =
-    investmentScore?.totalScore ??
-    extractScore(section.content, "AI Investment Score") ??
-    extractConfidence(section.content);
+  // CRITICAL FIX -- root-cause repair (ticket: "Fix the canonical
+  // decision consistency bug"). Market Intelligence never computes an
+  // "AI Investment Score" (investment-score.ts's founder-viability
+  // metric, per the report-isolation policy) -- it must always show "--"
+  // here, never fall through to extractConfidence(section.content)'s bare
+  // percentage scan, which can attach an unrelated "NN%" mentioned
+  // anywhere in the executive summary's own prose as if it were an
+  // investment score.
+  const score = isMarketIntelligence
+    ? null
+    : investmentScore?.totalScore ??
+      extractScore(section.content, "AI Investment Score") ??
+      extractConfidence(section.content);
   // CRITICAL ARCHITECTURE FIX -- centralize executive decision
   // vocabulary (see executive-decision-vocabulary.ts). Every report
   // kind's own, unmodified decision output (the shared Executive
@@ -3577,25 +4223,30 @@ function ExecutiveSummaryVisual({
   // is translated into the same 4-value label here, instead of showing
   // each report kind's raw word verbatim on this KPI card.
   //
-  // CRITICAL FIX -- Market Intelligence must never fall back to
-  // investmentScore.recommendation, investment-score.ts's generic
-  // founder-viability GO/WAIT/PASS score -- Market Intelligence has its
-  // own, deliberately more conservative ENTER/MONITOR/AVOID market-entry
-  // verdict instead (mapped to the same shared banner text by
-  // market-intelligence-presentation.ts). Only the report's own
-  // deterministic decision text is trusted for Market Intelligence, so
-  // a monitor-stage or avoid verdict is never overridden by an
-  // unrelated founder-viability score whenever this section's own text
-  // extraction comes up empty.
-  const resolvedDecision = resolveCanonicalDecisionFromReportText(
-    section.content,
-    isMarketIntelligence ? undefined : investmentScore?.recommendation
-  );
-  const recommendation = resolvedDecision
-    ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
-    : detectRecommendation(section.content) || "—";
+  // CRITICAL FIX -- confirmed live (root-cause repair): Market
+  // Intelligence now resolves through resolveMarketIntelligenceExecutiveDecision
+  // (the ONE canonical decision/confidence source for this report kind),
+  // never resolveCanonicalDecisionFromReportText's own detectRecommendation
+  // fallback -- that bare keyword scan (`\b(GO|NO GO|WAIT|...)\b`) can
+  // match the "GO" inside "Go-to-Market", a phrase virtually every Market
+  // Intelligence executive summary mentions when discussing entry
+  // strategy, fabricating a "GO" verdict regardless of the report's real,
+  // conservative recommendation.
+  const marketDecision = isMarketIntelligence
+    ? resolveMarketIntelligenceExecutiveDecision(section.content, evidenceLocale)
+    : null;
+  const resolvedDecision = isMarketIntelligence
+    ? null
+    : resolveCanonicalDecisionFromReportText(section.content, investmentScore?.recommendation);
+  const recommendation = marketDecision
+    ? marketDecision.decisionLabel
+    : resolvedDecision
+      ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
+      : detectRecommendation(section.content) || "—";
   const decisionColorKey = resolvedDecision?.decision || recommendation;
-  const highlights = getExecutiveHighlights(section.content);
+  const highlights = isMarketIntelligence
+    ? getMarketIntelligenceExecutiveHighlights(section.content)
+    : getExecutiveHighlights(section.content);
   const kpis = [
     {
       label: "Investment Score",
@@ -3610,14 +4261,35 @@ function ExecutiveSummaryVisual({
       evidence: getSectionEvidenceLevel(section),
     },
     {
+      // CRITICAL FIX -- confirmed live: Market Intelligence's
+      // deterministic Executive Decision banner has no "Market:"/"TAM:"
+      // labeled line at all -- this generic Business-Plan-shaped
+      // extraction (any line starting with "Market"/"TAM" anywhere in
+      // the whole executive summary) risked matching an unrelated clause
+      // in free-flowing MI prose rather than a genuine market signal.
+      // There is no reliable canonical "Market Signal" source in the
+      // deterministic banner, so Market Intelligence shows the neutral
+      // placeholder directly instead of guessing from arbitrary prose.
+      // Business Plan/Acquisition are completely untouched.
       label: "Market Signal",
-      value: extractMetricValue(section.content, "Market") || extractMetricValue(section.content, "TAM") || "—",
+      value: isMarketIntelligence
+        ? "—"
+        : extractMetricValue(section.content, "Market") || extractMetricValue(section.content, "TAM") || "—",
       accent: "from-sky-300/18 to-teal-300/5",
       evidence: "benchmarkDerived" as EvidenceLevel,
     },
     {
+      // CRITICAL FIX -- confirmed live: same generic risk here. Market
+      // Intelligence reads its real "Top 3 Risks" list from the
+      // deterministic banner (locale-agnostic label lookup, matching the
+      // same extraction the PDF's own Executive Decision card already
+      // uses), taking only the first named risk for this compact KPI
+      // value, rather than an unlabeled "any line starting with Risk"
+      // scan of the whole summary.
       label: "Risk Posture",
-      value: extractMetricValue(section.content, "Risk") || extractMetricValue(section.content, "Main Risk") || "Tracked",
+      value: isMarketIntelligence
+        ? takeFirstListItem(extractMetricValueFromAliases(section.content, localizedLabelVariants("topRisks"))) || "Tracked"
+        : extractMetricValue(section.content, "Risk") || extractMetricValue(section.content, "Main Risk") || "Tracked",
       accent: "from-amber-300/18 to-teal-300/5",
       evidence: "validationRequired" as EvidenceLevel,
     },
@@ -3758,10 +4430,18 @@ function PremiumSectionVisual({
   section,
   investmentScore,
   isMarketIntelligence = false,
+  majorPlayersContent = "",
 }: {
   section: ReportSection;
   investmentScore?: ReportInvestmentScore;
   isMarketIntelligence?: boolean;
+  // Competitive Landscape's own table and Major Players' bullet list are
+  // built from the exact same evidence-backed vendor set (see
+  // extractMarketIntelligenceCompetitorRows' own comment) -- passed
+  // through so this card can fall back to Major Players' data when its
+  // own table content fails to parse, rather than showing "Validation
+  // Needed" while a sibling section plainly names the same vendors.
+  majorPlayersContent?: string;
 }) {
   const field = section.field;
 
@@ -3796,8 +4476,6 @@ function PremiumSectionVisual({
     // would hide two genuinely available figures just because a third
     // one is missing. The whole component only falls back to a single
     // combined empty state when NONE of the three could be established.
-    const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value));
-    const maxMagnitude = Math.max(0, ...magnitudes.filter((magnitude): magnitude is number => magnitude !== null));
     // CRITICAL FIX -- TAM/SAM/SOM must always be logically nested
     // (TAM >= SAM >= SOM). Each row previously showed its own extracted
     // value fully independently, which could produce an investor-facing
@@ -3809,10 +4487,11 @@ function PremiumSectionVisual({
     // instead of a bare "Validation Needed". A row that has its own value
     // but fails the nesting check against an otherwise-resolved parent
     // falls back to the generic "Validation Needed" -- that is this row's
-    // own data problem, not a cascade from above.
-    const tamResolved = magnitudes[0] !== null;
-    const samResolved = tamResolved && magnitudes[1] !== null && magnitudes[1] <= (magnitudes[0] as number);
-    const somResolved = samResolved && magnitudes[2] !== null && magnitudes[2] <= (magnitudes[1] as number);
+    // own data problem, not a cascade from above. Shared with the
+    // section-level evidence badge (see resolveTamSamSomCascade's own
+    // comment) so the two can never disagree.
+    const { magnitudes, tamResolved, samResolved, somResolved } = resolveTamSamSomCascade(section.content);
+    const maxMagnitude = Math.max(0, ...magnitudes.filter((magnitude): magnitude is number => magnitude !== null));
     const resolved = [tamResolved, samResolved, somResolved];
     const pendingLabels: Array<string | null> = [
       null,
@@ -3882,6 +4561,15 @@ function PremiumSectionVisual({
                         Planning Estimate / Not Verified
                       </p>
                     ) : null}
+                    {/* CRITICAL FIX -- confirmed live: line-clamp-2 could
+                        still cut off a real, single-sentence methodology/
+                        assumption explanation when it ran long (e.g. a
+                        stated formula or scaling basis) -- removed so the
+                        full sentence the report actually generated is
+                        always visible, never a fabricated addition. */}
+                    {row.description ? (
+                      <p className="mt-3 text-xs leading-5 text-zinc-500">{row.description}</p>
+                    ) : null}
                   </>
                 ) : (
                   <div className="mt-3 flex flex-1 flex-col items-start justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-black/20 p-3">
@@ -3904,6 +4592,70 @@ function PremiumSectionVisual({
     );
   }
 
+  // FINAL PREMIUM REPORT RESTORATION -- see extractRealBulletLines' own
+  // comment. Key Takeaway (one highlighted line) + a genuinely different
+  // main explanation + real bullet points only when the model's own
+  // output used a list -- never a blank card, falls back to a premium
+  // Validation Needed state when nothing could be extracted at all.
+  if (
+    field === "marketDrivers" ||
+    field === "barriers" ||
+    field === "opportunities" ||
+    field === "threats" ||
+    field === "customerSegments" ||
+    field === "majorPlayers" ||
+    field === "regionalAnalysis" ||
+    field === "industryTrends" ||
+    field === "marketSegmentation"
+  ) {
+    const takeaway = getSectionTakeaway(section.content);
+    const explanation = extractSectionMainExplanation(section.content, takeaway);
+    const bullets = extractRealBulletLines(section.content);
+
+    if (!takeaway && !explanation && bullets.length === 0) {
+      return (
+        <div className="mb-5 rounded-[2rem] border border-dashed border-white/15 bg-black/20 p-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+            {section.title}
+          </p>
+          <div className="mt-4 flex items-center gap-3">
+            <span className="h-2 w-2 rounded-full bg-amber-300" />
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-amber-200">
+              Validation Needed
+            </p>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-zinc-400">
+            No {section.title.toLowerCase()} data could be established for this market yet.
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mb-5 rounded-[2rem] border border-white/10 bg-white/[0.025] p-5">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+          {getReportPresentationLabels(section.content).keyTakeaway}
+        </p>
+        {takeaway ? (
+          <p className="mt-3 text-lg font-medium leading-7 text-white">{takeaway}</p>
+        ) : null}
+        {explanation ? (
+          <p className="mt-3 text-sm leading-6 text-zinc-400">{explanation}</p>
+        ) : null}
+        {bullets.length > 1 ? (
+          <ul className="mt-4 space-y-2 border-t border-white/10 pt-4">
+            {bullets.map((bullet, index) => (
+              <li key={index} className="flex gap-2 text-sm leading-6 text-zinc-300">
+                <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200" />
+                <span>{bullet}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    );
+  }
+
   if (field === "marketOpportunity" || field === "marketOverview") {
     const opportunity = extractFirstInsight(section.content);
 
@@ -3915,15 +4667,41 @@ function PremiumSectionVisual({
     // Market Intelligence's real market-size/CAGR/indicator figures get
     // their own dedicated, data-driven Market Metrics cards instead (see
     // the "marketSize"/"cagr" field branch below).
+    //
+    // CRITICAL FIX -- confirmed live: this panel used to show only a
+    // line-clamped first sentence, so marketOverview's raw-text Details
+    // disclosure below it repeated that same scope statement in full --
+    // the exact duplication this ticket's bug report described. Now
+    // captures the section's COMPLETE content (headline sentence + the
+    // real remaining explanation + any real bullets), mirroring
+    // page.tsx's identical fix -- reusing the same extractors, no new
+    // calculation. marketOverview is now safe to add to
+    // cardFirstReportFields below.
     if (isMarketIntelligence) {
+      const explanation = extractSectionMainExplanation(section.content, opportunity);
+      const bullets = extractRealBulletLines(section.content);
+
       return (
         <div className="mb-5 rounded-[2rem] border border-teal-200/15 bg-teal-200/[0.055] p-5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
             Market Opportunity
           </p>
-          <p className="mt-3 line-clamp-4 text-xl font-semibold leading-8 text-white">
+          <p className="mt-3 text-xl font-semibold leading-8 text-white">
             {opportunity || "Opportunity signal is being evaluated."}
           </p>
+          {explanation ? (
+            <p className="mt-3 text-sm leading-6 text-teal-50/80">{explanation}</p>
+          ) : null}
+          {bullets.length > 1 ? (
+            <ul className="mt-4 space-y-2 border-t border-teal-200/15 pt-4">
+              {bullets.map((bullet, index) => (
+                <li key={index} className="flex gap-2 text-sm leading-6 text-teal-50/75">
+                  <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200" />
+                  <span>{bullet}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       );
     }
@@ -3975,7 +4753,21 @@ function PremiumSectionVisual({
   if (field === "marketSize" || field === "cagr") {
     const isCagr = field === "cagr";
     const value = isCagr ? extractHeadlineCagrValue(section.content) : extractHeadlineMonetaryValue(section.content);
-    const isEstimated = /\[estimated\]|\btahmini\b/i.test(section.content);
+    // CRITICAL FIX -- confirmed live: this card previously classified ANY
+    // extracted figure as "verified" (Data Confirmed) by default, only
+    // downgrading it when the content contained the literal
+    // "[Estimated]"/"tahmini" tag -- a figure hedged in prose ("could not
+    // be independently verified", "requires validation", an assumption
+    // or benchmark) with no literal tag still rendered as confirmed
+    // evidence. Reuses the SAME canonical evidence classifier
+    // (inferEvidenceLevel) TAM/SAM/SOM already uses correctly via
+    // getSectionEvidenceLevel, whose default for ambiguous/unlabeled
+    // context is "benchmarkDerived", never "verified".
+    const evidence = inferEvidenceLevel({
+      label: isCagr ? "CAGR" : "Market Size",
+      value,
+      context: section.content,
+    });
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.1),transparent_30%),rgba(255,255,255,0.025)] p-5">
@@ -3983,12 +4775,26 @@ function PremiumSectionVisual({
           <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
             {isCagr ? "CAGR" : "Market Size"}
           </p>
-          {value ? <EvidenceBadge level={isEstimated ? "benchmarkDerived" : "verified"} locale={evidenceLocale} market /> : null}
+          {value ? <EvidenceBadge level={evidence} locale={evidenceLocale} market /> : null}
         </div>
         {value ? (
           <>
             <p className="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-5xl">{value}</p>
-            <p className="mt-3 line-clamp-3 text-sm leading-6 text-zinc-400">{section.content}</p>
+            {/* CRITICAL FIX -- confirmed live: this evidence paragraph used
+                to be clamped to 3 lines, silently hiding most of the
+                section's real reasoning/evidence now that its raw-text
+                Details disclosure is fully suppressed (marketSize/cagr are
+                in cardFirstReportFields) -- the card became a bare number
+                with no supporting analysis. Restyled as a distinct,
+                labeled evidence block (never re-fabricated; the same real
+                content, just no longer visually cut off) rather than a
+                clamped leftover. */}
+            <div className="mt-4 border-t border-white/10 pt-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-teal-200/60">
+                Evidence &amp; Analysis
+              </p>
+              <p className="mt-2 text-xs leading-5 text-zinc-400">{section.content}</p>
+            </div>
           </>
         ) : (
           <div className="mt-4 rounded-2xl border border-dashed border-white/15 bg-black/20 p-4">
@@ -4183,7 +4989,7 @@ if (field === "swotAnalysis") {
   // structured presentation without touching the existing Business
   // Plan/Acquisition visual.
   if (field === "competitiveLandscape") {
-    const rows = extractMarketIntelligenceCompetitorRows(section.content);
+    const rows = extractMarketIntelligenceCompetitorRows(section.content, majorPlayersContent);
 
     // No competitor data validated at all -- a large empty table shell
     // (header row with nothing under it) stacked on top of MarketMap's
@@ -4193,6 +4999,47 @@ if (field === "swotAnalysis") {
     // Market Metrics), and skip MarketMap entirely -- it has nothing to
     // plot with zero rows.
     if (rows.length === 0) {
+      // CRITICAL FIX -- confirmed live: before claiming "no competitor
+      // data could be validated," check whether Major Players actually
+      // names real, plausible vendors that just don't fit the strict row
+      // shape (see extractMarketIntelligenceCompetitorNamesOnly's own
+      // comment) -- this is what let the report say "no competitor data
+      // validated" one section above Major Players naming real vendors.
+      // Never fabricates category/position/strengths/weaknesses to fill
+      // the full table -- shows a distinct, honest third state instead.
+      const namesOnly = extractMarketIntelligenceCompetitorNamesOnly(majorPlayersContent);
+
+      if (namesOnly.length > 0) {
+        return (
+          <div className="mb-5 rounded-[2rem] border border-dashed border-white/15 bg-black/20 p-5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+              Competitive Landscape
+            </p>
+            <div className="mt-4 flex items-center gap-3">
+              <span className="h-2 w-2 rounded-full bg-sky-300" />
+              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-200">
+                Relevant Players Identified — Not Validated as Direct Competitors
+              </p>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-zinc-400">
+              These companies are named in available evidence as active in or adjacent to this market,
+              but current evidence does not independently validate them as direct, head-to-head
+              competitors for this analysis.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {namesOnly.map((name) => (
+                <span
+                  key={name}
+                  className="rounded-full border border-sky-300/20 bg-sky-300/10 px-3 py-1 text-xs font-semibold text-sky-100"
+                >
+                  {name}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="mb-5 rounded-[2rem] border border-dashed border-white/15 bg-black/20 p-5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
@@ -4761,8 +5608,12 @@ if (field === "swotAnalysis") {
                     Not specified
                   </p>
                 )}
+                {/* CRITICAL FIX -- confirmed live: line-clamp-3 could cut
+                    off a real, single-sentence force implication at this
+                    card's narrow width -- removed so the full sentence the
+                    report actually generated is always visible. */}
                 {implication ? (
-                  <p className="mt-3 line-clamp-3 border-t border-white/10 pt-3 text-xs leading-5 text-zinc-400">
+                  <p className="mt-3 border-t border-white/10 pt-3 text-xs leading-5 text-zinc-400">
                     {implication}
                   </p>
                 ) : null}
@@ -4964,7 +5815,10 @@ function extractRiskLevel(threatsContent: string) {
   return "Low";
 }
 
-function MarketMetricsDashboard({ sections }: { sections: ReportSection[] }) {
+// Memoized -- sections is already a stable, useMemo'd reference from
+// ReportPanel, so this only needs to recompute when the report's own
+// content actually changes, not on every unrelated parent re-render.
+const MarketMetricsDashboard = memo(function MarketMetricsDashboard({ sections }: { sections: ReportSection[] }) {
   const findContent = (field: string) => sections.find((section) => section.field === field)?.content || "";
   const marketSizeContent = findContent("marketSize");
   const cagrContent = findContent("cagr");
@@ -5004,7 +5858,7 @@ function MarketMetricsDashboard({ sections }: { sections: ReportSection[] }) {
       </div>
     </div>
   );
-}
+});
 
 // CRITICAL FIX -- restore Market Intelligence's SWOT-equivalent
 // four-quadrant visual. Market Intelligence has no single "swotAnalysis"
@@ -5025,7 +5879,8 @@ const marketForcesQuadrants: ReadonlyArray<{ field: string; icon: LucideIcon }> 
   { field: "threats", icon: ShieldAlert },
 ];
 
-function MarketForcesQuadrant({ sections }: { sections: ReportSection[] }) {
+// Memoized -- same rationale as MarketMetricsDashboard above.
+const MarketForcesQuadrant = memo(function MarketForcesQuadrant({ sections }: { sections: ReportSection[] }) {
   const quadrants = marketForcesQuadrants
     .map(({ field, icon }) => {
       const section = sections.find((candidate) => candidate.field === field);
@@ -5066,7 +5921,7 @@ function MarketForcesQuadrant({ sections }: { sections: ReportSection[] }) {
       </div>
     </div>
   );
-}
+});
 
 function hasPremiumSectionVisual(section: ReportSection) {
   return (
@@ -5095,25 +5950,46 @@ function hasPremiumSectionVisual(section: ReportSection) {
     section.field === "entryStrategy" ||
     section.field === "unitEconomics" ||
     section.field === "kpiDashboard" ||
-    section.field === "kpis"
+    section.field === "kpis" ||
+    section.field === "marketDrivers" ||
+    section.field === "barriers" ||
+    section.field === "opportunities" ||
+    section.field === "threats" ||
+    section.field === "customerSegments" ||
+    section.field === "majorPlayers" ||
+    section.field === "regionalAnalysis" ||
+    section.field === "industryTrends" ||
+    section.field === "marketSegmentation"
   );
 }
 
 // FINAL REPORT PRESENTATION CLEANUP -- these fields already get their own
-// premium visual card (ExecutiveSummaryVisual, MarketForcesQuadrant, the
-// TAM/SAM/SOM bars, or the Strategic Recommendation action cards), so the
-// generic ExecutiveInsightBanner/SectionTakeaway snippets would only repeat
-// the same summary a second (or third) time. Full raw text/methodology
-// stays available for all of them, but only inside the collapsed
-// AnalysisNotes disclosure -- never as a second always-visible summary.
+// premium visual card (ExecutiveSummaryVisual, MarketForcesQuadrant plus
+// each field's own Key-Takeaway/explanation/bullets card, the TAM/SAM/SOM
+// bars, the Porter's Five Forces radar, or the Strategic Recommendation
+// action cards), so the generic ExecutiveInsightBanner/SectionTakeaway
+// snippets would only repeat the same summary a second (or third) time.
+// Full raw text/methodology stays available for all of them, but only
+// inside the collapsed AnalysisNotes disclosure -- never as a second
+// always-visible summary.
 const cardFirstReportFields = new Set([
   "executiveSummary",
+  "marketOverview",
   "marketDrivers",
   "barriers",
   "opportunities",
   "threats",
+  "customerSegments",
+  "majorPlayers",
+  "regionalAnalysis",
+  "industryTrends",
+  "marketSegmentation",
   "tamSamSom",
   "strategicRecommendations",
+  "portersFiveForces",
+  "marketSize",
+  "cagr",
+  "competitiveLandscape",
 ]);
 
 function getReportArticleClass(section: ReportSection) {
@@ -5268,6 +6144,36 @@ function ExecutiveSnapshotPanel({
     reportQuality,
     labels.reportQuality === "Rapor Kalitesi"
   );
+  // CRITICAL FIX -- root-cause repair (ticket: "Fix the canonical
+  // decision consistency bug"). buildExecutiveSnapshot's generic
+  // decision/confidence fallback (used whenever
+  // resolveCanonicalDecisionFromReportText fails to find the
+  // deterministic banner -- e.g. a legacy pre-Executive-Decision-layer
+  // executiveSummary) is built on two unsafe full-content scans:
+  // extractDecision's fallback matches ANY standalone GO/WAIT/PASS/...
+  // keyword in the ENTIRE report (every Market Intelligence report
+  // mentions "Go-to-Market" -- \bGO\b matches the "GO" inside it, since a
+  // hyphen is a non-word boundary), and separately maps a matched "PASS"
+  // token to "GO" -- backwards. extractConfidence's bare percentage
+  // fallback can likewise attach an unrelated "NN%" mentioned near the
+  // word "confidence" anywhere in ordinary prose. Market Intelligence now
+  // resolves decision AND confidence together from resolveMarketIntelligenceExecutiveDecision
+  // (the ONE canonical source for this report kind), which never falls
+  // through to either unsafe scan. Business Plan/Acquisition's own
+  // generic buildExecutiveSnapshot values are completely untouched.
+  const marketDecision = isMarketIntelligence
+    ? resolveMarketIntelligenceExecutiveDecision(
+        section.content,
+        isMarketIntelligenceTurkish ? "Turkish" : "English"
+      )
+    : null;
+  const snapshotDecision = marketDecision ? marketDecision.decisionLabel : snapshot.decision;
+  const snapshotConfidenceScore = marketDecision ? marketDecision.confidenceScore : snapshot.confidenceScore;
+  const snapshotConfidenceDisplay = marketDecision
+    ? marketDecision.confidenceScore !== null
+      ? `${marketDecision.confidenceScore}%`
+      : "—"
+    : snapshot.confidence;
   // CRITICAL FIX -- Executive Decision Center. The Founder Readiness
   // gauge reads investmentScore.decisionEngine, the founder-viability
   // score Market Intelligence never computes (report-isolation policy:
@@ -5302,18 +6208,18 @@ function ExecutiveSnapshotPanel({
             {labels.executiveSnapshot}
           </p>
           <h4 className="mt-2 text-xl font-semibold tracking-tight text-white">
-            {labels.decision}: {snapshot.decision}
+            {labels.decision}: {snapshotDecision}
           </h4>
         </div>
         <span className="w-fit rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-xs font-semibold text-zinc-200">
-          {labels.confidence}: {snapshot.confidence}
+          {labels.confidence}: {snapshotConfidenceDisplay}
         </span>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <SnapshotGauge
           label={labels.confidenceGauge}
-          value={snapshot.confidenceScore}
-          display={snapshot.confidence}
+          value={snapshotConfidenceScore}
+          display={snapshotConfidenceDisplay}
         />
         {isMarketIntelligence ? (
           <SnapshotGauge
@@ -5854,6 +6760,7 @@ const ReportSectionCard = memo(
     isMarketIntelligence,
     reportQuality,
     waitingMessage,
+    majorPlayersContent,
   }: {
     section: ReportSection;
     index: number;
@@ -5862,6 +6769,7 @@ const ReportSectionCard = memo(
     isMarketIntelligence: boolean;
     reportQuality?: ReportQualityScore;
     waitingMessage: string;
+    majorPlayersContent?: string;
   }) {
     const Icon = section.icon;
     const isFinancialDashboard = section.field === "financialDashboard";
@@ -5943,18 +6851,21 @@ const ReportSectionCard = memo(
                   section={section}
                   investmentScore={investmentScore}
                   isMarketIntelligence={isMarketIntelligence}
+                  majorPlayersContent={majorPlayersContent}
                 />
               ) : null}
               {/* Card-first sections (see cardFirstReportFields) already
-                  surface their own summary via a dedicated visual card --
-                  a generic SectionTakeaway here would only repeat it. Full
-                  raw methodology stays available for every section, but
-                  only inside the collapsed AnalysisNotes disclosure below,
-                  never as always-visible body text. */}
+                  surface their COMPLETE content via a dedicated visual card
+                  -- each card's own extraction now captures the section's
+                  full remaining prose/bullets, not just a teaser, so a
+                  generic SectionTakeaway or a raw-text "Details"
+                  disclosure underneath would only repeat what the card
+                  already fully communicates. Neither renders for these
+                  sections; every other section keeps both, unchanged. */}
               {hasVisibleDetailsContent && !cardFirstReportFields.has(section.field ?? "") ? (
                 <SectionTakeaway content={detailsContent} />
               ) : null}
-              {hasVisibleDetailsContent ? (
+              {hasVisibleDetailsContent && !cardFirstReportFields.has(section.field ?? "") ? (
                 <AnalysisNotes
                   compact
                   label={isFinancialDashboard ? "Metric Details" : presentationLabels.details}
@@ -5977,7 +6888,8 @@ const ReportSectionCard = memo(
     prev.investmentScore === next.investmentScore &&
     prev.isDomainDecisionReport === next.isDomainDecisionReport &&
     prev.reportQuality === next.reportQuality &&
-    prev.waitingMessage === next.waitingMessage
+    prev.waitingMessage === next.waitingMessage &&
+    prev.majorPlayersContent === next.majorPlayersContent
 );
 
 const ReportPanel = memo(function ReportPanel({
@@ -6324,9 +7236,26 @@ const ReportPanel = memo(function ReportPanel({
         pdf.setFontSize(6.8);
         pdf.setTextColor("#71717a");
         pdf.text(localizePdfPresentationLabel(label, pdfLocale).toUpperCase(), x + 5, gaugeY + 7);
-        pdf.setFontSize(15);
         pdf.setTextColor("#ffffff");
-        pdf.text(display, x + 5, gaugeY + 17);
+        // CRITICAL FIX -- this box is a fixed 28mm-tall, single-line
+        // gauge. `display` can be up to ~120 characters of free text
+        // (buildExecutiveSnapshot's confidence fallback, not just a
+        // "NN%" figure) -- drawing it at a fixed 15pt with no width
+        // constraint risked unbounded overflow past the box edge. Shrink
+        // to fit first (same step size drawSingleLine below uses), then
+        // hard-truncate only as a last resort.
+        const gaugeMaxWidth = width - 10;
+        let gaugeFontSize = 15;
+        pdf.setFontSize(gaugeFontSize);
+        while (gaugeFontSize > 6.5 && pdf.getTextWidth(display) > gaugeMaxWidth) {
+          gaugeFontSize -= 0.35;
+          pdf.setFontSize(gaugeFontSize);
+        }
+        const gaugeDisplayText =
+          pdf.getTextWidth(display) > gaugeMaxWidth
+            ? `${display.slice(0, Math.max(4, Math.floor(display.length * (gaugeMaxWidth / Math.max(pdf.getTextWidth(display), 1))) - 1))}…`
+            : display;
+        pdf.text(gaugeDisplayText, x + 5, gaugeY + 17);
         pdf.setFillColor("#27272a");
         pdf.roundedRect(x + 5, gaugeY + 21, width - 10, 2.4, 1.2, 1.2, "F");
         pdf.setFillColor("#5eead4");
@@ -6361,6 +7290,44 @@ const ReportPanel = memo(function ReportPanel({
           maxWidth: contentWidth - 24,
         });
 
+        // CRITICAL FIX -- root-cause repair (ticket: "Fix the canonical
+        // decision consistency bug"): confirmed live -- the PREVIOUS fix
+        // here fell back to `buildExecutiveSnapshot(fullReportContent,
+        // undefined, ...)` for decision, and `extractConfidence(fullReportContent)`
+        // for confidence, whenever no deterministic decision banner was
+        // present. Both scan the ENTIRE report: extractDecision matches
+        // "GO" inside "Go-to-Market" (a phrase virtually every Market
+        // Intelligence report mentions somewhere), and extractConfidence's
+        // bare percentage fallback can attach an unrelated "NN%" mentioned
+        // anywhere in the report near the word "confidence". This is the
+        // confirmed root cause of the live defect (PDF cover/card showing
+        // "GO"/"30%" while the web report correctly showed a conservative
+        // "MONITOR..." verdict with no confidence figure). Market
+        // Intelligence had NO branch of its own here at all before this,
+        // so it also fell into the generic default branch below,
+        // rendering a "Founder Readiness Score"/"Financial Quality" tile
+        // (a report kind that never evaluates a founder, per this report
+        // kind's own isolation policy). Now resolves through
+        // resolveMarketIntelligenceExecutiveDecision -- the ONE
+        // canonical decision/confidence source for Market Intelligence,
+        // which never falls through to either unsafe scan -- over the
+        // SAME executiveSummary section content the Executive Summary
+        // card and the web report use, structurally guaranteeing the
+        // cover can never disagree with either.
+        const marketExecutiveSummaryContent = isMarketIntelligence
+          ? pdfSections.find((section) => section.field === "executiveSummary")?.content || ""
+          : "";
+        const marketDecision = isMarketIntelligence
+          ? resolveMarketIntelligenceExecutiveDecision(
+              marketExecutiveSummaryContent,
+              pdfLocale === "tr" ? "Turkish" : "English"
+            )
+          : null;
+        const marketDecisionDisplay = marketDecision ? marketDecision.decisionLabel : "";
+        const marketConfidenceScore = marketDecision ? marketDecision.confidenceScore : null;
+        const marketConfidenceDisplay =
+          marketConfidenceScore === null ? "—" : `${marketConfidenceScore}%`;
+
         const metricCards = isRealEstateReport
           ? [
               ["Decision", executiveSnapshot.decision],
@@ -6378,6 +7345,14 @@ const ReportPanel = memo(function ReportPanel({
                   "See Development Potential",
               ],
               ["Required Next Action", executiveSnapshot.nextAction],
+            ]
+          : isMarketIntelligence
+          ? [
+              [localizePdfPresentationLabel("Decision", pdfLocale), marketDecisionDisplay],
+              [localizePdfPresentationLabel("Confidence Score", pdfLocale), marketConfidenceDisplay],
+              [localizePdfPresentationLabel("Report Quality", pdfLocale), executiveSnapshot.reportQuality],
+              [localizePdfPresentationLabel("Main Risk", pdfLocale), executiveSnapshot.mainRisk],
+              [localizePdfPresentationLabel("Next Action", pdfLocale), executiveSnapshot.nextAction],
             ]
           : isDomainDecisionReport
           ? [
@@ -6419,8 +7394,20 @@ const ReportPanel = memo(function ReportPanel({
         });
 
         const gaugeWidth = (contentWidth - 33) / 2;
-        drawDecisionGauge("Confidence Gauge", executiveSnapshot.confidenceScore, executiveSnapshot.confidence, margin + 12, 156, gaugeWidth);
-        if (!isDomainDecisionReport) {
+        drawDecisionGauge(
+          "Confidence Gauge",
+          isMarketIntelligence ? marketConfidenceScore : executiveSnapshot.confidenceScore,
+          isMarketIntelligence ? marketConfidenceDisplay : executiveSnapshot.confidence,
+          margin + 12,
+          156,
+          gaugeWidth
+        );
+        // Market Intelligence never evaluates a founder (report isolation
+        // policy) -- a Founder Readiness gauge is structurally
+        // inapplicable, so it is suppressed here exactly like
+        // isDomainDecisionReport already suppresses it for Real
+        // Estate/Legal/domain-analysis reports.
+        if (!isDomainDecisionReport && !isMarketIntelligence) {
           drawDecisionGauge("Founder Readiness Gauge", executiveSnapshot.founderScoreValue, executiveSnapshot.founderScore, margin + 21 + gaugeWidth, 156, gaugeWidth);
         }
 
@@ -6559,7 +7546,19 @@ const ReportPanel = memo(function ReportPanel({
 
       pdf.setFontSize(24);
       pdf.setTextColor("#ffffff");
-      pdf.text(localizedReportTitle, margin, y + 11);
+      // CRITICAL FIX -- confirmed live: this running title previously had
+      // NO maxWidth/wrap/truncate at all, so a long report title ran
+      // straight off the page edge, silently clipped by the page
+      // boundary with no ellipsis or visual cue -- worse than truncation,
+      // an invisible loss. Wraps like the cover title above, then pushes
+      // everything below down to match (mirrors ReportPdfButton.tsx's
+      // already-correct section-page running title).
+      const runningTitleMaxWidth = contentWidth - 40;
+      const runningTitleLines = pdf.splitTextToSize(localizedReportTitle, runningTitleMaxWidth) as string[];
+      pdf.text(runningTitleLines, margin, y + 11, {
+        lineHeightFactor: 1.08,
+        maxWidth: runningTitleMaxWidth,
+      });
 
       pdf.setFillColor("#042f2e");
       pdf.setDrawColor("#115e59");
@@ -6569,7 +7568,7 @@ const ReportPanel = memo(function ReportPanel({
       pdf.setTextColor("#ccfbf1");
       pdf.text(localizePdfPresentationLabel("AI Ready", pdfLocale), pageWidth - margin - 25, y + 7.3);
 
-      y += 26;
+      y += 26 + Math.max(0, runningTitleLines.length - 1) * 7;
 
       const summaryCards = [
         `${pdfSections.filter((section) => !isSourceSection(section)).length} Sections`,
@@ -6613,6 +7612,9 @@ const ReportPanel = memo(function ReportPanel({
         "portersFiveForces",
         "risks",
         "kpis",
+        "competitiveLandscape",
+        "strategicRecommendations",
+        ...pdfKeyTakeawayCardFields,
       ]);
 
       if (isDomainDecisionReport) {
@@ -6725,9 +7727,188 @@ const ReportPanel = memo(function ReportPanel({
         };
       };
 
+      // Fixed footprints for the Competitive Landscape table/Market Map
+      // and Strategic Recommendation cards below -- shared between
+      // getPdfVisualHeight (pagination budgeting) and drawPdfVisual
+      // (drawing) so the two never disagree on how much space either
+      // visual needs. Matches ReportPdfButton.tsx's own constants so both
+      // PDF exports produce visually consistent layouts.
+      const competitorHeaderHeight = 8;
+      const competitorRowHeight = 15;
+      const recommendationCardHeight = 36;
+      const recommendationCardGap = 3;
+
+      // Fixed-line-count cells (table cells, action cards) hard-slice a
+      // wrapped line array to fit their budgeted height; slicing alone
+      // silently drops the remainder with no visual cue that content was
+      // cut. Mirrors ReportPdfButton.tsx's own truncatePdfCellLines.
+      const truncatePdfCellLines = (lines: string[], maxLines: number) => {
+        if (lines.length <= maxLines) return lines;
+        const output = lines.slice(0, maxLines);
+        output[maxLines - 1] = `${output[maxLines - 1].replace(/[.,;:]*$/, "")}...`;
+        return output;
+      };
+
+      // Shared by drawPdfVisual's Executive Summary branch (drawing) and
+      // getPdfVisualHeight (pagination budgeting) -- computing the
+      // decision/confidence/why/top-risk/etc. values AND their wrapped
+      // line counts in exactly one place is what guarantees the height
+      // reserved for this card always matches what actually gets drawn
+      // in it. Also the root fix for ticket-reported truncation of Why/
+      // Top Risk/Information Required/Next Action: those 4 values
+      // previously always drew through drawSingleLine (a single-line-
+      // only helper that hard-truncates with an ellipsis regardless of
+      // available page space) inside a hardcoded 15mm-tall tile. Now
+      // wraps up to 4 lines and only grows the tile past its original
+      // 15mm height when the content actually needs more room. Mirrors
+      // ReportPdfButton.tsx's own getExecutiveDecisionCardLayout.
+      const getExecutiveDecisionCardLayout = (content: string, width: number) => {
+        const whyLabels = localizedLabelVariants("why");
+        const topRisksLabels = localizedLabelVariants("topRisks");
+        const missingEvidenceLabels = localizedLabelVariants("missingEvidence");
+        const whatWouldChangeLabels = localizedLabelVariants("whatWouldChangeThisDecision");
+        const immediateNextActionLabels = localizedLabelVariants("immediateNextAction");
+        const why = extractMetricValueFromAliases(content, whyLabels);
+        const topRisk = extractAliasedSectionSnippet(content, topRisksLabels, missingEvidenceLabels);
+        const missingEvidence = extractAliasedSectionSnippet(content, missingEvidenceLabels, whatWouldChangeLabels);
+        const whatWouldChange = extractMetricValueFromAliases(content, whatWouldChangeLabels);
+        const nextAction = extractMetricValueFromAliases(content, immediateNextActionLabels);
+
+        // CRITICAL FIX -- root-cause repair (ticket: "Fix the canonical
+        // decision consistency bug"): confirmed live -- the PREVIOUS fix
+        // here fell back to `buildExecutiveSnapshot(fullReportContent,
+        // undefined, ...)` for decision, and `extractConfidence(fullReportContent)`
+        // for confidence, whenever this section's own deterministic
+        // banner wasn't found. Both scan the ENTIRE report: extractDecision
+        // matches "GO" inside "Go-to-Market" (a phrase virtually every
+        // Market Intelligence report mentions somewhere), and
+        // extractConfidence's bare percentage fallback can attach an
+        // unrelated "NN%" mentioned anywhere in the report near the word
+        // "confidence". This is the confirmed root cause of the live
+        // defect (PDF cover/card showing "GO"/"30%" while the web report
+        // correctly showed a conservative "MONITOR..." verdict with no
+        // confidence figure). Now resolves through
+        // resolveMarketIntelligenceExecutiveDecision -- the ONE
+        // canonical decision/confidence source for Market Intelligence,
+        // which never falls through to either unsafe scan.
+        const marketDecision = isMarketIntelligence
+          ? resolveMarketIntelligenceExecutiveDecision(content, pdfLocale === "tr" ? "Turkish" : "English")
+          : null;
+        const decisionMatch = extractExecutiveDecisionFromText(content);
+        const decisionLabel = marketDecision
+          ? marketDecision.decisionLabel
+          : decisionMatch?.token.toUpperCase() || "—";
+        const confidence = marketDecision
+          ? marketDecision.confidenceScore
+          : extractConfidence(content) ??
+            investmentScore?.confidence ??
+            extractConfidence(fullReportContent) ??
+            extractScore(fullReportContent, "Investment Score");
+
+        const isTurkishPdf = pdfLocale === "tr";
+        const recItems: Array<[string, string]> = [
+          ["Confidence", confidence === null ? "—" : `${confidence}%`],
+          [
+            "Why",
+            why ||
+              extractKeywordInsight(fullReportContent, ["opportunity", "market"]) ||
+              (isTurkishPdf ? "Gerekçe, yönetici kararı bölümünde detaylandırılmıştır" : "Rationale is detailed in the executive decision"),
+          ],
+          [
+            "Top Risk",
+            topRisk ||
+              extractKeywordInsight(fullReportContent, ["risk", "threat"]) ||
+              (isTurkishPdf ? "Ana risk, risk analizi bölümünde detaylandırılmıştır" : "Primary risk is detailed in the risk analysis"),
+          ],
+          [
+            isMarketIntelligence ? "Information Required Before Decision" : "Missing Evidence",
+            missingEvidence ||
+              (isTurkishPdf
+                ? "Oluşturulan yönetici özetinde açıkça belirtilmedi"
+                : "Not explicitly stated in the generated executive summary"),
+          ],
+          [
+            "Next Action",
+            nextAction ||
+              whatWouldChange ||
+              extractKeywordInsight(fullReportContent, ["next action", "critical action", "validate"]) ||
+              (isTurkishPdf ? "Acil sonraki adım için yönetici kararı bölümüne bakın" : "See the Immediate Next Action in the executive decision"),
+          ],
+        ];
+
+        const itemWidth = (width - 68) / 2;
+        const previousFontSize = pdf.getFontSize();
+        pdf.setFontSize(6);
+        const wrappedValues = recItems.map(([, value]) =>
+          (pdf.splitTextToSize(localizePdfPresentationText(value, pdfLocale), itemWidth - 4) as string[]).slice(0, 4)
+        );
+        pdf.setFontSize(previousFontSize);
+
+        const rowHeights: number[] = [];
+        for (let row = 0; row * 2 < recItems.length; row += 1) {
+          const leftLines = wrappedValues[row * 2]?.length ?? 1;
+          const rightLines = wrappedValues[row * 2 + 1]?.length ?? 1;
+          const maxLines = Math.max(leftLines, rightLines, 1);
+          rowHeights.push(Math.max(15, 7.8 + (maxLines - 1) * 3.2 + 3));
+        }
+        const gridHeight =
+          rowHeights.reduce((sum, height) => sum + height, 0) + Math.max(0, rowHeights.length - 1) * 2;
+        // The card's previous fixed 65 return value already carried ~16mm
+        // of padding beyond the raw 3-row grid's own math (49mm) -- kept
+        // here so short-content reports render at identical proportions
+        // to before; only content that needs more than the original
+        // per-tile height grows the card.
+        const totalHeight = Math.max(65, gridHeight + 16);
+
+        return {
+          decisionLabel,
+          confidence,
+          recItems,
+          itemWidth,
+          wrappedValues,
+          rowHeights,
+          totalHeight,
+        };
+      };
+
+      // Shared by drawPdfVisual's Competitive Landscape branch (drawing)
+      // and getPdfVisualHeight (pagination budgeting) for the "no
+      // structured rows, but Major Players names real vendors" state --
+      // see extractMarketIntelligenceCompetitorNamesOnly's own comment.
+      // Mirrors ReportPdfButton.tsx's own getNamesOnlyCompetitorLayout.
+      const getNamesOnlyCompetitorLayout = (namesOnly: string[], width: number) => {
+        const previousFontSize = pdf.getFontSize();
+        pdf.setFontSize(5.8);
+        const introLines = pdf.splitTextToSize(
+          localizePdfPresentationText(
+            "These companies are named in available evidence as active in or adjacent to this market, but current evidence does not independently validate them as direct, head-to-head competitors for this analysis.",
+            pdfLocale
+          ),
+          width - 6
+        ) as string[];
+        pdf.setFontSize(6.2);
+        const nameLines = pdf.splitTextToSize(namesOnly.join("   •   "), width - 6) as string[];
+        pdf.setFontSize(previousFontSize);
+        const totalHeight = 13 + introLines.length * 3.6 + 5 + nameLines.length * 3.8 + 6;
+
+        return { introLines, nameLines, totalHeight };
+      };
+
       const getPdfVisualHeight = (section: ReportSection) => {
         if (!visualFields.has(section.field)) {
           return 0;
+        }
+
+        if (pdfKeyTakeawayCardFields.has(section.field ?? "")) {
+          const takeaway = getSectionTakeaway(section.content);
+          if (!takeaway) {
+            return 0;
+          }
+          const previousFontSize = pdf.getFontSize();
+          pdf.setFontSize(8.4);
+          const takeawayLines = pdf.splitTextToSize(localizePdfPresentationText(takeaway, pdfLocale), bodyWidth - 12) as string[];
+          pdf.setFontSize(previousFontSize);
+          return Math.max(16, 8 + Math.min(3, takeawayLines.length) * 4.4);
         }
 
         if (section.field === "financialDashboard") {
@@ -6743,7 +7924,9 @@ const ReportPanel = memo(function ReportPanel({
         }
 
         if (section.field === "portersFiveForces") {
-          return 46;
+          // Must match drawPdfVisual's own isPorterSection branch exactly
+          // (Math.max(44, forces.length(5) * forceCardSpacing(16))).
+          return Math.max(44, 5 * 16);
         }
 
         if (section.field === "founderScore") {
@@ -6751,7 +7934,10 @@ const ReportPanel = memo(function ReportPanel({
         }
 
         if (section.field === "tamSamSom") {
-          return 51;
+          // Must match drawPdfVisual's own tamCircleVisualHeight exactly
+          // (tamCircleMaxRadius * 2 + 8 + 27) -- a mismatch here would
+          // under- or over-budget the card's page space.
+          return tamCircleMaxRadius * 2 + 8 + 27;
         }
 
         if (section.field === "scenarioAnalysis") {
@@ -6762,8 +7948,44 @@ const ReportPanel = memo(function ReportPanel({
           return 52;
         }
 
+        if (section.field === "competitiveLandscape") {
+          // Row source must match drawPdfVisual's own fork exactly -- MI
+          // reports draw extractMarketIntelligenceCompetitorRows (plus the
+          // Market Map), everything else draws extractCompetitorRows with
+          // no Market Map -- or drawing and pagination height disagree.
+          if (isMarketIntelligence) {
+            const rows = extractMarketIntelligenceCompetitorRows(
+              section.content,
+              pdfSections.find((entry) => entry.field === "majorPlayers")?.content
+            );
+            // Must match drawPdfVisual's own namesOnly fork exactly -- see
+            // extractMarketIntelligenceCompetitorNamesOnly's own comment --
+            // or drawing and pagination height disagree.
+            if (rows.length === 0) {
+              const namesOnly = extractMarketIntelligenceCompetitorNamesOnly(
+                pdfSections.find((entry) => entry.field === "majorPlayers")?.content || ""
+              );
+              if (namesOnly.length > 0) {
+                return getNamesOnlyCompetitorLayout(namesOnly, bodyWidth).totalHeight + 8 + 50;
+              }
+            }
+            return competitorHeaderHeight + Math.max(1, rows.length) * competitorRowHeight + 4 + 8 + 50;
+          }
+          const rows = extractCompetitorRows(section.content);
+          return competitorHeaderHeight + Math.max(1, rows.length) * competitorRowHeight + 4;
+        }
+
+        if (section.field === "strategicRecommendations") {
+          const items = extractRecommendationItems(section.content).slice(0, 4);
+          if (items.length === 0) {
+            return 0;
+          }
+          const rows = Math.ceil(items.length / 2);
+          return rows * recommendationCardHeight + Math.max(0, rows - 1) * recommendationCardGap;
+        }
+
         if (section.field === "executiveSummary") {
-          return 65;
+          return getExecutiveDecisionCardLayout(section.content, bodyWidth).totalHeight;
         }
 
         return 22;
@@ -6801,6 +8023,404 @@ const ReportPanel = memo(function ReportPanel({
           pdf.text(safeText, x, lineY);
         };
 
+        // Competitive Landscape's markdown table becomes a real table
+        // (plus a Market Map for Market Intelligence reports) instead of
+        // rendering as raw "| Vendor | Category | ... |" pipe syntax --
+        // mirrored from ReportPdfButton.tsx so this PDF path matches both
+        // the on-screen PremiumSectionVisual and the other PDF export.
+        if (section.field === "competitiveLandscape") {
+          const marketMapGap = 8;
+          const marketMapHeight = 50;
+
+          // Market Intelligence gets its own real column set (see
+          // extractMarketIntelligenceCompetitorRows' own comment) -- the
+          // generic table below stays exactly as it always was for
+          // Business Plan/Acquisition.
+          if (isMarketIntelligence) {
+            const miRows = extractMarketIntelligenceCompetitorRows(
+              section.content,
+              pdfSections.find((entry) => entry.field === "majorPlayers")?.content
+            );
+            // CRITICAL FIX -- confirmed live: before falling back to a
+            // bare empty table shell, check whether Major Players
+            // actually names real, plausible vendors that just don't fit
+            // the strict row shape (see
+            // extractMarketIntelligenceCompetitorNamesOnly's own
+            // comment). Never fabricates category/position/strengths/
+            // weaknesses to fill the full table -- shows a distinct,
+            // honest state instead, matching the on-screen dashboard.
+            const namesOnly =
+              miRows.length === 0
+                ? extractMarketIntelligenceCompetitorNamesOnly(
+                    pdfSections.find((entry) => entry.field === "majorPlayers")?.content || ""
+                  )
+                : [];
+            const namesLayout =
+              namesOnly.length > 0 ? getNamesOnlyCompetitorLayout(namesOnly, visualWidth) : null;
+            const miColumns = [
+              { label: localizePdfPresentationLabel("Vendor", pdfLocale), width: visualWidth * 0.15 },
+              { label: localizePdfPresentationLabel("Category", pdfLocale), width: visualWidth * 0.13 },
+              { label: localizePdfPresentationLabel("Position", pdfLocale), width: visualWidth * 0.15 },
+              { label: localizePdfPresentationLabel("Strengths", pdfLocale), width: visualWidth * 0.17 },
+              { label: localizePdfPresentationLabel("Weaknesses", pdfLocale), width: visualWidth * 0.17 },
+              { label: localizePdfPresentationLabel("Relevance", pdfLocale), width: visualWidth * 0.11 },
+              { label: localizePdfPresentationLabel("Validation", pdfLocale), width: visualWidth * 0.12 },
+            ];
+            let miX = bodyX;
+
+            pdf.setFillColor("#101113");
+            pdf.setDrawColor("#27272a");
+            pdf.roundedRect(
+              bodyX,
+              visualY,
+              visualWidth,
+              namesLayout ? namesLayout.totalHeight : competitorHeaderHeight + Math.max(1, miRows.length) * competitorRowHeight,
+              3,
+              3,
+              "FD"
+            );
+            if (namesLayout) {
+              pdf.setFontSize(6.5);
+              pdf.setTextColor("#7dd3fc");
+              pdf.text(
+                localizePdfPresentationText("RELEVANT PLAYERS IDENTIFIED — NOT VALIDATED AS DIRECT COMPETITORS", pdfLocale),
+                bodyX + 3,
+                visualY + 7,
+                { maxWidth: visualWidth - 6 }
+              );
+              pdf.setFontSize(5.8);
+              pdf.setTextColor("#a1a1aa");
+              pdf.text(namesLayout.introLines, bodyX + 3, visualY + 13, {
+                lineHeightFactor: 1.3,
+                maxWidth: visualWidth - 6,
+              });
+              pdf.setFontSize(6.2);
+              pdf.setTextColor("#e0f2fe");
+              const namesY = visualY + 13 + namesLayout.introLines.length * 3.6 + 5;
+              pdf.text(namesLayout.nameLines, bodyX + 3, namesY, {
+                lineHeightFactor: 1.35,
+                maxWidth: visualWidth - 6,
+              });
+            } else {
+              pdf.setFontSize(5.8);
+              pdf.setTextColor("#5eead4");
+              miColumns.forEach((column) => {
+                pdf.text(column.label.toUpperCase(), miX + 2, visualY + 5.2, { maxWidth: column.width - 4 });
+                miX += column.width;
+              });
+            }
+
+            const drawMarketMap = (mapY: number) => {
+              const placements = miRows
+                .map((row) => {
+                  const coordinates = inferMarketMapPosition(row);
+                  return coordinates ? { vendor: row.vendor || "Vendor", ...coordinates } : null;
+                })
+                .filter((placement): placement is { vendor: string; x: number; y: number } => placement !== null);
+
+              pdf.setFontSize(7.2);
+              pdf.setTextColor("#5eead4");
+              pdf.text(localizePdfPresentationLabel("MARKET MAP", pdfLocale), bodyX, mapY - 2);
+
+              pdf.setFillColor("#101113");
+              pdf.setDrawColor("#27272a");
+              pdf.roundedRect(bodyX, mapY, visualWidth, marketMapHeight, 3, 3, "FD");
+
+              if (placements.length < 2) {
+                pdf.setFontSize(6.2);
+                pdf.setTextColor("#fbbf24");
+                pdf.text(localizePdfPresentationLabel("VALIDATION NEEDED", pdfLocale), bodyX + 5, mapY + 9);
+                pdf.setFontSize(6);
+                pdf.setTextColor("#a1a1aa");
+                pdf.text(
+                  pdf.splitTextToSize(
+                    localizePdfPresentationText(
+                      "Not enough competitors have a clear category or positioning signal on both axes to plot a reliable market map yet.",
+                      pdfLocale
+                    ),
+                    visualWidth - 10
+                  ) as string[],
+                  bodyX + 5,
+                  mapY + 15,
+                  { lineHeightFactor: 1.3, maxWidth: visualWidth - 10 }
+                );
+                return;
+              }
+
+              const mapInnerX = bodyX + 6;
+              const mapInnerY = mapY + 6;
+              const mapInnerWidth = visualWidth - 12;
+              const mapInnerHeight = marketMapHeight - 12;
+
+              pdf.setDrawColor("#27272a");
+              pdf.line(mapInnerX + mapInnerWidth / 2, mapInnerY, mapInnerX + mapInnerWidth / 2, mapInnerY + mapInnerHeight);
+              pdf.line(mapInnerX, mapInnerY + mapInnerHeight / 2, mapInnerX + mapInnerWidth, mapInnerY + mapInnerHeight / 2);
+              pdf.setFontSize(5);
+              pdf.setTextColor("#71717a");
+              pdf.text(localizePdfPresentationLabel("Broad platform", pdfLocale), mapInnerX + 1, mapInnerY + 3.6);
+              pdf.text(localizePdfPresentationLabel("Specialized", pdfLocale), mapInnerX + 1, mapInnerY + mapInnerHeight - 1);
+              pdf.text(localizePdfPresentationLabel("SME", pdfLocale), mapInnerX + 1, mapInnerY + mapInnerHeight / 2 - 1);
+              const enterpriseLabelWidth = pdf.getTextWidth(localizePdfPresentationLabel("Enterprise", pdfLocale));
+              pdf.text(
+                localizePdfPresentationLabel("Enterprise", pdfLocale),
+                mapInnerX + mapInnerWidth - enterpriseLabelWidth - 1,
+                mapInnerY + mapInnerHeight / 2 - 1
+              );
+
+              placements.forEach((placement) => {
+                const dotX = mapInnerX + (placement.x / 100) * mapInnerWidth;
+                const dotY = mapInnerY + (placement.y / 100) * mapInnerHeight;
+
+                pdf.setFillColor("#5eead4");
+                pdf.circle(dotX, dotY, 1.6, "F");
+                pdf.setFontSize(5.2);
+                pdf.setTextColor("#ccfbf1");
+                drawSingleLine(placement.vendor, dotX + 2.6, dotY + 1.2, 24, 5.2, 4);
+              });
+            };
+
+            if (namesLayout) {
+              drawMarketMap(visualY + namesLayout.totalHeight + marketMapGap);
+              return namesLayout.totalHeight + marketMapGap + marketMapHeight;
+            }
+
+            if (miRows.length === 0) {
+              pdf.setFontSize(6.2);
+              pdf.setTextColor("#a1a1aa");
+              pdf.text(
+                localizePdfPresentationText("See the Competitive Landscape section for full competitor detail.", pdfLocale),
+                bodyX + 3,
+                visualY + 14,
+                { maxWidth: visualWidth - 6 }
+              );
+              drawMarketMap(visualY + competitorHeaderHeight + competitorRowHeight + 4 + marketMapGap);
+              return competitorHeaderHeight + competitorRowHeight + 4 + marketMapGap + marketMapHeight;
+            }
+
+            miRows.forEach((row, rowIndex) => {
+              const rowY = visualY + competitorHeaderHeight + rowIndex * competitorRowHeight;
+              const values = [row.vendor, row.category, row.position, row.strengths, row.weaknesses, row.relevance, row.validationStatus];
+              let cellX = bodyX;
+
+              pdf.setDrawColor("#27272a");
+              pdf.line(bodyX, rowY, bodyX + visualWidth, rowY);
+              values.forEach((value, cellIndex) => {
+                const width = miColumns[cellIndex]?.width ?? 20;
+                pdf.setFontSize(cellIndex === 0 ? 6.3 : 5.5);
+                pdf.setTextColor(cellIndex === 0 ? "#f4f4f5" : "#d4d4d8");
+                pdf.text(
+                  truncatePdfCellLines(pdf.splitTextToSize(value || "Validation required", width - 4) as string[], 2),
+                  cellX + 2,
+                  rowY + 4.7,
+                  { lineHeightFactor: 1.1, maxWidth: width - 4 }
+                );
+                cellX += width;
+              });
+            });
+
+            drawMarketMap(
+              visualY + competitorHeaderHeight + Math.max(1, miRows.length) * competitorRowHeight + 4 + marketMapGap
+            );
+            return (
+              competitorHeaderHeight +
+              Math.max(1, miRows.length) * competitorRowHeight +
+              4 +
+              marketMapGap +
+              marketMapHeight
+            );
+          }
+
+          const rows = extractCompetitorRows(section.content);
+          const columns = [
+            { label: localizePdfPresentationLabel("Company", pdfLocale), width: visualWidth * 0.19 },
+            { label: localizePdfPresentationLabel("Positioning", pdfLocale), width: visualWidth * 0.27 },
+            { label: localizePdfPresentationLabel("Strengths", pdfLocale), width: visualWidth * 0.2 },
+            { label: localizePdfPresentationLabel("Weaknesses", pdfLocale), width: visualWidth * 0.2 },
+            { label: localizePdfPresentationLabel("Threat", pdfLocale), width: visualWidth * 0.14 },
+          ];
+          let x = bodyX;
+
+          pdf.setFillColor("#101113");
+          pdf.setDrawColor("#27272a");
+          pdf.roundedRect(
+            bodyX,
+            visualY,
+            visualWidth,
+            competitorHeaderHeight + Math.max(1, rows.length) * competitorRowHeight,
+            3,
+            3,
+            "FD"
+          );
+          pdf.setFontSize(5.8);
+          pdf.setTextColor("#5eead4");
+          columns.forEach((column) => {
+            pdf.text(column.label.toUpperCase(), x + 2, visualY + 5.2, { maxWidth: column.width - 4 });
+            x += column.width;
+          });
+
+          if (rows.length === 0) {
+            pdf.setFontSize(6.2);
+            pdf.setTextColor("#a1a1aa");
+            pdf.text(
+              localizePdfPresentationText("See the Competitive Landscape section for full competitor detail.", pdfLocale),
+              bodyX + 3,
+              visualY + 14,
+              { maxWidth: visualWidth - 6 }
+            );
+            return competitorHeaderHeight + competitorRowHeight + 4;
+          }
+
+          rows.forEach((row, rowIndex) => {
+            const rowY = visualY + competitorHeaderHeight + rowIndex * competitorRowHeight;
+            const values = [row.company, row.positioning, row.strengths, row.weaknesses, row.threat];
+            let cellX = bodyX;
+
+            pdf.setDrawColor("#27272a");
+            pdf.line(bodyX, rowY, bodyX + visualWidth, rowY);
+            values.forEach((value, cellIndex) => {
+              const width = columns[cellIndex]?.width ?? 20;
+              pdf.setFontSize(cellIndex === 0 ? 6.3 : 5.5);
+              pdf.setTextColor(cellIndex === 0 ? "#f4f4f5" : "#d4d4d8");
+              pdf.text(
+                truncatePdfCellLines(pdf.splitTextToSize(value || "Validation required", width - 4) as string[], 2),
+                cellX + 2,
+                rowY + 4.7,
+                { lineHeightFactor: 1.1, maxWidth: width - 4 }
+              );
+              cellX += width;
+            });
+          });
+
+          return competitorHeaderHeight + Math.max(1, rows.length) * competitorRowHeight + 4;
+        }
+
+        // Strategic Recommendations is inherently a list -- rendered as
+        // Action/Owner/Timeline/Budget/Success Metric/Decision Gate cards
+        // rather than one long paragraph block, mirrored from
+        // ReportPdfButton.tsx. Each card's signals are read directly out
+        // of this recommendation's own generated sentence
+        // (extractRecommendationSignals never fabricates a value it
+        // cannot find). The section's full prose still renders below this
+        // visual, unchanged.
+        if (section.field === "strategicRecommendations") {
+          const items = extractRecommendationItems(section.content).slice(0, 4);
+
+          if (items.length === 0) {
+            return 0;
+          }
+
+          const columns = 2;
+          const cardGap = recommendationCardGap;
+          const cardHeight = recommendationCardHeight;
+          const cardWidth = (visualWidth - (columns - 1) * cardGap) / columns;
+          const rowCount = Math.ceil(items.length / columns);
+
+          items.forEach((item, index) => {
+            const { timeframe, metric, budget, owner, gate } = extractRecommendationSignals(item);
+            const col = index % columns;
+            const row = Math.floor(index / columns);
+            const x = bodyX + col * (cardWidth + cardGap);
+            const cardY = visualY + row * (cardHeight + cardGap);
+
+            pdf.setFillColor("#18181b");
+            pdf.setDrawColor("#27272a");
+            pdf.roundedRect(x, cardY, cardWidth, cardHeight, 2.5, 2.5, "FD");
+
+            pdf.setFillColor("#042f2e");
+            pdf.setDrawColor("#5eead4");
+            pdf.circle(x + 6, cardY + 6, 3, "FD");
+            pdf.setFontSize(5.6);
+            pdf.setTextColor("#ccfbf1");
+            pdf.text(String(index + 1), x + 4.7, cardY + 7.4);
+
+            pdf.setFontSize(5.2);
+            pdf.setTextColor("#71717a");
+            pdf.text(localizePdfPresentationLabel("ACTION", pdfLocale), x + 11, cardY + 4);
+            pdf.setFontSize(6);
+            pdf.setTextColor("#e4e4e7");
+            const actionLines = truncatePdfCellLines(
+              pdf.splitTextToSize(localizePdfPresentationText(item, pdfLocale), cardWidth - 13) as string[],
+              2
+            );
+            pdf.text(actionLines, x + 11, cardY + 7.8, {
+              lineHeightFactor: 1.15,
+              maxWidth: cardWidth - 13,
+            });
+
+            const fields = (
+              [
+                ["Owner", owner],
+                ["Timeline", timeframe],
+                ["Budget", budget],
+                ["Success Metric", metric],
+              ] as const
+            ).filter(([, value]) => value);
+
+            const fieldsTopY = cardY + 7.8 + actionLines.length * 3.3 + 2.5;
+            const fieldColWidth = (cardWidth - 6) / 2;
+
+            if (fields.length > 0) {
+              pdf.setDrawColor("#27272a");
+              pdf.line(x + 3, fieldsTopY - 1.6, x + cardWidth - 3, fieldsTopY - 1.6);
+
+              fields.slice(0, 4).forEach(([label, value], fieldIndex) => {
+                const fx = x + 3 + (fieldIndex % 2) * fieldColWidth;
+                const fy = fieldsTopY + Math.floor(fieldIndex / 2) * 5.6;
+
+                pdf.setFontSize(4.4);
+                pdf.setTextColor("#71717a");
+                pdf.text(localizePdfPresentationLabel(label, pdfLocale).toUpperCase(), fx, fy);
+                pdf.setFontSize(5.2);
+                pdf.setTextColor("#5eead4");
+                drawSingleLine(value, fx, fy + 2.8, fieldColWidth - 2, 5.2, 4);
+              });
+            }
+
+            if (gate) {
+              pdf.setFontSize(4.4);
+              pdf.setTextColor("#71717a");
+              pdf.text(localizePdfPresentationLabel("DECISION GATE", pdfLocale), x + 3, cardY + cardHeight - 5.4);
+              pdf.setFontSize(5);
+              pdf.setTextColor("#fbbf24");
+              drawSingleLine(gate, x + 3, cardY + cardHeight - 2, cardWidth - 6, 5, 4);
+            }
+          });
+
+          return rowCount * cardHeight + Math.max(0, rowCount - 1) * cardGap;
+        }
+
+        if (pdfKeyTakeawayCardFields.has(section.field ?? "")) {
+          const takeaway = getSectionTakeaway(section.content);
+
+          if (!takeaway) {
+            return 0;
+          }
+
+          // Pin to the actual draw-time font before measuring -- see
+          // ReportPdfButton.tsx's own identical comment on this same
+          // measurement-order bug.
+          pdf.setFontSize(8.4);
+          const takeawayLines = (pdf.splitTextToSize(localizePdfPresentationText(takeaway, pdfLocale), visualWidth - 12) as string[]).slice(0, 3);
+          const takeawayBoxHeight = Math.max(16, 8 + takeawayLines.length * 4.4);
+
+          pdf.setFillColor("#101f1d");
+          pdf.setDrawColor("#115e59");
+          pdf.roundedRect(bodyX, visualY, visualWidth, takeawayBoxHeight, 3, 3, "FD");
+
+          pdf.setFontSize(6.4);
+          pdf.setTextColor("#5eead4");
+          pdf.text(localizePdfPresentationLabel("KEY TAKEAWAY", pdfLocale), bodyX, visualY - 2);
+
+          pdf.setFontSize(8.4);
+          pdf.setTextColor("#e4e4e7");
+          pdf.text(takeawayLines, bodyX + 6, visualY + 7, {
+            lineHeightFactor: 1.3,
+            maxWidth: visualWidth - 12,
+          });
+
+          return takeawayBoxHeight;
+        }
+
         if (section.field === "tamSamSom") {
           // Concentric TAM/SAM/SOM circles -- the standard consulting/
           // VC-deck device for market sizing -- replacing the previous
@@ -6808,7 +8428,10 @@ const ReportPanel = memo(function ReportPanel({
           // the in-app preview matches the exported PDF.
           const rows = getTamRows(section.content, visualWidth);
           const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value));
-          const tamCircleVisualHeight = tamCircleMaxRadius * 2 + 8;
+          // Plus 27mm (9mm per legend row) so each row has room for its
+          // own two-line planning-assumption sentence beneath the value --
+          // mirrors ReportPdfButton.tsx's own identical constant.
+          const tamCircleVisualHeight = tamCircleMaxRadius * 2 + 8 + 27;
           // Mirrors ReportPdfButton.tsx's own gate: a chart drawn from
           // missing or non-nested (TAM >= SAM >= SOM) figures asserts a
           // market shape that isn't real, so it is replaced with a plain
@@ -6858,6 +8481,11 @@ const ReportPanel = memo(function ReportPanel({
           rows.forEach(({ label, color, value }, index) => {
             const rowY = visualY + 2 + index * legendRowHeight;
             const isEstimated = isMarketSizeEstimated(section.content, label);
+            // The reader must see WHY the figure is what it is without
+            // opening Details -- the same real planning-assumption
+            // sentence the on-screen visual now shows inline, never a
+            // fabricated one.
+            const assumption = extractMarketSizeAssumption(section.content, label);
             pdf.setFillColor(color);
             pdf.roundedRect(legendX, rowY, 7, 4.4, 1.5, 1.5, "F");
             pdf.setFontSize(7.2);
@@ -6869,6 +8497,17 @@ const ReportPanel = memo(function ReportPanel({
             );
             pdf.setTextColor("#ccfbf1");
             drawSingleLine(value || "—", legendX + 10, rowY + 9.4, legendWidth - 10, 8, 5, false);
+            if (assumption) {
+              pdf.setFontSize(5.2);
+              pdf.setTextColor("#71717a");
+              const assumptionLines = (
+                pdf.splitTextToSize(localizePdfPresentationText(assumption, pdfLocale), legendWidth - 10) as string[]
+              ).slice(0, 2);
+              pdf.text(assumptionLines, legendX + 10, rowY + 13.6, {
+                lineHeightFactor: 1.2,
+                maxWidth: legendWidth - 10,
+              });
+            }
           });
 
           return tamCircleVisualHeight;
@@ -6940,28 +8579,8 @@ const ReportPanel = memo(function ReportPanel({
         }
 
         if (section.field === "executiveSummary") {
-          // Same deterministic "Decision: TOKEN" shape as the on-screen
-          // card above -- read via the locale-agnostic extractor instead
-          // of an English-only regex, which silently fails for every
-          // non-English report.
-          const decisionMatch = extractExecutiveDecisionFromText(section.content);
-          const decisionLabel = decisionMatch?.token.toUpperCase() || "—";
-          const confidence =
-            extractConfidence(section.content) ??
-            investmentScore?.confidence ??
-            extractConfidence(fullReportContent) ??
-            extractScore(fullReportContent, "Investment Score");
-          const whyLabels = localizedLabelVariants("why");
-          const topRisksLabels = localizedLabelVariants("topRisks");
-          const missingEvidenceLabels = localizedLabelVariants("missingEvidence");
-          const whatWouldChangeLabels = localizedLabelVariants("whatWouldChangeThisDecision");
-          const immediateNextActionLabels = localizedLabelVariants("immediateNextAction");
-          const why = extractMetricValueFromAliases(section.content, whyLabels);
-          const topRisk = extractAliasedSectionSnippet(section.content, topRisksLabels, missingEvidenceLabels);
-          const missingEvidence = extractAliasedSectionSnippet(section.content, missingEvidenceLabels, whatWouldChangeLabels);
-          const whatWouldChange = extractMetricValueFromAliases(section.content, whatWouldChangeLabels);
-          const nextAction = extractMetricValueFromAliases(section.content, immediateNextActionLabels);
-          const isTurkishPdf = pdfLocale === "tr";
+          const cardLayout = getExecutiveDecisionCardLayout(section.content, visualWidth);
+          const { decisionLabel, confidence, recItems, itemWidth, wrappedValues, rowHeights } = cardLayout;
 
           pdf.setFillColor("#ccfbf1");
           pdf.setDrawColor("#5eead4");
@@ -6986,53 +8605,39 @@ const ReportPanel = memo(function ReportPanel({
             "F"
           );
 
-          const recItems = [
-            ["Confidence", confidence === null ? "—" : `${confidence}%`],
-            [
-              "Why",
-              why ||
-                extractKeywordInsight(fullReportContent, ["opportunity", "market"]) ||
-                (isTurkishPdf ? "Gerekçe, yönetici kararı bölümünde detaylandırılmıştır" : "Rationale is detailed in the executive decision"),
-            ],
-            [
-              "Top Risk",
-              topRisk ||
-                extractKeywordInsight(fullReportContent, ["risk", "threat"]) ||
-                (isTurkishPdf ? "Ana risk, risk analizi bölümünde detaylandırılmıştır" : "Primary risk is detailed in the risk analysis"),
-            ],
-            [
-              isMarketIntelligence ? "Information Required Before Decision" : "Missing Evidence",
-              missingEvidence ||
-                (isTurkishPdf
-                  ? "Kararı değiştirecek nitelikte bir veri eksikliği belirtilmedi"
-                  : "No decision-changing data gap was flagged"),
-            ],
-            [
-              "Next Action",
-              nextAction ||
-                whatWouldChange ||
-                extractKeywordInsight(fullReportContent, ["next action", "critical action", "validate"]) ||
-                (isTurkishPdf ? "Acil sonraki adım için yönetici kararı bölümüne bakın" : "See the Immediate Next Action in the executive decision"),
-            ],
-          ];
-
-          recItems.forEach(([label, value], index) => {
+          // CRITICAL FIX -- confirmed live (root-cause repair): Why/Top
+          // Risk/Information Required/Next Action previously always drew
+          // through drawSingleLine (single line only, hard-truncated with
+          // an ellipsis regardless of available space) inside a fixed
+          // 15mm-tall tile. Now wraps to getExecutiveDecisionCardLayout's
+          // own pre-measured line count and each row grows to fit the
+          // taller of its two tiles -- short content (the common case)
+          // renders at the exact same 15mm tile height as before.
+          let recItemRowY = visualY;
+          recItems.forEach(([label], index) => {
+            const row = Math.floor(index / 2);
+            if (index % 2 === 0 && row > 0) {
+              recItemRowY += rowHeights[row - 1] + 2;
+            }
             const itemX = bodyX + 60 + (index % 2) * ((visualWidth - 64) / 2 + 2);
-            const itemY = visualY + Math.floor(index / 2) * 17;
-            const itemWidth = (visualWidth - 68) / 2;
+            const itemY = recItemRowY;
+            const rowHeight = rowHeights[row] ?? 15;
 
             pdf.setFillColor("#18181b");
             pdf.setDrawColor("#27272a");
-            pdf.roundedRect(itemX, itemY, itemWidth, 15, 2.5, 2.5, "FD");
+            pdf.roundedRect(itemX, itemY, itemWidth, rowHeight, 2.5, 2.5, "FD");
             pdf.setFontSize(6);
             pdf.setTextColor("#71717a");
             pdf.text(localizePdfPresentationLabel(label, pdfLocale).toUpperCase(), itemX + 2, itemY + 3.2);
             pdf.setTextColor("#e4e4e7");
             pdf.setFontSize(6);
-            drawSingleLine(localizePdfPresentationText(value, pdfLocale), itemX + 2, itemY + 7.8, itemWidth - 4, 6);
+            pdf.text(wrappedValues[index] ?? [], itemX + 2, itemY + 7.8, {
+              lineHeightFactor: 1.28,
+              maxWidth: itemWidth - 4,
+            });
           });
 
-          return 65;
+          return cardLayout.totalHeight;
         }
 
         if (section.field === "founderRoadmap" || section.field === "roadmap306090") {
@@ -7053,6 +8658,17 @@ const ReportPanel = memo(function ReportPanel({
           const forces = ["Rivalry", "Entrants", "Buyer", "Supplier", "Substitutes"];
           const centerX = bodyX + visualWidth * 0.32;
           const centerY = visualY + 22;
+          // Each force card now also carries its own real investor-
+          // interpretation sentence (matching the on-screen radar cards
+          // and ReportPdfButton.tsx) -- this section's raw paragraph is
+          // essentially "one sentence per force" by its own prompt's
+          // structure, so with all five shown here the paragraph below it
+          // would be a pure duplicate; the taller card (was a fixed
+          // 6mm/8mm-spaced row, now sized to fit up to 2 wrapped lines) is
+          // what makes it safe for pdfCompleteVisualFields to suppress
+          // that paragraph entirely.
+          const forceCardHeight = 14;
+          const forceCardSpacing = 16;
 
           pdf.setDrawColor("#115e59");
           pdf.circle(centerX, centerY, 20, "S");
@@ -7066,13 +8682,14 @@ const ReportPanel = memo(function ReportPanel({
             const dotX = centerX + Math.cos(angle) * 20;
             const dotY = centerY + Math.sin(angle) * 20;
             const cardX = bodyX + visualWidth * 0.58;
-            const cardY = visualY + index * 8;
+            const cardY = visualY + index * forceCardSpacing;
             // CRITICAL FIX -- do not reintroduce old fake-data behavior.
             // This used to be a static [72, 54, 66, 48, 60] array,
             // identical for every report -- see extractForceIntensity's
             // own comment for why a real per-force reading is used
             // instead, mirroring the on-screen visual above.
             const score = extractForceIntensity(section.content, force)?.width ?? 0;
+            const implication = extractForceImplication(section.content, force);
 
             pdf.setDrawColor("#5eead4");
             pdf.line(centerX, centerY, dotX, dotY);
@@ -7081,7 +8698,7 @@ const ReportPanel = memo(function ReportPanel({
 
             pdf.setFillColor("#18181b");
             pdf.setDrawColor("#27272a");
-            pdf.roundedRect(cardX, cardY, visualWidth * 0.38, 6, 2, 2, "FD");
+            pdf.roundedRect(cardX, cardY, visualWidth * 0.38, forceCardHeight, 2, 2, "FD");
             pdf.setFontSize(5.8);
             pdf.setTextColor("#e4e4e7");
             pdf.text(localizePdfPresentationLabel(force, pdfLocale), cardX + 2, cardY + 4);
@@ -7089,9 +8706,23 @@ const ReportPanel = memo(function ReportPanel({
             pdf.roundedRect(cardX + 22, cardY + 2.2, visualWidth * 0.24, 1.4, 0.7, 0.7, "F");
             pdf.setFillColor("#5eead4");
             pdf.roundedRect(cardX + 22, cardY + 2.2, (visualWidth * 0.24 * score) / 100, 1.4, 0.7, 0.7, "F");
+            if (implication) {
+              pdf.setFontSize(4.6);
+              pdf.setTextColor("#a1a1aa");
+              const implicationLines = (
+                pdf.splitTextToSize(
+                  localizePdfPresentationText(implication, pdfLocale),
+                  visualWidth * 0.38 - 4
+                ) as string[]
+              ).slice(0, 2);
+              pdf.text(implicationLines, cardX + 2, cardY + 7.6, {
+                lineHeightFactor: 1.2,
+                maxWidth: visualWidth * 0.38 - 4,
+              });
+            }
           });
 
-          return 46;
+          return Math.max(44, forces.length * forceCardSpacing);
         }
 
         const financialLayout =
@@ -7593,6 +9224,7 @@ const ReportPanel = memo(function ReportPanel({
             isMarketIntelligence={isMarketIntelligence}
             reportQuality={reportQuality}
             waitingMessage={waitingMessage}
+            majorPlayersContent={sections.find((entry) => entry.field === "majorPlayers")?.content}
           />
         ))}
       </div>
@@ -9982,8 +11614,29 @@ export default function Planner({
       let totalPollFailures = 0;
       let lastProgress = -1;
       let lastProgressStage = "";
+      // CRITICAL FIX -- this loop previously had no wall-clock ceiling: a
+      // job stuck in a non-terminal status (e.g. its worker died mid-run)
+      // keeps returning HTTP 200 with "processing"/"researching"/etc.
+      // forever, which is not caught by the 5-consecutive-*network*-
+      // failure guard above -- the UI's "Preparing your report..." spinner
+      // (isReportWorking, tied to this same async call) would then spin
+      // indefinitely. Report generation's own worst-case internal budget
+      // is well under 5 minutes; this ceiling is a generous multiple of
+      // that (covering a retry_wait cycle or two) so it never cuts off a
+      // report that is genuinely still progressing, while guaranteeing the
+      // UI always eventually recovers into the existing error/retry state
+      // instead of hanging forever.
+      const maxReportPollWaitMs = 8 * 60 * 1000;
 
       while (!completedReportId) {
+        if (performance.now() - clientExecutionStartedAt > maxReportPollWaitMs) {
+          throw new Error(
+            reportLanguage === "Turkish"
+              ? "Rapor oluşturma beklenenden çok daha uzun sürdü ve zaman aşımına uğradı. Lütfen tekrar deneyin."
+              : "Report generation is taking much longer than expected and has timed out. Please try again."
+          );
+        }
+
         if (pollDelayMs > 0) {
           await new Promise((resolve) => window.setTimeout(resolve, pollDelayMs));
         }
@@ -10705,7 +12358,11 @@ export default function Planner({
           onSelectConversation={selectConversation}
           renderMessageContent={(message: MobileConversationMessage) => (
             <MarkdownRenderer
-              content={message.content}
+              content={
+                message.role === "assistant" && message.mode === "market" && message.status === "complete"
+                  ? getReportCompletionHeadline(message.content)
+                  : message.content
+              }
               streaming={message.status === "streaming"}
             />
           )}

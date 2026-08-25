@@ -72,6 +72,25 @@ function extractFunctionSource(source, functionName) {
   return match[0];
 }
 
+// A later ticket ("RESTORE PREMIUM ANALYTICAL DEPTH") split
+// extractMarketIntelligenceCompetitorRows into a 3-tier fallback chain
+// (table -> flattened bullets -> Major Players' own bullets), each its
+// own helper function -- all three must compile alongside the main
+// function for the isolated module below to run.
+const functionDependencies = {
+  // A later ticket ("MARKET INTELLIGENCE -- ROOT-CAUSE DATA PIPELINE
+  // REPAIR") added isImplausibleCompetitorNameOnScreen/...Pdf right
+  // before this chain (each of the three tiers below now calls it), so
+  // the dependency span now starts there instead of at the flattened
+  // extractor.
+  extractMarketIntelligenceCompetitorRows:
+    /function isImplausibleCompetitorName(?:OnScreen|Pdf)\([\s\S]*?\nfunction extractMarketIntelligenceCompetitorRowsFromTable\([\s\S]*?\n\}/,
+  // A later ticket ("MARKET INTELLIGENCE -- ROOT-CAUSE DATA PIPELINE
+  // REPAIR") made extractRecommendationItems depend on a new sibling
+  // helper, isRecommendationHeadingLine.
+  extractRecommendationItems: /function isRecommendationHeadingLine\([\s\S]*?\n\}/,
+};
+
 // Function bodies here contain their own inline TypeScript type
 // annotations (e.g. a typed arrow-function local), too much for the
 // simple signature-line stripping used elsewhere in this suite -- so
@@ -79,9 +98,14 @@ function extractFunctionSource(source, functionName) {
 // transpile it properly, then imports the compiled function directly.
 async function compileFunction(source, functionName) {
   const raw = extractFunctionSource(source, functionName);
+  const dependencyPattern = functionDependencies[functionName];
+  const dependency = dependencyPattern ? source.match(dependencyPattern)?.[0] : null;
+  if (dependencyPattern) {
+    assert.ok(dependency, `dependency for ${functionName} not found`);
+  }
   const dir = mkdtempSync(join(tmpdir(), "zerinix-visual-fn-"));
   const outPath = join(dir, `${functionName}.ts`);
-  writeFileSync(outPath, `export ${raw}\n`);
+  writeFileSync(outPath, `${dependency ? `${dependency}\n` : ""}export ${raw}\n`);
   const mod = await import(pathToFileURL(outPath).href);
   return mod[functionName];
 }
@@ -171,7 +195,7 @@ test("Planner.tsx: the Competitive Landscape and Strategic Recommendations visua
 
 test("the new visual branches never regress to a silently blank card -- an empty competitor extraction falls back to a single, clean 'Validation Needed' state (not a bare empty table shell stacked with a second empty MarketMap state)", () => {
   for (const source of [pageSource, plannerSource]) {
-    assert.match(source, /if \(rows\.length === 0\) \{\s*\n\s*return \(\s*\n\s*<div className="mb-5 rounded-\[2rem\] border border-dashed border-white\/15 bg-black\/20 p-5">/);
+    assert.match(source, /if \(rows\.length === 0\) \{[\s\S]*?<div className="mb-5 rounded-\[2rem\] border border-dashed border-white\/15 bg-black\/20 p-5">/);
     assert.match(source, /No competitor data could be validated for this market yet\./);
   }
 });

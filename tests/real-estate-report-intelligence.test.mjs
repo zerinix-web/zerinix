@@ -340,7 +340,7 @@ test("planner and saved reports preserve the real-estate schema without startup 
   assert.match(planner, /realEstateReportFields/);
   assert.match(planner, /reportDomain === "real_estate"/);
   assert.match(planner, /real_estate_investment_analysis/);
-  assert.match(planner, /if \(!isDomainDecisionReport\)[\s\S]*Founder Readiness Gauge/);
+  assert.match(planner, /if \(!isDomainDecisionReport && !isMarketIntelligence\)[\s\S]*Founder Readiness Gauge/);
   assert.match(planner, /Real Estate Evidence & Due-Diligence Methodology/);
   assert.match(planner, /isRealEstateReport[\s\S]*Evidence Quality[\s\S]*Main Opportunity[\s\S]*Required Next Action/);
   assert.match(planner, /isRealEstateReport[\s\S]*\? "Due-Diligence Report"[\s\S]*: "Investor Ready"/);

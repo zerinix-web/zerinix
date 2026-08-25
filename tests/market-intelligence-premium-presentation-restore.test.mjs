@@ -67,7 +67,12 @@ async function compileFunction(source, functionName) {
   const dependency =
     functionName === "extractRecommendationSignals"
       ? source.match(/const recommendationOwnerRolePattern =[\s\S]*?;/)?.[0]
-      : null;
+      : functionName === "extractHeadlineMonetaryValue"
+        ? [
+            source.match(/const marketSizeExclusionContext =[\s\S]*?;/)?.[0],
+            source.match(/const marketSizePositiveContext =[\s\S]*?;/)?.[0],
+          ].join("\n")
+        : null;
   const dir = mkdtempSync(join(tmpdir(), "zerinix-premium-fn-"));
   const outPath = join(dir, `${functionName}.ts`);
   writeFileSync(outPath, `${dependency ? `${dependency}\n` : ""}export ${raw}\n`);
@@ -199,12 +204,18 @@ test("the empty state is genuinely conditional on extraction failing, not always
 
 // --- 3. Do not reintroduce old fake data behavior --------------------------
 
+// A later ticket ("Premium Report Presentation Deduplication Audit & Fix")
+// enriched this isMarketIntelligence branch further: it now also extracts
+// the section's full remaining explanation and real bullets (previously
+// only the headline sentence), so marketOverview's raw-text Details
+// disclosure below it is no longer a duplicate and can be fully
+// suppressed via cardFirstReportFields. See
+// tests/market-intelligence-market-overview-deduplication.test.mjs for
+// that fix's own dedicated regression coverage.
 test("Market Intelligence's marketOverview visual no longer shows the static, hardcoded Demand/Timing/Access/Defensibility bars -- Business Plan's identical visual is untouched", () => {
   for (const source of [pageSource, plannerSource]) {
-    assert.match(
-      source,
-      /if \(isMarketIntelligence\) \{\s*\n\s*return \(\s*\n\s*<div className="mb-5 rounded-\[2rem\] border border-teal-200\/15 bg-teal-200\/\[0\.055\] p-5">/
-    );
+    assert.match(source, /if \(isMarketIntelligence\) \{/);
+    assert.match(source, /<div className="mb-5 rounded-\[2rem\] border border-teal-200\/15 bg-teal-200\/\[0\.055\] p-5">/);
     // The fake bars array itself is still present (for Business Plan),
     // but only reachable after the isMarketIntelligence early return.
     assert.match(source, /\{ label: "Demand", width: "82%", color: "bg-teal-200" \}/);
@@ -257,8 +268,21 @@ test("routing (classifyReportDomain, applyPromptIntentModeOverride) and the deci
   );
 });
 
-test("validation/uncertainty labeling (Estimated tags, evidence badges) is untouched -- the new Market Size/CAGR cards read the [Estimated] tag rather than suppressing it", () => {
-  for (const source of [pageSource, plannerSource]) {
-    assert.match(source, /isEstimated = \/\\\[estimated\\\]\|\\btahmini\\b\/i\.test\(/);
-  }
+// CRITICAL FIX -- superseded by a later ticket ("Fix the semantic
+// field-mapping and evidence-status integrity bugs"): the binary
+// "[Estimated]"-tag-only check this test asserted defaulted EVERY
+// unlabeled figure to "verified" (Data Confirmed), even a hedged or
+// unsupported one -- exactly the "never promote an assumption, proxy, or
+// derived planning input to confirmed market evidence" bug that ticket
+// fixed. The Market Size/CAGR card now reuses the SAME canonical
+// evidence classifier (inferEvidenceLevel) TAM/SAM/SOM already used
+// correctly, whose default is "benchmarkDerived", never "verified" -- see
+// tests/market-intelligence-semantic-field-mapping-fix.test.mjs for that
+// fix's own dedicated coverage.
+test("validation/uncertainty labeling (Estimated tags, evidence badges) is untouched -- the Market Size/CAGR cards classify evidence via the shared canonical evidence classifier, which still reads hedging/estimate language rather than suppressing it", () => {
+  assert.match(pageSource, /const evidence = getDashboardMetricEvidence\(isCagr \? "CAGR" : "Market Size", value, content\);/);
+  assert.match(
+    plannerSource,
+    /const evidence = inferEvidenceLevel\(\{\s*\n\s*label: isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*context: section\.content,\s*\n\s*\}\);/
+  );
 });

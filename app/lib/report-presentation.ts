@@ -230,10 +230,37 @@ function stripMarkdown(value: string) {
     .trim();
 }
 
+// Sentence-boundary splitting must not treat a period inside a common
+// abbreviation as an end-of-sentence marker -- confirmed live: content like
+// "Evidence-supported major players relevant to the U.S. legal AI software
+// market include Thomson Reuters/CoCounsel..." was being cut right after
+// "U.S." because the split regex has no abbreviation awareness, silently
+// truncating the takeaway (and, transitively, the PDF Key Takeaway box) to
+// a fragment ending mid-thought. Protect known abbreviations' periods with
+// a sentinel before splitting, then restore them afterward.
+const SENTENCE_ABBREVIATIONS = [
+  "U.S.", "U.K.", "U.N.", "E.U.", "U.A.E.",
+  "e.g.", "i.e.", "etc.", "vs.", "cf.",
+  "Inc.", "Corp.", "Ltd.", "Co.", "LLC.",
+  "Dr.", "Mr.", "Mrs.", "Ms.", "Jr.", "Sr.", "St.", "Prof.", "Ph.D.",
+  "a.m.", "p.m.", "No.", "approx.",
+];
+
+function protectSentenceAbbreviations(value: string) {
+  return SENTENCE_ABBREVIATIONS.reduce((acc, abbreviation) => {
+    const escaped = abbreviation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return acc.replace(new RegExp(escaped, "g"), abbreviation.replace(/\./g, "\u0000"));
+  }, value);
+}
+
+function restoreSentenceAbbreviations(value: string) {
+  return value.replace(/\u0000/g, ".");
+}
+
 function splitSentences(content: string) {
-  return stripMarkdown(content)
+  return protectSentenceAbbreviations(stripMarkdown(content))
     .split(/(?<=[.!?])\s+|(?:\n|\r)+/)
-    .map((sentence) => sentence.trim())
+    .map((sentence) => restoreSentenceAbbreviations(sentence).trim())
     .filter((sentence) => sentence.length > 24);
 }
 

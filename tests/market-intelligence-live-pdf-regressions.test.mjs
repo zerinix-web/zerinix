@@ -221,9 +221,14 @@ test("failure 4 (reproduction): stripFillerAndDuplicateSentences silently delete
 const marketRouteSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
 
 test("failure 4 (fix): strategicRecommendations and tamSamSom are excluded from both the cross-section dedup and the per-field filler/duplicate-sentence pass", () => {
+  // A later ticket ("MARKET INTELLIGENCE -- ROOT-CAUSE DATA PIPELINE
+  // REPAIR") added executiveSummary to this same exclusion list for the
+  // identical reason (its own fixed-count "What Evidence Is Missing" list
+  // was being silently emptied by the same dedup pass) -- allow either
+  // the original two-field list or the extended one.
   assert.match(
     marketRouteSource,
-    /excludedFields:\s*\["strategicRecommendations",\s*"tamSamSom"\]/
+    /excludedFields:\s*\["strategicRecommendations",\s*"tamSamSom"(?:,\s*"executiveSummary")?\]/
   );
   const fillerLoopStart = marketRouteSource.indexOf("Eliminate filler LAST");
   const fillerLoopBlock = marketRouteSource.slice(fillerLoopStart, fillerLoopStart + 2500);

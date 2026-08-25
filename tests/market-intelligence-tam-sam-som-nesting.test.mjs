@@ -156,26 +156,44 @@ test("ReportPdfButton.tsx and Planner.tsx's downloadPdf: the PDF legend marks an
 
 // --- 3. Formulas/methodology/assumptions moved out of the main visual -----
 
-test("page.tsx and Planner.tsx: the main TAM/SAM/SOM visual no longer renders an inline assumption/description snippet -- only values, bars, Pending/Validation states, and the Planning Estimate tag", () => {
-  assert.doesNotMatch(pageSource, /\{value && assumption \? \(/);
-  assert.doesNotMatch(
+test("page.tsx and Planner.tsx: the main TAM/SAM/SOM visual renders a real per-layer planning-assumption/sizing-explanation line again (restored by a later ticket's explicit 'user must see ... sizing explanation without opening DETAILS' requirement, reversing the prior ticket's inline-removal) alongside values, bars, Pending/Validation states, and the Planning Estimate tag", () => {
+  assert.match(pageSource, /\{isResolved && assumption \? \(/);
+  // A later ticket ("RESTORE PREMIUM ANALYTICAL DEPTH") removed the
+  // line-clamp-2 here -- a real, single-sentence assumption explanation
+  // could still run long enough to get cut off at that width.
+  assert.match(
     plannerSource.slice(plannerSource.indexOf('if (field === "tamSamSom")'), plannerSource.indexOf('if (field === "marketOpportunity"')),
-    /line-clamp-2 text-xs leading-5 text-zinc-500">\{row\.description\}/
+    /text-xs leading-5 text-zinc-500">\{row\.description\}/
   );
 });
 
-test("full methodology (formulas, calculation basis, assumptions) is still reachable, but only inside the collapsed AnalysisNotes disclosure, per this ticket's requirement 3 (regression guard, carried over from the prior ticket's fix)", () => {
+// A later ticket ("FINAL CLEANUP -- remove all redundant DETAILS
+// duplication") superseded the "collapsed AnalysisNotes" treatment below
+// with full removal for TAM/SAM/SOM: the visual's per-layer assumption
+// text now captures the section's complete content. See
+// tests/market-intelligence-final-cleanup-details-duplication.test.mjs for
+// the current, superseding behavior.
+test("TAM/SAM/SOM is in cardFirstReportFields (regression guard on the underlying flag the Details-removal logic depends on)", () => {
   for (const source of [pageSource, plannerSource]) {
-    assert.match(source, /hasVisibleDetailsContent \? \(\s*\n\s*<AnalysisNotes|detailsContent\.trim\(\) \? \(\s*\n\s*<AnalysisNotes/);
+    const setMatch = source.match(/const cardFirstReportFields = new Set\(\[([\s\S]*?)\]\);/);
+    assert.ok(setMatch, "cardFirstReportFields not found");
+    assert.match(setMatch[1], /"tamSamSom",/);
   }
 });
 
 // --- 4. PDF does not duplicate methodology ---------------------------------
 
-test("ReportPdfButton.tsx: the TAM/SAM/SOM commentary/methodology body paragraph is drawn at most once, and only when the visual drew real (coherently nested) circles -- never alongside the visual's own explanatory text for the missing-data case", () => {
+// A later ticket ("FINAL CLEANUP -- remove all redundant DETAILS
+// duplication") superseded this coherence-gated partial suppression with
+// full suppression -- see
+// tests/market-intelligence-final-cleanup-details-duplication.test.mjs.
+test("ReportPdfButton.tsx: the TAM/SAM/SOM commentary/methodology body paragraph is never drawn at all -- exactly one isTamSamSomPdfSection card gate, with sectionBodyContent unconditionally suppressed for it", () => {
   const occurrences = pdfButtonSource.match(/const isTamSamSomPdfSection = section\.field === "tamSamSom"/g) || [];
   assert.equal(occurrences.length, 1);
-  assert.match(pdfButtonSource, /if \(hasBodyText && isTamSamSomCoherentlyNested\) \{/);
+  assert.match(
+    pdfButtonSource,
+    /const isPdfCompleteVisualSection = pdfCompleteVisualFields\.has\(section\.field \?\? ""\) \|\| isTamSamSomPdfSection;/
+  );
 });
 
 test("AI generation and the calculation engine are untouched -- only presentation and validation display logic changed (drift check)", () => {

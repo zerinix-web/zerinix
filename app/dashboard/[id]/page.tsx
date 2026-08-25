@@ -52,7 +52,9 @@ import { readExecutiveDecisionIntelligenceSummary } from "@/app/lib/report-engin
 import {
   getCanonicalDecisionLabel,
   resolveCanonicalDecisionFromReportText,
+  resolveMarketIntelligenceExecutiveDecision,
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
+import { localizedLabelVariants } from "@/app/lib/report-engine/executive-decision-brief";
 import {
   detectPdfPresentationLocale,
   localizePdfPresentationLabel,
@@ -214,26 +216,96 @@ function extractMetricValueFromAliases(
   return "";
 }
 
+// A labeled block (e.g. the text captured after "Top 3 Risks:") is often
+// a multi-item bulleted/numbered list, not a single sentence -- too long
+// for a compact KPI tile. Takes just the first real item, stripping its
+// own bullet/number marker, rather than displaying the whole block
+// verbatim or an arbitrary substring of it.
+function takeFirstListItem(value: string) {
+  const firstLine = value
+    .split(/\n+/)
+    .map((line) => line.trim().replace(/^[-*•]\s*/, "").replace(/^\(?\d{1,2}[).]\s*/, ""))
+    .find(Boolean);
+
+  return firstLine || value.trim();
+}
+
+// CRITICAL FIX -- confirmed live: TAM/SAM/SOM's own deterministic
+// "Planning Estimate" backend (market-intelligence-graph.ts's
+// buildPlanningEstimate) writes each layer as "TAM [Estimated]: $2.4M" --
+// a bracketed classification tag sitting between the label and its colon
+// that extractMetricValue's generic "label immediately followed by a
+// colon" regex cannot see past. That silently read every Planning
+// Estimate report as if TAM/SAM/SOM had never been stated at all: the
+// card showed "Validation Needed" for a layer while the report's own text
+// plainly stated a dollar figure two words later. Tries the existing
+// "LABEL: value" extraction first (unchanged for the "verified figure"
+// shape), then falls back to a pattern that tolerates an optional
+// bracketed tag ([Estimated]/[Verified]/etc.) between the label and the
+// colon -- never a new calculation, purely reading past a formatting
+// detail the original regex didn't anticipate.
+function extractMarketSizeCardValue(content: string, label: string) {
+  const direct = extractMetricValueFromAliases(content, [label]);
+
+  if (direct) {
+    return direct;
+  }
+
+  // CRITICAL FIX -- confirmed live (second gap, beyond the [Estimated]
+  // bracket tag above): the model's own natural prose also writes
+  // "TAM (Total Addressable Market): USD 1.45B" -- a parenthetical
+  // expansion of the label sitting between it and the colon, which
+  // neither extractMetricValueFromAliases above nor the bracket-only
+  // fallback below could see past, so the card fell back to "Validation
+  // Needed" a second, different way even though the report's own text
+  // plainly stated the figure. Strips "**" first (the model sometimes
+  // bolds the label itself, e.g. "**TAM** (...)"), then tolerates an
+  // optional "(...)" label expansion in addition to the existing
+  // "[...]" tag, in either order.
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = content
+    .replace(/\*\*/g, "")
+    .match(
+      new RegExp(`\\b${escapedLabel}\\b\\s*(?:\\([^)\\n]{0,80}\\)\\s*)?(?:\\[[^\\]\\n]{0,40}\\]\\s*)?[:\\-–—]\\s*([^\\n]*)`, "i")
+    );
+
+  return match?.[1]?.trim().replace(/\*\*/g, "") || "";
+}
+
 // CRITICAL FIX -- do not reintroduce old fake-data behavior. TAM/SAM/SOM's
 // bar widths were static, hardcoded percentages (100%/62%/28%) --
 // identical for every report regardless of the actual figures -- rather
 // than reflecting the real relationship between the three values. This
-// parses the extracted value's leading number and unit (K/M/B/T or a
-// spelled-out word) into a comparable magnitude so bar widths can be
-// computed from what the report actually says. A range ("$2.1-2.8B")
-// uses its first bound -- a reasonable, honest basis for relative sizing
-// even though the full range still displays as the card's own value text.
+// parses the extracted value's number and unit (K/M/B/T or a spelled-out
+// word) into a comparable magnitude so bar widths can be computed from
+// what the report actually says.
+//
+// CRITICAL FIX -- confirmed live (root-cause pipeline repair): a range
+// ("$2.1-2.8 billion") used to take its FIRST bound with a unit token
+// required immediately adjacent to that first number -- since a shared
+// trailing unit sits next to the SECOND number in this phrasing, the
+// first number parsed with NO unit at all (e.g. magnitude 2.1 instead of
+// 2,100,000,000). That silently broke the TAM >= SAM >= SOM nesting check
+// against a correctly-parsed sibling layer, showing "Additional market
+// validation is required" even though the report's own text was a
+// complete, internally consistent, evidence-labeled estimate -- not a
+// data problem, a parsing bug. Now takes the LAST number+unit found
+// (matching the already-correct parseMarketSizeMagnitude used by the PDF
+// exports/Planner.tsx for the identical field), which correctly resolves
+// a shared trailing unit. Also matches the full unit word first so
+// "thousand"/"trillion" (both starting with "t") can no longer collide.
 function parseMonetaryMagnitude(value: string) {
-  const match = (value || "").match(
-    /([\d.,]+)\s*(thousand|million|billion|trillion|[kKmMbBtT])?/
-  );
-  const num = match ? parseFloat(match[1].replace(/,/g, "")) : NaN;
+  const matches = [...(value || "").matchAll(/([\d.,]+)\s*(thousand|million|billion|trillion|[kKmMbBtT])?/g)];
+  const last = matches
+    .filter((candidate) => candidate[1] && Number.isFinite(parseFloat(candidate[1].replace(/,/g, ""))))
+    .at(-1);
 
-  if (!Number.isFinite(num)) {
+  if (!last) {
     return null;
   }
 
-  const unit = (match?.[2] || "").toLowerCase();
+  const num = parseFloat(last[1].replace(/,/g, ""));
+  const unit = (last[2] || "").toLowerCase();
   const multiplier =
     unit === "k" || unit === "thousand"
       ? 1e3
@@ -270,6 +342,50 @@ function isMarketSizeEstimated(content: string, label: string) {
   const sentence = extractMarketSizeAssumption(content, label);
 
   return /\[Estimated\]/i.test(sentence) || /\bPlanning Estimate\b/i.test(sentence);
+}
+
+const tamSamSomBarLabels = ["TAM", "SAM", "SOM"] as const;
+
+// CRITICAL FIX -- confirmed live: the TAM/SAM/SOM per-layer bar visual
+// (below) and the section-level evidence badge used two independent
+// derivations that could disagree. The badge fell back to a naive
+// keyword scan (inferEvidenceLevel) whose "value" input was the section's
+// own static title whenever no metric line matched -- and the honest
+// "insufficient evidence" notice copy itself (market-intelligence-graph.ts)
+// contains the word "verified" ("A verified market-size figure ... could
+// not be established"), which that keyword scan read as a positive
+// signal and returned "Data Confirmed" even though TAM/SAM/SOM were all
+// unresolved. Both now derive from this single, deterministic cascade so
+// they can never diverge again: a layer only counts as resolved once
+// every layer above it in the TAM >= SAM >= SOM hierarchy is also
+// resolved, exactly mirroring the nesting rule the bar visual has always
+// enforced.
+function resolveTamSamSomCascade(content: string) {
+  const values = tamSamSomBarLabels.map((label) => extractMarketSizeCardValue(content, label));
+  const magnitudes = values.map((value) => parseMonetaryMagnitude(value));
+  const tamResolved = magnitudes[0] !== null;
+  const samResolved = tamResolved && magnitudes[1] !== null && magnitudes[1] <= (magnitudes[0] as number);
+  const somResolved = samResolved && magnitudes[2] !== null && magnitudes[2] <= (magnitudes[1] as number);
+  const allResolved = tamResolved && samResolved && somResolved;
+  const anyEstimated =
+    allResolved && tamSamSomBarLabels.some((label) => isMarketSizeEstimated(content, label));
+
+  return { values, magnitudes, tamResolved, samResolved, somResolved, allResolved, anyEstimated };
+}
+
+// A section must never show "Data Confirmed" when TAM, SAM, or SOM is
+// unresolved, pending its parent's validation, or only ever reached an
+// [Estimated]/Planning Estimate figure -- a resolved-but-estimated stack
+// is a planning estimate, not verified data, and must not read as
+// confirmed either.
+function getTamSamSomSectionEvidence(content: string): EvidenceLevel {
+  const cascade = resolveTamSamSomCascade(content);
+
+  if (!cascade.allResolved) {
+    return "validationRequired";
+  }
+
+  return cascade.anyEstimated ? "benchmarkDerived" : "verified";
 }
 
 function formatMetricCardValue(value: string) {
@@ -487,10 +603,19 @@ function getDashboardSectionEvidence(section: { field?: string; title: string; c
     return "verified";
   }
 
-  if (field.includes("tam") || title.includes("tam / sam / som") || field.includes("financial") || title.includes("financial") || title.includes("finansal")) {
+  // TAM/SAM/SOM gets its own canonical cascade-based derivation (see
+  // resolveTamSamSomCascade's own comment) -- split out from the
+  // "financial" branch below, which keeps its prior, unrelated Gross
+  // Margin-based derivation unchanged for Business Plan's Financial
+  // Dashboard section.
+  if (field.includes("tam") || title.includes("tam / sam / som")) {
+    return getTamSamSomSectionEvidence(section.content);
+  }
+
+  if (field.includes("financial") || title.includes("financial") || title.includes("finansal")) {
     return getDashboardMetricEvidence(
       section.title,
-      extractMetricValue(section.content, "Gross Margin") || extractMetricValue(section.content, "TAM") || section.title,
+      extractMetricValue(section.content, "Gross Margin") || section.title,
       section.content
     );
   }
@@ -596,6 +721,66 @@ function extractBullets(content: string, fallback: string) {
     .slice(0, 2);
 }
 
+// FINAL PREMIUM REPORT RESTORATION -- Market Drivers/Barriers/
+// Opportunities/Threats/Customer Segments/Major Players have no separate
+// "methodology" the way TAM/SAM/SOM's formulas or Strategic
+// Recommendations' owner/budget do -- their generated content IS the
+// primary insight, so it must be visible without opening Details, not
+// collapsed away. Deliberately strict (no sentence-splitting fallback,
+// unlike extractBullets): only lines that already carry a real bullet/
+// numbered marker in the model's own output count as "multiple items" --
+// never fabricated by chopping prose into fake list items. Capped
+// generously (8, not the old 4) so a genuinely longer ranked list is
+// never silently cut -- this card is now the section's ONLY presentation
+// (no more "Details" underneath to fall back on for the rest).
+function extractRealBulletLines(content: string, limit = 8) {
+  return (content || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^[-*•]\s+/.test(line) || /^\d+[.)]\s+/.test(line))
+    .map((line) =>
+      line
+        .replace(/^[-*•]\s+/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .replace(/\*\*/g, "")
+        .trim()
+    )
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+// The "main explanation" paragraph shown alongside the Key Takeaway --
+// genuinely different text, not a restatement. getSectionTakeaway already
+// returns the content's first sentence (normalized through its own,
+// separate text-cleaning pipeline, and truncated with "..." past 220
+// chars) -- a literal string-match-and-remove against that value would
+// silently fail whenever either of those differ from this function's own
+// cleaning, leaving the "removed" sentence back in and restating it here.
+// Skipping by INDEX instead is robust regardless of any such mismatch:
+// whenever a takeaway was found at all, it corresponds to this content's
+// own first sentence, so the explanation simply starts one sentence later.
+// Bullet-marked lines are excluded from the sentence pool -- those are
+// surfaced separately by extractRealBulletLines, and including them here
+// too would show the same list item twice. Deliberately UNCAPPED (no
+// sentence-count or character-length ceiling): this card is now this
+// section's complete, only presentation, so it must carry every remaining
+// sentence, not a truncated teaser, or real analysis would be silently
+// lost now that there is no "Details" disclosure left to fall back on.
+function extractSectionMainExplanation(content: string, takeaway: string) {
+  const cleaned = (content || "").replace(/\*\*/g, "").replace(/^#{1,6}\s+.*$/gm, "");
+  const proseOnly = cleaned
+    .split("\n")
+    .filter((line) => !/^\s*(?:[-*•]|\d+[.)])\s+/.test(line))
+    .join(" ");
+  const sentences = proseOnly
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim().replace(/^[-*•]\s+/, ""))
+    .filter((sentence) => sentence.length > 20);
+  const startIndex = takeaway ? 1 : 0;
+
+  return sentences.slice(startIndex).join(" ");
+}
+
 // CRITICAL FIX -- restore Market Intelligence's Market Metrics cards.
 // marketSize/cagr are free-flowing analytical prose (their prompts never
 // require a literal "Market Size:"/"CAGR:" label line the way
@@ -606,14 +791,90 @@ function extractBullets(content: string, fallback: string) {
 // and the caller falls back to a premium "Validation Needed" empty state
 // when nothing is found, per this ticket's explicit requirement not to
 // paper over missing data with invented figures.
+// CRITICAL FIX -- confirmed live (root-cause pipeline repair): this
+// regex never recognized "£" (only €/$/₺), nor a spelled-out currency
+// CODE ("USD 1.2 billion") -- a correctly-generated, correctly-sourced
+// GBP or code-labeled figure would silently render "Validation Needed"
+// purely because of currency notation, not because evidence was
+// missing. Tolerates the same common codes already added for TAM/SAM/SOM
+// elsewhere in this file.
+// CRITICAL FIX -- confirmed live: a pricing/ARPA/per-customer dollar
+// figure mentioned in marketSize's own free-flowing prose (e.g. "SMB
+// customers typically pay $2K-$10K annually") was being grabbed as if it
+// were the section's headline TOTAL MARKET SIZE figure -- this function
+// used to match the FIRST dollar amount found anywhere in the content
+// with no awareness of what that figure actually represents. A
+// pricing/ARPA/ACV figure must never be classified or rendered as total
+// market size. Any candidate whose immediate surrounding text names it
+// as a pricing/per-customer/contract-value figure is now skipped; when
+// every candidate is excluded (as in this exact reported case, where the
+// only dollar figure present is an SMB ARPA assumption), the caller
+// correctly falls back to its "Validation Needed" state, matching
+// TAM/SAM/SOM's own already-correct behavior for the same report.
+const marketSizeExclusionContext =
+  /\b(?:ARPA|ACV|WTP|average revenue per (?:account|customer|user|buyer)|revenue per (?:account|customer|user|buyer)|per[\s-](?:customer|user|seat|account|buyer|month|mo)\b|\/\s*(?:user|month|mo|seat|customer|buyer)\b|pricing|price point|price range|subscription (?:price|fee|cost|tier)|contract value|\bACV\b|\bCAC\b|\bLTV\b|willing(?:ness)? to pay|customers?\s+(?:typically\s+)?(?:pay|spend|purchase)|SMBs?\s+(?:typically\s+)?(?:pay|spend|purchase)|buyers?\s+(?:typically\s+)?(?:pay|spend|purchase)|annual (?:revenue|spend|contract|purchase) per|per[\s-]buyer)\b/i;
+// CRITICAL FIX -- confirmed live (root-cause repair, ticket 2): the
+// negative exclusion list above is fundamentally open-ended -- it has to
+// anticipate every possible way the model might describe a non-market-
+// size figure (pricing, ARPA, ACV, willingness-to-pay, "per-buyer
+// purchase", ...), and a live report still leaked a per-buyer figure
+// worded in a way the exclusion list didn't yet cover. This is not a
+// case that can be closed by continuing to add more exclusion keywords.
+// A candidate figure is now REQUIRED to sit near genuine, positive
+// market-sizing language ("market size", "total addressable market",
+// "market is valued/worth/estimated at", "TAM of", ...) -- a small,
+// closed vocabulary -- in addition to passing the exclusion check.
+// Whenever this restored one canonical field: the graph-projection layer
+// (market-intelligence-graph.ts) now deterministically sets marketSize
+// itself whenever no verified figure exists (a computed planning
+// estimate, or an explicit "unavailable" notice) -- this presentation-
+// layer check only remains as defense-in-depth for the narrow residual
+// case where the model's own raw prose is trusted verbatim (adjacent
+// benchmarks exist but no computable estimate). Fails closed: if nothing
+// passes BOTH checks, no figure is ever guessed.
+const marketSizePositiveContext =
+  /\b(?:market size|total addressable market|serviceable addressable market|serviceable obtainable market|addressable market|market (?:opportunity|value)|\bTAM\b|\bSAM\b|\bSOM\b|industry size|(?:is|was|remains)\s+(?:valued|worth|estimated|sized)\s+at)\b/i;
+
 function extractHeadlineMonetaryValue(content: string) {
   const unitWord = "(?:thousand|million|billion|trillion)";
-  const bound = `[€$₺]\\s*\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT]\\b|\\s+${unitWord}\\b)?`;
-  const match = (content || "").match(
-    new RegExp(`${bound}(?:\\s*[-–—]\\s*(?:[€$₺]\\s*)?\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT]\\b|\\s+${unitWord}\\b)?)?`, "i")
+  const currencyToken = "(?:[€$₺£]|(?:USD|EUR|GBP|TRY|CAD|AUD|CHF|JPY)\\b)";
+  const bound = `${currencyToken}\\s*\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT]\\b|\\s+${unitWord}\\b)?`;
+  const pattern = new RegExp(
+    `${bound}(?:\\s*[-–—]\\s*(?:${currencyToken}\\s*)?\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT]\\b|\\s+${unitWord}\\b)?)?`,
+    "gi"
   );
+  const text = content || "";
 
-  return match ? match[0].replace(/\s+/g, " ").trim() : "";
+  for (const match of text.matchAll(pattern)) {
+    const matchIndex = match.index ?? 0;
+    // Trailing window is deliberately short (just enough for a directly
+    // attached qualifier like "$2K-$10K annually (ARPA)" or "$2K-$10K
+    // per customer") -- a longer trailing window risked reaching into
+    // the START of the NEXT, unrelated sentence (e.g. a genuine market-
+    // size figure immediately followed by a separate sentence about
+    // per-customer pricing) and excluding a perfectly valid market-size
+    // figure because of context that describes a different number
+    // entirely. The leading window stays generous since a pricing/ARPA
+    // label almost always precedes the figure it describes.
+    const exclusionWindow = text.slice(Math.max(0, matchIndex - 80), matchIndex + match[0].length + 20);
+
+    if (marketSizeExclusionContext.test(exclusionWindow)) {
+      continue;
+    }
+
+    // The positive-confirmation window is wider (market-sizing language
+    // often opens the sentence, well before the figure itself: "The
+    // total addressable market for X in the U.S. is estimated at $Y").
+    const positiveWindow = text.slice(Math.max(0, matchIndex - 150), matchIndex + match[0].length + 60);
+
+    if (!marketSizePositiveContext.test(positiveWindow)) {
+      continue;
+    }
+
+    return match[0].replace(/\s+/g, " ").trim();
+  }
+
+  return "";
 }
 
 function extractHeadlineCagrValue(content: string) {
@@ -622,6 +883,48 @@ function extractHeadlineCagrValue(content: string) {
   );
 
   return match ? match[0].replace(/\s+/g, " ").trim() : "";
+}
+
+// CRITICAL FIX -- confirmed live (root-cause pipeline repair): none of
+// the three competitor-row extraction tiers below validated that a
+// captured "vendor" string actually LOOKS like a company/product name --
+// so when the underlying competitiveLandscape text was un-gated model
+// prose (e.g. the cache-degraded path where the deterministic,
+// isImplausibleCompetitorName-filtered graph splice was unavailable), an
+// entire evidence/citation sentence like "Pricing evidence: Westlaw Edge
+// charges $89-$450/user/month..." could be captured whole as a "vendor
+// name" -- a structural parsing failure, not a data problem. Mirrors
+// vendor-discovery.ts's own isImplausibleCompetitorName heuristic
+// (length/word-count bounds, markdown/parser-artifact characters,
+// instruction-leading verbs) plus an explicit reject for the specific
+// evidence/citation-label prefixes this exact failure mode produces
+// (never a real company name). Applied as a per-row VENDOR-field gate
+// only -- a row with an implausible vendor is dropped entirely (there is
+// no real identity to attach the rest of the row to), but a row with a
+// real vendor and only SOME missing attributes keeps its other real
+// fields untouched, never destroyed wholesale for one missing attribute.
+function isImplausibleCompetitorNameOnScreen(name: string) {
+  const trimmed = (name || "").trim();
+
+  if (!trimmed) return true;
+  if (trimmed.length > 60) return true;
+  if (trimmed.includes("...") || trimmed.includes("…")) return true;
+  if (/[[\]{}`|]|https?:\/\/|www\.|\.(?:com|org|net|edu|gov|io)\b/i.test(trimmed)) return true;
+  if (
+    /^(?:conduct|analyz[e]?|generate|write|provide|summarize|summarise|explain|list|identify|assess|evaluate|create|perform|produce|research|describe|compare|review|investigate|determine|prepare|draft|compile|outline)\b/i.test(
+      trimmed
+    )
+  )
+    return true;
+  if (
+    /^(?:pricing evidence|market relevance|confidence|validation(?:\s+status)?|evidence|source|citation|methodology|assumption|coverage|note|reference)\s*:/i.test(
+      trimmed
+    )
+  )
+    return true;
+  if (trimmed.split(/\s+/).length > 6) return true;
+
+  return false;
 }
 
 // CRITICAL FIX -- restore Market Intelligence's structured visual
@@ -634,7 +937,217 @@ function extractHeadlineCagrValue(content: string) {
 // forced reuse that would leave Company/Threat cells empty. Positional
 // slicing (not .filter(Boolean) on data cells) keeps columns aligned even
 // when a cell is legitimately empty.
-function extractMarketIntelligenceCompetitorRows(content: string) {
+// CRITICAL FIX -- confirmed live: app/lib/report-engine/markdown-table-
+// flattening.ts's flattenMarkdownTables runs on every Market Intelligence
+// field (including competitiveLandscape) before the deterministic graph
+// projection is spliced back in; when that graph splice is unavailable
+// for a given generation (e.g. a cached response with no preserved
+// research graph), the flattened "- Vendor — Category: X; Strengths: Y;
+// ..." bullet shape is what actually reaches this section's content --
+// never restored back into a "| a | b | c |" table. The table-only parser
+// below then saw zero table rows and reported "Validation Needed" even
+// though the report plainly names real, evidence-backed vendors. This
+// fallback reads that exact flattened shape (the same header vocabulary
+// the deterministic table uses, now as "Header: Value" pairs instead of
+// cells) so the premium card consumes the SAME underlying vendor data
+// either way, without fabricating anything new.
+function extractFlattenedMarketIntelligenceCompetitorRows(content: string) {
+  const normalized = (content || "").replace(/\*\*/g, "");
+  const bulletLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^-\s+\S/.test(line));
+
+  const read = (fieldMap: Array<[string, string]>, keys: string[]) => {
+    for (const [key, value] of fieldMap) {
+      if (keys.some((k) => key.includes(k))) return value;
+    }
+    return "";
+  };
+
+  return bulletLines
+    .map((line) => {
+      const withoutBullet = line.replace(/^-\s+/, "");
+      const emDashIndex = withoutBullet.indexOf(" — ");
+      const vendor = (emDashIndex >= 0 ? withoutBullet.slice(0, emDashIndex) : withoutBullet).trim();
+      const fieldsText = emDashIndex >= 0 ? withoutBullet.slice(emDashIndex + 3) : "";
+      const fieldMap = fieldsText
+        .split("; ")
+        .map((pair): [string, string] | null => {
+          const colonIndex = pair.indexOf(": ");
+          return colonIndex < 0
+            ? null
+            : [pair.slice(0, colonIndex).trim().toLowerCase(), pair.slice(colonIndex + 2).trim()];
+        })
+        .filter((pair): pair is [string, string] => pair !== null);
+
+      return {
+        vendor,
+        category: read(fieldMap, ["category"]),
+        position: read(fieldMap, ["segment", "ai capability", "position", "positioning"]),
+        strengths: read(fieldMap, ["strength"]),
+        weaknesses: read(fieldMap, ["weakness"]),
+        relevance: read(fieldMap, ["market relevance"]),
+        validationStatus: read(fieldMap, ["confidence"]),
+      };
+    })
+    // An implausible vendor string is treated as MISSING, not kept as a
+    // fabricated identity -- any other real fields this row captured
+    // (category/strengths/weaknesses/...) survive untouched; the row is
+    // only dropped entirely when nothing real remains at all, per this
+    // fix's "mark only the unsupported field unavailable, never destroy
+    // the whole row" requirement.
+    .map((row) => ({ ...row, vendor: isImplausibleCompetitorNameOnScreen(row.vendor) ? "" : row.vendor }))
+    .filter((row) => row.vendor || row.strengths || row.weaknesses)
+    .slice(0, 20);
+}
+
+// CRITICAL FIX -- confirmed live: Competitive Landscape's table has a
+// narrow, brittle format requirement (an unbroken "| a | b | c |" block),
+// while Major Players' bullet list (built from the exact same
+// evidence-backed vendor set -- see market-intelligence-graph.ts's
+// projectMarketIntelligenceGraphToReport, which always sets both fields
+// from the same renderableVendors array together) tolerates almost any
+// shape, since the generic bullet extractor used elsewhere just needs a
+// line starting with "-". That asymmetry let a real, live contradiction
+// through: Competitive Landscape showing "Validation Needed" while Major
+// Players, immediately below, named real vendors (e.g. "Autodesk
+// Construction Cloud") from that identical vendor set. This reads Major
+// Players' own real bullet line shape ("- Vendor (Label): Classifications;
+// target customer: X (ranking: N/100; overall score: N/100; confidence:
+// N/100 Level; [ids])") as a last-resort source of the SAME authoritative
+// vendor data, rather than a fabricated stand-in -- vendor/category/
+// position map directly from real text; strengths/weaknesses/relevance
+// stay empty since Major Players' own format never states them.
+function extractMarketIntelligenceCompetitorRowsFromMajorPlayers(majorPlayersContent: string) {
+  const normalized = (majorPlayersContent || "").replace(/\*\*/g, "");
+  const bulletLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^-\s+\S/.test(line));
+
+  return bulletLines
+    .map((line) => {
+      const match = line.match(/^-\s+(.+?)\s+\(([^)]+)\):\s*([^;]+);[^:]*:\s*([^(]+)\(([^)]*)\)/);
+
+      if (!match) {
+        return null;
+      }
+
+      const [, vendor, majorPlayerLabel, classifications, , metrics] = match;
+      const confidenceMatch = metrics.match(/confidence[^:]*:\s*([^;]+)/i);
+
+      return {
+        vendor: vendor.trim(),
+        category: majorPlayerLabel.trim(),
+        position: classifications.trim(),
+        strengths: "",
+        weaknesses: "",
+        relevance: "",
+        validationStatus: confidenceMatch?.[1]?.trim() || "",
+      };
+    })
+    .filter(
+      (row): row is NonNullable<typeof row> =>
+        row !== null && Boolean(row.vendor) && !isImplausibleCompetitorNameOnScreen(row.vendor)
+    )
+    .slice(0, 20);
+}
+
+// CRITICAL FIX -- confirmed live: real Major Players content can be
+// grouped/prose bullets with no parenthetical label immediately after the
+// name at all (e.g. "- Thomson Reuters / CoCounsel / Westlaw Edge:
+// AI-powered legal research and contract platform..."), which fails the
+// row extractor above at its very first capture boundary (it requires
+// "Name (Label): ..."). That produced a real, live contradiction the
+// ticket flagged: this section's own table said "no competitor data could
+// be validated" while Major Players, immediately below, named real,
+// validated vendors. This is a 4th, last-resort tier: it never fabricates
+// category/position/strengths/weaknesses (an empty cell would misrepresent
+// unknown structure as verified-absent) -- it extracts ONLY the plausible
+// name segment(s) from each bullet, splitting a grouped "A / B / C" entry
+// into separate candidate names, and returns names alone. Callers must
+// render this as its own distinct state (validated identities, but not
+// enough structure for a comparison matrix) rather than blending it into
+// the full-row table.
+function extractMarketIntelligenceCompetitorNamesOnly(majorPlayersContent: string) {
+  const normalized = (majorPlayersContent || "").replace(/\*\*/g, "");
+  const bulletLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^-\s+\S/.test(line));
+
+  const names: string[] = [];
+
+  for (const line of bulletLines) {
+    // Strip URLs before splitting on ":" -- a bare "https://" scheme's own
+    // colon would otherwise be mistaken for the name/label separator,
+    // leaving a bogus "https" candidate.
+    const withoutBullet = line.replace(/^-\s+/, "").replace(/https?:\/\/\S+/gi, "");
+    const nameSegment = withoutBullet.split(/\s*[:(]|\s+—\s+/)[0]?.trim() || "";
+
+    if (!nameSegment) continue;
+
+    // Grouped multi-brand entries ("Thomson Reuters / CoCounsel / Westlaw
+    // Edge") are split into individual candidate names -- each one is
+    // plausibility-checked on its own, since a group that fails as one
+    // long string (too many words) is often several real, short names.
+    const candidates = nameSegment
+      .split(/\s*\/\s*|,\s*/)
+      .map((candidate) => candidate.trim())
+      .filter(Boolean);
+
+    for (const candidate of candidates) {
+      // isImplausibleCompetitorNameOnScreen's evidence/label-phrase reject
+      // ("market relevance:", "confidence:", ...) only fires when the
+      // colon is still attached -- nameSegment already stripped it during
+      // the name/label split above, so re-attach one here purely for this
+      // check (never part of the stored name itself).
+      if (!isImplausibleCompetitorNameOnScreen(`${candidate}:`) && !names.includes(candidate)) {
+        names.push(candidate);
+      }
+    }
+  }
+
+  // CRITICAL FIX -- confirmed live: real Major Players content is not
+  // always bulleted at all -- when the deterministic graph splice that
+  // normally produces the "- Vendor (Label): ..." bulleted shape isn't
+  // applied (e.g. a cached research bundle with no preserved graph),
+  // whatever the model itself wrote for this field can be a single prose
+  // paragraph naming vendors inline (e.g. "Evidence-supported major
+  // players in this market include Procore, Autodesk Construction Cloud,
+  // OpenSpace, and Buildots..."), with no bullet markers for the tier
+  // above to split on at all -- reproducing the exact reported
+  // contradiction (Competitive Landscape saying no data validated while
+  // Major Players plainly names real vendors). Only tried when the
+  // bulleted tier found nothing; extracts names from the SAME
+  // "include/such as/like/named" list-introducing shape prose lists
+  // almost always use, never fabricating category/position/strengths/
+  // weaknesses here either.
+  if (names.length === 0) {
+    const proseWithoutUrls = normalized.replace(/https?:\/\/\S+/gi, "");
+    const listMatch = proseWithoutUrls.match(
+      /\b(?:include|includes|including|such as|like|named)\s+((?:[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})(?:\s*,\s*(?:and\s+)?[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})*(?:\s+and\s+[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})?)/
+    );
+
+    if (listMatch?.[1]) {
+      const candidates = listMatch[1]
+        .split(/\s*,\s*|\s+and\s+/)
+        .map((candidate) => candidate.replace(/^and\s+/i, "").trim())
+        .filter(Boolean);
+
+      for (const candidate of candidates) {
+        if (!isImplausibleCompetitorNameOnScreen(`${candidate}:`) && !names.includes(candidate)) {
+          names.push(candidate);
+        }
+      }
+    }
+  }
+
+  return names.slice(0, 20);
+}
+
+function extractMarketIntelligenceCompetitorRowsFromTable(content: string) {
   const normalized = (content || "").replace(/\*\*/g, "");
   const tableRows = normalized
     .split("\n")
@@ -671,8 +1184,53 @@ function extractMarketIntelligenceCompetitorRows(content: string) {
       // Market Relevance, never conflated with it.
       validationStatus: read(cells, ["confidence"]),
     }))
+    // Defense-in-depth: the deterministic table is already filtered
+    // server-side (isImplausibleCompetitorName), but this render-time
+    // check never trusts that alone -- the same evidence-sentence-as-
+    // vendor failure mode is possible here too if a model ever writes
+    // its own "| a | b | c |" table without going through the graph.
+    .map((row) => ({ ...row, vendor: isImplausibleCompetitorNameOnScreen(row.vendor) ? "" : row.vendor }))
     .filter((row) => row.vendor || row.strengths || row.weaknesses)
     .slice(0, 20);
+}
+
+// Tries, in order: the real table, the flattened-bullet shape, then Major
+// Players' own bullet list (see its own comment above) -- the first tier
+// to produce any real rows wins. Every tier reads only content already
+// present in the payload; none fabricates a vendor.
+function extractMarketIntelligenceCompetitorRows(content: string, majorPlayersContent = "") {
+  const tableRows = extractMarketIntelligenceCompetitorRowsFromTable(content);
+  if (tableRows.length > 0) {
+    return tableRows;
+  }
+
+  const flattenedRows = extractFlattenedMarketIntelligenceCompetitorRows(content);
+  if (flattenedRows.length > 0) {
+    return flattenedRows;
+  }
+
+  return extractMarketIntelligenceCompetitorRowsFromMajorPlayers(majorPlayersContent);
+}
+
+// CRITICAL FIX -- confirmed live (root-cause pipeline repair): a
+// section-intro/label line the model writes before its real numbered
+// actions (e.g. "First 90 Days (three actions with owners, budgets,
+// KPIs, and success criteria):", closely echoing this field's own prompt
+// wording -- a known LLM failure mode) or the deterministic "Market Entry
+// Recommendation"/"Why Entry Is Not Recommended Now" heading route.ts
+// appends were both being treated as if they were themselves real
+// recommendation sentences, rendering a fake "Action" card with prompt/
+// heading scaffolding instead of real content. Mirrors market-
+// intelligence-presentation.ts's own isHeadingOnlyLine heuristic (a line
+// ending in ":" is a label, not a sentence) plus an explicit reject for
+// the two known deterministic heading strings.
+function isRecommendationHeadingLine(item: string) {
+  if (/:$/.test(item)) return true;
+  if (/^(?:first\s+90\s*-?\s*days?|market entry recommendation|why entry is not recommended now)\b/i.test(item)) {
+    return true;
+  }
+
+  return false;
 }
 
 // Strategic Recommendations is inherently a list -- each real recommendation
@@ -691,7 +1249,7 @@ function extractRecommendationItems(content: string) {
         .replace(/\*\*/g, "")
         .trim()
     )
-    .filter((line) => line.length > 8);
+    .filter((line) => line.length > 8 && !isRecommendationHeadingLine(line));
 
   if (bulletLines.length > 0) {
     return bulletLines.slice(0, 8);
@@ -846,15 +1404,29 @@ function extractKeywordInsight(content: string, keywords: string[]) {
   );
 }
 
-function getExecutiveHighlights(content: string) {
+// CRITICAL FIX -- confirmed live: Market Intelligence's deterministic
+// Executive Decision banner has real, clearly labeled Why/Top 3 Risks/
+// Immediate Next Action/What Evidence Is Missing fields -- the generic
+// keyword search above (built for Business Plan's free-flowing prose)
+// ignores that structure entirely, and its own fallback
+// (extractKeywordInsight's `lines[0]`, used whenever a keyword isn't
+// found anywhere in the section) can surface a completely unrelated
+// opening line as if it were "the risk" or "the next action". Sources
+// highlights from the SAME locale-agnostic labeled fields the PDF's own
+// Executive Decision card already reads, never a keyword scan of
+// arbitrary prose.
+function getMarketIntelligenceExecutiveHighlights(content: string) {
   const candidates = [
-    extractKeywordInsight(content, ["decision", "recommendation", "karar", "tavsiye"]),
-    extractKeywordInsight(content, ["opportunity", "market", "pazar", "tam", "sam", "som"]),
-    extractKeywordInsight(content, ["risk", "threat", "tehdit"]),
-    extractKeywordInsight(content, ["next action", "critical action", "action", "validate", "aksiyon", "doğrula"]),
-    extractKeywordInsight(content, ["validation", "evidence", "confidence", "doğrulama", "kanıt", "güven"]),
-    extractFirstInsight(content),
+    extractMetricValueFromAliases(content, localizedLabelVariants("why")),
+    takeFirstListItem(extractMetricValueFromAliases(content, localizedLabelVariants("topRisks"))),
+    extractMetricValueFromAliases(content, localizedLabelVariants("immediateNextAction")),
+    takeFirstListItem(extractMetricValueFromAliases(content, localizedLabelVariants("missingEvidence"))),
   ];
+
+  return dedupeHighlightCandidates(candidates);
+}
+
+function dedupeHighlightCandidates(candidates: string[]) {
   const seen = new Set<string>();
 
   return candidates
@@ -879,6 +1451,19 @@ function getExecutiveHighlights(content: string) {
       return true;
     })
     .slice(0, 5);
+}
+
+function getExecutiveHighlights(content: string) {
+  const candidates = [
+    extractKeywordInsight(content, ["decision", "recommendation", "karar", "tavsiye"]),
+    extractKeywordInsight(content, ["opportunity", "market", "pazar", "tam", "sam", "som"]),
+    extractKeywordInsight(content, ["risk", "threat", "tehdit"]),
+    extractKeywordInsight(content, ["next action", "critical action", "action", "validate", "aksiyon", "doğrula"]),
+    extractKeywordInsight(content, ["validation", "evidence", "confidence", "doğrulama", "kanıt", "güven"]),
+    extractFirstInsight(content),
+  ];
+
+  return dedupeHighlightCandidates(candidates);
 }
 
 function getSectionContentByFieldOrTitle(
@@ -962,7 +1547,8 @@ function extractDecisionDriverList(content: string, labels: string[]) {
 }
 
 function getDecisionSummaryItems(
-  sections: Array<{ field?: string; title: string; content: string }>
+  sections: Array<{ field?: string; title: string; content: string }>,
+  isMarketIntelligence = false
 ) {
   const fullContent = sections.map((section) => `${section.title}\n${section.content}`).join("\n\n");
   const executiveSummary = getSectionContentByFieldOrTitle(sections, [
@@ -999,30 +1585,67 @@ function getDecisionSummaryItems(
   // heuristic is kept only as a fallback for reports generated before
   // any of these formats existed.
   const dashboardLocale = detectPdfPresentationLocale(fullContent);
-  const resolvedDecision = resolveCanonicalDecisionFromReportText(
-    `${executiveRecommendation}\n${executiveSummary}\n${fullContent}`
-  );
-  const decisionSignal = resolvedDecision
-    ? getCanonicalDecisionLabel(
-        resolvedDecision.decision,
-        dashboardLocale === "tr" ? "Turkish" : resolvedDecision.language
-      )
-    : detectRecommendation(`${executiveRecommendation}\n${executiveSummary}\n${fullContent}`) ||
-      extractMetricValue(executiveRecommendation, "Decision") ||
-      extractMetricValue(executiveRecommendation, "Recommendation") ||
-      "—";
+  // CRITICAL FIX -- root-cause repair (ticket: "Fix the canonical
+  // decision consistency bug"). Market Intelligence resolves through
+  // resolveMarketIntelligenceExecutiveDecision -- the ONE canonical
+  // decision source for this report kind -- scoped to just the executive
+  // summary content, never the fullContent-wide detectRecommendation
+  // fallback below. That bare keyword scan (`\b(GO|NO GO|WAIT|...)\b`)
+  // matches the "GO" inside "Go-to-Market", a phrase virtually every
+  // Market Intelligence report mentions somewhere across its full text,
+  // fabricating a "GO" verdict on this top-of-page decision strip
+  // regardless of the report's real, conservative recommendation.
+  const marketDecisionSignal = isMarketIntelligence
+    ? resolveMarketIntelligenceExecutiveDecision(
+        executiveSummary || executiveRecommendation,
+        dashboardLocale === "tr" ? "Turkish" : "English"
+      ).decisionLabel
+    : null;
+  const resolvedDecision = isMarketIntelligence
+    ? null
+    : resolveCanonicalDecisionFromReportText(
+        `${executiveRecommendation}\n${executiveSummary}\n${fullContent}`
+      );
+  const decisionSignal =
+    marketDecisionSignal ??
+    (resolvedDecision
+      ? getCanonicalDecisionLabel(
+          resolvedDecision.decision,
+          dashboardLocale === "tr" ? "Turkish" : resolvedDecision.language
+        )
+      : detectRecommendation(`${executiveRecommendation}\n${executiveSummary}\n${fullContent}`) ||
+        extractMetricValue(executiveRecommendation, "Decision") ||
+        extractMetricValue(executiveRecommendation, "Recommendation") ||
+        "—");
+  // CRITICAL FIX -- confirmed live: for Market Intelligence, "Next
+  // Action"/"Main Risk" previously fell back to a bare keyword scan
+  // across fullContent (the ENTIRE report) whenever no literal "Next
+  // Action:"/"Main Risk:" label was found in the narrower executive
+  // fields -- risking a completely unrelated sentence from elsewhere in
+  // the report being surfaced as if it were the next action or main
+  // risk. Market Intelligence's deterministic Executive Decision banner
+  // has real, clearly labeled "Immediate Next Action"/"Top 3 Risks"
+  // fields (locale-agnostic lookup, matching the PDF's own Executive
+  // Decision card) -- read first, before ever falling through to the
+  // generic scan.
+  const marketNextAction = isMarketIntelligence
+    ? extractMetricValueFromAliases(executiveSummary || fullContent, localizedLabelVariants("immediateNextAction"))
+    : "";
   const nextStep =
+    marketNextAction ||
     extractMetricValue(executiveRecommendation, "Next Critical Action") ||
     extractMetricValue(executiveRecommendation, "Next Action") ||
     extractMetricValue(fullContent, "Next Critical Action") ||
     extractMetricValue(fullContent, "Next Action") ||
-    extractKeywordInsight(executiveRecommendation || executiveSummary || fullContent, [
-      "next",
-      "validate",
-      "launch",
-      "pilot",
-      "action",
-    ]);
+    (isMarketIntelligence
+      ? ""
+      : extractKeywordInsight(executiveRecommendation || executiveSummary || fullContent, [
+          "next",
+          "validate",
+          "launch",
+          "pilot",
+          "action",
+        ]));
   const mainInsight =
     extractMetricValue(executiveSummary, "Main Insight") ||
     extractKeywordInsight(executiveSummary || marketOpportunity || fullContent, [
@@ -1032,10 +1655,16 @@ function getDecisionSummaryItems(
       "growth",
       "customer",
     ]);
+  const marketMainRisk = isMarketIntelligence
+    ? takeFirstListItem(extractMetricValueFromAliases(executiveSummary || fullContent, localizedLabelVariants("topRisks")))
+    : "";
   const mainRisk =
+    marketMainRisk ||
     extractMetricValue(executiveRecommendation, "Main Risk") ||
     extractMetricValue(risks, "Main Risk") ||
-    extractKeywordInsight(risks || fullContent, ["risk", "threat", "regulation", "competition"]);
+    (isMarketIntelligence
+      ? ""
+      : extractKeywordInsight(risks || fullContent, ["risk", "threat", "regulation", "competition"]));
   const decisionConfidence = extractDecisionConfidenceValue(executiveRecommendation || fullContent);
   const positiveDrivers = extractDecisionDriverList(executiveRecommendation || fullContent, [
     "Positive signals",
@@ -1358,38 +1987,49 @@ function ExecutiveSummaryVisual({
 
   const evidenceLocale = getResponseLanguage(detectPdfPresentationLocale(content));
 
-  const score =
-    investmentScore?.totalScore ??
-    extractScore(content, "AI Investment Score") ??
-    extractConfidence(content);
+  // CRITICAL FIX -- root-cause repair (ticket: "Fix the canonical
+  // decision consistency bug"). Market Intelligence never computes an
+  // "AI Investment Score" (investment-score.ts's founder-viability
+  // metric, per the report-isolation policy: MI "must never mention a
+  // founder ... or any startup-readiness concept") -- it must always show
+  // "--" here, never fall through to extractConfidence(content)'s bare
+  // percentage scan, which can attach an unrelated "NN%" mentioned
+  // anywhere in the executive summary's own prose (e.g. a market-share or
+  // CAGR figure) as if it were an investment score.
+  const score = isMarketIntelligence
+    ? null
+    : investmentScore?.totalScore ??
+      extractScore(content, "AI Investment Score") ??
+      extractConfidence(content);
   // CRITICAL ARCHITECTURE FIX -- centralize executive decision
   // vocabulary (see executive-decision-vocabulary.ts). Every report
   // kind's own, unmodified decision output is translated into the same
   // 4-value label here, instead of showing each report kind's raw word
   // ("GO"/"Proceed with Conditions"/"BUY") verbatim on this KPI card.
   //
-  // CRITICAL FIX -- Market Intelligence must never fall back to
-  // investmentScore.recommendation. That field is investment-score.ts's
-  // generic business-viability GO/WAIT/PASS score -- a founder-idea
-  // scoring model Market Intelligence explicitly does not evaluate (it
-  // has its own, deliberately more conservative ENTER/MONITOR/AVOID
-  // market-entry verdict, mapped to the same shared GO/CONDITIONAL_GO/
-  // NO_GO banner text by market-intelligence-presentation.ts). Passing
-  // the generic score through here risked showing "Proceed" for a
-  // report whose real, correctly-computed verdict was a bounded pilot
-  // or an outright avoid, whenever the primary "Decision:" line
-  // extraction from this section's own text came up empty. Only the
-  // report's own deterministic decision text is ever trusted for
-  // Market Intelligence; if that is not found, the neutral legacy
-  // fallback below is used instead of a wrong, over-confident score.
-  const resolvedDecision = resolveCanonicalDecisionFromReportText(
-    content,
-    isMarketIntelligence ? undefined : investmentScore?.recommendation
-  );
-  const recommendation = resolvedDecision
-    ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
-    : detectRecommendation(content) || "—";
-  const highlights = getExecutiveHighlights(content);
+  // CRITICAL FIX -- confirmed live (root-cause repair): Market
+  // Intelligence now resolves through resolveMarketIntelligenceExecutiveDecision
+  // (the ONE canonical decision/confidence source for this report kind),
+  // never resolveCanonicalDecisionFromReportText's own detectRecommendation
+  // fallback -- that bare keyword scan (`\b(GO|NO GO|WAIT|...)\b`) can
+  // match the "GO" inside "Go-to-Market", a phrase virtually every Market
+  // Intelligence executive summary mentions when discussing entry
+  // strategy, fabricating a "GO" verdict regardless of the report's real,
+  // conservative recommendation.
+  const marketDecision = isMarketIntelligence
+    ? resolveMarketIntelligenceExecutiveDecision(content, evidenceLocale)
+    : null;
+  const resolvedDecision = isMarketIntelligence
+    ? null
+    : resolveCanonicalDecisionFromReportText(content, investmentScore?.recommendation);
+  const recommendation = marketDecision
+    ? marketDecision.decisionLabel
+    : resolvedDecision
+      ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
+      : detectRecommendation(content) || "—";
+  const highlights = isMarketIntelligence
+    ? getMarketIntelligenceExecutiveHighlights(content)
+    : getExecutiveHighlights(content);
   const kpis = [
     {
       label: "Investment Score",
@@ -1404,14 +2044,35 @@ function ExecutiveSummaryVisual({
       evidence: getDashboardMetricEvidence("Decision", recommendation, content),
     },
     {
+      // CRITICAL FIX -- confirmed live: Market Intelligence's deterministic
+      // Executive Decision banner has no "Market:"/"TAM:" labeled line at
+      // all -- this generic Business-Plan-shaped extraction (any line
+      // starting with "Market"/"TAM" anywhere in the whole executive
+      // summary) risked matching an unrelated clause in free-flowing MI
+      // prose rather than a genuine market signal. There is no reliable
+      // canonical "Market Signal" source in the deterministic banner, so
+      // Market Intelligence now shows the neutral placeholder directly
+      // instead of guessing from arbitrary prose. Business Plan/Acquisition
+      // are completely untouched.
       label: "Market Signal",
-      value: extractMetricValue(content, "Market") || extractMetricValue(content, "TAM") || "Review",
+      value: isMarketIntelligence
+        ? "Review"
+        : extractMetricValue(content, "Market") || extractMetricValue(content, "TAM") || "Review",
       accent: "from-sky-300/18 to-teal-300/5",
       evidence: "benchmarkDerived" as EvidenceLevel,
     },
     {
+      // CRITICAL FIX -- confirmed live: same generic risk here. Market
+      // Intelligence reads its real "Top 3 Risks" list from the
+      // deterministic banner (locale-agnostic label lookup, matching the
+      // same extraction the PDF's own Executive Decision card already
+      // uses), taking only the first named risk for this compact KPI
+      // value, rather than an unlabeled "any line starting with Risk"
+      // scan of the whole summary.
       label: "Risk Posture",
-      value: extractMetricValue(content, "Risk") || extractMetricValue(content, "Main Risk") || "Tracked",
+      value: isMarketIntelligence
+        ? takeFirstListItem(extractMetricValueFromAliases(content, localizedLabelVariants("topRisks"))) || "Tracked"
+        : extractMetricValue(content, "Risk") || extractMetricValue(content, "Main Risk") || "Tracked",
       accent: "from-amber-300/18 to-teal-300/5",
       evidence: "validationRequired" as EvidenceLevel,
     },
@@ -1557,11 +2218,19 @@ function ReportSectionVisual({
   content,
   investmentScore,
   isMarketIntelligence = false,
+  majorPlayersContent = "",
 }: {
   title: string;
   content: string;
   investmentScore?: ReportInvestmentScore;
   isMarketIntelligence?: boolean;
+  // Competitive Landscape's own table and Major Players' bullet list are
+  // built from the exact same evidence-backed vendor set (see
+  // extractMarketIntelligenceCompetitorRows' own comment) -- passed
+  // through so this card can fall back to Major Players' data when its
+  // own table content fails to parse, rather than showing "Validation
+  // Needed" while a sibling section plainly names the same vendors.
+  majorPlayersContent?: string;
 }) {
   const normalizedTitle = title.toLowerCase();
   const evidenceLocale = getResponseLanguage(detectPdfPresentationLocale(content));
@@ -1581,9 +2250,6 @@ function ReportSectionVisual({
     // naturally lands near 100% while SAM/SOM reflect their real,
     // reported proportion of it. A bar with no extractable value shows
     // its own premium "Validation Needed" state instead of a fake bar.
-    const values = bars.map((bar) => extractMetricValueFromAliases(content, bar.aliases));
-    const magnitudes = values.map((value) => parseMonetaryMagnitude(value));
-    const maxMagnitude = Math.max(0, ...magnitudes.filter((magnitude): magnitude is number => magnitude !== null));
     // CRITICAL FIX -- TAM/SAM/SOM must always be logically nested
     // (TAM >= SAM >= SOM). Each bar previously showed its own extracted
     // value fully independently, which could produce an investor-facing
@@ -1597,10 +2263,11 @@ function ReportSectionVisual({
     // value but fails the nesting check against an otherwise-resolved
     // parent (e.g. a SAM larger than its own TAM) falls back to the
     // generic "Validation Needed" -- that is this layer's own data
-    // problem, not a cascade from above.
-    const tamResolved = magnitudes[0] !== null;
-    const samResolved = tamResolved && magnitudes[1] !== null && magnitudes[1] <= (magnitudes[0] as number);
-    const somResolved = samResolved && magnitudes[2] !== null && magnitudes[2] <= (magnitudes[1] as number);
+    // problem, not a cascade from above. Shared with the section-level
+    // evidence badge (see resolveTamSamSomCascade's own comment) so the
+    // two can never disagree.
+    const { values, magnitudes, tamResolved, samResolved, somResolved } = resolveTamSamSomCascade(content);
+    const maxMagnitude = Math.max(0, ...magnitudes.filter((magnitude): magnitude is number => magnitude !== null));
     const resolved = [tamResolved, samResolved, somResolved];
     const pendingLabels: Array<string | null> = [
       null,
@@ -1613,10 +2280,17 @@ function ReportSectionVisual({
     // "Planning Estimate / Not Verified" tag instead of silently
     // presenting an estimate as a verified figure.
     const estimated = bars.map((bar, index) => resolved[index] && isMarketSizeEstimated(content, bar.label));
+    // The reader must see WHY a resolved figure is what it is -- a short,
+    // real planning-assumption sentence per layer (the specific scaling
+    // basis tamSamSom's own prompt requires stating), not just the bare
+    // number. This is the sizing explanation itself, distinct from
+    // methodology: the full derivation/formula chain still lives only in
+    // this section's own expandable Details disclosure below the visual.
+    const assumptions = bars.map((bar, index) => (resolved[index] ? extractMarketSizeAssumption(content, bar.label) : ""));
     // Only remaining explanatory line for this section -- shown when at
     // least one layer is still unresolved (a fully-nested stack needs no
-    // extra caveat). Formulas, calculation methodology, and assumptions
-    // live only in this section's own expandable Details/Methodology
+    // extra caveat). The deep formula/calculation derivation still lives
+    // only in this section's own expandable Details/Methodology
     // disclosure below the visual, never inline here.
     const hasUnresolvedLayer = resolved.some((isResolved) => !isResolved);
 
@@ -1638,41 +2312,53 @@ function ReportSectionVisual({
             const isResolved = resolved[index];
             const width = isResolved && magnitude !== null ? `${Math.max(8, (magnitude / maxMagnitude) * 100)}%` : null;
             const isEstimated = estimated[index];
+            const assumption = assumptions[index];
 
             return (
-              <div key={bar.label} className="grid items-center gap-3 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(7rem,auto)]">
-                <div className="rounded-2xl border border-white/10 bg-black/35 p-3 text-center">
-                  <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">{bar.label}</p>
-                  <div className="mt-2 flex justify-center">
-                    <EvidenceBadge level={getDashboardMetricEvidence(bar.label, isResolved ? value : "", content)} locale={evidenceLocale} market={isMarketIntelligence} />
+              <div key={bar.label} className="space-y-2">
+                <div className="grid items-center gap-3 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(7rem,auto)]">
+                  <div className="rounded-2xl border border-white/10 bg-black/35 p-3 text-center">
+                    <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">{bar.label}</p>
+                    <div className="mt-2 flex justify-center">
+                      <EvidenceBadge level={getDashboardMetricEvidence(bar.label, isResolved ? value : "", content)} locale={evidenceLocale} market={isMarketIntelligence} />
+                    </div>
                   </div>
-                </div>
-                {width ? (
-                  <div className="h-14 rounded-2xl border border-white/10 bg-zinc-950 p-1.5">
-                    <div
-                      className={`h-full rounded-[1.1rem] bg-gradient-to-r ${bar.color} shadow-lg shadow-teal-950/20`}
-                      style={{ width }}
-                    />
-                  </div>
-                ) : (
-                  <div className="flex h-14 items-center rounded-2xl border border-dashed border-white/15 bg-black/20 px-4">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" />
-                    <span className="ml-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">
-                      {pendingLabels[index] || "Validation Needed"}
-                    </span>
-                  </div>
-                )}
-                {isResolved ? (
-                  <div className="min-w-0 space-y-1 text-left sm:text-right">
-                    <p className="whitespace-normal rounded-2xl border border-white/10 bg-black/35 px-3 py-2 text-sm font-semibold text-white [overflow-wrap:anywhere] sm:truncate sm:whitespace-nowrap">
-                      {formatMetricCardValue(value)}
-                    </p>
-                    {isEstimated ? (
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-200/80">
-                        Planning Estimate / Not Verified
+                  {width ? (
+                    <div className="h-14 rounded-2xl border border-white/10 bg-zinc-950 p-1.5">
+                      <div
+                        className={`h-full rounded-[1.1rem] bg-gradient-to-r ${bar.color} shadow-lg shadow-teal-950/20`}
+                        style={{ width }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex h-14 items-center rounded-2xl border border-dashed border-white/15 bg-black/20 px-4">
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" />
+                      <span className="ml-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">
+                        {pendingLabels[index] || "Validation Needed"}
+                      </span>
+                    </div>
+                  )}
+                  {isResolved ? (
+                    <div className="min-w-0 space-y-1 text-left sm:text-right">
+                      <p className="whitespace-normal rounded-2xl border border-white/10 bg-black/35 px-3 py-2 text-sm font-semibold text-white [overflow-wrap:anywhere] sm:truncate sm:whitespace-nowrap">
+                        {formatMetricCardValue(value)}
                       </p>
-                    ) : null}
-                  </div>
+                      {isEstimated ? (
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-200/80">
+                          Planning Estimate / Not Verified
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+                {/* CRITICAL FIX -- confirmed live: line-clamp-2 could still
+                    cut off a real, single-sentence methodology/assumption
+                    explanation when it ran long (e.g. a stated formula or
+                    scaling basis) -- removed so the full sentence the
+                    report actually generated is always visible, never a
+                    fabricated addition. */}
+                {isResolved && assumption ? (
+                  <p className="pl-1 text-xs leading-5 text-zinc-500 sm:pl-[4.75rem]">{assumption}</p>
                 ) : null}
               </div>
             );
@@ -1682,6 +2368,75 @@ function ReportSectionVisual({
           <p className="mt-5 border-t border-white/10 pt-4 text-sm leading-6 text-zinc-400">
             Additional market validation is required before sizing can be confirmed.
           </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  // FINAL PREMIUM REPORT RESTORATION -- Market Drivers/Barriers/
+  // Opportunities/Threats/Customer Segments/Major Players have no
+  // separate "methodology" the way TAM/SAM/SOM or Strategic
+  // Recommendations do; their generated content IS the primary insight.
+  // This card keeps it visible without opening Details -- Key Takeaway
+  // (one highlighted line), a genuinely different main explanation
+  // (never a restatement of the takeaway), and real bullet points only
+  // when the model's own output actually used a list. Never a blank
+  // card: falls back to a premium Validation Needed state when nothing
+  // could be extracted at all.
+  if (
+    normalizedTitle.includes("market driver") ||
+    normalizedTitle.includes("barrier") ||
+    normalizedTitle.includes("opportunities") ||
+    normalizedTitle.includes("threat") ||
+    normalizedTitle.includes("customer segment") ||
+    normalizedTitle.includes("major player") ||
+    normalizedTitle.includes("regional analysis") ||
+    normalizedTitle.includes("industry trend") ||
+    normalizedTitle.includes("market segmentation")
+  ) {
+    const takeaway = getSectionTakeaway(content);
+    const explanation = extractSectionMainExplanation(content, takeaway);
+    const bullets = extractRealBulletLines(content);
+
+    if (!takeaway && !explanation && bullets.length === 0) {
+      return (
+        <div className="mb-5 rounded-[2rem] border border-dashed border-white/15 bg-black/20 p-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+            {title}
+          </p>
+          <div className="mt-4 flex items-center gap-3">
+            <span className="h-2 w-2 rounded-full bg-amber-300" />
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-amber-200">
+              Validation Needed
+            </p>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-zinc-400">
+            No {title.toLowerCase()} data could be established for this market yet.
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mb-5 rounded-[2rem] border border-white/10 bg-white/[0.025] p-5">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+          {getReportPresentationLabels(content).keyTakeaway}
+        </p>
+        {takeaway ? (
+          <p className="mt-3 text-lg font-medium leading-7 text-white">{takeaway}</p>
+        ) : null}
+        {explanation ? (
+          <p className="mt-3 text-sm leading-6 text-zinc-400">{explanation}</p>
+        ) : null}
+        {bullets.length > 1 ? (
+          <ul className="mt-4 space-y-2 border-t border-white/10 pt-4">
+            {bullets.map((bullet, index) => (
+              <li key={index} className="flex gap-2 text-sm leading-6 text-zinc-300">
+                <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200" />
+                <span>{bullet}</span>
+              </li>
+            ))}
+          </ul>
         ) : null}
       </div>
     );
@@ -1698,15 +2453,42 @@ function ReportSectionVisual({
     // Market Intelligence's real market-size/CAGR/indicator figures get
     // their own dedicated, data-driven Market Metrics cards instead (see
     // the "market metrics" title branch below).
+    //
+    // CRITICAL FIX -- confirmed live: this panel used to show only a
+    // line-clamped first sentence, so marketOverview's raw-text Details
+    // disclosure below it repeated that same scope statement in full --
+    // the exact duplication this ticket's bug report described. Now
+    // captures the section's COMPLETE content (headline sentence + the
+    // real remaining explanation + any real bullets), the same "capture
+    // everything, then suppress the raw duplicate" pattern already used
+    // for the Key Takeaway card above -- reusing the same extractors, no
+    // new calculation. marketOverview is now safe to add to
+    // cardFirstReportFields below.
     if (isMarketIntelligence) {
+      const explanation = extractSectionMainExplanation(content, opportunity);
+      const bullets = extractRealBulletLines(content);
+
       return (
         <div className="mb-5 rounded-[2rem] border border-teal-200/15 bg-teal-200/[0.055] p-5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
             Market Opportunity
           </p>
-          <p className="mt-3 line-clamp-4 text-xl font-semibold leading-8 text-white">
+          <p className="mt-3 text-xl font-semibold leading-8 text-white">
             {opportunity || "Opportunity signal is being evaluated."}
           </p>
+          {explanation ? (
+            <p className="mt-3 text-sm leading-6 text-teal-50/80">{explanation}</p>
+          ) : null}
+          {bullets.length > 1 ? (
+            <ul className="mt-4 space-y-2 border-t border-teal-200/15 pt-4">
+              {bullets.map((bullet, index) => (
+                <li key={index} className="flex gap-2 text-sm leading-6 text-teal-50/75">
+                  <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200" />
+                  <span>{bullet}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       );
     }
@@ -1758,7 +2540,20 @@ function ReportSectionVisual({
   if (normalizedTitle.includes("market size") || normalizedTitle === "cagr" || normalizedTitle.includes("cagr")) {
     const isCagr = normalizedTitle === "cagr" || normalizedTitle.includes("cagr");
     const value = isCagr ? extractHeadlineCagrValue(content) : extractHeadlineMonetaryValue(content);
-    const isEstimated = /\[estimated\]|\btahmini\b/i.test(content);
+    // CRITICAL FIX -- confirmed live: this card previously classified
+    // ANY extracted figure as "verified" (Data Confirmed) by default,
+    // only downgrading it when the content contained the literal
+    // "[Estimated]"/"tahmini" tag -- a figure hedged in prose ("could not
+    // be independently verified", "requires validation", an assumption
+    // or benchmark) with no literal tag still rendered as confirmed
+    // evidence. Reuses the SAME canonical evidence classifier TAM/SAM/SOM
+    // already uses correctly (getDashboardMetricEvidence ->
+    // inferEvidenceLevel), whose default for ambiguous/unlabeled context
+    // is "benchmarkDerived", never "verified" -- an assumption, proxy, or
+    // derived planning input can no longer be promoted to confirmed
+    // market evidence just because no explicit "[Estimated]" tag happens
+    // to be present.
+    const evidence = getDashboardMetricEvidence(isCagr ? "CAGR" : "Market Size", value, content);
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.1),transparent_30%),rgba(255,255,255,0.025)] p-5">
@@ -1766,12 +2561,26 @@ function ReportSectionVisual({
           <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
             {isCagr ? "CAGR" : "Market Size"}
           </p>
-          {value ? <EvidenceBadge level={isEstimated ? "benchmarkDerived" : "verified"} locale={evidenceLocale} market /> : null}
+          {value ? <EvidenceBadge level={evidence} locale={evidenceLocale} market /> : null}
         </div>
         {value ? (
           <>
             <p className="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-5xl">{value}</p>
-            <p className="mt-3 line-clamp-3 text-sm leading-6 text-zinc-400">{content}</p>
+            {/* CRITICAL FIX -- confirmed live: this evidence paragraph used
+                to be clamped to 3 lines, silently hiding most of the
+                section's real reasoning/evidence now that its raw-text
+                Details disclosure is fully suppressed (marketSize/cagr are
+                in cardFirstReportFields) -- the card became a bare number
+                with no supporting analysis. Restyled as a distinct,
+                labeled evidence block (never re-fabricated; the same real
+                content, just no longer visually cut off) rather than a
+                clamped leftover. */}
+            <div className="mt-4 border-t border-white/10 pt-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-teal-200/60">
+                Evidence &amp; Analysis
+              </p>
+              <p className="mt-2 text-xs leading-5 text-zinc-400">{content}</p>
+            </div>
           </>
         ) : (
           <div className="mt-4 rounded-2xl border border-dashed border-white/15 bg-black/20 p-4">
@@ -1961,7 +2770,7 @@ function ReportSectionVisual({
   // structured presentation without touching the existing Business
   // Plan/Acquisition visual.
   if (normalizedTitle.includes("competitive landscape")) {
-    const rows = extractMarketIntelligenceCompetitorRows(content);
+    const rows = extractMarketIntelligenceCompetitorRows(content, majorPlayersContent);
 
     // No competitor data validated at all -- a large empty table shell
     // (header row with nothing under it) stacked on top of MarketMap's
@@ -1971,6 +2780,49 @@ function ReportSectionVisual({
     // Market Metrics), and skip MarketMap entirely -- it has nothing to
     // plot with zero rows.
     if (rows.length === 0) {
+      // CRITICAL FIX -- confirmed live: before claiming "no competitor
+      // data could be validated," check whether Major Players actually
+      // names real, plausible vendors that just don't fit the strict
+      // row shape (see extractMarketIntelligenceCompetitorNamesOnly's own
+      // comment) -- this is what let the report say "no competitor data
+      // validated" one section above Major Players naming real vendors
+      // like Thomson Reuters/CoCounsel, LexisNexis/Lexis+ AI, Evisort,
+      // Fastcase, and Litera/Kira. Never fabricates category/position/
+      // strengths/weaknesses to fill the full table -- shows a distinct,
+      // honest third state instead.
+      const namesOnly = extractMarketIntelligenceCompetitorNamesOnly(majorPlayersContent);
+
+      if (namesOnly.length > 0) {
+        return (
+          <div className="mb-5 rounded-[2rem] border border-dashed border-white/15 bg-black/20 p-5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+              Competitive Landscape
+            </p>
+            <div className="mt-4 flex items-center gap-3">
+              <span className="h-2 w-2 rounded-full bg-sky-300" />
+              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-200">
+                Relevant Players Identified — Not Validated as Direct Competitors
+              </p>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-zinc-400">
+              These companies are named in available evidence as active in or adjacent to this market,
+              but current evidence does not independently validate them as direct, head-to-head
+              competitors for this analysis.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {namesOnly.map((name) => (
+                <span
+                  key={name}
+                  className="rounded-full border border-sky-300/20 bg-sky-300/10 px-3 py-1 text-xs font-semibold text-sky-100"
+                >
+                  {name}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="mb-5 rounded-[2rem] border border-dashed border-white/15 bg-black/20 p-5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
@@ -2504,8 +3356,12 @@ function ReportSectionVisual({
                     Not specified
                   </p>
                 )}
+                {/* CRITICAL FIX -- confirmed live: line-clamp-3 could cut
+                    off a real, single-sentence force implication at this
+                    card's narrow width -- removed so the full sentence the
+                    report actually generated is always visible. */}
                 {implication ? (
-                  <p className="mt-3 line-clamp-3 border-t border-white/10 pt-3 text-xs leading-5 text-zinc-400">
+                  <p className="mt-3 border-t border-white/10 pt-3 text-xs leading-5 text-zinc-400">
                     {implication}
                   </p>
                 ) : null}
@@ -2857,20 +3713,32 @@ function hasReportSectionVisual(title: string) {
 }
 
 // FINAL REPORT PRESENTATION CLEANUP -- these fields already get their own
-// premium visual card (ExecutiveSummaryVisual, MarketForcesQuadrant, the
-// TAM/SAM/SOM bars, or the Strategic Recommendation action cards), so the
-// generic ExecutiveInsightBanner/SectionTakeaway snippets would only repeat
-// the same summary a second (or third) time. Full raw text/methodology
-// stays available for all of them, but only inside the collapsed
-// AnalysisNotes disclosure -- never as a second always-visible summary.
+// premium visual card (ExecutiveSummaryVisual, MarketForcesQuadrant plus
+// each field's own Key-Takeaway/explanation/bullets card, the TAM/SAM/SOM
+// bars, the Porter's Five Forces radar, or the Strategic Recommendation
+// action cards), so the generic ExecutiveInsightBanner/SectionTakeaway
+// snippets would only repeat the same summary a second (or third) time.
+// Full raw text/methodology stays available for all of them, but only
+// inside the collapsed AnalysisNotes disclosure -- never as a second
+// always-visible summary.
 const cardFirstReportFields = new Set([
   "executiveSummary",
+  "marketOverview",
   "marketDrivers",
   "barriers",
   "opportunities",
   "threats",
+  "customerSegments",
+  "majorPlayers",
+  "regionalAnalysis",
+  "industryTrends",
+  "marketSegmentation",
   "tamSamSom",
   "strategicRecommendations",
+  "portersFiveForces",
+  "marketSize",
+  "cagr",
+  "competitiveLandscape",
 ]);
 
 function getReportArticleClass(title: string) {
@@ -3030,6 +3898,43 @@ function ExecutiveSnapshotPanel({
     reportQuality,
     labels.reportQuality === "Rapor Kalitesi"
   );
+  // CRITICAL FIX -- root-cause repair (ticket: "Fix the canonical
+  // decision consistency bug"). Confirmed live: buildExecutiveSnapshot's
+  // generic decision/confidence fallback (used whenever
+  // resolveCanonicalDecisionFromReportText fails to find the
+  // deterministic banner -- e.g. this report's own legacy
+  // pre-Executive-Decision-layer executiveSummary) is built on two unsafe
+  // full-content scans: extractDecision's fallback matches ANY standalone
+  // GO/WAIT/PASS/... keyword in the ENTIRE report (every Market
+  // Intelligence report mentions "Go-to-Market" -- \bGO\b matches the
+  // "GO" inside it, since a hyphen is a non-word boundary), and separately
+  // maps a matched "PASS" token to "GO" -- backwards. extractConfidence's
+  // bare percentage fallback can likewise attach an unrelated "NN%"
+  // mentioned near the word "confidence" anywhere in ordinary prose. This
+  // is what let a report whose real recommendation was "MONITOR FOR A
+  // STAGED U.S. ..." render as "GO"/"30%" wherever that generic fallback
+  // was reached with more than just this section's own text. Market
+  // Intelligence now resolves decision AND confidence together from ONE
+  // canonical function (executive-decision-vocabulary.ts) that never
+  // falls through to either unsafe scan: the deterministic banner if
+  // present (with confidence read only from that SAME matched line), else
+  // the raw "Decision:"/"Recommendation:" labeled text verbatim (never
+  // re-scanned for a keyword, never remapped), else an honest "—" with no
+  // numeric confidence at all. Business Plan/Acquisition's own generic
+  // buildExecutiveSnapshot values are completely untouched.
+  const marketDecision = isMarketIntelligence
+    ? resolveMarketIntelligenceExecutiveDecision(
+        section.content,
+        isMarketIntelligenceTurkish ? "Turkish" : "English"
+      )
+    : null;
+  const snapshotDecision = marketDecision ? marketDecision.decisionLabel : snapshot.decision;
+  const snapshotConfidenceScore = marketDecision ? marketDecision.confidenceScore : snapshot.confidenceScore;
+  const snapshotConfidenceDisplay = marketDecision
+    ? marketDecision.confidenceScore !== null
+      ? `${marketDecision.confidenceScore}%`
+      : "—"
+    : snapshot.confidence;
   // CRITICAL FIX -- Executive Decision Center. The Founder Readiness
   // gauge reads investmentScore.decisionEngine, the founder-viability
   // score Market Intelligence never computes (report-isolation policy:
@@ -3064,18 +3969,18 @@ function ExecutiveSnapshotPanel({
             {labels.executiveSnapshot}
           </p>
           <h4 className="mt-2 text-xl font-semibold tracking-tight text-white">
-            {labels.decision}: {snapshot.decision}
+            {labels.decision}: {snapshotDecision}
           </h4>
         </div>
         <span className="w-fit rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-xs font-semibold text-zinc-200">
-          {labels.confidence}: {snapshot.confidence}
+          {labels.confidence}: {snapshotConfidenceDisplay}
         </span>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <SnapshotGauge
           label={labels.confidenceGauge}
-          value={snapshot.confidenceScore}
-          display={snapshot.confidence}
+          value={snapshotConfidenceScore}
+          display={snapshotConfidenceDisplay}
         />
         {isMarketIntelligence ? (
           <SnapshotGauge
@@ -4062,7 +4967,7 @@ export default async function ReportDetailPage({
   const sourceSections: typeof uniqueReportSections = [];
   const getReportSectionKey = (section: (typeof report.sections)[number]) =>
     `${report.id}:${section.field || section.title}`;
-  const decisionSummaryItems = getDecisionSummaryItems(visibleSections);
+  const decisionSummaryItems = getDecisionSummaryItems(visibleSections, isMarketIntelligenceReport);
   const decisionSignalItem =
     decisionSummaryItems.find((item) => item.label === "Decision Signal") ||
     decisionSummaryItems[0];
@@ -4256,12 +5161,12 @@ export default async function ReportDetailPage({
                         )
                       : section.content;
                   // Card-first sections (see cardFirstReportFields) already
-                  // surface their own summary via a dedicated visual card --
-                  // the full raw paragraph is methodology detail, not primary
-                  // content, so on mobile it stays behind its own nested
-                  // disclosure instead of always being fully expanded right
-                  // under the visual (matching the desktop AnalysisNotes
-                  // treatment). Every other section type is unchanged.
+                  // surface their COMPLETE content via a dedicated visual card
+                  // -- the raw paragraph below it would only repeat what the
+                  // card already fully communicates, so it renders neither
+                  // expanded nor collapsed for these sections (matching the
+                  // desktop treatment). Every other section type is
+                  // unchanged.
                   const isCardFirstSection = cardFirstReportFields.has(section.field ?? "");
 
                   return (
@@ -4283,19 +5188,16 @@ export default async function ReportDetailPage({
                                 content={section.content}
                                 investmentScore={report.investmentScore}
                                 isMarketIntelligence={report.type === "Market Analysis"}
+                                majorPlayersContent={
+                                  visibleSections.find((entry) => entry.field === "majorPlayers")?.content
+                                }
                               />
                             ) : null}
                           </div>
-                          {detailsContent.trim() ? (
-                            isCardFirstSection ? (
-                              <AnalysisNotes compact label={getReportPresentationLabels(section.content).details}>
-                                <ReportText content={detailsContent} mobile />
-                              </AnalysisNotes>
-                            ) : (
-                              <div className="min-w-0 rounded-[1.25rem] border border-white/[0.12] bg-black/30 p-3.5 shadow-inner shadow-black/20">
-                                <ReportText content={detailsContent} mobile />
-                              </div>
-                            )
+                          {detailsContent.trim() && !isCardFirstSection ? (
+                            <div className="min-w-0 rounded-[1.25rem] border border-white/[0.12] bg-black/30 p-3.5 shadow-inner shadow-black/20">
+                              <ReportText content={detailsContent} mobile />
+                            </div>
                           ) : null}
                           <CopySectionButton content={section.content} />
                         </div>
@@ -4734,19 +5636,25 @@ export default async function ReportDetailPage({
                                 content={section.content}
                                 investmentScore={report.investmentScore}
                                 isMarketIntelligence={report.type === "Market Analysis"}
+                                majorPlayersContent={
+                                  visibleSections.find((entry) => entry.field === "majorPlayers")?.content
+                                }
                               />
                               {/* Card-first sections (see cardFirstReportFields) already
-                                  surface their own summary via a dedicated visual card
-                                  (ExecutiveSummaryVisual, MarketForcesQuadrant, the
-                                  TAM/SAM/SOM bars, or the Recommendation cards) -- a
-                                  generic SectionTakeaway here would only repeat it.
-                                  Full raw methodology stays available for every
-                                  section, but only inside the collapsed AnalysisNotes
-                                  disclosure below, never as always-visible body text. */}
+                                  surface their COMPLETE content via a dedicated visual
+                                  card (ExecutiveSummaryVisual, MarketForcesQuadrant, the
+                                  TAM/SAM/SOM bars, Porter's radar, the Recommendation
+                                  cards, ...) -- each card's own extraction now captures
+                                  the section's full remaining prose/bullets, not just a
+                                  teaser, so a generic SectionTakeaway or a raw-text
+                                  "Details" disclosure underneath would only repeat what
+                                  the card already fully communicates. Neither renders
+                                  for these sections; every other section keeps both,
+                                  unchanged. */}
                               {detailsContent.trim() && !cardFirstReportFields.has(section.field ?? "") ? (
                                 <SectionTakeaway content={detailsContent} />
                               ) : null}
-                              {detailsContent.trim() ? (
+                              {detailsContent.trim() && !cardFirstReportFields.has(section.field ?? "") ? (
                                 <AnalysisNotes
                                   compact
                                   label={isFinancialDashboard ? "Metric Details" : presentationLabels.details}

@@ -872,7 +872,26 @@ function ensureMarketReportQuality(
     // real SAM/SOM breakdown and assumptions, and leaving nothing for the
     // PDF's TAM/SAM/SOM chart to parse even when the model had produced a
     // genuine, correctly-labeled estimate.
-    excludedFields: ["strategicRecommendations", "tamSamSom"],
+    //
+    // CRITICAL FIX -- confirmed live (root-cause pipeline repair):
+    // executiveSummary carries the identical risk. buildMarketExecutiveDecisionBrief
+    // builds its own fixed-count "Top Risks" / "What Evidence Is Missing"
+    // numbered lists (executive-decision-brief.ts) and splices them into
+    // executiveSummary -- the exact same "fixed, complete set of items
+    // that must never be silently pruned" shape strategicRecommendations
+    // was already protected for. When the top risk sentence (biggestRisk,
+    // market-intelligence-presentation.ts) and the TAM/SAM/SOM data-gap
+    // sentence (identifyMarketInformationGaps) read as near-duplicate
+    // "insights" -- both routinely discuss "market size and competitive
+    // positioning" data availability -- cross-section dedup could silently
+    // drop the gap sentence entirely, leaving the "What Evidence Is
+    // Missing:" heading in the persisted executiveSummary text with no
+    // list item under it. That produced a real, live contradiction
+    // downstream: the PDF/web executive decision card's own re-extraction
+    // of that now-empty section fell back to claiming "no decision-
+    // changing data gap was flagged" even though Market Size/CAGR/TAM-SAM-
+    // SOM were genuinely unresolved elsewhere in the same report.
+    excludedFields: ["strategicRecommendations", "tamSamSom", "executiveSummary"],
   }) as Record<MarketReportField, string>;
 
   // Evidence and confidence stay in the background: no per-section

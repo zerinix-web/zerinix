@@ -114,21 +114,15 @@ test("Planner.tsx: the TAM/SAM/SOM section no longer shows a duplicate Executive
   );
 });
 
-test("page.tsx: mobile TAM/SAM/SOM no longer shows the full raw paragraph always-expanded next to the visual -- it moves into a collapsed AnalysisNotes disclosure (now via the general isCardFirstSection gate, not a tamSamSom-only special case)", () => {
+// A later ticket ("FINAL CLEANUP -- remove all redundant DETAILS
+// duplication") superseded the "collapsed AnalysisNotes" treatment below
+// with full removal for TAM/SAM/SOM: the visual's per-layer assumption
+// text now captures the section's complete content, making even a
+// collapsed raw-text disclosure fully redundant. See
+// tests/market-intelligence-final-cleanup-details-duplication.test.mjs for
+// the current, superseding behavior.
+test("page.tsx: mobile TAM/SAM/SOM's raw-paragraph gating still runs through isCardFirstSection (regression guard on the underlying flag)", () => {
   assert.match(pageSource, /const isCardFirstSection = cardFirstReportFields\.has\(section\.field \?\? ""\);/);
-  assert.match(
-    pageSource,
-    /isCardFirstSection \? \(\s*\n\s*<AnalysisNotes compact label=\{getReportPresentationLabels\(section\.content\)\.details\}>/
-  );
-});
-
-test("methodology stays reachable (only inside the collapsed AnalysisNotes disclosure, per this ticket's own requirement), never fully dropped", () => {
-  for (const source of [pageSource, plannerSource]) {
-    // AnalysisNotes must still render for tamSamSom sections (no
-    // `&& section.field !== "tamSamSom"` guard on the AnalysisNotes call
-    // itself) -- only the duplicate insight-snippet components are gated.
-    assert.match(source, /hasVisibleDetailsContent \? \(\s*\n\s*<AnalysisNotes|detailsContent\.trim\(\) \? \(\s*\n\s*<AnalysisNotes/);
-  }
 });
 
 // --- 2. Missing data uses the visual validation state, not a paragraph ---
@@ -207,13 +201,19 @@ test("ReportPdfButton.tsx: exactly one TAM/SAM/SOM section is ever drawn per rep
   assert.doesNotMatch(pdfButtonSource, /No verified or logically nested/);
 });
 
-test("ReportPdfButton.tsx: the commentary/insight body paragraph below the TAM/SAM/SOM visual is only drawn when the visual actually drew real circles -- never stacked under the visual's own 'Additional market validation...' explanation", () => {
+// A later ticket ("FINAL CLEANUP -- remove all redundant DETAILS
+// duplication") superseded this coherence-gated partial suppression with
+// full suppression: the commentary/insight body paragraph is now NEVER
+// drawn below the TAM/SAM/SOM visual (not even when circles are real),
+// because the visual's own per-layer assumption sentence is already this
+// section's complete presentation. See
+// tests/market-intelligence-final-cleanup-details-duplication.test.mjs for
+// the current, superseding behavior.
+test("ReportPdfButton.tsx: the commentary/insight body paragraph below the TAM/SAM/SOM visual is never drawn at all -- sectionBodyContent is unconditionally suppressed for tamSamSom via pdfCompleteVisualFields/isTamSamSomPdfSection", () => {
   assert.match(
     pdfButtonSource,
-    /const tamSamSomMagnitudes = getTamRows\(getTamVisualContent\(section\.content\), section\.content\)\.map\(\(row\) =>/
+    /const isPdfCompleteVisualSection = pdfCompleteVisualFields\.has\(section\.field \?\? ""\) \|\| isTamSamSomPdfSection;/
   );
-  assert.match(pdfButtonSource, /const isTamSamSomCoherentlyNested =/);
-  assert.match(pdfButtonSource, /if \(hasBodyText && isTamSamSomCoherentlyNested\) \{/);
 });
 
 test("Planner.tsx's own downloadPdf export: the coherence-gated explanation now matches the UI's exact wording (regression guard on the deliberately separate, otherwise-untouched PDF code path)", () => {
