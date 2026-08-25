@@ -10,7 +10,9 @@ import {
   FileText,
   Globe2,
   Languages,
+  LayoutDashboard,
   LockKeyhole,
+  LogOut,
   Mail,
   MessageCircle,
   ShieldCheck,
@@ -20,6 +22,7 @@ import {
 } from "lucide-react";
 import type { BillingOverview } from "@/app/dashboard/billing/billing-data";
 import type { UserSettingsProfile } from "@/app/dashboard/settings/settings-data";
+import SignOutButton from "@/components/auth/SignOutButton";
 
 type AccountRowProps = {
   icon: LucideIcon;
@@ -178,6 +181,26 @@ export default function MobileAccountHome({
             secure.
           </div>
         ) : null}
+
+        <section className="mt-6">
+          <Link
+            href="/dashboard"
+            className="flex min-h-[4.25rem] items-center gap-3 rounded-[1.4rem] border border-white/10 bg-white/[0.05] px-4 py-3 shadow-lg shadow-black/20 ring-1 ring-white/[0.02] transition active:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-200/30"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.95rem] border border-teal-200/20 bg-teal-200/10 shadow-inner shadow-black/20">
+              <LayoutDashboard className="h-[1.125rem] w-[1.125rem] text-teal-200" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-white">
+                Go to Dashboard
+              </span>
+              <span className="mt-1 block truncate text-xs text-zinc-500">
+                Reports, workspaces and analytics
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-zinc-600" />
+          </Link>
+        </section>
 
         <section className="mt-7">
           <div className="mb-3 flex items-center justify-between">
@@ -355,6 +378,27 @@ export default function MobileAccountHome({
               detail="Privacy policy"
               badge="Soon"
             />
+          </div>
+        </section>
+
+        <section className="mt-7">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+            Session
+          </h2>
+          <div className="mt-3 overflow-hidden rounded-[1.6rem] border border-red-300/15 bg-red-950/10 shadow-xl shadow-black/20 ring-1 ring-red-200/[0.03]">
+            <SignOutButton className="flex min-h-[4.5rem] w-full items-center gap-3 px-4 py-3.5 text-left transition active:bg-red-950/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-200/30 disabled:cursor-not-allowed disabled:opacity-60">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.95rem] border border-red-300/20 bg-red-300/10 shadow-inner shadow-black/20">
+                <LogOut className="h-[1.125rem] w-[1.125rem] text-red-200" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-white">
+                  Sign out
+                </span>
+                <span className="mt-1 block truncate text-xs text-zinc-500">
+                  {settings.email}
+                </span>
+              </span>
+            </SignOutButton>
           </div>
         </section>
 

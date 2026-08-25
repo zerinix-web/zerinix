@@ -8,11 +8,15 @@ import {
   Bot,
   ChartSpline,
   FileText,
+  LayoutDashboard,
   Loader2,
+  LogOut,
   Rocket,
   Send,
   Sparkles,
   User,
+  UserRound,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -36,6 +40,7 @@ import {
   createClient,
   restoreSupabaseSession,
 } from "@/app/lib/supabase/client";
+import SignOutButton from "@/components/auth/SignOutButton";
 
 const MOBILE_CONVERSATION_STORAGE_KEY = "zerinix.mobileChatConversationId";
 const INTERNAL_REPORT_DIAGNOSTIC_LINE =
@@ -684,6 +689,7 @@ export default function MobileChatHome({
   const [isInitializing, setIsInitializing] = useState(true);
   const [hasEnteredConversation, setHasEnteredConversation] = useState(false);
   const [persistenceError, setPersistenceError] = useState("");
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const landingScrollRef = useRef<HTMLDivElement | null>(null);
   const conversationScrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1301,7 +1307,7 @@ export default function MobileChatHome({
         <span className="flex h-10 w-10 items-center justify-center rounded-[1rem] bg-white text-xs font-black tracking-[0.12em] text-black shadow-lg shadow-white/10">
           ZX
         </span>
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-bold tracking-[0.16em] text-white">
             ZERINIX
           </p>
@@ -1309,7 +1315,67 @@ export default function MobileChatHome({
             AI Business Assistant
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => setAccountMenuOpen(true)}
+          aria-label="Open account menu"
+          aria-haspopup="dialog"
+          aria-expanded={accountMenuOpen}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-zinc-300 transition active:bg-white/[0.12]"
+        >
+          <UserRound className="h-[1.1rem] w-[1.1rem]" />
+        </button>
       </header>
+
+      {accountMenuOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex flex-col justify-end bg-black/70 backdrop-blur-sm"
+          onClick={() => setAccountMenuOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Account menu"
+            onClick={(event) => event.stopPropagation()}
+            className="rounded-t-[1.75rem] border-t border-white/10 bg-zinc-950 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3 shadow-2xl shadow-black/60"
+          >
+            <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-white/15" />
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-sm font-semibold text-white">Account</p>
+              <button
+                type="button"
+                onClick={() => setAccountMenuOpen(false)}
+                aria-label="Close account menu"
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-zinc-400 transition active:bg-white/[0.1]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <nav className="space-y-1.5 pb-1">
+              <Link
+                href="/dashboard"
+                onClick={() => setAccountMenuOpen(false)}
+                className="flex min-h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-4 text-sm font-medium text-zinc-200 transition active:bg-white/[0.08]"
+              >
+                <LayoutDashboard className="h-4 w-4 text-teal-200" />
+                Dashboard
+              </Link>
+              <Link
+                href="/dashboard/settings"
+                onClick={() => setAccountMenuOpen(false)}
+                className="flex min-h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-4 text-sm font-medium text-zinc-200 transition active:bg-white/[0.08]"
+              >
+                <UserRound className="h-4 w-4 text-teal-200" />
+                Account
+              </Link>
+              <SignOutButton className="flex min-h-14 w-full items-center gap-3 rounded-2xl border border-red-300/15 bg-red-950/15 px-4 text-left text-sm font-medium text-red-100 transition active:bg-red-950/30 disabled:cursor-not-allowed disabled:opacity-60">
+                <LogOut className="h-4 w-4 text-red-200" />
+                Sign out
+              </SignOutButton>
+            </nav>
+          </div>
+        </div>
+      ) : null}
 
       <div className="relative z-10 min-h-0 flex-1">
         {isInitializing ? (

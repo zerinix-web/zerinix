@@ -12,7 +12,7 @@ import {
   UserRound,
   WalletCards,
 } from "lucide-react";
-import { signOut } from "@/app/auth/actions";
+import SignOutButton from "@/components/auth/SignOutButton";
 import { dashboardTheme } from "@/app/lib/ui/dashboard-theme";
 import {
   MobileBottomNavigation,
@@ -129,15 +129,10 @@ export default async function DashboardSidebar({
         ))}
       </nav>
 
-      <form action={signOut} className="ml-2 lg:ml-0 lg:mt-6">
-        <button
-          type="submit"
-          className="flex min-h-12 items-center gap-3 rounded-[1.15rem] border border-white/10 bg-zinc-950/80 px-4 py-3 text-sm font-medium text-zinc-300 shadow-sm shadow-black/10 transition duration-300 hover:-translate-y-0.5 hover:border-red-300/30 hover:bg-red-950/30 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200/30 lg:w-full"
-        >
-          <LogOut className="h-4 w-4 text-red-200" />
-          <span className="whitespace-nowrap">{dictionary.common.logout}</span>
-        </button>
-      </form>
+      <SignOutButton className="ml-2 flex min-h-12 items-center gap-3 rounded-[1.15rem] border border-white/10 bg-zinc-950/80 px-4 py-3 text-sm font-medium text-zinc-300 shadow-sm shadow-black/10 transition duration-300 hover:-translate-y-0.5 hover:border-red-300/30 hover:bg-red-950/30 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200/30 disabled:cursor-not-allowed disabled:opacity-60 lg:ml-0 lg:mt-6 lg:w-full">
+        <LogOut className="h-4 w-4 text-red-200" />
+        <span className="whitespace-nowrap">{dictionary.common.logout}</span>
+      </SignOutButton>
       </aside>
     </>
   );
