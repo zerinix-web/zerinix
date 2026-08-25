@@ -221,14 +221,17 @@ test("failure 4 (reproduction): stripFillerAndDuplicateSentences silently delete
 const marketRouteSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
 
 test("failure 4 (fix): strategicRecommendations and tamSamSom are excluded from both the cross-section dedup and the per-field filler/duplicate-sentence pass", () => {
-  // A later ticket ("MARKET INTELLIGENCE -- ROOT-CAUSE DATA PIPELINE
-  // REPAIR") added executiveSummary to this same exclusion list for the
-  // identical reason (its own fixed-count "What Evidence Is Missing" list
-  // was being silently emptied by the same dedup pass) -- allow either
-  // the original two-field list or the extended one.
+  // Later tickets extended this exclusion list twice more, for the
+  // identical reason each time: executiveSummary ("MARKET INTELLIGENCE --
+  // ROOT-CAUSE DATA PIPELINE REPAIR", its own fixed-count "What Evidence
+  // Is Missing" list was being silently emptied), then competitiveLandscape/
+  // majorPlayers (a production report's Major Players section collapsing
+  // into a circular "See Competitive Landscape for the established
+  // premise" cross-reference) -- allow the original two-field list or
+  // either extended variant.
   assert.match(
     marketRouteSource,
-    /excludedFields:\s*\["strategicRecommendations",\s*"tamSamSom"(?:,\s*"executiveSummary")?\]/
+    /excludedFields:\s*\[\s*"strategicRecommendations",\s*"tamSamSom"(?:,\s*"executiveSummary")?(?:,\s*"competitiveLandscape",\s*"majorPlayers",?)?\s*\]/
   );
   const fillerLoopStart = marketRouteSource.indexOf("Eliminate filler LAST");
   const fillerLoopBlock = marketRouteSource.slice(fillerLoopStart, fillerLoopStart + 2500);

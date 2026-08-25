@@ -601,7 +601,7 @@ test("market-analysis/route.ts wires the single Executive Decision layer, eviden
   assert.match(marketAnalysisSource, /buildMarketExecutiveDecisionBrief/);
   assert.match(
     marketAnalysisSource,
-    /marketExecutiveDecisionBrief = buildMarketExecutiveDecisionBrief\(normalized, language, coverage\);\s*\n\s*normalized\.executiveSummary = formatExecutiveDecisionBrief\(marketExecutiveDecisionBrief, language\);/
+    /marketExecutiveDecisionBrief = buildMarketExecutiveDecisionBrief\(normalized, language, coverage\);\s*\n(?:.*\n)*?\s*normalized\.executiveSummary = formatExecutiveDecisionBrief\(marketExecutiveDecisionBrief, language, "market"\);/
   );
   // Single decision layer: no confidence rollup or source-reliability
   // overview may be appended to executiveSummary after the brief, and no

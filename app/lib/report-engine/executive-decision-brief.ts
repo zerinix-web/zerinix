@@ -52,11 +52,46 @@ const decisionTranslations: Record<ResponseLanguage, Record<ExecutiveDecisionCod
   Spanish: { GO: "GO", CONDITIONAL_GO: "GO CONDICIONAL", NO_GO: "NO-GO" },
 };
 
+// CRITICAL FIX -- confirmed live (production report on a real market):
+// Market Intelligence's OWN native decision vocabulary is ENTER/MONITOR/
+// AVOID (assessMarketEntryConfidence, market-intelligence-presentation.ts)
+// -- but buildMarketExecutiveDecisionBrief converts it to this shared
+// module's GO/CONDITIONAL_GO/NO_GO purely to reuse the banner formatter,
+// and executive-decision-vocabulary.ts's resolver further remapped THAT
+// into the cross-report-kind PROCEED/PROCEED_WITH_CONDITIONS/
+// PAUSE_PENDING_REVIEW/REJECT label set (built for Business Plan/
+// Acquisition/Real Estate) -- so the SAME report showed "NO-GO" verbatim
+// in its own raw executiveSummary banner text and "Reject" wherever the
+// resolved decisionLabel was displayed: two different vocabularies for
+// one decision. This is a second, additive translation table for the
+// exact same ExecutiveDecisionCode values -- Business Plan/Acquisition/
+// the domain-analysis family keep using decisionTranslations (the
+// `vocabulary` parameter below defaults to "standard", so every existing
+// caller is completely unaffected); Market Intelligence explicitly opts
+// into "market" wherever it formats or parses its own banner, so its
+// raw banner text, resolved decision label, and final verdict paragraph
+// all say ENTER/MONITOR/AVOID -- never GO/CONDITIONAL GO/NO-GO, never
+// Proceed/Reject.
+const marketDecisionTranslations: Record<ResponseLanguage, Record<ExecutiveDecisionCode, string>> = {
+  English: { GO: "ENTER", CONDITIONAL_GO: "MONITOR", NO_GO: "AVOID" },
+  Turkish: { GO: "GİR", CONDITIONAL_GO: "İZLE", NO_GO: "KAÇIN" },
+  German: { GO: "EINTRETEN", CONDITIONAL_GO: "BEOBACHTEN", NO_GO: "VERMEIDEN" },
+  French: { GO: "ENTRER", CONDITIONAL_GO: "SURVEILLER", NO_GO: "ÉVITER" },
+  Spanish: { GO: "ENTRAR", CONDITIONAL_GO: "MONITOREAR", NO_GO: "EVITAR" },
+};
+
+export type ExecutiveDecisionVocabulary = "standard" | "market";
+
+function decisionTranslationsFor(vocabulary: ExecutiveDecisionVocabulary) {
+  return vocabulary === "market" ? marketDecisionTranslations : decisionTranslations;
+}
+
 export function localizeExecutiveDecision(
   decision: ExecutiveDecisionCode,
-  language: ResponseLanguage
+  language: ResponseLanguage,
+  vocabulary: ExecutiveDecisionVocabulary = "standard"
 ) {
-  return decisionTranslations[language][decision];
+  return decisionTranslationsFor(vocabulary)[language][decision];
 }
 
 export const executiveDecisionLabels: Record<
@@ -207,10 +242,11 @@ function stripLeadingListMarker(text: string): string {
 // supports this decision; none of them restate it.
 export function formatExecutiveDecisionBrief(
   brief: ExecutiveDecisionBrief,
-  language: ResponseLanguage
+  language: ResponseLanguage,
+  vocabulary: ExecutiveDecisionVocabulary = "standard"
 ) {
   const copy = executiveDecisionLabels[language];
-  const localizedDecision = localizeExecutiveDecision(brief.decision, language);
+  const localizedDecision = localizeExecutiveDecision(brief.decision, language, vocabulary);
   const reasons = takeThree(brief.topReasons);
   const risks = takeThree(brief.topRisks);
   const gaps = takeThree(brief.missingEvidence);
@@ -302,15 +338,17 @@ export function extractGenericDecisionSignal(text: string) {
 // falls back to a placeholder ("REVIEW", "Review required") that should
 // never reach a user.
 export function extractExecutiveDecisionFromText(
-  text: string
+  text: string,
+  vocabulary: ExecutiveDecisionVocabulary = "standard"
 ): { code: ExecutiveDecisionCode; token: string; language: ResponseLanguage } | null {
   if (!text) return null;
 
+  const table = decisionTranslationsFor(vocabulary);
   const codes: ExecutiveDecisionCode[] = ["GO", "CONDITIONAL_GO", "NO_GO"];
   const candidates: Array<{ code: ExecutiveDecisionCode; token: string; language: ResponseLanguage }> = [];
-  for (const language of Object.keys(decisionTranslations) as ResponseLanguage[]) {
+  for (const language of Object.keys(table) as ResponseLanguage[]) {
     for (const code of codes) {
-      candidates.push({ code, token: decisionTranslations[language][code], language });
+      candidates.push({ code, token: table[language][code], language });
     }
   }
   // Longest tokens first: "CONDITIONAL GO"/"KOŞULLU EVET" must match
@@ -323,7 +361,23 @@ export function extractExecutiveDecisionFromText(
 
   for (const { code, token, language } of candidates) {
     const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(`(?:${labelPattern})\\s*[:\\-–—]\\s*(${escapedToken})\\b`, "i");
+    // CRITICAL FIX -- confirmed live: the "market" vocabulary's tokens
+    // (ENTER/MONITOR/AVOID) are ordinary English words far more likely to
+    // appear as the start of an unrelated sentence than "GO"/"CONDITIONAL
+    // GO"/"NO-GO" ever were -- e.g. raw legacy prose "Decision: Monitor
+    // for a staged U.S. entry, contingent on ..." would otherwise
+    // false-positive-match "MONITOR" as the deterministic banner's
+    // token. The real banner formatExecutiveDecisionBrief generates
+    // always immediately follows the token with " (Confidence: NN%)" or
+    // ends the line right there -- requiring that same shape (the token
+    // is followed only by optional whitespace and then "(", end of line,
+    // or end of string, never more lowercase prose continuing the
+    // sentence) distinguishes the real deterministic banner from
+    // coincidental prose for every vocabulary, not just "market".
+    const pattern = new RegExp(
+      `(?:${labelPattern})\\s*[:\\-–—]\\s*(${escapedToken})\\b(?=\\s*(?:\\(|$|\\r?\\n))`,
+      "im"
+    );
     const match = text.match(pattern);
     if (match) {
       return { code, token: match[1], language };
@@ -336,10 +390,10 @@ export function extractExecutiveDecisionFromText(
 // All 3 decision tokens in the same language as a previously-matched
 // result, for UI that renders a full badge set (e.g. "GO / CONDITIONAL GO
 // / NO-GO") and must not mix languages within that set.
-export function decisionTokensForLanguage(language: ResponseLanguage): string[] {
-  return [
-    decisionTranslations[language].GO,
-    decisionTranslations[language].CONDITIONAL_GO,
-    decisionTranslations[language].NO_GO,
-  ];
+export function decisionTokensForLanguage(
+  language: ResponseLanguage,
+  vocabulary: ExecutiveDecisionVocabulary = "standard"
+): string[] {
+  const table = decisionTranslationsFor(vocabulary);
+  return [table[language].GO, table[language].CONDITIONAL_GO, table[language].NO_GO];
 }

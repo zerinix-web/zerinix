@@ -995,7 +995,7 @@ export function buildMarketFinalVerdictParagraph(
   brief: ExecutiveDecisionBrief,
   language: ResponseLanguage
 ): string {
-  const localizedDecision = localizeExecutiveDecision(brief.decision, language);
+  const localizedDecision = localizeExecutiveDecision(brief.decision, language, "market");
   const heading = marketText(
     language,
     "Final Investment Decision",

@@ -144,9 +144,18 @@ test("Unavailable state: no decision label or confidence label at all resolves t
 
 // --- Requirement 9: a genuinely evidence-supported GO must still work --
 
-test("PROPERTY (GO is not globally suppressed): a genuine deterministic 'Decision: GO (Confidence: 82%)' banner still resolves to PROCEED with its real confidence, even when the SAME report also mentions 'Go-to-Market' and 'pass' elsewhere", () => {
+// CRITICAL FIX -- confirmed live (production report on a real market):
+// Market Intelligence's decision vocabulary is now ENTER/MONITOR/AVOID
+// (see executive-decision-brief.ts's "market" ExecutiveDecisionVocabulary),
+// never GO/CONDITIONAL GO/NO-GO or the cross-report-kind Proceed/Reject
+// label set -- the SAME report was previously showing "Reject" in one
+// place and "NO-GO" verbatim in another. Fixtures below use the real
+// market-vocabulary banner shape; decisionLabel now asserts ENTER/MONITOR/
+// AVOID directly rather than Proceed/Reject, while canonicalDecision (an
+// internal styling-only axis, never displayed as text) is unchanged.
+test("PROPERTY (ENTER is not globally suppressed): a genuine deterministic 'Decision: ENTER (Confidence: 82%)' banner still resolves to ENTER/PROCEED with its real confidence, even when the SAME report also mentions 'Go-to-Market' and 'pass' elsewhere", () => {
   const content = `Executive Decision
-Decision: GO (Confidence: 82%)
+Decision: ENTER (Confidence: 82%)
 
 Confidence Supported By:
 - Three independent sources confirm TAM/SAM sizing.
@@ -157,34 +166,46 @@ A phased Go-to-Market plan should prioritize design partners. We would pass on a
   const result = resolveMarketIntelligenceExecutiveDecision(content);
   assert.equal(result.decisionSource, "canonical-banner");
   assert.equal(result.canonicalDecision, "PROCEED");
-  assert.equal(result.decisionLabel, "Proceed");
+  assert.equal(result.decisionLabel, "ENTER");
   assert.equal(result.confidenceScore, 82);
 });
 
-test("PROPERTY (GO is not globally suppressed, Turkish): a genuine 'Karar: EVET (Güven: 75%)' banner still resolves correctly", () => {
-  const content = "Yönetici Kararı\nKarar: EVET (Güven: 75%)";
+test("PROPERTY (ENTER is not globally suppressed, Turkish): a genuine 'Karar: GİR (Güven: 75%)' banner still resolves correctly", () => {
+  const content = "Yönetici Kararı\nKarar: GİR (Güven: 75%)";
   const result = resolveMarketIntelligenceExecutiveDecision(content, "Turkish");
   assert.equal(result.canonicalDecision, "PROCEED");
+  assert.equal(result.decisionLabel, "GİR");
   assert.equal(result.confidenceScore, 75);
 });
 
-test("A CONDITIONAL_GO/NO_GO banner still resolves to its own distinct canonical value and confidence, unaffected by this fix", () => {
+test("A MONITOR/AVOID banner still resolves to its own distinct canonical value, decision label, and confidence, unaffected by this fix", () => {
   const conditional = resolveMarketIntelligenceExecutiveDecision(
-    "Decision: CONDITIONAL GO (Confidence: 55%)"
+    "Decision: MONITOR (Confidence: 55%)"
   );
   assert.equal(conditional.canonicalDecision, "PROCEED_WITH_CONDITIONS");
+  assert.equal(conditional.decisionLabel, "MONITOR");
   assert.equal(conditional.confidenceScore, 55);
 
-  const rejected = resolveMarketIntelligenceExecutiveDecision("Decision: NO-GO (Confidence: 20%)");
+  const rejected = resolveMarketIntelligenceExecutiveDecision("Decision: AVOID (Confidence: 20%)");
   assert.equal(rejected.canonicalDecision, "REJECT");
+  assert.equal(rejected.decisionLabel, "AVOID");
   assert.equal(rejected.confidenceScore, 20);
 });
 
 test("Confidence is never picked up from a DIFFERENT, unrelated percentage even when it sits right after the banner's decision token but is not itself the confidence figure", () => {
-  const content = "Decision: GO (Confidence: 60%) -- note: 30% of pilots historically fail in month one.";
+  const content = "Decision: ENTER (Confidence: 60%) -- note: 30% of pilots historically fail in month one.";
   const result = resolveMarketIntelligenceExecutiveDecision(content);
   // Must read the FIRST, structurally-adjacent 60%, never the unrelated 30% later in the sentence.
   assert.equal(result.confidenceScore, 60);
+});
+
+test("REGRESSION (exact reported production defect): the report's own raw executiveSummary banner text and its resolved decisionLabel never disagree -- 'NO-GO'/'Reject' must never appear for Market Intelligence again", () => {
+  const content = "Executive Decision\nDecision: AVOID (Confidence: 39%)";
+  const result = resolveMarketIntelligenceExecutiveDecision(content);
+  assert.equal(result.decisionLabel, "AVOID");
+  assert.notEqual(result.decisionLabel, "Reject");
+  assert.notEqual(result.decisionLabel, "NO-GO");
+  assert.doesNotMatch(content, /\bNO-GO\b/);
 });
 
 // --- marketDecisionColorCategory: never defaults to the affirmative GO -
@@ -307,7 +328,7 @@ test("DRIFT GUARD: the Market Intelligence raw-decision-label fallback no longer
 
 test("PROPERTY (semantic separation, ticket 3): resolveMarketIntelligenceExecutiveDecision's decision field and a separately-extracted 'Immediate Next Action' field remain independent -- the SAME content's decision and next action never collapse into the same value", async () => {
   const content =
-    "Decision: CONDITIONAL GO (Confidence: 38%)\n\nImmediate Next Action: Commission a $50k primary demand study to validate buyer willingness-to-pay.";
+    "Decision: MONITOR (Confidence: 38%)\n\nImmediate Next Action: Commission a $50k primary demand study to validate buyer willingness-to-pay.";
 
   const decisionResult = resolveMarketIntelligenceExecutiveDecision(content);
   assert.equal(decisionResult.decisionSource, "canonical-banner");

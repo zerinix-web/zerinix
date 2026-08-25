@@ -864,7 +864,13 @@ function ensureMarketReportQuality(
     // Plan -- and nothing else. No second summary, no confidence rollup,
     // and no source-reliability overview may be appended to this field.
     marketExecutiveDecisionBrief = buildMarketExecutiveDecisionBrief(normalized, language, coverage);
-    normalized.executiveSummary = formatExecutiveDecisionBrief(marketExecutiveDecisionBrief, language);
+    // CRITICAL FIX -- confirmed live: Market Intelligence's own native
+    // decision vocabulary is ENTER/MONITOR/AVOID -- the "market" vocabulary
+    // renders this banner's "Decision: TOKEN" line using those tokens
+    // instead of the shared GO/CONDITIONAL GO/NO-GO ones Business Plan/
+    // Acquisition use, so the raw executiveSummary text a user can see
+    // never says "NO-GO" for this report kind.
+    normalized.executiveSummary = formatExecutiveDecisionBrief(marketExecutiveDecisionBrief, language, "market");
 
     if (!normalized.strategicRecommendations.includes(marketEntryHeading)) {
       normalized.strategicRecommendations = `${normalized.strategicRecommendations}\n\n${buildMarketEntryRecommendation(normalized, language, coverage)}`.trim();
@@ -928,7 +934,31 @@ function ensureMarketReportQuality(
     // of that now-empty section fell back to claiming "no decision-
     // changing data gap was flagged" even though Market Size/CAGR/TAM-SAM-
     // SOM were genuinely unresolved elsewhere in the same report.
-    excludedFields: ["strategicRecommendations", "tamSamSom", "executiveSummary"],
+    //
+    // CRITICAL FIX -- confirmed live (production report on a real market):
+    // competitiveLandscape/majorPlayers carry the identical risk.
+    // applySharedMarketGraph (above) already writes deterministic,
+    // canonically-derived text into both -- e.g. when no direct competitor
+    // validated, competitiveLandscape's "direct competitors could not be
+    // independently validated... adjacent/platform players... identified"
+    // sentence and majorPlayers' adjacent-players intro sentence
+    // necessarily share heavy vocabulary overlap by design (they describe
+    // the SAME underlying evidence gap). Cross-section dedup judged that
+    // overlap a duplicate "insight" and collapsed the entire majorPlayers
+    // section into a bare `See "Competitive Landscape" for the established
+    // premise.` cross-reference -- discarding the real, evidence-backed
+    // adjacent-player list this pass exists to preserve, and reproducing
+    // the exact circular "Major Players points back to an empty
+    // Competitive Landscape" contradiction this fix must eliminate. Both
+    // fields are canonically owned by the graph and must never be silently
+    // collapsed into each other.
+    excludedFields: [
+      "strategicRecommendations",
+      "tamSamSom",
+      "executiveSummary",
+      "competitiveLandscape",
+      "majorPlayers",
+    ],
   }) as Record<MarketReportField, string>;
 
   // Evidence and confidence stay in the background: no per-section

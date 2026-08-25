@@ -1,5 +1,6 @@
 import {
   extractExecutiveDecisionFromText,
+  localizeExecutiveDecision,
   localizedLabelVariants,
   type ExecutiveDecisionCode,
 } from "@/app/lib/report-engine/executive-decision-brief";
@@ -359,12 +360,27 @@ export function resolveMarketIntelligenceExecutiveDecision(
   language: ResponseLanguage = "English"
 ): MarketIntelligenceExecutiveDecision {
   const text = executiveSummaryContent || "";
-  const banner = extractExecutiveDecisionFromText(text);
+  // CRITICAL FIX -- confirmed live (production report on a real market):
+  // Market Intelligence's banner is now generated using the "market"
+  // vocabulary (ENTER/MONITOR/AVOID -- see formatExecutiveDecisionBrief's
+  // call site in market-analysis/route.ts), so it must also be PARSED
+  // back out with that same vocabulary -- extractExecutiveDecisionFromText's
+  // default "standard" (GO/CONDITIONAL GO/NO-GO) vocabulary would simply
+  // fail to match this report kind's own banner text at all.
+  const banner = extractExecutiveDecisionFromText(text, "market");
 
   if (banner) {
+    // canonicalDecision stays on the shared 4-value PROCEED/.../REJECT
+    // axis -- used only for internal styling (badge/fill color, see
+    // ReportPdfButton.tsx's canonicalDecision checks), never rendered as
+    // literal text. decisionLabel is the ONLY user-facing string, and it
+    // now comes directly from the same market vocabulary the banner was
+    // written in -- never the cross-report-kind Proceed/Reject label set,
+    // which is what previously showed "Reject" for a MONITOR/AVOID-class
+    // decision in the same report that also showed "NO-GO" verbatim.
     const canonical = mapExecutiveDecisionCodeToCanonicalDecision(banner.code);
     return {
-      decisionLabel: getCanonicalDecisionLabel(canonical, banner.language),
+      decisionLabel: localizeExecutiveDecision(banner.code, banner.language, "market"),
       decisionSource: "canonical-banner",
       canonicalDecision: canonical,
       confidenceScore: extractMarketIntelligenceBannerConfidence(text, banner.token),

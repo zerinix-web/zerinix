@@ -326,5 +326,8 @@ test("DRIFT CHECK: market-intelligence-graph.ts and the /api/market-analysis rou
   const graphSource = readFileSync("app/lib/ai/market-intelligence-graph.ts", "utf8");
   const routeSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
   assert.match(graphSource, /function projectMarketIntelligenceGraphToReport/);
-  assert.match(routeSource, /excludedFields: \["strategicRecommendations", "tamSamSom", "executiveSummary"\]/);
+  assert.match(
+    routeSource,
+    /excludedFields:\s*\[\s*"strategicRecommendations",\s*"tamSamSom",\s*"executiveSummary",\s*"competitiveLandscape",\s*"majorPlayers",?\s*\]/
+  );
 });

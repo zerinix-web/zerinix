@@ -61,6 +61,7 @@ import {
   localizePdfPresentationText,
 } from "@/app/lib/pdf-normalization.mjs";
 import { getExecutiveRecommendationDisplayMetrics } from "@/app/lib/report-executive-recommendation.mjs";
+import { createInsightSignature, describesSameInsight } from "@/app/lib/report-content-quality.mjs";
 import {
   getEvidenceBadgeClass,
   getEvidenceLabel,
@@ -1426,8 +1427,26 @@ function getMarketIntelligenceExecutiveHighlights(content: string) {
   return dedupeHighlightCandidates(candidates);
 }
 
+// CRITICAL FIX -- confirmed live (production report on a real market):
+// the exact-fingerprint check below (strip a small decision-word
+// stoplist, then require byte-identical normalized text) only ever
+// caught two candidates that were nearly IDENTICAL already -- it could
+// not recognize the same underlying insight restated with different
+// wording, e.g. "risk" and "opportunity" -shaped extraction both landing
+// on essentially the same "Platform module commoditization --
+// Autodesk/Procore embedding AI features reduces..." claim with a
+// different lead-in phrase or punctuation. Now also runs
+// describesSameInsight (report-content-quality.mjs) -- the same
+// containment/Jaccard token-overlap semantic-similarity check the
+// report's own cross-section paragraph dedup already uses -- against
+// every PREVIOUSLY ACCEPTED candidate, so a near-identical restatement is
+// collapsed into the first (fuller-context) occurrence instead of
+// appearing twice. Genuinely distinct risks/opportunities (low token
+// overlap) are always kept; nothing is dropped merely for sharing a topic
+// or a common word.
 function dedupeHighlightCandidates(candidates: string[]) {
   const seen = new Set<string>();
+  const acceptedSignatures: ReturnType<typeof createInsightSignature>[] = [];
 
   return candidates
     .map((highlight) => highlight.trim())
@@ -1447,7 +1466,13 @@ function dedupeHighlightCandidates(candidates: string[]) {
         return false;
       }
 
+      const signature = createInsightSignature(highlight);
+      if (acceptedSignatures.some((previous) => describesSameInsight(signature, previous))) {
+        return false;
+      }
+
       seen.add(fingerprint);
+      acceptedSignatures.push(signature);
       return true;
     })
     .slice(0, 5);

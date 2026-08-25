@@ -35,7 +35,7 @@ function normalizeInsightToken(value) {
     .replace(/(?:ları|leri|lar|ler|dan|den|dir|dır|dur|dür)$/i, "");
 }
 
-function createInsightSignature(value) {
+export function createInsightSignature(value) {
   const fingerprint = normalizeParagraphFingerprint(value);
   const semanticText = fingerprint
     .replace(/\[(?:r\d+|asset:[^\]]+|user|method:[^\]]+)\]/gi, "")
@@ -80,7 +80,7 @@ function setsEqual(left, right) {
   return left.size === right.size && [...left].every((value) => right.has(value));
 }
 
-function describesSameInsight(current, previous) {
+export function describesSameInsight(current, previous) {
   if (current.fingerprint === previous.fingerprint) return true;
   if (current.tokens.size < 7 || previous.tokens.size < 7) return false;
   if (!setsEqual(current.numbers, previous.numbers)) return false;
