@@ -638,7 +638,9 @@ type MarketGraphCopyKey =
   | "rankingLabel"
   | "overallScoreLabel"
   | "sourcesTitle"
-  | "noVerifiableSourcesText";
+  | "noVerifiableSourcesText"
+  | "competitorClaimAdjacentReframeTemplate"
+  | "competitorClaimUnsupportedReplacement";
 
 const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, string>> = {
   English: {
@@ -680,6 +682,10 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     sourcesTitle: "Sources",
     noVerifiableSourcesText:
       "No independently verifiable sources were used in this report.",
+    competitorClaimAdjacentReframeTemplate:
+      "%NAMES%: tracked as an adjacent/platform presence in this market, not independently validated as a direct, head-to-head competitor with current evidence.",
+    competitorClaimUnsupportedReplacement:
+      "Specific named rivals could not be independently validated with current evidence; any competitive pressure discussed here reflects general market structure, not a confirmed competitor claim.",
     basisLabel: "Basis",
     evidenceLabel: "Evidence",
     assumptionOnlyScenario: "assumption-only scenario",
@@ -735,6 +741,10 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     sourcesTitle: "Kaynaklar",
     noVerifiableSourcesText:
       "Bu raporda bağımsız olarak doğrulanabilir bir kaynak kullanılmadı.",
+    competitorClaimAdjacentReframeTemplate:
+      "%NAMES% bu pazarda ilgili/platform oyuncuları olarak izlenmektedir; mevcut kanıtlar bunları doğrudan, birebir rakip olarak bağımsız şekilde doğrulamamaktadır.",
+    competitorClaimUnsupportedReplacement:
+      "Belirli isimli rakipler mevcut kanıtlarla bağımsız şekilde doğrulanamadı; burada tartışılan rekabet baskısı genel pazar yapısını yansıtır, doğrulanmış bir rakip iddiasını değil.",
     basisLabel: "Temel",
     evidenceLabel: "Kanıt",
     assumptionOnlyScenario: "sadece varsayıma dayalı senaryo",
@@ -790,6 +800,10 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     sourcesTitle: "Quellen",
     noVerifiableSourcesText:
       "In diesem Bericht wurden keine unabhängig überprüfbaren Quellen verwendet.",
+    competitorClaimAdjacentReframeTemplate:
+      "%NAMES%: in diesem Markt als angrenzende Plattformpräsenz geführt, mit aktuellen Nachweisen nicht unabhängig als direkter Wettbewerber bestätigt.",
+    competitorClaimUnsupportedReplacement:
+      "Konkret genannte Konkurrenten konnten mit aktuellen Nachweisen nicht unabhängig bestätigt werden; hier beschriebener Wettbewerbsdruck spiegelt die allgemeine Marktstruktur wider, keine bestätigte Wettbewerberaussage.",
     basisLabel: "Grundlage",
     evidenceLabel: "Nachweis",
     assumptionOnlyScenario: "reines Annahmenszenario",
@@ -845,6 +859,10 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     sourcesTitle: "Sources",
     noVerifiableSourcesText:
       "Aucune source vérifiable de manière indépendante n'a été utilisée dans ce rapport.",
+    competitorClaimAdjacentReframeTemplate:
+      "%NAMES% : suivi(s) comme acteur(s) adjacent(s)/de plateforme sur ce marché, non validé(s) de manière indépendante comme concurrent(s) direct(s) avec les preuves actuelles.",
+    competitorClaimUnsupportedReplacement:
+      "Des concurrents nommément désignés n'ont pas pu être validés de manière indépendante avec les preuves actuelles ; la pression concurrentielle évoquée ici reflète la structure générale du marché, non une allégation de concurrent confirmée.",
     basisLabel: "Base",
     evidenceLabel: "Preuve",
     assumptionOnlyScenario: "scénario basé uniquement sur des hypothèses",
@@ -900,6 +918,10 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     sourcesTitle: "Fuentes",
     noVerifiableSourcesText:
       "No se utilizaron fuentes verificables de forma independiente en este informe.",
+    competitorClaimAdjacentReframeTemplate:
+      "%NAMES%: registrado(s) como presencia adyacente/de plataforma en este mercado, no validado(s) de forma independiente como competidor(es) directo(s) con la evidencia actual.",
+    competitorClaimUnsupportedReplacement:
+      "No se pudieron validar de forma independiente competidores específicos con la evidencia actual; la presión competitiva mencionada aquí refleja la estructura general del mercado, no una afirmación de competidor confirmada.",
     basisLabel: "Base",
     evidenceLabel: "Evidencia",
     assumptionOnlyScenario: "escenario basado únicamente en suposiciones",
@@ -946,9 +968,34 @@ function marketTableCell(value: string) {
 // report's target language and the raw coverage numbers are in scope.
 function describeCompetitiveCoverage(
   language: MarketGraphLanguage,
-  coverage: { vendorCount: number; independentProviderSources: number; sufficient: boolean }
+  coverage: { vendorCount: number; independentProviderSources: number; sufficient: boolean },
+  adjacentPlayerCount = 0
 ): string {
   const { vendorCount, independentProviderSources, sufficient } = coverage;
+
+  // CRITICAL FIX -- confirmed live: when no direct competitor validated
+  // but adjacent/platform players ARE evidenced (vendor-intelligence.ts's
+  // adjacentPlayers), the generic "information was limited" text below
+  // read as a flat "nothing was found" -- true for direct competitors,
+  // but misleading given real, evidence-supported adjacent players exist
+  // and are named in Major Players immediately below this section. States
+  // the distinction explicitly instead of leaving the reader to notice
+  // the contradiction between this section's tone and Major Players'
+  // actual content.
+  if (vendorCount === 0 && adjacentPlayerCount > 0) {
+    return {
+      English:
+        "Direct, head-to-head competitors could not be independently validated for this market with current evidence. Adjacent/platform players with independent evidence of relevance to this market were identified -- see Major Players below -- but they are not established here as validated direct competitors.",
+      Turkish:
+        "Bu pazar için mevcut kanıtlarla doğrudan, birebir rakipler bağımsız şekilde doğrulanamadı. Bu pazarla ilgisine dair bağımsız kanıt bulunan ilgili/platform oyuncuları tespit edildi -- aşağıdaki Önemli Oyuncular bölümüne bakın -- ancak bunlar burada doğrulanmış doğrudan rakip olarak belirlenmemiştir.",
+      German:
+        "Direkte, unmittelbare Wettbewerber konnten für diesen Markt mit den aktuellen Nachweisen nicht unabhängig bestätigt werden. Angrenzende Plattformakteure mit unabhängigen Nachweisen zur Relevanz für diesen Markt wurden identifiziert -- siehe Wichtige Akteure unten -- werden hier jedoch nicht als validierte direkte Wettbewerber ausgewiesen.",
+      French:
+        "Des concurrents directs n'ont pas pu être validés de manière indépendante pour ce marché avec les preuves actuelles. Des acteurs adjacents/de plateforme disposant de preuves indépendantes de pertinence pour ce marché ont été identifiés -- voir Acteurs majeurs ci-dessous -- mais ils ne sont pas établis ici comme des concurrents directs validés.",
+      Spanish:
+        "No se pudieron validar de forma independiente competidores directos para este mercado con la evidencia actual. Se identificaron actores adyacentes/de plataforma con evidencia independiente de relevancia para este mercado -- consulte Actores principales a continuación -- pero no se establecen aquí como competidores directos validados.",
+    }[language];
+  }
 
   if (sufficient) {
     return {
@@ -1273,7 +1320,14 @@ export function projectMarketIntelligenceGraphToReport(
       projection.majorPlayers = copy.insufficientMajorPlayers;
     }
   } else {
-    const coverageDescription = describeCompetitiveCoverage(copyLanguage(language), vendorCoverage);
+    const adjacentPlayers = graph.vendorIntelligence.adjacentPlayers.filter(
+      (player) => !isImplausibleCompetitorName(player.name)
+    );
+    const coverageDescription = describeCompetitiveCoverage(
+      copyLanguage(language),
+      vendorCoverage,
+      adjacentPlayers.length
+    );
     // CRITICAL FIX -- confirmed live (root-cause repair): with no
     // validated *direct* competitor, this branch used to force
     // majorPlayers to the exact same "no competitor data validated" text
@@ -1290,11 +1344,12 @@ export function projectMarketIntelligenceGraphToReport(
     // Never upgrades an adjacent player into a direct competitor: this
     // list is built from graph.vendorIntelligence.adjacentPlayers only,
     // the exact same set (and exclusions) computed once during discovery.
+    // describeCompetitiveCoverage itself now states explicitly, when
+    // adjacentPlayers exist, that direct competition specifically is
+    // unestablished while adjacent players are evidenced -- never the
+    // flat "no competitor data" phrasing the exact reported contradiction
+    // used.
     projection.competitiveLandscape = coverageDescription;
-
-    const adjacentPlayers = graph.vendorIntelligence.adjacentPlayers.filter(
-      (player) => !isImplausibleCompetitorName(player.name)
-    );
 
     projection.majorPlayers =
       adjacentPlayers.length > 0
@@ -1412,6 +1467,154 @@ export function projectMarketIntelligenceGraphToReport(
   }
 
   return projection;
+}
+
+// Same list-introducing shape reused by page.tsx/Planner.tsx/
+// ReportPdfButton.tsx's own extractMarketIntelligenceCompetitorNamesOnly
+// prose-list fallback -- kept in sync deliberately (never fabricates a
+// new pattern), so a "competitors include X, Y, and Z" clause is
+// recognized identically everywhere a claim like it can appear.
+const competitorListIntroducerPattern =
+  /\b(?:include|includes|including|such as|like|named)\s+((?:[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})(?:\s*,\s*(?:and\s+)?[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})*(?:\s+and\s+[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})?)/;
+// A sentence asserting head-to-head rivalry against a SPECIFIC named
+// entity, without necessarily using the "include/such as" list shape
+// above (e.g. "Competition from Procore is intense."). Deliberately
+// narrow -- this only ever fires in combination with a name already on
+// the graph's own known adjacent-player list (see
+// sanitizeMarketProseCompetitorClaims), never a generic proper-noun scan,
+// so it can never flag or invent a name the graph hasn't already
+// evidenced.
+const competitorRivalryFramingPattern =
+  /\b(?:competitors?|rivals?|competition from|compete[s]?\s+(?:with|against)|competing\s+(?:directly|head-on)|head-to-head)\b/i;
+
+function splitIntoSentenceSegments(line: string): string[] {
+  return line.split(/(?<=[.!?])\s+(?=[A-ZÇĞİÖŞÜ0-9])/);
+}
+
+function extractPlausibleNameCandidates(listText: string): string[] {
+  return listText
+    .split(/\s*,\s*|\s+and\s+/)
+    .map((candidate) => candidate.replace(/^and\s+/i, "").trim())
+    .filter((candidate) => candidate && !isImplausibleCompetitorName(`${candidate}:`));
+}
+
+type CompetitorClaimClassification = "direct" | "adjacent" | "unknown";
+
+function classifyCompetitorClaimNames(
+  names: readonly string[],
+  directNames: ReadonlySet<string>,
+  adjacentNames: ReadonlySet<string>
+): CompetitorClaimClassification[] {
+  return names.map((name) =>
+    directNames.has(name) ? "direct" : adjacentNames.has(name) ? "adjacent" : "unknown"
+  );
+}
+
+// CRITICAL FIX -- root-cause repair: named-vendor evidence is validated
+// once, in the canonical vendor-discovery graph (vendors = direct
+// competitors, vendorIntelligence.adjacentPlayers = relevant-but-not-
+// independently-validated players) -- but the model's own free-flowing
+// prose for opportunities/threats/portersFiveForces/marketDrivers/
+// barriers/strategicRecommendations is generated independently and can
+// still assert "Competition from Procore and Autodesk is intense" (an
+// adjacent player described as a validated direct rival) or "Leading
+// competitors include X, Y, and Z" (names with no graph evidence at all)
+// -- the exact reported failure mode: the report structurally establishes
+// one competitive reality (Competitive Landscape/Major Players, via
+// projectMarketIntelligenceGraphToReport above) while free-form prose
+// elsewhere communicates a contradictory, stronger one. Deliberately
+// narrow and deterministic rather than a general-purpose sentence parser:
+// it only ever acts on (a) the same "include/such as/like/named" list
+// shape already established and tested for Major Players' own prose-list
+// fallback, or (b) bare rivalry language co-occurring with a name already
+// on the graph's own KNOWN adjacent-player list -- never a generic
+// proper-noun scan that could misfire on ordinary prose or invent a name
+// to flag. A sentence naming ONLY validated direct competitors is left
+// completely untouched (that claim is genuinely supported); a sentence
+// that mixes a real direct competitor with an adjacent/unknown one is
+// ALSO left untouched -- a surgical partial edit inside a mixed claim
+// risks producing broken grammar or silently over-correcting a sentence
+// that is partly true, so this only ever replaces a sentence whose
+// competitive claim rests entirely on non-direct names. Only the
+// offending sentence is replaced; every other sentence in the field is
+// preserved verbatim, per "apply the smallest deterministic correction,
+// never destroy useful prose unnecessarily."
+export function sanitizeMarketProseCompetitorClaims(
+  content: string,
+  graph: MarketIntelligenceGraph,
+  language: string
+): string {
+  if (!content) {
+    return content;
+  }
+
+  const directNames = new Set(
+    graph.vendorIntelligence.vendors
+      .filter((vendor) => !isImplausibleCompetitorName(vendor.name))
+      .map((vendor) => vendor.name)
+  );
+  const adjacentNames = new Set(
+    graph.vendorIntelligence.adjacentPlayers
+      .filter((player) => !isImplausibleCompetitorName(player.name))
+      .map((player) => player.name)
+  );
+
+  const copy = marketGraphCopy[copyLanguage(language)];
+
+  const resolveReplacement = (classifications: CompetitorClaimClassification[]) => {
+    if (classifications.length === 0) return null;
+    if (classifications.every((value) => value === "direct")) return null;
+    if (classifications.some((value) => value === "direct")) return null;
+    if (classifications.every((value) => value === "adjacent")) {
+      return "adjacent" as const;
+    }
+    return "unsupported" as const;
+  };
+
+  const sanitizeSentence = (sentence: string): string => {
+    const listMatch = sentence.match(competitorListIntroducerPattern);
+    if (listMatch?.[1]) {
+      const candidates = extractPlausibleNameCandidates(listMatch[1]);
+      if (candidates.length > 0) {
+        const classifications = classifyCompetitorClaimNames(candidates, directNames, adjacentNames);
+        const outcome = resolveReplacement(classifications);
+        if (outcome === "adjacent") {
+          const adjacentCandidates = candidates.filter((name) => adjacentNames.has(name));
+          return copy.competitorClaimAdjacentReframeTemplate.replace(
+            "%NAMES%",
+            adjacentCandidates.join(", ")
+          );
+        }
+        if (outcome === "unsupported") {
+          return copy.competitorClaimUnsupportedReplacement;
+        }
+      }
+    }
+
+    if (competitorRivalryFramingPattern.test(sentence)) {
+      const mentionedDirect = [...directNames].some((name) => sentence.includes(name));
+      if (!mentionedDirect) {
+        const mentionedAdjacent = [...adjacentNames].filter((name) => sentence.includes(name));
+        if (mentionedAdjacent.length > 0) {
+          return copy.competitorClaimAdjacentReframeTemplate.replace(
+            "%NAMES%",
+            mentionedAdjacent.join(", ")
+          );
+        }
+      }
+    }
+
+    return sentence;
+  };
+
+  return content
+    .split("\n")
+    .map((line) =>
+      splitIntoSentenceSegments(line)
+        .map((sentence) => sanitizeSentence(sentence))
+        .join(" ")
+    )
+    .join("\n");
 }
 
 const bibliographyReferencePattern = /\[R(\d+)\]/g;

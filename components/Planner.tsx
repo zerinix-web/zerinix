@@ -1444,10 +1444,24 @@ function extractMetricValue(content: string, label: string) {
     );
 
   if (lineMatch) {
-    return lineMatch
+    const lineValue = lineMatch
       .replace(new RegExp(`^(?:[-*•]\\s*)?(?:\\*\\*)?${escapedLabel}(?:\\*\\*)?\\s*[:\\-–—]\\s*`, "i"), "")
       .trim()
       .replace(/\*\*/g, "");
+    // CRITICAL FIX -- confirmed live: a label written alone on its own
+    // line, with its real value on the FOLLOWING line(s) (e.g. the
+    // deterministic Executive Decision banner's "Top 3 Risks:" heading
+    // above a numbered list), matched here and returned an EMPTY string
+    // immediately -- this branch never looked past the label's own line,
+    // so callers like takeFirstListItem(extractMetricValueFromAliases(...))
+    // always got "" for exactly the multi-line, list-shaped fields they
+    // exist to read. Falls through to the multi-line-capable branches
+    // below only when this line genuinely had nothing after the label;
+    // every single-line "Label: value" match (the overwhelming majority
+    // of call sites) is completely unaffected.
+    if (lineValue) {
+      return lineValue;
+    }
   }
 
   const tableMatch = normalizedContent.match(
@@ -2707,8 +2721,19 @@ function extractMarketSizeValue(content: string, label: string) {
 // TAM/SAM/SOM values are ranges by design ("$2.1-2.8B"), so the
 // magnitude used for chart scaling is the upper bound of the range --
 // the last number+unit found in the string, not the first.
+//
+// CRITICAL FIX -- confirmed live (cross-surface audit): this only matched
+// a single-letter unit ([kKmMbBtT]), so a spelled-out "thousand" matched
+// just its leading "t" and was read as TRILLION -- a billion-fold
+// misparse ("$200 thousand" -> 200,000,000,000,000 instead of 200,000).
+// page.tsx's parseMonetaryMagnitude already tries the full unit word
+// first for exactly this reason (thousand/trillion both start with "t");
+// mirrored here so the dashboard, Planner, and exported PDF can never
+// disagree on a TAM/SAM/SOM layer's resolved/nested state -- or the
+// "Data Confirmed" evidence badge derived from it -- purely because one
+// surface used a narrower unit parser than another.
 function parseMarketSizeMagnitude(value: string): number | null {
-  const matches = [...value.matchAll(/(\d+(?:[.,]\d+)?)\s*([kKmMbBtT])?/g)];
+  const matches = [...value.matchAll(/(\d+(?:[.,]\d+)?)\s*(thousand|million|billion|trillion|[kKmMbBtT])?/gi)];
   const last = matches.at(-1);
   if (!last) return null;
 
@@ -2717,7 +2742,15 @@ function parseMarketSizeMagnitude(value: string): number | null {
 
   const unit = (last[2] || "").toLowerCase();
   const multiplier =
-    unit === "t" ? 1e12 : unit === "b" ? 1e9 : unit === "m" ? 1e6 : unit === "k" ? 1e3 : 1;
+    unit === "t" || unit === "trillion"
+      ? 1e12
+      : unit === "b" || unit === "billion"
+        ? 1e9
+        : unit === "m" || unit === "million"
+          ? 1e6
+          : unit === "k" || unit === "thousand"
+            ? 1e3
+            : 1;
 
   return numeric * multiplier;
 }
@@ -6188,6 +6221,42 @@ function ExecutiveSnapshotPanel({
   const marketSignalDimension = isMarketIntelligence
     ? confidenceRadarDimensions.find((dimension) => dimension.label === "Market" || dimension.label === "Pazar") ?? null
     : null;
+  // CRITICAL FIX -- confirmed live: this panel's own "Main Risk"/"Next
+  // Action" tiles and Risk Level badge were never covered by the decision/
+  // confidence fix above -- they still read buildExecutiveSnapshot's
+  // generic fallback (investmentScore is always empty for MI, so mainRisk
+  // fell to normalizedRiskBullets[0] -- an unbounded full-content bullet
+  // scan -- and riskLevel to inferRiskLevel's founder/business-plan
+  // keyword presence-check, e.g. "cac"/"funding"). That let this card's
+  // "Main Risk" silently disagree with the "Risk Posture" tile a few
+  // lines above it in ExecutiveSummaryVisual, which correctly reads the
+  // SAME deterministic banner's "Top 3 Risks" field -- two tiles on the
+  // same report answering the same question with different text. Now
+  // reads the identical canonical alias fields ExecutiveSummaryVisual's
+  // Risk Posture tile and getMarketIntelligenceExecutiveHighlights already
+  // use, so Main Risk/Next Action can never diverge from them again. Risk
+  // Level's severity word is read from that SAME resolved risk sentence
+  // (extractRiskLevel, already used identically for Market Metrics'
+  // Threats-derived tile) rather than a fabricated classification --
+  // falls back to the generic snapshot value only if the banner truly has
+  // neither field (never invents a severity that isn't in the text).
+  const marketMainRisk = isMarketIntelligence
+    ? takeFirstListItem(extractMetricValueFromAliases(section.content, localizedLabelVariants("topRisks"))) ||
+      snapshot.mainRisk
+    : snapshot.mainRisk;
+  const marketNextAction = isMarketIntelligence
+    ? extractMetricValueFromAliases(section.content, localizedLabelVariants("immediateNextAction")) ||
+      snapshot.nextAction
+    : snapshot.nextAction;
+  const marketRiskLevel = isMarketIntelligence
+    ? (() => {
+        const severity = extractRiskLevel(marketMainRisk);
+        if (severity === "High") return "High";
+        if (severity === "Moderate") return "Medium";
+        if (severity === "Low") return "Low";
+        return snapshot.riskLevel;
+      })()
+    : snapshot.riskLevel;
   const groups = [
     { label: labels.why, items: snapshot.why },
     { label: labels.mainRisks, items: snapshot.risks },
@@ -6196,8 +6265,8 @@ function ExecutiveSnapshotPanel({
   const metrics = [
     { label: labels.financialQuality, value: snapshot.financialQuality },
     { label: labels.reportQuality, value: snapshot.reportQuality },
-    { label: labels.mainRisk, value: snapshot.mainRisk },
-    { label: labels.nextAction, value: snapshot.nextAction },
+    { label: labels.mainRisk, value: marketMainRisk },
+    { label: labels.nextAction, value: marketNextAction },
   ];
 
   return (
@@ -6245,10 +6314,10 @@ function ExecutiveSnapshotPanel({
             {labels.riskLevel}
           </p>
           <div className="mt-3 flex items-center gap-3">
-            <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${getRiskIndicatorClass(snapshot.riskLevel)}`}>
-              {snapshot.riskLevel}
+            <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${getRiskIndicatorClass(marketRiskLevel)}`}>
+              {marketRiskLevel}
             </span>
-            <p className="line-clamp-2 text-sm leading-5 text-zinc-300">{snapshot.mainRisk}</p>
+            <p className="line-clamp-2 text-sm leading-5 text-zinc-300">{marketMainRisk}</p>
           </div>
         </div>
       </div>

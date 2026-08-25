@@ -217,8 +217,13 @@ test("A) no validated direct competitors + supported adjacent industry players: 
   const projection = projectMarketIntelligenceGraphToReport(graph, "English");
 
   // Competitive Landscape correctly remains "Validation Needed" -- no
-  // fabricated direct-competitor claim.
-  assert.match(projection.competitiveLandscape, /limited during research|no competitor data|not indicate an absence/i);
+  // fabricated direct-competitor claim -- and, since adjacent players DO
+  // exist, explicitly says so rather than the flat "no competitor data"
+  // phrasing (further hardened in a later pass: describeCompetitiveCoverage
+  // now distinguishes "nothing at all" from "no direct, but adjacent
+  // players evidenced").
+  assert.match(projection.competitiveLandscape, /direct.*competitors could not be independently validated/i);
+  assert.match(projection.competitiveLandscape, /adjacent\/platform players/i);
   assert.doesNotMatch(projection.competitiveLandscape, /Procore/);
   assert.doesNotMatch(projection.competitiveLandscape, /Autodesk/);
 

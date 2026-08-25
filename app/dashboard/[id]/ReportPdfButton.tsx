@@ -1305,8 +1305,18 @@ function extractMarketSizeValue(content: string, label: string) {
 // TAM/SAM/SOM values are ranges by design ("$2.1-2.8B"), so the
 // magnitude used for chart scaling is the upper bound of the range --
 // the last number+unit found in the string, not the first.
+//
+// CRITICAL FIX -- confirmed live (cross-surface audit): this only matched
+// a single-letter unit ([kKmMbBtT]), so a spelled-out "thousand" matched
+// just its leading "t" and was read as TRILLION -- a billion-fold
+// misparse ("$200 thousand" -> 200,000,000,000,000 instead of 200,000).
+// page.tsx's parseMonetaryMagnitude already tries the full unit word
+// first for exactly this reason (thousand/trillion both start with "t");
+// mirrored here so the dashboard, Planner, and exported PDF can never
+// disagree on a TAM/SAM/SOM layer's resolved/nested state purely because
+// one surface used a narrower unit parser than another.
 function parseMarketSizeMagnitude(value: string): number | null {
-  const matches = [...value.matchAll(/(\d+(?:[.,]\d+)?)\s*([kKmMbBtT])?/g)];
+  const matches = [...value.matchAll(/(\d+(?:[.,]\d+)?)\s*(thousand|million|billion|trillion|[kKmMbBtT])?/gi)];
   const last = matches.at(-1);
   if (!last) return null;
 
@@ -1315,7 +1325,15 @@ function parseMarketSizeMagnitude(value: string): number | null {
 
   const unit = (last[2] || "").toLowerCase();
   const multiplier =
-    unit === "t" ? 1e12 : unit === "b" ? 1e9 : unit === "m" ? 1e6 : unit === "k" ? 1e3 : 1;
+    unit === "t" || unit === "trillion"
+      ? 1e12
+      : unit === "b" || unit === "billion"
+        ? 1e9
+        : unit === "m" || unit === "million"
+          ? 1e6
+          : unit === "k" || unit === "thousand"
+            ? 1e3
+            : 1;
 
   return numeric * multiplier;
 }
@@ -4098,7 +4116,19 @@ export function buildStandardReportPdf({
       };
 
       drawCoverPage();
-      const executiveDecisionIntelligenceSummary = readExecutiveDecisionIntelligenceSummary(report.metadata);
+      // CRITICAL FIX -- confirmed live: this page was never gated to
+      // exclude Market Intelligence, even though the Executive Decision
+      // System is deliberately scoped to Business Idea Validation only
+      // (see app/api/plan/route.ts's isSupportedExecutiveDecisionSystemContext)
+      // and MI already has its own, separate canonical decision resolver
+      // (resolveMarketIntelligenceExecutiveDecision, used on the cover
+      // page above). Gated here as defense in depth, matching the same
+      // web-dashboard fix (page.tsx's ExecutiveDecisionIntelligencePanel
+      // call site) -- an MI PDF must never carry a second, uncoordinated
+      // "verdict" page that could disagree with the cover page's Decision.
+      const executiveDecisionIntelligenceSummary = isMarketIntelligenceReport
+        ? null
+        : readExecutiveDecisionIntelligenceSummary(report.metadata);
       if (executiveDecisionIntelligenceSummary) {
         pdf.addPage();
         drawExecutiveDecisionIntelligencePage(executiveDecisionIntelligenceSummary);

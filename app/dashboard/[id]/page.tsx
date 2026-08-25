@@ -2056,7 +2056,7 @@ function ExecutiveSummaryVisual({
       // are completely untouched.
       label: "Market Signal",
       value: isMarketIntelligence
-        ? "Review"
+        ? "—"
         : extractMetricValue(content, "Market") || extractMetricValue(content, "TAM") || "Review",
       accent: "from-sky-300/18 to-teal-300/5",
       evidence: "benchmarkDerived" as EvidenceLevel,
@@ -3949,6 +3949,42 @@ function ExecutiveSnapshotPanel({
   const marketSignalDimension = isMarketIntelligence
     ? confidenceRadarDimensions.find((dimension) => dimension.label === "Market" || dimension.label === "Pazar") ?? null
     : null;
+  // CRITICAL FIX -- confirmed live: this panel's own "Main Risk"/"Next
+  // Action" tiles and Risk Level badge were never covered by the decision/
+  // confidence fix above -- they still read buildExecutiveSnapshot's
+  // generic fallback (investmentScore is always empty for MI, so mainRisk
+  // fell to normalizedRiskBullets[0] -- an unbounded full-content bullet
+  // scan -- and riskLevel to inferRiskLevel's founder/business-plan
+  // keyword presence-check, e.g. "cac"/"funding"). That let this card's
+  // "Main Risk" silently disagree with the "Risk Posture" tile a few
+  // lines above it in ExecutiveSummaryVisual, which correctly reads the
+  // SAME deterministic banner's "Top 3 Risks" field -- two tiles on the
+  // same report answering the same question with different text. Now
+  // reads the identical canonical alias fields ExecutiveSummaryVisual's
+  // Risk Posture tile and getMarketIntelligenceExecutiveHighlights already
+  // use, so Main Risk/Next Action can never diverge from them again. Risk
+  // Level's severity word is read from that SAME resolved risk sentence
+  // (extractRiskLevel, already used identically for Market Metrics'
+  // Threats-derived tile) rather than a fabricated classification --
+  // falls back to the generic snapshot value only if the banner truly has
+  // neither field (never invents a severity that isn't in the text).
+  const marketMainRisk = isMarketIntelligence
+    ? takeFirstListItem(extractMetricValueFromAliases(section.content, localizedLabelVariants("topRisks"))) ||
+      snapshot.mainRisk
+    : snapshot.mainRisk;
+  const marketNextAction = isMarketIntelligence
+    ? extractMetricValueFromAliases(section.content, localizedLabelVariants("immediateNextAction")) ||
+      snapshot.nextAction
+    : snapshot.nextAction;
+  const marketRiskLevel = isMarketIntelligence
+    ? (() => {
+        const severity = extractRiskLevel(marketMainRisk);
+        if (severity === "High") return "High";
+        if (severity === "Moderate") return "Medium";
+        if (severity === "Low") return "Low";
+        return snapshot.riskLevel;
+      })()
+    : snapshot.riskLevel;
   const groups = [
     { label: labels.why, items: snapshot.why },
     { label: labels.mainRisks, items: snapshot.risks },
@@ -3957,8 +3993,8 @@ function ExecutiveSnapshotPanel({
   const metrics = [
     { label: labels.financialQuality, value: snapshot.financialQuality },
     { label: labels.reportQuality, value: snapshot.reportQuality },
-    { label: labels.mainRisk, value: snapshot.mainRisk },
-    { label: labels.nextAction, value: snapshot.nextAction },
+    { label: labels.mainRisk, value: marketMainRisk },
+    { label: labels.nextAction, value: marketNextAction },
   ];
 
   return (
@@ -4006,10 +4042,10 @@ function ExecutiveSnapshotPanel({
             {labels.riskLevel}
           </p>
           <div className="mt-3 flex items-center gap-3">
-            <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${getRiskIndicatorClass(snapshot.riskLevel)}`}>
-              {snapshot.riskLevel}
+            <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${getRiskIndicatorClass(marketRiskLevel)}`}>
+              {marketRiskLevel}
             </span>
-            <p className="line-clamp-2 text-sm leading-5 text-zinc-300">{snapshot.mainRisk}</p>
+            <p className="line-clamp-2 text-sm leading-5 text-zinc-300">{marketMainRisk}</p>
           </div>
         </div>
       </div>
@@ -5619,7 +5655,23 @@ export default async function ReportDetailPage({
                                 reportQuality={report.metadata?.reportQuality}
                                 isMarketIntelligence={report.type === "Market Analysis"}
                               />
-                              <ExecutiveDecisionIntelligencePanel metadata={report.metadata} />
+                              {/* CRITICAL FIX -- confirmed live: the Executive Decision
+                                  System's explainability/verdict metadata was never
+                                  gated to exclude Market Intelligence, even though EDS
+                                  is deliberately scoped to Business Idea Validation only
+                                  (see app/api/plan/route.ts's isSupportedExecutiveDecisionSystemContext)
+                                  and MI has its own separate, already-canonical decision
+                                  resolver (resolveMarketIntelligenceExecutiveDecision).
+                                  If EDS metadata were ever present on an MI report, this
+                                  panel would render a second, uncoordinated "verdict" a
+                                  reader could see disagree with the Decision shown two
+                                  panels above it -- gated here as defense in depth,
+                                  matching the report-isolation policy already enforced
+                                  for every other MI-inapplicable construct (founder
+                                  score, investment score, etc.). */}
+                              {report.type !== "Market Analysis" ? (
+                                <ExecutiveDecisionIntelligencePanel metadata={report.metadata} />
+                              ) : null}
                               {section.field === "marketSize" && report.type === "Market Analysis" ? (
                                 <MarketMetricsDashboard sections={visibleSections} />
                               ) : null}

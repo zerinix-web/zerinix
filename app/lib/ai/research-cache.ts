@@ -35,6 +35,37 @@ export type ResearchCacheIdentity = {
   reportFamily: string;
 };
 
+// CRITICAL FIX -- confirmed live (cache/regeneration safety audit): a
+// conversation-scoped research snapshot was reused across every later
+// request in that same conversation thread purely by conversationId
+// match, with no check that it was actually captured for the SAME topic
+// as the current request -- asking about one market in chat and then
+// requesting a Market Intelligence report for a different, unrelated
+// market later in the same conversation silently reused the first
+// market's stale evidence for the second (new canonical report data
+// combined with old cached research). A snapshot is now only trusted
+// when its recorded identity (the same normalized prompt, uploaded-asset
+// fingerprint, and language it was captured under) matches the current
+// request's -- reportFamily/analysisMode are deliberately excluded, since
+// a casual chat question and a later formal report request in the same
+// conversation are expected to differ there while still describing the
+// same real topic. A mismatched snapshot simply falls through to the
+// normal per-user/global cache or a fresh research run -- this only
+// costs a cache miss, it can never serve mismatched evidence. Exported so
+// every caller of getConversationResearchSnapshot/
+// resolveDomainResearchWithCache enforces the identical guarantee from
+// one place.
+export function conversationResearchIdentityMatches(
+  snapshotIdentity: ResearchCacheIdentity,
+  requestIdentity: ResearchCacheIdentity
+): boolean {
+  return (
+    snapshotIdentity.normalizedPrompt === requestIdentity.normalizedPrompt &&
+    snapshotIdentity.uploadedAssetHash === requestIdentity.uploadedAssetHash &&
+    snapshotIdentity.language === requestIdentity.language
+  );
+}
+
 type CachedResearchPayload = {
   version: typeof RESEARCH_CACHE_VERSION;
   identity: ResearchCacheIdentity;
@@ -358,11 +389,22 @@ export async function resolveDomainResearchWithCache(input: {
   conversationId?: string | null;
   execute: () => Promise<DomainResearchBundle>;
 }) {
-  const conversationSnapshot = await getConversationResearchSnapshot({
+  const rawConversationSnapshot = await getConversationResearchSnapshot({
     supabase: input.supabase,
     userId: input.userId,
     conversationId: input.conversationId,
   });
+  // See conversationResearchIdentityMatches's own comment -- a mismatched
+  // snapshot falls through to the normal per-user/global research cache
+  // or a fresh research run below, never serving stale/mismatched
+  // evidence. This is the single place every caller of
+  // resolveDomainResearchWithCache resolves conversation reuse, so the
+  // guarantee holds regardless of caller.
+  const conversationSnapshot =
+    rawConversationSnapshot &&
+    conversationResearchIdentityMatches(rawConversationSnapshot.identity, input.identity)
+      ? rawConversationSnapshot
+      : null;
 
   if (conversationSnapshot) {
     const tokenUsage = estimateResearchUsage(

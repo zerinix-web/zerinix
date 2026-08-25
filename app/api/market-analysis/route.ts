@@ -37,6 +37,7 @@ import {
 } from "@/app/lib/ai/domain-research";
 import { MARKET_ONLY_FORBIDDEN_EVIDENCE_FIELDS } from "@/app/lib/ai/dynamic-research-plan";
 import {
+  conversationResearchIdentityMatches,
   createPreResearchReportCacheKey,
   createResearchBundleFingerprint,
   createReportCacheData,
@@ -85,6 +86,7 @@ import {
   buildMarketIntelligenceGraph,
   formatMarketIntelligenceGraphForModel,
   projectMarketIntelligenceGraphToReport,
+  sanitizeMarketProseCompetitorClaims,
   type MarketIntelligenceGraph,
 } from "@/app/lib/ai/market-intelligence-graph";
 import {
@@ -636,6 +638,25 @@ function enforceMarketReportLanguage(
 // already-computed content from being appended to a customer-visible
 // field. marketInfrastructure is destructured out and discarded rather
 // than spread onto the report, since it is not itself a MarketReportField.
+// Free-text fields that can plausibly name a competitor with rivalry
+// framing, run through sanitizeMarketProseCompetitorClaims (market-
+// intelligence-graph.ts) so a company already classified by the graph as
+// adjacent-only (or not evidenced at all) can never be asserted as a
+// validated direct competitor here, even though these fields are
+// otherwise raw, un-gated model prose (unlike competitiveLandscape/
+// majorPlayers above, which the graph replaces outright). Deliberately
+// excludes fields the graph already fully owns (marketSize, tamSamSom,
+// cagr, competitiveLandscape, majorPlayers, sources) -- sanitizing
+// already-canonical text would be redundant.
+const competitorClaimSensitiveFields: MarketReportField[] = [
+  "marketDrivers",
+  "barriers",
+  "opportunities",
+  "threats",
+  "portersFiveForces",
+  "strategicRecommendations",
+];
+
 function applySharedMarketGraph(
   report: Record<MarketReportField, string>,
   graph: MarketIntelligenceGraph,
@@ -643,10 +664,26 @@ function applySharedMarketGraph(
 ) {
   const projection = projectMarketIntelligenceGraphToReport(graph, language);
   const { marketInfrastructure: _marketInfrastructure, ...reportFieldsFromGraph } = projection;
-  return {
+  const merged = {
     ...report,
     ...reportFieldsFromGraph,
   };
+
+  // Runs AFTER the graph-owned fields above are spliced in, and BEFORE
+  // buildMarketExecutiveDecisionBrief (ensureMarketReportQuality, below)
+  // reads opportunities/threats to build the deterministic Executive
+  // Decision banner and final verdict -- so a downgraded competitor claim
+  // here also protects that entire downstream executive-decision chain
+  // (and, via the earlier consistency fix, ExecutiveSnapshotPanel's Main
+  // Risk/Next Action tiles and Executive Highlights) without needing its
+  // own separate sanitization pass.
+  for (const field of competitorClaimSensitiveFields) {
+    if (merged[field]) {
+      merged[field] = sanitizeMarketProseCompetitorClaims(merged[field], graph, language);
+    }
+  }
+
+  return merged;
 }
 
 // Unlike plan-executor.ts's business-report path (createPlanFieldFallback),
@@ -1560,7 +1597,7 @@ Write only this section's content. Do not write a JSON object, field name, headi
         language: responseLanguage,
         reportFamily: "market_analysis",
       };
-      const conversationResearch = await getConversationResearchSnapshot({
+      const conversationResearchSnapshot = await getConversationResearchSnapshot({
         supabase,
         userId: user.id,
         conversationId:
@@ -1568,6 +1605,18 @@ Write only this section's content. Do not write a JSON object, field name, headi
             ? body.conversationId
             : null,
       });
+      // CRITICAL FIX -- confirmed live (cache/regeneration safety audit):
+      // this snapshot was trusted "authoritative" purely by conversationId
+      // match, with no check that it was captured for THIS prompt/topic --
+      // see conversationResearchIdentityMatches's own comment. A mismatch
+      // (e.g. an earlier chat message in this thread was about a different
+      // market) now discards the snapshot here, once, so every downstream
+      // consumer of `conversationResearch` (context fingerprint, graph
+      // reuse) inherits the same guarantee without its own check.
+      const conversationResearch = conversationResearchSnapshot &&
+        conversationResearchIdentityMatches(conversationResearchSnapshot.identity, researchIdentity)
+        ? conversationResearchSnapshot
+        : null;
       const fullReportCacheKey = createPreResearchReportCacheKey({
         endpoint: "/api/market-analysis",
         identity: researchIdentity,
