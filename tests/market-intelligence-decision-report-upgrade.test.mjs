@@ -451,7 +451,15 @@ test("ReportPdfButton.tsx: extractMarketGrowthTrend, extractAdoptionSignal, extr
 test("ReportPdfButton.tsx: draws the Market Metrics dashboard (Market Growth Signal, CAGR, Customer Segment, Adoption Signal, Risk Level) on the Market Size section, reading cagr/customerSegments/threats from the report's other real sections -- with a premium Validation Needed tile, never a fabricated value", () => {
   assert.match(pdfButtonSource, /isMarketIntelligenceReport && field === "marketSize"/);
   assert.match(pdfButtonSource, /label: "Market Growth Signal", value: extractMarketGrowthTrend\(content, cagrContent\)/);
-  assert.match(pdfButtonSource, /label: "CAGR", value: extractHeadlineCagrValue\(cagrContent\)/);
+  // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair): the
+  // tile's value is now resolved via resolveCagrHeadlinePresentation, with
+  // this exact pinned extractHeadlineCagrValue(cagrContent) call retained
+  // as the single-estimate source of truth (see the isMultiEstimate
+  // branch immediately preceding it).
+  assert.match(
+    pdfButtonSource,
+    /cagrPresentation\.isMultiEstimate \? cagrPresentation\.displayValue : extractHeadlineCagrValue\(cagrContent\)/
+  );
   assert.match(pdfButtonSource, /label: "Customer Segment", value: extractKeywordInsight\(customerSegmentsContent, \[\]\)/);
   assert.match(pdfButtonSource, /label: "Adoption Signal", value: extractAdoptionSignal\(customerSegmentsContent\)/);
   assert.match(pdfButtonSource, /label: "Risk Level", value: extractRiskLevel\(threatsContent\)/);

@@ -32,6 +32,8 @@ import {
   readFounderReadinessMetricValue,
   readFounderReadinessScoreValue,
   resolveMarketSizingCascade,
+  resolveCagrHeadlinePresentation,
+  stripLeadingTakeawaySentence,
 } from "@/app/lib/report-presentation";
 import {
   cleanPdfLegacyValidationIntelligenceContent,
@@ -5023,9 +5025,19 @@ export function buildStandardReportPdf({
             }
 
             if (miRows.length === 0) {
+              // P0 FIX #8 -- confirmed live (Competitive Landscape data-flow
+              // repair): this IS the Competitive Landscape section's own
+              // render (title-matched above) -- telling the reader to "see
+              // the Competitive Landscape section" from inside that exact
+              // section was a self-referential, useless copy-paste artifact.
+              // Every real extraction tier (table, flattened bullets, Major
+              // Players' own bullets/prose-list) has already failed by this
+              // point, so this is the genuine "nothing defensible found"
+              // case -- matches page.tsx's own wording for the identical
+              // state, never fabricating a vendor to fill the gap.
               pdf.setFontSize(6.2);
               pdf.setTextColor("#a1a1aa");
-              pdf.text(localizePdfPresentationText("See the Competitive Landscape section for full competitor detail.", pdfLocale), bodyX + 3, visualY + 14, {
+              pdf.text(localizePdfPresentationText("No competitor data could be validated for this market yet.", pdfLocale), bodyX + 3, visualY + 14, {
                 maxWidth: bodyWidth - 6,
               });
               drawMarketMap(visualY + headerHeight + rowHeight + 4 + marketMapGap);
@@ -5076,9 +5088,14 @@ export function buildStandardReportPdf({
           });
 
           if (rows.length === 0) {
+            // P0 FIX #8 -- same self-referential copy-paste fix as the
+            // Market Intelligence branch above: this is the Competitive
+            // Landscape section's own generic (Business Plan/Acquisition)
+            // render, so it must never tell the reader to "see" the exact
+            // section already on screen.
             pdf.setFontSize(6.2);
             pdf.setTextColor("#a1a1aa");
-            pdf.text(localizePdfPresentationText("See the Competitive Landscape section for full competitor detail.", pdfLocale), bodyX + 3, visualY + 14, {
+            pdf.text(localizePdfPresentationText("No competitor data could be validated for this market yet.", pdfLocale), bodyX + 3, visualY + 14, {
               maxWidth: bodyWidth - 6,
             });
             return headerHeight + rowHeight + 4;
@@ -5118,9 +5135,24 @@ export function buildStandardReportPdf({
           const customerSegmentsContent = pdfSections.find((candidate) => candidate.field === "customerSegments")?.content || "";
           const threatsContent = pdfSections.find((candidate) => candidate.field === "threats")?.content || "";
 
+          // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair):
+          // mirrors page.tsx's identical fix -- when the evidence names
+          // more than one materially different growth-rate figure for
+          // what the report presents as one requested market,
+          // resolveCagrHeadlinePresentation (report-presentation.ts, the
+          // ONE canonical source both surfaces read) reports an honest
+          // range instead of extractHeadlineCagrValue's plain first-match
+          // pick, so the PDF tile can never disagree with the web card
+          // about which figure is authoritative.
           const tiles = [
             { label: "Market Growth Signal", value: extractMarketGrowthTrend(content, cagrContent) },
-            { label: "CAGR", value: extractHeadlineCagrValue(cagrContent) },
+            {
+              label: "CAGR",
+              value: (() => {
+                const cagrPresentation = resolveCagrHeadlinePresentation(cagrContent);
+                return cagrPresentation.isMultiEstimate ? cagrPresentation.displayValue : extractHeadlineCagrValue(cagrContent);
+              })(),
+            },
             { label: "Customer Segment", value: extractKeywordInsight(customerSegmentsContent, []) },
             { label: "Adoption Signal", value: extractAdoptionSignal(customerSegmentsContent) },
             { label: "Risk Level", value: extractRiskLevel(threatsContent) },
@@ -5759,6 +5791,22 @@ export function buildStandardReportPdf({
         // never draws a second time below the visual. Every other section
         // keeps its existing body text, unchanged.
         const isPdfCompleteVisualSection = pdfCompleteVisualFields.has(section.field ?? "") || isTamSamSomPdfSection;
+        // P0 FIX #8 -- confirmed live (Key Takeaway / body duplication
+        // repair): pdfKeyTakeawayCardFields draws a highlighted Key
+        // Takeaway box (drawSectionVisual, below) ABOVE this same body
+        // text -- previously the body still started with the identical
+        // leading sentence/bulleted item ("1) Integration-first add-on
+        // products...", the exact reported production shape), since
+        // nothing here ever removed it. stripLeadingTakeawaySentence
+        // (report-presentation.ts) is the ONE canonical function that
+        // removes JUST that duplicate -- conservative by design, it
+        // returns the content completely unchanged whenever there is any
+        // uncertainty, so distinct evidence/qualifiers/numbers/citations
+        // and every sentence after the first are never touched.
+        const isKeyTakeawayCardSection = pdfKeyTakeawayCardFields.has(section.field ?? "");
+        const sectionContentWithoutTakeawayDuplication = isKeyTakeawayCardSection
+          ? stripLeadingTakeawaySentence(section.content, getSectionTakeaway(section.content))
+          : section.content;
         // stripReportPresentationArtifacts wraps every branch as the final
         // step -- pdfSections is already filtered to exclude Sources/
         // External Evidence sections above, so isSourceSectionTitle can no
@@ -5785,7 +5833,7 @@ export function buildStandardReportPdf({
                               section.content,
                               readFounderReadinessScoreValue(report.investmentScore)
                             )
-                          : section.content
+                          : sectionContentWithoutTakeawayDuplication
                       )
                     )
                   ),

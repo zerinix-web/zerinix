@@ -152,9 +152,14 @@ test("page.tsx and Planner.tsx: the Market Size/CAGR card no longer classifies e
   // see tests/market-intelligence-source-evidence-integrity.test.mjs.
   // Planner.tsx (Business Plan/Acquisition, out of scope for that
   // Market-Intelligence-specific fix) keeps its original, unscoped call.
+  // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair): a
+  // multi-estimate CAGR range is forced to "benchmarkDerived" before
+  // reaching the classifier below (no single evidence line supports a
+  // two-number range); the single-estimate case this test protects still
+  // routes through this exact pinned getDashboardMetricEvidence(...) call.
   assert.match(
     pageSource,
-    /const evidence = getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
+    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
   );
   assert.match(
     plannerSource,

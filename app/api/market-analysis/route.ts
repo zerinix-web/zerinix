@@ -105,6 +105,7 @@ import {
   logAiExecution,
 } from "@/app/lib/ai/runtime";
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
+import { stripInternalImplementationTokens } from "@/app/lib/report-output-sanitization";
 import {
   applyUserMemoryOperations,
   buildUserMemoryContext,
@@ -280,9 +281,23 @@ const marketReportTermReplacements: Array<[RegExp, string]> = [
   [/\bStrong evidence\b/gi, "Verified"],
   [/\bSector view\b/gi, "Market view"],
   [/\bIndustry[\s-]+Estimate\b/gi, "Market view"],
-  [/\bAI[\s-]+Assumptions?\b/gi, "Planning inputs"],
+  // P0 FIX #8 -- confirmed live (internal/debug token leakage repair):
+  // these two rows previously matched "Assumption"/"AI Assumption"
+  // ANYWHERE in the text -- including ordinary prose use of the word
+  // ("...holds only if this assumption about adoption remains true")
+  // -- rewriting it into "Planning inputs" mid-sentence and producing
+  // ungrammatical, jarring output. The relabeling is only meaningful
+  // when the word is acting as a LABEL: the bracketed evidence tag
+  // report-quality-directives.ts instructs the model to emit
+  // ("[Assumption] Serviceable share is 25%...") or a section/line
+  // header ("Assumptions:", "Critical Assumptions:"). The lookahead
+  // scopes the match to that label position only; the same word inside
+  // a sentence is left untouched.
+  [/\[\s*AI[\s-]+Assumptions?\s*\]/gi, "[Planning inputs]"],
+  [/\[\s*Assumptions?\s*\]/gi, "[Planning inputs]"],
+  [/\bAI[\s-]+Assumptions?\b(?=\s*\**\s*:)/gi, "Planning inputs"],
   [/\bBenchmarks?\b/gi, "Market references"],
-  [/\bAssumptions?\b/gi, "Planning inputs"],
+  [/\bAssumptions?\b(?=\s*\**\s*:)/gi, "Planning inputs"],
   [/\bSource unavailable\b/gi, ""],
   [/\bConfidence unavailable\b/gi, ""],
   [/\bTBD\b/gi, ""],
@@ -295,10 +310,20 @@ const marketReportTermReplacements: Array<[RegExp, string]> = [
   [/\bFailed\b/gi, ""],
 ];
 
+// P0 FIX #8 (hardening pass) -- confirmed live: stripInternalImplementationTokens
+// (report-output-sanitization.ts) is the ONE shared, schema-independent
+// generic sanitizer for internal identifier leaks (sizingGap-class
+// tokens) that this function and chat/route.ts's final response
+// sanitization both call -- see that function's own comment for the
+// full shape-plus-heuristic rationale. Running it here, on the initial
+// sanitizeAiResponseText(value) accumulator before the market-report-
+// specific term replacements below, means it applies uniformly
+// regardless of which downstream replacement rules a given report
+// happens to trigger.
 function sanitizeMarketReportContent(value: string) {
   const sanitized = marketReportTermReplacements.reduce(
     (content, [pattern, replacement]) => content.replace(pattern, replacement),
-    sanitizeAiResponseText(value)
+    stripInternalImplementationTokens(sanitizeAiResponseText(value))
   );
 
   return normalizePdfText(sanitized)
@@ -2215,7 +2240,7 @@ ${userMemoryInstruction ? `\n${userMemoryInstruction}\n` : ""}
 Completed domain-aware research (this is the closed evidence registry for the report):
 ${domainResearchContext}
 
-Final validated market intelligence graph (authoritative shared chat/report object):
+Final validated market intelligence graph (authoritative shared chat/report object -- this JSON's field names such as "sizingGap" or "confidenceClassification" are internal code identifiers for your reference only; never copy a field/key name into the written report, write only natural business language):
 ${formatMarketIntelligenceGraphForModel(marketIntelligenceGraph)}
 
 ${marketEvidenceCoverageContext}

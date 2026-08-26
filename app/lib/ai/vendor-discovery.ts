@@ -992,6 +992,20 @@ const professionalServicesFirmPattern =
   /\b(?:law firms?|accounting firms?|cpa firms?|consulting firms?|advisory firms?|consultanc(?:y|ies))\b/gi;
 const customerFramingBeforeProfessionalServicesFirmPattern =
   /\b(?:for|to|serving|serves|served|used by|trusted by|built for|designed for|marketed to|offered to|sold to|sells? to|caters? to|available to)\s+(?:\S+\s+){0,4}$/i;
+// P0 FIX #8 -- confirmed live (Competitive Landscape data-flow repair): a
+// SECOND, equally common customer-framing shape names the profession as a
+// MODIFIER of the AUDIENCE, not the candidate itself -- "rated highly by
+// law firm reviewers on G2", "trusted by law firm staff", "law firm
+// clients report..." -- the profession term is immediately followed by a
+// role-noun describing WHO is reviewing/using/buying, never a claim about
+// what the candidate is. The preceding-preposition check above only looks
+// BEFORE the term and would miss this shape entirely (e.g. "rated highly
+// by " does not match "used by"/"trusted by" verbatim), which is exactly
+// what let a genuinely corroborated vendor (the Clio-shaped case) fail
+// assessMarketRelevance purely because review-site evidence happened to
+// describe its reviewers this way.
+const customerFramingAfterProfessionalServicesFirmPattern =
+  /^\s*(?:reviewers?|users?|customers?|clients?|buyers?|practitioners?|staff|teams?|professionals?|employees?|partners?|subscribers?)\b/i;
 
 function matchesNonVendorRole(text: string): boolean {
   if (nonVendorRolePattern.test(text)) return true;
@@ -999,11 +1013,15 @@ function matchesNonVendorRole(text: string): boolean {
   const matches = [...text.matchAll(professionalServicesFirmPattern)];
   if (matches.length === 0) return false;
 
-  return matches.some(
-    (match) =>
-      typeof match.index === "number" &&
-      !customerFramingBeforeProfessionalServicesFirmPattern.test(text.slice(0, match.index))
-  );
+  return matches.some((match) => {
+    if (typeof match.index !== "number") return true;
+    const precedingText = text.slice(0, match.index);
+    const followingText = text.slice(match.index + match[0].length);
+    const readsAsCustomerFraming =
+      customerFramingBeforeProfessionalServicesFirmPattern.test(precedingText) ||
+      customerFramingAfterProfessionalServicesFirmPattern.test(followingText);
+    return !readsAsCustomerFraming;
+  });
 }
 
 /**

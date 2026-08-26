@@ -380,8 +380,14 @@ test("DRIFT CHECK: P0 FIX #1 (TAM/SAM/SOM), #2 (CAGR), #3 (Competitive Landscape
   );
 
   const pageSource = readFileSync(new URL("../app/dashboard/[id]/page.tsx", import.meta.url), "utf8");
+  // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair): a
+  // multi-estimate CAGR range is now forced to "benchmarkDerived" before
+  // it ever reaches the canonical classifier (no single evidence line
+  // supports a two-number range), but the single-estimate case -- the
+  // one this drift check protects -- still routes through the exact
+  // pinned getDashboardMetricEvidence(...) call below, unchanged.
   assert.match(
     pageSource,
-    /const evidence = getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
+    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
   );
 });

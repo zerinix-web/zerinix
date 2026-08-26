@@ -58,6 +58,7 @@ import {
   sanitizeAiResponseText,
   markChatStreamError,
 } from "@/app/lib/ai/response-sanitization";
+import { stripInternalImplementationTokens } from "@/app/lib/report-output-sanitization";
 import {
   addTokenUsage,
   CHAT_RESPONSE_CONTINUATION_INPUT,
@@ -865,7 +866,14 @@ function buildAdvisorClarification(
 
 function textStream(content: string) {
   const encoder = new TextEncoder();
-  const sanitizedContent = sanitizeAiResponseText(content);
+  // P0 FIX #8 (hardening pass) -- confirmed live: chat, like Market
+  // Analysis, injects the market intelligence graph as raw JSON into the
+  // model prompt (formatMarketIntelligenceGraphForModel below) whenever
+  // one is in scope for the conversation, so this reply is exposed to
+  // the exact same internal-identifier leak vector. See
+  // stripInternalImplementationTokens's own comment for the full
+  // shape-plus-heuristic rationale.
+  const sanitizedContent = stripInternalImplementationTokens(sanitizeAiResponseText(content));
 
   return new Response(
     new ReadableStream({
@@ -2061,7 +2069,7 @@ async function handleChatPost(req: Request) {
                   }
 
                   if (!currentAttemptText && completedText) {
-                    const sanitizedCompletedText = sanitizeAiResponseText(completedText);
+                    const sanitizedCompletedText = stripInternalImplementationTokens(sanitizeAiResponseText(completedText));
                     currentAttemptText = sanitizedCompletedText;
                     streamedText += sanitizedCompletedText;
                     controller.enqueue(encoder.encode(sanitizedCompletedText));
@@ -2090,7 +2098,7 @@ async function handleChatPost(req: Request) {
                   });
 
                   if (!currentAttemptText && completedText) {
-                    const sanitizedCompletedText = sanitizeAiResponseText(completedText);
+                    const sanitizedCompletedText = stripInternalImplementationTokens(sanitizeAiResponseText(completedText));
                     currentAttemptText = sanitizedCompletedText;
                     streamedText += sanitizedCompletedText;
                     controller.enqueue(encoder.encode(sanitizedCompletedText));
@@ -2182,7 +2190,17 @@ async function handleChatPost(req: Request) {
               controller.enqueue(encoder.encode(streamedText));
             }
 
-            streamedText = sanitizeAiResponseText(streamedText);
+            // P0 FIX #8 (hardening pass) -- this sanitizes the ACCUMULATED
+            // text used for caching (storeCachedAiResponse below) and
+            // logging; it does not retroactively touch the raw
+            // response.output_text.delta chunks already enqueued to the
+            // client above as they streamed in (a pre-existing
+            // characteristic of this streaming loop that predates this
+            // fix and applies equally to every sanitizeAiResponseText
+            // protection, not just this one -- fixing it would mean
+            // buffering/delaying the live token stream, which is a
+            // streaming-behavior change outside this fix's scope).
+            streamedText = stripInternalImplementationTokens(sanitizeAiResponseText(streamedText));
 
             controller.close();
 

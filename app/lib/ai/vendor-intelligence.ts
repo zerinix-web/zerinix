@@ -427,13 +427,51 @@ export function buildVendorIntelligenceGraph(
             confidence: 98,
             reason: "Matched to the market taxonomy's commercial vendor catalog.",
           }
-        : classifyOrganizationEntity({
-            name: candidate.canonicalName,
-            url: candidate.sourceUrls[0] || "",
-            sourceType: allItems[0].sourceType,
-            context: evidenceTextJoined,
-            knownCommercialVendor: false,
-          });
+        : (() => {
+            const classification = classifyOrganizationEntity({
+              name: candidate.canonicalName,
+              url: candidate.sourceUrls[0] || "",
+              sourceType: allItems[0].sourceType,
+              context: evidenceTextJoined,
+              knownCommercialVendor: false,
+            });
+            // P0 FIX #8 -- confirmed live (Competitive Landscape data-flow
+            // repair): a candidate discovered via a genuine descriptive
+            // heuristic mention (NOT a bare domain-fallback guess) already
+            // matched one of extractVendorCandidateMentions' own
+            // vendor-signal-verb patterns ("offers"/"provides"/"is a
+            // cloud-based"/"is a leading"/...) to be named a candidate at
+            // all -- a real, deliberate signal that the evidence describes
+            // a commercial product. classifyOrganizationEntity's own
+            // "commercial_vendor" bar only recognizes a narrow, exact
+            // phrase set ("company website"/"product page"/"software
+            // vendor"/...) that ordinary third-party review-site or press
+            // coverage describing a real vendor (e.g. "Clio is a
+            // cloud-based legal practice management platform rated highly
+            // by reviewers on G2") almost never uses verbatim, so a
+            // genuinely commercial candidate fell through to the generic
+            // "unknown" default and was discarded here -- before
+            // validateVendorCandidate (the real, unchanged existence bar)
+            // or assessMarketRelevance (the real, unchanged relevance
+            // filter) ever got a chance to evaluate it, and before it
+            // could even become an honestly-labeled adjacentPlayers entry.
+            // Only upgrades the AMBIGUOUS "unknown" default -- every
+            // SPECIFIC non-vendor classification (government/regulator/
+            // academic/community/customer_adopter/channel_partner/
+            // research_provider/...) is still fully respected and excludes
+            // the candidate exactly as before; domain-fallback candidates
+            // (no descriptive mention at all) are untouched by this branch
+            // and still require an explicit commercial_vendor signal.
+            if (!candidate.matchedByDomainFallbackOnly && classification.entityType === "unknown") {
+              return {
+                entityType: "commercial_vendor" as const,
+                confidence: classification.confidence,
+                reason:
+                  "Discovered via a commercial-product-shaped mention (e.g. an \"offers\"/\"provides\"/\"is a cloud-based\" pattern) with no specific non-vendor institutional signal found.",
+              };
+            }
+            return classification;
+          })();
 
       if (nonVendorInstitutionalTypes.has(preliminaryClassification.entityType)) {
         mergeEntity(organizationEntities, {

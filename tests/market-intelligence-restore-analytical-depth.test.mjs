@@ -65,7 +65,12 @@ for (const [label, source] of [
         : 'if (field === "marketSize" || field === "cagr")'
     );
     assert.ok(marketSizeBlockStart >= 0, "Market Size / CAGR branch not found");
-    const block = source.slice(marketSizeBlockStart, marketSizeBlockStart + 3200);
+    // P0 FIX #8 widened the CAGR branch with additional documentation
+    // (resolveCagrHeadlinePresentation's multi-estimate handling) between
+    // this branch's start and its "Evidence & Analysis" block -- the
+    // window is widened to still capture it, the underlying JSX asserted
+    // below is otherwise unchanged.
+    const block = source.slice(marketSizeBlockStart, marketSizeBlockStart + 5500);
 
     assert.match(block, /Evidence &amp; Analysis/);
     assert.doesNotMatch(block, /line-clamp-3 text-sm leading-6 text-zinc-400">\{(?:section\.)?content\}/);

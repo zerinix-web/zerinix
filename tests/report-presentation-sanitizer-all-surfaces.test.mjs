@@ -135,8 +135,13 @@ test("ReportPdfButton.tsx's per-section render loop wraps the final sectionBodyC
   const wrapIndex = pdfButtonSource.indexOf("const sectionBodyContent = stripReportPresentationArtifacts(");
   assert.ok(loopStart > -1, "pdfSections.forEach loop not found");
   assert.ok(wrapIndex > -1, "sectionBodyContent is not wrapped in stripReportPresentationArtifacts");
+  // P0 FIX #8 added the isKeyTakeawayCardSection/
+  // sectionContentWithoutTakeawayDuplication computation (plus its
+  // documentation) between the loop start and this wrap, widening the
+  // distance -- the window is widened to still confirm the wrap remains
+  // inside the same forEach loop, not moved outside it.
   assert.ok(
-    wrapIndex > loopStart && wrapIndex < loopStart + 2000,
+    wrapIndex > loopStart && wrapIndex < loopStart + 2800,
     "the stripReportPresentationArtifacts wrap is not inside the render loop"
   );
 });

@@ -39,6 +39,7 @@ import {
   normalizeReportPresentationText,
   readFounderReadinessMetricValue,
   readFounderReadinessScoreValue,
+  resolveCagrHeadlinePresentation,
 } from "@/app/lib/report-presentation";
 import type {
   ReportBenchmarkFit,
@@ -2591,7 +2592,24 @@ function ReportSectionVisual({
   // "never invent a value" directive already requires.
   if (normalizedTitle.includes("market size") || normalizedTitle === "cagr" || normalizedTitle.includes("cagr")) {
     const isCagr = normalizedTitle === "cagr" || normalizedTitle.includes("cagr");
-    const value = isCagr ? extractHeadlineCagrValue(content) : extractHeadlineMonetaryValue(content);
+    // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair): when
+    // the evidence names more than one materially different growth-rate
+    // figure for what the report presents as one requested market (e.g.
+    // 7.0% on one sourced base, 9.8% on a differently-scoped one),
+    // extractHeadlineCagrValue's plain first-match regex (unchanged --
+    // still used for the single-estimate case, and still the source of
+    // truth ReportPdfButton.tsx mirrors) would silently promote whichever
+    // number happens to appear first as if it were the one authoritative
+    // figure. resolveCagrHeadlinePresentation (report-presentation.ts)
+    // detects genuine disagreement and reports an honest range instead --
+    // never averaging, never fabricating a scope explanation the evidence
+    // never stated.
+    const cagrPresentation = isCagr ? resolveCagrHeadlinePresentation(content) : null;
+    const value = isCagr
+      ? cagrPresentation!.isMultiEstimate
+        ? cagrPresentation!.displayValue
+        : extractHeadlineCagrValue(content)
+      : extractHeadlineMonetaryValue(content);
     // CRITICAL FIX -- confirmed live: this card previously classified
     // ANY extracted figure as "verified" (Data Confirmed) by default,
     // only downgrading it when the content contained the literal
@@ -2609,11 +2627,26 @@ function ReportSectionVisual({
     // P0 FIX -- a multi-item field (e.g. cagr with one [Verified] and one
     // [Estimated] line) must not let a DIFFERENT line confirm this one --
     // see extractEvidenceLineForValue's own comment.
-    const evidence = getDashboardMetricEvidence(
-      isCagr ? "CAGR" : "Market Size",
-      value,
-      extractEvidenceLineForValue(content, value)
-    );
+    // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair): a
+    // range built from two genuinely disagreeing estimates can never
+    // classify as "verified" ("Data Confirmed") -- no single evidence
+    // line supports a two-number range, so scanning either underlying
+    // line for "[Verified]" (extractEvidenceLineForValue's own line-match
+    // would fail to find any line containing this range value and fall
+    // back to the whole field anyway) would let a downstream summary
+    // strengthen what is honestly a directional, multi-sourced read.
+    // Forced to "benchmarkDerived" ("Market Support") -- an existing,
+    // already-correct evidence tier for exactly this shape, never a new
+    // one, and never "validationRequired" either: real, sourced evidence
+    // for the range DOES exist, it just does not agree on one figure.
+    const evidence =
+      isCagr && cagrPresentation?.isMultiEstimate
+        ? ("benchmarkDerived" as const)
+        : getDashboardMetricEvidence(
+            isCagr ? "CAGR" : "Market Size",
+            value,
+            extractEvidenceLineForValue(content, value)
+          );
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.1),transparent_30%),rgba(255,255,255,0.025)] p-5">
@@ -3627,9 +3660,21 @@ function MarketMetricsDashboard({
   const customerSegmentsContent = findContent("customerSegments");
   const threatsContent = findContent("threats");
 
+  // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair):
+  // resolveCagrHeadlinePresentation (report-presentation.ts, the ONE
+  // canonical source both this tile and ReportPdfButton.tsx's identical
+  // tile read) reports an honest range instead of picking whichever
+  // figure appears first when the evidence names more than one
+  // materially different growth-rate estimate.
   const tiles = [
     { label: "Market Growth Signal", value: extractMarketGrowthTrend(marketSizeContent, cagrContent) },
-    { label: "CAGR", value: extractHeadlineCagrValue(cagrContent) },
+    {
+      label: "CAGR",
+      value: (() => {
+        const cagrPresentation = resolveCagrHeadlinePresentation(cagrContent);
+        return cagrPresentation.isMultiEstimate ? cagrPresentation.displayValue : extractHeadlineCagrValue(cagrContent);
+      })(),
+    },
     { label: "Customer Segment", value: extractFirstInsight(customerSegmentsContent) },
     { label: "Adoption Signal", value: extractAdoptionSignal(customerSegmentsContent) },
     { label: "Risk Level", value: extractRiskLevel(threatsContent) },

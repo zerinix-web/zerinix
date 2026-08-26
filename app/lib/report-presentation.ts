@@ -1035,6 +1035,161 @@ export function getSectionTakeaway(content: string) {
   return firstSentence.length > 220 ? `${firstSentence.slice(0, 217).trim()}...` : firstSentence;
 }
 
+// P0 FIX #8 -- confirmed live (Key Takeaway / body duplication repair):
+// page.tsx's Key-Takeaway-card fields already avoid restating the takeaway
+// in the body via extractSectionMainExplanation (index-based sentence
+// skip, robust to getSectionTakeaway's own separate normalization) -- but
+// ReportPdfButton.tsx never had an equivalent: its "Key Takeaway box above
+// + full body prose below" design (deliberately never shortening the
+// report) drew the SAME leading sentence/bulleted item twice, once in the
+// highlighted box and once as the first line of the body. This is the ONE
+// canonical function both the PDF and any future caller use to remove
+// JUST that duplicate -- never a section-specific hardcoded string, never
+// a blanket truncation. Extremely conservative by design: it only ever
+// touches the FIRST non-empty line of `content`, and only removes
+// anything at all when that line's own text (normalized the exact same
+// way getSectionTakeaway itself normalizes) genuinely matches `takeaway`;
+// any uncertainty (no takeaway, no sentence boundary found, no match)
+// returns `content` completely unchanged. Two shapes are handled
+// distinctly:
+//   - A bulleted/numbered first line ("1) Integration-first add-on
+//     products...", the exact reported production shape) is an
+//     indivisible whole item -- if it duplicates the takeaway, the ENTIRE
+//     line is removed, never a partial cut that would leave a dangling
+//     "1)" marker with no text after it.
+//   - Flowing prose removes only the FIRST SENTENCE of the first line,
+//     using the same abbreviation-protected sentence boundary
+//     splitSentences relies on (protectSentenceAbbreviations/
+//     restoreSentenceAbbreviations below), so "U.S."/"Inc."/etc. can never
+//     be mistaken for a sentence end -- every other sentence, every later
+//     line, every bullet further down, and all formatting survive
+//     completely untouched.
+export function stripLeadingTakeawaySentence(content: string, takeaway: string): string {
+  const raw = content || "";
+  // getSectionTakeaway extracts the takeaway from whatever the first
+  // sentence literally is -- when the first line is bulleted/numbered
+  // ("1) Integration-first add-on products...", the exact reported
+  // production shape), the takeaway text keeps that marker verbatim. The
+  // bullet branch below compares against the first line with its OWN
+  // marker already stripped, so the takeaway's marker must be stripped
+  // here too, or an identical line is never recognized as a duplicate.
+  const normalizedTakeaway = takeaway
+    .replace(/\.{3}$/, "")
+    .trim()
+    .replace(/^(?:[-*•]|\d+[.)])\s+/, "")
+    .toLocaleLowerCase();
+  if (!normalizedTakeaway || !raw.trim()) {
+    return raw;
+  }
+
+  const isDuplicateOfTakeaway = (candidate: string) => {
+    const normalizedCandidate = normalizeReportPresentationText(candidate).trim().toLocaleLowerCase();
+    if (!normalizedCandidate) return false;
+    return (
+      normalizedCandidate === normalizedTakeaway ||
+      (normalizedTakeaway.length > 40 && normalizedCandidate.startsWith(normalizedTakeaway))
+    );
+  };
+
+  const lines = raw.split("\n");
+  const firstContentIndex = lines.findIndex((line) => line.trim().length > 0);
+  if (firstContentIndex === -1) {
+    return raw;
+  }
+
+  const firstLine = lines[firstContentIndex];
+  const trimmedFirstLine = firstLine.trim();
+  const bulletMarkerMatch = trimmedFirstLine.match(/^(?:[-*•]|\d+[.)])\s+/);
+
+  if (bulletMarkerMatch) {
+    const firstLineTextOnly = trimmedFirstLine.slice(bulletMarkerMatch[0].length).replace(/\*\*/g, "");
+    if (!isDuplicateOfTakeaway(firstLineTextOnly)) {
+      return raw;
+    }
+
+    const nextLines = lines.slice();
+    nextLines.splice(firstContentIndex, 1);
+    return nextLines.join("\n").replace(/^\n+/, "").trim();
+  }
+
+  const protectedLine = protectSentenceAbbreviations(firstLine);
+  const boundaryMatch = protectedLine.match(/[.!?](?=\s|$)/);
+  if (!boundaryMatch || boundaryMatch.index === undefined) {
+    return raw;
+  }
+
+  const cutIndex = boundaryMatch.index + 1;
+  const candidateSentence = restoreSentenceAbbreviations(protectedLine.slice(0, cutIndex));
+  if (!isDuplicateOfTakeaway(candidateSentence)) {
+    return raw;
+  }
+
+  const remainderOfLine = restoreSentenceAbbreviations(protectedLine.slice(cutIndex)).replace(/^\s+/, "");
+  const nextLines = lines.slice();
+  nextLines[firstContentIndex] = remainderOfLine;
+  return nextLines.join("\n").replace(/^\n+/, "").trim();
+}
+
+export type CagrHeadlinePresentation = {
+  // The exact string the KPI card/headline should display -- either the
+  // single figure (unchanged from today's behavior) or a "low%–high%"
+  // range when the underlying evidence disagrees. Empty when no
+  // percentage was found at all (the existing "Validation Needed" state).
+  displayValue: string;
+  // True only when the underlying evidence genuinely states more than one
+  // DISTINCT growth-rate figure (rounded to 1 decimal place, the
+  // precision every current CAGR figure in this pipeline is already
+  // formatted to) -- never true merely because the same number is cited
+  // twice by different sources.
+  isMultiEstimate: boolean;
+};
+
+// P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair): a real
+// production report's `cagr` field legitimately named TWO independently
+// sourced, materially different growth estimates for what the report
+// presented as one requested market (7.0% on a ~$7.3B->$13.1B base, 9.8%
+// on a ~$25.5B->$65.3B base) -- graph.cagr is already an array (each
+// qualifying evidence item contributes its own line), so the field's own
+// body text already discloses both, but extractHeadlineCagrValue's simple
+// regex (page.tsx/ReportPdfButton.tsx, unchanged by this fix) always
+// picks the FIRST percentage found -- research-discovery order, not
+// evidence quality or scope alignment -- and promotes it to the headline
+// KPI as if ZERINIX had established one authoritative figure for the
+// exact requested market. This function does not attempt to infer or
+// fabricate WHY the two figures differ (no per-item geography/segment/
+// period metadata exists to reason from, and inventing a scope
+// explanation the evidence never stated would itself be fabrication) --
+// it only detects that they genuinely differ and, when they do, reports a
+// transparent range instead of silently picking one. A single figure
+// restated by multiple sources (the common, non-conflicting case)
+// continues to display exactly as before.
+export function resolveCagrHeadlinePresentation(content: string): CagrHeadlinePresentation {
+  const matches = [...(content || "").matchAll(/\d+(?:[.,]\d+)?(?:\s*[-–—]\s*\d+(?:[.,]\d+)?)?\s*%/g)];
+  if (matches.length === 0) {
+    return { displayValue: "", isMultiEstimate: false };
+  }
+
+  const firstValue = matches[0][0].replace(/\s+/g, " ").trim();
+  const distinctValues = new Set(
+    matches
+      .map((match) => Number.parseFloat(match[0].replace(",", ".")))
+      .filter((value) => Number.isFinite(value))
+      .map((value) => value.toFixed(1))
+  );
+
+  if (distinctValues.size <= 1) {
+    return { displayValue: firstValue, isMultiEstimate: false };
+  }
+
+  const sortedValues = [...distinctValues].map(Number).sort((left, right) => left - right);
+  const lowValue = sortedValues[0];
+  const highValue = sortedValues[sortedValues.length - 1];
+  return {
+    displayValue: `${lowValue.toFixed(1)}%–${highValue.toFixed(1)}%`,
+    isMultiEstimate: true,
+  };
+}
+
 export type MarketSizingCascadeResolution = {
   tamResolved: boolean;
   samResolved: boolean;

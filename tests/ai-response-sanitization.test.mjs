@@ -29,10 +29,24 @@ test("chat streaming sanitizes accumulated output before rendering and persisten
 
 test("API chat sanitizes cached, mock, and completed response text", () => {
   assert.match(chatRouteSource, /import \{[\s\S]{0,80}sanitizeAiResponseText/);
-  assert.match(chatRouteSource, /const sanitizedContent = sanitizeAiResponseText\(content\)/);
+  // P0 FIX #8 (hardening pass) -- confirmed live: chat/route.ts dumps the
+  // market intelligence graph as raw JSON into its own prompt just like
+  // market-analysis/route.ts does, so it is exposed to the same internal-
+  // identifier leak vector -- these 3 real-model-output call sites now
+  // also route through stripInternalImplementationTokens
+  // (report-output-sanitization.ts), the same shared generic sanitizer
+  // market-analysis/route.ts uses. sanitizeAiResponseText itself is
+  // unchanged and still called exactly as before, just wrapped.
+  assert.match(chatRouteSource, /const sanitizedContent = stripInternalImplementationTokens\(sanitizeAiResponseText\(content\)\)/);
   assert.match(chatRouteSource, /sanitizeAiResponseText\(\[/);
-  assert.match(chatRouteSource, /const sanitizedCompletedText = sanitizeAiResponseText\(completedText\)/);
-  assert.match(chatRouteSource, /streamedText = sanitizeAiResponseText\(streamedText\)/);
+  assert.match(
+    chatRouteSource,
+    /const sanitizedCompletedText = stripInternalImplementationTokens\(sanitizeAiResponseText\(completedText\)\)/
+  );
+  assert.match(
+    chatRouteSource,
+    /streamedText = stripInternalImplementationTokens\(sanitizeAiResponseText\(streamedText\)\)/
+  );
 });
 
 test("report generation and saved report detail use AI response sanitization", () => {

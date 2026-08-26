@@ -1,3 +1,111 @@
+// P0 FIX #8 (hardening pass) -- confirmed live: the model is shown
+// internal graph/context objects as raw JSON (e.g.
+// formatMarketIntelligenceGraphForModel in market-intelligence-graph.ts,
+// injected into both the Market Analysis report prompt and the chat
+// prompt whenever a market intelligence graph is in scope) so it can
+// synthesize evidence-grounded prose, and that JSON's camelCase property
+// names ("sizingGap", "matchedByTaxonomy", "confidenceClassification",
+// ...) are code identifiers, not vocabulary -- but a model occasionally
+// echoes one verbatim into user-facing text. A prior pass closed this
+// with an enumerated list of the internal field names known at the time,
+// but that list can never be complete: every new field added to any
+// internal schema is a new potential leak the list would not know about.
+//
+// This generic detector replaces reliance on that list with a shape-plus-
+// heuristic rule that requires no knowledge of this codebase's specific
+// schemas, so it also catches identifiers that do not exist yet:
+//
+//   1. Bracketed tokens: this pipeline's only legitimate bracket tags are
+//      Title-Case evidence labels ([Verified]/[Estimated]/[Assumption])
+//      or short reference codes ([R1]/[Asset: ...]/[User]/
+//      [Method: ...]) -- never a lowercase-start/internal-capital shape,
+//      so ANY bracketed token of that shape is safe to remove outright,
+//      with zero allowlist and zero false-positive risk.
+//
+//   2. Bare (unbracketed) tokens: a real proper noun a model would
+//      legitimately write (Clio, LexisNexis, CaseText) is, by near-
+//      universal branding convention, capitalized at its first letter --
+//      entirely outside this detector's scope, which only ever looks at
+//      tokens that start lowercase. The narrow class of real lowercase-
+//      started brand names (eBay, eCommerce, eDiscovery, iPhone, iCloud,
+//      macOS, nCino, hCaptcha, mBank, ...) is reliably distinguished from
+//      an internal code identifier by TWO structural properties, not by
+//      knowing the brand names in advance:
+//        - Those brand names almost always have exactly one internal
+//          capital-letter transition ("hump"), because brand naming
+//          deliberately keeps this style to prefix+ONE-word. An internal
+//          identifier compounding two or more concepts together
+//          ("matchedByTaxonomy", "sourceRecordByEvidenceId") has two or
+//          more humps -- a shape essentially never used by a real brand
+//          name, so any 2+-hump token is flagged unconditionally.
+//        - For the single-hump case, the deciding signal is the LENGTH
+//          of the lowercase prefix before that one capital letter: real
+//          brand prefixes are conventionally a single letter (e, i, n, h,
+//          m, u, x, o) or a very short recognizable abbreviation (mac,
+//          tv), while genuine internal identifiers are built from an
+//          ordinary, spelled-out English word root ("sizing", "matched",
+//          "confidence", "evidence", "planning", "adjacent", ...), which
+//          is reliably 4 or more characters. A prefix of 4+ characters is
+//          therefore flagged; a prefix of 1-3 characters is left alone.
+//      A tiny, explicit safety-net allowlist below catches the rare real
+//      exception that would otherwise land on the wrong side of that
+//      length threshold (e.g. "watchOS", prefix "watch" = 5 chars) --
+//      this allowlist exists only as a backstop for known edge cases, not
+//      as the detector's primary mechanism, so an internal identifier
+//      that happens to share a shape with something on it would still
+//      need to ALSO be a real 5+ character dictionary-shaped prefix,
+//      which internal identifiers in this codebase never coincidentally
+//      are.
+//
+//   Neither rule ever inspects a URL -- a citation or source link's own
+//   path segments could otherwise incidentally match either shape -- so
+//   http(s) URLs are protected (substituted with a placeholder and
+//   restored verbatim afterward) before either pattern runs.
+const legitimateLowerCamelCaseTerms = new Set(["watchos"]);
+
+const bareLowerCamelCaseTokenPattern = /\b[a-z][a-z0-9]*[A-Z][a-zA-Z0-9]*\b/g;
+const bracketedInternalTokenPattern = /\[[a-z][a-zA-Z0-9]{0,40}[A-Z][a-zA-Z0-9]{0,40}\]/g;
+const urlPattern = /\bhttps?:\/\/\S+/g;
+
+function isSuspiciousBareToken(token: string): boolean {
+  const firstUpperIndex = token.search(/[A-Z]/);
+  if (firstUpperIndex <= 0) {
+    return false;
+  }
+  if (legitimateLowerCamelCaseTerms.has(token.toLowerCase())) {
+    return false;
+  }
+
+  const prefix = token.slice(0, firstUpperIndex);
+  const upperCaseRuns = token.match(/[A-Z]+[a-z0-9]*/g) || [];
+  if (upperCaseRuns.length >= 2) {
+    return true;
+  }
+
+  return prefix.length >= 4;
+}
+
+export function stripInternalImplementationTokens(content: string): string {
+  if (!content) {
+    return content;
+  }
+
+  const protectedUrls: string[] = [];
+  const withProtectedUrls = content.replace(urlPattern, (match) => {
+    protectedUrls.push(match);
+    return `ZERINIXURLPLACEHOLDER${protectedUrls.length - 1}ENDPLACEHOLDER`;
+  });
+
+  const stripped = withProtectedUrls
+    .replace(bracketedInternalTokenPattern, "")
+    .replace(bareLowerCamelCaseTokenPattern, (match) => (isSuspiciousBareToken(match) ? "" : match));
+
+  return stripped.replace(
+    /ZERINIXURLPLACEHOLDER(\d+)ENDPLACEHOLDER/g,
+    (_match, index) => protectedUrls[Number(index)]
+  );
+}
+
 const internalResearchDiagnosticPattern =
   /(?:\bprovider_unavailable\b|\bcompleted_no_evidence\b|\brequest (?:was )?aborted\b|\bprovider disabled\b|\bresult\s*=\s*failed\b|\breason\s*=\s*request was aborted\b|\bresearch attempts?\b|\battempt\s*\||\bnext provider\b|\bsearch query\b|\b(?:provider|query|result|reason|status)\s*[:=|]|\b(?:stack trace|request payload|api response|execution log)\b|\b(?:tavily|perplexity|firecrawl|serper|exa)\b)/i;
 

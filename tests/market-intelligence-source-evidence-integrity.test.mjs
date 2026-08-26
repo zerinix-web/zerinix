@@ -199,9 +199,14 @@ test("extractEvidenceLineForValue isolates the single line containing the extrac
 });
 
 test("PARITY: the Market Metrics card (CAGR/Market Size) now scopes getDashboardMetricEvidence's context to extractEvidenceLineForValue(content, value), not the raw multi-line content", () => {
+  // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair): a
+  // multi-estimate CAGR range is forced to "benchmarkDerived" before
+  // reaching the classifier below (no single evidence line supports a
+  // two-number range); the single-estimate case this test protects still
+  // routes through this exact pinned getDashboardMetricEvidence(...) call.
   assert.match(
     pageSource,
-    /const evidence = getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
+    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
   );
 });
 

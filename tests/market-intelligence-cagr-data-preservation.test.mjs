@@ -252,7 +252,19 @@ test("PARITY: ReportPdfButton.tsx's 'CAGR' metric tile and 'Market Growth Signal
     pdfButtonSource,
     /const cagrContent = pdfSections\.find\(\(candidate\) => candidate\.field === "cagr"\)\?\.content \|\| "";/
   );
-  assert.match(pdfButtonSource, /\{ label: "CAGR", value: extractHeadlineCagrValue\(cagrContent\) \}/);
+  // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair): the
+  // tile now routes through resolveCagrHeadlinePresentation(cagrContent)
+  // so it can display an honest range when the evidence names more than
+  // one materially different growth-rate figure, but the single-estimate
+  // case (the common case, and the one this parity test protects) still
+  // falls back to this exact pinned extractHeadlineCagrValue(cagrContent)
+  // call -- the two surfaces still read the same field with the same
+  // underlying extractor, never a separate PDF-only derivation.
+  assert.match(pdfButtonSource, /resolveCagrHeadlinePresentation\(cagrContent\)/);
+  assert.match(
+    pdfButtonSource,
+    /cagrPresentation\.isMultiEstimate \? cagrPresentation\.displayValue : extractHeadlineCagrValue\(cagrContent\)/
+  );
 });
 
 // --- Fix #1: cagr excluded from cross-section paragraph dedup --------------

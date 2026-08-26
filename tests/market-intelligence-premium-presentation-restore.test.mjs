@@ -287,9 +287,14 @@ test("validation/uncertainty labeling (Estimated tags, evidence badges) is untou
   // can no longer confirm a DIFFERENT, [Estimated] line's own figure. See
   // tests/market-intelligence-source-evidence-integrity.test.mjs for that
   // fix's own dedicated coverage.
+  // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair): a
+  // multi-estimate CAGR range is forced to "benchmarkDerived" before
+  // reaching the classifier below (no single evidence line supports a
+  // two-number range); the single-estimate case this test protects still
+  // routes through this exact pinned getDashboardMetricEvidence(...) call.
   assert.match(
     pageSource,
-    /const evidence = getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
+    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
   );
   assert.match(
     plannerSource,
