@@ -463,8 +463,14 @@ test("11. with no verified size, no defensible planning-estimate inputs, and no 
   const graph = buildMarketIntelligenceGraph({ evidence: fixture }, prompt);
   assert.equal(graph.planningEstimate, null);
   assert.equal(graph.adjacentBenchmarks.length, 0);
+  // Evidence-first market-sizing recovery loop: instead of the fully
+  // generic "could not be established" notice, tamSamSom now carries the
+  // specific sizingGap explanation (what was searched, what is missing)
+  // -- still an honest non-fabrication, just more useful.
+  assert.ok(graph.sizingGap, "expected a sizingGap explaining the evidence gap");
+  assert.equal(graph.sizingGap.missingIngredient, "everything");
   const projection = projectMarketIntelligenceGraphToReport(graph, "English");
-  assert.match(projection.tamSamSom, /could not be established/i);
+  assert.match(projection.tamSamSom, /found no verifiable numeric evidence|could not be established/i);
   assert.doesNotMatch(projection.tamSamSom, /\$\d/, "must never contain a fabricated dollar figure");
 });
 
@@ -549,12 +555,14 @@ test("11b. projection.marketSize stays the explicit deterministic unavailable no
   const graph = buildMarketIntelligenceGraph({ evidence: fixture }, prompt);
   assert.equal(graph.planningEstimate, null);
   assert.equal(graph.adjacentBenchmarks.length, 0);
+  assert.ok(graph.sizingGap, "expected a sizingGap explaining the evidence gap");
   const projection = projectMarketIntelligenceGraphToReport(graph, "English");
-  assert.equal(
-    projection.marketSize,
-    "A defensible aggregate market-size figure could not be established for this market. No verified local figure, comparable benchmark, or sufficient buyer-population-and-pricing data was available to build one. Per-customer figures such as pricing, ARPA, ACV, or willingness-to-pay evidence found during research describe an individual buyer's spend, not the total market, and were never substituted here as a market-size figure."
-  );
-  assert.match(projection.marketSize, /could not be established/i);
+  // marketSize now mirrors the same specific sizingGap explanation as
+  // tamSamSom (evidence-first market-sizing recovery loop), rather than
+  // the fully generic "could not be established" copy -- still never a
+  // fabricated figure.
+  assert.equal(projection.marketSize, graph.sizingGap.explanation);
+  assert.match(projection.marketSize, /found no verifiable numeric evidence|could not be established/i);
   assert.doesNotMatch(projection.marketSize, /\$\d/, "must never contain a fabricated dollar figure");
 });
 

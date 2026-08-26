@@ -191,9 +191,13 @@ test("5. genuinely insufficient evidence (no explicit figure, no buyer-populatio
 
   assert.equal(graph.planningEstimate, null);
   assert.equal(graph.adjacentBenchmarks.length, 0);
+  // Evidence-first recovery loop: a specific sizingGap explanation now
+  // replaces the fully generic "could not be established" notice.
+  assert.ok(graph.sizingGap);
+  assert.equal(graph.sizingGap.missingIngredient, "everything");
 
   const projection = projectMarketIntelligenceGraphToReport(graph);
-  assert.match(projection.tamSamSom, /could not be established/i);
+  assert.match(projection.tamSamSom, /found no verifiable numeric evidence/i);
   assert.doesNotMatch(projection.tamSamSom, /\$\d/);
 });
 
@@ -637,7 +641,7 @@ test("15b. triangulated, agreeing TAM/SAM/SOM (with real obtainable-share eviden
 // --- 16. Cached-result consistency -------------------------------------------
 
 test("16. the graph version was bumped for this shape change, and a full JSON round-trip (simulating a cache read/write) preserves every new traceability field losslessly", () => {
-  assert.equal(MARKET_INTELLIGENCE_GRAPH_VERSION, "market-intelligence-graph-v5");
+  assert.equal(MARKET_INTELLIGENCE_GRAPH_VERSION, "market-intelligence-graph-v6");
 
   const graph = buildMarketIntelligenceGraph(
     {

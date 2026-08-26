@@ -160,12 +160,15 @@ for (const prompt of markets) {
     assert.doesNotMatch(projection.competitiveLandscape, /packed discovery queries|candidates? discovered|earlyStopReason/i);
     assert.doesNotMatch(projection.majorPlayers, /No competitive evidence/i);
     assert.equal(graph.planningEstimate, null);
-    // Rewritten in natural executive language (no "endpoint" / "validated
-    // buyer-population input" pipeline jargon) while preserving the same
-    // behavior: a verified figure is genuinely unavailable and nothing was
-    // fabricated to fill the gap.
-    assert.match(projection.tamSamSom, /could not be established for this market/i);
-    assert.match(projection.tamSamSom, /not used on its own to fabricate a market-size figure/i);
+    // Evidence-first market-sizing recovery loop: instead of the fully
+    // generic pipeline-jargon-free notice, tamSamSom now carries the
+    // specific sizingGap explanation naming exactly what was searched and
+    // found missing -- while preserving the same underlying behavior: a
+    // verified figure is genuinely unavailable and nothing was fabricated
+    // to fill the gap.
+    assert.ok(graph.sizingGap, "expected a sizingGap explaining the evidence gap");
+    assert.equal(projection.tamSamSom, graph.sizingGap.explanation);
+    assert.doesNotMatch(projection.tamSamSom, /\$\d/, "must never contain a fabricated dollar figure");
   });
 }
 

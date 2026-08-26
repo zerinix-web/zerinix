@@ -24,7 +24,7 @@ import {
 import { isImplausibleCompetitorName } from "./vendor-discovery.ts";
 
 export const MARKET_INTELLIGENCE_GRAPH_VERSION =
-  "market-intelligence-graph-v5" as const;
+  "market-intelligence-graph-v6" as const;
 
 export type MarketIntelligenceSource = {
   evidenceId: string;
@@ -53,19 +53,57 @@ export type MarketIntelligenceCompetitor = {
 // How the TAM figure was actually produced -- retained for calculation
 // traceability and so the rendered report can name its own method rather
 // than presenting every estimate as if it used the same approach.
+// "adjacentProxy": no direct or bottom-up figure existed for the exact
+// requested market, but a broader/parent-category benchmark plus a real,
+// evidence-derived narrowing ratio (never an invented scaling factor)
+// produced a bounded estimate -- see findAdjacentProxyTopDown below.
 export type MarketSizingMethod =
   | "topDown"
   | "bottomUp"
-  | "triangulated";
+  | "triangulated"
+  | "adjacentProxy";
 
 // SUPPORTED ESTIMATE: multiple hierarchy-ranked evidence items agree (a
 // single high-authority source, or top-down/bottom-up triangulation that
 // converged). DIRECTIONAL: only one thin/lower-authority evidence item
-// was available, or the underlying methods materially disagreed and had
-// to be reconciled into a wide range. Never "Verified" -- that tier is
+// was available, the underlying methods materially disagreed, or the
+// figure depends on adjacent/proxy evidence rather than a direct
+// measurement of the requested market. Never "Verified" -- that tier is
 // reserved for graph.verifiedMarketSize, which this estimate type is
 // never blended with (see the buildMarketIntelligenceGraph comment).
 export type MarketSizingEvidenceTier = "supportedEstimate" | "directional";
+
+// User-facing confidence vocabulary (REQUIRED: TAM CONFIDENCE MODEL) --
+// a descriptive label layered on top of the existing 0-100 confidence
+// score and MarketConfidenceLevel (High/Medium/Low), not a separate or
+// more precise measurement. "verified" is intentionally absent here: a
+// verified headline figure is graph.verifiedMarketSize, a structurally
+// different, stricter array this estimate type never produces.
+export type MarketSizingConfidenceState =
+  | "highConfidence"
+  | "moderateConfidence"
+  | "directional";
+
+// Canonical market definition (REQUIRED: DEFINE THE MARKET BEFORE
+// SIZING) -- constructed once per request from the prompt and the
+// evidence actually anchoring the estimate, then used both to label the
+// report and to reject evidence describing a materially different
+// market (see evidenceMatchesRequestedGeography). Deliberately a
+// lightweight, regex/heuristic construction (consistent with this
+// file's existing extractGeographyLabel/promptReadiness-style
+// approach), not a claimed precise NLP extraction -- every field falls
+// back to an honest "Not specified in request" rather than guessing.
+export type MarketDefinition = {
+  geography: string;
+  buyerSegment: string;
+  companySize: string;
+  category: string;
+  useCase: string;
+  spendUnit: string;
+  year: string;
+  inclusions: string[];
+  exclusions: string[];
+};
 
 export type MarketPlanningEstimate = {
   classification: "Estimated";
@@ -84,9 +122,11 @@ export type MarketPlanningEstimate = {
   // only read tam/sam/som/formula/confidence are unaffected.
   method: MarketSizingMethod;
   tier: MarketSizingEvidenceTier;
+  confidenceState: MarketSizingConfidenceState;
   geography: string;
   year: string;
   marketDefinition: string;
+  definition: MarketDefinition;
   // Set when top-down and bottom-up estimates were both computable but
   // diverged materially -- the rendered range already reflects this, but
   // the flag/note let callers (tests, future report-engine consumers)
@@ -97,17 +137,44 @@ export type MarketPlanningEstimate = {
   // Whether the serviceable-share (TAM -> SAM) ratio came from real
   // evidence about this market's addressable segment, or is the
   // disclosed default assumption used when no such evidence exists.
-  samMethod: "evidenceDerived" | "defaultAssumption";
+  samMethod: "evidenceDerived" | "defaultAssumption" | "blocked";
   // SOM must never be an invented percentage of SAM (see SOM section of
   // the ticket). When no defensible bottom-up obtainable-share inputs
   // exist, som holds a non-numeric "pending" explanation instead of a
   // fabricated figure, and somStatus records that honestly.
   somStatus: "calculated" | "pending";
+  // Whether the per-unit spend figure behind this estimate came directly
+  // from evidence about the exact requested category ("direct"), or from
+  // a comparable/adjacent product used as an explicitly disclosed proxy
+  // ("proxy") -- see findProxyPricingCandidate. "none" only when the
+  // estimate's method never needed a per-unit spend figure at all.
+  pricingSource: "direct" | "proxy" | "none";
+  // Populated only when pricingSource === "proxy" or method ===
+  // "adjacentProxy": what the proxy represents, why it is relevant, how
+  // it differs from the requested market, and the uncertainty this
+  // introduces (REQUIRED: every proxy must explicitly explain all four).
+  proxyDisclosure: string;
   // True when the evidence backing the TAM figure is, on average, more
   // than 3 years old (see the shared freshness() bands in
   // market-research-coverage.ts) -- the rendered estimate must label its
   // year and avoid implying the figure is current.
   stale: boolean;
+};
+
+// Returned instead of a bare null when no defensible TAM could be built,
+// so the report can explain SPECIFICALLY what was found and what is
+// still missing (REQUIRED: USER-FACING REPORT QUALITY / RESEARCH
+// RECOVERY LOOP) rather than a generic "insufficient evidence" notice.
+export type MarketSizingGap = {
+  attemptedTopDown: boolean;
+  attemptedBottomUp: boolean;
+  attemptedAdjacentProxy: boolean;
+  // The single most useful real quantity the research DID establish, if
+  // any -- e.g. a genuine buyer-population count -- so the explanation
+  // can cite it by name instead of just saying "nothing was found".
+  partialQuantity: { amount: number; description: string; evidenceId: string } | null;
+  missingIngredient: "pricing" | "buyerPopulation" | "topDownFigure" | "everything";
+  explanation: string;
 };
 
 export type MarketIntelligenceGraph = {
@@ -128,6 +195,12 @@ export type MarketIntelligenceGraph = {
     confidenceLevel: MarketConfidenceLevel;
   }>;
   planningEstimate: MarketPlanningEstimate | null;
+  // Populated only when planningEstimate is null -- explains specifically
+  // what evidence WAS found and what is still missing, so the report
+  // never falls back to a bare "Validation Needed" when something more
+  // useful can be said. See buildPlanningEstimate's recovery-loop comment
+  // for the exact order of attempts this reflects.
+  sizingGap: MarketSizingGap | null;
   // Regional/global market data (Europe, OECD, neighboring countries) is
   // never the requested geography's own verified figure, so it is kept
   // separate from verifiedMarketSize rather than blended into it -- this
@@ -255,11 +328,10 @@ function concise(value: string, maximum = 240) {
 // (unchanged from before) still exists for a lone value with no
 // thousands grouping, including the rarer single-comma-as-decimal case
 // (e.g. "2,5" in some non-US evidence text).
-function extractNumber(value: string) {
-  const match = value.match(
-    /([$€£₺])?\s*(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?)\s*(thousand|million|billion|trillion|[kmbt])?\b/i
-  );
-  if (!match) return null;
+const NUMBER_PATTERN_SOURCE =
+  "([$€£₺])?\\s*(\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:[.,]\\d+)?)\\s*(thousand|million|billion|trillion|[kmbt])?\\b";
+
+function parseNumberMatch(match: RegExpMatchArray) {
   const rawDigits = match[2];
   const isThousandsGrouped = /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(rawDigits);
   const raw = isThousandsGrouped ? rawDigits.replace(/,/g, "") : rawDigits.replace(",", ".");
@@ -282,12 +354,47 @@ function extractNumber(value: string) {
   };
 }
 
+function extractNumber(value: string) {
+  const match = value.match(new RegExp(NUMBER_PATTERN_SOURCE, "i"));
+  return match ? parseNumberMatch(match) : null;
+}
+
 function extractMarketAmount(value: string) {
   const parsed = extractNumber(value);
   if (!parsed) return null;
   return /[$€£₺]|\b(?:million|billion|trillion|[mbt])\b/i.test(parsed.token)
     ? parsed
     : null;
+}
+
+// CRITICAL FIX -- confirmed live: extractNumber always takes the FIRST
+// bare digit sequence in the combined claim+value text. Real research
+// prose about a buyer/establishment population very often ALSO mentions
+// a classification code earlier in the same sentence ("NAICS 23611:
+// 212,178 establishments", "CBP tables ... (sector 23) ... (NAICS 236
+// series)"), so the first digit sequence encountered is frequently the
+// code, not the count. Tried first: a number sitting directly next to a
+// population noun (establishments/businesses/buyers/companies/firms/
+// customers/contractors), which is a far more reliable signal of "this
+// is the actual count" than raw position in the sentence. Falls back to
+// plain extractNumber only when no such adjacency exists, in which case
+// isPlausibleBusinessPopulationClaim's minimum-amount and code-context
+// guards are the only remaining defense against a stray code/section
+// number being mistaken for a population figure.
+const POPULATION_NEAR_NOUN_PATTERN = `${NUMBER_PATTERN_SOURCE}\\s+(?:employer\\s+)?(?:establishments?|businesses?|buyers?|companies|firms|customers?|contractors?)\\b`;
+
+function matchPopulationNearNoun(text: string) {
+  return text.match(new RegExp(POPULATION_NEAR_NOUN_PATTERN, "i"));
+}
+
+function extractPopulationCount(item: DomainResearchEvidence) {
+  const text = `${item.claim} ${item.value}`;
+  const nearNounMatch = matchPopulationNearNoun(text);
+  if (nearNounMatch) {
+    const parsed = parseNumberMatch(nearNounMatch);
+    if (parsed) return parsed;
+  }
+  return extractNumber(text);
 }
 
 function formatAmount(amount: number, currency: string) {
@@ -422,9 +529,254 @@ function extractObtainableSharePercent(item: DomainResearchEvidence) {
   return Number.isFinite(percent) && percent > 0 && percent < 50 ? percent / 100 : null;
 }
 
+// CRITICAL FIX -- confirmed live: a research item can legitimately match
+// the buyer-population keyword pattern (mentions "establishments") while
+// its claim is actually a METHODOLOGY note describing WHERE such data
+// lives, not the data point itself -- e.g. "CBP tables provide number of
+// employer establishments by NAICS for construction (sector 23) and
+// specific 4-6 digit codes (including NAICS 236 series)." extractNumber
+// then grabs the first bare digit sequence it finds ("23", from "sector
+// 23"), which is a NAICS SECTOR CODE, not a population count, producing
+// a real-looking but wrong "23 buyers" TAM input. Two independent,
+// deliberately simple guards: (1) the extracted amount must clear a
+// minimum plausibility floor -- a real addressable-business-population
+// figure for a country/regional market is essentially never below 50,
+// so a smaller number is far more likely to be a stray code/index/sector
+// fragment than a genuine count; (2) the digits actually used must not
+// sit immediately next to a code/classification word (NAICS, sector,
+// code, digit, table, figure, column, row) that marks them as a
+// classification reference rather than a quantity. Both must pass --
+// this never accepts a number that either looks too small to be real or
+// reads as a classification reference in its own sentence.
+const populationCodeContextPattern =
+  /\b(?:naics|sic|sector|code|digit|table|figure|column|row|appendix|chapter|section)\b\s*[:#]?\s*\d[\d,]*|\d[\d,]*\s*\b(?:digit|series)\b/i;
+
+function isPlausibleBusinessPopulationClaim(item: DomainResearchEvidence) {
+  const combinedText = `${item.claim} ${item.value}`;
+  const nearNounMatch = matchPopulationNearNoun(combinedText);
+  if (nearNounMatch) {
+    // A number sitting directly next to a population noun is trusted on
+    // its own -- the adjacency itself is the plausibility signal, so a
+    // classification code appearing elsewhere in the same sentence (e.g.
+    // a NAICS code cited for context alongside the real count) does not
+    // veto it.
+    const parsed = parseNumberMatch(nearNounMatch);
+    return Boolean(parsed && parsed.amount >= 50);
+  }
+  // No number found directly adjacent to a population noun -- the
+  // fallback plain extraction (first bare digit sequence in the
+  // sentence) is much more likely to have grabbed a classification code,
+  // section reference, or table index, so both guards apply here.
+  const parsed = extractNumber(combinedText);
+  if (!parsed || parsed.amount < 50) return false;
+  return !populationCodeContextPattern.test(evidenceText(item));
+}
+
+// A short, closed list of specific geographies -- deliberately not
+// exhaustive. Used two ways: (1) to state the requested geography in the
+// canonical market definition, and (2) to reject a candidate figure that
+// explicitly names a DIFFERENT specific geography from the one requested
+// (REQUIRED: market-definition mismatch guard). A prompt/evidence item
+// naming none of these is never treated as a conflict either way -- this
+// only catches explicit, named disagreements, never penalizes evidence
+// for silence.
+const specificGeographyPatterns: Array<[RegExp, string]> = [
+  [/\bunited states\b|\bu\.s\.a?\.?\b(?!\w)|\bamerican\b/i, "United States"],
+  [/\bunited kingdom\b|\bu\.k\.\b(?!\w)|\bbritain\b/i, "United Kingdom"],
+  [/\bgermany\b|\bgerman\b/i, "Germany"],
+  [/\bfrance\b|\bfrench\b/i, "France"],
+  [/\bspain\b|\bspanish\b/i, "Spain"],
+  [/\bturkey\b|\bt[üu]rkiye\b/i, "Turkey"],
+  [/\bcanada\b|\bcanadian\b/i, "Canada"],
+  [/\baustralia\b/i, "Australia"],
+  [/\bindia\b/i, "India"],
+  [/\bjapan\b/i, "Japan"],
+  [/\bchina\b/i, "China"],
+];
+
+function extractRequestedGeography(text: string) {
+  for (const [pattern, label] of specificGeographyPatterns) {
+    if (pattern.test(text)) return label;
+  }
+  return "";
+}
+
+// REQUIRED: market-definition mismatch guard. Only ever excludes a
+// candidate for an EXPLICIT, named conflict (e.g. a figure whose own
+// text is about "the UK market" when the request is about the United
+// States) -- it never demotes evidence merely for not repeating the
+// requested geography verbatim, since most real evidence about a
+// national market states its scope through domain/publisher context
+// (e.g. a .gov.uk source) rather than the word itself.
+function evidenceConflictsWithRequestedGeography(
+  item: DomainResearchEvidence,
+  requestedGeography: string
+) {
+  if (!requestedGeography) return false;
+  const mentioned = extractRequestedGeography(evidenceText(item));
+  return Boolean(mentioned) && mentioned !== requestedGeography;
+}
+
+const companySizePatterns: Array<[RegExp, string]> = [
+  [/\bsmall and mid-?sized\b|\bsmb\b|\bsme\b|\bsmall business(?:es)?\b/i, "Small and mid-sized businesses (SMB/SME)"],
+  [/\benterprise\b/i, "Enterprise"],
+  [/\bmid-?market\b/i, "Mid-market"],
+  [/\bstartups?\b/i, "Startups"],
+];
+
+function extractCompanySize(text: string) {
+  for (const [pattern, label] of companySizePatterns) {
+    if (pattern.test(text)) return label;
+  }
+  return "Not specified in request";
+}
+
+// Lightweight, regex-based extraction of "launching/offering/selling
+// <category> for <buyer>" -- the shape most market-sizing requests use.
+// Deliberately narrow: this is not a claimed general-purpose NLP parser,
+// so a prompt that does not match this shape simply falls back to "Not
+// specified in request" downstream rather than guessing.
+function extractMarketCategoryAndBuyer(prompt: string) {
+  const match = prompt.match(
+    /\b(?:launching|offering|selling|building)\s+(.+?)\s+for\s+(.+?)(?:\s+is\s+(?:commercially|strategically)|\?|\.|$)/i
+  );
+  if (!match) return { category: "", buyerSegment: "" };
+  return { category: concise(match[1], 140), buyerSegment: concise(match[2], 140) };
+}
+
+// REQUIRED: DEFINE THE MARKET BEFORE SIZING. Built once per request from
+// the prompt (for what was asked) and the anchor evidence actually
+// backing the estimate (for what the number covers) -- every field is an
+// honest "Not specified" rather than a guess when the input does not
+// clearly state it. spendUnit is filled in by the caller once the
+// bottom-up unit (if any) is known.
+function buildCanonicalMarketDefinition(
+  prompt: string,
+  anchorEvidence: DomainResearchEvidence | null,
+  spendUnit: string
+): MarketDefinition {
+  const { category, buyerSegment } = extractMarketCategoryAndBuyer(prompt);
+  const requestedGeography = extractRequestedGeography(prompt);
+  const geography =
+    requestedGeography ||
+    (anchorEvidence ? extractGeographyLabel(evidenceText(anchorEvidence)) : "") ||
+    "Not specified in request";
+  const companySize = extractCompanySize(prompt);
+  const currentYear = String(new Date().getUTCFullYear());
+  const yearMatch = prompt.match(/\b(20[2-3]\d)\b/);
+
+  return {
+    geography,
+    buyerSegment: buyerSegment || "Not specified in request",
+    companySize,
+    category: category || concise(prompt, 140),
+    useCase: category || concise(prompt, 140),
+    spendUnit,
+    year: yearMatch ? yearMatch[1] : currentYear,
+    inclusions: [
+      category ? `${category} providers` : "Providers in the requested category",
+      buyerSegment ? `Buyers matching: ${buyerSegment}` : "Buyers as described in the request",
+    ],
+    exclusions: [
+      "Adjacent or broader categories not explicitly evidenced as this exact market",
+      geography !== "Not specified in request"
+        ? `Geographies outside ${geography} unless explicitly used as a disclosed adjacent-market proxy`
+        : "No specific geography was requested, so no geography exclusion could be established",
+    ],
+  };
+}
+
+function describeConfidenceState(
+  tier: MarketSizingEvidenceTier,
+  confidenceLevel: MarketConfidenceLevel
+): MarketSizingConfidenceState {
+  if (tier === "directional") return "directional";
+  return confidenceLevel === "High" ? "highConfidence" : "moderateConfidence";
+}
+
+// REQUIRED: ADJACENT-MARKET RECOVERY (pricing ingredient). Tried only
+// after the strict, direct pricing search (annualPricingCandidates)
+// finds nothing -- broadens both the vocabulary (cost/spend/budget/
+// contract value/deal size/ACV/licensing, not just "pricing/
+// subscription") and drops the requirement that the evidence be about
+// the exact requested category, since by definition a proxy is allowed
+// to come from a comparable/adjacent product. Never used silently: every
+// caller that accepts this candidate must attach proxyDisclosure.
+function findProxyPricingCandidate(sourceBacked: readonly DomainResearchEvidence[]) {
+  const candidates = rankEvidenceCandidates(
+    sourceBacked.filter(
+      (item) =>
+        /cost|spend|budget|contract value|deal size|\bacv\b|licensing fee|price point|average.*(?:price|contract)/i.test(
+          evidenceText(item)
+        ) && extractNumber(`${item.claim} ${item.value}`)
+    )
+  );
+  return candidates[0] || null;
+}
+
+// REQUIRED: ADJACENT-MARKET RECOVERY (top-down path). When no direct or
+// bottom-up figure exists, checks whether a broader/parent-category
+// benchmark (the same regional_benchmark/global_benchmark evidence
+// adjacentBenchmarks is built from) can be narrowed down using a REAL,
+// evidence-derived ratio -- never an invented scaling factor. The ratio
+// comes from two independently-sourced population/establishment-count
+// figures at different specificity (e.g. all construction employer
+// establishments vs. this exact NAICS sub-code) -- the smaller count is
+// treated as the narrower target, the larger as the broader parent it is
+// implicitly a subset of. Returns null (no proxy) whenever that ratio
+// cannot be built from real evidence, rather than assuming a default
+// share.
+function findAdjacentProxyTopDown(
+  evidence: readonly DomainResearchEvidence[],
+  sourceBacked: readonly DomainResearchEvidence[],
+  populationCandidates: readonly DomainResearchEvidence[]
+) {
+  const benchmarkCandidates = rankEvidenceCandidates(
+    evidence.filter(
+      (item) =>
+        (item.field === "global_benchmark" || item.field === "regional_benchmark") &&
+        isVerified(item) &&
+        calculateEvidenceConfidence(item) >= 40 &&
+        Boolean(extractMarketAmount(`${item.claim} ${item.value}`))
+    )
+  );
+  const benchmark = benchmarkCandidates[0] || null;
+  if (!benchmark) return null;
+
+  const benchmarkAmount = extractMarketAmount(`${benchmark.claim} ${benchmark.value}`);
+  if (!benchmarkAmount) return null;
+
+  if (populationCandidates.length < 2) return null;
+  const populationAmounts = populationCandidates
+    .map((item) => ({ item, parsed: extractPopulationCount(item) }))
+    .filter((entry): entry is { item: DomainResearchEvidence; parsed: NonNullable<ReturnType<typeof extractNumber>> } =>
+      Boolean(entry.parsed)
+    )
+    .sort((left, right) => right.parsed.amount - left.parsed.amount);
+  if (populationAmounts.length < 2) return null;
+
+  const broader = populationAmounts[0];
+  const narrower = populationAmounts[populationAmounts.length - 1];
+  if (broader.parsed.amount <= 0 || narrower.item.id === broader.item.id) return null;
+  const narrowingRatio = narrower.parsed.amount / broader.parsed.amount;
+  if (!Number.isFinite(narrowingRatio) || narrowingRatio <= 0 || narrowingRatio >= 1) return null;
+
+  return {
+    amount: benchmarkAmount.amount * narrowingRatio,
+    currency: benchmarkAmount.currency || "$",
+    benchmark,
+    benchmarkAmount,
+    narrower: narrower.item,
+    broader: broader.item,
+    narrowingRatio,
+  };
+}
+
 function buildPlanningEstimate(
-  evidence: readonly DomainResearchEvidence[]
-): MarketPlanningEstimate | null {
+  evidence: readonly DomainResearchEvidence[],
+  prompt: string
+): { estimate: MarketPlanningEstimate | null; gap: MarketSizingGap | null } {
+  const requestedGeography = extractRequestedGeography(prompt);
   const sourceBacked = evidence.filter(
     (item) =>
       isVerified(item) &&
@@ -433,15 +785,18 @@ function buildPlanningEstimate(
       item.value.trim()
   );
 
-  // --- Tier 1: top-down -- every candidate market-size figure for this
-  // exact target (not just the first one encountered), ranked by the
-  // required research hierarchy so a government/regulatory/association
-  // figure is preferred over a lower-authority one when several exist.
+  // --- Step 1: direct top-down -- every candidate market-size figure for
+  // this exact target that does not explicitly conflict with the
+  // requested geography (not just the first one encountered), ranked by
+  // the required research hierarchy so a government/regulatory/
+  // association figure is preferred over a lower-authority one when
+  // several exist.
   const topDownCandidates = rankEvidenceCandidates(
     sourceBacked.filter(
       (item) =>
         /market.size|tam|addressable.market|market.value/i.test(evidenceText(item)) &&
-        extractMarketAmount(`${item.claim} ${item.value}`)
+        extractMarketAmount(`${item.claim} ${item.value}`) &&
+        !evidenceConflictsWithRequestedGeography(item, requestedGeography)
     )
   );
   const topDownBest = topDownCandidates[0] || null;
@@ -449,19 +804,26 @@ function buildPlanningEstimate(
     ? extractMarketAmount(`${topDownBest.claim} ${topDownBest.value}`)
     : null;
 
-  // --- Tier 2: bottom-up -- best available addressable-buyer-population
-  // figure x best available annualized price, each independently ranked
-  // by authority rather than "whichever appeared first in the evidence
-  // array".
+  // --- Step 2: buyer-count research -- every candidate addressable-
+  // buyer/establishment count, geography-consistent, ranked by
+  // authority.
   const buyerPopulationCandidates = rankEvidenceCandidates(
     sourceBacked.filter(
       (item) =>
         /business.population|buyer.population|addressable.customer|number.of.business|establishment|small.business/i.test(
           evidenceText(item)
-        ) && extractNumber(`${item.claim} ${item.value}`)
+        ) &&
+        isPlausibleBusinessPopulationClaim(item) &&
+        !evidenceConflictsWithRequestedGeography(item, requestedGeography)
     )
   );
-  const annualPricingCandidates = rankEvidenceCandidates(
+  // --- Step 3: pricing/spend research -- direct evidence first; only
+  // when that finds nothing does the adjacent/proxy search below run
+  // (REQUIRED: ADJACENT-MARKET RECOVERY). Geography-consistency is not
+  // enforced on the proxy tier since a proxy is, by definition, allowed
+  // to come from a comparable product/market -- the disclosure makes
+  // that explicit instead of hiding it.
+  const directPricingCandidates = rankEvidenceCandidates(
     sourceBacked.filter(
       (item) =>
         /pricing|subscription|per.month|per.year|annual.price|monthly.price/i.test(
@@ -470,11 +832,23 @@ function buildPlanningEstimate(
     )
   );
   const buyerPopulation = buyerPopulationCandidates[0] || null;
-  const annualPricing = annualPricingCandidates[0] || null;
+  let annualPricing = directPricingCandidates[0] || null;
+  let pricingSource: "direct" | "proxy" | "none" = annualPricing ? "direct" : "none";
+  let pricingProxyDisclosure = "";
+  if (!annualPricing) {
+    const proxyCandidate = findProxyPricingCandidate(sourceBacked);
+    if (proxyCandidate) {
+      annualPricing = proxyCandidate;
+      pricingSource = "proxy";
+      pricingProxyDisclosure = `Uses a per-unit cost/spend figure from [${proxyCandidate.id}] (${classifyMarketEvidenceSource(proxyCandidate).replace(/_/g, " ")}) as a proxy for this exact category's own pricing, since no direct pricing evidence was found. This figure describes a comparable product/spend context, not a confirmed price for this specific category, which introduces meaningful uncertainty into the resulting TAM.`;
+    }
+  }
+
+  // --- Step 4: bottom-up construction.
   const bottomUpInputs =
     buyerPopulation && annualPricing
       ? {
-          buyers: extractNumber(`${buyerPopulation.claim} ${buyerPopulation.value}`),
+          buyers: extractPopulationCount(buyerPopulation),
           pricing: extractNumber(`${annualPricing.claim} ${annualPricing.value}`),
         }
       : null;
@@ -486,22 +860,72 @@ function buildPlanningEstimate(
           : bottomUpInputs.pricing.amount)
       : null;
 
-  if (
-    (!topDownAmount || !Number.isFinite(topDownAmount.amount) || topDownAmount.amount <= 0) &&
-    (!bottomUpAmount || !Number.isFinite(bottomUpAmount) || bottomUpAmount <= 0)
-  ) {
-    // True last resort: neither a direct hierarchy-ranked figure nor a
-    // defensible bottom-up calculation could be built from the gathered
-    // evidence. Falls through to the honest "unavailable"/model-authored
-    // adjacent-benchmark path in projectMarketIntelligenceGraphToReport.
-    return null;
+  // --- Step 5: independent top-down construction already computed above
+  // (topDownAmount). Step 6: adjacent-market recovery for top-down, only
+  // attempted when neither direct top-down nor bottom-up succeeded --
+  // tried here so its cost (extra ranking/filtering over already-fetched
+  // evidence, no new research calls) is only paid when actually needed.
+  const hasDirectTopDown = Boolean(topDownAmount && topDownAmount.amount > 0);
+  const hasBottomUp = Boolean(bottomUpAmount && bottomUpAmount > 0);
+  const adjacentProxyTopDown =
+    !hasDirectTopDown && !hasBottomUp
+      ? findAdjacentProxyTopDown(evidence, sourceBacked, buyerPopulationCandidates)
+      : null;
+
+  if (!hasDirectTopDown && !hasBottomUp && !adjacentProxyTopDown) {
+    // Recovery loop exhausted: direct top-down, buyer-count + pricing
+    // (direct and proxy), and adjacent-benchmark narrowing all failed.
+    // Build a specific explanation instead of a bare null (REQUIRED:
+    // USER-FACING REPORT QUALITY / RESEARCH RECOVERY LOOP).
+    const bestPopulation = buyerPopulationCandidates[0] || null;
+    const populationAmount = bestPopulation ? extractPopulationCount(bestPopulation) : null;
+    const partialQuantity =
+      bestPopulation && populationAmount
+        ? {
+            amount: populationAmount.amount,
+            description: concise(bestPopulation.claim || bestPopulation.value, 200),
+            evidenceId: bestPopulation.id,
+          }
+        : null;
+    // pricingIsAvailable mirrors the exact ingredients bottom-up already
+    // tried (direct pricing candidates, then the proxy search) -- used
+    // only to make the gap explanation specific, never to compute
+    // anything, since without a population count there is nothing to
+    // multiply a price by regardless of how good the pricing evidence is.
+    const pricingIsAvailable =
+      directPricingCandidates.length > 0 || Boolean(findProxyPricingCandidate(sourceBacked));
+    const missingIngredient: MarketSizingGap["missingIngredient"] = partialQuantity
+      ? "pricing"
+      : pricingIsAvailable
+        ? "buyerPopulation"
+        : topDownCandidates.length === 0
+          ? "everything"
+          : "topDownFigure";
+    const explanation = partialQuantity
+      ? `ZERINIX identified approximately ${Math.round(partialQuantity.amount).toLocaleString("en-US")} qualifying buyers/establishments from [${partialQuantity.evidenceId}] (${partialQuantity.description}), but could not establish a sufficiently reliable annual spend, subscription, or contract-value benchmark for this product category -- no vendor pricing, comparable-product cost, or procurement disclosure was found even after searching adjacent/comparable evidence. A monetary TAM is therefore withheld pending pricing validation, rather than assuming a spend figure with no evidential basis.`
+      : missingIngredient === "buyerPopulation"
+        ? "ZERINIX found credible pricing/spend evidence for this category, but no addressable buyer or establishment population count that met the confidence and geography-consistency bar required to anchor a bottom-up calculation. A monetary TAM is therefore withheld pending buyer-population validation -- a real price without a real population to apply it to cannot become a market size."
+        : missingIngredient === "topDownFigure"
+          ? "ZERINIX found a candidate market-size figure, but it did not clear the confidence, geography-consistency, or amount-extraction bar required to anchor a TAM, and no bottom-up or adjacent-market alternative was available either. A monetary TAM is therefore withheld pending a more reliable market-size disclosure."
+          : "ZERINIX searched for a direct market-size figure, an addressable buyer population, and comparable adjacent-market benchmarks for this exact request, but found no verifiable numeric evidence for any of them. A monetary TAM is therefore withheld until at least one of these evidence types becomes available.";
+
+    return {
+      estimate: null,
+      gap: {
+        attemptedTopDown: true,
+        attemptedBottomUp: true,
+        attemptedAdjacentProxy: true,
+        partialQuantity,
+        missingIngredient,
+        explanation,
+      },
+    };
   }
 
-  const hasTopDown = Boolean(topDownAmount && topDownAmount.amount > 0);
-  const hasBottomUp = Boolean(bottomUpAmount && bottomUpAmount > 0);
   const currency =
-    (hasTopDown ? topDownAmount!.currency : "") ||
+    (hasDirectTopDown ? topDownAmount!.currency : "") ||
     (hasBottomUp ? bottomUpInputs!.pricing!.currency : "") ||
+    (adjacentProxyTopDown ? adjacentProxyTopDown.currency : "") ||
     "$";
 
   let tamLow: number;
@@ -511,10 +935,11 @@ function buildPlanningEstimate(
   let conflicting = false;
   let conflictNote = "";
   let basis = "";
+  let proxyDisclosure = pricingSource === "proxy" ? pricingProxyDisclosure : "";
   const evidenceIds: string[] = [];
   let anchorEvidence: DomainResearchEvidence;
 
-  if (hasTopDown && hasBottomUp) {
+  if (hasDirectTopDown && hasBottomUp) {
     const low = Math.min(topDownAmount!.amount, bottomUpAmount!);
     const high = Math.max(topDownAmount!.amount, bottomUpAmount!);
     const ratio = high / Math.max(low, 1);
@@ -522,14 +947,14 @@ function buildPlanningEstimate(
     tamHigh = high;
     method = "triangulated";
     conflicting = ratio > 2.5;
-    tier = conflicting ? "directional" : "supportedEstimate";
-    basis = `Top-down figure ${formatAmount(topDownAmount!.amount, currency)} from [${topDownBest!.id}] triangulated against bottom-up estimate ${formatAmount(bottomUpAmount!, currency)} (addressable buyers [${buyerPopulation!.id}] × annualized price [${annualPricing!.id}]).`;
+    tier = conflicting || pricingSource === "proxy" ? "directional" : "supportedEstimate";
+    basis = `Top-down figure ${formatAmount(topDownAmount!.amount, currency)} from [${topDownBest!.id}] triangulated against bottom-up estimate ${formatAmount(bottomUpAmount!, currency)} (addressable buyers [${buyerPopulation!.id}] × annualized price [${annualPricing!.id}]${pricingSource === "proxy" ? ", proxy pricing" : ""}).`;
     conflictNote = conflicting
-      ? `Top-down and bottom-up methods diverge by ${ratio.toFixed(1)}x (${formatAmount(topDownAmount!.amount, currency)} vs ${formatAmount(bottomUpAmount!, currency)}); the range below spans both rather than silently choosing one.`
+      ? `Top-down and bottom-up methods diverge by ${ratio.toFixed(1)}x (${formatAmount(topDownAmount!.amount, currency)} vs ${formatAmount(bottomUpAmount!, currency)}); the range below spans both rather than silently choosing one. Possible reasons include a different market definition, geography, reference year, or buyer-population scope between the two methods -- neither figure was discarded to force agreement.`
       : "";
     evidenceIds.push(topDownBest!.id, buyerPopulation!.id, annualPricing!.id);
     anchorEvidence = topDownBest!;
-  } else if (hasTopDown) {
+  } else if (hasDirectTopDown) {
     tamLow = topDownAmount!.amount;
     tamHigh = topDownAmount!.amount;
     method = "topDown";
@@ -537,14 +962,31 @@ function buildPlanningEstimate(
     basis = `TAM planning baseline uses ${topDownAmount!.token} from [${topDownBest!.id}] (${classifyMarketEvidenceSource(topDownBest!).replace(/_/g, " ")}).`;
     evidenceIds.push(topDownBest!.id);
     anchorEvidence = topDownBest!;
-  } else {
+  } else if (hasBottomUp) {
     tamLow = bottomUpAmount!;
     tamHigh = bottomUpAmount!;
     method = "bottomUp";
-    tier = isHighAuthoritySource(buyerPopulation!) ? "supportedEstimate" : "directional";
-    basis = `TAM = addressable buyers from [${buyerPopulation!.id}] (${classifyMarketEvidenceSource(buyerPopulation!).replace(/_/g, " ")}) × annualized price from [${annualPricing!.id}].`;
+    tier =
+      pricingSource === "proxy" || !isHighAuthoritySource(buyerPopulation!)
+        ? "directional"
+        : "supportedEstimate";
+    basis = `TAM = addressable buyers from [${buyerPopulation!.id}] (${classifyMarketEvidenceSource(buyerPopulation!).replace(/_/g, " ")}) × annualized price from [${annualPricing!.id}]${pricingSource === "proxy" ? " (proxy)" : ""}.`;
     evidenceIds.push(buyerPopulation!.id, annualPricing!.id);
     anchorEvidence = buyerPopulation!;
+  } else {
+    // adjacentProxyTopDown (REQUIRED: ADJACENT-MARKET RECOVERY, top-down
+    // path) -- always directional, regardless of the benchmark's own
+    // authority, since the figure depends on a scaling ratio rather than
+    // a direct measurement of the requested market.
+    const proxy = adjacentProxyTopDown!;
+    tamLow = proxy.amount;
+    tamHigh = proxy.amount;
+    method = "adjacentProxy";
+    tier = "directional";
+    basis = `TAM = broader-category benchmark ${formatAmount(proxy.benchmarkAmount.amount, currency)} from [${proxy.benchmark.id}] (${classifyMarketEvidenceSource(proxy.benchmark).replace(/_/g, " ")}) × ${(proxy.narrowingRatio * 100).toFixed(1)}% narrowing ratio (${narrowingRatioLabel(proxy)}).`;
+    proxyDisclosure = `Uses [${proxy.benchmark.id}]'s broader/parent-category market figure as a proxy, scaled down by the real, evidence-derived ratio between [${proxy.narrower.id}] and [${proxy.broader.id}] (narrower/broader buyer-population counts), since no direct market-size or complete bottom-up figure exists for this exact category. This proxy assumes the narrower category's revenue share is proportional to its population share, which may not hold if pricing, adoption, or competitive intensity differ materially between the broader and narrower categories -- treat this as a bounded, directional estimate, not a measured figure.`;
+    evidenceIds.push(proxy.benchmark.id, proxy.narrower.id, proxy.broader.id);
+    anchorEvidence = proxy.narrower;
   }
 
   const tamSupporting = sourceBacked.filter((item) => evidenceIds.includes(item.id));
@@ -590,7 +1032,27 @@ function buildPlanningEstimate(
   if (conflicting) confidence -= 15;
   if (stale) confidence -= 10;
   if (samMethod === "defaultAssumption") confidence -= 6;
+  if (pricingSource === "proxy") confidence -= 12;
+  if (method === "adjacentProxy") confidence -= 18;
   confidence = clampScore(confidence);
+
+  // REQUIRED: TAM -> SAM GATING. TAM existing is necessary but not
+  // sufficient to unlock SAM -- "allow a sufficiently defensible DERIVED
+  // TAM to unlock SAM when its evidence/confidence threshold is
+  // satisfied" means a TAM that survived the recovery loop but stacked
+  // enough uncertainty penalties (e.g. an adjacent-market proxy that is
+  // also stale and also conflicting) must not silently produce a SAM/SOM
+  // that looks just as solid as a well-evidenced one. 20 is a low bar
+  // deliberately -- most real, single-penalty estimates clear it easily;
+  // only a TAM compounding multiple uncertainty penalties gets blocked.
+  const MINIMUM_CONFIDENCE_TO_UNLOCK_SAM = 20;
+  const samUnlocked = confidence >= MINIMUM_CONFIDENCE_TO_UNLOCK_SAM;
+
+  // A TAM whose confidence did not clear the unlock threshold blocks SAM
+  // (and therefore SOM) entirely, regardless of what the serviceable-
+  // share/obtainable-share searches above found -- the dependency chain
+  // must hold even when SAM's own inputs would otherwise look fine.
+  const effectiveSomStatus: "calculated" | "pending" = samUnlocked ? somStatus : "pending";
 
   const range = (low: number, high: number) =>
     low === high
@@ -598,14 +1060,20 @@ function buildPlanningEstimate(
       : `${formatAmount(low, currency)}–${formatAmount(high, currency)}`;
 
   const formulaParts = [basis];
-  if (samMethod === "evidenceDerived") {
+  if (!samUnlocked) {
+    formulaParts.push(
+      `SAM withheld: TAM confidence (${confidence}/100) did not clear the ${MINIMUM_CONFIDENCE_TO_UNLOCK_SAM}/100 threshold required to derive a serviceable market from this estimate -- narrowing an already-uncertain TAM would compound speculation rather than add precision.`
+    );
+  } else if (samMethod === "evidenceDerived") {
     formulaParts.push(
       `SAM = TAM × ${Math.round(serviceableSharePercent * 100)}% serviceable-share evidence from [${serviceableShareEvidence!.id}].`
     );
   } else {
     formulaParts.push("SAM = TAM × 25% disclosed default serviceable-share assumption (no segment-narrowing evidence found).");
   }
-  if (somStatus === "calculated") {
+  if (!samUnlocked) {
+    formulaParts.push("SOM left pending: blocked by SAM, not independently evaluated.");
+  } else if (effectiveSomStatus === "calculated") {
     formulaParts.push(
       `SOM = SAM × ${Math.round(obtainableSharePercent! * 100)}% obtainable-share evidence from [${obtainableShareEvidence!.id}].`
     );
@@ -622,45 +1090,78 @@ function buildPlanningEstimate(
   }
 
   const assumptions = [
-    samMethod === "evidenceDerived"
-      ? `[Evidence] Serviceable share of ${Math.round(serviceableSharePercent * 100)}% is based on segment/geography evidence, not a default.`
-      : "[Assumption] Serviceable share is 25% until segment and geography data are validated.",
+    !samUnlocked
+      ? `[Gap] SAM requires a TAM confidence of at least ${MINIMUM_CONFIDENCE_TO_UNLOCK_SAM}/100; this estimate scored ${confidence}/100, so SAM is reported as pending rather than derived from an insufficiently defensible TAM.`
+      : samMethod === "evidenceDerived"
+        ? `[Evidence] Serviceable share of ${Math.round(serviceableSharePercent * 100)}% is based on segment/geography evidence, not a default.`
+        : "[Assumption] Serviceable share is 25% until segment and geography data are validated.",
   ];
-  if (somStatus === "pending") {
-    assumptions.push(
-      "[Gap] Obtainable share (SOM) requires evidence of realistic penetration rate, win rate, or reachable-account capacity -- none was found, so SOM is reported as pending rather than assumed."
-    );
-  } else {
-    assumptions.push(
-      `[Evidence] Obtainable share of ${Math.round(obtainableSharePercent! * 100)}% is based on penetration/win-rate evidence, not a default.`
-    );
+  if (samUnlocked) {
+    if (effectiveSomStatus === "pending") {
+      assumptions.push(
+        "[Gap] Obtainable share (SOM) requires evidence of realistic penetration rate, win rate, or reachable-account capacity -- none was found, so SOM is reported as pending rather than assumed."
+      );
+    } else {
+      assumptions.push(
+        `[Evidence] Obtainable share of ${Math.round(obtainableSharePercent! * 100)}% is based on penetration/win-rate evidence, not a default.`
+      );
+    }
   }
 
+  const confidenceLevel = classifyMarketConfidence(confidence);
+  const spendUnitLabel =
+    method === "adjacentProxy"
+      ? "Not applicable — scaled from a broader-category benchmark"
+      : method === "bottomUp" || (method === "triangulated" && hasBottomUp)
+        ? "Annual per-buyer spend (USD)"
+        : "Not applicable — top-down category figure";
+  const geography = extractGeographyLabel(evidenceText(anchorEvidence));
+  const definition = buildCanonicalMarketDefinition(prompt, anchorEvidence, spendUnitLabel);
+
   return {
-    classification: "Estimated",
-    tam: range(tamLow, tamHigh),
-    sam: range(samLow, samHigh),
-    som:
-      somStatus === "calculated"
-        ? range(samLow * obtainableSharePercent!, samHigh * obtainableSharePercent!)
-        : "realistic obtainable-share evidence (penetration rate, win rate, or reachable-account capacity) was not found for this market.",
-    formula: formulaParts.join(" "),
-    assumptions,
-    evidenceIds: [...new Set(evidenceIds)],
-    confidence,
-    confidenceLevel: classifyMarketConfidence(confidence),
-    basis: "source_based",
-    method,
-    tier,
-    geography: extractGeographyLabel(evidenceText(anchorEvidence)),
-    year: extractEvidenceYear(anchorEvidence),
-    marketDefinition: concise(anchorEvidence.claim || anchorEvidence.value, 160),
-    conflicting,
-    conflictNote,
-    samMethod,
-    somStatus,
-    stale,
+    estimate: {
+      classification: "Estimated",
+      tam: range(tamLow, tamHigh),
+      sam: samUnlocked
+        ? range(samLow, samHigh)
+        : "not derived — TAM confidence did not clear the threshold required to unlock a serviceable-market estimate (see confidence and formula below).",
+      som:
+        effectiveSomStatus === "calculated"
+          ? range(samLow * obtainableSharePercent!, samHigh * obtainableSharePercent!)
+          : samUnlocked
+            ? "realistic obtainable-share evidence (penetration rate, win rate, or reachable-account capacity) was not found for this market."
+            : "blocked — SAM was not derived, so no obtainable-market estimate can be built.",
+      formula: formulaParts.join(" "),
+      assumptions,
+      evidenceIds: [...new Set(evidenceIds)],
+      confidence,
+      confidenceLevel,
+      basis: "source_based",
+      method,
+      tier,
+      confidenceState: describeConfidenceState(tier, confidenceLevel),
+      geography,
+      year: extractEvidenceYear(anchorEvidence),
+      marketDefinition: concise(anchorEvidence.claim || anchorEvidence.value, 160),
+      definition,
+      conflicting,
+      conflictNote,
+      samMethod: samUnlocked ? samMethod : "blocked",
+      somStatus: effectiveSomStatus,
+      pricingSource: method === "topDown" || method === "adjacentProxy" ? "none" : pricingSource,
+      proxyDisclosure,
+      stale,
+    },
+    gap: null,
   };
+}
+
+function narrowingRatioLabel(proxy: {
+  narrower: DomainResearchEvidence;
+  broader: DomainResearchEvidence;
+  narrowingRatio: number;
+}) {
+  return `${concise(proxy.narrower.claim || proxy.narrower.value, 80)} is ${(proxy.narrowingRatio * 100).toFixed(1)}% of ${concise(proxy.broader.claim || proxy.broader.value, 80)}`;
 }
 
 export function buildMarketIntelligenceGraph(
@@ -839,7 +1340,7 @@ export function buildMarketIntelligenceGraph(
 
   const baseCoverage = evaluateMarketResearchCoverage(evidence, prompt);
   const competitorBreadth = competitorMap.size;
-  const planningEstimate = buildPlanningEstimate(evidence);
+  const { estimate: planningEstimate, gap: sizingGap } = buildPlanningEstimate(evidence, prompt);
   const competitiveEvidence = Math.max(
     baseCoverage.dimensions.competitiveEvidence,
     vendorIntelligence.coverage.competitiveCoverageScore,
@@ -875,6 +1376,7 @@ export function buildMarketIntelligenceGraph(
     pricingModels,
     verifiedMarketSize,
     planningEstimate,
+    sizingGap,
     adjacentBenchmarks,
     cagr,
     sources,
@@ -1720,18 +2222,28 @@ export function projectMarketIntelligenceGraphToReport(
         ? "Triangulated (top-down + bottom-up)"
         : estimate.method === "topDown"
           ? "Top-down"
-          : "Bottom-up";
+          : estimate.method === "adjacentProxy"
+            ? "Adjacent-market proxy (parent-category, scaled)"
+            : "Bottom-up";
     const tierLabel =
       estimate.tier === "supportedEstimate" ? "Supported Estimate" : "Directional / Proxy";
+    const confidenceStateLabel =
+      estimate.confidenceState === "highConfidence"
+        ? "High Confidence"
+        : estimate.confidenceState === "moderateConfidence"
+          ? "Moderate Confidence"
+          : "Directional";
+    const samTag = estimate.samMethod === "blocked" ? "Validation Needed" : copy.estimatedTag;
     const somTag = estimate.somStatus === "calculated" ? copy.estimatedTag : "Validation Needed";
     projection.tamSamSom = [
       copy.planningEstimateTitle,
-      `Method: ${methodLabel} | Tier: ${tierLabel} | Geography: ${estimate.geography} | Year: ${estimate.year} | Scope: ${estimate.marketDefinition}`,
+      `Method: ${methodLabel} | Tier: ${tierLabel} (${confidenceStateLabel}) | Geography: ${estimate.geography} | Year: ${estimate.year} | Scope: ${estimate.marketDefinition}`,
       `TAM [${copy.estimatedTag}]: ${estimate.tam}`,
-      `SAM [${copy.estimatedTag}]: ${estimate.sam}`,
+      `SAM [${samTag}]: ${estimate.sam}`,
       `SOM [${somTag}]: ${estimate.som}`,
       `${copy.formulaLabel}: ${estimate.formula}`,
       ...estimate.assumptions,
+      ...(estimate.proxyDisclosure ? [`Proxy disclosure: ${estimate.proxyDisclosure}`] : []),
       `${copy.confidenceLabel}: ${estimate.confidence}/100 (${estimate.confidenceLevel}) | ${copy.basisLabel}: ${estimate.basis} | ${copy.evidenceLabel}: ${estimate.evidenceIds.map((id) => `[${id}]`).join(", ") || copy.assumptionOnlyScenario}`,
     ].join("\n");
     // CRITICAL FIX -- confirmed live (root-cause repair): marketSize was
@@ -1751,28 +2263,35 @@ export function projectMarketIntelligenceGraphToReport(
       `- [${copy.estimatedTag}] ${copy.marketSizePlanningEstimateLine}: ${estimate.tam} | Method: ${methodLabel} (${tierLabel}) | Geography: ${estimate.geography} | Year: ${estimate.year} | ${copy.basisLabel}: ${estimate.basis} | ${copy.confidenceLabel}: ${estimate.confidence}/100 (${estimate.confidenceLevel}) | ${copy.evidenceLabel}: ${estimate.evidenceIds.map((id) => `[${id}]`).join(", ") || copy.assumptionOnlyScenario}`,
     ].join("\n");
   } else if (graph.adjacentBenchmarks.length === 0) {
-    // Only forced to the flat "unavailable" notice when there is truly
-    // nothing to reason from -- no verified local figure, no source-based
+    // Only forced to an "unavailable" notice when there is truly nothing
+    // to reason from -- no verified local figure, no source-based
     // planning estimate, AND no regional/global benchmark either. When a
     // benchmark exists, the model has real, sourced material and explicit
     // instructions (marketPrompts.tamSamSom) to build its own transparent,
-    // clearly labeled estimate from it -- overwriting that with this
-    // generic string, as this branch used to do unconditionally, is
-    // exactly the "insufficient evidence instead of the strongest
-    // available analysis" failure mode this exists to prevent.
-    projection.tamSamSom = copy.tamSamSomUnavailable;
+    // clearly labeled estimate from it -- overwriting that with a generic
+    // string, as this branch used to do unconditionally, is exactly the
+    // "insufficient evidence instead of the strongest available analysis"
+    // failure mode this exists to prevent.
+    //
+    // REQUIRED: USER-FACING REPORT QUALITY / RESEARCH RECOVERY LOOP --
+    // buildPlanningEstimate always returns a sizingGap alongside a null
+    // estimate, naming specifically what evidence WAS found (e.g. a real
+    // buyer-population count) and what is still missing, instead of the
+    // flat, non-specific notice this branch used to always show. The
+    // fully generic copy is now only a defensive fallback for the
+    // structurally-impossible case where sizingGap is itself missing.
+    projection.tamSamSom = graph.sizingGap?.explanation || copy.tamSamSomUnavailable;
     // CRITICAL FIX -- confirmed live (root-cause repair): same principle
     // applied to marketSize -- when there is truly nothing to build a
     // defensible aggregate figure from, the headline Market Size value
-    // must be a deterministic "unavailable" notice, never whatever raw
-    // prose the model happened to write (which, per the ticket's own
-    // reported defect, can describe a per-buyer pricing/ARPA figure
-    // without ever stating a real market-size total). This is what
-    // guarantees Market Size can never disagree with TAM/SAM/SOM's own
-    // "validation needed" state for the exact same underlying evidence
-    // gap, and structurally rules out an ARPA/ACV/WTP figure ever
-    // reaching the Market Size field again.
-    projection.marketSize = copy.marketSizeUnavailable;
+    // must be a deterministic notice, never whatever raw prose the model
+    // happened to write (which, per the ticket's own reported defect, can
+    // describe a per-buyer pricing/ARPA figure without ever stating a
+    // real market-size total). This is what guarantees Market Size can
+    // never disagree with TAM/SAM/SOM's own validation state for the
+    // exact same underlying evidence gap, and structurally rules out an
+    // ARPA/ACV/WTP figure ever reaching the Market Size field again.
+    projection.marketSize = graph.sizingGap?.explanation || copy.marketSizeUnavailable;
   }
 
   if (graph.cagr.length > 0) {

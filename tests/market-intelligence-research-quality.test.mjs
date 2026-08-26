@@ -305,15 +305,16 @@ test("sizing stays unavailable and explains the evidence gap when endpoints are 
   assert.equal(graph.planningEstimate, null);
 
   const report = projectMarketIntelligenceGraphToReport(graph);
-  // Rewritten in natural executive language (no "endpoint" / "validated
-  // buyer-population input" pipeline jargon exposed to report readers) while
-  // preserving the same behavior: a verified figure is genuinely
-  // unavailable, no benchmark or estimate could be built, and vendor count
-  // alone is not used to fabricate a market-size figure.
-  assert.match(report.tamSamSom, /could not be established for this market/i);
-  assert.match(report.tamSamSom, /No comparable local, regional, or global benchmark was available/i);
-  assert.match(report.tamSamSom, /not sufficient together to construct one either/i);
-  assert.match(report.tamSamSom, /not used on its own to fabricate a market-size figure/i);
+  // Evidence-first market-sizing recovery loop: instead of the fully
+  // generic pipeline-jargon-free notice, tamSamSom now carries the
+  // specific sizingGap explanation naming exactly what was searched and
+  // found missing -- still an honest non-fabrication (no vendor count or
+  // per-buyer figure ever substituted as a market-size figure).
+  assert.ok(graph.sizingGap, "expected a sizingGap explaining the evidence gap");
+  assert.equal(graph.sizingGap.missingIngredient, "everything");
+  assert.equal(report.tamSamSom, graph.sizingGap.explanation);
+  assert.match(report.tamSamSom, /found no verifiable numeric evidence/i);
+  assert.doesNotMatch(report.tamSamSom, /\$\d/, "must never contain a fabricated dollar figure");
 });
 
 test("market contract keeps verified sizing separate from transparent planning estimates", async () => {
