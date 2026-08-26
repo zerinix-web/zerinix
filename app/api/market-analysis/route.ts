@@ -10,7 +10,7 @@ import {
 import { validateApiRequest } from "@/app/lib/security/request-validation";
 import { logServerError } from "@/app/lib/security/errors";
 import { logOperationalInfo } from "@/app/lib/security/logging";
-import { runDecisionEngineV2ShadowMode } from "@/app/lib/decision-engine-v2/shadow-mode";
+import { scheduleDecisionEngineV2ShadowMode } from "@/app/lib/decision-engine-v2/shadow-mode";
 import {
   createAiCacheKey,
   estimateAiCostUsd,
@@ -2206,11 +2206,19 @@ Do not include markdown code fences, braces inside string values, or commentary 
             // MarketResearchCoverage, and MarketIntelligenceGraph this
             // request already produced -- no new AI/search call, no
             // change to `parsedReport`, no effect on the response sent
-            // below. Result is only ever logged for internal comparison
-            // (see app/lib/decision-engine-v2/shadow-mode.ts); it is
+            // below. Scheduled (not run inline) so it cannot delay this
+            // response: scheduleDecisionEngineV2ShadowMode defers the
+            // entire evaluation to setImmediate, strictly after this
+            // request's response body has been enqueued below. Disabled
+            // by default (see app/lib/decision-engine-v2/ab-readiness.ts);
+            // its result is only ever logged for internal comparison
+            // (see app/lib/decision-engine-v2/shadow-mode.ts) and is
             // never read by anything on the production response path.
+            // parsedReport/coverage/graph are never mutated anywhere
+            // later in this file, so the deferred evaluation sees
+            // identical data to what a synchronous call would have seen.
             if (!isPartialReport) {
-              runDecisionEngineV2ShadowMode({
+              scheduleDecisionEngineV2ShadowMode({
                 decisionInput: {
                   sections: parsedReport,
                   coverage: marketCoverageResult.coverage,

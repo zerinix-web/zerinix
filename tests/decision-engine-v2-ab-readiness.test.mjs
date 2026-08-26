@@ -244,8 +244,14 @@ test("6c. this module never writes to any report/response field, database table,
     .sort();
   assert.deepEqual(
     runtimeExportNames,
-    ["buildAbComparisonRecord", "recordControlledComparison", "shouldRecordControlledComparison"].sort(),
-    "ab-readiness.ts must export nothing beyond building and logging a comparison record -- no writer/mutator function"
+    [
+      "buildAbComparisonRecord",
+      "isShadowEvaluationEnabled",
+      "isShadowKillSwitchEngaged",
+      "recordControlledComparison",
+      "shouldRecordControlledComparison",
+    ].sort(),
+    "ab-readiness.ts must export nothing beyond building/gating/logging a comparison record -- no writer/mutator function"
   );
 });
 

@@ -20,7 +20,22 @@ import { runDecisionEngineV2 } from "./engine.ts";
 import type { DecisionEngineV2Input } from "./dimensions.ts";
 import type { DecisionV2Code, DecisionV2Result, DimensionAssessment } from "./types.ts";
 import { recordShadowComparisonToDisk } from "./shadow-log.ts";
-import { buildAbComparisonRecord, recordControlledComparison } from "./ab-readiness.ts";
+import { buildAbComparisonRecord, isShadowEvaluationEnabled, recordControlledComparison } from "./ab-readiness.ts";
+
+// LATENCY PROTECTION: a hard wall-clock budget for the engine
+// computation itself. Real evaluation is pure in-memory regex/data
+// aggregation over a few KB of already-generated text and normally
+// completes in low single-digit milliseconds -- this budget exists as
+// a defensive backstop against a pathological input (e.g. catastrophic
+// regex backtracking on unusually-shaped report text) rather than a
+// number tuned against real measurements. Exceeding it skips the
+// (additional, avoidable) cost of building and persisting a full
+// comparison record -- it cannot make the already-elapsed computation
+// itself any faster, since JavaScript cannot abort synchronous code
+// mid-execution, but it stops the shadow path from compounding an
+// already-slow outlier with further work, and surfaces the anomaly
+// instead of silently absorbing it.
+const MAX_SHADOW_EVALUATION_MS = 200;
 
 // A trimmed, log-safe projection of a full DimensionAssessment -- kept
 // as its own type so the log schema is explicit and stable rather
@@ -154,13 +169,44 @@ export function runDecisionEngineV2ShadowMode(input: {
   // on an external caller-side gate that a future call site could forget.
   isPartialReport: boolean;
 }): DecisionV2Result | null {
+  // KILL SWITCH / DEFAULT-OFF GATE: checked before ANY computation, not
+  // just before logging -- when disabled (the default in production),
+  // this costs exactly zero CPU time. Defense in depth: the scheduling
+  // wrapper below (scheduleDecisionEngineV2ShadowMode) already checks
+  // this before even scheduling a callback, but this function checks it
+  // again independently in case it is ever called directly.
+  if (!isShadowEvaluationEnabled()) return null;
+
   // Shadow mode must never affect the production response path -- the
   // ENTIRE computation (including running the engine itself, not just
   // the comparison/logging around it) is inside this try block, so any
   // unexpected input shape degrades to a logged no-op rather than an
   // uncaught exception on the live request path.
   try {
+    // performance.now() (a dedicated monotonic timer), not Date.now() --
+    // this computation graph makes many incidental Date.now() calls of
+    // its own (timestamps, freshness scoring), which would make a
+    // Date.now()-based measurement here ambiguous to reason about and
+    // impossible to deterministically unit-test. performance.now() is
+    // used nowhere else in this codebase, so mocking it for a test
+    // affects only this measurement.
+    const startedAt = performance.now();
     const result = runDecisionEngineV2(input.decisionInput);
+    const elapsedMs = performance.now() - startedAt;
+
+    if (elapsedMs > MAX_SHADOW_EVALUATION_MS) {
+      // Anomalously slow -- skip the additional cost of building and
+      // persisting a full comparison record (comparison-building,
+      // reasoning re-derivation, and two logging/disk-write sinks), and
+      // surface the anomaly instead of silently paying for more work on
+      // top of an already-slow evaluation.
+      logOperationalInfo("[decision-engine-v2] shadow evaluation exceeded latency budget, comparison skipped", {
+        reportRequestId: input.reportRequestId,
+        elapsedMs,
+        budgetMs: MAX_SHADOW_EVALUATION_MS,
+      });
+      return result;
+    }
 
     const legacyBanner = extractExecutiveDecisionFromText(input.executiveSummaryText, "market");
     const legacyDecision = legacyBanner?.code ?? null;
@@ -246,4 +292,31 @@ export function runDecisionEngineV2ShadowMode(input: {
     });
     return null;
   }
+}
+
+// LATENCY PROTECTION (the primary mechanism): route.ts calls THIS
+// function, not runDecisionEngineV2ShadowMode directly. It defers the
+// entire shadow evaluation -- engine run, comparison building, and both
+// logging sinks -- to setImmediate, which fires strictly after the
+// current synchronous call stack (everything that follows this call
+// site in route.ts, including enqueueing the streamed response body)
+// has already run and yielded control back to the event loop. This
+// means shadow evaluation structurally cannot delay any part of the
+// response the user is waiting on, regardless of how long it takes.
+//
+// Checked (and skipped) BEFORE scheduling, not just inside the deferred
+// callback, so a disabled kill switch/default-off state costs not even
+// one event-loop tick, on top of runDecisionEngineV2ShadowMode's own
+// independent re-check for defense in depth.
+//
+// Intentionally void / fire-and-forget: nothing on the response path
+// depends on or waits for this, matching PHASE 6's requirement that
+// shadow mode "returns nothing the caller is required to use."
+export function scheduleDecisionEngineV2ShadowMode(
+  input: Parameters<typeof runDecisionEngineV2ShadowMode>[0]
+): void {
+  if (!isShadowEvaluationEnabled()) return;
+  setImmediate(() => {
+    runDecisionEngineV2ShadowMode(input);
+  });
 }

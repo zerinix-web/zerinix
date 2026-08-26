@@ -28,7 +28,7 @@
 // 3. Never throws, never blocks, never mutates its input, never affects
 //    the response. See buildAbComparisonRecord/recordControlledComparison.
 
-import { logOperationalInfo, shouldLogOperationalInfo } from "@/app/lib/security/logging";
+import { logOperationalInfo } from "@/app/lib/security/logging";
 import type { ExecutiveDecisionCode } from "@/app/lib/report-engine/executive-decision-brief";
 import { dimensionKeys, type DecisionV2Result, type DimensionKey, type DimensionState } from "./types.ts";
 
@@ -140,14 +140,53 @@ export function buildAbComparisonRecord(input: {
   };
 }
 
-// Separate from shouldLogOperationalInfo(): dev/verbose mode already
-// gets this data via shadow-log.ts's richer local file, so this flag
-// exists specifically to let a real production deployment opt IN to
-// compact, privacy-safe comparison capture without also turning on
-// every other ZERINIX_VERBOSE_LOGS-gated log line, and without any
-// change firing automatically. Defaults OFF everywhere.
+// PRE-COMMIT AUDIT FIX: deliberately NOT shouldLogOperationalInfo().
+// That helper returns true whenever ZERINIX_VERBOSE_LOGS==="true",
+// REGARDLESS of NODE_ENV -- so an operator flipping on general-purpose
+// verbose logging in production, for a completely unrelated debugging
+// need, would have silently also turned on Decision Engine V2
+// evaluation on every request. That is exactly the "accidental
+// production activation" this layer exists to prevent: activating
+// shadow evaluation in production must require the ONE dedicated flag
+// below, never a side effect of an unrelated logging switch. Outside
+// production, this still defaults to enabled for local dev/test
+// convenience (matching how every other module in this codebase
+// behaves without a flag) -- checked directly against NODE_ENV here
+// rather than via shouldLogOperationalInfo(), so this function's
+// production behavior can never drift if that shared helper's
+// definition changes for unrelated logging reasons.
 export function shouldRecordControlledComparison(): boolean {
-  return process.env.ZERINIX_DECISION_ENGINE_V2_AB_LOGGING === "true" || shouldLogOperationalInfo();
+  if (process.env.ZERINIX_DECISION_ENGINE_V2_AB_LOGGING === "true") return true;
+  return process.env.NODE_ENV !== "production";
+}
+
+// KILL SWITCH: an explicit, dedicated, human-set flag that instantly
+// disables ALL production shadow observation -- not just its logging.
+// Checked FIRST and unconditionally, ahead of every other enable
+// signal, so setting it to "true" always wins regardless of
+// ZERINIX_DECISION_ENGINE_V2_AB_LOGGING or dev/verbose mode. Reading
+// process.env live (never cached) means the effect is immediate for
+// any process that re-reads its environment without a restart, and at
+// worst requires only a redeploy/restart to take effect -- there is no
+// code path that requires coordinated multi-step action to shut this
+// off. Distinct from the enable flag by design: an operator flips ONE
+// well-known switch to stop shadow evaluation, without needing to know
+// or unset every possible flag that could have turned it on.
+const SHADOW_KILL_SWITCH_ENV_VAR = "ZERINIX_DECISION_ENGINE_V2_SHADOW_KILL_SWITCH";
+
+export function isShadowKillSwitchEngaged(): boolean {
+  return process.env[SHADOW_KILL_SWITCH_ENV_VAR] === "true";
+}
+
+// Master gate for whether Decision Engine V2 should run AT ALL for a
+// given request -- not merely whether its result gets logged. Checked
+// BEFORE any computation happens (see shadow-mode.ts), so when this is
+// false, V2 costs exactly zero CPU time, not just zero log volume --
+// this is the primary latency-protection mechanism: work that is never
+// performed cannot delay anything.
+export function isShadowEvaluationEnabled(): boolean {
+  if (isShadowKillSwitchEngaged()) return false;
+  return shouldRecordControlledComparison();
 }
 
 // SAFEGUARD: comparison/logging failure must never fail the request.
