@@ -332,7 +332,7 @@ function extractMarketIntelligenceRawDecisionText(text: string): string {
   return "";
 }
 
-function extractMarketIntelligenceBannerConfidence(text: string, decisionToken: string): number | null {
+export function extractMarketIntelligenceBannerConfidence(text: string, decisionToken: string): number | null {
   const decisionLabelPattern = localizedLabelVariants("decision")
     .map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .join("|");

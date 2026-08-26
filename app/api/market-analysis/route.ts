@@ -10,6 +10,7 @@ import {
 import { validateApiRequest } from "@/app/lib/security/request-validation";
 import { logServerError } from "@/app/lib/security/errors";
 import { logOperationalInfo } from "@/app/lib/security/logging";
+import { runDecisionEngineV2ShadowMode } from "@/app/lib/decision-engine-v2/shadow-mode";
 import {
   createAiCacheKey,
   estimateAiCostUsd,
@@ -2199,6 +2200,27 @@ Do not include markdown code fences, braces inside string values, or commentary 
                 contentLength: parsedReport[fieldName]?.length || 0,
               });
             });
+
+            // Decision Engine V2 -- SHADOW MODE ONLY. Consumes the exact
+            // same already-computed, already-normalized report sections,
+            // MarketResearchCoverage, and MarketIntelligenceGraph this
+            // request already produced -- no new AI/search call, no
+            // change to `parsedReport`, no effect on the response sent
+            // below. Result is only ever logged for internal comparison
+            // (see app/lib/decision-engine-v2/shadow-mode.ts); it is
+            // never read by anything on the production response path.
+            if (!isPartialReport) {
+              runDecisionEngineV2ShadowMode({
+                decisionInput: {
+                  sections: parsedReport,
+                  coverage: marketCoverageResult.coverage,
+                  graph: marketIntelligenceGraph,
+                },
+                executiveSummaryText: parsedReport.executiveSummary || "",
+                reportRequestId: reportRequestId || null,
+                isPartialReport,
+              });
+            }
 
             const warning =
               isPartialReport
