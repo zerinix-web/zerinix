@@ -108,7 +108,7 @@ test("Business Plan and Market Intelligence build their single Executive Decisio
   assert.doesNotMatch(presentationSource, /investmentScore/);
   assert.match(
     marketSource,
-    /marketExecutiveDecisionBrief = buildMarketExecutiveDecisionBrief\(normalized, language, coverage\);\s*\n(?:.*\n)*?\s*normalized\.executiveSummary = formatExecutiveDecisionBrief\(marketExecutiveDecisionBrief, language, "market"\);/
+    /marketExecutiveDecisionBrief = buildMarketExecutiveDecisionBrief\(\s*\n\s*normalized,\s*\n\s*language,\s*\n\s*coverage,\s*\n\s*decisionCriticalEvidence\s*\n\s*\);\s*\n(?:.*\n)*?\s*normalized\.executiveSummary = formatExecutiveDecisionBrief\(marketExecutiveDecisionBrief, language, "market"\);/
   );
 
   // Market Intelligence's own entry-recommendation section supports the

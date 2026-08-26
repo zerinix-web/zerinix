@@ -359,7 +359,14 @@ function extractNumber(value: string) {
   return match ? parseNumberMatch(match) : null;
 }
 
-function extractMarketAmount(value: string) {
+// Exported (P0 FIX #6 -- cross-section canonical consistency): route.ts's
+// buildMarketGraphMetricConsistencyTargets reuses this exact parser to read a
+// clean, short numeric token (`.token`, e.g. "$2.1 billion") back out of
+// graph.verifiedMarketSize's own free-text description -- the same
+// authoritative figure the market's headline Market Size/TAM value is
+// already built from -- rather than re-deriving a possibly-different
+// number from rendered prose.
+export function extractMarketAmount(value: string) {
   const parsed = extractNumber(value);
   if (!parsed) return null;
   return /[$€£₺]|\b(?:million|billion|trillion|[mbt])\b/i.test(parsed.token)
@@ -1462,13 +1469,29 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     insufficientMajorPlayers:
       "Insufficient independent evidence for Major Players ranking; validated commercial vendors remain available in the Competitive Landscape.",
     verifiedMarketSizeTitle: "Verified market-size evidence",
-    planningEstimateTitle: "Planning Estimate — not externally verified market size",
+    // P0 FIX -- confirmed live (source/evidence integrity repair):
+    // planningEstimateTitle/tamSamSomUnavailable/marketSizeUnavailable
+    // deliberately say "confirmed", never "verified" -- these three
+    // strings ride into tamSamSom/marketSize field content that
+    // page.tsx's report-wide `fullContent` blob concatenates every section
+    // into, and the Decision Signal/Decision Confidence KPI cards
+    // (getDashboardMetricEvidence -> inferEvidenceLevel) scan that entire
+    // blob for the bare word "verified" as their sole positive-evidence
+    // signal. planningEstimateTitle in particular renders on EVERY report
+    // that uses a Planning Estimate (the common case, not just full
+    // unavailability), so its prior "not externally verified" wording
+    // alone was enough to make an unrelated KPI card read as "Data
+    // Confirmed" on a normal, correctly-labeled [Estimated] report.
+    // verifiedMarketSizeTitle above is deliberately left untouched: that
+    // branch only ever renders when the market size genuinely IS verified,
+    // so the word is accurate there, not a false-positive trigger.
+    planningEstimateTitle: "Planning Estimate — not externally confirmed market size",
     formulaLabel: "Formula",
     confidenceLabel: "Confidence",
     tamSamSomUnavailable:
-      "A verified market-size figure (TAM / SAM / SOM) could not be established for this market. No comparable local, regional, or global benchmark was available to build a labeled estimate from, and the available data on buyer population and pricing was not sufficient together to construct one either. This gap reflects a lack of published data for this specific scope, not the size of the opportunity. The number of vendors identified was not used on its own to fabricate a market-size figure.",
+      "A confirmed market-size figure (TAM / SAM / SOM) could not be established for this market. No comparable local, regional, or global benchmark was available to build a labeled estimate from, and the available data on buyer population and pricing was not sufficient together to construct one either. This gap reflects a lack of published data for this specific scope, not the size of the opportunity. The number of vendors identified was not used on its own to fabricate a market-size figure.",
     marketSizeUnavailable:
-      "A defensible aggregate market-size figure could not be established for this market. No verified local figure, comparable benchmark, or sufficient buyer-population-and-pricing data was available to build one. Per-customer figures such as pricing, ARPA, ACV, or willingness-to-pay evidence found during research describe an individual buyer's spend, not the total market, and were never substituted here as a market-size figure.",
+      "A defensible aggregate market-size figure could not be established for this market. No confirmed local figure, comparable benchmark, or sufficient buyer-population-and-pricing data was available to build one. Per-customer figures such as pricing, ARPA, ACV, or willingness-to-pay evidence found during research describe an individual buyer's spend, not the total market, and were never substituted here as a market-size figure.",
     marketSizePlanningEstimateLine: "Market Size",
     adjacentPlayersTitle: "Relevant Industry Players — Not Independently Validated as Direct Competitors",
     adjacentPlayersIntro:
@@ -2090,6 +2113,27 @@ export function projectMarketIntelligenceGraphToReport(
       (pricing) =>
         `- ${copy.pricingEvidenceLabel}: ${pricing.description} (${classificationTag(language, pricing.confidenceClassification)}; ${copy.confidenceLabel.toLowerCase()} ${pricing.confidenceScore}/100 ${pricing.confidenceLevel}; ${pricing.evidenceIds.map((id) => `[${id}]`).join(", ")})`
     );
+    // P0 FIX -- confirmed live (COMPETITOR EXISTENCE vs MAJOR PLAYER
+    // RANKING repair): graph.vendorIntelligence.adjacentPlayers used to be
+    // read ONLY in the `else` branch below (zero validated direct
+    // competitors). The moment even ONE candidate cleared the stricter
+    // direct-competitor bar, every other real, evidence-named, relevant
+    // company that didn't clear that same bar was silently discarded from
+    // the ENTIRE report -- not shown in Competitive Landscape, not shown in
+    // Major Players, not shown anywhere -- even though the underlying
+    // evidence (same discovery pass, never a lower bar invented after the
+    // fact) was identical to what the `else` branch already surfaces
+    // honestly when it is the ONLY evidence available. Competitive
+    // Landscape is the correct home for this tier: existence + relevance is
+    // sufficient to appear here (see the type's own doc comment on
+    // AdjacentMarketPlayer), it is never promoted into majorPlayers (which
+    // stays exclusively eligibleForMajorPlayers-gated, unchanged below) and
+    // never merged into the validated competitor table -- it is appended as
+    // its own explicitly, honestly labeled tier so a reader can never read
+    // it as a validated direct competitor.
+    const adjacentPlayersAlongsideValidatedVendors = graph.vendorIntelligence.adjacentPlayers.filter(
+      (player) => !isImplausibleCompetitorName(player.name)
+    );
     projection.competitiveLandscape = [
       copy.competitorComparisonTitle,
       describeCompetitiveCoverage(copyLanguage(language), vendorCoverage),
@@ -2097,6 +2141,17 @@ export function projectMarketIntelligenceGraphToReport(
       "| --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- |",
       ...competitorLines,
       ...pricingLines,
+      ...(adjacentPlayersAlongsideValidatedVendors.length > 0
+        ? [
+            "",
+            copy.adjacentPlayersTitle,
+            copy.adjacentPlayersIntro,
+            ...adjacentPlayersAlongsideValidatedVendors.map(
+              (player) =>
+                `- ${player.name}: ${localizeMarketRelevanceReason(player.reason, copy)} (${copy.confidenceLabel.toLowerCase()}: ${player.confidence}/100 ${player.confidenceLevel}) — ${copy.adjacentPlayerValidationGapLabel}.`
+            ),
+          ]
+        : []),
     ].join("\n");
     // CRITICAL FIX -- confirmed live (root-cause pipeline repair): this
     // sentence used to bake rankingScore/overallVendorScore -- internal

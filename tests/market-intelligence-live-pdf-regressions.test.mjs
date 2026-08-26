@@ -231,7 +231,7 @@ test("failure 4 (fix): strategicRecommendations and tamSamSom are excluded from 
   // either extended variant.
   assert.match(
     marketRouteSource,
-    /excludedFields:\s*\[\s*"strategicRecommendations",\s*"tamSamSom"(?:,\s*"executiveSummary")?(?:,\s*"competitiveLandscape",\s*"majorPlayers",?)?\s*\]/
+    /excludedFields:\s*\[\s*"strategicRecommendations",\s*"tamSamSom"(?:,\s*"executiveSummary")?(?:,\s*"competitiveLandscape",\s*"majorPlayers")?(?:,\s*"cagr")?,?\s*\]/
   );
   const fillerLoopStart = marketRouteSource.indexOf("Eliminate filler LAST");
   const fillerLoopBlock = marketRouteSource.slice(fillerLoopStart, fillerLoopStart + 2500);

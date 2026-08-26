@@ -430,7 +430,7 @@ test("adjacent players are never promoted to direct competitors regardless of wh
 test("Major Players cannot render the circular 'See Competitive Landscape for the established premise' fallback -- competitiveLandscape and majorPlayers are excluded from cross-section paragraph dedup", () => {
   assert.match(
     routeSource,
-    /excludedFields:\s*\[\s*"strategicRecommendations",\s*"tamSamSom",\s*"executiveSummary",\s*"competitiveLandscape",\s*"majorPlayers",?\s*\]/
+    /excludedFields:\s*\[\s*"strategicRecommendations",\s*"tamSamSom",\s*"executiveSummary",\s*"competitiveLandscape",\s*"majorPlayers",\s*"cagr",?\s*\]/
   );
 });
 
@@ -470,7 +470,7 @@ test("F) web dashboard, Planner, and the PDF export all read the SAME canonical 
 //         preserved (no threshold loosened, no fabricated values)
 // ---------------------------------------------------------------------------
 
-test("Market Size/CAGR: still fail closed to a Validation Needed / unavailable state when evidence is insufficient -- the canonical marketSizeUnavailable/tamSamSomUnavailable copy is untouched by this pass", () => {
+test("Market Size/CAGR: still fail closed to a Validation Needed / unavailable state when evidence is insufficient -- the canonical marketSizeUnavailable/tamSamSomUnavailable copy still names the same gap after P0 FIX #5 reworded it to say 'confirmed' instead of 'verified' (source/evidence integrity repair -- avoids a false 'Data Confirmed' KPI-card read of this exact unavailability text)", () => {
   const graphSource = readFileSync(new URL("../app/lib/ai/market-intelligence-graph.ts", import.meta.url), "utf8");
   assert.match(
     graphSource,
@@ -478,7 +478,7 @@ test("Market Size/CAGR: still fail closed to a Validation Needed / unavailable s
   );
   assert.match(
     graphSource,
-    /A verified market-size figure \(TAM \/ SAM \/ SOM\) could not be established for this market\./
+    /A confirmed market-size figure \(TAM \/ SAM \/ SOM\) could not be established for this market\./
   );
 });
 

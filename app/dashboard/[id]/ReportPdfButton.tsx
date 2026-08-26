@@ -31,6 +31,7 @@ import {
   normalizeFounderReadinessScoreText,
   readFounderReadinessMetricValue,
   readFounderReadinessScoreValue,
+  resolveMarketSizingCascade,
 } from "@/app/lib/report-presentation";
 import {
   cleanPdfLegacyValidationIntelligenceContent,
@@ -4630,31 +4631,35 @@ export function buildStandardReportPdf({
           // unparseable range.
           const tamVisualContent = getTamVisualContent(content);
           const rows = getTamRows(tamVisualContent, content);
-          const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value));
-          // A concentric TAM/SAM/SOM chart visually asserts that SAM sits
-          // inside TAM and SOM sits inside SAM -- drawing it from values
-          // that are missing, or that don't actually nest that way (e.g. a
-          // SAM larger than its own TAM), doesn't just look odd, it
-          // actively misleads the reader about the market's real shape.
-          // computeTamSamSomRadii's own fallback still draws *a* chart
-          // (fixed silhouette) whenever the numbers don't parse -- that
-          // fallback exists for a different purpose, cosmetic legibility
-          // when the model's phrasing merely doesn't parse cleanly, not for
-          // this correctness gate. Here, the chart itself is replaced with
-          // a plain, honest explanatory state whenever the three figures
-          // are not all present and logically nested (TAM >= SAM >= SOM).
-          const [tamMagnitude, samMagnitude, somMagnitude] = magnitudes;
-          const isCoherentlyNested =
-            tamMagnitude !== null &&
-            samMagnitude !== null &&
-            somMagnitude !== null &&
-            tamMagnitude >= samMagnitude &&
-            samMagnitude >= somMagnitude;
+          const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value)) as [
+            number | null,
+            number | null,
+            number | null,
+          ];
+          // P0 FIX -- confirmed live (root-cause repair): this section used
+          // to require ALL THREE of TAM/SAM/SOM to parse before drawing
+          // anything, discarding an already-resolved TAM and SAM the
+          // moment SOM alone was pending -- the web report never had this
+          // restriction (each layer renders independently there). The
+          // per-layer resolution decision now comes from
+          // resolveMarketSizingCascade (report-presentation.ts), the SAME
+          // canonical rule the web report uses, so the two surfaces can
+          // never disagree about which layers are trustworthy: a layer
+          // resolves only when it has its own parseable value AND every
+          // layer above it in the hierarchy is also resolved and correctly
+          // nested -- exactly preserving the existing evidence-first
+          // gating (an unresolved TAM still withholds SAM/SOM here, same
+          // as it always has), while no longer punishing SAM/TAM for an
+          // unrelated, independently-missing SOM.
+          const cascade = resolveMarketSizingCascade(magnitudes);
+          const resolvedByIndex = [cascade.tamResolved, cascade.samResolved, cascade.somResolved];
 
-          if (!isCoherentlyNested) {
-            // Same wording as the on-screen "Validation Needed" state (see
-            // page.tsx/Planner.tsx's ReportSectionVisual/PremiumSectionVisual)
-            // -- PDF must match the UI, not show its own bespoke explanation.
+          if (!cascade.tamResolved && !cascade.samResolved && !cascade.somResolved) {
+            // Genuinely nothing to show -- same wording as the on-screen
+            // "Validation Needed" state (see page.tsx/Planner.tsx's
+            // ReportSectionVisual/PremiumSectionVisual) -- PDF must match
+            // the UI, not show its own bespoke explanation. Unchanged from
+            // prior behavior for this one case.
             const explanationText =
               pdfLocale === "tr"
                 ? "Boyutlandırmanın doğrulanabilmesi için ek pazar doğrulaması gereklidir."
@@ -4686,11 +4691,17 @@ export function buildStandardReportPdf({
 
           rows.forEach(({ label, color, value }, index) => {
             const rowY = visualY + 2 + index * legendRowHeight;
+            const isResolved = resolvedByIndex[index];
             const isEstimated = isMarketSizeEstimated(content, label);
             // The reader must see WHY the figure is what it is without
             // opening Details -- the same real planning-assumption
             // sentence the on-screen visual now shows inline, never a
-            // fabricated one.
+            // fabricated one. Unconditional (not gated on isResolved):
+            // for an unresolved layer, this same extraction finds that
+            // layer's own real, already-honest gap sentence (e.g. "SAM
+            // withheld: TAM confidence did not clear the threshold..."),
+            // which is informative context for why it is unresolved, not
+            // a fabricated value.
             const assumption = extractMarketSizeAssumption(content, label);
             pdf.setFillColor(color);
             pdf.roundedRect(legendX, rowY, 7, 4.4, 1.5, 1.5, "F");
@@ -4701,7 +4712,7 @@ export function buildStandardReportPdf({
               legendX + 10,
               rowY + 3.8
             );
-            pdf.setTextColor("#ccfbf1");
+            pdf.setTextColor(isResolved ? "#ccfbf1" : "#71717a");
             drawSingleLine(value || "—", legendX + 10, rowY + 9.4, legendWidth - 10, 8, 5, false);
             if (assumption) {
               pdf.setFontSize(5.2);

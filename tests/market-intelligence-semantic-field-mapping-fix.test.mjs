@@ -147,7 +147,15 @@ test("page.tsx and Planner.tsx: the Market Size/CAGR card no longer classifies e
       `${label}: the old binary evidence default must be gone`
     );
   }
-  assert.match(pageSource, /const evidence = getDashboardMetricEvidence\(isCagr \? "CAGR" : "Market Size", value, content\);/);
+  // P0 FIX #5 (source/evidence integrity repair) scoped page.tsx's
+  // `content` argument to extractEvidenceLineForValue(content, value) --
+  // see tests/market-intelligence-source-evidence-integrity.test.mjs.
+  // Planner.tsx (Business Plan/Acquisition, out of scope for that
+  // Market-Intelligence-specific fix) keeps its original, unscoped call.
+  assert.match(
+    pageSource,
+    /const evidence = getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
+  );
   assert.match(
     plannerSource,
     /const evidence = inferEvidenceLevel\(\{\s*\n\s*label: isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*context: section\.content,\s*\n\s*\}\);/

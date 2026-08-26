@@ -256,7 +256,7 @@ test("reference: the new Major Players sentence shape (vendor, label, classifica
 test("route.ts: executiveSummary is now excluded from dedupeReportParagraphsAcrossSections, alongside strategicRecommendations/tamSamSom -- its own fixed-count 'What Evidence Is Missing' list can no longer be silently emptied by cross-section fuzzy-dedup against the 'biggest risk' sentence", () => {
   assert.match(
     routeSource,
-    /excludedFields:\s*\[\s*"strategicRecommendations",\s*"tamSamSom",\s*"executiveSummary",\s*"competitiveLandscape",\s*"majorPlayers",?\s*\]/
+    /excludedFields:\s*\[\s*"strategicRecommendations",\s*"tamSamSom",\s*"executiveSummary",\s*"competitiveLandscape",\s*"majorPlayers",\s*"cagr",?\s*\]/
   );
 });
 

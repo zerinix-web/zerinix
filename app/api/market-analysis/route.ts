@@ -65,6 +65,7 @@ import {
   buildPreGenerationVerdictContext,
   assessMarketEntryConfidence,
   localizeMarketEntryDecision,
+  type DecisionCriticalEvidenceState,
 } from "@/app/lib/report-engine/market-intelligence-presentation";
 import { assertNoDecisionContradiction } from "@/app/lib/report-engine/decision-contradiction-gate";
 import { assertReportIsolation } from "@/app/lib/report-engine/report-isolation-validator";
@@ -85,6 +86,7 @@ import { enforceInlineRawUrlLimitAcrossSections } from "@/app/lib/report-engine/
 import {
   buildMarketIntelligenceBibliography,
   buildMarketIntelligenceGraph,
+  extractMarketAmount,
   formatMarketIntelligenceGraphForModel,
   projectMarketIntelligenceGraphToReport,
   sanitizeMarketProseCompetitorClaims,
@@ -110,7 +112,10 @@ import {
   loadUserMemoriesForUser,
 } from "@/app/lib/ai/user-memory";
 import { dedupeReportParagraphsAcrossSections } from "@/app/lib/report-content-quality.mjs";
-import { runConsistencyValidationPass } from "@/app/lib/report-consistency-validation";
+import {
+  runConsistencyValidationPass,
+  type MetricConsistencyTarget,
+} from "@/app/lib/report-consistency-validation";
 import { normalizeReportSourceSection } from "@/app/lib/report-source-normalization.mjs";
 import {
   localizePdfPresentationText,
@@ -451,9 +456,18 @@ function cleanInternalMarketSourceFallbacks(content: string, language: ResponseL
   // sentences, so they are deliberately left alone here to avoid mangling
   // real prose. This runs for every field (enforceMarketReportLanguage
   // calls this function first), not just Sources.
+  // P0 FIX -- confirmed live (source/evidence integrity repair): the
+  // English replacement says "Not confirmed", never "Not verified" -- this
+  // runs on every field, so the substituted text can end up anywhere in
+  // the report, including page.tsx's report-wide `fullContent` blob. The
+  // Decision Signal/Decision Confidence KPI cards scan that blob for the
+  // bare word "verified" as their sole positive-evidence signal, which
+  // does not distinguish "verified" from "NOT verified" -- see
+  // insufficientEvidenceFallbackTemplates' own comment for the full
+  // mechanism.
   const notVerifiedReplacement = marketText(
     language,
-    "Not verified",
+    "Not confirmed",
     "Doğrulanmadı",
     "Nicht verifiziert",
     "Non vérifié",
@@ -658,6 +672,107 @@ const competitorClaimSensitiveFields: MarketReportField[] = [
   "strategicRecommendations",
 ];
 
+// P0 FIX -- confirmed live (executive decision integrity repair): the ONE
+// place this report's decision-critical evidence pillars are derived from
+// the same canonical, evidence-first graph fields P0 FIX #1 and #3 already
+// established as authoritative for what the report actually SHOWS a
+// reader -- graph.planningEstimate/graph.verifiedMarketSize for market
+// sizing (mirrors TAM/SAM/SOM's own resolution logic), graph.vendorIntelligence.
+// vendors/adjacentPlayers for competitive evidence (mirrors Competitive
+// Landscape's own existence-tier logic). Used at both call sites of
+// assessMarketEntryConfidence/buildMarketExecutiveDecisionBrief below (the
+// pre-generation verdict shown to the model, and the final post-generation
+// banner) so the model is never told a stronger verdict than the final
+// report will actually display, and the two can never contradict each
+// other. Never derived from `coverage` -- see assessMarketEntryConfidence's
+// own comment for why that generic, floor-padded signal is exactly what
+// let a false ENTER through in the reported production defect.
+function resolveDecisionCriticalEvidenceState(
+  graph: MarketIntelligenceGraph
+): DecisionCriticalEvidenceState {
+  return {
+    marketSizingResolved:
+      graph.planningEstimate !== null || graph.verifiedMarketSize.length > 0,
+    competitiveEvidenceResolved:
+      graph.vendorIntelligence.vendors.length > 0 ||
+      graph.vendorIntelligence.adjacentPlayers.length > 0,
+  };
+}
+
+// P0 FIX #6 -- confirmed live (canonical cross-section consistency repair):
+// Market Intelligence never wired runConsistencyValidationPass's
+// metricTargets (unlike Business Plan's buildPlanFinancialConsistencyTargets,
+// plan-executor.ts) -- a stale comment at this function's own call site
+// below explained this as "no financial model of a hypothetical company to
+// check numbers against," which is true for CAC/LTV/ARR but was never true
+// for Market Size/TAM/SAM/SOM/CAGR themselves: graph.planningEstimate/
+// graph.verifiedMarketSize/graph.cagr (P0 FIX #1/#2's own canonical fields)
+// ARE a real, already-computed source of truth, just never cross-checked
+// against every OTHER section's own free-text mentions of the same figures
+// (marketOverview, industryTrends, customerSegments, strategicRecommendations,
+// etc. can each independently restate "the $X market" or "a CAGR of Y%" in
+// their own prose, with no mechanism preventing that restatement from
+// silently drifting from the canonical number). Builds the SAME
+// MetricConsistencyTarget shape Business Plan already uses, sourced only
+// from values that are themselves unambiguous, already-resolved numbers --
+// never a placeholder/gap sentence (see the SAM/SOM guards below), so a
+// genuinely unresolved layer is never forced into becoming a false
+// "canonical" value elsewhere; it stays missing, exactly as P0 FIX #1
+// requires.
+function buildMarketGraphMetricConsistencyTargets(
+  graph: MarketIntelligenceGraph,
+  cagrFieldText: string
+): MetricConsistencyTarget[] {
+  const targets: MetricConsistencyTarget[] = [];
+
+  // Market Size / TAM: the same authoritative figure whenever one exists,
+  // whether it came from a fully verified observation (graph.verifiedMarketSize,
+  // whose free-text description is parsed back into a clean short token
+  // via extractMarketAmount, e.g. "$2.1 billion") or a Planning Estimate
+  // (graph.planningEstimate.tam, already a clean pre-formatted range) --
+  // projectMarketIntelligenceGraphToReport derives marketSize FROM this
+  // exact same value, so this is the single source both fields must agree
+  // with, never a second, independently-parsed number.
+  const verifiedMarketSizeToken =
+    graph.verifiedMarketSize.length > 0
+      ? extractMarketAmount(graph.verifiedMarketSize[0].description)?.token || null
+      : null;
+  const marketSizeCanonical = verifiedMarketSizeToken || graph.planningEstimate?.tam || null;
+  if (marketSizeCanonical) {
+    targets.push({ labelPattern: "Market Size", canonicalDisplayValue: marketSizeCanonical, type: "market_size_mismatch" });
+    targets.push({ labelPattern: "TAM", canonicalDisplayValue: marketSizeCanonical, type: "market_size_mismatch" });
+  }
+
+  // SAM/SOM: only enforced when buildPlanningEstimate itself resolved a
+  // real numeric range for that layer (samMethod !== "blocked" /
+  // somStatus === "calculated") -- otherwise estimate.sam/estimate.som is
+  // itself a gap-explanation SENTENCE ("not derived -- TAM confidence did
+  // not clear the threshold..."), never a value fit to overwrite another
+  // section's own numeric mention with. An unresolved layer must remain
+  // missing, never get promoted into a fabricated "canonical" figure.
+  if (graph.planningEstimate && graph.planningEstimate.samMethod !== "blocked") {
+    targets.push({ labelPattern: "SAM", canonicalDisplayValue: graph.planningEstimate.sam, type: "market_size_mismatch" });
+  }
+  if (graph.planningEstimate && graph.planningEstimate.somStatus === "calculated") {
+    targets.push({ labelPattern: "SOM", canonicalDisplayValue: graph.planningEstimate.som, type: "market_size_mismatch" });
+  }
+
+  // CAGR: mirrors extractHeadlineCagrValue's own regex (page.tsx,
+  // ReportPdfButton.tsx -- byte-identical between those two, see P0 FIX
+  // #2's own parity test) against the SAME already-normalized `cagr` field
+  // text those cards read, so the canonical figure other sections get
+  // corrected against is the exact number the KPI card will display, not a
+  // separately-derived one.
+  const cagrMatch = (cagrFieldText || "").match(
+    /\d+(?:[.,]\d+)?(?:\s*[-–—]\s*\d+(?:[.,]\d+)?)?\s*%/
+  );
+  if (cagrMatch) {
+    targets.push({ labelPattern: "CAGR", canonicalDisplayValue: cagrMatch[0], type: "growth_rate_mismatch" });
+  }
+
+  return targets;
+}
+
 function applySharedMarketGraph(
   report: Record<MarketReportField, string>,
   graph: MarketIntelligenceGraph,
@@ -730,8 +845,20 @@ const insufficientEvidenceFallbackTemplates: Record<
   ResponseLanguage,
   (label: string, reason: string) => string
 > = {
+  // P0 FIX -- confirmed live (source/evidence integrity repair): this
+  // fallback text is inserted directly into `fullContent`/`executiveSummary`
+  // whenever ANY section degrades, and page.tsx's Decision Signal/Decision
+  // Confidence KPI cards (getDashboardMetricEvidence -> inferEvidenceLevel)
+  // scan that entire blob for the bare word "verified" as their sole
+  // positive-evidence signal. The literal word "verified" -- meant here to
+  // say evidence was INSUFFICIENT -- was being read as proof the displayed
+  // decision/confidence value itself was confirmed, producing "Data
+  // Confirmed" on the one card that should least be able to claim it: a
+  // report that just admitted a section could not be completed to
+  // standard. "confirmed" carries the identical meaning without colliding
+  // with inferEvidenceLevel's keyword scan.
   English: (label, reason) =>
-    `${label}: Insufficient verified evidence. ${reason} The rest of this report remains based on independently verified evidence -- this section alone could not be completed to that standard and should not be treated as a market finding.`,
+    `${label}: Insufficient confirmed evidence. ${reason} The rest of this report remains based on independently confirmed evidence -- this section alone could not be completed to that standard and should not be treated as a market finding.`,
   Turkish: (label, reason) =>
     `${label}: Yeterli doğrulanmış kanıt bulunamadı. ${reason} Raporun geri kalanı bağımsız olarak doğrulanmış kanıtlara dayanmaya devam ediyor; yalnızca bu bölüm aynı standartta tamamlanamadı ve bir pazar bulgusu olarak değerlendirilmemelidir.`,
   German: (label, reason) =>
@@ -742,9 +869,16 @@ const insufficientEvidenceFallbackTemplates: Record<
     `${label}: evidencia validada insuficiente. ${reason} El resto de este informe sigue basándose en evidencia validada de forma independiente -- solo esta sección no pudo completarse con ese estándar y no debe considerarse un hallazgo de mercado.`,
 };
 
+// P0 FIX -- confirmed live (source/evidence integrity repair): says
+// "confirmed", never "verified" -- this reason string is spliced directly
+// into report content (via insufficientEvidenceFallbackTemplates above),
+// which page.tsx's Decision Signal/Decision Confidence KPI cards scan
+// (via fullContent) for the bare word "verified" as their sole
+// positive-evidence signal. See insufficientEvidenceFallbackTemplates'
+// own comment for the full mechanism.
 const missingMarketSizeBenchmarkReason: Record<ResponseLanguage, string> = {
   English:
-    "No verified local market-size figure and no adjacent regional or global benchmark data were found in this run.",
+    "No confirmed local market-size figure and no adjacent regional or global benchmark data were found in this run.",
   Turkish:
     "Bu çalıştırmada ne doğrulanmış bir yerel pazar büyüklüğü rakamı ne de bölgesel veya küresel bir referans veri bulunabildi.",
   German:
@@ -778,7 +912,6 @@ const generalInsufficientEvidenceReason: Record<ResponseLanguage, string> = {
 
 const marketSizeBenchmarkDependentFields = new Set<MarketReportField>([
   "marketSize",
-  "cagr",
   "tamSamSom",
   "regionalAnalysis",
 ]);
@@ -787,12 +920,41 @@ const competitorEvidenceDependentFields = new Set<MarketReportField>([
   "majorPlayers",
 ]);
 
+// P0 FIX -- confirmed live (CAGR data-preservation repair): cagr used to be
+// a member of marketSizeBenchmarkDependentFields above, so a degraded cagr
+// section was always explained by "no verified local market-size figure and
+// no adjacent benchmark" -- TAM-related signals that say nothing about
+// whether CAGR's OWN evidence (graph.cagr, the keyword+percentage
+// co-occurrence extraction in market-intelligence-graph.ts) existed. A
+// report could have zero CAGR evidence but a perfectly good verified market
+// size, or the reverse, and this coupling would still blame the wrong gap.
+// cagr now names its own evidence signal.
+const missingCagrEvidenceReason: Record<ResponseLanguage, string> = {
+  English:
+    "No independently verifiable CAGR or compound-growth figure -- and no adjacent-market benchmark growth rate -- was found in this run.",
+  Turkish:
+    "Bu çalıştırmada ne bağımsız olarak doğrulanabilir bir YBBO/bileşik büyüme rakamı ne de yakın pazar referans büyüme oranı bulunabildi.",
+  German:
+    "In diesem Durchlauf wurde weder eine unabhängig verifizierbare CAGR-/Wachstumsrate noch ein Wachstums-Benchmark aus einem angrenzenden Markt gefunden.",
+  French:
+    "Aucun taux de croissance annuel composé vérifiable de manière indépendante -- ni aucun taux de croissance de référence d'un marché adjacent -- n'a été trouvé lors de cette exécution.",
+  Spanish:
+    "No se encontró ninguna cifra de CAGR/crecimiento compuesto verificable de forma independiente, ni una tasa de crecimiento de referencia de un mercado adyacente, en esta ejecución.",
+};
+
 function describeMissingMarketEvidence(
   field: MarketReportField,
   language: ResponseLanguage,
   coverage?: MarketResearchCoverage,
   graph?: MarketIntelligenceGraph
 ): string {
+  if (field === "cagr") {
+    const hasCagrEvidence = Boolean(graph?.cagr?.length);
+    if (!hasCagrEvidence) {
+      return missingCagrEvidenceReason[language];
+    }
+    return generalInsufficientEvidenceReason[language];
+  }
   if (marketSizeBenchmarkDependentFields.has(field)) {
     const hasVerifiedSize = Boolean(coverage?.verifiedMarketSizeAvailable);
     const hasBenchmark = Boolean(graph?.adjacentBenchmarks?.length);
@@ -832,7 +994,10 @@ function ensureMarketReportQuality(
   graph?: MarketIntelligenceGraph
 ) {
   const normalized = { ...report };
-  const marketAssessment = coverage ? assessMarketEntryConfidence(coverage) : undefined;
+  const decisionCriticalEvidence = graph ? resolveDecisionCriticalEvidenceState(graph) : undefined;
+  const marketAssessment = coverage
+    ? assessMarketEntryConfidence(coverage, decisionCriticalEvidence)
+    : undefined;
   // Computed once inside the `if (coverage)` block below and reused for
   // both the opening Executive Decision layer and the closing verdict
   // paragraph, so the two can never diverge or contradict each other.
@@ -864,7 +1029,12 @@ function ensureMarketReportQuality(
     // Biggest Risks, Biggest Opportunity, and the First 90-Day Action
     // Plan -- and nothing else. No second summary, no confidence rollup,
     // and no source-reliability overview may be appended to this field.
-    marketExecutiveDecisionBrief = buildMarketExecutiveDecisionBrief(normalized, language, coverage);
+    marketExecutiveDecisionBrief = buildMarketExecutiveDecisionBrief(
+      normalized,
+      language,
+      coverage,
+      decisionCriticalEvidence
+    );
     // CRITICAL FIX -- confirmed live: Market Intelligence's own native
     // decision vocabulary is ENTER/MONITOR/AVOID -- the "market" vocabulary
     // renders this banner's "Decision: TOKEN" line using those tokens
@@ -953,12 +1123,31 @@ function ensureMarketReportQuality(
     // Competitive Landscape" contradiction this fix must eliminate. Both
     // fields are canonically owned by the graph and must never be silently
     // collapsed into each other.
+    //
+    // P0 FIX -- confirmed live (CAGR data-preservation repair): cagr carries
+    // the identical risk marketSize/tamSamSom already had. cagr sits
+    // immediately after marketSize in field order (marketReportFields), and
+    // per its own prompt (marketPrompts.cagr) the model is expected to name
+    // the SAME growth percentage marketOverview/executiveSummary may already
+    // mention in scene-setting prose (e.g. "the market is growing at 12.4%
+    // CAGR"). When that percentage is the only number either paragraph
+    // contains, cross-section fuzzy-dedup reads cagr's paragraph as a
+    // restatement of the earlier section's own "insight" and collapses the
+    // entire cagr field into a bare `See "Market Overview" for the
+    // established premise.` cross-reference -- a stub with no digits left
+    // in it. The web/PDF headline extractor (extractHeadlineCagrValue) then
+    // correctly finds no percentage in that stub and renders "Validation
+    // Needed", even though the model's original text stated a real,
+    // sourced (or honestly [Estimated]) figure. cagr must never be silently
+    // collapsed into another section for the exact reason tamSamSom/
+    // executiveSummary/competitiveLandscape/majorPlayers already are not.
     excludedFields: [
       "strategicRecommendations",
       "tamSamSom",
       "executiveSummary",
       "competitiveLandscape",
       "majorPlayers",
+      "cagr",
     ],
   }) as Record<MarketReportField, string>;
 
@@ -972,17 +1161,28 @@ function ensureMarketReportQuality(
     // Final consistency validation pass, run last so it sees every prior
     // addition. Silently corrects any section that contradicts the
     // report's own canonical market-entry decision -- never adds visible
-    // text, never surfaces a message to the user. No metric-consistency
-    // targets: Market Intelligence has no financial model of a
-    // hypothetical company to check numbers against, only its own
-    // AI-researched tamSamSom/cagr text, which is already the source of
-    // truth and should not be silently overwritten.
+    // text, never surfaces a message to the user.
+    //
+    // P0 FIX #6 -- confirmed live (canonical cross-section consistency
+    // repair): metricTargets now cross-checks Market Size/TAM/SAM/SOM/CAGR
+    // mentions against buildMarketGraphMetricConsistencyTargets' own
+    // graph-sourced canonical values (see that function's own comment) --
+    // this was previously omitted entirely (a stale comment here claimed
+    // Market Intelligence had "no financial model... to check numbers
+    // against," true for CAC/LTV/ARR but never true for its own
+    // graph.planningEstimate/graph.verifiedMarketSize/graph.cagr values).
+    // metricProtectedFields excludes the three fields these canonical
+    // values are themselves deterministically rendered into
+    // (marketSize/cagr/tamSamSom) -- correcting those against themselves
+    // would be a no-op at best, a formatting risk at worst.
     const consistencyResult = runConsistencyValidationPass({
       sections: deduped,
       fields: reportFields,
       language,
       authoritativeDecision: localizeMarketEntryDecision(marketAssessment.decision, language),
       decisionProtectedFields: ["executiveSummary", "strategicRecommendations", "sources"],
+      metricTargets: graph ? buildMarketGraphMetricConsistencyTargets(graph, deduped.cagr) : undefined,
+      metricProtectedFields: ["marketSize", "cagr", "tamSamSom"],
       riskOpportunity: {
         risksField: "threats",
         opportunitiesHostField: "opportunities",
@@ -1031,7 +1231,7 @@ function ensureMarketReportQuality(
     deduped[field] = stripFillerAndDuplicateSentences(deduped[field]);
   }
 
-  // Degrade weak sections to an honest "Insufficient verified evidence"
+  // Degrade weak sections to an honest "Insufficient confirmed evidence"
   // fallback BEFORE assertReportIsolation/assertNoDecisionContradiction
   // run below, not after. Those two checks scan whatever raw text the
   // model wrote for a section -- including its own attempt to explain an
@@ -1929,8 +2129,19 @@ Write only this section's content. Do not write a JSON object, field name, headi
       // Recommendations, Opportunities, Market Drivers) self-condition on
       // the real verdict instead of only being checked against it after
       // the fact by assertNoDecisionContradiction.
+      //
+      // P0 FIX -- confirmed live (executive decision integrity repair):
+      // gated by the SAME resolveDecisionCriticalEvidenceState(marketIntelligenceGraph)
+      // the final post-generation banner below uses, so the model is never
+      // pre-conditioned on a stronger verdict (e.g. told "ENTER" here) than
+      // the report will actually display once generation finishes -- the
+      // exact mismatch that used to let the model write full-speed growth
+      // advice against a verdict the final banner then downgraded.
       const preGenerationVerdictContext = buildPreGenerationVerdictContext(
-        assessMarketEntryConfidence(marketCoverageResult.coverage),
+        assessMarketEntryConfidence(
+          marketCoverageResult.coverage,
+          resolveDecisionCriticalEvidenceState(marketIntelligenceGraph)
+        ),
         responseLanguage,
         marketCoverageResult.coverage.dimensions
       );

@@ -596,6 +596,33 @@ function getDashboardMetricEvidence(label: string, value: string, content: strin
   });
 }
 
+// P0 FIX -- confirmed live (source/evidence integrity repair): a Market
+// Intelligence field like `cagr` can legitimately contain MULTIPLE
+// independently-classified evidence items on separate lines (graph.cagr in
+// market-intelligence-graph.ts computes confidenceClassification per item,
+// e.g. one evidence sentence using "forecast" language classifies
+// [Estimated] while another, differently-worded sentence about the SAME
+// market classifies [Verified]). getDashboardMetricEvidence's own
+// inferEvidenceLevel call scans the ENTIRE multi-line content for the word
+// "verified" -- so whenever the headline value extracted by
+// extractHeadlineCagrValue/extractHeadlineMonetaryValue happens to come
+// from the [Estimated] line (array order is research-discovery order, not
+// sorted by classification), the card still shows "Data Confirmed" purely
+// because a DIFFERENT line elsewhere in the same field happens to be
+// [Verified] -- a source that supports a DIFFERENT claim being used to
+// confirm this one. Isolating evidence-level detection to the single line
+// that actually contains the extracted headline value (falling back to the
+// full content when no single line contains it, e.g. unstructured model
+// prose with no graph-derived per-item tags) ties the badge to the exact
+// claim actually displayed, never a claim merely present somewhere else in
+// the same field.
+function extractEvidenceLineForValue(content: string, value: string): string {
+  if (!value) return content;
+  const lines = (content || "").split("\n");
+  const matchingLine = lines.find((line) => line.includes(value));
+  return matchingLine ?? content;
+}
+
 function getDashboardSectionEvidence(section: { field?: string; title: string; content: string }): EvidenceLevel {
   const field = section.field?.toLowerCase() || "";
   const title = section.title.toLowerCase();
@@ -2578,7 +2605,15 @@ function ReportSectionVisual({
     // derived planning input can no longer be promoted to confirmed
     // market evidence just because no explicit "[Estimated]" tag happens
     // to be present.
-    const evidence = getDashboardMetricEvidence(isCagr ? "CAGR" : "Market Size", value, content);
+    //
+    // P0 FIX -- a multi-item field (e.g. cagr with one [Verified] and one
+    // [Estimated] line) must not let a DIFFERENT line confirm this one --
+    // see extractEvidenceLineForValue's own comment.
+    const evidence = getDashboardMetricEvidence(
+      isCagr ? "CAGR" : "Market Size",
+      value,
+      extractEvidenceLineForValue(content, value)
+    );
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.1),transparent_30%),rgba(255,255,255,0.025)] p-5">

@@ -1035,6 +1035,45 @@ export function getSectionTakeaway(content: string) {
   return firstSentence.length > 220 ? `${firstSentence.slice(0, 217).trim()}...` : firstSentence;
 }
 
+export type MarketSizingCascadeResolution = {
+  tamResolved: boolean;
+  samResolved: boolean;
+  somResolved: boolean;
+  allResolved: boolean;
+};
+
+// CANONICAL TAM/SAM/SOM cascade rule -- the single source of truth for
+// "which of these three layers can be trusted and displayed," shared by
+// the web report (app/dashboard/[id]/page.tsx) and the PDF export
+// (ReportPdfButton.tsx) so the two can never disagree. Each caller does
+// its own text extraction (the two renderers have legitimately
+// different parsing/measurement needs), then hands the three already-
+// parsed magnitudes here for the actual resolution decision.
+//
+// A layer counts as resolved only when it has its own parseable
+// magnitude AND every layer above it in the TAM >= SAM >= SOM hierarchy
+// is ALSO resolved and correctly nested beneath it (a value that is
+// present but exceeds its parent is a genuine data inconsistency, e.g.
+// a SAM larger than its own TAM -- not merely a missing figure -- and
+// must not be treated as valid). This is a strictly PER-LAYER decision:
+// SOM being unresolved must never affect whether TAM/SAM are reported
+// as resolved, and a missing/unresolved TAM must continue to withhold
+// SAM/SOM exactly as the evidence-first market-sizing engine
+// (market-intelligence-graph.ts) already requires upstream -- this
+// function only decides what to DISPLAY, it never derives or fabricates
+// a value the upstream engine did not already produce.
+export function resolveMarketSizingCascade(
+  magnitudes: readonly [number | null, number | null, number | null]
+): MarketSizingCascadeResolution {
+  const [tamMagnitude, samMagnitude, somMagnitude] = magnitudes;
+  const tamResolved = tamMagnitude !== null;
+  const samResolved = tamResolved && samMagnitude !== null && samMagnitude <= (tamMagnitude as number);
+  const somResolved = samResolved && somMagnitude !== null && somMagnitude <= (samMagnitude as number);
+  const allResolved = tamResolved && samResolved && somResolved;
+
+  return { tamResolved, samResolved, somResolved, allResolved };
+}
+
 export function isExecutivePresentationSection(section: { field?: string; title: string }) {
   const field = section.field?.toLowerCase() || "";
   const title = section.title.toLowerCase();

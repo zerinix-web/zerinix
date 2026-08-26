@@ -25,7 +25,7 @@ test("tamSamSom is excluded from cross-section paragraph dedup, alongside strate
   // two-field list or either extended variant.
   assert.match(
     routeSource,
-    /excludedFields:\s*\[\s*"strategicRecommendations",\s*"tamSamSom"(?:,\s*"executiveSummary")?(?:,\s*"competitiveLandscape",\s*"majorPlayers",?)?\s*\]/
+    /excludedFields:\s*\[\s*"strategicRecommendations",\s*"tamSamSom"(?:,\s*"executiveSummary")?(?:,\s*"competitiveLandscape",\s*"majorPlayers")?(?:,\s*"cagr")?,?\s*\]/
   );
 });
 

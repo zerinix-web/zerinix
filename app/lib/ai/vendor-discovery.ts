@@ -966,16 +966,55 @@ export function classifyMajorPlayerLabel(input: {
 export type MarketRelevanceResult = { relevant: boolean; reason: string };
 
 const nonVendorRolePattern =
-  /\b(?:implementation partner|systems? integrator|si partner|reseller partner|channel partner|app marketplace|marketplace|app store|outsourced accounting|outsourced bookkeeping|managed bookkeeping service|accounting firm|cpa firm|law firm|consulting firm|consultancy|advisory firm|distributor|distribution partner|wholesale distributor|media (?:company|group|outlet|network)|news (?:outlet|organization|publication|site)|trade (?:press|publication|journal)|publishing (?:company|house)|b2b media|industry (?:media|publication)|events? (?:company|organizer|producer)|conference organizer|trade show organizer|analyst firm|research and advisory firm|market research (?:firm|company|provider|group|agency|publisher)|market intelligence (?:firm|provider|company)|industry research (?:firm|company|provider)|data (?:and|&) analytics (?:firm|company|provider))\b/i;
+  /\b(?:implementation partner|systems? integrator|si partner|reseller partner|channel partner|app marketplace|marketplace|app store|outsourced accounting|outsourced bookkeeping|managed bookkeeping service|distributor|distribution partner|wholesale distributor|media (?:company|group|outlet|network)|news (?:outlet|organization|publication|site)|trade (?:press|publication|journal)|publishing (?:company|house)|b2b media|industry (?:media|publication)|events? (?:company|organizer|producer)|conference organizer|trade show organizer|analyst firm|research and advisory firm|market research (?:firm|company|provider|group|agency|publisher)|market intelligence (?:firm|provider|company)|industry research (?:firm|company|provider)|data (?:and|&) analytics (?:firm|company|provider))\b/i;
 const managedServicesAllowancePattern = /\bmanaged (?:service|services|detection|soc|security)\b/i;
+
+// P0 FIX -- confirmed live (LegalTech/professional-services market):
+// "law firm"/"accounting firm"/"cpa firm"/"consulting firm"/"advisory
+// firm"/"consultancy" are a DIFFERENT risk than the hard-exclusion terms
+// above -- they are also extremely common CUSTOMER-SEGMENT descriptors for
+// a B2B SaaS vendor that SELLS TO that profession. A LegalTech vendor's own
+// evidence routinely reads "practice management software for law firms" or
+// "AI-assisted bookkeeping services to accounting firms" -- the profession
+// names WHO BUYS the product, not what the candidate itself is. A real,
+// independently corroborated vendor (Clio/MyCase-shaped) was excluded
+// outright as though it WERE a law firm, purely because its own evidence
+// text legitimately described its target customer using this phrase -- the
+// candidate never reached `vendors` OR `adjacentPlayers`, since
+// assessMarketRelevance rejects a candidate before either tier can see it.
+// Scoped narrowly: only suppresses the exclusion when EVERY occurrence of
+// the profession term is immediately preceded by an explicit customer-
+// targeting preposition ("for"/"to" + up to 4 filler words). A genuine
+// self-description ("is a boutique law firm", "operates as a consultancy")
+// never takes that shape, so it is still excluded -- and if even one
+// occurrence reads as self-description, the exclusion still applies.
+const professionalServicesFirmPattern =
+  /\b(?:law firms?|accounting firms?|cpa firms?|consulting firms?|advisory firms?|consultanc(?:y|ies))\b/gi;
+const customerFramingBeforeProfessionalServicesFirmPattern =
+  /\b(?:for|to|serving|serves|served|used by|trusted by|built for|designed for|marketed to|offered to|sold to|sells? to|caters? to|available to)\s+(?:\S+\s+){0,4}$/i;
+
+function matchesNonVendorRole(text: string): boolean {
+  if (nonVendorRolePattern.test(text)) return true;
+
+  const matches = [...text.matchAll(professionalServicesFirmPattern)];
+  if (matches.length === 0) return false;
+
+  return matches.some(
+    (match) =>
+      typeof match.index === "number" &&
+      !customerFramingBeforeProfessionalServicesFirmPattern.test(text.slice(0, match.index))
+  );
+}
 
 /**
  * Excludes implementation partners, marketplaces, systems integrators,
  * outsourced/managed-service providers, media/publishing companies,
- * distributors, event organizers, and advisory/accounting firms from the
- * vendor pool, unless the market itself is about managed services (e.g.
- * Cybersecurity MDR). Always returns a human-readable reason, satisfying the
- * "clear relevance explanation" requirement for validated vendors too.
+ * distributors, event organizers, and advisory/accounting/law firms (when
+ * genuinely self-described as one, not merely named as the vendor's own
+ * customer segment -- see matchesNonVendorRole above) from the vendor pool,
+ * unless the market itself is about managed services (e.g. Cybersecurity
+ * MDR). Always returns a human-readable reason, satisfying the "clear
+ * relevance explanation" requirement for validated vendors too.
  */
 export function assessMarketRelevance(
   candidate: AggregatedVendorCandidate,
@@ -986,7 +1025,7 @@ export function assessMarketRelevance(
   const allowManagedServices = managedServicesAllowancePattern.test(
     `${marketPrompt} ${taxonomy?.productCategory || ""} ${(taxonomy?.adjacentCategories || []).join(" ")}`
   );
-  if (!allowManagedServices && nonVendorRolePattern.test(`${candidate.canonicalName} ${evidenceText}`)) {
+  if (!allowManagedServices && matchesNonVendorRole(`${candidate.canonicalName} ${evidenceText}`)) {
     return {
       relevant: false,
       reason: `Excluded: evidence identifies ${candidate.canonicalName} as an implementation partner, marketplace, distributor, media/events company, outsourced service provider, or advisory firm rather than a commercial product vendor in this market.`,

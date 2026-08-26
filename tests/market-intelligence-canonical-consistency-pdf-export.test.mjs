@@ -328,6 +328,6 @@ test("DRIFT CHECK: market-intelligence-graph.ts and the /api/market-analysis rou
   assert.match(graphSource, /function projectMarketIntelligenceGraphToReport/);
   assert.match(
     routeSource,
-    /excludedFields:\s*\[\s*"strategicRecommendations",\s*"tamSamSom",\s*"executiveSummary",\s*"competitiveLandscape",\s*"majorPlayers",?\s*\]/
+    /excludedFields:\s*\[\s*"strategicRecommendations",\s*"tamSamSom",\s*"executiveSummary",\s*"competitiveLandscape",\s*"majorPlayers",\s*"cagr",?\s*\]/
   );
 });

@@ -55,9 +55,58 @@ function marketText(
   return english;
 }
 
+// P0 FIX -- confirmed live (executive decision integrity repair): whether
+// the two decision-critical evidence pillars this report can actually
+// SHOW to a reader are resolved -- sourced from the same canonical,
+// evidence-first graph fields P0 FIX #1 (TAM/SAM/SOM) and P0 FIX #3
+// (Competitive Landscape/Major Players) already established as
+// authoritative: market-intelligence-graph.ts's graph.planningEstimate/
+// graph.verifiedMarketSize for sizing, graph.vendorIntelligence.vendors/
+// adjacentPlayers for competitive evidence. Deliberately a plain boolean
+// pair, not the full MarketIntelligenceGraph type, so this module (which
+// intentionally has no dependency on the graph/evidence-extraction layer,
+// per this file's own top-of-file comment) stays decoupled -- the caller
+// (route.ts, which already has the graph) computes these two booleans.
+export type DecisionCriticalEvidenceState = {
+  marketSizingResolved: boolean;
+  competitiveEvidenceResolved: boolean;
+};
+
+function hasDecisionCriticalEvidenceGap(state: DecisionCriticalEvidenceState): boolean {
+  return !state.marketSizingResolved || !state.competitiveEvidenceResolved;
+}
+
 // Only the market-native evidence dimensions -- never founderReadiness or
 // executionReadiness, which score a founder's pitch, not a market.
-export function assessMarketEntryConfidence(coverage: MarketResearchCoverage) {
+//
+// P0 FIX -- confirmed live (root-cause repair): the weighted blend below
+// (marketConfidence/competitiveEvidence/financialEvidence/productEvidence,
+// weights unchanged) is a COMPENSATORY average -- strong evidence in three
+// dimensions can offset a fourth dimension that has effectively no real
+// evidence at all, since evaluateMarketResearchCoverage's own formulas give
+// financialEvidence/productEvidence a hard floor (22+) even when zero
+// qualifying evidence exists for that dimension. A real production report
+// showed "Decision: ENTER, Confidence: 67%" while TAM/SAM/SOM, CAGR, and
+// Major Players all independently read "Validation Needed" -- proven here:
+// `coverage` (this function's only input) is a generic, evidence-COUNT/
+// diversity/freshness signal computed independently of, and materially
+// weaker than, the STRICT graph-level derivation that decides what the
+// report actually displays for market sizing and competitors (P0 FIX #1
+// and #3's own canonical fields). A blended score crossing 65/40 never by
+// itself proves those decision-critical dimensions are resolved. The fix
+// is NOT to reweight or clamp the blend (that would just move the same
+// compensatory-averaging bug to a different threshold) -- it is to gate
+// the DIRECTIONAL decision itself: a strong ENTER or AVOID is only ever
+// returned when the two decision-critical evidence pillars are resolved;
+// otherwise this downgrades to MONITOR, the system's own existing neutral/
+// conditional decision state (never a new vocabulary token). confidence
+// itself is left untouched -- it remains the same traceable, transparent
+// number every caller already renders and reasons about; only the
+// DIRECTIONAL claim built on top of it is gated.
+export function assessMarketEntryConfidence(
+  coverage: MarketResearchCoverage,
+  decisionCriticalEvidence?: DecisionCriticalEvidenceState
+) {
   const { marketConfidence, competitiveEvidence, financialEvidence, productEvidence } =
     coverage.dimensions;
   const confidence = Math.round(
@@ -66,10 +115,18 @@ export function assessMarketEntryConfidence(coverage: MarketResearchCoverage) {
       financialEvidence * 0.2 +
       productEvidence * 0.15
   );
-  const decision: MarketEntryDecision =
+  const blendedDecision: MarketEntryDecision =
     confidence >= 65 ? "ENTER" : confidence >= 40 ? "MONITOR" : "AVOID";
+  const evidenceGapBlocksStrongDecision =
+    blendedDecision !== "MONITOR" &&
+    Boolean(decisionCriticalEvidence) &&
+    hasDecisionCriticalEvidenceGap(decisionCriticalEvidence as DecisionCriticalEvidenceState);
 
-  return { confidence, decision };
+  return {
+    confidence,
+    decision: evidenceGapBlocksStrongDecision ? "MONITOR" : blendedDecision,
+    evidenceGapBlocksStrongDecision,
+  } as { confidence: number; decision: MarketEntryDecision; evidenceGapBlocksStrongDecision: boolean };
 }
 
 // Injected into the generation prompt BEFORE the model writes a single
@@ -841,14 +898,51 @@ function buildConfidenceExplanation(
 // Named, concrete data gaps that could change the decision itself -- never
 // a generic "more research is needed" caveat. Ranked weakest dimension
 // first so the single most decision-relevant gap leads.
+//
+// P0 FIX -- confirmed live (executive decision integrity repair):
+// decisionCriticalEvidence (when provided) names the SAME graph-level
+// signal that gated the decision in assessMarketEntryConfidence -- a
+// stricter, more authoritative check than coverage.verifiedMarketSizeAvailable/
+// dimensions.competitiveEvidence below (see that function's own comment).
+// Surfaced here with the highest priority (most negative weight, so it
+// always sorts first) whenever it is the reason a strong decision was
+// withheld, so "why was this gated" is never left implicit. Falls through
+// to the pre-existing coverage-based checks when the graph-level signal
+// itself reports the pillar as resolved (a finer-grained, still-useful
+// weakness can still be named) or when no decisionCriticalEvidence was
+// supplied at all (every pre-existing caller/test).
 function identifyMarketInformationGaps(
   coverage: MarketResearchCoverage,
   language: ResponseLanguage,
-  decisionCode: ExecutiveDecisionCode
+  decisionCode: ExecutiveDecisionCode,
+  decisionCriticalEvidence?: DecisionCriticalEvidenceState
 ): string[] {
   const gaps: Array<{ weight: number; text: string }> = [];
 
-  if (!coverage.verifiedMarketSizeAvailable) {
+  // P0 FIX -- confirmed live (source/evidence integrity repair): the
+  // English gap text below deliberately says "confirmed", never "verified"
+  // -- page.tsx's Decision Signal/Decision Confidence KPI cards
+  // (getDashboardMetricEvidence -> inferEvidenceLevel) scan this brief's
+  // entire rendered text for the bare word "verified" as their sole
+  // positive-evidence signal, so a gap explanation that itself contains
+  // "verified" (even used here to say evidence could NOT be verified) was
+  // read as proof the gated decision was confirmed -- producing "Data
+  // Confirmed" on exactly the card admitting a decision-critical pillar is
+  // unresolved. Meaning is unchanged; only the literal trigger word is
+  // avoided.
+  if (decisionCriticalEvidence && !decisionCriticalEvidence.marketSizingResolved) {
+    gaps.push({
+      weight: -2,
+      text: marketText(
+        language,
+        "A defensible market-size figure (TAM/SAM/SOM) could not be established from independently confirmed evidence -- this is decision-critical and keeps this recommendation at a conditional stance regardless of other positive signals elsewhere in this report.",
+        "Bağımsız olarak doğrulanmış kanıtlardan savunulabilir bir pazar büyüklüğü rakamı (TAM/SAM/SOM) oluşturulamadı; bu karar açısından kritik bir eksikliktir ve raporun başka yerlerindeki olumlu sinyallerden bağımsız olarak bu tavsiyeyi koşullu bir duruşta tutar.",
+        "Es konnte keine belastbare Marktgrößenangabe (TAM/SAM/SOM) aus unabhängig verifizierten Nachweisen ermittelt werden -- dies ist entscheidungskritisch und hält diese Empfehlung unabhängig von anderen positiven Signalen im übrigen Bericht auf einer bedingten Haltung.",
+        "Aucun chiffre de taille de marché défendable (TAM/SAM/SOM) n'a pu être établi à partir de preuves vérifiées de manière indépendante -- ceci est décisif et maintient cette recommandation à une position conditionnelle, quels que soient les autres signaux positifs ailleurs dans ce rapport.",
+        "No se pudo establecer una cifra de tamaño de mercado defendible (TAM/SAM/SOM) a partir de evidencia verificada de forma independiente; esto es decisivo y mantiene esta recomendación en una postura condicional, sin importar otras señales positivas en el resto del informe."
+      ),
+    });
+  } else if (!coverage.verifiedMarketSizeAvailable) {
     gaps.push({
       weight: 0,
       text: marketText(
@@ -862,7 +956,19 @@ function identifyMarketInformationGaps(
     });
   }
 
-  if (coverage.dimensions.competitiveEvidence < 50) {
+  if (decisionCriticalEvidence && !decisionCriticalEvidence.competitiveEvidenceResolved) {
+    gaps.push({
+      weight: -1,
+      text: marketText(
+        language,
+        "No named competitor or adjacent-market player could be independently validated -- competitive positioning is decision-critical and keeps this recommendation at a conditional stance regardless of other positive signals elsewhere in this report.",
+        "Bağımsız olarak doğrulanabilen isimli bir rakip veya yakın pazar oyuncusu bulunamadı; rekabetçi konumlandırma karar açısından kritiktir ve raporun başka yerlerindeki olumlu sinyallerden bağımsız olarak bu tavsiyeyi koşullu bir duruşta tutar.",
+        "Es konnte kein namentlich genannter Wettbewerber oder angrenzender Marktteilnehmer unabhängig validiert werden -- die Wettbewerbspositionierung ist entscheidungskritisch und hält diese Empfehlung unabhängig von anderen positiven Signalen im übrigen Bericht auf einer bedingten Haltung.",
+        "Aucun concurrent nommé ni acteur de marché adjacent n'a pu être validé de manière indépendante -- le positionnement concurrentiel est décisif et maintient cette recommandation à une position conditionnelle, quels que soient les autres signaux positifs ailleurs dans ce rapport.",
+        "No se pudo validar de forma independiente ningún competidor nombrado ni actor de mercado adyacente; el posicionamiento competitivo es decisivo y mantiene esta recomendación en una postura condicional, sin importar otras señales positivas en el resto del informe."
+      ),
+    });
+  } else if (coverage.dimensions.competitiveEvidence < 50) {
     gaps.push({
       weight: coverage.dimensions.competitiveEvidence,
       text: marketText(
@@ -949,9 +1055,13 @@ function identifyMarketInformationGaps(
 export function buildMarketExecutiveDecisionBrief(
   sections: MarketSections,
   language: ResponseLanguage,
-  coverage: MarketResearchCoverage
+  coverage: MarketResearchCoverage,
+  decisionCriticalEvidence?: DecisionCriticalEvidenceState
 ): ExecutiveDecisionBrief {
-  const { confidence, decision } = assessMarketEntryConfidence(coverage);
+  const { confidence, decision, evidenceGapBlocksStrongDecision } = assessMarketEntryConfidence(
+    coverage,
+    decisionCriticalEvidence
+  );
   const code: ExecutiveDecisionCode =
     decision === "ENTER" ? "GO" : decision === "MONITOR" ? "CONDITIONAL_GO" : "NO_GO";
 
@@ -979,7 +1089,12 @@ export function buildMarketExecutiveDecisionBrief(
     why: buildWhySynthesis(code, primaryOpportunity, primaryRisk, language),
     topReasons: topReasons.length ? topReasons : [topMarketDriver(sections, language)],
     topRisks,
-    missingEvidence: identifyMarketInformationGaps(coverage, language, code),
+    missingEvidence: identifyMarketInformationGaps(
+      coverage,
+      language,
+      code,
+      evidenceGapBlocksStrongDecision ? decisionCriticalEvidence : undefined
+    ),
     whatWouldChangeThisDecision: buildWhatWouldChangeThisDecision(code, primaryRisk, language),
     immediateNextAction: buildImmediateNextAction(code, language),
   };

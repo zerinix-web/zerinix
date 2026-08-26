@@ -280,7 +280,17 @@ test("routing (classifyReportDomain, applyPromptIntentModeOverride) and the deci
 // tests/market-intelligence-semantic-field-mapping-fix.test.mjs for that
 // fix's own dedicated coverage.
 test("validation/uncertainty labeling (Estimated tags, evidence badges) is untouched -- the Market Size/CAGR cards classify evidence via the shared canonical evidence classifier, which still reads hedging/estimate language rather than suppressing it", () => {
-  assert.match(pageSource, /const evidence = getDashboardMetricEvidence\(isCagr \? "CAGR" : "Market Size", value, content\);/);
+  // P0 FIX #5 (source/evidence integrity repair) scoped the `content`
+  // argument to extractEvidenceLineForValue(content, value) -- the single
+  // line that actually produced the displayed headline, not the raw
+  // multi-line field -- so a [Verified] line elsewhere in the same field
+  // can no longer confirm a DIFFERENT, [Estimated] line's own figure. See
+  // tests/market-intelligence-source-evidence-integrity.test.mjs for that
+  // fix's own dedicated coverage.
+  assert.match(
+    pageSource,
+    /const evidence = getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
+  );
   assert.match(
     plannerSource,
     /const evidence = inferEvidenceLevel\(\{\s*\n\s*label: isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*context: section\.content,\s*\n\s*\}\);/
