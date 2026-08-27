@@ -261,9 +261,22 @@ test("route.ts: executiveSummary is now excluded from dedupeReportParagraphsAcro
 });
 
 test("ReportPdfButton.tsx and Planner.tsx: the executive decision card's 'no gap' fallback no longer affirmatively claims 'No decision-changing data gap was flagged' when its own regex re-extraction comes back empty -- an empty extraction means 'not found in this text', not 'confirmed no gap', and asserting the latter is exactly the fabricated certainty this report must never present", () => {
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+  // consistency hardening): "Not explicitly stated in the generated
+  // executive summary" itself turned out to read as internal parser/
+  // generation-state language in an investor-grade report -- replaced
+  // with an honest, evidence-aware validation statement that preserves
+  // this test's own original protective guarantee (never claims a
+  // CONFIRMED absence of a gap) without describing the report's own
+  // generation/parsing mechanics.
   for (const source of [pdfButtonSource, plannerSource]) {
     assert.doesNotMatch(source, /No decision-changing data gap was flagged/);
-    assert.match(source, /Not explicitly stated in the generated executive summary/);
+    assert.doesNotMatch(
+      source,
+      /Not explicitly stated in the generated executive summary/,
+      "internal generation/parser-state language must not appear in report output"
+    );
+    assert.match(source, /Additional validation required before a final decision\./);
   }
 });
 

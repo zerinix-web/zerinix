@@ -1833,18 +1833,30 @@ function describeCompetitiveCoverage(
   // the distinction explicitly instead of leaving the reader to notice
   // the contradiction between this section's tone and Major Players'
   // actual content.
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+  // consistency hardening): this branch already avoided the flat "no
+  // competitor data could be validated" claim, but its wording framed
+  // the gap as competitor IDENTITY being unvalidated -- misleading when
+  // the incumbents themselves are evidence-supported (named in Major
+  // Players below) and the actual gap is that there isn't enough
+  // STRUCTURED positioning/comparison data (category, strengths,
+  // weaknesses, market-share, pricing) to build a defensible
+  // competitor-vs-competitor landscape or market map. Reworded to state
+  // that distinction explicitly -- never manufactures the missing
+  // positioning data itself, which stays absent from the table exactly
+  // as before.
   if (vendorCount === 0 && adjacentPlayerCount > 0) {
     return {
       English:
-        "Direct, head-to-head competitors could not be independently validated for this market with current evidence. Adjacent/platform players with independent evidence of relevance to this market were identified -- see Major Players below -- but they are not established here as validated direct competitors.",
+        "Major incumbents in this market are evidence-supported -- see Major Players below -- but insufficient structured positioning data (category, strengths, weaknesses, market share, or pricing) is available to build a defensible direct-competitor landscape or market map here.",
       Turkish:
-        "Bu pazar için mevcut kanıtlarla doğrudan, birebir rakipler bağımsız şekilde doğrulanamadı. Bu pazarla ilgisine dair bağımsız kanıt bulunan ilgili/platform oyuncuları tespit edildi -- aşağıdaki Önemli Oyuncular bölümüne bakın -- ancak bunlar burada doğrulanmış doğrudan rakip olarak belirlenmemiştir.",
+        "Bu pazardaki başlıca yerleşik oyuncular kanıt destekli -- aşağıdaki Önemli Oyuncular bölümüne bakın -- ancak burada savunulabilir bir doğrudan rakip haritası veya pazar haritası oluşturmak için yeterli yapılandırılmış konumlandırma verisi (kategori, güçlü/zayıf yönler, pazar payı veya fiyatlandırma) bulunmuyor.",
       German:
-        "Direkte, unmittelbare Wettbewerber konnten für diesen Markt mit den aktuellen Nachweisen nicht unabhängig bestätigt werden. Angrenzende Plattformakteure mit unabhängigen Nachweisen zur Relevanz für diesen Markt wurden identifiziert -- siehe Wichtige Akteure unten -- werden hier jedoch nicht als validierte direkte Wettbewerber ausgewiesen.",
+        "Die wichtigsten etablierten Akteure in diesem Markt sind evidenzgestützt -- siehe Wichtige Akteure unten -- es liegen jedoch nicht genügend strukturierte Positionierungsdaten (Kategorie, Stärken, Schwächen, Marktanteil oder Preisgestaltung) vor, um hier eine belastbare direkte Wettbewerbslandschaft oder Marktkarte zu erstellen.",
       French:
-        "Des concurrents directs n'ont pas pu être validés de manière indépendante pour ce marché avec les preuves actuelles. Des acteurs adjacents/de plateforme disposant de preuves indépendantes de pertinence pour ce marché ont été identifiés -- voir Acteurs majeurs ci-dessous -- mais ils ne sont pas établis ici comme des concurrents directs validés.",
+        "Les principaux acteurs historiques de ce marché sont étayés par des preuves -- voir Acteurs majeurs ci-dessous -- mais les données de positionnement structurées (catégorie, forces, faiblesses, part de marché ou tarification) sont insuffisantes pour établir ici un paysage concurrentiel direct ou une carte de marché défendable.",
       Spanish:
-        "No se pudieron validar de forma independiente competidores directos para este mercado con la evidencia actual. Se identificaron actores adyacentes/de plataforma con evidencia independiente de relevancia para este mercado -- consulte Actores principales a continuación -- pero no se establecen aquí como competidores directos validados.",
+        "Los principales actores establecidos en este mercado cuentan con respaldo de evidencia -- consulte Actores principales a continuación -- pero no hay suficientes datos de posicionamiento estructurados (categoría, fortalezas, debilidades, cuota de mercado o precios) disponibles para construir aquí un panorama competitivo directo o un mapa de mercado defendible.",
     }[language];
   }
 

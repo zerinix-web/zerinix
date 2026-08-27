@@ -4537,17 +4537,58 @@ export function buildStandardReportPdf({
               extractKeywordInsight(fullReportContent, ["risk", "threat"]) ||
               (isTurkishPdf ? "Ana risk, risk analizi bölümünde detaylandırılmıştır" : "Primary risk is detailed in the risk analysis"),
           ],
+          // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+          // production consistency hardening): this fallback fires
+          // whenever the deterministic banner's own "What Evidence Is
+          // Missing"/localized-equivalent labeled section wasn't
+          // embedded (the same coverage-dependent gap already fixed for
+          // Decision/Confidence/Next Action/Main Risk elsewhere) -- the
+          // old text described PARSER/GENERATION state ("not explicitly
+          // stated in the generated executive summary"), which reads as
+          // internal system language in an investor-grade report, not a
+          // finding about the market. Replaced with the same honest,
+          // evidence-aware validation wording this codebase already uses
+          // elsewhere for an equivalent "no structured gap description
+          // available" state (see marketIntelligenceUnverifiedSourcesReplacements,
+          // report-presentation-sanitizer.ts) -- never invents a
+          // specific missing-evidence claim the report didn't actually
+          // make.
           [
             isMarketIntelligenceReport ? "Information Required Before Decision" : "Missing Evidence",
             missingEvidence ||
               (isTurkishPdf
-                ? "Oluşturulan yönetici özetinde açıkça belirtilmedi"
-                : "Not explicitly stated in the generated executive summary"),
+                ? "Nihai karardan önce ek doğrulama gereklidir."
+                : "Additional validation required before a final decision."),
           ],
+          // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+          // production consistency hardening): this is a SEPARATE
+          // occurrence of the same malformed-fragment defect already
+          // fixed for the PDF cover's own Next Action field --
+          // `extractKeywordInsight(fullReportContent, [...])` scans the
+          // ENTIRE report for a bare keyword match with no section
+          // boundary, which produced the reported "combined AUM$150M) to
+          // validate attainable..." fragment lifted mid-sentence from an
+          // unrelated section. For Market Intelligence, falls back to
+          // the model's own scoped "(5) Recommendation" bullets (still
+          // confined to this card's own `content`, i.e. the executive
+          // summary section only, never the full report) before ever
+          // reaching that unscoped scan; Business Plan/Acquisition are
+          // unchanged.
           [
             "Next Action",
             nextAction ||
               whatWouldChange ||
+              (isMarketIntelligenceReport
+                ? takeFirstListItemOrSentence(
+                    extractMetricValueFromAliases(content, [
+                      "Recommendation",
+                      "Öneri",
+                      "Empfehlung",
+                      "Recommandation",
+                      "Recomendación",
+                    ])
+                  )
+                : "") ||
               extractKeywordInsight(fullReportContent, ["next action", "critical action", "validate"]) ||
               (isTurkishPdf ? "Acil sonraki adım için yönetici kararı bölümüne bakın" : "See the Immediate Next Action in the executive decision"),
           ],

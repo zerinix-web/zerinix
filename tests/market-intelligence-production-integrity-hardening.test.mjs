@@ -392,11 +392,8 @@ test("B) no direct competitors, but validated adjacent/platform players (Autodes
   const projection = projectMarketIntelligenceGraphToReport(graph, "English");
 
   assert.doesNotMatch(projection.competitiveLandscape, /No competitor data could be validated/i);
-  assert.match(
-    projection.competitiveLandscape,
-    /Direct, head-to-head competitors could not be independently validated/i
-  );
-  assert.match(projection.competitiveLandscape, /Adjacent\/platform players.*identified/i);
+  assert.match(projection.competitiveLandscape, /evidence-supported/i);
+  assert.match(projection.competitiveLandscape, /structured positioning data/i);
 
   // Major Players uses the SAME classification -- adjacent, never promoted
   // to a validated direct competitor.

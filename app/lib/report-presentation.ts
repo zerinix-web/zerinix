@@ -257,9 +257,31 @@ function restoreSentenceAbbreviations(value: string) {
   return value.replace(/\u0000/g, ".");
 }
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+// consistency hardening): the `(?:\n|\r)+` alternative below looks like
+// it splits on real line breaks, but it is dead code -- stripMarkdown
+// (called first, on the WHOLE string) already collapses every newline
+// into a single space via its own `\s+` -> " " pass, so by the time the
+// split regex runs, no `\n`/`\r` characters survive anywhere in the
+// string for that alternative to ever match. The practical effect:
+// a bulleted/numbered list with no terminal punctuation ending EACH
+// item before the list's own last period ("- CBRE (Market Leader):
+// Global scale...\n- JLL (Established Challenger): Broad advisory...")
+// gets treated as ONE continuous run-on "sentence" spanning every list
+// item, since the only real sentence-boundary left to split on is
+// whichever period happens to occur latest in the whole flattened
+// string. getSectionTakeaway then extracts that entire multi-item blob
+// as "the takeaway" -- which duplicates the ENTIRE section's content in
+// the highlighted box, with the (unchanged) body repeating it all again
+// below. Splitting on real newlines FIRST -- before stripMarkdown ever
+// runs -- then sentence-splitting WITHIN each resulting line
+// independently, guarantees a bulleted/numbered item can never be fused
+// with a neighboring line, matching how a reader actually perceives list
+// structure.
 function splitSentences(content: string) {
-  return protectSentenceAbbreviations(stripMarkdown(content))
-    .split(/(?<=[.!?])\s+|(?:\n|\r)+/)
+  return content
+    .split(/\r?\n/)
+    .flatMap((line) => protectSentenceAbbreviations(stripMarkdown(line)).split(/(?<=[.!?])\s+/))
     .map((sentence) => restoreSentenceAbbreviations(sentence).trim())
     .filter((sentence) => sentence.length > 24);
 }
@@ -1172,6 +1194,30 @@ export function stripLeadingTakeawaySentence(content: string, takeaway: string):
     boundaries.push(boundaryMatch.index + boundaryMatch[0].length);
   }
 
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+  // consistency hardening): when the window was extended to a second
+  // line (the "bare label + continuation" case), the two lines are
+  // joined into one string before boundary-scanning -- but if the FIRST
+  // line has no punctuation of its own ("**Answer:**"), there is no
+  // boundary separating it from the second line's text, so the whole
+  // joined blob was tested as ONE candidate. getSectionTakeaway, by
+  // contrast, now sentence-splits per LINE first (see splitSentences'
+  // own fix), so it never fuses these two lines together at all -- it
+  // simply drops the short first line as too-short-to-count and returns
+  // the second line's own sentence as the takeaway, with no "Answer:"
+  // prefix. Without a matching boundary at the line join, this
+  // function's candidate ("Answer: Vendors are bundling...") could
+  // never equal or start-with the takeaway's own text ("Vendors are
+  // bundling..."), so it silently returned the content unchanged.
+  // Recording the join position as its own boundary lets the scan loop
+  // below test the second line's text on its own -- exactly mirroring
+  // how splitSentences treats it as a separate, independent candidate.
+  const joinBoundary = bodyAfterMarker.length + 1;
+  if (secondConsumedIndex !== -1) {
+    boundaries.push(joinBoundary);
+    boundaries.sort((a, b) => a - b);
+  }
+
   let matchStart = -1;
   let matchEnd = -1;
   let previousBoundary = 0;
@@ -1185,10 +1231,20 @@ export function stripLeadingTakeawaySentence(content: string, takeaway: string):
     previousBoundary = boundary;
   }
 
-  // A bulleted/numbered item with no internal sentence boundary at all
-  // ("1) Integration-first add-on products...", the original reported
-  // shape) is still tested as one indivisible whole, exactly as before.
-  if (matchStart === -1 && marker && boundaries.length === 0) {
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+  // consistency hardening): this previously required `marker` (a
+  // bulleted/numbered line) to try the whole window as one indivisible
+  // candidate -- but a genuinely PLAIN heading/title line with no
+  // internal punctuation at all ("Evidence-supported major players", a
+  // deterministic section title with no bullet marker) is just as
+  // eligible to BE the entire takeaway on its own (splitSentences now
+  // treats every line independently, so a title line long enough to
+  // clear the length filter becomes its own standalone "sentence").
+  // Dropping the `marker` requirement lets this whole-window fallback
+  // apply to both shapes uniformly; boundaries.length === 0 alone
+  // already guarantees this only fires when nothing else could be
+  // found, exactly as conservative as before.
+  if (matchStart === -1 && boundaries.length === 0) {
     const wholeCandidate = restoreSentenceAbbreviations(protectedWindow).trim();
     if (isDuplicateOfTakeaway(wholeCandidate)) {
       matchStart = 0;
@@ -1200,7 +1256,18 @@ export function stripLeadingTakeawaySentence(content: string, takeaway: string):
     return raw;
   }
 
-  const before = restoreSentenceAbbreviations(protectedWindow.slice(0, matchStart)).trim();
+  // When the match starts EXACTLY at the label/continuation join point,
+  // "before" is precisely the original bare label line ("**Answer:**")
+  // and nothing more -- a label that introduced content now entirely
+  // removed serves no purpose on its own and would otherwise be left as
+  // a dangling, orphaned heading with nothing following it. Discarded
+  // only in that exact case; if any of the SECOND line's own real text
+  // precedes the match (matchStart > joinBoundary), "before" legitimately
+  // contains real, non-duplicate content and is fully preserved.
+  const discardBeforeAsBareLabel = secondConsumedIndex !== -1 && matchStart === joinBoundary;
+  const before = discardBeforeAsBareLabel
+    ? ""
+    : restoreSentenceAbbreviations(protectedWindow.slice(0, matchStart)).trim();
   const after = restoreSentenceAbbreviations(protectedWindow.slice(matchEnd)).trim();
   const remainder = [before, after].filter(Boolean).join(" ");
 

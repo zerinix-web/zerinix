@@ -7920,17 +7920,42 @@ const ReportPanel = memo(function ReportPanel({
               extractKeywordInsight(fullReportContent, ["risk", "threat"]) ||
               (isTurkishPdf ? "Ana risk, risk analizi bölümünde detaylandırılmıştır" : "Primary risk is detailed in the risk analysis"),
           ],
+          // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+          // production consistency hardening): mirrors the identical fix
+          // in ReportPdfButton.tsx -- the old fallback described parser/
+          // generation state ("not explicitly stated in the generated
+          // executive summary"), which reads as internal system language
+          // rather than a finding about the market. Same honest,
+          // evidence-aware wording used there for the equivalent state.
           [
             isMarketIntelligence ? "Information Required Before Decision" : "Missing Evidence",
             missingEvidence ||
               (isTurkishPdf
-                ? "Oluşturulan yönetici özetinde açıkça belirtilmedi"
-                : "Not explicitly stated in the generated executive summary"),
+                ? "Nihai karardan önce ek doğrulama gereklidir."
+                : "Additional validation required before a final decision."),
           ],
+          // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+          // production consistency hardening): mirrors the identical fix
+          // in ReportPdfButton.tsx -- extractKeywordInsight's unscoped
+          // full-report scan produced a malformed mid-sentence fragment.
+          // Falls back to the model's own scoped "(5) Recommendation"
+          // bullets (confined to this card's own `content`, never the
+          // full report) first.
           [
             "Next Action",
             nextAction ||
               whatWouldChange ||
+              (isMarketIntelligence
+                ? takeFirstListItem(
+                    extractMetricValueFromAliases(content, [
+                      "Recommendation",
+                      "Öneri",
+                      "Empfehlung",
+                      "Recommandation",
+                      "Recomendación",
+                    ])
+                  )
+                : "") ||
               extractKeywordInsight(fullReportContent, ["next action", "critical action", "validate"]) ||
               (isTurkishPdf ? "Acil sonraki adım için yönetici kararı bölümüne bakın" : "See the Immediate Next Action in the executive decision"),
           ],

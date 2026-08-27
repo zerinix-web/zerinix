@@ -170,13 +170,19 @@ test("A) bare rivalry framing naming a single known adjacent player without list
   assert.match(sanitized, /A greenfield opportunity exists in the SMB segment/);
 });
 
-test("A) Competitive Landscape explicitly states direct competition is unestablished while adjacent players are evidenced -- never the flat 'no competitor data' phrasing -- and Major Players uses the identical classification", () => {
+test("A) Competitive Landscape explicitly states evidence-supported incumbents exist but structured positioning data is insufficient for a defensible landscape/map -- never the flat 'no competitor data' phrasing, and never framing the gap as competitor IDENTITY being unvalidated -- and Major Players uses the identical classification", () => {
   const graph = buildAdjacentOnlyGraph();
   const projection = projectMarketIntelligenceGraphToReport(graph, "English");
 
-  assert.match(projection.competitiveLandscape, /Direct, head-to-head competitors could not be independently validated/i);
-  assert.match(projection.competitiveLandscape, /Adjacent\/platform players/i);
+  assert.match(projection.competitiveLandscape, /evidence-supported/i);
+  assert.match(projection.competitiveLandscape, /structured positioning data/i);
+  assert.match(projection.competitiveLandscape, /Major Players below/i);
   assert.doesNotMatch(projection.competitiveLandscape, /^Independent, publicly available information.*was limited during research/i);
+  assert.doesNotMatch(
+    projection.competitiveLandscape,
+    /no competitor data (?:could be validated|exists)/i,
+    "must never claim no competitor data exists when validated major-player evidence exists"
+  );
 
   assert.match(projection.majorPlayers, /Procore/);
   assert.match(projection.majorPlayers, /Not Independently Validated as Direct Competitors/i);

@@ -215,6 +215,26 @@ const internalVocabularyPattern =
 const bareUrlPattern = /https?:\/\/\S+/gi;
 const confidenceScorePattern = /\bconfidence\s*\d{1,3}\/100\b/gi;
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+// consistency hardening): every section prompt in
+// app/lib/report-engine/prompts/market.ts ends with its own word-count
+// budget as the LAST sentence of the model's instructions ("... Max 200
+// words.", "... Max 180 words.", etc.) -- a known LLM failure mode is
+// echoing a trailing generation constraint verbatim into the answer
+// itself when it isn't clearly separated from "write this" framing.
+// Confirmed live: a PDF export displayed literal "(Max 180 words)"/
+// "(Max 160 words)" fragments as if they were report content. Anchored
+// to end-of-line (the `m` flag's `$`) rather than matching anywhere in
+// a line -- the real leaked artifact always appears as the LAST thing
+// the model wrote for that section, exactly mirroring how it sits at
+// the end of its own prompt instruction -- so this can never strip a
+// legitimate business sentence that merely mentions a word count or the
+// word "words" in the middle of otherwise-real content (e.g. "the
+// report contains 200 words of executive commentary before the
+// appendix" is left completely untouched, since more text follows it on
+// the same line).
+const promptWordBudgetLeakPattern = /\s*\(?\b(?:max|maximum)\.?\s+\d{1,4}\s+words\)?\.?\s*$/gim;
+
 function collapseWhitespace(value: string): string {
   return value
     .split("\n")
@@ -282,6 +302,7 @@ export function stripReportPresentationArtifacts(content: string): string {
   sanitized = sanitized.replace(internalVocabularyPattern, "");
   sanitized = sanitized.replace(confidenceScorePattern, "");
   sanitized = sanitized.replace(bareUrlPattern, "");
+  sanitized = sanitized.replace(promptWordBudgetLeakPattern, "");
   sanitized = naturalizeSnakeCaseIdentifiers(sanitized);
 
   return collapseWhitespace(sanitized) || emptyAfterSanitizationFallback;

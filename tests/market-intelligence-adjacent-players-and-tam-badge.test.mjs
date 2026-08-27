@@ -221,9 +221,12 @@ test("A) no validated direct competitors + supported adjacent industry players: 
   // exist, explicitly says so rather than the flat "no competitor data"
   // phrasing (further hardened in a later pass: describeCompetitiveCoverage
   // now distinguishes "nothing at all" from "no direct, but adjacent
-  // players evidenced").
-  assert.match(projection.competitiveLandscape, /direct.*competitors could not be independently validated/i);
-  assert.match(projection.competitiveLandscape, /adjacent\/platform players/i);
+  // players evidenced" -- and later still, reworded to frame the actual
+  // gap as missing STRUCTURED POSITIONING data rather than unvalidated
+  // competitor identity, since the incumbents themselves ARE
+  // evidence-supported).
+  assert.match(projection.competitiveLandscape, /evidence-supported/i);
+  assert.match(projection.competitiveLandscape, /structured positioning data/i);
   assert.doesNotMatch(projection.competitiveLandscape, /Procore/);
   assert.doesNotMatch(projection.competitiveLandscape, /Autodesk/);
 
