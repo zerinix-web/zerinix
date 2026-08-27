@@ -143,12 +143,33 @@ const reviewDirectoryDomains = [
   "alternativeto.net",
 ];
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+// quality failure): "industry_structure" (market-research-planner.ts's
+// own purpose text: "market structure, trends, regulation, switching
+// costs, and buyer behavior" -- feeding industry_trends/porters_five_
+// forces/barriers) and "news_evidence" (feeding market_drivers/threats/
+// opportunities) are the exact research fields a real production report
+// used to name incumbents (CBRE, JLL) as part of "incumbent/platform
+// concentration" and "Top Risk" narrative -- narrative text that is
+// generated from the FULL evidence corpus with no field gate at all
+// (see the free-text threats/opportunities/portersFiveForces generation
+// upstream). Because those two fields were missing from this allowlist,
+// isVendorDiscoveryRelevant rejected that same evidence before mention
+// extraction ever ran on it, so those companies could be woven into risk
+// prose yet remain completely invisible to vendor/adjacent-player
+// discovery -- an internal inconsistency, not a case of genuinely
+// absent evidence. Adding these two fields only widens WHICH evidence is
+// eligible to be scanned for a name; every downstream validation gate
+// (isQualifyingVendorEvidence, validateVendorCandidate,
+// assessMarketRelevance) is completely unchanged.
 const vendorRelevantFields = new Set([
   "vendor_discovery",
   "competitors",
   "product_evidence",
   "pricing_models",
   "company_evidence",
+  "industry_structure",
+  "news_evidence",
 ]);
 
 // classifyMarketResearchSourceType (domain-research.ts) is the actual,
@@ -248,7 +269,7 @@ function isNonCompetitorSourceDomain(domain: string) {
 // prose-pattern heuristics below, so without a dedicated fallback, a real
 // competitor's own website is indistinguishable from noise and silently
 // disappears from vendor discovery.
-function isThinDomainOnlyEvidence(item: DomainResearchEvidence, domain: string) {
+export function isThinDomainOnlyEvidence(item: DomainResearchEvidence, domain: string) {
   if (item.supportingData.length > 0) return false;
   const domainPattern = new RegExp(domain.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
   const remainder = [item.claim, item.value, item.sourceTitle]
@@ -423,8 +444,24 @@ const mentionPatterns = [
 // "& " connector (own company name, e.g. "Cushman & Wakefield",
 // "Procter & Gamble") so a single "&"-named company doesn't break the
 // whole enumeration match at that point.
+//
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+// consistency verification): the connector between list items required
+// a comma unconditionally (`\s*,\s*(?:and\s+)?`), so a genuine two-item
+// enumeration with no Oxford comma -- "the leading commercial real
+// estate services firms are CBRE and JLL", the single most natural way
+// to name exactly the two incumbents a real report cited -- never
+// matched at all, since the pattern's repeat group demanded at least
+// one comma-prefixed continuation. Adding a bare "`\s+and\s+`"
+// alternative alongside the existing comma-based connector lets a
+// plain two-item "X and Y" list match too, while every 3+-item,
+// comma-separated list (with or without an Oxford comma) keeps matching
+// exactly as before. The captured group's own required leading
+// capitalized-name shape is unchanged, so this does not loosen what
+// counts as a plausible company name -- only which connector between
+// two already-plausible names is accepted.
 const enumerationMentionPattern =
-  /\b(?:leading|top|major|largest|primary|key|dominant)\s+(?:[a-z][a-z-]{2,20}\s+){0,4}(?:firms?|companies|providers?|players?|vendors?|brands?|competitors?|operators?)\s+(?:are|include[s]?|including|such as)\s+((?:[A-Z][A-Za-z0-9&'-]{1,28}(?:\s+(?:&\s+)?[A-Z][A-Za-z0-9&'-]{1,28}){0,2})(?:\s*,\s*(?:and\s+)?(?:[A-Z][A-Za-z0-9&'-]{1,28}(?:\s+(?:&\s+)?[A-Z][A-Za-z0-9&'-]{1,28}){0,2})){1,6})/g;
+  /\b(?:leading|top|major|largest|primary|key|dominant)\s+(?:[a-z][a-z-]{2,20}\s+){0,4}(?:firms?|companies|providers?|players?|vendors?|brands?|competitors?|operators?)\s+(?:are|include[s]?|including|such as)\s+((?:[A-Z][A-Za-z0-9&'-]{1,28}(?:\s+(?:&\s+)?[A-Z][A-Za-z0-9&'-]{1,28}){0,2})(?:(?:\s*,\s*(?:and\s+)?)|(?:\s+and\s+))(?:[A-Z][A-Za-z0-9&'-]{1,28}(?:\s+(?:&\s+)?[A-Z][A-Za-z0-9&'-]{1,28}){0,2})(?:(?:(?:\s*,\s*(?:and\s+)?)|(?:\s+and\s+))(?:[A-Z][A-Za-z0-9&'-]{1,28}(?:\s+(?:&\s+)?[A-Z][A-Za-z0-9&'-]{1,28}){0,2})){0,5})/g;
 
 function extractEnumeratedMentions(text: string): string[] {
   const names: string[] = [];

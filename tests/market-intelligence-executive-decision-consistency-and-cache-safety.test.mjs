@@ -104,6 +104,18 @@ const plannerHeader = `import { normalizePdfText } from ${JSON.stringify(
   pathToFileURL(join(process.cwd(), "app/lib/pdf-normalization.mjs")).href
 )};\n\n`;
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+// quality failure, UI/PDF canonical-data divergence): ReportPdfButton.tsx's
+// own parseMarketSizeMagnitude is now a thin delegation to the shared,
+// canonical parseMarketSizingMagnitude (report-presentation.ts) rather
+// than an independent copy -- imported by absolute path so the compiled
+// bundle has the real dependency available, the same pattern plannerHeader
+// already uses above. Harmless (unused) for Planner.tsx's own compiled
+// bundle, which still has its own full, independent implementation.
+const canonicalMagnitudeHeader = `import { parseMarketSizingMagnitude } from ${JSON.stringify(
+  pathToFileURL(join(process.cwd(), "app/lib/report-presentation.ts")).href
+)};\n\n`;
+
 // research-cache.ts itself cannot be imported directly (it starts with
 // `import "server-only"`, which only resolves inside the Next.js build) --
 // conversationResearchIdentityMatches is a small, pure, self-contained
@@ -241,7 +253,9 @@ for (const [label, source] of [
   ["ReportPdfButton.tsx", pdfButtonSource],
 ]) {
   test(`${label}: the exact reported bug -- parseMarketSizeMagnitude no longer misreads a spelled-out "thousand" as TRILLION (both start with "t")`, async () => {
-    const { parseMarketSizeMagnitude } = await compileFunctions(source, ["parseMarketSizeMagnitude"]);
+    const { parseMarketSizeMagnitude } = await compileFunctions(source, ["parseMarketSizeMagnitude"], {
+      header: canonicalMagnitudeHeader,
+    });
 
     assert.equal(parseMarketSizeMagnitude("$200 thousand"), 200_000);
     assert.equal(parseMarketSizeMagnitude("$4.2 trillion"), 4.2e12);
@@ -254,7 +268,9 @@ for (const [label, source] of [
   });
 
   test(`${label}: a full TAM/SAM/SOM stack phrased with spelled-out units nests correctly (TAM $4.2 trillion >= SAM $1.8 billion >= SOM $200 thousand) -- would have collapsed to TAM=SAM=SOM=trillions pre-fix, breaking the nesting check`, async () => {
-    const { parseMarketSizeMagnitude } = await compileFunctions(source, ["parseMarketSizeMagnitude"]);
+    const { parseMarketSizeMagnitude } = await compileFunctions(source, ["parseMarketSizeMagnitude"], {
+      header: canonicalMagnitudeHeader,
+    });
 
     const tam = parseMarketSizeMagnitude("$4.2 trillion");
     const sam = parseMarketSizeMagnitude("$1.8 billion");
@@ -269,9 +285,9 @@ test("page.tsx: parseMonetaryMagnitude (the reference implementation these two f
   const { parseMarketSizeMagnitude: plannerParse } = await compileFunctions(plannerSource, [
     "parseMarketSizeMagnitude",
   ]);
-  const { parseMarketSizeMagnitude: pdfParse } = await compileFunctions(pdfButtonSource, [
-    "parseMarketSizeMagnitude",
-  ]);
+  const { parseMarketSizeMagnitude: pdfParse } = await compileFunctions(pdfButtonSource, ["parseMarketSizeMagnitude"], {
+    header: canonicalMagnitudeHeader,
+  });
 
   for (const value of ["$200 thousand", "$1.8 billion", "$4.2 trillion", "$450 million"]) {
     const pageResult = parseMonetaryMagnitude(value);

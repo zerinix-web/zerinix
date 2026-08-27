@@ -22,6 +22,7 @@ import {
   isImplausibleCompetitorName,
   isOfficialVendorEvidence,
   isQualifyingVendorEvidence,
+  isThinDomainOnlyEvidence,
   normalizeVendorKey,
   resolveVendorIdentity,
   validateVendorCandidate,
@@ -606,16 +607,47 @@ export function buildVendorIntelligenceGraph(
         // evidence about a named player is surfaced honestly instead of
         // being silently discarded merely because Competitive Landscape
         // has no validated direct competitors to show.
+        //
+        // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+        // research-quality failure): this tier previously required
+        // `qualifyingItems.length > 0` -- the exact same label+confidence
+        // bar (>=48, "Verified from official/external source") used to
+        // validate a full direct competitor -- even though this tier
+        // exists specifically to honestly hold companies that do NOT
+        // clear that bar. A real production report named CBRE/JLL in
+        // "Top Risk"/incumbent-concentration prose (generated from the
+        // full evidence corpus with no confidence gate at all) while
+        // Major Players said "named competitor information was limited"
+        // -- an internal inconsistency, since the SAME evidence that was
+        // good enough for risk prose failed this tier's needlessly strict
+        // admission bar. This does not touch validateVendorCandidate,
+        // assessMarketRelevance, or isQualifyingVendorEvidence -- the
+        // strict `vendors`/Competitive Landscape bar is completely
+        // unchanged (isValidatedVendor above is still computed purely
+        // from the unmodified qualifyingItems). It only widens what
+        // counts as sufficient for THIS already-lower, already-explicitly-
+        // labeled "not independently validated" tier: real, substantive
+        // evidence (not a bare domain-only citation, not a "Missing
+        // Information" placeholder) is enough to be named honestly here,
+        // even when it falls short of the verified-source/confidence bar.
+        // No pricing, market share, positioning, strength, or weakness is
+        // ever populated for this tier (AdjacentMarketPlayer has no such
+        // fields) -- only the name, evidence count, and an explicit
+        // confidence/validation-gap label.
+        const substantiveNamedItems = allItems.filter(
+          (item) => item.label !== "Unknown" && !isThinDomainOnlyEvidence(item, hostnameOf(item.url))
+        );
+        const adjacentEvidencePool = qualifyingItems.length > 0 ? qualifyingItems : substantiveNamedItems;
         if (
           preliminaryClassification.entityType === "commercial_vendor" &&
           relevance.relevant &&
-          qualifyingItems.length > 0 &&
+          adjacentEvidencePool.length > 0 &&
           !isImplausibleCompetitorName(candidate.canonicalName)
         ) {
-          const evidenceIds = unique(qualifyingItems.map((item) => item.id));
+          const evidenceIds = unique(adjacentEvidencePool.map((item) => item.id));
           const confidence = Math.round(
-            qualifyingItems.reduce((sum, item) => sum + calculateEvidenceConfidence(item), 0) /
-              Math.max(1, qualifyingItems.length)
+            adjacentEvidencePool.reduce((sum, item) => sum + calculateEvidenceConfidence(item), 0) /
+              Math.max(1, adjacentEvidencePool.length)
           );
           adjacentPlayerCandidates.push({
             name: candidate.canonicalName,
@@ -623,7 +655,10 @@ export function buildVendorIntelligenceGraph(
             evidenceCount: evidenceIds.length,
             confidence,
             confidenceLevel: classifyMarketConfidence(confidence),
-            reason: relevance.reason,
+            reason:
+              qualifyingItems.length > 0
+                ? relevance.reason
+                : `${relevance.reason} Evidence is directional: named in research without independently verified sourcing.`,
           });
         }
         return [];

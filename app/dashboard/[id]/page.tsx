@@ -265,6 +265,17 @@ function extractMarketSizeCardValue(content: string, label: string) {
   // bolds the label itself, e.g. "**TAM** (...)"), then tolerates an
   // optional "(...)" label expansion in addition to the existing
   // "[...]" tag, in either order.
+  //
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+  // quality failure, UI/PDF canonical-data divergence): this exact
+  // strategy is now also duplicated, verbatim in behavior, as the shared
+  // extractMarketSizingLayerValue (report-presentation.ts) -- see that
+  // function's own PARITY test for the proof the two stay identical.
+  // Left as page.tsx's own copy (rather than delegated) to avoid
+  // touching this file's extensively drift-tested internals; only
+  // ReportPdfButton.tsx's independently-diverging extractor was the
+  // actual source of the reported inconsistency and now calls the
+  // shared function directly.
   const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = content
     .replace(/\*\*/g, "")

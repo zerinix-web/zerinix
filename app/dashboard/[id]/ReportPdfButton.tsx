@@ -26,9 +26,11 @@ import {
 import {
   buildExecutiveSnapshot,
   compactExecutiveDecisionMemoSections,
+  extractMarketSizingLayerValue,
   getReportQualityBreakdown,
   getSectionTakeaway,
   normalizeFounderReadinessScoreText,
+  parseMarketSizingMagnitude,
   readFounderReadinessMetricValue,
   readFounderReadinessScoreValue,
   resolveMarketSizingCascade,
@@ -1211,9 +1213,32 @@ function compactPdfMetricValue(value: string) {
   return numericMatch?.[0]?.replace(/\s+/g, " ").replace(/([kKmMbB%])\s+([$€₺])/g, "$1$2") || cleanValue.split(/\s{2,}/)[0] || "";
 }
 
-function extractMarketSizeVisualValue(content: string, label: string) {
-  const escapedLabel = escapeRegExp(label);
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+// quality failure, UI/PDF canonical-data divergence): this used to run
+// its own independent line/prose extraction over the raw content before
+// ever looking for a number -- a stricter, self-anchored strategy than
+// the web report's, which grabs the label's full value text first (via
+// the canonical extractMarketSizingLayerValue, shared with page.tsx) and
+// only THEN looks for the number/currency shape within it. A production
+// TAM line's exact phrasing matched the web's extractor but fell outside
+// what this function's old anchored regex accepted, so tamResolved was
+// false in the PDF for a TAM that was correctly resolved on the web --
+// which then cascaded (via the shared, unchanged TAM-first nesting rule)
+// to collapse an independently-valid SAM into the same "Additional
+// market validation is required" message. Delegating raw-value capture
+// to the canonical function -- then applying this function's own
+// existing shape/compacting pattern to produce a clean chart-legend
+// string -- keeps the PDF's display formatting unchanged while
+// guaranteeing the two surfaces can no longer disagree about which
+// layers are actually stated in the report's own text.
+function extractMarketSizeVisualValue(content: string, label: "TAM" | "SAM" | "SOM") {
   const normalized = normalizePdfText(content);
+  const rawValue = extractMarketSizingLayerValue(normalized, label);
+
+  if (!rawValue) {
+    return "";
+  }
+
   // The tamSamSom prompt explicitly instructs "use ranges" instead of
   // inventing false precision, so a value like "$2.1-2.8B" is the expected
   // shape, not an edge case -- capture an optional second bound instead of
@@ -1234,50 +1259,15 @@ function extractMarketSizeVisualValue(content: string, label: string) {
   const singleBound = `(?:[<>~≈]?\\s*)?(?:${currencyToken}\\s*)?\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT%]\\b|\\s+${unitWord}\\b)?`;
   const valuePattern = `(${singleBound}(?:\\s*[-–—]\\s*(?:${currencyToken}\\s*)?${singleBound})?)`;
 
-  const line = normalized
-    .split("\n")
-    .find((item) => new RegExp(`^\\s*${escapedLabel}\\s*[:\\-–—]`, "i").test(item.trim()));
-  const lineValue = line?.match(
-    new RegExp(`^\\s*${escapedLabel}\\s*[:\\-–—]\\s*${valuePattern}`, "i")
-  )?.[1];
+  // Searches WITHIN the already-scoped raw value text rather than
+  // requiring the shape to start at position 0 -- this is what lets a
+  // value text like "near-term obtainable share is estimated at $3-5M"
+  // (real prose preceding the actual figure) still resolve to a clean
+  // "$3-5M" legend string, instead of failing outright the way an
+  // anchored `^...` match would.
+  const shapedValue = rawValue.match(new RegExp(valuePattern, "i"))?.[0];
 
-  if (lineValue) {
-    return lineValue.replace(/\s+/g, " ").trim();
-  }
-
-  // Fallback: the label embedded in prose rather than as its own
-  // dedicated line -- the shape a Planning Estimate paragraph naturally
-  // takes ("...Resulting Planning Estimate: TAM (Germany, 2026) ~=
-  // EUR200-800 million [Estimated]; SAM (...) ~= ..."). Confirmed live:
-  // the line-start pattern above never matches this, silently discarding
-  // a genuine, correctly nested TAM/SAM/SOM estimate and falling back to
-  // "Could not be calculated" even though the model had produced exactly
-  // what its prompt asked for. Still requires the label immediately
-  // followed by a real value (only an optional short parenthetical/
-  // bracketed tag and a separator in between), so a bare mention of the
-  // label with no value attached (e.g. a "TAM / SAM / SOM" heading) still
-  // cannot match.
-  //
-  // CRITICAL FIX -- confirmed live: market-intelligence-graph.ts's own
-  // deterministic "Planning Estimate" backend writes each layer as
-  // "TAM [Estimated]: $2.4M" -- a SQUARE-bracketed classification tag,
-  // not the round parenthetical this fallback already handled. That gap
-  // (present since this fallback was first added -- see its own example
-  // comment above, which already showed "[Estimated]" without the regex
-  // actually tolerating it) silently read every such report as if
-  // TAM/SAM/SOM had never been stated, showing "Validation Needed" for a
-  // layer while the report's own text plainly stated a dollar figure two
-  // words later. Now tolerates the optional context group in either
-  // (parentheses) or [square brackets].
-  const proseValue = normalized.match(
-    new RegExp(`\\b${escapedLabel}\\b\\s*(?:[(\\[][^)\\]]{0,80}[)\\]])?\\s*[:\\-–—≈~]+\\s*${valuePattern}`, "i")
-  )?.[1];
-
-  // Already exactly the compact number(s)+unit shape by construction --
-  // running it through compactPdfMetricValue would re-truncate a captured
-  // range (e.g. "$2.1-2.8B") down to its first bound, undoing the match
-  // above.
-  return proseValue ? proseValue.replace(/\s+/g, " ").trim() : "";
+  return shapedValue ? shapedValue.replace(/\s+/g, " ").trim() : "";
 }
 
 // compactPdfMetricValue's fallback pattern deliberately allows a bare
@@ -1297,7 +1287,7 @@ function isMarketSizeValueMeaningful(value: string) {
   );
 }
 
-function extractMarketSizeValue(content: string, label: string) {
+function extractMarketSizeValue(content: string, label: "TAM" | "SAM" | "SOM") {
   const value =
     extractMarketSizeVisualValue(content, label) ||
     compactPdfMetricValue(extractMetricValue(content, label));
@@ -1305,40 +1295,16 @@ function extractMarketSizeValue(content: string, label: string) {
   return isMarketSizeValueMeaningful(value) ? value : "";
 }
 
-// TAM/SAM/SOM values are ranges by design ("$2.1-2.8B"), so the
-// magnitude used for chart scaling is the upper bound of the range --
-// the last number+unit found in the string, not the first.
-//
-// CRITICAL FIX -- confirmed live (cross-surface audit): this only matched
-// a single-letter unit ([kKmMbBtT]), so a spelled-out "thousand" matched
-// just its leading "t" and was read as TRILLION -- a billion-fold
-// misparse ("$200 thousand" -> 200,000,000,000,000 instead of 200,000).
-// page.tsx's parseMonetaryMagnitude already tries the full unit word
-// first for exactly this reason (thousand/trillion both start with "t");
-// mirrored here so the dashboard, Planner, and exported PDF can never
-// disagree on a TAM/SAM/SOM layer's resolved/nested state purely because
-// one surface used a narrower unit parser than another.
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+// quality failure, UI/PDF canonical-data divergence): this was its own
+// independent copy of the exact magnitude-parsing logic now shared as
+// parseMarketSizingMagnitude (report-presentation.ts). Delegating
+// (rather than keeping a parallel, hand-maintained copy) is what
+// actually guarantees the dashboard and exported PDF can never
+// independently disagree on a TAM/SAM/SOM layer's resolved/nested
+// state, instead of merely happening to agree today.
 function parseMarketSizeMagnitude(value: string): number | null {
-  const matches = [...value.matchAll(/(\d+(?:[.,]\d+)?)\s*(thousand|million|billion|trillion|[kKmMbBtT])?/gi)];
-  const last = matches.at(-1);
-  if (!last) return null;
-
-  const numeric = Number(last[1].replace(",", "."));
-  if (!Number.isFinite(numeric) || numeric <= 0) return null;
-
-  const unit = (last[2] || "").toLowerCase();
-  const multiplier =
-    unit === "t" || unit === "trillion"
-      ? 1e12
-      : unit === "b" || unit === "billion"
-        ? 1e9
-        : unit === "m" || unit === "million"
-          ? 1e6
-          : unit === "k" || unit === "thousand"
-            ? 1e3
-            : 1;
-
-  return numeric * multiplier;
+  return parseMarketSizingMagnitude(value);
 }
 
 // tamSamSom's own prompt requires a "named scaling assumption" and

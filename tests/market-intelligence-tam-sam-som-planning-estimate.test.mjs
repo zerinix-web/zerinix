@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { extractMarketSizingLayerValue } from "../app/lib/report-presentation.ts";
 
 const routeSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
 const graphSource = readFileSync("app/lib/ai/market-intelligence-graph.ts", "utf8");
@@ -60,8 +61,13 @@ test("extractMarketSizeVisualValue recognizes a value embedded in prose, not jus
   const fn = new Function(
     "normalizePdfText",
     "escapeRegExp",
+    "extractMarketSizingLayerValue",
     `${[jsSignature, ...rest].join("\n")}\nreturn extractMarketSizeVisualValue;`
-  )((value) => value, (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  )(
+    (value) => value,
+    (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    extractMarketSizingLayerValue
+  );
 
   // Reproduces a real, live-observed defect: a genuine, correctly nested
   // Planning Estimate paragraph ("Resulting Planning Estimate: TAM
@@ -87,8 +93,13 @@ test("extractMarketSizeVisualValue still matches the original dedicated-line sha
   const fn = new Function(
     "normalizePdfText",
     "escapeRegExp",
+    "extractMarketSizingLayerValue",
     `${[jsSignature, ...rest].join("\n")}\nreturn extractMarketSizeVisualValue;`
-  )((value) => value, (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  )(
+    (value) => value,
+    (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    extractMarketSizingLayerValue
+  );
 
   const content = "TAM: $2.1B\nSAM: $800M\nSOM: $120M";
   assert.equal(fn(content, "TAM"), "$2.1B");
@@ -105,8 +116,13 @@ test("extractMarketSizeVisualValue does not match a bare label mention with no v
   const fn = new Function(
     "normalizePdfText",
     "escapeRegExp",
+    "extractMarketSizingLayerValue",
     `${[jsSignature, ...rest].join("\n")}\nreturn extractMarketSizeVisualValue;`
-  )((value) => value, (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  )(
+    (value) => value,
+    (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    extractMarketSizingLayerValue
+  );
 
   assert.equal(fn("TAM / SAM / SOM\nCould not be calculated.", "TAM"), "");
 });

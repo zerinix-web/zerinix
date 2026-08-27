@@ -1128,19 +1128,74 @@ export function stripLeadingTakeawaySentence(content: string, takeaway: string):
 
   const protectedLine = protectSentenceAbbreviations(firstLine);
   const boundaryMatch = protectedLine.match(/[.!?](?=\s|$)/);
-  if (!boundaryMatch || boundaryMatch.index === undefined) {
+  if (boundaryMatch && boundaryMatch.index !== undefined) {
+    const cutIndex = boundaryMatch.index + 1;
+    const candidateSentence = restoreSentenceAbbreviations(protectedLine.slice(0, cutIndex));
+    if (!isDuplicateOfTakeaway(candidateSentence)) {
+      return raw;
+    }
+
+    const remainderOfLine = restoreSentenceAbbreviations(protectedLine.slice(cutIndex)).replace(/^\s+/, "");
+    const nextLines = lines.slice();
+    nextLines[firstContentIndex] = remainderOfLine;
+    return nextLines.join("\n").replace(/^\n+/, "").trim();
+  }
+
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+  // quality failure): getSectionTakeaway extracts its sentence from
+  // splitSentences, which collapses ALL whitespace -- including
+  // newlines -- before scanning for a sentence boundary (stripMarkdown's
+  // own `\s+` collapse). A short label-only first line with no
+  // sentence-ending punctuation of its own ("**Answer:**", the shape a
+  // model routinely writes as its own line before the real sentence)
+  // therefore gets silently fused with the NEXT line by
+  // getSectionTakeaway, correctly producing a takeaway drawn from both
+  // lines together -- but the check above only ever looked for a
+  // boundary within this single physical line, found none, and bailed
+  // out returning `raw` completely unchanged, leaving the real
+  // duplicate sentence sitting untouched on the very next line. Bounded
+  // to exactly the next ONE non-empty content line (not a general
+  // multi-line scan) so this stays narrowly scoped to that specific,
+  // diagnosed shape rather than risking consumption of unrelated later
+  // prose; a bulleted/numbered next line is never treated as a
+  // continuation, since that begins its own separate list item.
+  const nextContentIndex = lines.findIndex(
+    (line, index) => index > firstContentIndex && line.trim().length > 0
+  );
+  if (nextContentIndex === -1) {
+    return raw;
+  }
+  const nextLine = lines[nextContentIndex];
+  const trimmedNextLine = nextLine.trim();
+  if (/^(?:[-*•]|\d+[.)])\s+/.test(trimmedNextLine)) {
     return raw;
   }
 
-  const cutIndex = boundaryMatch.index + 1;
-  const candidateSentence = restoreSentenceAbbreviations(protectedLine.slice(0, cutIndex));
-  if (!isDuplicateOfTakeaway(candidateSentence)) {
+  const joinedLine = `${trimmedFirstLine} ${trimmedNextLine}`;
+  const protectedJoinedLine = protectSentenceAbbreviations(joinedLine);
+  const joinedBoundaryMatch = protectedJoinedLine.match(/[.!?](?=\s|$)/);
+  if (!joinedBoundaryMatch || joinedBoundaryMatch.index === undefined) {
     return raw;
   }
 
-  const remainderOfLine = restoreSentenceAbbreviations(protectedLine.slice(cutIndex)).replace(/^\s+/, "");
+  const joinedCutIndex = joinedBoundaryMatch.index + 1;
+  const joinedCandidateSentence = restoreSentenceAbbreviations(protectedJoinedLine.slice(0, joinedCutIndex));
+  if (!isDuplicateOfTakeaway(joinedCandidateSentence)) {
+    return raw;
+  }
+
+  // The label line carried no sentence content of its own and is fully
+  // consumed by the takeaway; whatever remains of the second line after
+  // the matched sentence boundary survives as that line's own new
+  // content, exactly mirroring the single-line "remainder" behavior
+  // above.
+  const remainderOfNextLine = restoreSentenceAbbreviations(protectedJoinedLine.slice(joinedCutIndex)).replace(
+    /^\s+/,
+    ""
+  );
   const nextLines = lines.slice();
-  nextLines[firstContentIndex] = remainderOfLine;
+  nextLines.splice(firstContentIndex, 1);
+  nextLines[nextContentIndex - 1] = remainderOfNextLine;
   return nextLines.join("\n").replace(/^\n+/, "").trim();
 }
 
@@ -1202,6 +1257,115 @@ export function resolveCagrHeadlinePresentation(content: string): CagrHeadlinePr
     displayValue: `${lowValue.toFixed(1)}%–${highValue.toFixed(1)}%`,
     isMultiEstimate: true,
   };
+}
+
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+// quality failure): the web report showed TAM = $131.6B, SAM = $32.9B,
+// SOM = Validation Needed -- a genuinely partial, correctly-nested
+// result -- while the exported PDF for the SAME report collapsed the
+// whole section to "Additional market validation is required," losing
+// the valid TAM and SAM. Root cause: page.tsx and ReportPdfButton.tsx
+// each hand-rolled their OWN regex pair for pulling a TAM/SAM/SOM
+// layer's raw value text out of the shared tamSamSom content string --
+// page.tsx's grab was a permissive, boundary-aware capture (stop at the
+// next field/keyword boundary), while ReportPdfButton.tsx's was a
+// stricter, self-anchored value-SHAPE pattern. The production TAM
+// line's phrasing matched the web's parser but not the PDF's, so
+// tamResolved was true on the web and false in the PDF for the exact
+// same TAM figure -- which then cascaded (by the correct, unchanged
+// TAM-first nesting rule below) to mark SAM unresolved in the PDF too,
+// even though SAM's own text independently parsed fine.
+//
+// extractMarketSizingLayerValue and parseMarketSizingMagnitude are now
+// the single canonical implementation for turning that content string
+// into raw value text and a comparable magnitude -- both the web report
+// and the PDF export call these directly instead of maintaining their
+// own copies, so the two surfaces can no longer independently disagree
+// about what a layer's own text says. This mirrors the two-step
+// strategy already proven correct in production on the web (a
+// boundary-aware "LABEL: value" grab first, since a report section
+// often lists several labeled fields on adjacent lines or separated by
+// narration like "formula"/"planning input"/"confidence"; then a
+// fallback that additionally tolerates a "[Estimated]"/"(Total
+// Addressable Market)" classification tag sitting between the label
+// and its value, the shape market-intelligence-graph.ts's own
+// deterministic Planning Estimate backend and natural model prose both
+// produce). Extraction only ever reads text that is already present in
+// the report's own content -- it never derives, infers, or fabricates a
+// value for a layer the upstream evidence-first market-sizing engine
+// did not already produce.
+export function extractMarketSizingLayerValue(
+  content: string,
+  label: "TAM" | "SAM" | "SOM"
+): string {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Separator class includes "≈"/"~" alongside ":"/"-"/"–"/"—" -- a
+  // Planning Estimate paragraph legitimately writes "TAM (...) ≈
+  // €200-800 million" (an approximation symbol, not a colon/dash) as its
+  // separator between the label and its value; this was previously only
+  // tolerated by ReportPdfButton.tsx's own separate fallback regex, never
+  // by page.tsx's, so consolidating on page.tsx's exact separator class
+  // alone would have silently regressed an already-shipped PDF fix.
+  const separator = "[:\\-–—≈~]";
+
+  const boundaryAware = content.match(
+    new RegExp(
+      `\\b${escapedLabel}\\b\\s*${separator}\\s*([\\s\\S]*?)(?=\\s*(?:\\||[,;]\\s*[A-Z][A-Za-z /-]{1,32}\\s*${separator}|\\bformula\\b|\\bplanning input\\b|\\bevidence\\b|\\breference\\b|\\bconfidence\\b|\\n\\s*[A-Z][A-Za-z /-]{1,32}\\s*${separator}|$))`,
+      "i"
+    )
+  );
+  const direct = boundaryAware?.[1]?.trim().replace(/\*\*/g, "");
+  if (direct) {
+    return direct;
+  }
+
+  const normalized = content.replace(/\*\*/g, "");
+  const withTag = normalized.match(
+    new RegExp(
+      `\\b${escapedLabel}\\b\\s*(?:\\([^)\\n]{0,80}\\)\\s*)?(?:\\[[^\\]\\n]{0,40}\\]\\s*)?${separator}\\s*([^\\n]*)`,
+      "i"
+    )
+  );
+  return withTag?.[1]?.trim().replace(/\*\*/g, "") || "";
+}
+
+// Canonical magnitude parser for a TAM/SAM/SOM layer's raw value text --
+// see extractMarketSizingLayerValue's comment above for why a single
+// shared implementation is required. Ranges ("$2.1-2.8 billion") take
+// the LAST number+unit found, which correctly resolves a trailing unit
+// shared across both bounds; the full unit word is tried before the
+// single-letter abbreviation so "thousand"/"trillion" (both starting
+// with "t") can never collide.
+export function parseMarketSizingMagnitude(value: string): number | null {
+  const matches = [
+    ...(value || "").matchAll(/([\d.,]+)\s*(thousand|million|billion|trillion|[kKmMbBtT])?/gi),
+  ];
+  const last = matches
+    .filter((candidate) => candidate[1] && Number.isFinite(parseFloat(candidate[1].replace(/,/g, ""))))
+    .at(-1);
+
+  if (!last) {
+    return null;
+  }
+
+  const num = parseFloat(last[1].replace(/,/g, ""));
+  if (!Number.isFinite(num) || num <= 0) {
+    return null;
+  }
+
+  const unit = (last[2] || "").toLowerCase();
+  const multiplier =
+    unit === "k" || unit === "thousand"
+      ? 1e3
+      : unit === "m" || unit === "million"
+        ? 1e6
+        : unit === "b" || unit === "billion"
+          ? 1e9
+          : unit === "t" || unit === "trillion"
+            ? 1e12
+            : 1;
+
+  return num * multiplier;
 }
 
 export type MarketSizingCascadeResolution = {
