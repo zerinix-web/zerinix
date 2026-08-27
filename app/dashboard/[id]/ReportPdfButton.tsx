@@ -3907,9 +3907,18 @@ export function buildStandardReportPdf({
             ]
           : isMarketIntelligenceReport
           ? [
+              // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+              // production presentation hardening): "Confidence Score: —"
+              // sitting directly above "Report Quality: Validation
+              // Required" (the SAME underlying null confidence, resolved
+              // to a semantic label two rows down) was exactly the
+              // internally-incoherent pairing this fix removes -- reuses
+              // the identical label rather than inventing new wording.
               [
                 localizePdfPresentationLabel("Confidence Score", pdfLocale),
-                marketConfidenceScore === null ? "—" : `${marketConfidenceScore}%`,
+                marketConfidenceScore === null
+                  ? localizePdfPresentationLabel("Validation Required", pdfLocale)
+                  : `${marketConfidenceScore}%`,
               ],
               [localizePdfPresentationLabel("Report Quality", pdfLocale), marketReportQualityLabel],
               [localizePdfPresentationLabel("Main Risk", pdfLocale), marketTopRisks[0] || executiveSnapshot.mainRisk],
@@ -3944,13 +3953,23 @@ export function buildStandardReportPdf({
           pdf.setFontSize(7.5);
           const labelLines = wrapPdfText(label.toUpperCase(), cardWidth - 8).slice(0, 2);
           pdf.setFontSize(9.5);
-          // conciseCoverText already shortens to ~46 chars with an ellipsis,
-          // but that string can still wrap into more than 2 lines inside
-          // this narrow two-column card -- truncate with our own ellipsis
-          // instead of silently dropping the tail (and conciseCoverText's
-          // own "…") with no indication anything was cut.
+          // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+          // production presentation hardening): this card already
+          // supports up to 2 wrapped lines (truncatePdfCellLines below,
+          // and the height formula two lines down already scales with
+          // however many value lines actually render) -- but the old
+          // 46-character pre-wrap cutoff is roughly enough text to fill
+          // only the FIRST line at this card's width, so Main Risk/Next
+          // Action routinely read as an abruptly clipped fragment while
+          // the card's own second line sat empty. Widening the cutoff to
+          // conciseCoverText's own default (already proven correct for
+          // the wider Insight Panel below, which allows the same 2-line
+          // budget) lets a real finding use BOTH available lines; this
+          // function's own word-boundary-safe clipping, plus
+          // truncatePdfCellLines' graceful "..." if it still overflows,
+          // remain the safety net for anything longer than that.
           const valueLines = truncatePdfCellLines(
-            wrapPdfText(conciseCoverText(value, 46), cardWidth - 8),
+            wrapPdfText(conciseCoverText(value), cardWidth - 8),
             2
           );
           pdf.setFontSize(previousCoverFontSize);
@@ -4523,8 +4542,24 @@ export function buildStandardReportPdf({
             extractScore(fullReportContent, "Investment Score");
 
         const isTurkishPdf = pdfLocale === "tr";
+        // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+        // production presentation hardening): a bare "—" for Confidence
+        // reads as an unexplained gap, not a stated evidence state --
+        // especially confusing right next to "Report Quality" on the
+        // SAME card, which already resolves this identical null case to
+        // the semantic localizePdfPresentationLabel("Validation
+        // Required", pdfLocale) a few lines above (marketReportQualityLabel).
+        // Reusing that exact label (rather than inventing new wording)
+        // keeps the two rows internally consistent -- never fabricates a
+        // number, only replaces an unexplained placeholder with the
+        // same honest state already shown elsewhere on this card.
         const recItems: Array<[string, string]> = [
-          ["Confidence", confidence === null ? "—" : `${confidence}%`],
+          [
+            "Confidence",
+            confidence === null
+              ? localizePdfPresentationLabel("Validation Required", pdfLocale)
+              : `${confidence}%`,
+          ],
           [
             "Why",
             why ||

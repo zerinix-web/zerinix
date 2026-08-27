@@ -2251,7 +2251,14 @@ function ExecutiveInsightBanner({
           </p>
         </div>
         <div className="shrink-0 rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-xs font-semibold text-zinc-300">
-          Confidence {confidence === null ? "—" : `${confidence}%`}
+          {/* P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+              production presentation hardening): a bare "—" reads as an
+              unexplained gap rather than a stated evidence state -- this
+              codebase's own dominant convention for "no defensible
+              numeric confidence exists" is "Validation Needed" (used
+              throughout this file for TAM/SAM/SOM, Competitive
+              Landscape, etc.), never a fabricated number. */}
+          {confidence === null ? "Confidence: Validation Needed" : `Confidence ${confidence}%`}
         </div>
       </div>
     </div>
@@ -4078,10 +4085,19 @@ function ExecutiveSnapshotPanel({
     : null;
   const snapshotDecision = marketDecision ? marketDecision.decisionLabel : snapshot.decision;
   const snapshotConfidenceScore = marketDecision ? marketDecision.confidenceScore : snapshot.confidenceScore;
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+  // presentation hardening): a bare "—" here read as an unexplained gap
+  // in both the header badge ("Confidence: —") and the Confidence Gauge
+  // label right below it -- this file's own dominant, already-
+  // established convention for "no defensible numeric confidence
+  // exists" is "Validation Needed" (TAM/SAM/SOM, Competitive Landscape,
+  // etc.), never a fabricated number.
   const snapshotConfidenceDisplay = marketDecision
     ? marketDecision.confidenceScore !== null
       ? `${marketDecision.confidenceScore}%`
-      : "—"
+      : isMarketIntelligenceTurkish
+        ? "Doğrulama Gerekli"
+        : "Validation Needed"
     : snapshot.confidence;
   // CRITICAL FIX -- Executive Decision Center. The Founder Readiness
   // gauge reads investmentScore.decisionEngine, the founder-viability

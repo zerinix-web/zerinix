@@ -66,6 +66,7 @@ import {
   normalizeReportPresentationText,
   readFounderReadinessMetricValue,
   readFounderReadinessScoreValue,
+  stripLeadingTakeawaySentence,
 } from "@/app/lib/report-presentation";
 import type {
   ReportBenchmarkFit,
@@ -3815,11 +3816,23 @@ function formatPdfReadableContent(
     return "";
   }
 
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+  // presentation hardening): pdfKeyTakeawayCardFields' own Key Takeaway box
+  // (drawPdfVisual) reads getSectionTakeaway(section.content) directly off
+  // raw content, while this function -- until now -- fed that SAME raw
+  // content straight through to the body paragraph below it, so the boxed
+  // takeaway sentence rendered a second time as the body's own opening
+  // sentence. Stripping it here (mirrors ReportPdfButton.tsx's identical
+  // sectionContentWithoutTakeawayDuplication fix) removes the duplicate
+  // while the full remaining body prose still draws unchanged.
+  const sourceContent = pdfKeyTakeawayCardFields.has(section.field ?? "")
+    ? stripLeadingTakeawaySentence(section.content, getSectionTakeaway(section.content))
+    : section.content;
   const content = removeDuplicateVisualText(
     section.title,
     section.field === "founderScore"
       ? normalizeFounderReadinessScoreText(section.content, founderReadinessScore)
-      : section.content
+      : sourceContent
   );
   const normalized = cleanPdfLegacyValidationIntelligenceContent(
     cleanPdfEvidenceMetadataText(content)
@@ -4463,7 +4476,11 @@ function ExecutiveInsightBanner({ section }: { section: ReportSection }) {
           </p>
         </div>
         <div className="shrink-0 rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-xs font-semibold text-zinc-300">
-          Confidence {confidence === null ? "—" : `${confidence}%`}
+          {/* P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+              production presentation hardening): mirrors the identical fix
+              on page.tsx's own ExecutiveInsightBanner -- a bare "—" reads
+              as an unexplained gap rather than a stated evidence state. */}
+          {confidence === null ? "Confidence: Validation Needed" : `Confidence ${confidence}%`}
         </div>
       </div>
     </div>
@@ -4673,8 +4690,23 @@ function PremiumSectionVisual({
     field === "marketSegmentation"
   ) {
     const takeaway = getSectionTakeaway(section.content);
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+    // presentation hardening): mirrors page.tsx's identical fix (see its
+    // own comment on this exact pattern). getSectionTakeaway's first
+    // sentence can itself be a bulleted/numbered line, which
+    // extractRealBulletLines(section.content) (raw, unstripped) then
+    // re-surfaces verbatim as bullet #1, duplicating the highlighted
+    // takeaway underneath it. extractSectionMainExplanation already
+    // excludes bulleted lines from its own sentence pool and correctly
+    // skips the content's first SENTENCE by index when a takeaway exists --
+    // left fed the original `content`, unchanged. Only the bullets
+    // extractor is given the takeaway-stripped content; feeding stripped
+    // content to extractSectionMainExplanation too would double-skip a
+    // sentence (its own index-1 skip, on top of the sentence already
+    // having been removed) and silently drop real prose.
+    const contentWithoutTakeawayDuplication = stripLeadingTakeawaySentence(section.content, takeaway);
     const explanation = extractSectionMainExplanation(section.content, takeaway);
-    const bullets = extractRealBulletLines(section.content);
+    const bullets = extractRealBulletLines(contentWithoutTakeawayDuplication);
 
     if (!takeaway && !explanation && bullets.length === 0) {
       return (
@@ -7425,8 +7457,18 @@ const ReportPanel = memo(function ReportPanel({
           : null;
         const marketDecisionDisplay = marketDecision ? marketDecision.decisionLabel : "";
         const marketConfidenceScore = marketDecision ? marketDecision.confidenceScore : null;
+        // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+        // production presentation hardening): mirrors the identical fix in
+        // ReportPdfButton.tsx -- this exact value sits one row above
+        // "Report Quality" in the metricCards array below, which already
+        // resolves the SAME null-confidence case to a semantic label. A
+        // bare "—" here read as an unexplained gap right next to that
+        // resolved row; reusing the same existing label keeps both rows
+        // internally consistent without fabricating a number.
         const marketConfidenceDisplay =
-          marketConfidenceScore === null ? "—" : `${marketConfidenceScore}%`;
+          marketConfidenceScore === null
+            ? localizePdfPresentationLabel("Validation Required", pdfLocale)
+            : `${marketConfidenceScore}%`;
 
         const metricCards = isRealEstateReport
           ? [
@@ -7906,8 +7948,20 @@ const ReportPanel = memo(function ReportPanel({
             extractScore(fullReportContent, "Investment Score");
 
         const isTurkishPdf = pdfLocale === "tr";
+        // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+        // production presentation hardening): mirrors the identical fix
+        // in ReportPdfButton.tsx -- a bare "—" for Confidence reads as
+        // an unexplained gap rather than a stated evidence state.
+        // Reuses the same existing "Validation Required" terminology
+        // this codebase already shows for the identical null-confidence
+        // state elsewhere, rather than inventing new wording.
         const recItems: Array<[string, string]> = [
-          ["Confidence", confidence === null ? "—" : `${confidence}%`],
+          [
+            "Confidence",
+            confidence === null
+              ? localizePdfPresentationLabel("Validation Required", pdfLocale)
+              : `${confidence}%`,
+          ],
           [
             "Why",
             why ||
