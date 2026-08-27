@@ -1416,6 +1416,8 @@ type MarketGraphCopyKey =
   | "majorPlayersTitle"
   | "insufficientMajorPlayers"
   | "verifiedMarketSizeTitle"
+  | "marketSizeBaselineLabel"
+  | "marketSizeBaselineExplanation"
   | "planningEstimateTitle"
   | "formulaLabel"
   | "confidenceLabel"
@@ -1469,6 +1471,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     insufficientMajorPlayers:
       "Insufficient independent evidence for Major Players ranking; validated commercial vendors remain available in the Competitive Landscape.",
     verifiedMarketSizeTitle: "Verified market-size evidence",
+    marketSizeBaselineLabel: "Market / Industry Baseline — Not Yet Validated as TAM for This Business",
+    marketSizeBaselineExplanation:
+      "This is a verified total for the broader industry or services category, not an automatically validated Total Addressable Market (TAM) for the specific business scope requested in this report. Promoting a broader baseline to TAM requires independently confirming that the requested geography, customer segment, and product/service definition are actually covered by this evidence. See TAM / SAM / SOM below for that determination.",
     // P0 FIX -- confirmed live (source/evidence integrity repair):
     // planningEstimateTitle/tamSamSomUnavailable/marketSizeUnavailable
     // deliberately say "confirmed", never "verified" -- these three
@@ -1549,6 +1554,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     insufficientMajorPlayers:
       "Başlıca Oyuncular sıralaması için bağımsız kanıt yetersiz; doğrulanmış ticari satıcılar Rekabet Ortamı bölümünde yer almaya devam ediyor.",
     verifiedMarketSizeTitle: "Doğrulanmış pazar büyüklüğü kanıtı",
+    marketSizeBaselineLabel: "Pazar / Sektör Temel Değeri — Bu İş İçin Henüz TAM Olarak Doğrulanmadı",
+    marketSizeBaselineExplanation:
+      "Bu rakam, daha geniş sektör veya hizmet kategorisi için doğrulanmış bir toplamdır; bu raporda talep edilen özel iş kapsamı için otomatik olarak doğrulanmış bir Toplam Adreslenebilir Pazar (TAM) değeri değildir. Daha geniş bir temel değerin TAM'a yükseltilmesi, talep edilen coğrafya, müşteri segmenti ve ürün/hizmet tanımının bu kanıt tarafından gerçekten kapsandığının bağımsız olarak doğrulanmasını gerektirir. Bu belirleme için aşağıdaki TAM / SAM / SOM bölümüne bakın.",
     planningEstimateTitle: "Planlama Tahmini — dış kaynakla doğrulanmış pazar büyüklüğü değildir",
     formulaLabel: "Formül",
     confidenceLabel: "Güven",
@@ -1608,6 +1616,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     insufficientMajorPlayers:
       "Unzureichende unabhängige Nachweise für die Rangliste der Hauptakteure; validierte kommerzielle Anbieter sind weiterhin in der Wettbewerbslandschaft verfügbar.",
     verifiedMarketSizeTitle: "Verifizierter Nachweis zur Marktgröße",
+    marketSizeBaselineLabel: "Markt-/Branchenbasiswert — Noch nicht als TAM für dieses Geschäft validiert",
+    marketSizeBaselineExplanation:
+      "Dies ist ein verifizierter Gesamtwert für die breitere Branche oder Dienstleistungskategorie, kein automatisch validierter Total Addressable Market (TAM) für den in diesem Bericht angeforderten spezifischen Geschäftsumfang. Die Hochstufung eines breiteren Basiswerts zu TAM erfordert die unabhängige Bestätigung, dass die angeforderte Geografie, das Kundensegment und die Produkt-/Dienstleistungsdefinition tatsächlich von diesem Nachweis abgedeckt werden. Siehe TAM / SAM / SOM unten für diese Feststellung.",
     planningEstimateTitle: "Planungsschätzung — keine extern verifizierte Marktgröße",
     formulaLabel: "Formel",
     confidenceLabel: "Konfidenz",
@@ -1667,6 +1678,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     insufficientMajorPlayers:
       "Preuves indépendantes insuffisantes pour le classement des principaux acteurs ; les fournisseurs commerciaux validés restent disponibles dans le paysage concurrentiel.",
     verifiedMarketSizeTitle: "Preuve vérifiée de la taille du marché",
+    marketSizeBaselineLabel: "Référence marché/secteur — Pas encore validée comme TAM pour cette activité",
+    marketSizeBaselineExplanation:
+      "Il s'agit d'un total vérifié pour la catégorie industrielle ou de services au sens large, et non d'un marché total adressable (TAM) automatiquement validé pour le périmètre commercial spécifique demandé dans ce rapport. La promotion d'une référence plus large en TAM nécessite de confirmer indépendamment que la géographie, le segment de clientèle et la définition du produit/service demandés sont bien couverts par ces preuves. Voir TAM / SAM / SOM ci-dessous pour cette détermination.",
     planningEstimateTitle: "Estimation de planification — taille de marché non vérifiée en externe",
     formulaLabel: "Formule",
     confidenceLabel: "Confiance",
@@ -1726,6 +1740,9 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     insufficientMajorPlayers:
       "Evidencia independiente insuficiente para la clasificación de los principales actores; los proveedores comerciales validados siguen disponibles en el panorama competitivo.",
     verifiedMarketSizeTitle: "Evidencia verificada del tamaño del mercado",
+    marketSizeBaselineLabel: "Referencia de mercado/industria — Aún no validada como TAM para este negocio",
+    marketSizeBaselineExplanation:
+      "Esta cifra es un total verificado para la categoría industrial o de servicios más amplia, no un Mercado Total Direccionable (TAM) validado automáticamente para el alcance de negocio específico solicitado en este informe. Promover una referencia más amplia a TAM requiere confirmar de forma independiente que la geografía, el segmento de clientes y la definición de producto/servicio solicitados están realmente cubiertos por esta evidencia. Consulte TAM / SAM / SOM más abajo para esa determinación.",
     planningEstimateTitle: "Estimación de planificación — tamaño de mercado no verificado externamente",
     formulaLabel: "Fórmula",
     confidenceLabel: "Confianza",
@@ -2238,12 +2255,33 @@ export function projectMarketIntelligenceGraphToReport(
   }
 
   if (graph.verifiedMarketSize.length > 0) {
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+    // consistency hardening): a validated market-size figure rendered
+    // here with no qualification read as internally contradictory
+    // sitting next to an unresolved TAM below -- a reader had no way to
+    // tell that "verified" here means "this industry/services total is
+    // real, sourced evidence," not "this has been confirmed as the
+    // addressable market for the specific business scope requested."
+    // This never changes the TAM/SAM/SOM validation rule itself (still
+    // computed independently below, still capable of staying
+    // "Validation Needed" when the requested scope isn't supported) --
+    // it only adds a generic, always-present explanation of WHY a
+    // broader verified baseline does not automatically become TAM,
+    // mirroring the same "broader/adjacent vs. exact-scope" distinction
+    // already made explicit for competitors (adjacentPlayersTitle/
+    // adjacentPlayersIntro above: validated direct competitor vs.
+    // relevant-but-not-independently-validated player). Purely additive
+    // presentation text -- no number, evidence item, or confidence score
+    // is altered, invented, or suppressed.
     const sizing = [
       copy.verifiedMarketSizeTitle,
       ...graph.verifiedMarketSize.map(
         (item) =>
           `- [${copy.verifiedTag}] ${item.description} | ${copy.confidenceLabel}: ${item.confidenceScore}/100 (${item.confidenceLevel}) | ${copy.evidenceLabel}: ${item.evidenceIds.map((id) => `[${id}]`).join(", ")}`
       ),
+      "",
+      copy.marketSizeBaselineLabel,
+      copy.marketSizeBaselineExplanation,
     ].join("\n");
     projection.marketSize = sizing;
     // tamSamSom is deliberately left untouched here, not overwritten with

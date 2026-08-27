@@ -1939,10 +1939,37 @@ Write only this section's content. Do not write a JSON object, field name, headi
         (cachedDomainResearch
           ? buildMarketIntelligenceGraph(cachedDomainResearch, promptText)
           : null);
-      const cachedCoverageResult = cachedDomainResearch
+      // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+      // production consistency hardening): this used to gate the ENTIRE
+      // coverage computation behind `cachedDomainResearch` being present
+      // -- but applyMarketResearchCoverageToContext's `bundle.evidence`
+      // argument is only ever read as a fallback (`coverageOverride ||
+      // evaluateMarketResearchCoverage(bundle.evidence, prompt)`,
+      // market-research-coverage.ts), completely unused whenever a
+      // coverageOverride (cachedMarketGraph?.coverage, already computed
+      // and cached alongside the report) is supplied. Requiring
+      // cachedDomainResearch here was therefore stricter than the
+      // function it gates actually needs: a report reconstructed from
+      // cache with a cached graph but no separately-cached domain-
+      // research bundle (a real, common shape -- confirmed live via
+      // getCachedMarketIntelligenceGraphFromReportData's own independent
+      // fallback above) always fell through to `coverage: undefined`,
+      // which skips the `if (coverage)` banner-embedding block in
+      // parseFullMarketReport/ensureMarketReportQuality below entirely --
+      // silently dropping the deterministic "Decision: TOKEN (Confidence:
+      // NN%)" banner from executiveSummary and leaving the web/PDF
+      // Confidence card at "--" even though a real, already-computed
+      // confidence value existed the whole time. Falling back to a safe
+      // empty-evidence bundle when cachedDomainResearch is absent but a
+      // real coverage override IS available lets that already-computed,
+      // real value through -- it never fabricates a coverage figure: the
+      // override is always either a genuine `MarketResearchCoverage`
+      // object or undefined, in which case this still correctly resolves
+      // to `null` exactly as before.
+      const cachedCoverageResult = cachedDomainResearch || cachedMarketGraph?.coverage
         ? applyMarketResearchCoverageToContext(
             canonicalFinancialAssumptions,
-            cachedDomainResearch,
+            cachedDomainResearch || { evidence: [] },
             promptText,
             cachedMarketGraph?.coverage
           )

@@ -1116,7 +1116,29 @@ export function stripLeadingTakeawaySentence(content: string, takeaway: string):
   const bulletMarkerMatch = trimmedFirstLine.match(/^(?:[-*•]|\d+[.)])\s+/);
 
   if (bulletMarkerMatch) {
-    const firstLineTextOnly = trimmedFirstLine.slice(bulletMarkerMatch[0].length).replace(/\*\*/g, "");
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+    // production consistency hardening): this used to strip "**"
+    // manually here (deleting it outright) before ever reaching
+    // isDuplicateOfTakeaway -- which independently normalizes its OWN
+    // candidate argument via stripMarkdown (this file's shared
+    // markdown-normalization function), and stripMarkdown replaces "**"
+    // with a SPACE, not nothing. Whenever the model's bold sub-label sat
+    // immediately against a colon ("**Regulatory tailwinds**: Rising...",
+    // the shape the shared report style guidance's "bold metric labels"
+    // instruction routinely produces for numbered/bulleted fields), the
+    // takeaway side (via getSectionTakeaway -> splitSentences ->
+    // stripMarkdown) ended up with a space before the colon
+    // ("tailwinds :") while this manual pre-strip produced none
+    // ("tailwinds:") -- a one-space mismatch that silently failed the
+    // duplicate check for every affected section (Market Segmentation,
+    // Regional Analysis, Industry Trends, Customer Segments, Market
+    // Drivers, Barriers, Opportunities, Threats), leaving the real
+    // duplicate untouched. Passing the raw (still bold-marked) text
+    // straight through -- exactly like the non-bullet branch below
+    // already does -- lets isDuplicateOfTakeaway's own stripMarkdown
+    // normalize both sides identically, the same fix already proven
+    // correct for the non-bullet case.
+    const firstLineTextOnly = trimmedFirstLine.slice(bulletMarkerMatch[0].length);
     if (!isDuplicateOfTakeaway(firstLineTextOnly)) {
       return raw;
     }
