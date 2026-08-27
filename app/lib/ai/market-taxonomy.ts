@@ -245,7 +245,43 @@ export function resolveMarketTaxonomy(
 // location, target customer) almost always starts, strips embedded
 // currency amounts by pattern rather than by language, and caps the
 // result far shorter -- a category is a few words, not a paragraph.
-function extractDynamicProductCategory(prompt: string) {
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+// quality failure, verified by executing this exact regex against a
+// real prompt): the capture group and the split-fallback below both
+// treat ANY literal period as a clause boundary, with no awareness that
+// "U.S."/"U.K."/etc. contain periods that are not sentence/clause
+// endings. For a prompt like "...on the mature U.S. commercial real
+// estate services market", the primary regex cannot span past "U.S."
+// to reach "market" (the period inside it looks like a clause end), so
+// it fails to match entirely; the fallback then also splits on that
+// same period, producing productCategory = "a on the mature U" -- pure
+// garbage that then propagates into every downstream query this
+// taxonomy profile feeds (vendor discovery, market size, competitors,
+// benchmarks), starving the whole pipeline of on-topic search terms
+// for what is otherwise a request with abundant published evidence.
+// Protecting known abbreviations' periods before matching/splitting
+// (the same technique report-presentation.ts's protectSentenceAbbreviations
+// already uses for the identical class of bug in sentence splitting)
+// fixes this without weakening or changing the regex's own logic.
+const CATEGORY_EXTRACTION_ABBREVIATIONS = [
+  "U.S.", "U.K.", "U.N.", "E.U.", "U.A.E.",
+  "Inc.", "Corp.", "Ltd.", "Co.", "LLC.",
+  "vs.", "etc.", "No.",
+];
+
+function protectCategoryExtractionAbbreviations(value: string) {
+  return CATEGORY_EXTRACTION_ABBREVIATIONS.reduce((acc, abbreviation) => {
+    const escaped = abbreviation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return acc.replace(new RegExp(escaped, "g"), abbreviation.replace(/\./g, " "));
+  }, value);
+}
+
+function restoreCategoryExtractionAbbreviations(value: string) {
+  return value.replace(/ /g, ".");
+}
+
+function extractDynamicProductCategory(rawPrompt: string) {
+  const prompt = protectCategoryExtractionAbbreviations(rawPrompt);
   // Prefer directly isolating the noun phrase between "the" and
   // "market/industry/sector" -- the standard Market Intelligence prompt
   // shape ("Market Intelligence report on the cybersecurity SaaS market")
@@ -285,7 +321,7 @@ function extractDynamicProductCategory(prompt: string) {
     .replace(/^\s*(?:on|for|about|regarding|into|of)\s+/i, "")
     .replace(/\s+/g, " ")
     .trim();
-  const candidate = withoutAmounts || firstClause;
+  const candidate = restoreCategoryExtractionAbbreviations(withoutAmounts || firstClause);
   return candidate.length <= 60
     ? candidate
     : candidate.slice(0, 60).replace(/\s+\S*$/, "").trim();

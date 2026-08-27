@@ -329,18 +329,44 @@ export function classifyOrganizationEntity(
   // allowed to count elsewhere as one signal among several.
   let officialPathSignal = false;
   try {
-    officialPathSignal = /\/products?|\/pricing|\/solutions?|\/features?|\/newsroom|\/press-releases?/i.test(
-      new URL(input.url || "").pathname
-    );
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+    // quality failure): the original path list is entirely SaaS-site-
+    // shaped (/products, /pricing, /solutions, /features are software
+    // marketing-site conventions). A traditional services company
+    // (a real-estate brokerage, a consultancy, a logistics provider)
+    // essentially never has a "/pricing" page, so its own official
+    // site could never clear this bar -- an ordinary about/investor-
+    // relations page is the services-industry equivalent of a SaaS
+    // site's product/pricing page, and is added here as the same kind
+    // of affirmative, industry-agnostic signal, not a CRE-specific one.
+    const pathname = new URL(input.url || "").pathname;
+    officialPathSignal =
+      /\/products?|\/pricing|\/solutions?|\/features?|\/newsroom|\/press-releases?/i.test(pathname) ||
+      // The 4 new segments are anchored to a full path SEGMENT (bounded
+      // by "/" or end-of-string on both sides) -- confirmed live: an
+      // unanchored "/about" substring-matched inside "/about-dsv/press/
+      // news/..." (DSV's own "About DSV" section used here only as a
+      // parent path for an unrelated press release), incorrectly
+      // treating a customer's press coverage as if it were the
+      // company's own official profile page.
+      /\/(?:about(?:-us)?|company|who-we-are|investor-relations?|investors?)(?:\/|$)/i.test(pathname);
   } catch {
     officialPathSignal = false;
   }
+  // P0 PRODUCTION FIX -- confirmed live: a stock-ticker adjacency
+  // ("CBRE Group, Inc. (NYSE:CBRE)") is an industry-agnostic, hard-to-
+  // fake signal that the subject is a real, substantial, publicly
+  // traded operating company -- as strong a signal as "software
+  // vendor" is for a SaaS company, applicable to any industry, not
+  // specific to any one company or market.
+  const tickerSignal = /\((?:NYSE|NASDAQ|NYSE American|LSE|TSX|ASX)\s*:\s*[A-Z]{1,6}\)/.test(text);
   if (
     hostname &&
     (matches(text, /\b(?:company website|product page|pricing page|commercial software|software vendor)\b/i) ||
-      officialPathSignal)
+      officialPathSignal ||
+      tickerSignal)
   ) {
-    return { entityType: "commercial_vendor", confidence: 82, reason: "Validated company-owned product, pricing, or newsroom/press-release source." };
+    return { entityType: "commercial_vendor", confidence: 82, reason: "Validated company-owned product, pricing, about/investor, or newsroom/press-release source." };
   }
   return { entityType: "unknown", confidence: 35, reason: "Insufficient evidence to assign a commercial or institutional role." };
 }
@@ -366,4 +392,42 @@ export function isCommercialVendorEntity(entity: {
   entityType: OrganizationEntityType;
 }) {
   return entity.entityType === "commercial_vendor";
+}
+
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+// quality failure): domain-research.ts's scoreResearchEvidence and
+// market-research-coverage.ts's classifyMarketEvidenceSource each had
+// their OWN narrow, domain-suffix-only or keyword-only authority
+// classifier, with no recognition of named market-research publishers
+// (IBISWorld, Grand View Research, Statista, Mordor Intelligence, ...)
+// or the generic "market research firm"/"industry research provider"
+// role phrases -- even though classifyOrganizationEntity above already
+// recognizes exactly this class of source (entityType "research_provider"),
+// just for a DIFFERENT purpose (excluding it from the competitor table).
+// A citation from a real market-research publisher was scoring LOWER
+// than a random blog for market-sizing purposes purely because that
+// recognition never reached the authority-scoring call sites. This is
+// the single shared answer to "is this evidence item's source
+// authoritative for market-sizing/industry-structure claims" that both
+// call sites now use, so the two systems can never diverge again.
+const authoritativeMarketEvidenceEntityTypes = new Set<OrganizationEntityType>([
+  "government",
+  "regulator",
+  "standards_body",
+  "research_provider",
+  "analyst_firm",
+  "consultancy",
+  "academic",
+]);
+
+export function isAuthoritativeMarketEvidenceSource(
+  item: Pick<DomainResearchEvidence, "publisher" | "url" | "sourceType" | "sourceTitle" | "field">
+): boolean {
+  const classification = classifyOrganizationEntity({
+    name: item.publisher,
+    url: item.url,
+    sourceType: item.sourceType,
+    context: `${item.sourceTitle} ${item.field}`,
+  });
+  return authoritativeMarketEvidenceEntityTypes.has(classification.entityType);
 }

@@ -1082,8 +1082,22 @@ export function stripLeadingTakeawaySentence(content: string, takeaway: string):
     return raw;
   }
 
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+  // quality failure): takeaway comes from getSectionTakeaway, which
+  // strips markdown (including "**" bold markers) via its own internal
+  // stripMarkdown call before this function ever sees it. Candidate
+  // text here was normalized only by normalizeReportPresentationText,
+  // which does NOT strip markdown -- so a bold-led lead sentence
+  // ("**Integration-first bundling:** Vendors are bundling...") kept
+  // its "**" on the candidate side while the takeaway had none,
+  // guaranteeing a mismatch and silently preserving the exact
+  // duplicate this function exists to remove. stripMarkdown is applied
+  // to the candidate here so both sides are normalized the same way,
+  // regardless of which markdown the model happened to use.
   const isDuplicateOfTakeaway = (candidate: string) => {
-    const normalizedCandidate = normalizeReportPresentationText(candidate).trim().toLocaleLowerCase();
+    const normalizedCandidate = stripMarkdown(normalizeReportPresentationText(candidate))
+      .trim()
+      .toLocaleLowerCase();
     if (!normalizedCandidate) return false;
     return (
       normalizedCandidate === normalizedTakeaway ||

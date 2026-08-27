@@ -179,6 +179,17 @@ const genericMentionStopWords = new Set([
   "services", "review", "reviews", "customer", "customers", "leading", "top",
   "best", "alternative", "alternatives", "competitor", "competitors", "pricing",
   "official", "directory", "association", "google", "capterra", "gartner", "g2",
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+  // quality failure): a bare corporate-suffix fragment ("Inc.") gets
+  // isolated as its own "candidate" whenever a name-adjacent pattern's
+  // capture stops at a comma before the real name -- e.g. "CBRE Group,
+  // Inc. reported 2024 revenue of..." matches only "Inc." immediately
+  // before "reported", since the comma breaks the capture from spanning
+  // back to "CBRE". A bare suffix is never itself a real company name,
+  // regardless of which pattern or which company produced it, so this
+  // is a generic filter fix, not specific to any one report.
+  "inc", "inc.", "corp", "corp.", "ltd", "ltd.", "llc", "llc.", "plc", "plc.",
+  "co", "co.", "gmbh", "s.a.", "s.a", "n.v.", "n.v", "s.p.a.", "s.p.a",
 ]);
 
 export function hostnameOf(value: string) {
@@ -253,7 +264,7 @@ function isThinDomainOnlyEvidence(item: DomainResearchEvidence, domain: string) 
 // "Quickcarwash"). Imperfect capitalization (no attempt at multi-word
 // splitting within the label) is an acceptable trade-off: the alternative
 // is the vendor never being discovered at all.
-function deriveCandidateNameFromDomain(domain: string): string | null {
+export function deriveCandidateNameFromDomain(domain: string): string | null {
   const withoutSuffix = domain.replace(domainSuffixPattern, "");
   const label = withoutSuffix.split(".").pop() || "";
   const cleaned = label.replace(/[-_]+/g, " ").trim();
@@ -342,10 +353,38 @@ function normalizedMentionCandidate(value: string, taxonomyWords: ReadonlySet<st
   return trimmed;
 }
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+// quality failure): every pattern above requires a SaaS-marketing-
+// copy-shaped verb ("offers"/"provides"/"is a leading") immediately
+// adjacent to the candidate name -- real evidence about who leads a
+// mature, non-software market almost never reads that way. It reads
+// like ranking/revenue framing ("CBRE reported 2024 revenue of $35.8
+// billion, the largest among commercial real estate services firms.",
+// "JLL ranked #2 by revenue.") or a self-description of scale ("CBRE
+// Group, Inc. is the world's largest commercial real estate services
+// and investment firm."), none of which any prior pattern could match
+// -- so real, well-known market leaders in services industries were
+// never even extracted as candidates, before any classification or
+// validation step ever ran. These patterns are industry-agnostic
+// (ranking/revenue/scale framing, not any named company or vertical),
+// so this generalizes to any market, not just the one that surfaced it.
 const mentionPatterns = [
   /\b([A-Z][A-Za-z0-9&.+'-]{1,28}(?:\s+[A-Z][A-Za-z0-9&.+'-]{1,28}){0,2})\s+(?:offers|provides|delivers|specializes in|is an AI-powered|is a leading|is a cloud-based)/g,
   /\b[Aa]lternatives?\s+[Tt]o\s+([A-Z][A-Za-z0-9&.+'-]{1,28}(?:\s+[A-Z][A-Za-z0-9&.+'-]{1,28}){0,2})/g,
   /\b([A-Z][A-Za-z0-9&.+'-]{1,28}(?:\s+[A-Z][A-Za-z0-9&.+'-]{1,28}){0,2})\s+(?:pricing|Pricing|reviews?|Reviews?|vs\.?|Vs\.?)\b/g,
+  // These four use a character class WITHOUT a period (unlike the
+  // patterns above) -- confirmed live: a period-terminated name at the
+  // end of one evidence field ("...and Newmark.") immediately followed
+  // by another field's own text starting with a capitalized word (this
+  // system joins claim/value/sourceTitle into one string with a single
+  // space) let the "additional word in the same name" continuation
+  // silently absorb that NEXT field's leading word as if it were part
+  // of the company name. A period is always a hard boundary for these
+  // four patterns instead.
+  /\b([A-Z][A-Za-z0-9&'-]{1,28}(?:\s+(?:&\s+)?[A-Z][A-Za-z0-9&'-]{1,28}){0,2})\s+(?:reported|posted|generated|recorded)\s+(?:[\d.,]+\s+)?(?:[A-Za-z]+\s+)?(?:revenue|sales|earnings) of/g,
+  /\b([A-Z][A-Za-z0-9&'-]{1,28}(?:\s+(?:&\s+)?[A-Z][A-Za-z0-9&'-]{1,28}){0,2})\s+(?:is|remains|ranks?)\s+(?:the\s+|among the\s+)?(?:world'?s?\s+|nation'?s?\s+)?(?:largest|leading|top-ranked|market leader|#\s?1)/g,
+  /\b([A-Z][A-Za-z0-9&'-]{1,28}(?:\s+(?:&\s+)?[A-Z][A-Za-z0-9&'-]{1,28}){0,2})\s+(?:holds?|commands?|has)\s+(?:a|an)?\s*\d+(?:\.\d+)?%\s+(?:of the\s+)?(?:market\s+)?share/g,
+  /\b([A-Z][A-Za-z0-9&'-]{1,28}(?:\s+(?:&\s+)?[A-Z][A-Za-z0-9&'-]{1,28}){0,2})\s+ranked\s+#?\d+/g,
   // Turkish equivalents of the same prose-mention shape above. Confirmed
   // live (Türkiye car-wash market run): evidence text explicitly named
   // real brands in Turkish sentence structure -- "ISTOBAL mümessili",
@@ -366,12 +405,57 @@ const mentionPatterns = [
   /\b(?:alternatifleri|rakipleri)\s+(?:olarak\s+)?([A-Z][A-Za-z0-9&.+'-]{1,28}(?:\s+[A-Z][A-Za-z0-9&.+'-]{1,28}){0,2})/g,
 ];
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+// quality failure): real evidence about who leads a market very
+// commonly names several companies at once as a plain enumeration --
+// "the leading commercial real estate services firms are CBRE, JLL,
+// Cushman & Wakefield, Colliers, and Newmark" -- which none of the
+// single-name mentionPatterns above can match (they all anchor on one
+// candidate immediately adjacent to a verb, not a list). This captures
+// the enumerated span as one match, then splits it into individual
+// names -- industry-agnostic (the intro phrase names a role, "leading
+// firms"/"top providers"/"major companies", never a specific market),
+// so it generalizes rather than hardcoding any company.
+// The intro adjective and the role-noun are rarely adjacent in real
+// prose ("leading commercial real estate services firms", not "leading
+// firms") -- the bounded lowercase-word gap accounts for the category
+// name sitting between them. Each list item also allows an internal
+// "& " connector (own company name, e.g. "Cushman & Wakefield",
+// "Procter & Gamble") so a single "&"-named company doesn't break the
+// whole enumeration match at that point.
+const enumerationMentionPattern =
+  /\b(?:leading|top|major|largest|primary|key|dominant)\s+(?:[a-z][a-z-]{2,20}\s+){0,4}(?:firms?|companies|providers?|players?|vendors?|brands?|competitors?|operators?)\s+(?:are|include[s]?|including|such as)\s+((?:[A-Z][A-Za-z0-9&'-]{1,28}(?:\s+(?:&\s+)?[A-Z][A-Za-z0-9&'-]{1,28}){0,2})(?:\s*,\s*(?:and\s+)?(?:[A-Z][A-Za-z0-9&'-]{1,28}(?:\s+(?:&\s+)?[A-Z][A-Za-z0-9&'-]{1,28}){0,2})){1,6})/g;
+
+function extractEnumeratedMentions(text: string): string[] {
+  const names: string[] = [];
+  enumerationMentionPattern.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = enumerationMentionPattern.exec(text))) {
+    const items = match[1]
+      .split(/\s*,\s*(?:and\s+)?|\s+and\s+/)
+      .map((item) => item.replace(/[.,;:]+$/, "").trim())
+      .filter(Boolean);
+    names.push(...items);
+  }
+  return names;
+}
+
 function extractHeuristicMentions(
   text: string,
   taxonomyWords: ReadonlySet<string>,
-  cap = 4
+  // P0 PRODUCTION FIX -- confirmed live: a legitimate market-leadership
+  // enumeration ("the top firms are A, B, C, D, and E") routinely names
+  // 5 real companies in one sentence; the previous cap of 4 silently
+  // dropped the last one even when every name came from the SAME
+  // single, well-evidenced enumeration match.
+  cap = 6
 ) {
   const found: string[] = [];
+  for (const enumerated of extractEnumeratedMentions(text)) {
+    if (found.length >= cap) break;
+    const candidate = normalizedMentionCandidate(enumerated, taxonomyWords);
+    if (candidate) found.push(candidate);
+  }
   for (const pattern of mentionPatterns) {
     pattern.lastIndex = 0;
     let match: RegExpExecArray | null;

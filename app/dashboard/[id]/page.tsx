@@ -40,6 +40,7 @@ import {
   readFounderReadinessMetricValue,
   readFounderReadinessScoreValue,
   resolveCagrHeadlinePresentation,
+  stripLeadingTakeawaySentence,
 } from "@/app/lib/report-presentation";
 import type {
   ReportBenchmarkFit,
@@ -2447,9 +2448,27 @@ function ReportSectionVisual({
     normalizedTitle.includes("industry trend") ||
     normalizedTitle.includes("market segmentation")
   ) {
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+    // quality failure): this card was the ONE place in the web
+    // dashboard that never received the earlier PDF fix
+    // (stripLeadingTakeawaySentence, wired into ReportPdfButton.tsx's
+    // sectionBodyContent). extractSectionMainExplanation already
+    // excludes bulleted lines from its OWN sentence pool and correctly
+    // skips the content's first SENTENCE by index when a takeaway
+    // exists (see its own comment -- left completely untouched here,
+    // still fed the original `content`) -- but extractRealBulletLines
+    // has no dedup awareness at all, so a numbered/bulleted first item
+    // (the exact reported production shape, "1) Integration-first
+    // add-on products...") rendered once as the Key Takeaway and again
+    // as the FIRST bullet in the list underneath it. Only the bullets
+    // extractor is given the takeaway-stripped content; feeding it to
+    // extractSectionMainExplanation too would double-skip a sentence
+    // (its own index-1 skip, on top of the sentence stripping already
+    // having removed index 0) and silently drop real prose.
     const takeaway = getSectionTakeaway(content);
+    const contentWithoutTakeawayDuplication = stripLeadingTakeawaySentence(content, takeaway);
     const explanation = extractSectionMainExplanation(content, takeaway);
-    const bullets = extractRealBulletLines(content);
+    const bullets = extractRealBulletLines(contentWithoutTakeawayDuplication);
 
     if (!takeaway && !explanation && bullets.length === 0) {
       return (

@@ -79,7 +79,10 @@ import {
   evaluateAggregateResearchEvidence,
   researchEvidenceThresholds,
 } from "./research-evidence-evaluation.ts";
-import { classifyOrganizationEntity } from "./commercial-vendor-intelligence.ts";
+import {
+  classifyOrganizationEntity,
+  isAuthoritativeMarketEvidenceSource,
+} from "./commercial-vendor-intelligence.ts";
 import { generateMarketResearchQueryExpansions } from "./market-query-expansion.ts";
 
 type ProviderResearchEvidence = {
@@ -1450,11 +1453,30 @@ export function scoreResearchEvidence(
     geographicMatch: boolean;
   }
 ) {
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+  // quality failure): this score was keyed on the LITERAL stage id
+  // string, but businessResearchSourceStages above repurposes the
+  // "official_government" id's actual GUIDANCE to mean "industry and
+  // market research sources" for business/Market Intelligence reports
+  // -- the model is explicitly told to search IBISWorld/Grand View
+  // Research/Statista/trade associations there, in the FIRST stage.
+  // Since those publishers are never authorityLevel:"primary" (not
+  // .gov) and isAuthoritativeInstitutionalSource only recognizes
+  // .edu/.gov/.ac.uk/.int, a genuine market-research citation found
+  // exactly where instructed fell into the else-branch (16) -- the
+  // LOWEST of all four possible scores, lower even than a random
+  // "regional_local" result. isAuthoritativeMarketEvidenceSource
+  // (shared with market-research-coverage.ts's classifyMarketEvidenceSource
+  // so the two authority signals can never diverge) recognizes named
+  // market-research publishers, industry associations, standards
+  // bodies, analyst firms, and consultancies regardless of which stage
+  // found them.
   const authorityScore =
     item.authorityLevel === "primary"
       ? 35
-      : stage === "authoritative_public" &&
-          isAuthoritativeInstitutionalSource(item.url)
+      : (stage === "authoritative_public" &&
+          isAuthoritativeInstitutionalSource(item.url)) ||
+          isAuthoritativeMarketEvidenceSource(item)
         ? 27
         : stage === "commercial_market"
           ? 19

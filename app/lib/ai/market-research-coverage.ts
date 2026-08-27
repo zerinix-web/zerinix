@@ -3,6 +3,7 @@ import type {
   DomainResearchBundle,
   DomainResearchEvidence,
 } from "@/app/lib/ai/domain-research";
+import { isAuthoritativeMarketEvidenceSource } from "@/app/lib/ai/commercial-vendor-intelligence";
 
 export type MarketSourceClass =
   | "government_statistics"
@@ -146,11 +147,28 @@ export function classifyMarketEvidenceSource(
   if (/\b(?:association|institute|foundation|council|alliance|society|professional[ _]standard)\b/.test(identity)) {
     return "industry_association";
   }
-  if (/\b(?:market[ _]research|industry[ _]report|market[ _]data|research[ _]report|forecast)\b/.test(identity)) {
+  if (/\b(?:market[ _]research|industry[ _]report|market[ _]data|research[ _]report|forecasts?(?:ing)?)\b/.test(identity)) {
     return "market_research";
   }
   if (/\b(?:news|journal|review|times|reuters|bloomberg|forbes|technology|financial publication)\b/.test(identity)) {
     return "credible_publication";
+  }
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+  // quality failure): every branch above is a brittle, domain-suffix-
+  // or literal-keyword match with no recognition of named market-
+  // research publishers (IBISWorld, Grand View Research, Statista,
+  // Mordor Intelligence, ...) or industry associations/analyst firms
+  // that don't happen to contain one of the exact tokens above in their
+  // title/publisher string -- e.g. "grandviewresearch.com" doesn't
+  // contain the literal token "market" immediately before "research",
+  // so it fell through every branch into "other" (the lowest rank),
+  // demoting a genuine market-research citation below a random blog.
+  // isAuthoritativeMarketEvidenceSource reuses the same classifier
+  // domain-research.ts's scoreResearchEvidence now uses, so a
+  // publisher can never be treated as high-authority in one signal and
+  // low-authority in the other.
+  if (isAuthoritativeMarketEvidenceSource(item)) {
+    return "market_research";
   }
   return "other";
 }

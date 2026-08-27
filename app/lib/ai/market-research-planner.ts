@@ -37,13 +37,47 @@ export type MarketResearchPlanInput = {
   queryExpansions?: MarketQueryExpansions;
 };
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+// quality failure, verified by executing this exact logic): every call
+// site below follows the same shape -- variable-length context/category
+// terms first, then a fixed, hand-written phrase LAST that actually
+// states the research intent ("market size CAGR methodology geography
+// year analyst report", "named competitors brands manufacturers
+// distributors", "competitor annual report investor filing market
+// position", ...). The previous implementation sliced the WHOLE joined
+// string to 220 chars from the front, so a long context/category prefix
+// (the taxonomy OR-chain can alone exceed 250 chars) silently ate the
+// entire budget and truncated away that final, most-important phrase --
+// meaning the query sent to the search provider never actually asked
+// for market size, CAGR, or competitor data, even with a clean category
+// name. The final part is now always preserved in full; only the
+// earlier, variable-length parts are truncated to fit what budget
+// remains, so the query's actual intent can never be silently dropped.
 function joinQuery(...parts: Array<string | undefined>) {
-  return parts
+  const maxLength = 220;
+  const cleaned = parts
+    .filter((part): part is string => Boolean(part && part.trim()))
+    .map((part) => part.trim());
+
+  if (cleaned.length === 0) {
+    return "";
+  }
+
+  const criticalSuffix = cleaned[cleaned.length - 1];
+  const variableParts = cleaned.slice(0, -1);
+  const variableJoined = variableParts.join(" ").replace(/\s+/g, " ").trim();
+  const budgetForVariableParts = Math.max(0, maxLength - criticalSuffix.length - 1);
+  const truncatedVariable =
+    variableJoined.length <= budgetForVariableParts
+      ? variableJoined
+      : variableJoined.slice(0, budgetForVariableParts).replace(/\s+\S*$/, "").trim();
+
+  return [truncatedVariable, criticalSuffix]
     .filter(Boolean)
     .join(" ")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 220);
+    .slice(0, maxLength);
 }
 
 function entityContext(facts: readonly ExtractedFact[]) {

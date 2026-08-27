@@ -123,7 +123,21 @@ test("CASE B (the reported production defect, reproduced): a blended score that 
   });
   assert.equal(gated.decision, "MONITOR", "a strong ENTER must never be produced while market sizing remains unresolved at the graph level");
   assert.equal(gated.evidenceGapBlocksStrongDecision, true);
-  assert.equal(gated.confidence, blendedOnly.confidence, "confidence itself must remain the same traceable number -- this fix gates the decision, it does not clamp or reweight the score");
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+  // quality failure): a SEPARATE real production report proved that
+  // gating only the decision LABEL is not enough on its own -- it read
+  // "MONITOR: 63%" while Market Size, CAGR, TAM/SAM/SOM, and the
+  // competitor table were ALL "Validation Needed", which still reads as
+  // reasonably confident despite missing most of the core evidence.
+  // Confidence is now capped (not reweighted or clamped for the
+  // GENERAL case -- only in this specific, narrow evidence-gap state)
+  // to a ceiling that scales with how much decision-critical evidence
+  // is actually missing: <=50 when exactly one of the two pillars is
+  // unresolved (this case), <=30 when both are. It must still be
+  // strictly lower than the raw blend whenever a gap exists, and must
+  // never exceed the moderate-gap ceiling.
+  assert.ok(gated.confidence < blendedOnly.confidence, "confidence must be reduced, not left at the same misleadingly-high number, when a decision-critical pillar is unresolved");
+  assert.ok(gated.confidence <= 50, "one unresolved pillar must cap confidence at the moderate ceiling");
 });
 
 // --- CASE C: strong negative evidence + sufficient completeness ------------
@@ -309,14 +323,33 @@ test("route.ts: both assessMarketEntryConfidence call sites (the post-generation
   );
 });
 
-test("DRIFT CHECK: the weighted-blend formula and its ENTER/MONITOR/AVOID thresholds are byte-identical to before this fix -- the root-cause repair is a decision GATE, never a reweighted or clamped confidence number", () => {
+test("DRIFT CHECK: the weighted-blend formula and its ENTER/MONITOR/AVOID thresholds are byte-identical to before this fix -- the decision LABEL logic is still a pure gate, never reweighted", () => {
   assert.match(
     presentationSource,
     /marketConfidence \* 0\.4 \+\s*\n\s*competitiveEvidence \* 0\.25 \+\s*\n\s*financialEvidence \* 0\.2 \+\s*\n\s*productEvidence \* 0\.15/
   );
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+  // quality failure): blendedDecision is now explicitly computed from
+  // rawConfidence (the UNCAPPED blend), not the possibly-capped
+  // `confidence` this test previously pinned by name -- this is
+  // deliberate: it guarantees the label-gating logic (this exact
+  // ternary, thresholds unchanged) can never be affected by the
+  // separate confidence-number cap added below it.
   assert.match(
     presentationSource,
-    /confidence >= 65 \? "ENTER" : confidence >= 40 \? "MONITOR" : "AVOID"/
+    /rawConfidence >= 65 \? "ENTER" : rawConfidence >= 40 \? "MONITOR" : "AVOID"/
+  );
+});
+
+test("DRIFT CHECK: confidence is capped ONLY in the two narrow evidence-gap states, and only after blendedDecision/evidenceGapBlocksStrongDecision have already been computed from the raw, uncapped score -- the cap can never influence which decision branch is chosen", () => {
+  assert.match(presentationSource, /function capConfidenceForEvidenceGap\(/);
+  const blendedDecisionIndex = presentationSource.indexOf("const blendedDecision: MarketEntryDecision =");
+  const evidenceGapIndex = presentationSource.indexOf("const evidenceGapBlocksStrongDecision =");
+  const confidenceCapIndex = presentationSource.indexOf("const confidence = capConfidenceForEvidenceGap(");
+  assert.ok(blendedDecisionIndex > -1 && evidenceGapIndex > -1 && confidenceCapIndex > -1);
+  assert.ok(
+    blendedDecisionIndex < confidenceCapIndex && evidenceGapIndex < confidenceCapIndex,
+    "the decision/gate must be computed BEFORE the confidence cap is applied, so the cap can never feed back into which decision is chosen"
   );
 });
 

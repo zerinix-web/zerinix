@@ -161,9 +161,14 @@ test("insufficient evidence -> MONITOR/neutral where a decision must still be di
 });
 
 test("assessMarketEntryConfidence never manufactures ENTER or AVOID as a false-precision middle ground -- MONITOR is the deliberate default band between the two directional thresholds", () => {
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+  // quality failure): this threshold ternary now reads from
+  // rawConfidence (the uncapped blend), not `confidence` -- the
+  // thresholds (65/40) and the ENTER/MONITOR/AVOID band structure this
+  // test protects are otherwise unchanged.
   assert.match(
     presentationSource,
-    /confidence >= 65 \? "ENTER" : confidence >= 40 \? "MONITOR" : "AVOID"/
+    /rawConfidence >= 65 \? "ENTER" : rawConfidence >= 40 \? "MONITOR" : "AVOID"/
   );
 });
 

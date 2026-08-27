@@ -17,9 +17,12 @@ import {
   classifyMajorPlayerLabel,
   computeVendorDiscoveryScores,
   extractVendorCandidateMentions,
+  deriveCandidateNameFromDomain,
+  hostnameOf,
   isImplausibleCompetitorName,
   isOfficialVendorEvidence,
   isQualifyingVendorEvidence,
+  normalizeVendorKey,
   resolveVendorIdentity,
   validateVendorCandidate,
   type MajorPlayerLabel,
@@ -378,6 +381,45 @@ const nonVendorInstitutionalTypes = new Set([
   "channel_partner",
 ]);
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+// quality failure), verified by direct instrumentation: candidate.sourceUrls[0]
+// is simply the FIRST url among the evidence that happened to MENTION
+// this candidate's name -- for a candidate discovered inside a third-
+// party market-research report (e.g. IBISWorld's report enumerating
+// "CBRE, JLL, ..."), that url is IBISWorld's own domain, not the named
+// company's. Passing it straight through to classifyOrganizationEntity
+// as "this candidate's url" let the PUBLISHER's own domain (a known
+// research-publisher hostname) get misread as the CANDIDATE's own
+// hostname, misclassifying CBRE/JLL/etc. themselves as "research_provider"
+// and discarding them before validateVendorCandidate or
+// assessMarketRelevance ever ran. A url is only passed through when its
+// hostname plausibly belongs to the candidate itself (a substring match
+// against the candidate's own normalized name, the same normalization
+// resolveVendorIdentity already uses for merging) -- otherwise
+// classification correctly falls back to text-only signals rather than
+// misattributing a third party's domain.
+function urlPlausiblyBelongsToCandidate(url: string, canonicalName: string): boolean {
+  // Reuses deriveCandidateNameFromDomain -- the EXACT same function that
+  // names a domain-fallback candidate in the first place (vendor-
+  // discovery.ts) -- rather than an independently-written domain-parsing
+  // rule. Confirmed live: an earlier, independent implementation here
+  // took the hostname's FIRST label ("vendor-a" from
+  // "vendor-a.example.com"), while deriveCandidateNameFromDomain
+  // (correctly) takes the label before the public suffix ("example"),
+  // treating "vendor-a" as a subdomain -- the mismatch meant a
+  // genuinely domain-owned candidate could never match its own url.
+  // Reusing the real function guarantees this check can never drift
+  // from how domain-fallback candidates are actually named.
+  const domain = hostnameOf(url);
+  if (!domain) return false;
+  const derivedName = deriveCandidateNameFromDomain(domain);
+  if (!derivedName) return false;
+  const normalizedDerived = normalizeVendorKey(derivedName).replace(/\s+/g, "");
+  const normalizedCandidate = normalizeVendorKey(canonicalName).replace(/\s+/g, "");
+  if (!normalizedDerived || !normalizedCandidate) return false;
+  return normalizedDerived === normalizedCandidate;
+}
+
 export function buildVendorIntelligenceGraph(
   evidence: readonly DomainResearchEvidence[],
   prompt: string
@@ -416,6 +458,30 @@ export function buildVendorIntelligenceGraph(
 
       const qualifyingItems = allItems.filter(isQualifyingVendorEvidence);
       const evidenceTextJoined = allItems.map(evidenceText).join(" ");
+      // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+      // quality failure), verified by direct instrumentation: evidenceText()
+      // (used for evidenceTextJoined above, correctly, for
+      // assessMarketRelevance's broader relevance check below) includes
+      // each item's own `publisher` field -- appropriate when asking
+      // "does this text describe a research/analyst organization" about
+      // the PUBLISHER itself (classifyEvidencePublisher, used elsewhere),
+      // but wrong here: this call classifies the CANDIDATE named in the
+      // evidence, not who published it. A real market-research report
+      // enumerating several companies by name ("IBISWorld reports the
+      // leading commercial real estate services firms are CBRE, JLL,
+      // ...") put the publisher "IBISWorld" into every one of those
+      // candidates' own classification text, and classifyOrganizationEntity's
+      // exact-brand-name research-publisher check then matched the
+      // PUBLISHER's name and misclassified CBRE/JLL/etc. themselves as
+      // "research_provider" -- discarding real, evidence-backed
+      // competitors before validateVendorCandidate or
+      // assessMarketRelevance ever got a chance to evaluate them. Only
+      // claim/value/sourceTitle (what the evidence actually SAYS) is used
+      // here; publisher/url/sourceType/supportingData (which describe the
+      // SOURCE, not the subject) are deliberately excluded.
+      const candidateDescriptionText = allItems
+        .flatMap((item) => [item.claim, item.value, item.sourceTitle])
+        .join(" ");
 
       // Curated taxonomy matches are trusted as commercial by construction
       // (matching prior behavior); everything else runs the full
@@ -428,11 +494,14 @@ export function buildVendorIntelligenceGraph(
             reason: "Matched to the market taxonomy's commercial vendor catalog.",
           }
         : (() => {
+            const candidateOwnUrl = candidate.sourceUrls.find((url) =>
+              urlPlausiblyBelongsToCandidate(url, candidate.canonicalName)
+            );
             const classification = classifyOrganizationEntity({
               name: candidate.canonicalName,
-              url: candidate.sourceUrls[0] || "",
+              url: candidateOwnUrl || "",
               sourceType: allItems[0].sourceType,
-              context: evidenceTextJoined,
+              context: candidateDescriptionText,
               knownCommercialVendor: false,
             });
             // P0 FIX #8 -- confirmed live (Competitive Landscape data-flow

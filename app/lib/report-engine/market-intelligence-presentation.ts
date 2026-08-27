@@ -103,24 +103,70 @@ function hasDecisionCriticalEvidenceGap(state: DecisionCriticalEvidenceState): b
 // itself is left untouched -- it remains the same traceable, transparent
 // number every caller already renders and reasons about; only the
 // DIRECTIONAL claim built on top of it is gated.
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+// quality failure): the comment above explains why confidence was
+// deliberately left untouched when this gate was first built -- and
+// that reasoning (don't paper over the compensatory-averaging bug with
+// an arbitrary reweight) is still correct for the general case. But a
+// SEPARATE, real production report proved leaving the NUMBER completely
+// untouched is its own defect: it read "MONITOR: 63%" while Market
+// Size, CAGR, TAM/SAM/SOM, AND the competitor table were ALL
+// "Validation Needed" -- the label was correctly gated, but 63% still
+// reads as "reasonably confident," directly contradicting the report's
+// own prose a few lines away describing what evidence is missing. This
+// does not reweight or clamp the blend for the general case (that
+// concern still holds) -- it caps the NUMBER only in the two specific,
+// narrow states where the report's own decision-critical fields are
+// unresolved, exactly mirroring the label gate's own scope: severity
+// scales with how much critical evidence is actually missing, never an
+// arbitrary flat penalty.
+function capConfidenceForEvidenceGap(
+  confidence: number,
+  decisionCriticalEvidence?: DecisionCriticalEvidenceState
+): number {
+  if (!decisionCriticalEvidence) {
+    return confidence;
+  }
+  const { marketSizingResolved, competitiveEvidenceResolved } = decisionCriticalEvidence;
+  if (!marketSizingResolved && !competitiveEvidenceResolved) {
+    // Neither of the two decision-critical pillars resolved -- the
+    // exact reported case (no defensible market size/CAGR/TAM-SAM-SOM
+    // AND no validated competitor). A confidence number this low can
+    // never read as "reasonably confident."
+    return Math.min(confidence, 30);
+  }
+  if (!marketSizingResolved || !competitiveEvidenceResolved) {
+    // Exactly one pillar unresolved -- real evidence exists for half
+    // of what a market-entry decision needs, so a moderate (not
+    // severe) cap, still comfortably below the ENTER threshold.
+    return Math.min(confidence, 50);
+  }
+  return confidence;
+}
+
 export function assessMarketEntryConfidence(
   coverage: MarketResearchCoverage,
   decisionCriticalEvidence?: DecisionCriticalEvidenceState
 ) {
   const { marketConfidence, competitiveEvidence, financialEvidence, productEvidence } =
     coverage.dimensions;
-  const confidence = Math.round(
+  const rawConfidence = Math.round(
     marketConfidence * 0.4 +
       competitiveEvidence * 0.25 +
       financialEvidence * 0.2 +
       productEvidence * 0.15
   );
+  // blendedDecision is computed from the RAW, uncapped score -- this
+  // preserves the exact pre-existing decision-label logic and its own
+  // ENTER/AVOID gating below completely unchanged; the cap only affects
+  // the NUMBER ultimately returned, never which branch this decides.
   const blendedDecision: MarketEntryDecision =
-    confidence >= 65 ? "ENTER" : confidence >= 40 ? "MONITOR" : "AVOID";
+    rawConfidence >= 65 ? "ENTER" : rawConfidence >= 40 ? "MONITOR" : "AVOID";
   const evidenceGapBlocksStrongDecision =
     blendedDecision !== "MONITOR" &&
     Boolean(decisionCriticalEvidence) &&
     hasDecisionCriticalEvidenceGap(decisionCriticalEvidence as DecisionCriticalEvidenceState);
+  const confidence = capConfidenceForEvidenceGap(rawConfidence, decisionCriticalEvidence);
 
   return {
     confidence,
@@ -518,12 +564,24 @@ export function buildMarketExecutiveSummary(
 // Market Intelligence's dedicated entry-recommendation generator. Answers
 // exactly: should this market be entered, why, where, when, and how -- it
 // must never evaluate a founder, team, or execution capability.
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+// quality failure): this previously called assessMarketEntryConfidence
+// with no decisionCriticalEvidence, so this section's own ENTER/AVOID
+// framing was computed from the raw, ungated blend alone -- meaning it
+// could render "Why This Market Entry Makes Sense" here while the main
+// executive decision banner (buildMarketExecutiveDecisionBrief, which
+// already receives decisionCriticalEvidence) correctly showed MONITOR
+// a few lines earlier in the same report. Threading the same evidence
+// state through here means no report surface can ever disagree with
+// the gated executive banner about whether the evidence actually
+// supports a strong ENTER or AVOID call.
 export function buildMarketEntryRecommendation(
   sections: MarketSections,
   language: ResponseLanguage,
-  coverage: MarketResearchCoverage
+  coverage: MarketResearchCoverage,
+  decisionCriticalEvidence?: DecisionCriticalEvidenceState
 ) {
-  const { confidence, decision } = assessMarketEntryConfidence(coverage);
+  const { confidence, decision } = assessMarketEntryConfidence(coverage, decisionCriticalEvidence);
 
   // AVOID must never be presented through an entry-oriented Why/Where/
   // When/How frame -- that structure itself implies entry is the plan.

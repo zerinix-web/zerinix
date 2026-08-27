@@ -331,8 +331,11 @@ test("DRIFT CHECK: P0 FIX #1 (TAM/SAM/SOM), #2 (CAGR), #3 (Competitive Landscape
     presentationSource,
     /marketConfidence \* 0\.4 \+\s*\n\s*competitiveEvidence \* 0\.25 \+\s*\n\s*financialEvidence \* 0\.2 \+\s*\n\s*productEvidence \* 0\.15/
   );
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+  // quality failure): reads from rawConfidence (the uncapped blend)
+  // now, not `confidence` -- thresholds unchanged.
   assert.match(
     presentationSource,
-    /confidence >= 65 \? "ENTER" : confidence >= 40 \? "MONITOR" : "AVOID"/
+    /rawConfidence >= 65 \? "ENTER" : rawConfidence >= 40 \? "MONITOR" : "AVOID"/
   );
 });

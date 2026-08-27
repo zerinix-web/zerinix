@@ -1106,7 +1106,7 @@ function ensureMarketReportQuality(
     normalized.executiveSummary = formatExecutiveDecisionBrief(marketExecutiveDecisionBrief, language, "market");
 
     if (!normalized.strategicRecommendations.includes(marketEntryHeading)) {
-      normalized.strategicRecommendations = `${normalized.strategicRecommendations}\n\n${buildMarketEntryRecommendation(normalized, language, coverage)}`.trim();
+      normalized.strategicRecommendations = `${normalized.strategicRecommendations}\n\n${buildMarketEntryRecommendation(normalized, language, coverage, decisionCriticalEvidence)}`.trim();
     }
   }
 
