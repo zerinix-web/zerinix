@@ -194,6 +194,23 @@ export type MarketIntelligenceGraph = {
     confidenceScore: number;
     confidenceLevel: MarketConfidenceLevel;
   }>;
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+  // consistency hardening): determines, ONCE, with full access to the
+  // request prompt and the verified market-size evidence's own text,
+  // whether verifiedMarketSize[0] (the anchor figure used for the
+  // marketSize section) is scoped to a DIFFERENT named geography than
+  // the one actually requested (e.g. a "European market" figure
+  // surfacing for a "United States" request) -- reusing the SAME
+  // evidenceConflictsWithRequestedGeography check buildPlanningEstimate
+  // already relies on for its own evidence-admission decisions, so this
+  // can never diverge from that established rule. `null` covers BOTH
+  // "no verified market size exists" and "no conflict was detected"
+  // (including when neither the request nor the evidence names a
+  // specific geography at all -- silence is not a conflict). Populated
+  // here, at graph-build time, because downstream presentation/
+  // propagation logic (applySharedMarketGraph, route.ts) does not have
+  // access to the raw prompt or evidence array on its own.
+  verifiedMarketSizeGeographyConflict: string | null;
   planningEstimate: MarketPlanningEstimate | null;
   // Populated only when planningEstimate is null -- explains specifically
   // what evidence WAS found and what is still missing, so the report
@@ -1284,13 +1301,25 @@ export function buildMarketIntelligenceGraph(
       };
     });
 
-  const verifiedMarketSize = evidence
-    .filter(
-      (item) =>
-        isAuthoritativeObservedMarketSize(item) &&
-        /market.size|tam|sam|som|addressable.market/i.test(evidenceText(item)) &&
-        Boolean(extractMarketAmount(`${item.claim} ${item.value}`))
-    )
+  const verifiedMarketSizeItems = evidence.filter(
+    (item) =>
+      isAuthoritativeObservedMarketSize(item) &&
+      /market.size|tam|sam|som|addressable.market/i.test(evidenceText(item)) &&
+      Boolean(extractMarketAmount(`${item.claim} ${item.value}`))
+  );
+  // See verifiedMarketSizeGeographyConflict's own doc comment on the
+  // MarketIntelligenceGraph type -- computed once here, where both the
+  // request prompt and the anchor evidence's own text are in scope, and
+  // reused unchanged by downstream propagation logic that only has the
+  // graph to work with.
+  const verifiedMarketSizeGeographyConflict = (() => {
+    const anchor = verifiedMarketSizeItems[0];
+    if (!anchor) return null;
+    const requestedGeography = extractRequestedGeography(prompt);
+    if (!evidenceConflictsWithRequestedGeography(anchor, requestedGeography)) return null;
+    return extractRequestedGeography(evidenceText(anchor));
+  })();
+  const verifiedMarketSize = verifiedMarketSizeItems
     .map((item) => {
       const confidenceScore = calculateEvidenceConfidence(item);
       return {
@@ -1382,6 +1411,7 @@ export function buildMarketIntelligenceGraph(
     competitors: [...competitorMap.values()],
     pricingModels,
     verifiedMarketSize,
+    verifiedMarketSizeGeographyConflict,
     planningEstimate,
     sizingGap,
     adjacentBenchmarks,
@@ -1418,6 +1448,7 @@ type MarketGraphCopyKey =
   | "verifiedMarketSizeTitle"
   | "marketSizeBaselineLabel"
   | "marketSizeBaselineExplanation"
+  | "marketSizeBaselineGeographyConflictExplanation"
   | "planningEstimateTitle"
   | "formulaLabel"
   | "confidenceLabel"
@@ -1474,6 +1505,8 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     marketSizeBaselineLabel: "Market / Industry Baseline — Not Yet Validated as TAM for This Business",
     marketSizeBaselineExplanation:
       "This is a verified total for the broader industry or services category, not an automatically validated Total Addressable Market (TAM) for the specific business scope requested in this report. Promoting a broader baseline to TAM requires independently confirming that the requested geography, customer segment, and product/service definition are actually covered by this evidence. See TAM / SAM / SOM below for that determination.",
+    marketSizeBaselineGeographyConflictExplanation:
+      "This figure's own evidence is specifically scoped to {geography}, not the geography requested in this report -- it cannot be promoted to TAM here, since the requested market's own addressable size has not been independently verified. See TAM / SAM / SOM below for what evidence would resolve this.",
     // P0 FIX -- confirmed live (source/evidence integrity repair):
     // planningEstimateTitle/tamSamSomUnavailable/marketSizeUnavailable
     // deliberately say "confirmed", never "verified" -- these three
@@ -1557,6 +1590,8 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     marketSizeBaselineLabel: "Pazar / Sektör Temel Değeri — Bu İş İçin Henüz TAM Olarak Doğrulanmadı",
     marketSizeBaselineExplanation:
       "Bu rakam, daha geniş sektör veya hizmet kategorisi için doğrulanmış bir toplamdır; bu raporda talep edilen özel iş kapsamı için otomatik olarak doğrulanmış bir Toplam Adreslenebilir Pazar (TAM) değeri değildir. Daha geniş bir temel değerin TAM'a yükseltilmesi, talep edilen coğrafya, müşteri segmenti ve ürün/hizmet tanımının bu kanıt tarafından gerçekten kapsandığının bağımsız olarak doğrulanmasını gerektirir. Bu belirleme için aşağıdaki TAM / SAM / SOM bölümüne bakın.",
+    marketSizeBaselineGeographyConflictExplanation:
+      "Bu rakamın kendi kanıtı özellikle {geography} ile sınırlıdır, bu raporda talep edilen coğrafya ile değil -- talep edilen pazarın kendi adreslenebilir büyüklüğü bağımsız olarak doğrulanmadığından burada TAM'a yükseltilemez. Bunu çözecek kanıt için aşağıdaki TAM / SAM / SOM bölümüne bakın.",
     planningEstimateTitle: "Planlama Tahmini — dış kaynakla doğrulanmış pazar büyüklüğü değildir",
     formulaLabel: "Formül",
     confidenceLabel: "Güven",
@@ -1619,6 +1654,8 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     marketSizeBaselineLabel: "Markt-/Branchenbasiswert — Noch nicht als TAM für dieses Geschäft validiert",
     marketSizeBaselineExplanation:
       "Dies ist ein verifizierter Gesamtwert für die breitere Branche oder Dienstleistungskategorie, kein automatisch validierter Total Addressable Market (TAM) für den in diesem Bericht angeforderten spezifischen Geschäftsumfang. Die Hochstufung eines breiteren Basiswerts zu TAM erfordert die unabhängige Bestätigung, dass die angeforderte Geografie, das Kundensegment und die Produkt-/Dienstleistungsdefinition tatsächlich von diesem Nachweis abgedeckt werden. Siehe TAM / SAM / SOM unten für diese Feststellung.",
+    marketSizeBaselineGeographyConflictExplanation:
+      "Der Nachweis dieser Zahl ist speziell auf {geography} beschränkt, nicht auf die in diesem Bericht angeforderte Geografie -- sie kann hier nicht zu TAM hochgestuft werden, da die adressierbare Größe des angeforderten Marktes nicht unabhängig verifiziert wurde. Siehe TAM / SAM / SOM unten für die Nachweise, die dies klären würden.",
     planningEstimateTitle: "Planungsschätzung — keine extern verifizierte Marktgröße",
     formulaLabel: "Formel",
     confidenceLabel: "Konfidenz",
@@ -1681,6 +1718,8 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     marketSizeBaselineLabel: "Référence marché/secteur — Pas encore validée comme TAM pour cette activité",
     marketSizeBaselineExplanation:
       "Il s'agit d'un total vérifié pour la catégorie industrielle ou de services au sens large, et non d'un marché total adressable (TAM) automatiquement validé pour le périmètre commercial spécifique demandé dans ce rapport. La promotion d'une référence plus large en TAM nécessite de confirmer indépendamment que la géographie, le segment de clientèle et la définition du produit/service demandés sont bien couverts par ces preuves. Voir TAM / SAM / SOM ci-dessous pour cette détermination.",
+    marketSizeBaselineGeographyConflictExplanation:
+      "Les preuves de ce chiffre sont spécifiquement limitées à {geography}, et non à la géographie demandée dans ce rapport -- il ne peut pas être promu en TAM ici, car la taille adressable du marché demandé n'a pas été vérifiée de manière indépendante. Voir TAM / SAM / SOM ci-dessous pour les preuves qui résoudraient ce point.",
     planningEstimateTitle: "Estimation de planification — taille de marché non vérifiée en externe",
     formulaLabel: "Formule",
     confidenceLabel: "Confiance",
@@ -1743,6 +1782,8 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     marketSizeBaselineLabel: "Referencia de mercado/industria — Aún no validada como TAM para este negocio",
     marketSizeBaselineExplanation:
       "Esta cifra es un total verificado para la categoría industrial o de servicios más amplia, no un Mercado Total Direccionable (TAM) validado automáticamente para el alcance de negocio específico solicitado en este informe. Promover una referencia más amplia a TAM requiere confirmar de forma independiente que la geografía, el segmento de clientes y la definición de producto/servicio solicitados están realmente cubiertos por esta evidencia. Consulte TAM / SAM / SOM más abajo para esa determinación.",
+    marketSizeBaselineGeographyConflictExplanation:
+      "La evidencia de esta cifra está específicamente delimitada a {geography}, no a la geografía solicitada en este informe -- no puede promoverse a TAM aquí, ya que el tamaño direccionable del mercado solicitado no se ha verificado de forma independiente. Consulte TAM / SAM / SOM más abajo para la evidencia que resolvería esto.",
     planningEstimateTitle: "Estimación de planificación — tamaño de mercado no verificado externamente",
     formulaLabel: "Fórmula",
     confidenceLabel: "Confianza",
@@ -1820,9 +1861,10 @@ function marketTableCell(value: string) {
 function describeCompetitiveCoverage(
   language: MarketGraphLanguage,
   coverage: { vendorCount: number; independentProviderSources: number; sufficient: boolean },
-  adjacentPlayerCount = 0
+  adjacentPlayerNames: readonly string[] = []
 ): string {
   const { vendorCount, independentProviderSources, sufficient } = coverage;
+  const adjacentPlayerCount = adjacentPlayerNames.length;
 
   // CRITICAL FIX -- confirmed live: when no direct competitor validated
   // but adjacent/platform players ARE evidenced (vendor-intelligence.ts's
@@ -1846,17 +1888,31 @@ function describeCompetitiveCoverage(
   // positioning data itself, which stays absent from the table exactly
   // as before.
   if (vendorCount === 0 && adjacentPlayerCount > 0) {
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+    // consistency hardening): the prior wording pointed the reader to
+    // "see Major Players below" for WHO the evidence-supported
+    // incumbents are, rather than naming them directly -- the ticket's
+    // explicit ask is that Competitive Landscape itself "show the
+    // validated competitors" rather than only describing their
+    // existence. Names are joined with a bare comma (no localized
+    // conjunction needed) since some real company names already contain
+    // "&" (e.g. "Cushman & Wakefield"), which would be ambiguous as a
+    // list separator. Never adds any attribute beyond the name itself --
+    // category/strengths/weaknesses/market-share/pricing remain
+    // explicitly named as the missing, unvalidated dimensions, exactly
+    // as before.
+    const companyList = adjacentPlayerNames.join(", ");
     return {
       English:
-        "Major incumbents in this market are evidence-supported -- see Major Players below -- but insufficient structured positioning data (category, strengths, weaknesses, market share, or pricing) is available to build a defensible direct-competitor landscape or market map here.",
+        `Major incumbents in this market are evidence-supported (${companyList} -- see Major Players below for their supporting evidence) but insufficient structured positioning data (category, strengths, weaknesses, market share, or pricing) is available to build a defensible direct-competitor landscape or market map here.`,
       Turkish:
-        "Bu pazardaki başlıca yerleşik oyuncular kanıt destekli -- aşağıdaki Önemli Oyuncular bölümüne bakın -- ancak burada savunulabilir bir doğrudan rakip haritası veya pazar haritası oluşturmak için yeterli yapılandırılmış konumlandırma verisi (kategori, güçlü/zayıf yönler, pazar payı veya fiyatlandırma) bulunmuyor.",
+        `Bu pazardaki başlıca yerleşik oyuncular kanıt destekli (${companyList} -- destekleyici kanıtlar için aşağıdaki Önemli Oyuncular bölümüne bakın) ancak burada savunulabilir bir doğrudan rakip haritası veya pazar haritası oluşturmak için yeterli yapılandırılmış konumlandırma verisi (kategori, güçlü/zayıf yönler, pazar payı veya fiyatlandırma) bulunmuyor.`,
       German:
-        "Die wichtigsten etablierten Akteure in diesem Markt sind evidenzgestützt -- siehe Wichtige Akteure unten -- es liegen jedoch nicht genügend strukturierte Positionierungsdaten (Kategorie, Stärken, Schwächen, Marktanteil oder Preisgestaltung) vor, um hier eine belastbare direkte Wettbewerbslandschaft oder Marktkarte zu erstellen.",
+        `Die wichtigsten etablierten Akteure in diesem Markt sind evidenzgestützt (${companyList} -- unterstützende Nachweise siehe Wichtige Akteure unten), es liegen jedoch nicht genügend strukturierte Positionierungsdaten (Kategorie, Stärken, Schwächen, Marktanteil oder Preisgestaltung) vor, um hier eine belastbare direkte Wettbewerbslandschaft oder Marktkarte zu erstellen.`,
       French:
-        "Les principaux acteurs historiques de ce marché sont étayés par des preuves -- voir Acteurs majeurs ci-dessous -- mais les données de positionnement structurées (catégorie, forces, faiblesses, part de marché ou tarification) sont insuffisantes pour établir ici un paysage concurrentiel direct ou une carte de marché défendable.",
+        `Les principaux acteurs historiques de ce marché sont étayés par des preuves (${companyList} -- preuves à l'appui dans Acteurs majeurs ci-dessous), mais les données de positionnement structurées (catégorie, forces, faiblesses, part de marché ou tarification) sont insuffisantes pour établir ici un paysage concurrentiel direct ou une carte de marché défendable.`,
       Spanish:
-        "Los principales actores establecidos en este mercado cuentan con respaldo de evidencia -- consulte Actores principales a continuación -- pero no hay suficientes datos de posicionamiento estructurados (categoría, fortalezas, debilidades, cuota de mercado o precios) disponibles para construir aquí un panorama competitivo directo o un mapa de mercado defendible.",
+        `Los principales actores establecidos en este mercado cuentan con respaldo de evidencia (${companyList} -- evidencia de respaldo en Actores principales a continuación) pero no hay suficientes datos de posicionamiento estructurados (categoría, fortalezas, debilidades, cuota de mercado o precios) disponibles para construir aquí un panorama competitivo directo o un mapa de mercado defendible.`,
     }[language];
   }
 
@@ -2221,7 +2277,7 @@ export function projectMarketIntelligenceGraphToReport(
     const coverageDescription = describeCompetitiveCoverage(
       copyLanguage(language),
       vendorCoverage,
-      adjacentPlayers.length
+      adjacentPlayers.map((player) => player.name)
     );
     // CRITICAL FIX -- confirmed live (root-cause repair): with no
     // validated *direct* competitor, this branch used to force
@@ -2285,6 +2341,20 @@ export function projectMarketIntelligenceGraphToReport(
     // relevant-but-not-independently-validated player). Purely additive
     // presentation text -- no number, evidence item, or confidence score
     // is altered, invented, or suppressed.
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+    // consistency hardening): when the anchor evidence itself names a
+    // DIFFERENT geography than requested (verifiedMarketSizeGeographyConflict,
+    // computed once at graph-build time from the same
+    // evidenceConflictsWithRequestedGeography rule buildPlanningEstimate
+    // already relies on), the generic baseline explanation is replaced
+    // with one naming the specific, deterministic reason -- never a
+    // vague "scope may not match," but the actual conflicting geography.
+    const baselineExplanation = graph.verifiedMarketSizeGeographyConflict
+      ? copy.marketSizeBaselineGeographyConflictExplanation.replace(
+          "{geography}",
+          graph.verifiedMarketSizeGeographyConflict
+        )
+      : copy.marketSizeBaselineExplanation;
     const sizing = [
       copy.verifiedMarketSizeTitle,
       ...graph.verifiedMarketSize.map(
@@ -2293,7 +2363,7 @@ export function projectMarketIntelligenceGraphToReport(
       ),
       "",
       copy.marketSizeBaselineLabel,
-      copy.marketSizeBaselineExplanation,
+      baselineExplanation,
     ].join("\n");
     projection.marketSize = sizing;
     // tamSamSom is deliberately left untouched here, not overwritten with

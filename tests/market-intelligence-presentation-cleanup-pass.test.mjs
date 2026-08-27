@@ -295,6 +295,16 @@ test("E1: the exact reported scenario -- CBRE and JLL are evidence-supported (Ma
   assert.match(projection.competitiveLandscape, /evidence-supported/i);
   assert.match(projection.competitiveLandscape, /structured positioning data/i);
   assert.match(projection.competitiveLandscape, /Major Players below/i);
+  // Names are now shown DIRECTLY in Competitive Landscape itself
+  // ("show the validated competitors"), not just referenced via a
+  // pointer to Major Players -- never claiming direct-competitor status.
+  assert.match(projection.competitiveLandscape, /CBRE/);
+  assert.match(projection.competitiveLandscape, /JLL/);
+  assert.doesNotMatch(
+    projection.competitiveLandscape,
+    /CBRE.{0,40}validated (?:as a )?direct competitor/i,
+    "naming the company must never itself claim validated direct-competitor status"
+  );
   assert.doesNotMatch(
     projection.competitiveLandscape,
     /no competitor data (?:could be validated|exists)/i,
@@ -315,12 +325,23 @@ test("E2 (no evidence-standard weakening, regression guard): the flat 'no compet
   assert.doesNotMatch(projection.competitiveLandscape, /evidence-supported/i);
 });
 
-test("E3: all 5 supported languages have real, non-empty translations for the reworded competitive-landscape message", () => {
+test("E3: all 5 supported languages have real, non-empty translations for the reworded competitive-landscape message, and each one embeds the evidence-supported company list via the shared companyList interpolation", () => {
   const graphSource = readFileSync(`${repoRoot}app/lib/ai/market-intelligence-graph.ts`, "utf8");
   const block = graphSource.match(/if \(vendorCount === 0 && adjacentPlayerCount > 0\) \{[\s\S]*?\}\[language\];\s*\n\s*\}/);
   assert.ok(block, "the reworded branch must exist");
   for (const lang of ["English", "Turkish", "German", "French", "Spanish"]) {
-    assert.match(block[0], new RegExp(`${lang}:\\s*\\n\\s*"[^"]{60,}"`), `${lang} translation must be present and substantial`);
+    // Translations are now template literals (backtick-quoted) so the
+    // company list can be interpolated -- match either quoting style,
+    // require a substantial length, and require the ${companyList}
+    // interpolation to actually be present.
+    assert.match(
+      block[0],
+      new RegExp(`${lang}:\\s*\\n\\s*\`[^\`]{60,}\``),
+      `${lang} translation must be present and substantial`
+    );
+    const langBlockMatch = block[0].match(new RegExp(`${lang}:\\s*\\n\\s*\`([^\`]*)\``));
+    assert.ok(langBlockMatch, `${lang} translation not found`);
+    assert.match(langBlockMatch[1], /\$\{companyList\}/, `${lang} translation must interpolate the evidence-supported company list`);
   }
 });
 

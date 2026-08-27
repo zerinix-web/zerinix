@@ -216,19 +216,28 @@ test("A) no validated direct competitors + supported adjacent industry players: 
 
   const projection = projectMarketIntelligenceGraphToReport(graph, "English");
 
-  // Competitive Landscape correctly remains "Validation Needed" -- no
-  // fabricated direct-competitor claim -- and, since adjacent players DO
-  // exist, explicitly says so rather than the flat "no competitor data"
-  // phrasing (further hardened in a later pass: describeCompetitiveCoverage
-  // now distinguishes "nothing at all" from "no direct, but adjacent
-  // players evidenced" -- and later still, reworded to frame the actual
-  // gap as missing STRUCTURED POSITIONING data rather than unvalidated
-  // competitor identity, since the incumbents themselves ARE
-  // evidence-supported).
+  // Competitive Landscape correctly avoids any fabricated direct-
+  // competitor claim -- and, since adjacent players DO exist, explicitly
+  // says so rather than the flat "no competitor data" phrasing (further
+  // hardened in later passes: describeCompetitiveCoverage now
+  // distinguishes "nothing at all" from "no direct, but adjacent players
+  // evidenced"; reworded to frame the actual gap as missing STRUCTURED
+  // POSITIONING data rather than unvalidated competitor identity; and
+  // most recently, to NAME the evidence-supported incumbents directly in
+  // Competitive Landscape itself rather than only pointing the reader to
+  // Major Players -- "show the validated competitors" -- while still
+  // never claiming they are validated DIRECT competitors, and never
+  // fabricating category/strengths/weaknesses/market-share/pricing for
+  // them).
   assert.match(projection.competitiveLandscape, /evidence-supported/i);
   assert.match(projection.competitiveLandscape, /structured positioning data/i);
-  assert.doesNotMatch(projection.competitiveLandscape, /Procore/);
-  assert.doesNotMatch(projection.competitiveLandscape, /Autodesk/);
+  assert.match(projection.competitiveLandscape, /Procore/);
+  assert.match(projection.competitiveLandscape, /Autodesk/);
+  assert.doesNotMatch(
+    projection.competitiveLandscape,
+    /Procore.{0,40}validated (?:as a )?direct competitor/i,
+    "naming the company must never itself claim validated direct-competitor status"
+  );
 
   // Major Players lists the real, evidence-named companies -- never
   // discarded -- but explicitly, honestly labeled as NOT validated direct

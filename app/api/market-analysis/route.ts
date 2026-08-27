@@ -76,6 +76,10 @@ import {
 } from "@/app/lib/report-engine/strategic-recommendations-integrity";
 import { flattenMarkdownTables } from "@/app/lib/report-engine/markdown-table-flattening";
 import { formatExecutiveDecisionBrief } from "@/app/lib/report-engine/executive-decision-brief";
+import {
+  extractMarketSizingLayerValue,
+  parseMarketSizingMagnitude,
+} from "@/app/lib/report-presentation";
 import { buildEvidenceSummary } from "@/app/lib/report-engine/evidence-summary";
 import { stripFillerAndDuplicateSentences } from "@/app/lib/report-engine/filler-detection";
 import {
@@ -835,6 +839,80 @@ function buildMarketGraphMetricConsistencyTargets(
   return targets;
 }
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+// consistency hardening): a real production report showed a verified
+// $131.6B Market Size figure with TAM immediately below it reading
+// "Validation Needed" -- the model's own tamSamSom prompt already
+// instructs it to build TAM from exactly this kind of verified figure
+// when the scope matches, but nothing enforced that deterministically,
+// so a report could show a validated total sitting right next to an
+// unresolved TAM with no code-level guarantee the two would ever be
+// reconciled. This closes that gap WITHOUT touching the validation rule
+// itself: eligible only when (1) a verified market-size figure exists,
+// (2) its own evidence does not conflict with the requested geography
+// (graph.verifiedMarketSizeGeographyConflict, computed once at
+// graph-build time from the exact same evidenceConflictsWithRequestedGeography
+// rule buildPlanningEstimate already relies on for its own evidence
+// admission), and (3) the model's own tamSamSom text has no already-
+// resolvable TAM value of its own -- checked via the SAME canonical
+// extractMarketSizingLayerValue/parseMarketSizingMagnitude the web
+// report and PDF already use to decide whether TAM is "resolved," so
+// this can never disagree with what either surface would determine.
+// A genuinely resolved TAM the model already derived is NEVER
+// overwritten. SAM and SOM are NEVER derived, invented, or estimated
+// from this figure -- only TAM, and only as a clearly labeled,
+// evidence-sourced addition ahead of the model's own (untouched)
+// SAM/SOM discussion.
+function propagateVerifiedMarketSizeIntoTam(
+  tamSamSomText: string,
+  graph: MarketIntelligenceGraph,
+  language: ResponseLanguage
+): string {
+  if (!tamSamSomText || graph.verifiedMarketSize.length === 0) {
+    return tamSamSomText;
+  }
+  if (graph.verifiedMarketSizeGeographyConflict) {
+    return tamSamSomText;
+  }
+
+  const existingTam = extractMarketSizingLayerValue(tamSamSomText, "TAM");
+  if (parseMarketSizingMagnitude(existingTam) !== null) {
+    return tamSamSomText;
+  }
+
+  const anchor = graph.verifiedMarketSize[0];
+  const amount = extractMarketAmount(anchor.description);
+  if (!amount) {
+    return tamSamSomText;
+  }
+
+  const tamLabels: Record<ResponseLanguage, { tam: string; evidence: string }> = {
+    English: { tam: "TAM [Evidence-Supported — from Verified Market Size]", evidence: "Evidence" },
+    Turkish: { tam: "TAM [Kanıt Destekli — Doğrulanmış Pazar Büyüklüğünden]", evidence: "Kanıt" },
+    German: { tam: "TAM [Evidenzgestützt — aus verifizierter Marktgröße]", evidence: "Nachweis" },
+    French: { tam: "TAM [Étayé par des preuves — à partir de la taille de marché vérifiée]", evidence: "Preuve" },
+    Spanish: { tam: "TAM [Respaldado por evidencia — a partir del tamaño de mercado verificado]", evidence: "Evidencia" },
+  };
+  const labels = tamLabels[language] || tamLabels.English;
+  const tamLine = `${labels.tam}: ${amount.token} | ${labels.evidence}: ${anchor.evidenceIds.map((id) => `[${id}]`).join(", ")}`;
+
+  // The model's own TAM line already established as unresolved above
+  // (extractMarketSizingLayerValue found it, but it carried no
+  // parseable magnitude) is removed rather than left sitting directly
+  // below the new evidence-supported line -- "TAM: $131.6 billion"
+  // immediately followed by "TAM: Validation Needed" would itself be
+  // exactly the internally-contradictory presentation this fix exists
+  // to remove. Only the single line beginning with the TAM label is
+  // dropped; SAM, SOM, and every other line the model wrote (method,
+  // formula, assumptions) survive completely untouched.
+  const withoutUnresolvedTamLine = tamSamSomText
+    .split("\n")
+    .filter((line) => !/^\s*(?:[-*•]\s*)?TAM\s*(?:\[[^\]]*\]\s*)?[:\-–—]/i.test(line))
+    .join("\n");
+
+  return `${tamLine}\n${withoutUnresolvedTamLine}`;
+}
+
 function applySharedMarketGraph(
   report: Record<MarketReportField, string>,
   graph: MarketIntelligenceGraph,
@@ -859,6 +937,10 @@ function applySharedMarketGraph(
     if (merged[field]) {
       merged[field] = sanitizeMarketProseCompetitorClaims(merged[field], graph, language);
     }
+  }
+
+  if (merged.tamSamSom) {
+    merged.tamSamSom = propagateVerifiedMarketSizeIntoTam(merged.tamSamSom, graph, language);
   }
 
   return merged;

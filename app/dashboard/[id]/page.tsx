@@ -3947,6 +3947,17 @@ function getRiskIndicatorClass(level: string) {
   return "border-teal-300/25 bg-teal-300/10 text-teal-100";
 }
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+// consistency hardening): `value ?? 0` treated a genuinely UNKNOWN
+// confidence (null, when no defensible numeric score exists) as the
+// NUMBER 0 for the ring-fill computation -- structurally the same as a
+// real, confirmed 0% score, not "we don't know." The center digit
+// already correctly showed "--", but the ring itself was computed as if
+// a real 0% value existed, which is exactly the "implies a numeric
+// score exists" incoherence this fix removes: an unknown confidence now
+// renders as a flat, neutral ring (no fill fraction of ANY kind, real
+// or fabricated) rather than a value-derived one that merely happens to
+// be empty at 0%.
 function SnapshotGauge({
   label,
   value,
@@ -3956,7 +3967,7 @@ function SnapshotGauge({
   value: number | null;
   display: string;
 }) {
-  const safeValue = value ?? 0;
+  const hasNoScore = value === null;
 
   return (
     <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
@@ -3967,11 +3978,13 @@ function SnapshotGauge({
         <div
           className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full"
           style={{
-            background: `conic-gradient(rgb(94 234 212) ${safeValue * 3.6}deg, rgba(255,255,255,0.08) 0deg)`,
+            background: hasNoScore
+              ? "rgba(255,255,255,0.08)"
+              : `conic-gradient(rgb(94 234 212) ${value * 3.6}deg, rgba(255,255,255,0.08) 0deg)`,
           }}
         >
           <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-zinc-950 text-[11px] font-semibold text-white">
-            {value === null ? "--" : value}
+            {hasNoScore ? "--" : value}
           </div>
         </div>
         <p className="min-w-0 text-sm font-semibold text-zinc-200">{display}</p>
