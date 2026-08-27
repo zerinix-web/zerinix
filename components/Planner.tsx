@@ -399,6 +399,12 @@ type PlannerProps = {
 
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 60_000;
 const CHAT_REQUEST_TIMEOUT_MS = 75_000;
+// P0 PRODUCTION FIX -- confirmed live: bounds only the initial /api/plan
+// enqueue POST (expected to return quickly with a jobId; the actual
+// report generation is deferred to the background job), not the overall
+// report-generation wait -- that is already covered by the polling
+// loop's own maxReportPollWaitMs ceiling further down.
+const PLAN_ENQUEUE_REQUEST_TIMEOUT_MS = 30_000;
 const ACTIVE_REPORT_ID_STORAGE_KEY = "zerinix.activeReportId";
 const MESSAGE_CONVERSATION_ID_CHUNK_SIZE = 25;
 
@@ -11638,38 +11644,72 @@ export default function Planner({
       const planRequestUrl = "/api/plan";
       const accessToken = await getSupabaseAccessToken();
 
-      const res = await fetch(planRequestUrl, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-          "X-Zerinix-Pipeline": "decision_intelligence_v1",
-          "X-Zerinix-Report-Request-Id": reportRequestId,
-          "X-Zerinix-AI-Request-Id": aiCostRequestId,
-          ...(reportReadiness
-            ? { "X-Zerinix-Universal-Input": "true" }
-            : {}),
-        },
-        referrerPolicy: "no-referrer",
-        body: JSON.stringify({
-          prompt: submittedPrompt,
-          analysisMode: requestedMode,
-          field: "fullReport",
-          reportRequestId,
-          language: reportLanguage,
-          explicitReportLanguage: getExplicitReportLanguageSelection() || undefined,
-          uiLanguage: getPlannerUiLanguage() || undefined,
-          browserLanguage: typeof navigator === "undefined" ? undefined : navigator.language,
-          reportDomain,
-          reportTitle,
-          workspaceId: selectedWorkspaceId,
-          conversationId,
-          assistantMessageId,
-          attachments: serializePlannerAttachments(reportAttachments),
-          ...(reportReadiness ? { reportReadiness } : {}),
-        }),
-      });
+      // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+      // generation timeout incident): this initial POST only enqueues
+      // the report job and is expected to return quickly (the actual
+      // generation is deferred to the background) -- but unlike the
+      // polling loop below, which has its own maxReportPollWaitMs wall-
+      // clock ceiling, this fetch call had no bound of its own. A
+      // connection that hangs completely (no response, no error, no
+      // closed socket) would leave the UI stuck on "Streaming"/
+      // "Preparing your report..." before ever reaching the polling
+      // phase where that ceiling could even start counting. Mirrors the
+      // same AbortController+timeout pattern already used for chat
+      // requests (CHAT_REQUEST_TIMEOUT_MS above).
+      const planFetchAbortController = new AbortController();
+      let planFetchTimedOut = false;
+      const planFetchTimeoutId = setTimeout(() => {
+        planFetchTimedOut = true;
+        planFetchAbortController.abort();
+      }, PLAN_ENQUEUE_REQUEST_TIMEOUT_MS);
+
+      let res: Response;
+      try {
+        res = await fetch(planRequestUrl, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+            "X-Zerinix-Pipeline": "decision_intelligence_v1",
+            "X-Zerinix-Report-Request-Id": reportRequestId,
+            "X-Zerinix-AI-Request-Id": aiCostRequestId,
+            ...(reportReadiness
+              ? { "X-Zerinix-Universal-Input": "true" }
+              : {}),
+          },
+          referrerPolicy: "no-referrer",
+          signal: planFetchAbortController.signal,
+          body: JSON.stringify({
+            prompt: submittedPrompt,
+            analysisMode: requestedMode,
+            field: "fullReport",
+            reportRequestId,
+            language: reportLanguage,
+            explicitReportLanguage: getExplicitReportLanguageSelection() || undefined,
+            uiLanguage: getPlannerUiLanguage() || undefined,
+            browserLanguage: typeof navigator === "undefined" ? undefined : navigator.language,
+            reportDomain,
+            reportTitle,
+            workspaceId: selectedWorkspaceId,
+            conversationId,
+            assistantMessageId,
+            attachments: serializePlannerAttachments(reportAttachments),
+            ...(reportReadiness ? { reportReadiness } : {}),
+          }),
+        });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError" && planFetchTimedOut) {
+          throw new Error(
+            reportLanguage === "Turkish"
+              ? "Rapor isteği sunucuya ulaşamadı ve zaman aşımına uğradı. Lütfen tekrar deneyin."
+              : "The report request could not reach the server and timed out. Please try again."
+          );
+        }
+        throw error;
+      } finally {
+        clearTimeout(planFetchTimeoutId);
+      }
 
       if (process.env.NODE_ENV !== "production") {
         console.info("[PLANNER] report response", {

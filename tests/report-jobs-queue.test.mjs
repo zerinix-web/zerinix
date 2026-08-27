@@ -67,10 +67,25 @@ test("job status is owner-scoped and the worker endpoint requires a server secre
   assert.match(workerRoute, /processReportJobQueue/);
 });
 
-test("polling recovers an orphaned queued job using its exact id", () => {
-  assert.match(statusRoute, /job\.status === "queued" \|\| job\.status === "retry_wait"/);
+test("polling recovers an orphaned job in ANY non-terminal status using its exact id", () => {
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence generation
+  // timeout incident): this previously only fired for "queued"/
+  // "retry_wait" -- a job stuck in an ACTIVE status (e.g. "researching"/
+  // "generating" after a Vercel hard-kill mid-generation, which bypasses
+  // this function's own try/catch/finally entirely) was echoed back with
+  // that same stale status forever, recoverable only by the once-daily
+  // cron. claim_report_job_by_id (the RPC this recovery call ultimately
+  // reaches) already safely no-ops unless the job's lease has genuinely
+  // expired, so it is safe to attempt this recovery on every poll
+  // regardless of status -- see TERMINAL_JOB_STATUSES below.
+  assert.match(statusRoute, /const TERMINAL_JOB_STATUSES = \["completed", "failed", "cancelled"\] as const;/);
+  assert.match(
+    statusRoute,
+    /if \(!TERMINAL_JOB_STATUSES\.includes\(job\.status as \(typeof TERMINAL_JOB_STATUSES\)\[number\]\)\) \{/
+  );
   assert.match(statusRoute, /processReportJobQueue\(\{\n\s+jobId,/);
   assert.match(statusRoute, /after\(async \(\) => \{/);
+  assert.match(statusRoute, /export const maxDuration = 300;/);
 });
 
 test("two consecutive report requests bind workers to their own created job ids", () => {

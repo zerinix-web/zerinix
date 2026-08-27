@@ -4414,7 +4414,19 @@ export async function runDomainAwareResearch(
     }
   }
 
-  const hardTimeoutMs = 120_000;
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence generation
+  // timeout incident): this outer cap, the full-report synthesis call's
+  // own FULL_REPORT_OPENAI_TIMEOUT_MS (app/api/market-analysis/route.ts),
+  // and the optional entity-extraction step summed to ~312-327s in the
+  // NON-pathological case -- already exceeding the 300s Vercel
+  // maxDuration shared by every trigger path (app/api/plan, the report
+  // status polling route, the cron worker route). Reduced with margin so
+  // the sum comfortably fits under that ceiling; this only shortens how
+  // long a genuinely slow/stuck provider is waited on before the
+  // existing degraded-evidence fallback (createEmergencyResearchFallback)
+  // takes over -- the fallback behavior itself, and every evidence-
+  // integrity guarantee it upholds, is completely unchanged.
+  const hardTimeoutMs = 90_000;
   const timeoutController = new AbortController();
   const abortFromParent = () =>
     timeoutController.abort(input.signal?.reason);

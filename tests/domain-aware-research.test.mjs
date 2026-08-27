@@ -112,7 +112,14 @@ test("report routes research first and the renderer supports specialized schemas
 test("research has a hard deadline and malformed evidence is discarded per item", () => {
   const research = read("app/lib/ai/domain-research.ts");
 
-  assert.match(research, /const hardTimeoutMs = 120_000/);
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence generation
+  // timeout incident): this outer research-phase cap, the full-report
+  // synthesis call's own timeout, and the optional entity-extraction
+  // step summed to ~312-327s -- already exceeding the 300s Vercel
+  // maxDuration shared by every Market Intelligence trigger path.
+  // Reduced with margin so the sum fits; the hard-deadline/Promise.race/
+  // degraded-fallback BEHAVIOR this test protects is unchanged.
+  assert.match(research, /const hardTimeoutMs = 90_000/);
   assert.match(research, /Promise\.race/);
   assert.match(research, /return createEmergencyResearchFallback\(error\)/);
   assert.match(research, /if \(!item \|\| typeof item !== "object"\) return \[\]/);

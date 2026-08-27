@@ -150,6 +150,20 @@ import { createFullReportJsonSchema } from "@/app/lib/report-engine/schema";
 import type { ResponseLanguage } from "@/app/lib/report-engine/schema";
 import { getResponseLanguage, resolveReportLanguage } from "@/app/lib/report-language";
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence generation
+// timeout incident): executeMarketAnalysisRequest below is only ever
+// invoked in-process, via a dynamic import + direct function call from
+// app/lib/report-jobs/plan-executor.ts (itself called in-process from
+// app/lib/report-jobs/worker.ts), so it always runs under whichever
+// maxDuration the CALLING route already declared (300s on every current
+// trigger path) -- this export has no effect on that path. It exists
+// purely as a defensive backstop: this file also exports its own POST
+// handler, making it independently addressable as a Next.js route; if
+// anything were ever to call it directly over HTTP, it would otherwise
+// silently fall back to a much shorter platform default even though its
+// own internal timeout budget below is sized for ~300s.
+export const maxDuration = 300;
+
 const reportFields = marketReportFields;
 const fieldPrompts = marketPrompts;
 const fieldLabelsByLanguage = marketFieldLabels;
@@ -157,8 +171,31 @@ const legacySectionToField = legacyMarketSectionToField;
 const FULL_REPORT_FIELD = "fullReport";
 const MARKET_EVIDENCE_QUALITY_VERSION = "market_evidence_graph_v7";
 const MAX_AI_CALLS_PER_MARKET_REPORT = 1;
-const FULL_REPORT_OPENAI_TIMEOUT_MS = 180_000;
+// P0 PRODUCTION FIX -- confirmed live: this timeout, the research
+// phase's own outer cap (domain-research.ts's hardTimeoutMs), and the
+// optional entity-extraction step summed to ~312-327s in the NON-
+// pathological case -- already exceeding the 300s Vercel maxDuration
+// shared by every trigger path for Market Intelligence generation.
+// Reduced with margin so the sum comfortably fits; this only shortens
+// how long a genuinely slow/stuck synthesis call is waited on before
+// failing cleanly (caught by app/lib/report-jobs/worker.ts's own
+// top-level deadline and existing retry/failure handling) -- it does
+// not change max_output_tokens, the model, the schema, or any evidence-
+// integrity requirement the generation itself must satisfy.
+const FULL_REPORT_OPENAI_TIMEOUT_MS = 150_000;
 const FULL_REPORT_POST_PROCESS_TIMEOUT_MS = 12_000;
+// P0 PRODUCTION FIX -- confirmed live: the single-field regeneration
+// branch's OpenAI call (reportField !== "fullReport", an individual-
+// field refresh, distinct from the primary full-report generation
+// above) previously had NO independent deadline at all -- only
+// `{ signal: req.signal }`, i.e. whatever the incoming HTTP request's
+// own abort behavior happens to be. If the client never disconnects,
+// this could run for however long the OpenAI SDK's own default timeout
+// allows (10 minutes, unmodified in createOpenAiClient), an indefinite-
+// hang risk independent of the full-report timeout work above. A single
+// field is a small fraction of a full 18-field report, so a much
+// shorter bound is appropriate.
+const SINGLE_FIELD_OPENAI_TIMEOUT_MS = 60_000;
 // REGRESSION FIX: 18 fields, 8 of them carrying a full Executive Insight +
 // Confidence + Next Actions block (buildExecutivePresentationDirectives),
 // routinely need close to the old 6,500-token ceiling just for the model's
@@ -2732,6 +2769,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
       model,
     });
 
+    const fieldAbort = createReportAbortSignal(req.signal, SINGLE_FIELD_OPENAI_TIMEOUT_MS);
     const stream = await withOpenAiCostOperation(
       {
         operationName: `market_intelligence:${reportField}`,
@@ -2758,7 +2796,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
             verbosity: "medium",
           },
         },
-        { signal: req.signal })
+        { signal: fieldAbort.signal })
       ).catch(async (error) => {
         logOperationalInfo("[api:market-analysis] provider request failed", {
           reportField,
@@ -2911,6 +2949,8 @@ Do not include markdown code fences, braces inside string values, or commentary 
             });
             logServerError("api:market-analysis:stream", error);
             controller.error(error);
+          } finally {
+            fieldAbort.cleanup();
           }
         },
       }),

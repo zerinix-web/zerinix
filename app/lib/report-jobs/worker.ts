@@ -522,7 +522,7 @@ function buildAssistantContent(
   ].join("\n\n");
 }
 
-function isTransientFailure(error: unknown) {
+export function isTransientFailure(error: unknown) {
   const status =
     typeof error === "object" && error && "status" in error
       ? Number((error as { status?: unknown }).status)
@@ -716,24 +716,60 @@ async function markTerminalFailure(
   error: unknown
 ) {
   const message = error instanceof Error ? error.message : "Report generation failed.";
-  const { error: updateError } = await supabase
+  const failureFields = {
+    status: "failed" as const,
+    progress_stage: "failed",
+    error_code: "REPORT_JOB_NON_RETRYABLE",
+    error_message: message.slice(0, 2_000),
+    next_attempt_at: null,
+    lease_owner: null,
+    lease_expires_at: null,
+    failed_at: new Date().toISOString(),
+  };
+
+  const { data: updatedRows, error: updateError } = await supabase
     .from("report_jobs")
-    .update({
-      status: "failed",
-      progress_stage: "failed",
-      error_code: "REPORT_JOB_NON_RETRYABLE",
-      error_message: message.slice(0, 2_000),
-      next_attempt_at: null,
-      lease_owner: null,
-      lease_expires_at: null,
-      failed_at: new Date().toISOString(),
-    })
+    .update(failureFields)
     .eq("id", job.id)
     .eq("lease_owner", workerId)
-    .gt("lease_expires_at", new Date().toISOString());
+    .gt("lease_expires_at", new Date().toISOString())
+    .select("id");
 
   if (updateError) {
     throw new Error(`Terminal report job failure could not be stored: ${updateError.message}`);
+  }
+
+  // P0 PRODUCTION FIX -- confirmed live: this UPDATE is lease-conditioned
+  // (only the worker that still legitimately owns an unexpired lease may
+  // write it), but Supabase/PostgREST returns success with an EMPTY row
+  // list -- never an `error` -- when the WHERE clause matches zero rows
+  // (e.g. this worker's own lease already expired by the time a long-
+  // running job finally failed, or a deadline-triggered abort took a
+  // moment to unwind). The caller previously had no way to detect this:
+  // it believed the failure was recorded when nothing was actually
+  // written, and the job stayed stuck at its last active status forever.
+  // A forced, lease-unconditional fallback (scoped only by id) trades a
+  // theoretical, benign overwrite race against another worker's own
+  // legitimate concurrent write for the certainty that this job reaches
+  // a terminal state -- exactly the tradeoff "never infinite pending"
+  // requires.
+  if (!updatedRows || updatedRows.length === 0) {
+    console.error("[report-jobs] lease-conditioned terminal failure write matched no rows -- forcing an unconditional fallback write", {
+      jobId: job.id,
+      workerId,
+    });
+
+    const { error: fallbackError } = await supabase
+      .from("report_jobs")
+      .update(failureFields)
+      .eq("id", job.id)
+      .neq("status", "completed");
+
+    if (fallbackError) {
+      throw new Error(
+        `Terminal report job failure could not be stored even via the unconditional fallback: ${fallbackError.message}`
+      );
+    }
   }
 }
 
@@ -757,6 +793,48 @@ export async function processNextReportJob(options: ReportWorkerOptions = {}) {
   }
 
   const abortController = new AbortController();
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence generation
+  // timeout incident): this function has no top-level deadline of its
+  // own -- it blindly trusted the SUM of its nested per-call budgets
+  // (research + full-report synthesis + post-processing, and optional
+  // entity extraction) to stay under whichever caller's Vercel
+  // maxDuration is in effect (300s on every trigger path: /api/plan,
+  // the polling route, and the cron worker route). That sum could
+  // legitimately reach ~312-327s even in the NON-pathological case,
+  // exceeding 300s outright. When Vercel hard-kills the function at its
+  // maxDuration, that is NOT a catchable JS exception -- this function's
+  // own try/catch/finally never runs, so no failure is ever recorded and
+  // the job is left stuck at whatever active status its last progress
+  // write reached.
+  //
+  // This deadline is a proactive backstop, not the primary bound --
+  // each nested call already has (and keeps) its own tighter timeout;
+  // this only fires if their SUM runs long, or if any nested timeout
+  // somehow fails to fire as expected. Aborting abortController.signal
+  // here propagates all the way down through executorRequest's signal
+  // (below) into executePlanRequest -> the market-analysis/plan-executor
+  // OpenAI and research calls, which already honor it. The resulting
+  // rejection is deliberately worded to match isTransientFailure's
+  // existing "timed out" pattern, so it flows through the EXISTING
+  // catch block's transient-failure path below (fail_report_job ->
+  // retry_wait, or terminal "failed" once attempts are exhausted) with
+  // no new failure-handling logic required.
+  const JOB_PROCESSING_DEADLINE_MS = 280_000;
+  const deadlineRemainingMs = Math.max(
+    0,
+    JOB_PROCESSING_DEADLINE_MS - (Date.now() - workerStartedAt)
+  );
+  const deadlineTimer = setTimeout(() => {
+    if (!abortController.signal.aborted) {
+      abortController.abort(
+        new Error(
+          `Report job exceeded its internal processing deadline of ${Math.round(
+            JOB_PROCESSING_DEADLINE_MS / 1_000
+          )} seconds (timed out) -- aborted proactively before the platform's own hard timeout could strand it in a non-terminal status.`
+        )
+      );
+    }
+  }, deadlineRemainingMs);
   let heartbeatInFlight = false;
   let lastSuccessfulHeartbeatAt = Date.now();
   const heartbeat = setInterval(() => {
@@ -1073,7 +1151,18 @@ export async function processNextReportJob(options: ReportWorkerOptions = {}) {
       });
 
       if (failureError) {
-        console.error("[report-jobs] retry scheduling failed", failureError);
+        // P0 PRODUCTION FIX -- confirmed live: fail_report_job (SQL)
+        // raises when the caller's lease no longer matches (already
+        // expired/reclaimed) -- previously this branch only logged that
+        // and returned, recording NOTHING in the database, leaving the
+        // job stuck exactly like the bug this whole pass fixes.
+        // markTerminalFailure's own lease-conditioned-write-plus-forced-
+        // fallback (see its comment) is reused here as the guaranteed
+        // last resort, so a transient failure that can't be scheduled
+        // for retry still reaches a real terminal state instead of
+        // silently vanishing.
+        console.error("[report-jobs] retry scheduling failed; forcing terminal failure instead", failureError);
+        await markTerminalFailure(supabase, job, workerId, error);
       } else {
         const failedJob = (Array.isArray(failedJobData)
           ? failedJobData[0]
@@ -1097,6 +1186,7 @@ export async function processNextReportJob(options: ReportWorkerOptions = {}) {
     };
   } finally {
     clearInterval(heartbeat);
+    clearTimeout(deadlineTimer);
   }
 }
 
