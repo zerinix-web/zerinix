@@ -1111,113 +1111,117 @@ export function stripLeadingTakeawaySentence(content: string, takeaway: string):
     return raw;
   }
 
-  const firstLine = lines[firstContentIndex];
-  const trimmedFirstLine = firstLine.trim();
+  const trimmedFirstLine = lines[firstContentIndex].trim();
   const bulletMarkerMatch = trimmedFirstLine.match(/^(?:[-*•]|\d+[.)])\s+/);
+  const marker = bulletMarkerMatch ? bulletMarkerMatch[0] : "";
+  const bodyAfterMarker = bulletMarkerMatch ? trimmedFirstLine.slice(marker.length) : trimmedFirstLine;
+  // A sentence-ending mark is often immediately followed by a markdown
+  // bold/italic closer before the actual whitespace ("**Regulatory
+  // tailwinds.**" -- the period sits right before "**", not a space) --
+  // the closer is included in the matched boundary itself (never just
+  // the bare punctuation) so a cut here never leaves a dangling,
+  // unclosed "**"/"_" behind in the preserved text on either side.
+  const sentenceBoundaryPattern = /[.!?](?:\*\*|__|\*|_)?(?=\s|$)/;
+  const hasOwnSentenceBoundary = sentenceBoundaryPattern.test(protectSentenceAbbreviations(bodyAfterMarker));
 
-  if (bulletMarkerMatch) {
-    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
-    // production consistency hardening): this used to strip "**"
-    // manually here (deleting it outright) before ever reaching
-    // isDuplicateOfTakeaway -- which independently normalizes its OWN
-    // candidate argument via stripMarkdown (this file's shared
-    // markdown-normalization function), and stripMarkdown replaces "**"
-    // with a SPACE, not nothing. Whenever the model's bold sub-label sat
-    // immediately against a colon ("**Regulatory tailwinds**: Rising...",
-    // the shape the shared report style guidance's "bold metric labels"
-    // instruction routinely produces for numbered/bulleted fields), the
-    // takeaway side (via getSectionTakeaway -> splitSentences ->
-    // stripMarkdown) ended up with a space before the colon
-    // ("tailwinds :") while this manual pre-strip produced none
-    // ("tailwinds:") -- a one-space mismatch that silently failed the
-    // duplicate check for every affected section (Market Segmentation,
-    // Regional Analysis, Industry Trends, Customer Segments, Market
-    // Drivers, Barriers, Opportunities, Threats), leaving the real
-    // duplicate untouched. Passing the raw (still bold-marked) text
-    // straight through -- exactly like the non-bullet branch below
-    // already does -- lets isDuplicateOfTakeaway's own stripMarkdown
-    // normalize both sides identically, the same fix already proven
-    // correct for the non-bullet case.
-    const firstLineTextOnly = trimmedFirstLine.slice(bulletMarkerMatch[0].length);
-    if (!isDuplicateOfTakeaway(firstLineTextOnly)) {
-      return raw;
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+  // consistency hardening): getSectionTakeaway's own sentence source
+  // (splitSentences) filters out any sentence of length <= 24 after
+  // markdown-stripping -- a short, punchy opening verdict the report's
+  // own style guidance explicitly instructs the model to write first
+  // ("Open the section with that answer in the first sentence",
+  // report-quality-directives.ts) is routinely exactly this short. That
+  // means the takeaway can legitimately be the SECOND (or later) real
+  // sentence, still sitting on the very same first physical line/bullet
+  // ("1. **Regulatory tailwinds.** Rising demand for compliance
+  // automation..." -- "Regulatory tailwinds." is 21 characters, filtered
+  // out; the takeaway is "Rising demand..."). Every prior version of
+  // this function only ever tested ONE candidate span (the whole
+  // bulleted line, or the line's first sentence) against the takeaway,
+  // so it could never recognize this case and silently left the real
+  // duplicate untouched. Scanning every successive sentence boundary
+  // within the search window (not just the first) and removing
+  // whichever one actually matches -- while preserving every sentence
+  // before and after it -- is what makes this generic: it no longer
+  // matters WHICH sentence position getSectionTakeaway happened to pick.
+  //
+  // The search window is the first line's own content, extended by
+  // exactly one following non-empty, non-bulleted line ONLY when that
+  // first line has no sentence boundary of its own at all (a bare label
+  // like "**Answer:**") -- mirrors the earlier "label line + continuation"
+  // fix. A bulleted line is never extended past its own line: the next
+  // line begins its own separate list item.
+  let windowLines = [bodyAfterMarker];
+  let secondConsumedIndex = -1;
+  if (!marker && !hasOwnSentenceBoundary) {
+    const nextContentIndex = lines.findIndex(
+      (line, index) => index > firstContentIndex && line.trim().length > 0
+    );
+    if (nextContentIndex !== -1 && !/^(?:[-*•]|\d+[.)])\s+/.test(lines[nextContentIndex].trim())) {
+      windowLines = [bodyAfterMarker, lines[nextContentIndex].trim()];
+      secondConsumedIndex = nextContentIndex;
     }
-
-    const nextLines = lines.slice();
-    nextLines.splice(firstContentIndex, 1);
-    return nextLines.join("\n").replace(/^\n+/, "").trim();
   }
 
-  const protectedLine = protectSentenceAbbreviations(firstLine);
-  const boundaryMatch = protectedLine.match(/[.!?](?=\s|$)/);
-  if (boundaryMatch && boundaryMatch.index !== undefined) {
-    const cutIndex = boundaryMatch.index + 1;
-    const candidateSentence = restoreSentenceAbbreviations(protectedLine.slice(0, cutIndex));
-    if (!isDuplicateOfTakeaway(candidateSentence)) {
-      return raw;
+  const windowText = windowLines.join(" ");
+  const protectedWindow = protectSentenceAbbreviations(windowText);
+  const boundaryRegex = new RegExp(sentenceBoundaryPattern, "g");
+  const boundaries: number[] = [];
+  let boundaryMatch: RegExpExecArray | null;
+  while ((boundaryMatch = boundaryRegex.exec(protectedWindow))) {
+    boundaries.push(boundaryMatch.index + boundaryMatch[0].length);
+  }
+
+  let matchStart = -1;
+  let matchEnd = -1;
+  let previousBoundary = 0;
+  for (const boundary of boundaries) {
+    const candidate = restoreSentenceAbbreviations(protectedWindow.slice(previousBoundary, boundary)).trim();
+    if (isDuplicateOfTakeaway(candidate)) {
+      matchStart = previousBoundary;
+      matchEnd = boundary;
+      break;
     }
-
-    const remainderOfLine = restoreSentenceAbbreviations(protectedLine.slice(cutIndex)).replace(/^\s+/, "");
-    const nextLines = lines.slice();
-    nextLines[firstContentIndex] = remainderOfLine;
-    return nextLines.join("\n").replace(/^\n+/, "").trim();
+    previousBoundary = boundary;
   }
 
-  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
-  // quality failure): getSectionTakeaway extracts its sentence from
-  // splitSentences, which collapses ALL whitespace -- including
-  // newlines -- before scanning for a sentence boundary (stripMarkdown's
-  // own `\s+` collapse). A short label-only first line with no
-  // sentence-ending punctuation of its own ("**Answer:**", the shape a
-  // model routinely writes as its own line before the real sentence)
-  // therefore gets silently fused with the NEXT line by
-  // getSectionTakeaway, correctly producing a takeaway drawn from both
-  // lines together -- but the check above only ever looked for a
-  // boundary within this single physical line, found none, and bailed
-  // out returning `raw` completely unchanged, leaving the real
-  // duplicate sentence sitting untouched on the very next line. Bounded
-  // to exactly the next ONE non-empty content line (not a general
-  // multi-line scan) so this stays narrowly scoped to that specific,
-  // diagnosed shape rather than risking consumption of unrelated later
-  // prose; a bulleted/numbered next line is never treated as a
-  // continuation, since that begins its own separate list item.
-  const nextContentIndex = lines.findIndex(
-    (line, index) => index > firstContentIndex && line.trim().length > 0
-  );
-  if (nextContentIndex === -1) {
-    return raw;
+  // A bulleted/numbered item with no internal sentence boundary at all
+  // ("1) Integration-first add-on products...", the original reported
+  // shape) is still tested as one indivisible whole, exactly as before.
+  if (matchStart === -1 && marker && boundaries.length === 0) {
+    const wholeCandidate = restoreSentenceAbbreviations(protectedWindow).trim();
+    if (isDuplicateOfTakeaway(wholeCandidate)) {
+      matchStart = 0;
+      matchEnd = protectedWindow.length;
+    }
   }
-  const nextLine = lines[nextContentIndex];
-  const trimmedNextLine = nextLine.trim();
-  if (/^(?:[-*•]|\d+[.)])\s+/.test(trimmedNextLine)) {
+
+  if (matchStart === -1) {
     return raw;
   }
 
-  const joinedLine = `${trimmedFirstLine} ${trimmedNextLine}`;
-  const protectedJoinedLine = protectSentenceAbbreviations(joinedLine);
-  const joinedBoundaryMatch = protectedJoinedLine.match(/[.!?](?=\s|$)/);
-  if (!joinedBoundaryMatch || joinedBoundaryMatch.index === undefined) {
-    return raw;
-  }
+  const before = restoreSentenceAbbreviations(protectedWindow.slice(0, matchStart)).trim();
+  const after = restoreSentenceAbbreviations(protectedWindow.slice(matchEnd)).trim();
+  const remainder = [before, after].filter(Boolean).join(" ");
 
-  const joinedCutIndex = joinedBoundaryMatch.index + 1;
-  const joinedCandidateSentence = restoreSentenceAbbreviations(protectedJoinedLine.slice(0, joinedCutIndex));
-  if (!isDuplicateOfTakeaway(joinedCandidateSentence)) {
-    return raw;
-  }
-
-  // The label line carried no sentence content of its own and is fully
-  // consumed by the takeaway; whatever remains of the second line after
-  // the matched sentence boundary survives as that line's own new
-  // content, exactly mirroring the single-line "remainder" behavior
-  // above.
-  const remainderOfNextLine = restoreSentenceAbbreviations(protectedJoinedLine.slice(joinedCutIndex)).replace(
-    /^\s+/,
-    ""
-  );
   const nextLines = lines.slice();
-  nextLines.splice(firstContentIndex, 1);
-  nextLines[nextContentIndex - 1] = remainderOfNextLine;
+  if (secondConsumedIndex !== -1) {
+    // The label line carried no sentence content of its own and is fully
+    // consumed by the takeaway; whatever remains (from either side of
+    // the matched span) becomes the second line's own new content.
+    nextLines.splice(firstContentIndex, 1);
+    const adjustedSecondIndex = secondConsumedIndex - 1;
+    if (remainder) {
+      nextLines[adjustedSecondIndex] = remainder;
+    } else {
+      nextLines.splice(adjustedSecondIndex, 1);
+    }
+  } else if (remainder) {
+    nextLines[firstContentIndex] = `${marker}${remainder}`;
+  } else {
+    nextLines.splice(firstContentIndex, 1);
+  }
+
   return nextLines.join("\n").replace(/^\n+/, "").trim();
 }
 

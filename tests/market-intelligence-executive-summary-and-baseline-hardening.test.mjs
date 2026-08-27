@@ -297,15 +297,44 @@ test("DEDUP5 (regression guard, previously fixed shape): the label-only-first-li
   assert.match(stripped, /Additional detail follows/);
 });
 
-test("DEDUP6: source drift check -- the bullet branch no longer manually strips '**' before calling isDuplicateOfTakeaway", () => {
+test("DEDUP6: source drift check -- the bullet branch no longer manually strips '**' before comparison (superseded by the multi-sentence-scan rewrite, which never pre-strips markdown at all -- isDuplicateOfTakeaway's own stripMarkdown normalizes every candidate)", () => {
   const presentationSource = readFileSync(`${repoRoot}app/lib/report-presentation.ts`, "utf8");
   assert.doesNotMatch(
     presentationSource,
     /const firstLineTextOnly = trimmedFirstLine\.slice\(bulletMarkerMatch\[0\]\.length\)\.replace\(\/\\\*\\\*\/g, ""\);/,
-    "the premature manual '**' strip must be removed so isDuplicateOfTakeaway's own stripMarkdown normalizes both sides identically"
+    "the premature manual '**' strip must never be reintroduced"
   );
-  assert.match(
-    presentationSource,
-    /const firstLineTextOnly = trimmedFirstLine\.slice\(bulletMarkerMatch\[0\]\.length\);/
-  );
+});
+
+test("DEDUP7: the exact newly-diagnosed shape -- a bulleted item whose own short (<=24 char) opening sentence is filtered out by splitSentences, making the takeaway the SECOND sentence on the same line -- is now correctly deduplicated while the short opening sentence is preserved intact", () => {
+  const content =
+    "1. **Regulatory tailwinds.** Rising demand for compliance automation across the U.S. and E.U. is accelerating adoption of AI-driven audit tools among mid-market financial services firms with cross-border obligations.\n2. **Cloud migration.** Enterprises are consolidating legacy on-prem audit systems onto cloud-native platforms, creating a large addressable upgrade market for compliance vendors.";
+  const takeaway = getSectionTakeaway(content);
+  assert.match(takeaway, /Rising demand for compliance automation/, "the takeaway must be the second sentence, since the first is <=24 chars and filtered by splitSentences");
+
+  const stripped = stripLeadingTakeawaySentence(content, takeaway);
+  assert.ok(!stripped.includes("Rising demand for compliance automation"), `the duplicated second sentence must be removed, got: "${stripped}"`);
+  assert.match(stripped, /\*\*Regulatory tailwinds\.\*\*/, "the short opening sentence must survive intact, including its closing bold marker");
+  assert.match(stripped, /Cloud migration/, "the second bullet must be fully preserved");
+});
+
+test("DEDUP8 (no regression): the non-bulleted equivalent of the same short-first-sentence shape also dedups correctly", () => {
+  const content =
+    "**Regulatory tailwinds.** Rising demand for compliance automation across the U.S. and E.U. is accelerating adoption of AI-driven audit tools among mid-market financial services firms with cross-border obligations.\n\nSeparately, cloud migration is also underway.";
+  const takeaway = getSectionTakeaway(content);
+  const stripped = stripLeadingTakeawaySentence(content, takeaway);
+  assert.ok(!stripped.includes("Rising demand for compliance automation"));
+  assert.match(stripped, /\*\*Regulatory tailwinds\.\*\*/);
+  assert.match(stripped, /Separately, cloud migration/);
+});
+
+test("DEDUP9 (no regression): when the takeaway genuinely IS the literal first sentence of a multi-sentence body, only that first sentence is removed -- later sentences on the same line are untouched", () => {
+  const content =
+    "Vendors are bundling integration services with core platform offerings to increase switching costs in mature markets. Additionally, pricing pressure is rising. A third observation follows here for good measure.\n\nMore detail follows in a separate paragraph.";
+  const takeaway = getSectionTakeaway(content);
+  const stripped = stripLeadingTakeawaySentence(content, takeaway);
+  assert.ok(!stripped.includes("Vendors are bundling integration services"));
+  assert.match(stripped, /Additionally, pricing pressure is rising/);
+  assert.match(stripped, /A third observation follows/);
+  assert.match(stripped, /More detail follows/);
 });

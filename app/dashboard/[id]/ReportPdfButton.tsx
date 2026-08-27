@@ -1625,6 +1625,24 @@ function extractMarketBriefListLines(content: string, headings: string[]): strin
   return [];
 }
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+// consistency hardening): a value extracted from a labeled section can
+// legitimately be either a single sentence ("Biggest Risk: Regulatory
+// uncertainty...") or a short bulleted list ("Recommendation:\n1. ...\n2.
+// ...\n3. ..."), depending on which real label matched. A cover-level
+// field needs exactly ONE concise statement -- this takes the first real
+// list item when the value is bulleted/numbered, or returns a
+// single-sentence value unchanged, rather than concatenating multiple
+// bullets into one run-on cover fragment.
+function takeFirstListItemOrSentence(value: string): string {
+  const trimmed = (value || "").trim();
+  if (!trimmed) return "";
+  const firstLine = trimmed
+    .split(/\n+/)
+    .map((line) => line.replace(/^\s*(?:\d+[.)]|[-*•])\s*/, "").trim())
+    .find(Boolean);
+  return firstLine || trimmed;
+}
 
 // Buckets the exact, verbatim decision text extracted above into a color
 // category -- checked NO_GO/CONDITIONAL first since "GO" is itself a
@@ -2955,7 +2973,22 @@ function getPdfSectionDedupeKey(section: { field?: string; title: string; conten
 function isLegacyTamSamSomSection(section: { field?: string; title: string; content: string }) {
   const fieldKey = section.field?.trim().toLowerCase();
 
-  if (fieldKey === "tamsamsom" || isTamSamSomTitle(section.title)) {
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+  // consistency hardening): the genuine, first-class "Market Size"
+  // section (field === "marketSize", its own real title is literally
+  // "Market Size") was being misclassified as a "legacy TAM/SAM/SOM
+  // duplicate" by the title regex below (`\bmarket\s+size\b` matches
+  // the section's OWN title, independent of content quality or
+  // confirmation status) -- dedupePdfSections then silently dropped a
+  // valid, populated, "Data Confirmed" Market Size section out of the
+  // PDF entirely, even though the web dashboard rendered it correctly.
+  // Market Size and TAM/SAM/SOM are two DIFFERENT, both-legitimate
+  // fields (see market-intelligence-graph.ts's own "Market / Industry
+  // Baseline" distinction) -- this guard excludes the real field the
+  // exact same way the existing tamsamsom guard above already protects
+  // its own canonical field, so only a genuinely different, untitled or
+  // stray legacy section can ever match the heuristics below.
+  if (fieldKey === "tamsamsom" || fieldKey === "marketsize" || isTamSamSomTitle(section.title)) {
     return false;
   }
 
@@ -3004,6 +3037,22 @@ function normalizeSavedPdfSectionsBeforeRender<T extends { field?: string; title
 
   return sections.filter((section) => {
     const isCanonicalTamSamSom = isTamSamSomTitle(section.title);
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+    // production consistency hardening): the genuine "Market Size"
+    // section (field === "marketSize") is a different, first-class
+    // field from TAM/SAM/SOM -- never a legacy duplicate of it -- but
+    // was being silently dropped here whenever its own content
+    // happened to include the report's standard "AI Executive Insight"
+    // callout: contentContainsSizingInsight's second condition matches
+    // on `${normalizedTitle}\n${normalizedContent}` including "market
+    // size", which the section's OWN title trivially always satisfies,
+    // independent of whether the content is actually a TAM/SAM/SOM
+    // duplicate. Excluding the real field here mirrors the same guard
+    // already protecting the canonical tamsamsom field two lines below.
+    const fieldKey = section.field?.trim().toLowerCase();
+    if (fieldKey === "marketsize") {
+      return true;
+    }
     const normalizedTitle = normalizePdfText(section.title);
     const normalizedContent = normalizePdfText(section.content);
     const titleContainsMarketSizingTerm = /\b(?:tam|sam|som)\b/i.test(normalizedTitle);
@@ -3549,14 +3598,44 @@ export function buildStandardReportPdf({
         // section" fallback, which risks attaching an unrelated
         // percentage mentioned in the executive summary's own prose).
         const marketConfidenceScore = marketDecision ? marketDecision.confidenceScore : null;
+        // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+        // production consistency hardening): "Top 3 Risks" is the
+        // deterministic banner's own label (formatExecutiveDecisionBrief),
+        // only present when coverage was available at generation/save
+        // time. When it's absent, this returned [] and the cover fell
+        // back to buildExecutiveSnapshot's mainRisk -- an UNSCOPED,
+        // keyword-based full-report scan (collectBullets) with no
+        // section boundary, the same class of defect that produced the
+        // malformed "combined AUM$150M) to validate attainable..." Next
+        // Action fragment below. The market executiveSummary prompt
+        // (market.ts) always instructs the model to write its own
+        // "(4) Biggest Risk -- one sentence" regardless of whether the
+        // deterministic banner is embedded, so falling back to THAT
+        // labeled, scoped sentence (still confined to
+        // marketExecutiveSummaryContent, never the full report) is a
+        // real, coherent risk statement instead of an arbitrary fragment
+        // from an unrelated section.
         const marketTopRisks = isMarketIntelligenceReport
-          ? extractMarketBriefListLines(marketExecutiveSummaryContent, [
-              "Top 3 Risks",
-              "En Önemli 3 Risk",
-              "Top 3 Risiken",
-              "Top 3 des risques",
-              "Los 3 riesgos principales",
-            ])
+          ? (() => {
+              const bannerRisks = extractMarketBriefListLines(marketExecutiveSummaryContent, [
+                "Top 3 Risks",
+                "En Önemli 3 Risk",
+                "Top 3 Risiken",
+                "Top 3 des risques",
+                "Los 3 riesgos principales",
+              ]);
+              if (bannerRisks.length > 0) {
+                return bannerRisks;
+              }
+              const biggestRisk = extractMetricValueFromAliases(marketExecutiveSummaryContent, [
+                "Biggest Risk",
+                "En Büyük Risk",
+                "Größtes Risiko",
+                "Risque le plus important",
+                "Mayor riesgo",
+              ]);
+              return biggestRisk ? [biggestRisk] : [];
+            })()
           : [];
         const marketConfidenceFactors = isMarketIntelligenceReport
           ? [
@@ -3574,8 +3653,41 @@ export function buildStandardReportPdf({
               ]),
             ]
           : [];
+        // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+        // production consistency hardening): "Immediate Next Action" is
+        // the deterministic banner's own label -- it never appears
+        // anywhere in the market executiveSummary prompt (market.ts),
+        // which instead always instructs the model to write its own
+        // "(5) Recommendation -- at most 3 bullets, concrete next
+        // actions only." When the banner isn't embedded (coverage
+        // unavailable at generation/save time), this extraction ALWAYS
+        // returned "", forcing the cover to fall back to
+        // buildExecutiveSnapshot's nextAction -- an UNSCOPED, keyword-
+        // based full-report scan (collectBullets, matching bare words
+        // like "validate"/"action"/"pilot" anywhere in the ENTIRE
+        // report) with no section boundary. Confirmed live: this
+        // produced the malformed cover fragment "combined AUM$150M) to
+        // validate attainable..." -- a mid-sentence clip lifted from
+        // strategicRecommendations (an unrelated section that
+        // legitimately contains the word "validate"), truncated to
+        // ~46 characters. Falling back to the model's own scoped
+        // "Recommendation" bullets (still confined to
+        // marketExecutiveSummaryContent, never the full report) instead
+        // gives a real, coherent next-action statement; if even that is
+        // genuinely absent, marketNextAction stays "" and the cover
+        // correctly falls through to the same honest unavailable state
+        // as before -- never a random unscoped fragment.
         const marketNextAction = isMarketIntelligenceReport
-          ? extractMetricValue(marketExecutiveSummaryContent, "Immediate Next Action")
+          ? extractMetricValue(marketExecutiveSummaryContent, "Immediate Next Action") ||
+            takeFirstListItemOrSentence(
+              extractMetricValueFromAliases(marketExecutiveSummaryContent, [
+                "Recommendation",
+                "Öneri",
+                "Empfehlung",
+                "Recommandation",
+                "Recomendación",
+              ])
+            )
           : "";
         const marketReportQualityLabel = isMarketIntelligenceReport
           ? marketConfidenceScore === null

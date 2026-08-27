@@ -262,12 +262,20 @@ export function resolveCanonicalDecisionFromReportText(
 //   scan of the rest of the document, so it can never attach an unrelated
 //   percentage.
 //   Tier 2 (safe, narrow): if no banner is present (a legacy report), the
-//   raw text following a line-anchored "Decision:"/"Recommendation:"
-//   label (matching the exact shape web already displayed correctly) is
+//   raw text following a "Decision:"/"Recommendation:" label -- ANYWHERE
+//   in the text, not only at line-start (the model's own free-text
+//   prose routinely writes this as a sub-clause of a larger sentence,
+//   e.g. "Bottom Line — Decision: MONITOR market entry for U.S.") -- is
 //   returned VERBATIM -- never re-scanned for a GO/WAIT/PASS keyword,
-//   never remapped through any token conversion. Confidence is left
-//   unavailable (null) at this tier: a legacy report's raw decision text
-//   has no reliably-adjacent confidence figure to read safely.
+//   never remapped through any token conversion. This is deliberately
+//   NOT collapsed down to just the leading vocabulary word even when one
+//   is present: confirmed live, "Decision: Monitor for a staged U.S.
+//   entry, contingent on validating TAM/SAM assumptions..." uses
+//   "Monitor" as an ordinary verb, not a categorical decision token, and
+//   truncating to "MONITOR" would discard the real, decision-changing
+//   qualification that follows it. Confidence is left unavailable (null)
+//   at this tier: a raw decision text has no reliably-adjacent
+//   confidence figure to read safely.
 //   Tier 3: neither found -- decision is "—" (unavailable) and confidence
 //   is null. No surface may guess a value here.
 export type MarketIntelligenceExecutiveDecisionSource = "canonical-banner" | "raw-label" | "unavailable";
@@ -316,12 +324,28 @@ const marketIntelligenceRawDecisionLabels = [
 const actionShapedTextPattern =
   /^(?:commission|conduct|analyz[e]?|generate|write|provide|summarize|summarise|explain|list|identify|assess|evaluate|create|perform|produce|research|describe|compare|review|investigate|determine|prepare|draft|compile|outline|launch|pilot|test|validate|hire|build|run|execute|survey|interview|gather|collect|develop|establish|secure|obtain|schedule|initiate|begin|start)\b/i;
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
+// consistency hardening): this used to require the label at the START
+// of a line (optionally after a bullet marker) -- a real production
+// executiveSummary instead wrote it as a sub-clause of a larger opening
+// sentence, "Bottom Line — Decision: MONITOR market entry for U.S." --
+// "Decision:" here is preceded by "Bottom Line — " on the same line, so
+// the old anchor never matched at all, leaving the canonical resolver
+// with genuinely nothing (decision "—", confidence null) despite a
+// real, valid decision statement being right there. Requiring only a
+// word boundary before the label (instead of line-start) lets it match
+// anywhere a genuine "Decision:"/"Karar:" label appears, while `\b`
+// still prevents matching inside an unrelated word (e.g. "Indecision:").
+// Deliberately still returns the FULL matched text verbatim, never just
+// a leading vocabulary word -- see this function's own historical
+// "Decision: Monitor for a staged U.S. entry, contingent on..." case,
+// where "Monitor" is an ordinary verb, not a categorical token, and the
+// qualifying clause that follows it is the actually decision-relevant
+// content.
 function extractMarketIntelligenceRawDecisionText(text: string): string {
   for (const label of marketIntelligenceRawDecisionLabels) {
     const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const match = text.match(
-      new RegExp(`(?:^|\\n)\\s*(?:[-*•]\\s*)?${escapedLabel}\\s*[:\\-–—]\\s*([^\\n]+)`, "i")
-    );
+    const match = text.match(new RegExp(`\\b${escapedLabel}\\s*[:\\-–—]\\s*([^\\n]+)`, "i"));
     const candidate = match?.[1]?.trim();
 
     if (candidate && !actionShapedTextPattern.test(candidate)) {
