@@ -798,7 +798,8 @@ function findAdjacentProxyTopDown(
 
 function buildPlanningEstimate(
   evidence: readonly DomainResearchEvidence[],
-  prompt: string
+  prompt: string,
+  language = "English"
 ): { estimate: MarketPlanningEstimate | null; gap: MarketSizingGap | null } {
   const requestedGeography = extractRequestedGeography(prompt);
   const sourceBacked = evidence.filter(
@@ -925,13 +926,25 @@ function buildPlanningEstimate(
         : topDownCandidates.length === 0
           ? "everything"
           : "topDownFigure";
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence report-
+    // language consistency): these 4 gap explanations used to be raw
+    // hardcoded English regardless of the report's own language, so a
+    // Turkish (or any non-English) report could show an English sentence
+    // sitting among otherwise fully-localized text. Now resolved through
+    // the SAME marketGraphCopy mechanism every other fixed fallback string
+    // in this file already uses -- never fabricates or changes WHAT is
+    // reported, only WHICH language the fixed explanation sentence is in.
+    const gapCopy = marketGraphCopy[copyLanguage(language)];
     const explanation = partialQuantity
-      ? `ZERINIX identified approximately ${Math.round(partialQuantity.amount).toLocaleString("en-US")} qualifying buyers/establishments from [${partialQuantity.evidenceId}] (${partialQuantity.description}), but could not establish a sufficiently reliable annual spend, subscription, or contract-value benchmark for this product category -- no vendor pricing, comparable-product cost, or procurement disclosure was found even after searching adjacent/comparable evidence. A monetary TAM is therefore withheld pending pricing validation, rather than assuming a spend figure with no evidential basis.`
+      ? gapCopy.tamGapPricingMissingTemplate
+          .replace("%COUNT%", Math.round(partialQuantity.amount).toLocaleString("en-US"))
+          .replace("%EVIDENCE_ID%", partialQuantity.evidenceId)
+          .replace("%DESCRIPTION%", partialQuantity.description)
       : missingIngredient === "buyerPopulation"
-        ? "ZERINIX found credible pricing/spend evidence for this category, but no addressable buyer or establishment population count that met the confidence and geography-consistency bar required to anchor a bottom-up calculation. A monetary TAM is therefore withheld pending buyer-population validation -- a real price without a real population to apply it to cannot become a market size."
+        ? gapCopy.tamGapBuyerPopulationMissing
         : missingIngredient === "topDownFigure"
-          ? "ZERINIX found a candidate market-size figure, but it did not clear the confidence, geography-consistency, or amount-extraction bar required to anchor a TAM, and no bottom-up or adjacent-market alternative was available either. A monetary TAM is therefore withheld pending a more reliable market-size disclosure."
-          : "ZERINIX searched for a direct market-size figure, an addressable buyer population, and comparable adjacent-market benchmarks for this exact request, but found no verifiable numeric evidence for any of them. A monetary TAM is therefore withheld until at least one of these evidence types becomes available.";
+          ? gapCopy.tamGapTopDownFigureMissing
+          : gapCopy.tamGapEverythingMissing;
 
     return {
       estimate: null,
@@ -1190,7 +1203,8 @@ function narrowingRatioLabel(proxy: {
 
 export function buildMarketIntelligenceGraph(
   bundle: Pick<DomainResearchBundle, "evidence">,
-  prompt = ""
+  prompt = "",
+  language = "English"
 ): MarketIntelligenceGraph {
   const evidence = bundle.evidence;
   const vendorIntelligence = buildVendorIntelligenceGraph(evidence, prompt);
@@ -1376,7 +1390,11 @@ export function buildMarketIntelligenceGraph(
 
   const baseCoverage = evaluateMarketResearchCoverage(evidence, prompt);
   const competitorBreadth = competitorMap.size;
-  const { estimate: planningEstimate, gap: sizingGap } = buildPlanningEstimate(evidence, prompt);
+  const { estimate: planningEstimate, gap: sizingGap } = buildPlanningEstimate(
+    evidence,
+    prompt,
+    language
+  );
   const competitiveEvidence = Math.max(
     baseCoverage.dimensions.competitiveEvidence,
     vendorIntelligence.coverage.competitiveCoverageScore,
@@ -1491,7 +1509,11 @@ type MarketGraphCopyKey =
   | "sourcesTitle"
   | "noVerifiableSourcesText"
   | "competitorClaimAdjacentReframeTemplate"
-  | "competitorClaimUnsupportedReplacement";
+  | "competitorClaimUnsupportedReplacement"
+  | "tamGapPricingMissingTemplate"
+  | "tamGapBuyerPopulationMissing"
+  | "tamGapTopDownFigureMissing"
+  | "tamGapEverythingMissing";
 
 const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, string>> = {
   English: {
@@ -1578,6 +1600,14 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     targetCustomerLabel: "Target",
     rankingLabel: "Ranking",
     overallScoreLabel: "Overall score",
+    tamGapPricingMissingTemplate:
+      "ZERINIX identified approximately %COUNT% qualifying buyers/establishments from [%EVIDENCE_ID%] (%DESCRIPTION%), but could not establish a sufficiently reliable annual spend, subscription, or contract-value benchmark for this product category -- no vendor pricing, comparable-product cost, or procurement disclosure was found even after searching adjacent/comparable evidence. A monetary TAM is therefore withheld pending pricing validation, rather than assuming a spend figure with no evidential basis.",
+    tamGapBuyerPopulationMissing:
+      "ZERINIX found credible pricing/spend evidence for this category, but no addressable buyer or establishment population count that met the confidence and geography-consistency bar required to anchor a bottom-up calculation. A monetary TAM is therefore withheld pending buyer-population validation -- a real price without a real population to apply it to cannot become a market size.",
+    tamGapTopDownFigureMissing:
+      "ZERINIX found a candidate market-size figure, but it did not clear the confidence, geography-consistency, or amount-extraction bar required to anchor a TAM, and no bottom-up or adjacent-market alternative was available either. A monetary TAM is therefore withheld pending a more reliable market-size disclosure.",
+    tamGapEverythingMissing:
+      "ZERINIX searched for a direct market-size figure, an addressable buyer population, and comparable adjacent-market benchmarks for this exact request, but found no verifiable numeric evidence for any of them. A monetary TAM is therefore withheld until at least one of these evidence types becomes available.",
   },
   Turkish: {
     marketInfrastructureTitle: "Pazar Altyapısı",
@@ -1642,6 +1672,14 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     targetCustomerLabel: "Hedef müşteri",
     rankingLabel: "Sıralama",
     overallScoreLabel: "Genel skor",
+    tamGapPricingMissingTemplate:
+      "ZERINIX, [%EVIDENCE_ID%] kaynağından (%DESCRIPTION%) yaklaşık %COUNT% uygun alıcı/işletme tespit etti, ancak bu ürün kategorisi için yeterince güvenilir bir yıllık harcama, abonelik veya sözleşme değeri referansı belirleyemedi -- ilgili/karşılaştırılabilir kanıtlar araştırılmasına rağmen tedarikçi fiyatlandırması, karşılaştırılabilir ürün maliyeti veya satın alma bildirimi bulunamadı. Bu nedenle, kanıta dayanmayan bir harcama rakamı varsaymak yerine, fiyatlandırma doğrulanana kadar parasal bir TAM belirtilmemektedir.",
+    tamGapBuyerPopulationMissing:
+      "ZERINIX bu kategori için güvenilir fiyatlandırma/harcama kanıtı buldu, ancak aşağıdan yukarıya bir hesaplamayı dayandırmak için gereken güven ve coğrafya tutarlılığı barını karşılayan bir hedef alıcı veya işletme nüfusu sayısı bulamadı. Bu nedenle, alıcı nüfusu doğrulanana kadar parasal bir TAM belirtilmemektedir -- gerçek bir nüfusa uygulanamayan gerçek bir fiyat, bir pazar büyüklüğüne dönüşemez.",
+    tamGapTopDownFigureMissing:
+      "ZERINIX aday bir pazar büyüklüğü rakamı buldu, ancak bu rakam bir TAM'ı dayandırmak için gereken güven, coğrafya tutarlılığı veya rakam çıkarma barını geçemedi ve aşağıdan yukarıya veya bitişik pazar alternatifi de mevcut değildi. Bu nedenle, daha güvenilir bir pazar büyüklüğü açıklaması yapılana kadar parasal bir TAM belirtilmemektedir.",
+    tamGapEverythingMissing:
+      "ZERINIX bu talep için doğrudan bir pazar büyüklüğü rakamı, hedeflenebilir bir alıcı nüfusu ve karşılaştırılabilir bitişik pazar referansları aradı, ancak bunların hiçbiri için doğrulanabilir sayısal kanıt bulamadı. Bu nedenle, bu kanıt türlerinden en az biri mevcut olana kadar parasal bir TAM belirtilmemektedir.",
   },
   German: {
     marketInfrastructureTitle: "Marktinfrastruktur",
@@ -1706,6 +1744,14 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     targetCustomerLabel: "Zielkunde",
     rankingLabel: "Rang",
     overallScoreLabel: "Gesamtbewertung",
+    tamGapPricingMissingTemplate:
+      "ZERINIX identifizierte anhand von [%EVIDENCE_ID%] (%DESCRIPTION%) etwa %COUNT% qualifizierte Käufer/Betriebe, konnte jedoch keinen ausreichend zuverlässigen Richtwert für jährliche Ausgaben, Abonnements oder Vertragswerte für diese Produktkategorie ermitteln -- auch nach der Suche nach angrenzenden/vergleichbaren Nachweisen wurden weder Anbieterpreise noch vergleichbare Produktkosten oder Beschaffungsangaben gefunden. Ein monetärer TAM wird daher bis zur Validierung der Preisgestaltung zurückgehalten, anstatt einen Ausgabenwert ohne Beleggrundlage anzunehmen.",
+    tamGapBuyerPopulationMissing:
+      "ZERINIX fand glaubwürdige Preis-/Ausgabennachweise für diese Kategorie, jedoch keine adressierbare Käufer- oder Betriebszahl, die die für eine Bottom-up-Berechnung erforderliche Konfidenz- und Geografie-Konsistenzschwelle erfüllte. Ein monetärer TAM wird daher bis zur Validierung der Käuferpopulation zurückgehalten -- ein realer Preis ohne eine reale Population, auf die er angewendet werden kann, ergibt keine Marktgröße.",
+    tamGapTopDownFigureMissing:
+      "ZERINIX fand eine Kandidatenzahl für die Marktgröße, die jedoch nicht die für die Verankerung eines TAM erforderliche Konfidenz-, Geografie-Konsistenz- oder Betragsextraktionsschwelle erreichte, und es war auch keine Bottom-up- oder benachbarte Marktalternative verfügbar. Ein monetärer TAM wird daher bis zu einer zuverlässigeren Offenlegung der Marktgröße zurückgehalten.",
+    tamGapEverythingMissing:
+      "ZERINIX suchte nach einer direkten Marktgrößenzahl, einer adressierbaren Käuferpopulation und vergleichbaren benachbarten Marktbenchmarks für diese genaue Anfrage, fand jedoch für keinen dieser Punkte überprüfbare numerische Nachweise. Ein monetärer TAM wird daher zurückgehalten, bis mindestens einer dieser Nachweistypen verfügbar wird.",
   },
   French: {
     marketInfrastructureTitle: "Infrastructure du marché",
@@ -1770,6 +1816,14 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     targetCustomerLabel: "Cible",
     rankingLabel: "Classement",
     overallScoreLabel: "Score global",
+    tamGapPricingMissingTemplate:
+      "ZERINIX a identifié environ %COUNT% acheteurs/établissements qualifiés à partir de [%EVIDENCE_ID%] (%DESCRIPTION%), mais n'a pas pu établir une référence suffisamment fiable de dépense annuelle, d'abonnement ou de valeur contractuelle pour cette catégorie de produits -- aucun prix fournisseur, coût de produit comparable ou divulgation d'achat n'a été trouvé, même après recherche de preuves adjacentes/comparables. Un TAM monétaire est donc retenu en attendant la validation des prix, plutôt que de supposer un montant de dépense sans base factuelle.",
+    tamGapBuyerPopulationMissing:
+      "ZERINIX a trouvé des preuves crédibles de prix/dépenses pour cette catégorie, mais aucun nombre de population d'acheteurs ou d'établissements adressables atteignant le seuil de confiance et de cohérence géographique requis pour ancrer un calcul ascendant. Un TAM monétaire est donc retenu en attendant la validation de la population d'acheteurs -- un prix réel sans une population réelle à laquelle l'appliquer ne peut pas devenir une taille de marché.",
+    tamGapTopDownFigureMissing:
+      "ZERINIX a trouvé un chiffre candidat pour la taille du marché, mais il n'a pas franchi le seuil de confiance, de cohérence géographique ou d'extraction de montant requis pour ancrer un TAM, et aucune alternative ascendante ou de marché adjacent n'était disponible non plus. Un TAM monétaire est donc retenu en attendant une divulgation plus fiable de la taille du marché.",
+    tamGapEverythingMissing:
+      "ZERINIX a recherché un chiffre direct de taille de marché, une population d'acheteurs adressables et des références de marché adjacentes comparables pour cette demande précise, mais n'a trouvé aucune preuve numérique vérifiable pour aucun d'entre eux. Un TAM monétaire est donc retenu jusqu'à ce qu'au moins un de ces types de preuves devienne disponible.",
   },
   Spanish: {
     marketInfrastructureTitle: "Infraestructura del mercado",
@@ -1834,6 +1888,14 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
     targetCustomerLabel: "Cliente objetivo",
     rankingLabel: "Clasificación",
     overallScoreLabel: "Puntuación general",
+    tamGapPricingMissingTemplate:
+      "ZERINIX identificó aproximadamente %COUNT% compradores/establecimientos calificados a partir de [%EVIDENCE_ID%] (%DESCRIPTION%), pero no pudo establecer una referencia suficientemente fiable de gasto anual, suscripción o valor contractual para esta categoría de producto -- no se encontró precio de proveedor, costo de producto comparable ni divulgación de adquisición, incluso después de buscar evidencia adyacente/comparable. Por lo tanto, se retiene un TAM monetario hasta que se valide el precio, en lugar de asumir una cifra de gasto sin base evidencial.",
+    tamGapBuyerPopulationMissing:
+      "ZERINIX encontró evidencia creíble de precios/gastos para esta categoría, pero ningún recuento de población de compradores o establecimientos direccionables que cumpliera el umbral de confianza y coherencia geográfica requerido para anclar un cálculo ascendente. Por lo tanto, se retiene un TAM monetario hasta que se valide la población de compradores -- un precio real sin una población real a la que aplicarlo no puede convertirse en un tamaño de mercado.",
+    tamGapTopDownFigureMissing:
+      "ZERINIX encontró una cifra candidata de tamaño de mercado, pero no superó el umbral de confianza, coherencia geográfica o extracción de monto requerido para anclar un TAM, y tampoco había disponible una alternativa ascendente o de mercado adyacente. Por lo tanto, se retiene un TAM monetario hasta que se disponga de una divulgación más fiable del tamaño de mercado.",
+    tamGapEverythingMissing:
+      "ZERINIX buscó una cifra directa de tamaño de mercado, una población de compradores direccionable y referencias de mercado adyacentes comparables para esta solicitud exacta, pero no encontró evidencia numérica verificable para ninguno de ellos. Por lo tanto, se retiene un TAM monetario hasta que al menos uno de estos tipos de evidencia esté disponible.",
   },
 };
 

@@ -31,6 +31,7 @@ import {
 import { sanitizeAiResponseText } from "@/app/lib/ai/response-sanitization";
 import {
   buildExecutiveSnapshot,
+  extractSectionMainExplanation,
   getReportQualityBreakdown,
   getReportPresentationLabels,
   getSectionTakeaway,
@@ -790,37 +791,10 @@ function extractRealBulletLines(content: string, limit = 8) {
     .slice(0, limit);
 }
 
-// The "main explanation" paragraph shown alongside the Key Takeaway --
-// genuinely different text, not a restatement. getSectionTakeaway already
-// returns the content's first sentence (normalized through its own,
-// separate text-cleaning pipeline, and truncated with "..." past 220
-// chars) -- a literal string-match-and-remove against that value would
-// silently fail whenever either of those differ from this function's own
-// cleaning, leaving the "removed" sentence back in and restating it here.
-// Skipping by INDEX instead is robust regardless of any such mismatch:
-// whenever a takeaway was found at all, it corresponds to this content's
-// own first sentence, so the explanation simply starts one sentence later.
-// Bullet-marked lines are excluded from the sentence pool -- those are
-// surfaced separately by extractRealBulletLines, and including them here
-// too would show the same list item twice. Deliberately UNCAPPED (no
-// sentence-count or character-length ceiling): this card is now this
-// section's complete, only presentation, so it must carry every remaining
-// sentence, not a truncated teaser, or real analysis would be silently
-// lost now that there is no "Details" disclosure left to fall back on.
-function extractSectionMainExplanation(content: string, takeaway: string) {
-  const cleaned = (content || "").replace(/\*\*/g, "").replace(/^#{1,6}\s+.*$/gm, "");
-  const proseOnly = cleaned
-    .split("\n")
-    .filter((line) => !/^\s*(?:[-*•]|\d+[.)])\s+/.test(line))
-    .join(" ");
-  const sentences = proseOnly
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim().replace(/^[-*•]\s+/, ""))
-    .filter((sentence) => sentence.length > 20);
-  const startIndex = takeaway ? 1 : 0;
-
-  return sentences.slice(startIndex).join(" ");
-}
+// extractSectionMainExplanation now lives in app/lib/report-presentation.ts
+// (shared with Planner.tsx) -- see its own doc comment there for the
+// per-line-first sentence-splitting fix that removed a residual
+// Key-Takeaway/body duplication bug this local copy still had.
 
 // CRITICAL FIX -- restore Market Intelligence's Market Metrics cards.
 // marketSize/cagr are free-flowing analytical prose (their prompts never

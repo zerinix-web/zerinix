@@ -2019,7 +2019,7 @@ Write only this section's content. Do not write a JSON object, field name, headi
           cachedFullReport?.responseData
         ) ||
         (cachedDomainResearch
-          ? buildMarketIntelligenceGraph(cachedDomainResearch, promptText)
+          ? buildMarketIntelligenceGraph(cachedDomainResearch, promptText, responseLanguage)
           : null);
       // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
       // production consistency hardening): this used to gate the ENTIRE
@@ -2263,7 +2263,7 @@ Write only this section's content. Do not write a JSON object, field name, headi
       // deterministic and only supports older snapshots that predate the graph.
       const marketIntelligenceGraph =
         conversationResearch?.marketIntelligenceGraph ||
-        buildMarketIntelligenceGraph(domainResearch, promptText);
+        buildMarketIntelligenceGraph(domainResearch, promptText, responseLanguage);
       logOperationalInfo("[api:market-analysis] shared market graph selected", {
         source: conversationResearch?.marketIntelligenceGraph
           ? "conversation_snapshot"

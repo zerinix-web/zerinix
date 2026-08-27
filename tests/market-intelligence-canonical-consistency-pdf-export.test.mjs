@@ -201,10 +201,28 @@ test("page.tsx and Planner.tsx: the Competitive Landscape 'no rows' branch check
   }
 });
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence PDF layout
+// hardening, round 2): the plain "namesLayout = namesOnly.length > 0 ?
+// ... : null" check this test used to assert was widened into
+// compactCompetitorState, which ALSO covers a second, distinct
+// evidence-insufficient case (a sparse 1-2 row structured table) that
+// used to render a mostly-empty spacious grid -- see either file's own
+// P0 fix comment on compactCompetitorState for the full root cause.
 test("ReportPdfButton.tsx and Planner.tsx (PDF export): the Competitive Landscape 'no rows' branch also checks the names-only fallback before falling back to the generic placeholder text, and draws a distinct 'PLAYERS IDENTIFIED' state instead of an empty table shell", () => {
   for (const source of [pdfButtonSource, plannerSource]) {
     assert.match(source, /RELEVANT PLAYERS IDENTIFIED — NOT VALIDATED AS DIRECT COMPETITORS/);
-    assert.match(source, /const namesLayout =\s*\n\s*namesOnly\.length > 0 \? getNamesOnlyCompetitorLayout\(namesOnly, (?:bodyWidth|visualWidth)\) : null;/);
+    assert.match(source, /COMPETITORS IDENTIFIED — LIMITED STRUCTURED COMPARISON DATA/);
+    assert.match(
+      source,
+      /const compactCompetitorState =\s*\n\s*namesOnly\.length > 0/,
+      "compactCompetitorState must still gate on the names-only fallback first"
+    );
+    assert.match(
+      source,
+      /miRows\.length > 0 && miRows\.length < minCompetitorTableRows/,
+      "compactCompetitorState must also cover the sparse-structured-rows case"
+    );
+    assert.match(source, /const namesLayout = compactCompetitorState\?\.layout \?\? null;/);
   }
 });
 

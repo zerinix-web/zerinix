@@ -1724,7 +1724,7 @@ async function handleChatPost(req: Request) {
         ? formatDomainResearchForReportGeneration(chatResearch)
         : "";
       chatMarketGraph = chatResearch
-        ? buildMarketIntelligenceGraph(chatResearch, researchConversationContext)
+        ? buildMarketIntelligenceGraph(chatResearch, researchConversationContext, responseLanguage)
         : null;
       if (chatMarketGraph) {
         chatResearchContext = `${chatResearchContext}\n\nFinal validated market intelligence graph:\n${formatMarketIntelligenceGraphForModel(chatMarketGraph)}`;

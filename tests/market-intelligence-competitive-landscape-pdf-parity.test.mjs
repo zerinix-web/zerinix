@@ -150,7 +150,7 @@ for (const [label, source] of [
 test("ReportPdfButton.tsx: the competitor-table drawing branch forks on isMarketIntelligenceReport BEFORE falling back to the generic extractCompetitorRows path, so MI reports never reach the generic 5-column table", () => {
   const block = pdfButtonSource.slice(
     pdfButtonSource.indexOf('if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {'),
-    pdfButtonSource.indexOf('if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {') + 12000
+    pdfButtonSource.indexOf('if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {') + 15000
   );
   const miForkIndex = block.indexOf("if (isMarketIntelligenceReport) {");
   const miExtractorIndex = block.indexOf("extractMarketIntelligenceCompetitorRows(\n              content,");
@@ -172,10 +172,16 @@ test("ReportPdfButton.tsx: the competitor-table drawing branch forks on isMarket
 // the two windows below check for the new namesOnly wiring plus the
 // still-present flat-height fallback, rather than requiring them to sit
 // immediately adjacent the way they did before this tier existed.
-test("ReportPdfButton.tsx: getVisualHeight's competitor-table branch computes height from the SAME row source AND the SAME names-only fallback the drawing branch will actually use for each report type (isMarketIntelligenceReport gates the row source, the names-only tier, and the Market Map height addend)", () => {
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence PDF layout
+// hardening, round 2): a 5th tier (sparse structured rows, below
+// minCompetitorTableRows) was added alongside the names-only fallback --
+// see compactCompetitorState's own comment on drawSectionVisual for the
+// full root cause. The height branch must compute from the exact same
+// tiers the drawing branch uses, or pagination and drawing disagree.
+test("ReportPdfButton.tsx: getVisualHeight's competitor-table branch computes height from the SAME row source AND the SAME names-only/sparse fallbacks the drawing branch will actually use for each report type (isMarketIntelligenceReport gates the row source, both fallback tiers, and the Market Map height addend)", () => {
   const heightBlock = pdfButtonSource.slice(
     pdfButtonSource.lastIndexOf('if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {'),
-    pdfButtonSource.lastIndexOf('if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {') + 1800
+    pdfButtonSource.lastIndexOf('if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {') + 2400
   );
   assert.match(
     heightBlock,
@@ -187,10 +193,20 @@ test("ReportPdfButton.tsx: getVisualHeight's competitor-table branch computes he
   );
   assert.match(
     heightBlock,
-    /return getNamesOnlyCompetitorLayout\(namesOnly, bodyWidth\)\.totalHeight \+ 8 \+ 50;/
+    /return getNamesOnlyCompetitorLayout\(namesOnly, bodyWidth, adjacentPlayersOnlyIntro\)\.totalHeight \+ 8 \+ 50;/
+  );
+  assert.match(
+    heightBlock,
+    /\} else if \(rows\.length < minCompetitorTableRows\) \{\s*\n\s*return \(\s*\n\s*getNamesOnlyCompetitorLayout\(\s*\n\s*rows\.map\(\(row\) => row\.vendor \|\| "Vendor"\),\s*\n\s*bodyWidth,\s*\n\s*sparseCompetitorTableIntro\s*\n\s*\)\.totalHeight/,
+    "the sparse-rows tier must use the same sparseCompetitorTableIntro-based layout"
   );
   assert.match(heightBlock, /return 8 \+ Math\.max\(1, rows\.length\) \* 15 \+ 4 \+ 8 \+ 50;/);
-  assert.match(heightBlock, /const rows = extractCompetitorRows\(section\.content\);\s*\n\s*return 8 \+ Math\.max\(1, rows\.length\) \* 15 \+ 4;/);
+  assert.match(heightBlock, /const rows = extractCompetitorRows\(section\.content\);\s*\n\s*if \(rows\.length === 0\) \{\s*\n\s*return 8 \+ 15 \+ 4;\s*\n\s*\}/);
+  assert.match(
+    heightBlock,
+    /if \(rows\.length < minCompetitorTableRows\) \{\s*\n\s*return getNamesOnlyCompetitorLayout\(\s*\n\s*rows\.map\(\(row\) => row\.company \|\| "Company"\),\s*\n\s*bodyWidth,\s*\n\s*sparseCompetitorTableIntro\s*\n\s*\)\.totalHeight;\s*\n\s*\}/
+  );
+  assert.match(heightBlock, /return 8 \+ rows\.length \* 15 \+ 4;/);
 });
 
 test("ReportPdfButton.tsx: the old generic company/positioning-shaped inferMarketMapPosition (the function this fix made unreachable, since the Market Map now always reads MI rows) was removed rather than left as dead code", () => {
@@ -216,10 +232,14 @@ test("Planner.tsx's downloadPdf: the competitor-table drawing branch (drawPdfVis
 // CRITICAL FIX -- root-cause repair (ticket: "Fix the remaining
 // canonical-data consistency and PDF export defects"): mirrors
 // ReportPdfButton.tsx's own names-only fallback tier fix above.
-test("Planner.tsx's downloadPdf: getPdfVisualHeight's competitiveLandscape branch computes height from the SAME row source AND the SAME names-only fallback drawPdfVisual will actually use for each report type", () => {
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence PDF layout
+// hardening, round 2): mirrors ReportPdfButton.tsx's own updated test --
+// a 5th tier (sparse structured rows) was added alongside the names-only
+// fallback.
+test("Planner.tsx's downloadPdf: getPdfVisualHeight's competitiveLandscape branch computes height from the SAME row source AND the SAME names-only/sparse fallbacks drawPdfVisual will actually use for each report type", () => {
   const heightBlock = plannerSource.slice(
     plannerSource.indexOf('if (section.field === "competitiveLandscape") {\n          // Row source'),
-    plannerSource.indexOf('if (section.field === "competitiveLandscape") {\n          // Row source') + 1800
+    plannerSource.indexOf('if (section.field === "competitiveLandscape") {\n          // Row source') + 2400
   );
   assert.match(
     heightBlock,
@@ -231,10 +251,20 @@ test("Planner.tsx's downloadPdf: getPdfVisualHeight's competitiveLandscape branc
   );
   assert.match(
     heightBlock,
-    /return getNamesOnlyCompetitorLayout\(namesOnly, bodyWidth\)\.totalHeight \+ 8 \+ 50;/
+    /return getNamesOnlyCompetitorLayout\(namesOnly, bodyWidth, adjacentPlayersOnlyIntro\)\.totalHeight \+ 8 \+ 50;/
+  );
+  assert.match(
+    heightBlock,
+    /\} else if \(rows\.length < minCompetitorTableRows\) \{\s*\n\s*return \(\s*\n\s*getNamesOnlyCompetitorLayout\(\s*\n\s*rows\.map\(\(row\) => row\.vendor \|\| "Vendor"\),\s*\n\s*bodyWidth,\s*\n\s*sparseCompetitorTableIntro\s*\n\s*\)\.totalHeight/,
+    "the sparse-rows tier must use the same sparseCompetitorTableIntro-based layout"
   );
   assert.match(heightBlock, /return competitorHeaderHeight \+ Math\.max\(1, rows\.length\) \* competitorRowHeight \+ 4 \+ 8 \+ 50;/);
-  assert.match(heightBlock, /const rows = extractCompetitorRows\(section\.content\);\s*\n\s*return competitorHeaderHeight \+ Math\.max\(1, rows\.length\) \* competitorRowHeight \+ 4;/);
+  assert.match(heightBlock, /const rows = extractCompetitorRows\(section\.content\);\s*\n\s*if \(rows\.length === 0\) \{\s*\n\s*return competitorHeaderHeight \+ competitorRowHeight \+ 4;\s*\n\s*\}/);
+  assert.match(
+    heightBlock,
+    /if \(rows\.length < minCompetitorTableRows\) \{\s*\n\s*return getNamesOnlyCompetitorLayout\(\s*\n\s*rows\.map\(\(row\) => row\.company \|\| "Company"\),\s*\n\s*bodyWidth,\s*\n\s*sparseCompetitorTableIntro\s*\n\s*\)\.totalHeight;\s*\n\s*\}/
+  );
+  assert.match(heightBlock, /return competitorHeaderHeight \+ rows\.length \* competitorRowHeight \+ 4;/);
 });
 
 test("Planner.tsx: the old generic company/positioning-shaped inferPdfMarketMapPosition (the function this fix made unreachable) was removed rather than left as dead code", () => {

@@ -58,6 +58,7 @@ import {
 import {
   buildExecutiveSnapshot,
   compactExecutiveDecisionMemoSections,
+  extractSectionMainExplanation,
   getReportQualityBreakdown,
   getReportPresentationLabels,
   getSectionTakeaway,
@@ -3187,37 +3188,10 @@ function extractRealBulletLines(content: string, limit = 8) {
     .slice(0, limit);
 }
 
-// The "main explanation" paragraph shown alongside the Key Takeaway --
-// genuinely different text, not a restatement. getSectionTakeaway already
-// returns the content's first sentence (normalized through its own,
-// separate text-cleaning pipeline, and truncated with "..." past 220
-// chars) -- a literal string-match-and-remove against that value would
-// silently fail whenever either of those differ from this function's own
-// cleaning, leaving the "removed" sentence back in and restating it here.
-// Skipping by INDEX instead is robust regardless of any such mismatch:
-// whenever a takeaway was found at all, it corresponds to this content's
-// own first sentence, so the explanation simply starts one sentence later.
-// Bullet-marked lines are excluded from the sentence pool -- those are
-// surfaced separately by extractRealBulletLines, and including them here
-// too would show the same list item twice. Deliberately UNCAPPED (no
-// sentence-count or character-length ceiling): this card is now this
-// section's complete, only presentation, so it must carry every remaining
-// sentence, not a truncated teaser, or real analysis would be silently
-// lost now that there is no "Details" disclosure left to fall back on.
-function extractSectionMainExplanation(content: string, takeaway: string) {
-  const cleaned = (content || "").replace(/\*\*/g, "").replace(/^#{1,6}\s+.*$/gm, "");
-  const proseOnly = cleaned
-    .split("\n")
-    .filter((line) => !/^\s*(?:[-*•]|\d+[.)])\s+/.test(line))
-    .join(" ");
-  const sentences = proseOnly
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim().replace(/^[-*•]\s+/, ""))
-    .filter((sentence) => sentence.length > 20);
-  const startIndex = takeaway ? 1 : 0;
-
-  return sentences.slice(startIndex).join(" ");
-}
+// extractSectionMainExplanation now lives in app/lib/report-presentation.ts
+// (shared with page.tsx) -- see its own doc comment there for the
+// per-line-first sentence-splitting fix that removed a residual
+// Key-Takeaway/body duplication bug this local copy still had.
 
 // FINAL PREMIUM REPORT RESTORATION -- these fields have no separate
 // "methodology," their generated prose IS the primary insight, and
@@ -5320,7 +5294,13 @@ if (field === "swotAnalysis") {
         ) : (
           <div className="flex min-h-36 items-center justify-center p-6 text-center">
             <p className="max-w-md text-sm leading-6 text-zinc-400">
-              See the Competitive Landscape section for full competitor detail.
+              {/* P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+                  presentation hardening, round 2): this IS the Competitive
+                  Landscape section's own render -- telling the reader to
+                  "see" the exact section already on screen was a
+                  self-referential, useless copy-paste artifact. Matches
+                  page.tsx's own wording for the identical empty state. */}
+              No competitor data could be validated for this market yet.
             </p>
           </div>
         )}
@@ -7529,7 +7509,21 @@ const ReportPanel = memo(function ReportPanel({
           pdf.text(label.toUpperCase(), cardX + 5, cardY + 6);
           pdf.setFontSize(index > 4 ? 7.7 : 10);
           pdf.setTextColor("#f4f4f5");
-          pdf.text((pdf.splitTextToSize(value, metricCardWidth - 10) as string[]).slice(0, 2), cardX + 5, cardY + 12, {
+          // P0 PRODUCTION FIX -- confirmed live (Market Intelligence PDF
+          // layout hardening): the old .slice(0, 2) silently dropped any
+          // wrapped line beyond the first two with no visual cue at all,
+          // unlike every other truncation point in this file (which all
+          // append "..." via truncatePdfCellLines) -- a reader could not
+          // tell Main Risk/Next Action had been cut short. truncatePdfCellLines
+          // itself is declared later in this function, so its exact
+          // "keep N lines, append '...' to the last" logic is inlined here
+          // rather than reordering unrelated code to hoist it earlier.
+          const rawValueLines = pdf.splitTextToSize(value, metricCardWidth - 10) as string[];
+          const valueLines = rawValueLines.slice(0, 2);
+          if (rawValueLines.length > 2 && valueLines.length > 0) {
+            valueLines[valueLines.length - 1] = `${valueLines[valueLines.length - 1].replace(/[.,;:]*$/, "")}...`;
+          }
+          pdf.text(valueLines, cardX + 5, cardY + 12, {
             lineHeightFactor: 1.05,
             maxWidth: metricCardWidth - 10,
           });
@@ -7869,16 +7863,55 @@ const ReportPanel = memo(function ReportPanel({
         };
       };
 
-      // Fixed footprints for the Competitive Landscape table/Market Map
-      // and Strategic Recommendation cards below -- shared between
-      // getPdfVisualHeight (pagination budgeting) and drawPdfVisual
-      // (drawing) so the two never disagree on how much space either
-      // visual needs. Matches ReportPdfButton.tsx's own constants so both
-      // PDF exports produce visually consistent layouts.
+      // Fixed footprint for the Competitive Landscape table/Market Map
+      // below -- shared between getPdfVisualHeight (pagination budgeting)
+      // and drawPdfVisual (drawing) so the two never disagree on how much
+      // space the visual needs.
       const competitorHeaderHeight = 8;
       const competitorRowHeight = 15;
-      const recommendationCardHeight = 36;
+      // P0 PRODUCTION FIX -- confirmed live (Market Intelligence PDF
+      // layout hardening): mirrors the identical fix in
+      // ReportPdfButton.tsx -- see its own comment for the full root
+      // cause (a single fixed 36mm card height regardless of actual
+      // action-text/field/gate content, causing visible truncation and
+      // overlap on row 2 specifically). Replaced with a real per-card
+      // height derived from that card's own content, computed identically
+      // for both getPdfVisualHeight (budgeting) and drawPdfVisual
+      // (drawing) so the two can never disagree.
       const recommendationCardGap = 3;
+      const recommendationCardMinHeight = 36;
+      const computeRecommendationCardLayout = (item: string, cardWidth: number) => {
+        const { timeframe, metric, budget, owner, gate } = extractRecommendationSignals(item);
+        pdf.setFontSize(6);
+        const actionLines = truncatePdfCellLines(
+          pdf.splitTextToSize(localizePdfPresentationText(item, pdfLocale), cardWidth - 13) as string[],
+          2
+        );
+        const fields = (
+          [
+            ["Owner", owner],
+            ["Timeline", timeframe],
+            ["Budget", budget],
+            ["Success Metric", metric],
+          ] as const
+        ).filter(([, value]) => value);
+        const fieldsTopY = 7.8 + actionLines.length * 3.3 + 2.5;
+        const fieldsRows = fields.length > 0 ? Math.ceil(Math.min(fields.length, 4) / 2) : 0;
+        const contentBottom =
+          fieldsRows > 0 ? fieldsTopY + (fieldsRows - 1) * 5.6 + 5.5 : fieldsTopY + 3;
+        const gateReservedHeight = gate ? 9 : 0;
+        const height = Math.max(recommendationCardMinHeight, contentBottom + gateReservedHeight);
+
+        return { timeframe, metric, budget, owner, gate, actionLines, fields, fieldsTopY, height };
+      };
+      const computeRecommendationRowHeights = (items: string[], cardWidth: number) => {
+        const cards = items.map((item) => computeRecommendationCardLayout(item, cardWidth));
+        const rowHeights = Array.from({ length: Math.ceil(cards.length / 2) }, (_, row) =>
+          Math.max(cards[row * 2]?.height ?? 0, cards[row * 2 + 1]?.height ?? 0)
+        );
+
+        return { cards, rowHeights };
+      };
 
       // Fixed-line-count cells (table cells, action cards) hard-slice a
       // wrapped line array to fit their budgeted height; slicing alone
@@ -8054,15 +8087,14 @@ const ReportPanel = memo(function ReportPanel({
       // and getPdfVisualHeight (pagination budgeting) for the "no
       // structured rows, but Major Players names real vendors" state --
       // see extractMarketIntelligenceCompetitorNamesOnly's own comment.
-      // Mirrors ReportPdfButton.tsx's own getNamesOnlyCompetitorLayout.
-      const getNamesOnlyCompetitorLayout = (namesOnly: string[], width: number) => {
+      // Mirrors ReportPdfButton.tsx's own getNamesOnlyCompetitorLayout --
+      // see its own P0 fix comment for why introText is now a parameter
+      // rather than a single hardcoded sentence.
+      const getNamesOnlyCompetitorLayout = (namesOnly: string[], width: number, introText: string) => {
         const previousFontSize = pdf.getFontSize();
         pdf.setFontSize(5.8);
         const introLines = pdf.splitTextToSize(
-          localizePdfPresentationText(
-            "These companies are named in available evidence as active in or adjacent to this market, but current evidence does not independently validate them as direct, head-to-head competitors for this analysis.",
-            pdfLocale
-          ),
+          localizePdfPresentationText(introText, pdfLocale),
           width - 6
         ) as string[];
         pdf.setFontSize(6.2);
@@ -8072,6 +8104,17 @@ const ReportPanel = memo(function ReportPanel({
 
         return { introLines, nameLines, totalHeight };
       };
+      const adjacentPlayersOnlyIntro =
+        "These companies are named in available evidence as active in or adjacent to this market, but current evidence does not independently validate them as direct, head-to-head competitors for this analysis.";
+      // Distinct from adjacentPlayersOnlyIntro above -- see
+      // ReportPdfButton.tsx's own identical constant for the full
+      // rationale: these rows ARE validated, named competitors, and the
+      // gap is structured comparison DATA, not competitor identity.
+      const sparseCompetitorTableIntro =
+        pdfLocale === "tr"
+          ? "Bu şirketler mevcut kanıtlarla doğrulanmış rakiplerdir, ancak güvenilir bir karşılaştırma tablosu oluşturmak için yeterli sayıda şirkette yapılandırılmış konumlandırma verisi (kategori, pazar konumu, güçlü/zayıf yönler) henüz bulunmamaktadır. Ek doğrulanmış kanıt gerekmektedir."
+          : "These are validated, named competitors from available evidence, but there is not yet enough structured comparison data (category, market position, relative strengths and weaknesses) across enough of them to build a reliable side-by-side table. Additional validated evidence is needed.";
+      const minCompetitorTableRows = 3;
 
       const getPdfVisualHeight = (section: ReportSection) => {
         if (!visualFields.has(section.field)) {
@@ -8137,21 +8180,41 @@ const ReportPanel = memo(function ReportPanel({
               section.content,
               pdfSections.find((entry) => entry.field === "majorPlayers")?.content
             );
-            // Must match drawPdfVisual's own namesOnly fork exactly -- see
-            // extractMarketIntelligenceCompetitorNamesOnly's own comment --
-            // or drawing and pagination height disagree.
+            // Must match drawPdfVisual's own compactCompetitorState fork
+            // exactly -- see its own comment -- or drawing and pagination
+            // height disagree.
             if (rows.length === 0) {
               const namesOnly = extractMarketIntelligenceCompetitorNamesOnly(
                 pdfSections.find((entry) => entry.field === "majorPlayers")?.content || ""
               );
               if (namesOnly.length > 0) {
-                return getNamesOnlyCompetitorLayout(namesOnly, bodyWidth).totalHeight + 8 + 50;
+                return getNamesOnlyCompetitorLayout(namesOnly, bodyWidth, adjacentPlayersOnlyIntro).totalHeight + 8 + 50;
               }
+            } else if (rows.length < minCompetitorTableRows) {
+              return (
+                getNamesOnlyCompetitorLayout(
+                  rows.map((row) => row.vendor || "Vendor"),
+                  bodyWidth,
+                  sparseCompetitorTableIntro
+                ).totalHeight +
+                8 +
+                50
+              );
             }
             return competitorHeaderHeight + Math.max(1, rows.length) * competitorRowHeight + 4 + 8 + 50;
           }
           const rows = extractCompetitorRows(section.content);
-          return competitorHeaderHeight + Math.max(1, rows.length) * competitorRowHeight + 4;
+          if (rows.length === 0) {
+            return competitorHeaderHeight + competitorRowHeight + 4;
+          }
+          if (rows.length < minCompetitorTableRows) {
+            return getNamesOnlyCompetitorLayout(
+              rows.map((row) => row.company || "Company"),
+              bodyWidth,
+              sparseCompetitorTableIntro
+            ).totalHeight;
+          }
+          return competitorHeaderHeight + rows.length * competitorRowHeight + 4;
         }
 
         if (section.field === "strategicRecommendations") {
@@ -8159,8 +8222,12 @@ const ReportPanel = memo(function ReportPanel({
           if (items.length === 0) {
             return 0;
           }
-          const rows = Math.ceil(items.length / 2);
-          return rows * recommendationCardHeight + Math.max(0, rows - 1) * recommendationCardGap;
+          const cardWidth = (bodyWidth - recommendationCardGap) / 2;
+          const { rowHeights } = computeRecommendationRowHeights(items, cardWidth);
+          return (
+            rowHeights.reduce((sum, height) => sum + height, 0) +
+            Math.max(0, rowHeights.length - 1) * recommendationCardGap
+          );
         }
 
         if (section.field === "executiveSummary") {
@@ -8234,8 +8301,31 @@ const ReportPanel = memo(function ReportPanel({
                     pdfSections.find((entry) => entry.field === "majorPlayers")?.content || ""
                   )
                 : [];
-            const namesLayout =
-              namesOnly.length > 0 ? getNamesOnlyCompetitorLayout(namesOnly, visualWidth) : null;
+            // P0 PRODUCTION FIX -- confirmed live (Market Intelligence PDF
+            // layout hardening, round 2): mirrors ReportPdfButton.tsx's
+            // identical fix -- see its own comment for the full root
+            // cause (a sparse 1-2 row table rendered a mostly-empty
+            // spacious 7-column grid instead of a compact, honest state).
+            const compactCompetitorState =
+              namesOnly.length > 0
+                ? {
+                    headerText: "RELEVANT PLAYERS IDENTIFIED — NOT VALIDATED AS DIRECT COMPETITORS",
+                    layout: getNamesOnlyCompetitorLayout(namesOnly, visualWidth, adjacentPlayersOnlyIntro),
+                  }
+                : miRows.length > 0 && miRows.length < minCompetitorTableRows
+                  ? {
+                      headerText:
+                        pdfLocale === "tr"
+                          ? "REKABET VERİSİ — SINIRLI YAPILANDIRILMIŞ KARŞILAŞTIRMA"
+                          : "COMPETITORS IDENTIFIED — LIMITED STRUCTURED COMPARISON DATA",
+                      layout: getNamesOnlyCompetitorLayout(
+                        miRows.map((row) => row.vendor || "Vendor"),
+                        visualWidth,
+                        sparseCompetitorTableIntro
+                      ),
+                    }
+                  : null;
+            const namesLayout = compactCompetitorState?.layout ?? null;
             const miColumns = [
               { label: localizePdfPresentationLabel("Vendor", pdfLocale), width: visualWidth * 0.15 },
               { label: localizePdfPresentationLabel("Category", pdfLocale), width: visualWidth * 0.13 },
@@ -8258,11 +8348,11 @@ const ReportPanel = memo(function ReportPanel({
               3,
               "FD"
             );
-            if (namesLayout) {
+            if (namesLayout && compactCompetitorState) {
               pdf.setFontSize(6.5);
               pdf.setTextColor("#7dd3fc");
               pdf.text(
-                localizePdfPresentationText("RELEVANT PLAYERS IDENTIFIED — NOT VALIDATED AS DIRECT COMPETITORS", pdfLocale),
+                localizePdfPresentationText(compactCompetitorState.headerText, pdfLocale),
                 bodyX + 3,
                 visualY + 7,
                 { maxWidth: visualWidth - 6 }
@@ -8364,10 +8454,17 @@ const ReportPanel = memo(function ReportPanel({
             }
 
             if (miRows.length === 0) {
+              // P0 PRODUCTION FIX -- confirmed live (Market Intelligence PDF
+              // layout hardening, round 2): mirrors ReportPdfButton.tsx's own
+              // already-fixed wording (its "P0 FIX #8" comment) -- this IS the
+              // Competitive Landscape section's own render, so it must never
+              // tell the reader to "see" the exact section already on screen.
+              // This specific occurrence (Planner.tsx's MI branch) had been
+              // missed when that fix was made elsewhere.
               pdf.setFontSize(6.2);
               pdf.setTextColor("#a1a1aa");
               pdf.text(
-                localizePdfPresentationText("See the Competitive Landscape section for full competitor detail.", pdfLocale),
+                localizePdfPresentationText("No competitor data could be validated for this market yet.", pdfLocale),
                 bodyX + 3,
                 visualY + 14,
                 { maxWidth: visualWidth - 6 }
@@ -8410,6 +8507,68 @@ const ReportPanel = memo(function ReportPanel({
           }
 
           const rows = extractCompetitorRows(section.content);
+
+          if (rows.length === 0) {
+            // P0 PRODUCTION FIX -- confirmed live (Market Intelligence PDF
+            // layout hardening, round 2): this IS the Competitive
+            // Landscape section's own render -- telling the reader to
+            // "see the Competitive Landscape section" from inside that
+            // exact section was a self-referential, useless copy-paste
+            // artifact, matching the identical fix already made in
+            // ReportPdfButton.tsx's own generic branch.
+            pdf.setFillColor("#101113");
+            pdf.setDrawColor("#27272a");
+            pdf.roundedRect(bodyX, visualY, visualWidth, competitorHeaderHeight + competitorRowHeight, 3, 3, "FD");
+            pdf.setFontSize(6.2);
+            pdf.setTextColor("#a1a1aa");
+            pdf.text(
+              localizePdfPresentationText("No competitor data could be validated for this market yet.", pdfLocale),
+              bodyX + 3,
+              visualY + 14,
+              { maxWidth: visualWidth - 6 }
+            );
+            return competitorHeaderHeight + competitorRowHeight + 4;
+          }
+
+          // P0 PRODUCTION FIX -- confirmed live (Market Intelligence PDF
+          // layout hardening, round 2): mirrors ReportPdfButton.tsx's
+          // identical fix -- a sparse table (1-2 rows) used to still draw
+          // the full 5-column grid, mostly empty.
+          if (rows.length < minCompetitorTableRows) {
+            const sparseLayout = getNamesOnlyCompetitorLayout(
+              rows.map((row) => row.company || "Company"),
+              visualWidth,
+              sparseCompetitorTableIntro
+            );
+
+            pdf.setFillColor("#101113");
+            pdf.setDrawColor("#27272a");
+            pdf.roundedRect(bodyX, visualY, visualWidth, sparseLayout.totalHeight, 3, 3, "FD");
+            pdf.setFontSize(6.5);
+            pdf.setTextColor("#7dd3fc");
+            pdf.text(
+              localizePdfPresentationText("COMPETITORS IDENTIFIED — LIMITED STRUCTURED COMPARISON DATA", pdfLocale),
+              bodyX + 3,
+              visualY + 7,
+              { maxWidth: visualWidth - 6 }
+            );
+            pdf.setFontSize(5.8);
+            pdf.setTextColor("#a1a1aa");
+            pdf.text(sparseLayout.introLines, bodyX + 3, visualY + 13, {
+              lineHeightFactor: 1.3,
+              maxWidth: visualWidth - 6,
+            });
+            pdf.setFontSize(6.2);
+            pdf.setTextColor("#e0f2fe");
+            const namesY = visualY + 13 + sparseLayout.introLines.length * 3.6 + 5;
+            pdf.text(sparseLayout.nameLines, bodyX + 3, namesY, {
+              lineHeightFactor: 1.35,
+              maxWidth: visualWidth - 6,
+            });
+
+            return sparseLayout.totalHeight;
+          }
+
           const columns = [
             { label: localizePdfPresentationLabel("Company", pdfLocale), width: visualWidth * 0.19 },
             { label: localizePdfPresentationLabel("Positioning", pdfLocale), width: visualWidth * 0.27 },
@@ -8436,18 +8595,6 @@ const ReportPanel = memo(function ReportPanel({
             pdf.text(column.label.toUpperCase(), x + 2, visualY + 5.2, { maxWidth: column.width - 4 });
             x += column.width;
           });
-
-          if (rows.length === 0) {
-            pdf.setFontSize(6.2);
-            pdf.setTextColor("#a1a1aa");
-            pdf.text(
-              localizePdfPresentationText("See the Competitive Landscape section for full competitor detail.", pdfLocale),
-              bodyX + 3,
-              visualY + 14,
-              { maxWidth: visualWidth - 6 }
-            );
-            return competitorHeaderHeight + competitorRowHeight + 4;
-          }
 
           rows.forEach((row, rowIndex) => {
             const rowY = visualY + competitorHeaderHeight + rowIndex * competitorRowHeight;
@@ -8490,16 +8637,15 @@ const ReportPanel = memo(function ReportPanel({
 
           const columns = 2;
           const cardGap = recommendationCardGap;
-          const cardHeight = recommendationCardHeight;
           const cardWidth = (visualWidth - (columns - 1) * cardGap) / columns;
-          const rowCount = Math.ceil(items.length / columns);
+          const { cards, rowHeights } = computeRecommendationRowHeights(items, cardWidth);
 
-          items.forEach((item, index) => {
-            const { timeframe, metric, budget, owner, gate } = extractRecommendationSignals(item);
+          cards.forEach(({ gate, actionLines, fields }, index) => {
             const col = index % columns;
             const row = Math.floor(index / columns);
             const x = bodyX + col * (cardWidth + cardGap);
-            const cardY = visualY + row * (cardHeight + cardGap);
+            const cardY = visualY + rowHeights.slice(0, row).reduce((sum, height) => sum + height + cardGap, 0);
+            const cardHeight = rowHeights[row];
 
             pdf.setFillColor("#18181b");
             pdf.setDrawColor("#27272a");
@@ -8517,23 +8663,10 @@ const ReportPanel = memo(function ReportPanel({
             pdf.text(localizePdfPresentationLabel("ACTION", pdfLocale), x + 11, cardY + 4);
             pdf.setFontSize(6);
             pdf.setTextColor("#e4e4e7");
-            const actionLines = truncatePdfCellLines(
-              pdf.splitTextToSize(localizePdfPresentationText(item, pdfLocale), cardWidth - 13) as string[],
-              2
-            );
             pdf.text(actionLines, x + 11, cardY + 7.8, {
               lineHeightFactor: 1.15,
               maxWidth: cardWidth - 13,
             });
-
-            const fields = (
-              [
-                ["Owner", owner],
-                ["Timeline", timeframe],
-                ["Budget", budget],
-                ["Success Metric", metric],
-              ] as const
-            ).filter(([, value]) => value);
 
             const fieldsTopY = cardY + 7.8 + actionLines.length * 3.3 + 2.5;
             const fieldColWidth = (cardWidth - 6) / 2;
@@ -8565,7 +8698,7 @@ const ReportPanel = memo(function ReportPanel({
             }
           });
 
-          return rowCount * cardHeight + Math.max(0, rowCount - 1) * cardGap;
+          return rowHeights.reduce((sum, height) => sum + height, 0) + Math.max(0, rowHeights.length - 1) * cardGap;
         }
 
         if (pdfKeyTakeawayCardFields.has(section.field ?? "")) {

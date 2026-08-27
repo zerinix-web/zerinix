@@ -4,6 +4,7 @@ import { readFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { extractSectionMainExplanation } from "../app/lib/report-presentation.ts";
 
 // FINAL CLEANUP -- REMOVE ALL REDUNDANT "DETAILS" DUPLICATION FROM MARKET
 // INTELLIGENCE.
@@ -168,20 +169,42 @@ test("SectionTakeaway is also fully excluded for the same 16 fields on both page
 
 // --- 3. No visual + identical raw-text duplicate; unique info preserved --
 
-test("page.tsx and Planner.tsx: extractSectionMainExplanation is now UNCAPPED (all remaining sentences, no 2-sentence/320-char ceiling) and excludes bullet-marked lines from its sentence pool -- the card must capture the section's complete remaining prose since there is no more Details to fall back on, and bullets/explanation must never show the same list item twice", async () => {
-  for (const source of [pageSource, plannerSource]) {
-    const fn = await compileFunction(source, "extractSectionMainExplanation");
-    const content =
-      "Enterprise buyers are consolidating vendor relationships. Mid-market adoption lags due to integration cost. A handful of regional players are closing the gap. Procurement cycles remain long across the sector. Budget owners increasingly demand compliance certification before signing.";
-    const explanation = fn(content, "Enterprise buyers are consolidating vendor relationships.");
-    // All four remaining sentences must be present -- not just the first two.
-    assert.match(explanation, /Mid-market adoption lags/);
-    assert.match(explanation, /A handful of regional players/);
-    assert.match(explanation, /Procurement cycles remain long/);
-    assert.match(explanation, /Budget owners increasingly demand/);
+test("page.tsx and Planner.tsx: extractSectionMainExplanation is now UNCAPPED (all remaining sentences, no 2-sentence/320-char ceiling) and excludes bullet-marked lines from its sentence pool -- the card must capture the section's complete remaining prose since there is no more Details to fall back on, and bullets/explanation must never show the same list item twice", () => {
+  // extractSectionMainExplanation now lives once in
+  // app/lib/report-presentation.ts (shared by both files -- see that
+  // module's own P0 fix comment) rather than as a per-file duplicate, so
+  // its behavior is exercised once via the real, shared implementation.
+  const content =
+    "Enterprise buyers are consolidating vendor relationships. Mid-market adoption lags due to integration cost. A handful of regional players are closing the gap. Procurement cycles remain long across the sector. Budget owners increasingly demand compliance certification before signing.";
+  const explanation = extractSectionMainExplanation(content, "Enterprise buyers are consolidating vendor relationships.");
+  // All four remaining sentences must be present -- not just the first two.
+  assert.match(explanation, /Mid-market adoption lags/);
+  assert.match(explanation, /A handful of regional players/);
+  assert.match(explanation, /Procurement cycles remain long/);
+  assert.match(explanation, /Budget owners increasingly demand/);
 
-    const withBullets = fn("Intro sentence here as the takeaway.\n- Real bullet one.\n- Real bullet two.", "Intro sentence here as the takeaway.");
-    assert.doesNotMatch(withBullets, /Real bullet/);
+  const withBullets = extractSectionMainExplanation(
+    "Intro sentence here as the takeaway.\n- Real bullet one.\n- Real bullet two.",
+    "Intro sentence here as the takeaway."
+  );
+  assert.doesNotMatch(withBullets, /Real bullet/);
+});
+
+test("page.tsx and Planner.tsx: source drift check -- both files import extractSectionMainExplanation from the shared app/lib/report-presentation module rather than keeping their own local duplicate", () => {
+  for (const source of [pageSource, plannerSource]) {
+    assert.doesNotMatch(
+      source,
+      /function extractSectionMainExplanation\(/,
+      "no local duplicate definition should exist any more"
+    );
+
+    const importBlockMatch = source.match(/import \{[\s\S]{0,600}?\} from "@\/app\/lib\/report-presentation";/);
+    assert.ok(importBlockMatch, "a report-presentation import block must exist");
+    assert.match(
+      importBlockMatch[0],
+      /\bextractSectionMainExplanation\b/,
+      "extractSectionMainExplanation must be imported from the shared module"
+    );
   }
 });
 

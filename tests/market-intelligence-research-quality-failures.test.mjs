@@ -425,14 +425,15 @@ async function importPageDedupFunctions() {
 
   const dir = mkdtempSync(join(tmpdir(), "zerinix-page-dedup-"));
   const outPath = join(dir, "page-dedup.mts");
+  // extractSectionMainExplanation now lives once in report-presentation.ts
+  // (shared with Planner.tsx, no longer a local page.tsx function) --
+  // imported directly here rather than extracted from page.tsx's source.
   const harness = `
-import { getSectionTakeaway, stripLeadingTakeawaySentence } from ${JSON.stringify(
+import { extractSectionMainExplanation, getSectionTakeaway, stripLeadingTakeawaySentence } from ${JSON.stringify(
     pathToFileURL(join(repoRoot, "app/lib/report-presentation.ts")).href
   )};
 
 ${extractFunction("extractRealBulletLines")}
-
-${extractFunction("extractSectionMainExplanation")}
 
 export { extractRealBulletLines, extractSectionMainExplanation, getSectionTakeaway, stripLeadingTakeawaySentence };
 `;

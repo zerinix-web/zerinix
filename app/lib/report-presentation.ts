@@ -1292,6 +1292,41 @@ export function stripLeadingTakeawaySentence(content: string, takeaway: string):
   return nextLines.join("\n").replace(/^\n+/, "").trim();
 }
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence report
+// presentation, round 2): page.tsx and Planner.tsx each kept their own
+// independent copy of this function, and both joined every non-bulleted
+// LINE with a single space BEFORE splitting into sentences -- the exact
+// run-on-fusion bug splitSentences (above) was already fixed to avoid for
+// getSectionTakeaway. A bare label line with no terminal punctuation
+// ("Segmentasyon (kanıt destekli):") has no sentence boundary of its own,
+// so joining it to whatever prose line followed (often unrelated, several
+// lines away once bulleted items are filtered out) fused them into one
+// blob before splitting -- disagreeing with getSectionTakeaway's own
+// per-line-first sentence boundaries, so the index-based
+// `sentences.slice(startIndex)` skip below no longer reliably excluded
+// the same text getSectionTakeaway had already used as the takeaway,
+// leaving the label visible a second time in this "explanation"
+// paragraph. Splitting per LINE first (mirroring splitSentences exactly,
+// reusing its own abbreviation-protected boundary and markdown-stripping)
+// before ever joining anything guarantees a label line can only ever
+// become its OWN candidate sentence, in full agreement with
+// getSectionTakeaway -- never fused with unrelated prose several lines
+// away. Moved here (was duplicated verbatim in page.tsx and
+// Planner.tsx) so both surfaces share one implementation instead of two
+// that can silently drift apart again.
+export function extractSectionMainExplanation(content: string, takeaway: string) {
+  const cleaned = normalizeReportPresentationText(content || "").replace(/^#{1,6}\s+.*$/gm, "");
+  const sentences = cleaned
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(?:[-*•]|\d+[.)])\s+/.test(line))
+    .flatMap((line) => protectSentenceAbbreviations(stripMarkdown(line)).split(/(?<=[.!?])\s+/))
+    .map((sentence) => restoreSentenceAbbreviations(sentence).trim().replace(/^[-*•]\s+/, ""))
+    .filter((sentence) => sentence.length > 20);
+  const startIndex = takeaway ? 1 : 0;
+
+  return sentences.slice(startIndex).join(" ");
+}
+
 export type CagrHeadlinePresentation = {
   // The exact string the KPI card/headline should display -- either the
   // single figure (unchanged from today's behavior) or a "low%–high%"

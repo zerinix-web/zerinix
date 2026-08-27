@@ -481,9 +481,29 @@ test("ReportPdfButton.tsx: draws Strategic Recommendation cards with Action, Own
   assert.equal(signals.gate, "before committing further budget");
 });
 
-test("ReportPdfButton.tsx: drawSectionVisual and getVisualHeight share the same fixed-height constants for the new visuals, so drawing and pagination budgeting never disagree (regression guard)", () => {
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence PDF layout
+// hardening, round 2): the fixed "const recommendationCardHeight = 36;"
+// this test used to assert was ITSELF the truncation bug for Strategic
+// Recommendation cards 3-4 -- replaced with computeRecommendationRowHeights,
+// a single shared function (still one declaration, reused by both
+// drawSectionVisual and getVisualHeight via closure) that derives each
+// card's real height from its own content instead of a hardcoded number.
+test("ReportPdfButton.tsx: drawSectionVisual and getVisualHeight share the same fixed-height constant for Market Metrics, and the same shared computeRecommendationRowHeights function (not a hardcoded height) for Strategic Recommendations, so drawing and pagination budgeting never disagree (regression guard)", () => {
   const occurrences = pdfButtonSource.match(/marketMetricsDashboardHeight/g) || [];
   assert.ok(occurrences.length >= 3, "expected the const declaration plus at least one use in each of drawSectionVisual/getVisualHeight");
-  assert.match(pdfButtonSource, /const recommendationCardHeight = 36;/);
+  const layoutFnOccurrences = pdfButtonSource.match(/const computeRecommendationCardLayout = /g) || [];
+  const rowsFnOccurrences = pdfButtonSource.match(/const computeRecommendationRowHeights = /g) || [];
+  assert.equal(layoutFnOccurrences.length, 1, "expected exactly one shared computeRecommendationCardLayout declaration, reused by both functions via closure");
+  assert.equal(rowsFnOccurrences.length, 1, "expected exactly one shared computeRecommendationRowHeights declaration, reused by both functions via closure");
   assert.match(pdfButtonSource, /const recommendationCardGap = 3;/);
+  assert.match(
+    pdfButtonSource,
+    /const \{ cards, rowHeights \} = computeRecommendationRowHeights\(items, cardWidth\);/,
+    "drawSectionVisual must draw using the shared computed rowHeights"
+  );
+  assert.match(
+    pdfButtonSource,
+    /const \{ rowHeights \} = computeRecommendationRowHeights\(items, cardWidth\);/,
+    "getVisualHeight must budget space from the shared computed rowHeights"
+  );
 });

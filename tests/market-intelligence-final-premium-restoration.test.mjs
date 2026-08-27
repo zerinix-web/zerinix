@@ -4,6 +4,7 @@ import { readFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { extractSectionMainExplanation } from "../app/lib/report-presentation.ts";
 
 // FINAL PREMIUM REPORT RESTORATION -- FIX WEB + PDF PRESENTATION LAYER.
 //
@@ -95,23 +96,24 @@ test("page.tsx and Planner.tsx: extractRealBulletLines only returns genuine bull
   }
 });
 
-test("page.tsx and Planner.tsx: extractSectionMainExplanation returns the sentence(s) AFTER the takeaway by index, robust to getSectionTakeaway's own separate normalization/truncation -- never silently restates the takeaway", async () => {
-  for (const source of [pageSource, plannerSource]) {
-    const fn = await compileFunction(source, "extractSectionMainExplanation");
-    const content =
-      "Enterprise buyers are consolidating vendor relationships around compliance-first platforms. Mid-market adoption still lags due to integration cost. A handful of regional players are closing that gap with lighter-weight offerings.";
+test("page.tsx and Planner.tsx: extractSectionMainExplanation returns the sentence(s) AFTER the takeaway by index, robust to getSectionTakeaway's own separate normalization/truncation -- never silently restates the takeaway", () => {
+  // extractSectionMainExplanation now lives once in
+  // app/lib/report-presentation.ts (shared by both files), so its
+  // behavior is exercised once via the real, shared implementation
+  // rather than a per-file source extraction.
+  const content =
+    "Enterprise buyers are consolidating vendor relationships around compliance-first platforms. Mid-market adoption still lags due to integration cost. A handful of regional players are closing that gap with lighter-weight offerings.";
 
-    // Even when the takeaway string does NOT appear verbatim in content
-    // (simulating getSectionTakeaway's own normalization/truncation), the
-    // explanation must still skip ahead by one sentence rather than
-    // restating sentence 1.
-    const explanation = fn(content, "Enterprise buyers are consolidating vendor relationships around compliance-first platforms...");
-    assert.doesNotMatch(explanation, /^Enterprise buyers are consolidating/);
-    assert.match(explanation, /Mid-market adoption still lags/);
+  // Even when the takeaway string does NOT appear verbatim in content
+  // (simulating getSectionTakeaway's own normalization/truncation), the
+  // explanation must still skip ahead by one sentence rather than
+  // restating sentence 1.
+  const explanation = extractSectionMainExplanation(content, "Enterprise buyers are consolidating vendor relationships around compliance-first platforms...");
+  assert.doesNotMatch(explanation, /^Enterprise buyers are consolidating/);
+  assert.match(explanation, /Mid-market adoption still lags/);
 
-    const noTakeaway = fn(content, "");
-    assert.match(noTakeaway, /^Enterprise buyers are consolidating/);
-  }
+  const noTakeaway = extractSectionMainExplanation(content, "");
+  assert.match(noTakeaway, /^Enterprise buyers are consolidating/);
 });
 
 test("page.tsx: ReportSectionVisual has a dedicated card for Market Drivers/Barriers/Opportunities/Threats/Customer Segments/Major Players -- Key Takeaway label, main explanation, and bullets only when real list items exist, with a Validation Needed fallback (never a blank card)", () => {

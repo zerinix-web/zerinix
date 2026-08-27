@@ -127,13 +127,34 @@ test("Planner.tsx's downloadPdf: Strategic Recommendations now has real Action/O
 // the SAME row source drawPdfVisual will actually use" test, which proves
 // the current, narrower parity guarantee (right row source AND right
 // addend per report type) directly against both functions' source.
-test("Planner.tsx's downloadPdf: getPdfVisualHeight and drawPdfVisual read the SAME shared recommendationCardHeight/recommendationCardGap constants for the Strategic Recommendations visual (rather than each independently hard-coding their own copies) -- a divergence there would silently under- or over-budget page space", () => {
-  const heightOccurrences = plannerSource.match(/const recommendationCardHeight = 36;/g) || [];
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence PDF layout
+// hardening, round 2): the fixed 36mm recommendationCardHeight constant
+// this test used to assert was ITSELF the bug -- Strategic Recommendation
+// cards with more Owner/Timeline/Budget/Success-Metric fields or a
+// Decision Gate needed more than 36mm and visibly truncated/overlapped
+// (confirmed live, especially cards 3-4). Replaced with
+// computeRecommendationRowHeights, a single shared function (still one
+// declaration, reused by both getPdfVisualHeight and drawPdfVisual via
+// closure -- the same "one source of truth" guarantee this test always
+// checked for) that derives each card's real height from its own content
+// instead of a hardcoded number.
+test("Planner.tsx's downloadPdf: getPdfVisualHeight and drawPdfVisual read the SAME shared computeRecommendationRowHeights function for the Strategic Recommendations visual (rather than each independently hard-coding their own height), so a divergence between drawing and pagination budgeting is structurally impossible", () => {
+  const layoutFnOccurrences = plannerSource.match(/const computeRecommendationCardLayout = /g) || [];
+  const rowsFnOccurrences = plannerSource.match(/const computeRecommendationRowHeights = /g) || [];
   const gapOccurrences = plannerSource.match(/const recommendationCardGap = 3;/g) || [];
-  assert.equal(heightOccurrences.length, 1, "expected exactly one shared recommendationCardHeight declaration, reused by both functions via closure");
+  assert.equal(layoutFnOccurrences.length, 1, "expected exactly one shared computeRecommendationCardLayout declaration, reused by both functions via closure");
+  assert.equal(rowsFnOccurrences.length, 1, "expected exactly one shared computeRecommendationRowHeights declaration, reused by both functions via closure");
   assert.equal(gapOccurrences.length, 1, "expected exactly one shared recommendationCardGap declaration, reused by both functions via closure");
-  assert.match(plannerSource, /return rows \* recommendationCardHeight \+ Math\.max\(0, rows - 1\) \* recommendationCardGap;/);
-  assert.match(plannerSource, /const cardGap = recommendationCardGap;\s*\n\s*const cardHeight = recommendationCardHeight;/);
+  assert.match(
+    plannerSource,
+    /return \(\s*\n\s*rowHeights\.reduce\(\(sum, height\) => sum \+ height, 0\) \+\s*\n\s*Math\.max\(0, rowHeights\.length - 1\) \* recommendationCardGap\s*\n\s*\);/,
+    "getPdfVisualHeight must budget space from the same computed rowHeights"
+  );
+  assert.match(
+    plannerSource,
+    /const \{ cards, rowHeights \} = computeRecommendationRowHeights\(items, cardWidth\);/,
+    "drawPdfVisual must draw using the same computed rowHeights"
+  );
 });
 
 // --- No duplicated information: Card, then the same text as a paragraph --
