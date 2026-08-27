@@ -445,11 +445,20 @@ function createMarketIntelligenceSeeds(
       evidenceField: "vendor_discovery",
       priority: "critical",
       preferredSourceTypes: ["credible_market_data", "professional_standard", "company_source", "official_filing"],
+      // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+      // depth hardening): mirrors the identical fix in
+      // market-research-planner.ts -- packedQueries[1]/[2] (taxonomy-term ×
+      // discovery-angle combinations, including pricing/positioning/
+      // target-customer angles) were built but silently discarded in favor
+      // of two generic hardcoded phrases. Using all 3 when available is the
+      // same 3-query budget, zero additional search-call cost.
       queries: [
         vendorDiscoveryQueryPlan.packedQueries[0] ||
           q(context, categoryQuery, "vendors alternatives directory market map"),
-        q(context, adjacentQuery, "software companies vendor landscape comparison"),
-        q(context, brandQuery || categoryQuery, "named competitors brands manufacturers distributors"),
+        vendorDiscoveryQueryPlan.packedQueries[1] ||
+          q(context, adjacentQuery, "software companies vendor landscape comparison"),
+        vendorDiscoveryQueryPlan.packedQueries[2] ||
+          q(context, brandQuery || categoryQuery, "named competitors brands manufacturers distributors"),
       ],
       required: true,
       criterionHints: ["competition", "market", "evidence"],

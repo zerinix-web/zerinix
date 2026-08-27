@@ -18,6 +18,15 @@ export type VendorDiscoveryQueryPlan = {
   anglesCovered: string[];
 };
 
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-depth
+// hardening): "pricing" alone produced generic market-level pricing
+// queries ("[market] pricing"), never explicitly asking for a vendor's
+// own target customer, positioning, or geographic coverage -- the exact
+// signals the product spec requires verifying "where evidence exists".
+// Added 3 angles targeting those specifically; this list still only
+// changes WHAT the already-scheduled, already-cost-bounded
+// market_vendor_discovery task asks for (see its own call site), never
+// how many search calls are made.
 const discoveryAngles = [
   "top vendors",
   "best software",
@@ -25,6 +34,9 @@ const discoveryAngles = [
   "alternatives",
   "competitors",
   "pricing",
+  "official pricing page plans",
+  "target customer segment",
+  "positioning differentiation",
   "customer reviews",
   "G2",
   "Capterra",

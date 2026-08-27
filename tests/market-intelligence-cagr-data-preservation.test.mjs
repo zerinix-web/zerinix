@@ -294,18 +294,47 @@ test("route.ts: cagr is no longer a member of marketSizeBenchmarkDependentFields
 // --- Drift check: evidence-first CAGR extraction and projection branch -----
 // --- structure are completely untouched by this fix ------------------------
 
-test("DRIFT CHECK: graph.cagr's own evidence-extraction filter (keyword+percentage co-occurrence in the SAME evidence item, confidence >= 48, isVerified) is byte-identical to before this fix -- this pass never loosens evidence standards to make the CAGR card populate", () => {
+// P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-depth
+// hardening, Task #10 round 2): the keyword+percentage co-occurrence
+// criteria themselves are unchanged (still confidence >= 48, isVerified,
+// the exact same CAGR/percentage regexes) -- what changed is that a CAGR
+// mention sourced from a global_benchmark/regional_benchmark item (an
+// ADJACENT market/geography, not the requested one) is now excluded from
+// this array entirely, since it was previously presented as if it were
+// the target market's own growth rate with no disclosure. This is an
+// evidence-standard TIGHTENING (never substitute an adjacent CAGR as this
+// market's own), not a loosening.
+test("DRIFT CHECK: graph.cagr's own evidence-extraction criteria (keyword+percentage co-occurrence in the SAME evidence item, confidence >= 48, isVerified) are byte-identical to before this fix, now applied via the isCagrEvidence helper -- this pass never loosens evidence standards to make the CAGR card populate", () => {
   assert.match(
     graphSource,
-    /const cagr = evidence\s*\.filter\(\s*\(item\) =>\s*isVerified\(item\) &&\s*calculateEvidenceConfidence\(item\) >= 48 &&\s*\/cagr\|compound annual\|growth rate\|forecast growth\/i\.test\(\s*evidenceText\(item\)\s*\) && \/\\d\+\(\?:\\\.\\d\+\)\?\\s\*%\/\.test\(evidenceText\(item\)\)/
+    /const isCagrEvidence = \(item: DomainResearchEvidence\) =>\s*isVerified\(item\) &&\s*calculateEvidenceConfidence\(item\) >= 48 &&\s*\/cagr\|compound annual\|growth rate\|forecast growth\/i\.test\(evidenceText\(item\)\) &&\s*\/\\d\+\(\?:\\\.\\d\+\)\?\\s\*%\/\.test\(evidenceText\(item\)\)/
   );
 });
 
-test("DRIFT CHECK: projectMarketIntelligenceGraphToReport's CAGR branch structure (if graph.cagr.length > 0, map to the [tag] description | Confidence | Evidence line) is untouched -- no new else-branch was added that could overwrite the model's own honest [Estimated]/gap prose with a deterministic fallback", () => {
+test("DRIFT CHECK (new evidence-standard tightening, not a loosening): graph.cagr now excludes global_benchmark/regional_benchmark-field items -- a CAGR mention from an adjacent market/geography can no longer silently pass as this market's own growth rate", () => {
+  assert.match(
+    graphSource,
+    /const cagr = evidence\s*\.filter\(\(item\) => item\.field !== "global_benchmark" && item\.field !== "regional_benchmark"\)\s*\.filter\(isCagrEvidence\)/
+  );
+});
+
+test("DRIFT CHECK: adjacent-sourced CAGR evidence is preserved, never discarded -- it is captured in a separate adjacentCagrBenchmarks array (mirroring adjacentBenchmarks' own field/tier logic) so it can still inform the report as an explicitly labeled directional comparator", () => {
+  assert.match(
+    graphSource,
+    /const adjacentCagrBenchmarks = evidence\s*\.filter\(\s*\(item\) =>\s*\(item\.field === "global_benchmark" \|\| item\.field === "regional_benchmark"\) &&\s*isCagrEvidence\(item\)\s*\)/
+  );
+});
+
+test("DRIFT CHECK: projectMarketIntelligenceGraphToReport's CAGR branch structure (if graph.cagr.length > 0, map to the [tag] description | Confidence | Evidence line) is untouched -- the only addition is an else-branch that surfaces adjacentCagrBenchmarks as an EXPLICITLY LABELED directional comparator (never as this market's own CAGR), and only when graph.cagr is genuinely empty -- it never overwrites real target-market CAGR evidence", () => {
   assert.match(graphSource, /if \(graph\.cagr\.length > 0\) \{/);
   assert.match(
     graphSource,
     /projection\.cagr = graph\.cagr\s*\.map\(\s*\(item\) =>\s*`- \[\$\{classificationTag\(language, item\.confidenceClassification\)\}\] \$\{item\.description\}/
+  );
+  assert.match(graphSource, /\} else if \(graph\.adjacentCagrBenchmarks\.length > 0\) \{/);
+  assert.match(
+    graphSource,
+    /projection\.cagr = graph\.adjacentCagrBenchmarks\s*\.map\(\s*\(item\) =>\s*`- \[\$\{copy\.adjacentCagrDirectionalComparatorLabel\}\]/
   );
 });
 

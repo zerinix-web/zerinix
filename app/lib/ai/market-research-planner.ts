@@ -140,7 +140,7 @@ function buildCapabilities(input: {
   comparatorQuery: string;
   methodologyQuery: string;
   localQuery: string;
-  vendorDiscoveryFirstQuery: string;
+  vendorDiscoveryQueries: readonly string[];
 }): MarketResearchCapability[] {
   const {
     reportPlan,
@@ -151,7 +151,7 @@ function buildCapabilities(input: {
     comparatorQuery,
     methodologyQuery,
     localQuery,
-    vendorDiscoveryFirstQuery,
+    vendorDiscoveryQueries,
   } = input;
   const section = (candidates: string[]) => findSectionId(reportPlan, candidates);
 
@@ -165,10 +165,21 @@ function buildCapabilities(input: {
       reportSectionId: section(["major_players", "competitive_landscape", "competition"]),
       purpose:
         "Discover 10–30 evidence-supported vendors/competitors where available by reconciling independent directories, analyst coverage, industry publications, filings, official company sources, review sites, and named brand/equipment-maker pages.",
+      // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+      // depth hardening): previously only vendorDiscoveryQueries[0] was
+      // ever used here -- packedQueries[1]/[2] (taxonomy-term ×
+      // discovery-angle combinations, including the pricing/positioning/
+      // target-customer angles) were built by buildVendorDiscoveryQueryPlan
+      // but silently discarded, replaced by two generic hardcoded phrases
+      // with no taxonomy awareness at all. Using all 3 when available (same
+      // task, same 3-query budget -- zero additional search-call cost)
+      // makes this task's existing queries meaningfully more targeted; the
+      // original generic phrases remain as the fallback for whichever slot
+      // a thin taxonomy didn't fill.
       queries: dedupeQueries([
-        vendorDiscoveryFirstQuery || joinQuery(context, categoryQuery, "vendors alternatives directory market map"),
-        joinQuery(context, adjacentQuery, "software companies vendor landscape comparison"),
-        joinQuery(context, brandQuery || categoryQuery, "named competitors brands manufacturers distributors"),
+        vendorDiscoveryQueries[0] || joinQuery(context, categoryQuery, "vendors alternatives directory market map"),
+        vendorDiscoveryQueries[1] || joinQuery(context, adjacentQuery, "software companies vendor landscape comparison"),
+        vendorDiscoveryQueries[2] || joinQuery(context, brandQuery || categoryQuery, "named competitors brands manufacturers distributors"),
       ]),
     },
     {
@@ -387,7 +398,7 @@ export function buildMarketResearchTasks(input: MarketResearchPlanInput): Resear
     comparatorQuery,
     methodologyQuery,
     localQuery,
-    vendorDiscoveryFirstQuery: vendorDiscoveryQueryPlan.packedQueries[0] || "",
+    vendorDiscoveryQueries: vendorDiscoveryQueryPlan.packedQueries,
   });
 
   return capabilities.map((capability) => ({

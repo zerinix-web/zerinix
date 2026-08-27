@@ -854,9 +854,33 @@ function buildConfidenceRadar(
     },
   ];
 
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence confidence-
+  // scoring hardening): extractPercentScore's own unlabeled fallback (used
+  // whenever no exact "Label: value" line exists) scans the ENTIRE content
+  // for the FIRST bare "NN%"/"NN/100" pattern, with no tie to which
+  // dimension is asking. Every dimension here passes the SAME `content`
+  // string, so for any report where none of the alias labels appear
+  // verbatim (true for every Market Intelligence report -- its generation
+  // prompts never write "Market Confidence:"/"Financial Quality:"/etc, and
+  // investmentScore is never populated for this report type) all 5
+  // dimensions collapsed onto the SAME unrelated percentage -- in
+  // production, almost always the Executive Decision banner's own overall
+  // confidence figure (frequently capped at exactly 50 by
+  // capConfidenceForEvidenceGap when a decision-critical evidence gap
+  // exists), producing the reported "uniform ~50/51 across every
+  // dimension" symptom. requireNearbyLabelWord (already the established
+  // safe pattern for buildExecutiveSnapshot's own confidenceScore, a few
+  // lines below) requires the dimension's OWN alias word within 20 chars
+  // of the percentage, so a report that never mentions that dimension by
+  // name correctly falls through to null ("Validation Required", the
+  // existing convention for "no defensible dimension-specific value")
+  // instead of fabricating a shared, unrelated number.
   return dimensions.map((dimension) => ({
     label: dimension.label,
-    score: extractPercentScore(content, dimension.aliases) ?? dimension.score ?? null,
+    score:
+      extractPercentScore(content, dimension.aliases, { requireNearbyLabelWord: true }) ??
+      dimension.score ??
+      null,
   }));
 }
 

@@ -240,6 +240,20 @@ export type MarketIntelligenceGraph = {
     confidenceScore: number;
     confidenceLevel: MarketConfidenceLevel;
   }>;
+  // A CAGR figure sourced from a broader/adjacent-category benchmark
+  // (item.field === "global_benchmark"/"regional_benchmark") -- never this
+  // market's own verified growth rate. Kept separate from `cagr` so it can
+  // only ever be presented as an explicitly labeled directional
+  // comparator, never silently substituted as if it were the requested
+  // market's own CAGR.
+  adjacentCagrBenchmarks: Array<{
+    description: string;
+    geography: string;
+    evidenceIds: string[];
+    confidenceClassification: "Estimated";
+    confidenceScore: number;
+    confidenceLevel: MarketConfidenceLevel;
+  }>;
   sources: MarketIntelligenceSource[];
   // Every evidence ID backed by a real, valid-URL source -- see the
   // build-time comment in buildMarketIntelligenceGraph. A superset of
@@ -999,6 +1013,32 @@ function buildPlanningEstimate(
     basis = `TAM planning baseline uses ${topDownAmount!.token} from [${topDownBest!.id}] (${classifyMarketEvidenceSource(topDownBest!).replace(/_/g, " ")}).`;
     evidenceIds.push(topDownBest!.id);
     anchorEvidence = topDownBest!;
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence evidence-
+    // reconciliation hardening): when multiple independent top-down
+    // candidates exist, only topDownCandidates[0] (the highest-authority
+    // one) was ever used -- every other candidate that might materially
+    // DISAGREE with it was silently discarded with no reconciliation note,
+    // unlike the sibling top-down-vs-bottom-up triangulation branch above,
+    // which already explains a >2.5x divergence rather than picking one
+    // side silently. Mirrors that exact same disclosure, scoped to the
+    // runner-up top-down candidate specifically -- never changes WHICH
+    // figure anchors the estimate (rankEvidenceCandidates' authority/
+    // confidence/freshness hierarchy is untouched), only discloses that a
+    // real disagreement exists and names the most likely reasons.
+    const runnerUpTopDown = topDownCandidates[1] || null;
+    const runnerUpAmount = runnerUpTopDown
+      ? extractMarketAmount(`${runnerUpTopDown.claim} ${runnerUpTopDown.value}`)
+      : null;
+    if (runnerUpTopDown && runnerUpAmount) {
+      const low = Math.min(topDownAmount!.amount, runnerUpAmount.amount);
+      const high = Math.max(topDownAmount!.amount, runnerUpAmount.amount);
+      const ratio = high / Math.max(low, 1);
+      if (ratio > 2.5) {
+        conflicting = true;
+        tier = "directional";
+        conflictNote = `A second market-size figure, ${formatAmount(runnerUpAmount.amount, currency)} from [${runnerUpTopDown.id}] (${classifyMarketEvidenceSource(runnerUpTopDown).replace(/_/g, " ")}), diverges from the figure used above by ${ratio.toFixed(1)}x. The higher-authority/higher-confidence source above was used as the anchor rather than averaging the two, but the disagreement itself is disclosed here rather than hidden -- possible reasons include a different market definition, geography, reference year, or methodology between the two sources.`;
+      }
+    }
   } else if (hasBottomUp) {
     tamLow = bottomUpAmount!;
     tamHigh = bottomUpAmount!;
@@ -1345,15 +1385,25 @@ export function buildMarketIntelligenceGraph(
       };
     });
 
+  const isCagrEvidence = (item: DomainResearchEvidence) =>
+    isVerified(item) &&
+    calculateEvidenceConfidence(item) >= 48 &&
+    /cagr|compound annual|growth rate|forecast growth/i.test(evidenceText(item)) &&
+    /\d+(?:\.\d+)?\s*%/.test(evidenceText(item));
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-depth
+  // hardening): this filter had no exclusion for item.field ===
+  // "global_benchmark"/"regional_benchmark" -- the exact two fields
+  // adjacentBenchmarks (a few lines below) and findAdjacentProxyTopDown
+  // both deliberately treat as a SEPARATE, lower-authority tier, never
+  // conflated with the requested market's own real evidence. A CAGR figure
+  // mentioned inside a broader/adjacent-category benchmark passed this
+  // filter unchanged and rendered as if it were the target market's own
+  // growth rate, tagged only "Verified"/"Estimated" -- never disclosed as
+  // adjacent. Excluded here (never silently substituted); surfaced
+  // separately below as an explicitly labeled directional comparator.
   const cagr = evidence
-    .filter(
-      (item) =>
-        isVerified(item) &&
-        calculateEvidenceConfidence(item) >= 48 &&
-        /cagr|compound annual|growth rate|forecast growth/i.test(
-          evidenceText(item)
-        ) && /\d+(?:\.\d+)?\s*%/.test(evidenceText(item))
-    )
+    .filter((item) => item.field !== "global_benchmark" && item.field !== "regional_benchmark")
+    .filter(isCagrEvidence)
     .map((item) => {
       const confidenceScore = calculateEvidenceConfidence(item);
       return {
@@ -1363,6 +1413,28 @@ export function buildMarketIntelligenceGraph(
           confidenceClassification(item) === "Verified"
             ? ("Verified" as const)
             : ("Estimated" as const),
+        confidenceScore,
+        confidenceLevel: classifyMarketConfidence(confidenceScore),
+      };
+    });
+  // Mirrors adjacentBenchmarks' own field/authority tier exactly, but
+  // specifically for CAGR-bearing benchmark items -- never presented as
+  // this market's own growth rate, only as a clearly labeled directional
+  // comparator (see projectMarketIntelligenceGraphToReport's own
+  // handling).
+  const adjacentCagrBenchmarks = evidence
+    .filter(
+      (item) =>
+        (item.field === "global_benchmark" || item.field === "regional_benchmark") &&
+        isCagrEvidence(item)
+    )
+    .map((item) => {
+      const confidenceScore = calculateEvidenceConfidence(item);
+      return {
+        description: concise(item.value || item.claim),
+        geography: extractGeographyLabel(evidenceText(item)),
+        evidenceIds: [item.id],
+        confidenceClassification: "Estimated" as const,
         confidenceScore,
         confidenceLevel: classifyMarketConfidence(confidenceScore),
       };
@@ -1434,6 +1506,7 @@ export function buildMarketIntelligenceGraph(
     sizingGap,
     adjacentBenchmarks,
     cagr,
+    adjacentCagrBenchmarks,
     sources,
     citableEvidenceIds,
     sourceRecordByEvidenceId,
@@ -1513,7 +1586,8 @@ type MarketGraphCopyKey =
   | "tamGapPricingMissingTemplate"
   | "tamGapBuyerPopulationMissing"
   | "tamGapTopDownFigureMissing"
-  | "tamGapEverythingMissing";
+  | "tamGapEverythingMissing"
+  | "adjacentCagrDirectionalComparatorLabel";
 
 const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, string>> = {
   English: {
@@ -1608,6 +1682,8 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
       "ZERINIX found a candidate market-size figure, but it did not clear the confidence, geography-consistency, or amount-extraction bar required to anchor a TAM, and no bottom-up or adjacent-market alternative was available either. A monetary TAM is therefore withheld pending a more reliable market-size disclosure.",
     tamGapEverythingMissing:
       "ZERINIX searched for a direct market-size figure, an addressable buyer population, and comparable adjacent-market benchmarks for this exact request, but found no verifiable numeric evidence for any of them. A monetary TAM is therefore withheld until at least one of these evidence types becomes available.",
+    adjacentCagrDirectionalComparatorLabel:
+      "Adjacent-Market Growth Rate — Directional Comparator, Not This Market's Own CAGR",
   },
   Turkish: {
     marketInfrastructureTitle: "Pazar Altyapısı",
@@ -1680,6 +1756,8 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
       "ZERINIX aday bir pazar büyüklüğü rakamı buldu, ancak bu rakam bir TAM'ı dayandırmak için gereken güven, coğrafya tutarlılığı veya rakam çıkarma barını geçemedi ve aşağıdan yukarıya veya bitişik pazar alternatifi de mevcut değildi. Bu nedenle, daha güvenilir bir pazar büyüklüğü açıklaması yapılana kadar parasal bir TAM belirtilmemektedir.",
     tamGapEverythingMissing:
       "ZERINIX bu talep için doğrudan bir pazar büyüklüğü rakamı, hedeflenebilir bir alıcı nüfusu ve karşılaştırılabilir bitişik pazar referansları aradı, ancak bunların hiçbiri için doğrulanabilir sayısal kanıt bulamadı. Bu nedenle, bu kanıt türlerinden en az biri mevcut olana kadar parasal bir TAM belirtilmemektedir.",
+    adjacentCagrDirectionalComparatorLabel:
+      "Bitişik Pazar Büyüme Oranı — Yönlü Karşılaştırma, Bu Pazarın Kendi CAGR'ı Değil",
   },
   German: {
     marketInfrastructureTitle: "Marktinfrastruktur",
@@ -1752,6 +1830,8 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
       "ZERINIX fand eine Kandidatenzahl für die Marktgröße, die jedoch nicht die für die Verankerung eines TAM erforderliche Konfidenz-, Geografie-Konsistenz- oder Betragsextraktionsschwelle erreichte, und es war auch keine Bottom-up- oder benachbarte Marktalternative verfügbar. Ein monetärer TAM wird daher bis zu einer zuverlässigeren Offenlegung der Marktgröße zurückgehalten.",
     tamGapEverythingMissing:
       "ZERINIX suchte nach einer direkten Marktgrößenzahl, einer adressierbaren Käuferpopulation und vergleichbaren benachbarten Marktbenchmarks für diese genaue Anfrage, fand jedoch für keinen dieser Punkte überprüfbare numerische Nachweise. Ein monetärer TAM wird daher zurückgehalten, bis mindestens einer dieser Nachweistypen verfügbar wird.",
+    adjacentCagrDirectionalComparatorLabel:
+      "Wachstumsrate eines benachbarten Marktes — Richtungsweisender Vergleichswert, nicht die eigene CAGR dieses Marktes",
   },
   French: {
     marketInfrastructureTitle: "Infrastructure du marché",
@@ -1824,6 +1904,8 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
       "ZERINIX a trouvé un chiffre candidat pour la taille du marché, mais il n'a pas franchi le seuil de confiance, de cohérence géographique ou d'extraction de montant requis pour ancrer un TAM, et aucune alternative ascendante ou de marché adjacent n'était disponible non plus. Un TAM monétaire est donc retenu en attendant une divulgation plus fiable de la taille du marché.",
     tamGapEverythingMissing:
       "ZERINIX a recherché un chiffre direct de taille de marché, une population d'acheteurs adressables et des références de marché adjacentes comparables pour cette demande précise, mais n'a trouvé aucune preuve numérique vérifiable pour aucun d'entre eux. Un TAM monétaire est donc retenu jusqu'à ce qu'au moins un de ces types de preuves devienne disponible.",
+    adjacentCagrDirectionalComparatorLabel:
+      "Taux de croissance d'un marché adjacent — Comparateur directionnel, pas le CAGR propre de ce marché",
   },
   Spanish: {
     marketInfrastructureTitle: "Infraestructura del mercado",
@@ -1896,6 +1978,8 @@ const marketGraphCopy: Record<MarketGraphLanguage, Record<MarketGraphCopyKey, st
       "ZERINIX encontró una cifra candidata de tamaño de mercado, pero no superó el umbral de confianza, coherencia geográfica o extracción de monto requerido para anclar un TAM, y tampoco había disponible una alternativa ascendente o de mercado adyacente. Por lo tanto, se retiene un TAM monetario hasta que se disponga de una divulgación más fiable del tamaño de mercado.",
     tamGapEverythingMissing:
       "ZERINIX buscó una cifra directa de tamaño de mercado, una población de compradores direccionable y referencias de mercado adyacentes comparables para esta solicitud exacta, pero no encontró evidencia numérica verificable para ninguno de ellos. Por lo tanto, se retiene un TAM monetario hasta que al menos uno de estos tipos de evidencia esté disponible.",
+    adjacentCagrDirectionalComparatorLabel:
+      "Tasa de crecimiento de un mercado adyacente — Comparador direccional, no el CAGR propio de este mercado",
   },
 };
 
@@ -2536,6 +2620,20 @@ export function projectMarketIntelligenceGraphToReport(
       .map(
         (item) =>
           `- [${classificationTag(language, item.confidenceClassification)}] ${item.description} | ${copy.confidenceLabel}: ${item.confidenceScore}/100 (${item.confidenceLevel}) | ${copy.evidenceLabel}: ${item.evidenceIds.map((id) => `[${id}]`).join(", ")}`
+      )
+      .join("\n");
+  } else if (graph.adjacentCagrBenchmarks.length > 0) {
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
+    // depth hardening): no verified growth-rate evidence exists for THIS
+    // market, but a broader/adjacent-category benchmark does mention a
+    // growth rate -- surfaced only as an explicitly labeled directional
+    // comparator (never as this market's own CAGR, and never silently
+    // substituted the way it previously could be when it passed the plain
+    // `cagr` filter above unmarked).
+    projection.cagr = graph.adjacentCagrBenchmarks
+      .map(
+        (item) =>
+          `- [${copy.adjacentCagrDirectionalComparatorLabel}] ${item.description} (${item.geography}) | ${copy.confidenceLabel}: ${item.confidenceScore}/100 (${item.confidenceLevel}) | ${copy.evidenceLabel}: ${item.evidenceIds.map((id) => `[${id}]`).join(", ")}`
       )
       .join("\n");
   }
