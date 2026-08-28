@@ -379,6 +379,32 @@ export function extractMarketIntelligenceBannerConfidence(text: string, decision
   return match ? Math.max(0, Math.min(100, Number(match[1]))) : null;
 }
 
+// CRITICAL FIX (Task #17B) -- shared by resolveMarketIntelligenceExecutiveDecision's
+// own Tier 2 downgrade below AND reconcileMarketIntelligenceDecisionText
+// further down, so both ALWAYS agree on exactly which tokens count as an
+// unverified strong-affirmative claim -- extracted here specifically to
+// prevent the two from drifting apart (the root cause this ticket exists
+// to close: two independent call sites each deciding for themselves
+// whether a raw decision is "strong enough" to trust). Recognizes this
+// report kind's own vocabulary word (ENTER/GİR/EINTRETEN/ENTRER/ENTRAR)
+// plus, for English text specifically, the ticket's own named equivalents
+// (GO/PROCEED/INVEST/BUILD) a model might use interchangeably.
+function strongAffirmativeDecisionTokens(language: ResponseLanguage): string[] {
+  const marketToken = localizeExecutiveDecision("GO", language, "market");
+
+  return language === "English"
+    ? Array.from(new Set([marketToken, "ENTER", "GO", "PROCEED", "INVEST", "BUILD"]))
+    : [marketToken];
+}
+
+function isUnverifiedStrongAffirmativeText(text: string, language: ResponseLanguage): boolean {
+  const tokens = strongAffirmativeDecisionTokens(language).map((token) =>
+    token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  );
+
+  return new RegExp(`^(?:${tokens.join("|")})\\b`, "i").test(text.trim());
+}
+
 export function resolveMarketIntelligenceExecutiveDecision(
   executiveSummaryContent: string,
   language: ResponseLanguage = "English"
@@ -414,6 +440,42 @@ export function resolveMarketIntelligenceExecutiveDecision(
 
   const rawDecisionText = extractMarketIntelligenceRawDecisionText(text);
   if (rawDecisionText) {
+    // CRITICAL FIX -- decision-integrity gate (confirmed live: a real
+    // regenerated report showed "Decision: ENTER the U.S." alongside an
+    // unavailable Investment Score/Planning Confidence and an explicitly
+    // unresolved SOM gap -- a strong affirmative decision with no
+    // evidence-sufficiency check behind it at all). This tier is reached
+    // only when the deterministic "Decision: TOKEN (Confidence: NN%)"
+    // banner is absent -- i.e. assessMarketEntryConfidence's own
+    // evidence-gap gate (market-intelligence-presentation.ts) never ran
+    // against this text, so confidenceScore is correctly null two lines
+    // below. A raw decision statement with NO verified confidence behind
+    // it can never be trusted to carry a strong affirmative claim (ENTER,
+    // this report kind's own "GO"-equivalent token) at face value --
+    // that would let an ungated report present exactly the coverage/
+    // graph-unavailable state this rule exists to catch. Downgrading to
+    // this vocabulary's own existing conservative equivalent
+    // (CONDITIONAL_GO -- ZERINIX's "validate before entry" state for
+    // Market Intelligence) is a value fix, not a wording change: the
+    // decision itself changes, not merely how it is displayed. This is
+    // NOT the same operation the "never re-tokenize free text" principle
+    // above forbids -- that principle guards against re-SCANNING
+    // arbitrary surrounding prose for a keyword (the "Go-to-Market" false-
+    // positive class of bug); this only inspects the LEADING token of an
+    // already label-confirmed, already-isolated decision phrase, exactly
+    // as Tier 1 already inspects banner.code. Only the leading token
+    // decides the downgrade; the original text is not otherwise altered
+    // or re-parsed.
+    if (isUnverifiedStrongAffirmativeText(rawDecisionText, language)) {
+      return {
+        decisionLabel: localizeExecutiveDecision("CONDITIONAL_GO", language, "market"),
+        decisionSource: "raw-label",
+        canonicalDecision: mapExecutiveDecisionCodeToCanonicalDecision("CONDITIONAL_GO"),
+        confidenceScore: null,
+        language,
+      };
+    }
+
     return {
       decisionLabel: rawDecisionText,
       decisionSource: "raw-label",
@@ -430,4 +492,108 @@ export function resolveMarketIntelligenceExecutiveDecision(
     confidenceScore: null,
     language,
   };
+}
+
+// CRITICAL FIX (Task #17B) -- confirmed live against a REAL regenerated
+// report: resolveMarketIntelligenceExecutiveDecision's own Tier 2
+// downgrade (above) only fixes the SHORT decisionLabel every badge/pill
+// surface reads (Decision Signal, Investment Decision Snapshot,
+// Executive Snapshot, Strategic Recommendations) -- it was never
+// consulted by the SEPARATE prose-extraction helpers (extractFirstInsight
+// et al., in page.tsx/Planner.tsx) that surface a raw SENTENCE from the
+// executiveSummary field directly, verbatim, for "Bottom Line" and
+// "Executive Highlights" display. Those sentences can still literally
+// read "Bottom Line — Decision: ENTER the U.S. ..." even after the badge
+// next to them correctly says MONITOR -- the exact reported
+// contradiction, and the reason Task #17's fix alone was insufficient.
+//
+// This function is the single place that launders any such free-text
+// sentence before it is displayed: it finds the same "Decision:"/"Karar:"
+// -labeled clause the resolver itself looks for, and -- ONLY when that
+// clause's own leading token is an unverified strong-affirmative claim
+// that disagrees with the ALREADY-RESOLVED canonicalDecision passed in
+// (computed once, from the same executiveSummary, by whichever call site
+// needs this) -- replaces just that clause with a decision label that
+// matches the canonical decision, while preserving every word around it
+// (the market/geography/timeframe/citations context that clause's own
+// text carried). Per this ticket's explicit instruction, this is
+// deliberately NOT a bare word swap ("ENTER" -> "MONITOR" in place): the
+// trailing context is reframed as what remains to be validated, not
+// restated as if it were still an unconditional action. Text that does
+// not contain a decision-labeled clause, or whose clause already agrees
+// with canonicalDecision, is returned completely unchanged.
+const marketIntelligenceReconciliationBridge: Record<
+  ResponseLanguage,
+  { label: string; connector: string; validationRequiredLabel: string }
+> = {
+  English: {
+    label: "Current Decision",
+    connector: "validate the unresolved evidence before entering",
+    validationRequiredLabel: "Validation Required",
+  },
+  Turkish: {
+    label: "Güncel Karar",
+    connector: "girmeden önce çözülmemiş kanıtları doğrulayın:",
+    validationRequiredLabel: "Doğrulama Gerekli",
+  },
+  // German/French/Spanish raw-label reconciliation is out of scope here,
+  // matching the same pre-existing scope boundary
+  // extractMarketIntelligenceRawDecisionText itself already has (its own
+  // marketIntelligenceRawDecisionLabels list only recognizes
+  // "Decision"/"Karar" as labels at all) -- text in those languages has
+  // no decision-labeled clause for this function to find in the first
+  // place, so it is returned unchanged, never mistranslated.
+  German: { label: "Current Decision", connector: "validate the unresolved evidence before entering", validationRequiredLabel: "Validation Required" },
+  French: { label: "Current Decision", connector: "validate the unresolved evidence before entering", validationRequiredLabel: "Validation Required" },
+  Spanish: { label: "Current Decision", connector: "validate the unresolved evidence before entering", validationRequiredLabel: "Validation Required" },
+};
+
+export function reconcileMarketIntelligenceDecisionText(
+  text: string,
+  canonicalDecision: MarketIntelligenceExecutiveDecision,
+  language: ResponseLanguage = "English"
+): string {
+  if (!text) {
+    return text;
+  }
+
+  for (const label of marketIntelligenceRawDecisionLabels) {
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = text.match(new RegExp(`\\b${escapedLabel}\\s*[:\\-–—]\\s*([^\\n]+)`, "i"));
+
+    if (!match || match.index === undefined) {
+      continue;
+    }
+
+    const tokens = strongAffirmativeDecisionTokens(language).map((token) =>
+      token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    );
+    const tokenMatch = match[1].match(new RegExp(`^(?:${tokens.join("|")})\\b\\s*(.*)$`, "i"));
+
+    if (!tokenMatch) {
+      // The clause's own leading token is not an unverified strong-
+      // affirmative claim at all (e.g. it already says MONITOR/AVOID, or
+      // is unrecognized free text) -- nothing to reconcile here.
+      continue;
+    }
+
+    if (canonicalDecision.decisionLabel !== "—" && isUnverifiedStrongAffirmativeText(canonicalDecision.decisionLabel, language)) {
+      // The canonical decision ITSELF is a genuinely verified strong
+      // affirmative (a real Tier 1 banner, confidence and all) -- this
+      // clause is not a contradiction, it is agreement. Leave it alone.
+      continue;
+    }
+
+    const trailingContext = (tokenMatch[1] || "").trim();
+    const bridge = marketIntelligenceReconciliationBridge[language] ?? marketIntelligenceReconciliationBridge.English;
+    const displayDecisionLabel =
+      canonicalDecision.decisionLabel === "—" ? bridge.validationRequiredLabel : canonicalDecision.decisionLabel;
+    const replacement = `${bridge.label}: ${displayDecisionLabel} — ${bridge.connector}${
+      trailingContext ? ` ${trailingContext}` : ""
+    }`;
+
+    return text.slice(0, match.index) + replacement + text.slice(match.index + match[0].length);
+  }
+
+  return text;
 }

@@ -54,6 +54,7 @@ import type {
 import { readExecutiveDecisionIntelligenceSummary } from "@/app/lib/report-engine/executive-decision-intelligence-presentation";
 import {
   getCanonicalDecisionLabel,
+  reconcileMarketIntelligenceDecisionText,
   resolveCanonicalDecisionFromReportText,
   resolveMarketIntelligenceExecutiveDecision,
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
@@ -1329,9 +1330,28 @@ function extractMarketIntelligenceCompetitorRows(content: string, majorPlayersCo
 // intelligence-presentation.ts's own isHeadingOnlyLine heuristic (a line
 // ending in ":" is a label, not a sentence) plus an explicit reject for
 // the two known deterministic heading strings.
+//
+// CRITICAL FIX (Task #17) -- confirmed live against a REAL regenerated
+// report: strategicRecommendations' own prompt (market.ts) asks the
+// model to "state plainly whether the evidence supports entering,
+// piloting, or avoiding this market" as its own opening verdict --
+// which the model routinely writes as "Recommendation: Enter (evidence
+// supports...)." / "Conviction: ..." / "Trade-offs: ..." sentences. These
+// have a colon in the MIDDLE, not at the end, so the ":$" heading check
+// above never caught them, and they were rendered verbatim as fake
+// numbered "Action" cards -- reproducing the exact reported
+// contradiction (this section's own "Action #1" literally read
+// "Recommendation: Enter" while Executive Summary's canonical decision
+// was MONITOR). These are Executive-Summary-owned verdict language, not
+// action items, regardless of which decision they happen to state --
+// excluded here unconditionally, the same way the deterministic heading
+// strings above already are.
 function isRecommendationHeadingLine(item: string) {
   if (/:$/.test(item)) return true;
   if (/^(?:first\s+90\s*-?\s*days?|market entry recommendation|why entry is not recommended now)\b/i.test(item)) {
+    return true;
+  }
+  if (/^(?:recommendation|conviction|trade-?offs?)\s*:/i.test(item)) {
     return true;
   }
 
@@ -2159,6 +2179,20 @@ function ExecutiveSummaryVisual({
   const highlights = isMarketIntelligence
     ? getMarketIntelligenceExecutiveHighlights(content)
     : getExecutiveHighlights(content);
+  // CRITICAL FIX (Task #17B) -- confirmed live: extractFirstInsight below
+  // reads the executiveSummary's OWN raw first sentence verbatim (e.g.
+  // "Bottom Line — Decision: ENTER the U.S. ..."), completely bypassing
+  // marketDecision above -- so this card could show a correctly-downgraded
+  // MONITOR badge right next to its own supporting-text line still
+  // literally reading "Decision: ENTER the U.S." one paragraph later.
+  // Every free-text sentence sourced from this section (the "AI
+  // Investment Score" supporting line and the "Executive Highlights"
+  // fallback, both below) is laundered through the SAME canonical
+  // resolver's own reconciliation helper before display, so this section
+  // can never contradict its own badge, regardless of what the raw model
+  // text says.
+  const reconcileExecutiveText = (text: string) =>
+    marketDecision ? reconcileMarketIntelligenceDecisionText(text, marketDecision, evidenceLocale) : text;
   const kpis = [
     {
       label: "Investment Score",
@@ -2248,7 +2282,7 @@ function ExecutiveSummaryVisual({
                 {recommendation}
               </span>
               <p className="mt-3 text-sm leading-6 text-zinc-300">
-                {extractFirstInsight(content) || "Executive signal is being assembled."}
+                {reconcileExecutiveText(extractFirstInsight(content)) || "Executive signal is being assembled."}
               </p>
             </div>
           </div>
@@ -2277,7 +2311,7 @@ function ExecutiveSummaryVisual({
               Executive Highlights
             </p>
             <div className="mt-3 grid gap-2">
-              {(highlights.length > 0 ? highlights : [extractFirstInsight(content)]).map((highlight) => (
+              {(highlights.length > 0 ? highlights.map(reconcileExecutiveText) : [reconcileExecutiveText(extractFirstInsight(content))]).map((highlight) => (
                 <div key={highlight} className="flex gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-sm leading-6 text-zinc-300 shadow-sm shadow-black/10">
                   <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200" />
                   <span className="line-clamp-2">{highlight}</span>
@@ -2355,6 +2389,7 @@ function ReportSectionVisual({
   investmentScore,
   isMarketIntelligence = false,
   majorPlayersContent = "",
+  executiveSummaryContent = "",
 }: {
   title: string;
   content: string;
@@ -2367,6 +2402,14 @@ function ReportSectionVisual({
   // own table content fails to parse, rather than showing "Validation
   // Needed" while a sibling section plainly names the same vendors.
   majorPlayersContent?: string;
+  // TASK #17 -- Strategic Recommendations' own raw text can carry the
+  // model's own independently-written "Recommendation: TOKEN" verdict
+  // sentence, generated at the same time as (but not reconciled with)
+  // Executive Summary's own decision statement -- passed through so this
+  // card can display the SAME canonical decision every other decision
+  // surface reads, rather than trusting its own section's possibly
+  // stale/contradictory verdict line.
+  executiveSummaryContent?: string;
 }) {
   const normalizedTitle = title.toLowerCase();
   const evidenceLocale = getResponseLanguage(detectPdfPresentationLocale(content));
@@ -3122,12 +3165,35 @@ function ReportSectionVisual({
 
   if (normalizedTitle.includes("strategic recommendation")) {
     const items = extractRecommendationItems(content);
+    // CRITICAL FIX (Task #17) -- confirmed live: this section's own raw
+    // text can carry the model's own independently-written decision
+    // verdict (see isRecommendationHeadingLine's own comment), generated
+    // at the same time as, but never reconciled with, Executive
+    // Summary's canonical decision. Rather than trusting that verdict
+    // (brittle, since the model's exact wording varies report to
+    // report), this reads the SAME canonical resolver every other
+    // decision surface in this file already calls, against the SAME
+    // executiveSummary content -- so Strategic Recommendations can never
+    // display a decision Executive Summary itself disagrees with.
+    const strategicRecommendationDecision = isMarketIntelligence
+      ? resolveMarketIntelligenceExecutiveDecision(
+          executiveSummaryContent,
+          detectPdfPresentationLocale(executiveSummaryContent || content) === "tr" ? "Turkish" : "English"
+        )
+      : null;
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-white/[0.025] p-5">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
-          Strategic Recommendations
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+            Strategic Recommendations
+          </p>
+          {strategicRecommendationDecision && strategicRecommendationDecision.decisionLabel !== "—" ? (
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-300">
+              Current Decision: {strategicRecommendationDecision.decisionLabel}
+            </span>
+          ) : null}
+        </div>
         {items.length > 0 ? (
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {items.map((item, index) => {
@@ -5498,6 +5564,9 @@ export default async function ReportDetailPage({
                                 majorPlayersContent={
                                   visibleSections.find((entry) => entry.field === "majorPlayers")?.content
                                 }
+                                executiveSummaryContent={
+                                  visibleSections.find((entry) => entry.field === "executiveSummary")?.content
+                                }
                               />
                             ) : null}
                           </div>
@@ -5961,6 +6030,9 @@ export default async function ReportDetailPage({
                                 isMarketIntelligence={report.type === "Market Analysis"}
                                 majorPlayersContent={
                                   visibleSections.find((entry) => entry.field === "majorPlayers")?.content
+                                }
+                                executiveSummaryContent={
+                                  visibleSections.find((entry) => entry.field === "executiveSummary")?.content
                                 }
                               />
                               {/* Card-first sections (see cardFirstReportFields) already

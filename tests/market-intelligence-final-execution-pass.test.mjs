@@ -147,8 +147,8 @@ test("Planner.tsx's downloadPdf: getPdfVisualHeight and drawPdfVisual read the S
   assert.equal(gapOccurrences.length, 1, "expected exactly one shared recommendationCardGap declaration, reused by both functions via closure");
   assert.match(
     plannerSource,
-    /return \(\s*\n\s*rowHeights\.reduce\(\(sum, height\) => sum \+ height, 0\) \+\s*\n\s*Math\.max\(0, rowHeights\.length - 1\) \* recommendationCardGap\s*\n\s*\);/,
-    "getPdfVisualHeight must budget space from the same computed rowHeights"
+    /return \(\s*\n\s*strategicRecommendationDecisionBadgeHeight \+\s*\n\s*rowHeights\.reduce\(\(sum, height\) => sum \+ height, 0\) \+\s*\n\s*Math\.max\(0, rowHeights\.length - 1\) \* recommendationCardGap\s*\n\s*\);/,
+    "getPdfVisualHeight must budget space from the same computed rowHeights (plus the Task #17 Current Decision badge, reserved identically in both functions)"
   );
   assert.match(
     plannerSource,

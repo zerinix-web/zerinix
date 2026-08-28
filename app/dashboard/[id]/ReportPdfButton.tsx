@@ -2047,9 +2047,28 @@ function extractRiskLevel(threatsContent: string) {
 // intelligence-presentation.ts's own isHeadingOnlyLine heuristic (a line
 // ending in ":" is a label, not a sentence) plus an explicit reject for
 // the two known deterministic heading strings.
+//
+// CRITICAL FIX (Task #17) -- confirmed live against a REAL regenerated
+// report: strategicRecommendations' own prompt (market.ts) asks the
+// model to "state plainly whether the evidence supports entering,
+// piloting, or avoiding this market" as its own opening verdict --
+// which the model routinely writes as "Recommendation: Enter (evidence
+// supports...)." / "Conviction: ..." / "Trade-offs: ..." sentences. These
+// have a colon in the MIDDLE, not at the end, so the ":$" heading check
+// above never caught them, and they were rendered verbatim as fake
+// numbered "Action" cards -- reproducing the exact reported
+// contradiction (this section's own "Action #1" literally read
+// "Recommendation: Enter" while Executive Summary's canonical decision
+// was MONITOR). These are Executive-Summary-owned verdict language, not
+// action items, regardless of which decision they happen to state --
+// excluded here unconditionally, the same way the deterministic heading
+// strings above already are.
 function isRecommendationHeadingLine(item: string) {
   if (/:$/.test(item)) return true;
   if (/^(?:first\s+90\s*-?\s*days?|market entry recommendation|why entry is not recommended now)\b/i.test(item)) {
+    return true;
+  }
+  if (/^(?:recommendation|conviction|trade-?offs?)\s*:/i.test(item)) {
     return true;
   }
 
@@ -4439,6 +4458,12 @@ export function buildStandardReportPdf({
       // constant did before, just content-aware instead of arbitrary.
       const recommendationCardGap = 3;
       const recommendationCardMinHeight = 36;
+      // TASK #17 -- fixed height reserved for the "Current Decision: X"
+      // line drawn above the recommendation cards (see drawSectionVisual's
+      // own strategic-recommendation branch), read once here so
+      // getVisualHeight (pagination budgeting) and drawSectionVisual
+      // (drawing) can never disagree about how much space it needs.
+      const strategicRecommendationDecisionBadgeHeight = 7;
       const computeRecommendationCardLayout = (item: string, cardWidth: number) => {
         const { timeframe, metric, budget, owner, gate } = extractRecommendationSignals(item);
         pdf.setFontSize(6);
@@ -5607,6 +5632,31 @@ export function buildStandardReportPdf({
             return 0;
           }
 
+          // CRITICAL FIX (Task #17) -- confirmed live: this section's own
+          // raw text used to carry an independently-written decision
+          // verdict ("Recommendation: Enter") that could disagree with
+          // Executive Summary's canonical decision -- isRecommendationHeadingLine
+          // now excludes that sentence from the cards below entirely (see
+          // its own comment), but this section is still a decision-
+          // bearing surface per this ticket's own requirement, so it
+          // explicitly states the SAME canonical decision every other
+          // surface reads, rather than asserting nothing at all.
+          const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecision(
+            pdfSections.find((entry) => entry.field === "executiveSummary")?.content || "",
+            pdfLocale === "tr" ? "Turkish" : "English"
+          );
+          if (strategicRecommendationDecision.decisionLabel !== "—") {
+            pdf.setFontSize(5.6);
+            pdf.setTextColor("#a1a1aa");
+            pdf.text(
+              `${localizePdfPresentationLabel("Current Decision", pdfLocale)}: ${strategicRecommendationDecision.decisionLabel}`,
+              bodyX,
+              visualY + 3.6,
+              { maxWidth: bodyWidth }
+            );
+          }
+          const recommendationCardsTopY = visualY + strategicRecommendationDecisionBadgeHeight;
+
           const columns = 2;
           const cardGap = recommendationCardGap;
           const cardWidth = (bodyWidth - (columns - 1) * cardGap) / columns;
@@ -5616,7 +5666,7 @@ export function buildStandardReportPdf({
             const col = index % columns;
             const row = Math.floor(index / columns);
             const x = bodyX + col * (cardWidth + cardGap);
-            const cardY = visualY + rowHeights.slice(0, row).reduce((sum, height) => sum + height + cardGap, 0);
+            const cardY = recommendationCardsTopY + rowHeights.slice(0, row).reduce((sum, height) => sum + height + cardGap, 0);
             const cardHeight = rowHeights[row];
 
             pdf.setFillColor("#18181b");
@@ -5670,7 +5720,11 @@ export function buildStandardReportPdf({
             }
           });
 
-          return rowHeights.reduce((sum, height) => sum + height, 0) + Math.max(0, rowHeights.length - 1) * cardGap;
+          return (
+            strategicRecommendationDecisionBadgeHeight +
+            rowHeights.reduce((sum, height) => sum + height, 0) +
+            Math.max(0, rowHeights.length - 1) * cardGap
+          );
         }
 
         // Acquisition Due Diligence's own postMergerIntegrationPlan field
@@ -6124,6 +6178,7 @@ export function buildStandardReportPdf({
           const cardWidth = (bodyWidth - recommendationCardGap) / 2;
           const { rowHeights } = computeRecommendationRowHeights(items, cardWidth);
           return (
+            strategicRecommendationDecisionBadgeHeight +
             rowHeights.reduce((sum, height) => sum + height, 0) +
             Math.max(0, rowHeights.length - 1) * recommendationCardGap
           );
