@@ -191,10 +191,16 @@ test("page.tsx and Planner.tsx: the Competitive Landscape 'no rows' branch check
       source,
       /const namesOnly = extractMarketIntelligenceCompetitorNamesOnly\(majorPlayersContent\);\s*\n\s*\n\s*if \(namesOnly\.length > 0\) \{/
     );
-    assert.match(source, /Relevant Players Identified — Not Validated as Direct Competitors/);
+    // TASK #15 -- wording updated: the old text cast doubt on whether
+    // these are evidence-supported named players at all ("does not
+    // independently validate them as direct, head-to-head competitors"),
+    // when only the structured attribute-level comparison was ever
+    // unvalidated. See page.tsx's own comment at this exact string for
+    // the full rationale.
+    assert.match(source, /Relevant Players Identified — Detailed Comparison Requires Validation/);
     assert.match(
       source,
-      /These companies are named in available evidence as active in or adjacent to this market,\s*\n\s*but current evidence does not independently validate them as direct, head-to-head\s*\n\s*competitors for this analysis\./
+      /These companies are identified in available evidence as active market participants\.\s*\n\s*Detailed competitive comparison — positioning, strengths, weaknesses, and market share —\s*\n\s*has not yet been independently validated for this analysis\./
     );
     // Chips render names only -- no category/position/strengths/weaknesses table cells in this branch.
     assert.match(source, /\{namesOnly\.map\(\(name\) => \(/);
@@ -210,7 +216,7 @@ test("page.tsx and Planner.tsx: the Competitive Landscape 'no rows' branch check
 // P0 fix comment on compactCompetitorState for the full root cause.
 test("ReportPdfButton.tsx and Planner.tsx (PDF export): the Competitive Landscape 'no rows' branch also checks the names-only fallback before falling back to the generic placeholder text, and draws a distinct 'PLAYERS IDENTIFIED' state instead of an empty table shell", () => {
   for (const source of [pdfButtonSource, plannerSource]) {
-    assert.match(source, /RELEVANT PLAYERS IDENTIFIED — NOT VALIDATED AS DIRECT COMPETITORS/);
+    assert.match(source, /RELEVANT PLAYERS IDENTIFIED — DETAILED COMPARISON REQUIRES VALIDATION/);
     assert.match(source, /COMPETITORS IDENTIFIED — LIMITED STRUCTURED COMPARISON DATA/);
     assert.match(
       source,

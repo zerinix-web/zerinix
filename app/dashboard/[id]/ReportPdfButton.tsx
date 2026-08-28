@@ -2353,18 +2353,87 @@ function extractMarketIntelligenceCompetitorNamesOnly(majorPlayersContent: strin
   // weaknesses here either. Mirrors page.tsx's identical fix.
   if (names.length === 0) {
     const proseWithoutUrls = normalized.replace(/https?:\/\/\S+/gi, "");
-    const listMatch = proseWithoutUrls.match(
-      /\b(?:include|includes|including|such as|like|named)\s+((?:[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})(?:\s*,\s*(?:and\s+)?[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})*(?:\s+and\s+[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})?)/
+    const nameListGroup =
+      "((?:[A-Z][\\w&.'-]*(?:\\s+[A-Z][\\w&.'-]*){0,3})(?:\\s*,\\s*(?:and\\s+)?[A-Z][\\w&.'-]*(?:\\s+[A-Z][\\w&.'-]*){0,3})*(?:\\s+and\\s+[A-Z][\\w&.'-]*(?:\\s+[A-Z][\\w&.'-]*){0,3})?)";
+    // Tier 2a: predicate-leading prose ("major players include X, Y, and
+    // Z", "such as X, Y, Z", "led by X, Y, Z").
+    const predicateLeadingMatch = proseWithoutUrls.match(
+      new RegExp(
+        `\\b(?:include|includes|including|such as|like|named|led by|dominated by|anchored by)\\s+${nameListGroup}`
+      )
     );
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence report-
+    // isolation-adjacent research-quality failure, Task #12): mirrors
+    // page.tsx's identical fix -- the predicate-leading pattern above only
+    // covers ONE of two equally common ways a model introduces a vendor
+    // list; the exact reported production shape ("Ironclad, Evisort,
+    // DocuSign CLM, and LawGeex are established competitors in this
+    // space") is SUBJECT-leading, which the prior pattern never matched
+    // at all. Tier 2b covers this second shape: a name list immediately
+    // followed by "are/is (adjective) competitors/players/vendors/...",
+    // reusing the EXACT SAME name-list capture group as tier 2a.
+    const subjectLeadingMatch = proseWithoutUrls.match(
+      new RegExp(
+        `${nameListGroup}\\s+(?:are|is)\\s+(?:the\\s+)?(?:established|leading|key|major|notable|primary|prominent|main|top)?\\s*(?:competitors?|players?|vendors?|providers?|companies|solutions?|options?)\\b`
+      )
+    );
+    // P0 PRODUCTION FIX -- confirmed live (Task #14): real Major Players
+    // prose can introduce its name list with neither a predicate trigger
+    // word before it NOR an "are/is ... competitors" clause after it --
+    // just a plain colon, e.g. "Only evidence-supported major players in
+    // the supplied registry: Ironclad, Evisort, DocuSign CLM, and
+    // LawGeex." Neither tier 2a/2b anchor matches this shape. Tier 2c
+    // anchors on the colon itself: a name list immediately after a colon,
+    // with nothing else before the sentence ends (period/newline/end of
+    // string) -- deliberately not open-ended, so a colon-introduced clause
+    // that continues past the list into further prose does not match at
+    // all, rather than truncating mid-sentence into a partial capture.
+    const colonLeadingMatch = proseWithoutUrls.match(new RegExp(`:\\s*${nameListGroup}\\s*(?:[.\\n]|$)`));
+    const listMatch = predicateLeadingMatch || subjectLeadingMatch || colonLeadingMatch;
 
     if (listMatch?.[1]) {
       const candidates = listMatch[1]
         .split(/\s*,\s*|\s+and\s+/)
-        .map((candidate) => candidate.replace(/^and\s+/i, "").trim())
+        .map((candidate) =>
+          candidate
+            .replace(/^and\s+/i, "")
+            // A name at the end of a captured list can swallow the
+            // sentence's own trailing period -- only stripped from the
+            // LAST character, never from the middle of a name (so real
+            // abbreviations like "Corp." elsewhere in the list survive).
+            .replace(/\.$/, "")
+            .trim()
+        )
         .filter(Boolean);
 
       for (const candidate of candidates) {
         if (!isImplausibleCompetitorNamePdf(`${candidate}:`) && !names.includes(candidate)) {
+          names.push(candidate);
+        }
+      }
+    }
+
+    // P0 PRODUCTION FIX -- confirmed live against the REAL regenerated
+    // report's own stored content (Task #15): Major Players is not always
+    // one combined comma-separated list -- the model wrote one "Vendor --
+    // description [citation]." entry per line, with the FIRST vendor
+    // sharing a line with the intro clause and no "-" bullet marker
+    // anywhere. None of the tiers above match this shape. This tier finds
+    // each vendor independently: a short capitalized phrase (1-4 words)
+    // immediately preceded by a line start, a newline, or a colon-
+    // introduced clause, and immediately followed by " -- " (an em dash),
+    // the model's own per-item label separator here. Anchoring on that
+    // exact separator -- not just any capitalized word -- keeps this
+    // safe: ordinary prose essentially never continues a colon or starts
+    // a new line with "Word -- " unless it is genuinely introducing a
+    // labeled item exactly like this.
+    if (names.length === 0) {
+      const emDashLabelPattern = /(?:^|\n|:\s+)([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})\s+—\s+/g;
+
+      for (const match of proseWithoutUrls.matchAll(emDashLabelPattern)) {
+        const candidate = match[1]?.trim();
+
+        if (candidate && !isImplausibleCompetitorNamePdf(`${candidate}:`) && !names.includes(candidate)) {
           names.push(candidate);
         }
       }
@@ -4739,8 +4808,17 @@ export function buildStandardReportPdf({
 
         return { introLines, nameLines, totalHeight };
       };
+      // CRITICAL FIX (Task #15) -- this wording used to say evidence
+      // "does not independently validate them as direct, head-to-head
+      // competitors," which conflates two separate things: whether these
+      // ARE evidence-supported named players (yes -- Major Players itself
+      // already says so), and whether a structured attribute-by-attribute
+      // comparison has been validated (no -- that is the genuine gap).
+      // The old wording cast doubt on the former when only the latter was
+      // ever true, producing exactly the reported contradiction against
+      // Major Players' own, more confident language for the same vendors.
       const adjacentPlayersOnlyIntro =
-        "These companies are named in available evidence as active in or adjacent to this market, but current evidence does not independently validate them as direct, head-to-head competitors for this analysis.";
+        "These companies are identified in available evidence as active market participants. Detailed competitive comparison -- positioning, strengths, weaknesses, and market share -- has not yet been independently validated for this analysis.";
       // Distinct from adjacentPlayersOnlyIntro above: these rows ARE
       // validated, named competitors (not merely adjacent players) --
       // the gap here is structured comparison DATA (category, market
@@ -4937,7 +5015,30 @@ export function buildStandardReportPdf({
               rowY + 3.8
             );
             pdf.setTextColor(isResolved ? "#ccfbf1" : "#71717a");
-            drawSingleLine(value || "—", legendX + 10, rowY + 9.4, legendWidth - 10, 8, 5, false);
+            // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+            // decision/market-sizing consistency hardening): an unresolved
+            // layer's own text is a gap-EXPLANATION sentence (e.g. "realistic
+            // obtainable-share evidence was not found..."), which
+            // isMarketSizeValueMeaningful correctly filters out of `value`
+            // (no $/%/magnitude unit) -- but that left this line falling
+            // through to a bare "—" with no semantic meaning, while page.tsx's
+            // equivalent bar already shows "Pending <Parent> Validation" or
+            // "Validation Needed" for the identical unresolved state. Reusing
+            // this file's own established "Validation Required" convention
+            // (already used everywhere else in this PDF for the same
+            // null-value state) keeps this one remaining site consistent with
+            // both the rest of this file and the web report's own wording --
+            // never inventing a number, only replacing an unexplained
+            // placeholder with an honest, already-localized state.
+            drawSingleLine(
+              isResolved ? value : localizePdfPresentationLabel("Validation Required", pdfLocale),
+              legendX + 10,
+              rowY + 9.4,
+              legendWidth - 10,
+              8,
+              5,
+              false
+            );
             if (assumption) {
               pdf.setFontSize(5.2);
               pdf.setTextColor("#71717a");
@@ -5125,7 +5226,7 @@ export function buildStandardReportPdf({
             const compactCompetitorState =
               namesOnly.length > 0
                 ? {
-                    headerText: "RELEVANT PLAYERS IDENTIFIED — NOT VALIDATED AS DIRECT COMPETITORS",
+                    headerText: "RELEVANT PLAYERS IDENTIFIED — DETAILED COMPARISON REQUIRES VALIDATION",
                     layout: getNamesOnlyCompetitorLayout(namesOnly, bodyWidth, adjacentPlayersOnlyIntro),
                   }
                 : miRows.length > 0 && miRows.length < minCompetitorTableRows
@@ -5306,7 +5407,7 @@ export function buildStandardReportPdf({
                 const width = miColumns[cellIndex]?.width ?? 20;
                 pdf.setFontSize(cellIndex === 0 ? 6.3 : 5.5);
                 pdf.setTextColor(cellIndex === 0 ? "#f4f4f5" : "#d4d4d8");
-                pdf.text(truncatePdfCellLines(wrapPdfText(value || "Validation required", width - 4), 2), cellX + 2, rowY + 4.7, {
+                pdf.text(truncatePdfCellLines(wrapPdfText(value || localizePdfPresentationLabel("Validation Required", pdfLocale), width - 4), 2), cellX + 2, rowY + 4.7, {
                   lineHeightFactor: 1.1,
                   maxWidth: width - 4,
                 });

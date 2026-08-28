@@ -195,7 +195,7 @@ for (const [label, source, fnName] of [
   ["Planner.tsx", plannerSource, "isImplausibleCompetitorNameOnScreen"],
   ["ReportPdfButton.tsx", pdfButtonSource, "isImplausibleCompetitorNamePdf"],
 ]) {
-  test(`${label}: ${fnName} exists with the reference implementation, and gates the vendor field in all five competitor extraction tiers (table, flattened bullets, Major Players fallback, Major Players names-only bulleted, Major Players names-only prose-list)`, () => {
+  test(`${label}: ${fnName} exists with the reference implementation, and gates the vendor field in all six competitor extraction tiers (table, flattened bullets, Major Players fallback, Major Players names-only bulleted, Major Players names-only prose-list, Major Players names-only em-dash-labeled list)`, () => {
     assert.match(source, new RegExp(`function ${fnName}\\(name: string\\)`));
     assert.match(source, /pricing evidence\|market relevance\|confidence\|validation/);
 
@@ -207,8 +207,10 @@ for (const [label, source, fnName] of [
     // already stripped the real colon) + 1 use site in the prose-list
     // fallback tier (re-attaching ":" the same way) + 1 comment mention
     // explaining that re-attached-":" pattern -- see
-    // extractMarketIntelligenceCompetitorNamesOnly's own comment.
-    assert.equal(occurrences.length, 7, `expected ${fnName} declared once and used across all 5 extraction tiers, got ${occurrences.length} occurrences`);
+    // extractMarketIntelligenceCompetitorNamesOnly's own comment + 1 use
+    // site in the TASK #15 em-dash-labeled-list tier (also re-attaching
+    // ":" the same way, for the same reason).
+    assert.equal(occurrences.length, 8, `expected ${fnName} declared once and used across all 6 extraction tiers, got ${occurrences.length} occurrences`);
   });
 }
 

@@ -154,13 +154,27 @@ test("page.tsx and Planner.tsx: TAM/SAM/SOM is never removed -- the visual stack
   }
 });
 
-test("Planner.tsx: the on-screen TAM/SAM/SOM visual no longer requires all three layers to be coherently nested before showing any bar (a genuine upgrade over the prior ticket's all-or-nothing gate) -- the PDF export's own separate coherence check is untouched", () => {
+// P0 PRODUCTION FIX -- confirmed live (Task #11, Market Intelligence
+// decision/market-sizing consistency hardening): this test's own prior
+// framing ("the PDF export's own separate coherence check is untouched")
+// documented a real, later-reported production bug: Planner.tsx's PDF
+// export (downloadPdf) kept the exact old all-or-nothing gate this same
+// ticket already removed from the on-screen preview, discarding an
+// already-resolved TAM/SAM the moment SOM alone was unresolved --
+// ReportPdfButton.tsx's OWN identical gate had separately already been
+// fixed to the canonical resolveMarketSizingCascade rule; Planner.tsx's
+// PDF export was simply never brought up to the same standard until now.
+// isCoherentlyNested no longer exists anywhere in this file.
+test("Planner.tsx: the on-screen TAM/SAM/SOM visual no longer requires all three layers to be coherently nested before showing any bar, AND its PDF export now uses the same canonical per-layer resolveMarketSizingCascade rule -- isCoherentlyNested is fully removed from both code paths", () => {
   const onScreenBlock = extractFunctionSource(plannerSource, "PremiumSectionVisual");
   assert.doesNotMatch(onScreenBlock, /isCoherentlyNested/);
   assert.match(onScreenBlock, /magnitude !== null \? \(/);
-  // The PDF export's own downloadPdf function keeps its coherence check --
-  // a deliberately different, unmodified code path.
-  assert.match(plannerSource, /isCoherentlyNested/);
+  assert.doesNotMatch(
+    plannerSource,
+    /isCoherentlyNested/,
+    "isCoherentlyNested must be fully removed from Planner.tsx, including its PDF export -- not merely bypassed"
+  );
+  assert.match(plannerSource, /const cascade = resolveMarketSizingCascade\(magnitudes\);/);
 });
 
 test("page.tsx: parseMonetaryMagnitude and the TAM/SAM/SOM bar computation are untouched (drift/regression guard)", async () => {

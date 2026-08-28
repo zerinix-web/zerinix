@@ -91,6 +91,7 @@ test("CASE A: strong positive evidence with both decision-critical pillars resol
   const result = assessMarketEntryConfidence(coverage, {
     marketSizingResolved: true,
     competitiveEvidenceResolved: true,
+    obtainableShareResolved: true,
   });
 
   assert.equal(result.decision, "ENTER");
@@ -120,6 +121,7 @@ test("CASE B (the reported production defect, reproduced): a blended score that 
   const gated = assessMarketEntryConfidence(coverage, {
     marketSizingResolved: false,
     competitiveEvidenceResolved: true,
+    obtainableShareResolved: true,
   });
   assert.equal(gated.decision, "MONITOR", "a strong ENTER must never be produced while market sizing remains unresolved at the graph level");
   assert.equal(gated.evidenceGapBlocksStrongDecision, true);
@@ -156,6 +158,7 @@ test("CASE C: strong negative evidence with both decision-critical pillars resol
   const result = assessMarketEntryConfidence(coverage, {
     marketSizingResolved: true,
     competitiveEvidenceResolved: true,
+    obtainableShareResolved: true,
   });
 
   assert.equal(result.decision, "AVOID");
@@ -182,6 +185,7 @@ test("CASE D: a blend that would read as AVOID is NOT treated as a confident neg
   const gated = assessMarketEntryConfidence(coverage, {
     marketSizingResolved: false,
     competitiveEvidenceResolved: false,
+    obtainableShareResolved: true,
   });
   assert.equal(gated.decision, "MONITOR", "missing evidence must never be silently converted into a confident negative (AVOID) verdict");
   assert.equal(gated.evidenceGapBlocksStrongDecision, true);
@@ -206,6 +210,7 @@ test("CASE E: a blend that already lands in the MONITOR band is unaffected by th
   const withGate = assessMarketEntryConfidence(coverage, {
     marketSizingResolved: false,
     competitiveEvidenceResolved: false,
+    obtainableShareResolved: true,
   });
   assert.equal(withGate.decision, "MONITOR");
   assert.equal(withGate.evidenceGapBlocksStrongDecision, false, "the gate only ever fires for a directional ENTER/AVOID call, never to re-flag an already-neutral MONITOR");
@@ -227,6 +232,7 @@ test("CASE H: confidence comfortably above the legacy ENTER threshold (67, match
   const gated = assessMarketEntryConfidence(coverage, {
     marketSizingResolved: true,
     competitiveEvidenceResolved: false,
+    obtainableShareResolved: true,
   });
   assert.equal(gated.decision, "MONITOR");
   assert.equal(gated.evidenceGapBlocksStrongDecision, true);
@@ -249,6 +255,7 @@ test("partial positive evidence is preserved, not converted to negative: market 
   const brief = buildMarketExecutiveDecisionBrief(marketSections, "English", coverage, {
     marketSizingResolved: true,
     competitiveEvidenceResolved: false,
+    obtainableShareResolved: true,
   });
 
   assert.equal(brief.decision, "CONDITIONAL_GO", "gated MONITOR maps to CONDITIONAL_GO, never the destructive NO_GO");
@@ -304,7 +311,7 @@ const presentationSource = readFileSync(
   "utf8"
 );
 
-test("route.ts: resolveDecisionCriticalEvidenceState derives both pillars from the canonical graph fields P0 FIX #1 (planningEstimate/verifiedMarketSize) and P0 FIX #3 (vendorIntelligence.vendors/adjacentPlayers) already established as authoritative -- never from `coverage`", () => {
+test("route.ts: resolveDecisionCriticalEvidenceState derives all three pillars from the canonical graph fields P0 FIX #1 (planningEstimate/verifiedMarketSize) and P0 FIX #3 (vendorIntelligence.vendors/adjacentPlayers) already established as authoritative -- never from `coverage`", () => {
   assert.match(
     routeSource,
     /marketSizingResolved:\s*\n\s*graph\.planningEstimate !== null \|\| graph\.verifiedMarketSize\.length > 0,/
@@ -312,6 +319,86 @@ test("route.ts: resolveDecisionCriticalEvidenceState derives both pillars from t
   assert.match(
     routeSource,
     /competitiveEvidenceResolved:\s*\n\s*graph\.vendorIntelligence\.vendors\.length > 0 \|\|\s*\n\s*graph\.vendorIntelligence\.adjacentPlayers\.length > 0,/
+  );
+});
+
+// P0 PRODUCTION FIX -- confirmed live (Task #11, decision-vs-evidence
+// consistency repair): the exact reported defect -- "Decision: ENTER" next
+// to "Confidence: Validation Required" while the report's own text says
+// SOM/obtainable share is unresolved -- was possible because
+// marketSizingResolved only checked whether a TOTAL market-size figure
+// existed, never whether the planning estimate's own SOM/obtainable-share
+// step actually resolved. obtainableShareResolved closes that gap as a
+// THIRD, independent pillar.
+test("route.ts: resolveDecisionCriticalEvidenceState derives obtainableShareResolved from the planning estimate's own samMethod/somStatus -- trivially true when no planning estimate was attempted at all, false only when one was attempted and SOM/obtainable-share did not resolve", () => {
+  assert.match(
+    routeSource,
+    /obtainableShareResolved:\s*\n\s*graph\.planningEstimate === null \|\|\s*\n\s*\(graph\.planningEstimate\.samMethod !== "blocked" &&\s*\n\s*graph\.planningEstimate\.somStatus === "calculated"\),/
+  );
+});
+
+test("market-intelligence-presentation.ts: hasDecisionCriticalEvidenceGap now checks all three pillars (marketSizingResolved, competitiveEvidenceResolved, obtainableShareResolved) -- a report can no longer show a strong ENTER/AVOID merely because the two ORIGINAL pillars happen to be resolved while SOM/obtainable-share specifically is not", () => {
+  assert.match(
+    presentationSource,
+    /return \(\s*\n\s*!state\.marketSizingResolved \|\| !state\.competitiveEvidenceResolved \|\| !state\.obtainableShareResolved\s*\n\s*\);/
+  );
+});
+
+test("CASE I (the exact reported production defect): TAM/SAM resolved and competitive evidence resolved, but the planning estimate's own SOM/obtainable-share step is unresolved -- a strong ENTER must be gated to MONITOR even though both of the original two pillars are individually fine", () => {
+  const coverage = fixtureCoverage({
+    dimensions: {
+      marketConfidence: 95,
+      competitiveEvidence: 90,
+      financialEvidence: 85,
+      productEvidence: 80,
+      executionReadiness: 0,
+      founderReadiness: 0,
+    },
+  });
+  const blendedOnly = assessMarketEntryConfidence(coverage);
+  assert.equal(blendedOnly.decision, "ENTER", "sanity check: the blend alone crosses 65 and would produce an unconditional ENTER -- this is the bug being fixed");
+
+  const gated = assessMarketEntryConfidence(coverage, {
+    marketSizingResolved: true,
+    competitiveEvidenceResolved: true,
+    obtainableShareResolved: false,
+  });
+  assert.equal(gated.decision, "MONITOR", "a strong ENTER must never be produced while SOM/obtainable-share remains unresolved, even with market sizing and competitive evidence both individually resolved");
+  assert.equal(gated.evidenceGapBlocksStrongDecision, true);
+  assert.ok(gated.confidence <= 50, "exactly one unresolved pillar caps confidence at the moderate ceiling");
+  assert.ok(gated.confidence < blendedOnly.confidence);
+});
+
+test("CASE I continued: the MONITOR downgrade for an unresolved obtainableShareResolved pillar is not silent -- Strategic Recommendations' missing-evidence list correctly names SOM/obtainable-share as the reason, and does NOT also claim market sizing or competitive evidence are gaps when they are genuinely resolved", () => {
+  const coverage = fixtureCoverage({
+    dimensions: {
+      marketConfidence: 95,
+      competitiveEvidence: 90,
+      financialEvidence: 85,
+      productEvidence: 80,
+      executionReadiness: 0,
+      founderReadiness: 0,
+    },
+    verifiedMarketSizeAvailable: true,
+  });
+  const brief = buildMarketExecutiveDecisionBrief(marketSections, "English", coverage, {
+    marketSizingResolved: true,
+    competitiveEvidenceResolved: true,
+    obtainableShareResolved: false,
+  });
+
+  assert.equal(brief.decision, "CONDITIONAL_GO", "gated MONITOR maps to CONDITIONAL_GO, never the destructive NO_GO");
+  assert.ok(
+    brief.missingEvidence.some((line) => /SOM|obtainable/i.test(line)),
+    "the missing-evidence list must name the specific unresolved pillar (SOM/obtainable share), not leave the MONITOR downgrade unexplained"
+  );
+  assert.ok(
+    !brief.missingEvidence.some((line) => /market-size figure \(TAM\/SAM\/SOM\) could not be established/i.test(line)),
+    "market sizing, which IS resolved in this fixture, must not also be listed as a gap"
+  );
+  assert.ok(
+    !brief.missingEvidence.some((line) => /No named competitor or adjacent-market player could be independently validated/i.test(line)),
+    "competitive evidence, which IS resolved in this fixture, must not also be listed as a gap"
   );
 });
 
@@ -385,4 +472,55 @@ test("DRIFT CHECK: P0 FIX #1 (TAM/SAM/SOM), #2 (CAGR), and #3 (Competitive Lands
 
   const vendorDiscoverySource = readFileSync("app/lib/ai/vendor-discovery.ts", "utf8");
   assert.match(vendorDiscoverySource, /official_product_page_plus_independent_source/);
+});
+
+// ===========================================================================
+// TASK #12 -- the exact reported symptom ("Decision: ENTER the U.S." next to
+// "Confidence: Validation Required", with the report's own text explicitly
+// stating SOM is unresolved) still reproduced after the Task #11 fix above.
+// End-to-end verification (assessMarketEntryConfidence ->
+// buildMarketExecutiveDecisionBrief -> formatExecutiveDecisionBrief ->
+// resolveMarketIntelligenceExecutiveDecision) confirmed the GATE ITSELF is
+// fully correct and round-trips cleanly whenever it runs (a MONITOR banner
+// is written and re-parsed as MONITOR with a real, capped confidence
+// number) -- the residual gap is a SEPARATE, ungated code path in this same
+// route: a "single-field" request (field !== "fullReport") generates and
+// caches its response with NO downstream processing at all -- no
+// ensureMarketReportQuality, no assessMarketEntryConfidence, no canonical
+// banner -- since it never builds the evidence graph the gate depends on.
+// Every OTHER report field is safely self-contained, but executiveSummary
+// specifically encodes the cross-field go/no-go decision, so it cannot be
+// safely regenerated in isolation. Fixed by refusing that one specific
+// request shape outright rather than rebuilding the graph/coverage
+// pipeline inside the narrower single-field path.
+// ===========================================================================
+
+test("route.ts: a single-field request for executiveSummary (not the full report) is rejected outright, rather than silently generating/caching an ungated decision with no evidence-gap gate at all", () => {
+  assert.match(
+    routeSource,
+    /if \(!isFullReportRequest && reportField === "executiveSummary"\) \{\s*\n\s*return NextResponse\.json\(/
+  );
+});
+
+test("route.ts: the single-field executiveSummary guard sits AFTER the AI_TEST_MODE mock branch, so deterministic test-mode mocks (which never leak a real, ungated decision) are completely unaffected", () => {
+  const testModeIndex = routeSource.indexOf("if (isAiTestMode()) {");
+  const guardIndex = routeSource.indexOf('if (!isFullReportRequest && reportField === "executiveSummary") {');
+  assert.ok(testModeIndex > -1 && guardIndex > -1);
+  assert.ok(guardIndex > testModeIndex, "the guard must only apply to real (non-test-mode) requests");
+});
+
+test("route.ts: the single-field executiveSummary guard never fires for a full-report request -- isFullReportRequest sets reportField to \"executiveSummary\" internally too, so the guard must explicitly exclude that case, not just check the field name", () => {
+  assert.match(routeSource, /const reportField = isFullReportRequest \? "executiveSummary" : requestedField;/);
+  // The guard's own condition (already asserted above) requires
+  // !isFullReportRequest -- re-asserted here as an explicit regression
+  // guard against a future edit accidentally dropping that clause, which
+  // would break full-report generation entirely.
+  assert.match(routeSource, /!isFullReportRequest && reportField === "executiveSummary"/);
+});
+
+test("route.ts: every OTHER single-field market report request (e.g. tamSamSom, competitiveLandscape, majorPlayers) is untouched by this guard -- only executiveSummary is refused, since only it encodes the cross-field decision", () => {
+  const guardIndex = routeSource.indexOf('if (!isFullReportRequest && reportField === "executiveSummary") {');
+  assert.ok(guardIndex > -1);
+  const guardBlock = routeSource.slice(guardIndex, guardIndex + 400);
+  assert.doesNotMatch(guardBlock, /tamSamSom|competitiveLandscape|majorPlayers/);
 });

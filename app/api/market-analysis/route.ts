@@ -753,6 +753,19 @@ const competitorClaimSensitiveFields: MarketReportField[] = [
 // other. Never derived from `coverage` -- see assessMarketEntryConfidence's
 // own comment for why that generic, floor-padded signal is exactly what
 // let a false ENTER through in the reported production defect.
+// P0 PRODUCTION FIX -- confirmed live (Task #11, decision-vs-evidence
+// consistency repair): marketSizingResolved (unchanged below) only ever
+// asked "does a trustworthy TOTAL market-size figure exist" -- it never
+// inspected the planning estimate's own samMethod/somStatus, so a report
+// whose SOM/obtainable-share chain was explicitly left unresolved still
+// read as fully sizing-resolved, letting a strong ENTER through right
+// next to the report's own "Confidence: Validation Required" statement --
+// the exact reported production defect. obtainableShareResolved (see its
+// own type-level comment in market-intelligence-presentation.ts) is
+// trivially true when no planning-estimate chain was attempted at all --
+// only a genuine "we tried to compute SOM and it did not clear the bar"
+// state (samMethod === "blocked" or somStatus !== "calculated") counts as
+// a gap.
 function resolveDecisionCriticalEvidenceState(
   graph: MarketIntelligenceGraph
 ): DecisionCriticalEvidenceState {
@@ -762,6 +775,10 @@ function resolveDecisionCriticalEvidenceState(
     competitiveEvidenceResolved:
       graph.vendorIntelligence.vendors.length > 0 ||
       graph.vendorIntelligence.adjacentPlayers.length > 0,
+    obtainableShareResolved:
+      graph.planningEstimate === null ||
+      (graph.planningEstimate.samMethod !== "blocked" &&
+        graph.planningEstimate.somStatus === "calculated"),
   };
 }
 
@@ -1881,6 +1898,37 @@ export async function executeMarketAnalysisRequest(
           "Cache-Control": "no-cache, no-transform",
         },
       });
+    }
+
+    // P0 PRODUCTION FIX -- confirmed live (Task #12, decision-vs-evidence
+    // consistency repair): the single-field path below (reached when a
+    // client requests one report field directly, not the full
+    // "fullReport" mode) generates and caches its response with NO
+    // downstream processing at all -- no ensureMarketReportQuality, no
+    // assessMarketEntryConfidence, no canonical "Decision: TOKEN
+    // (Confidence: NN%)" banner, since it never builds the domain-research
+    // evidence graph the gate needs. Every OTHER report field is safely
+    // self-contained (its own prompt, no cross-field decision
+    // dependency), but executiveSummary specifically encodes the
+    // go/no-go DECISION, which can only be safely computed with the full
+    // evidence graph (TAM/SAM/SOM resolution state, competitive evidence
+    // state, etc.). Serving/caching a standalone executiveSummary here
+    // would let the model's own raw, ungated "Decision: ENTER..."
+    // sentence through with zero evidence-gap gating -- exactly the
+    // reported incoherence (a definitive ENTER sitting next to an
+    // explicit, unresolved SOM caveat). Rather than rebuilding the
+    // graph/coverage pipeline inside this narrower, single-field code
+    // path (a far larger change than this fix warrants), Market
+    // Intelligence's executiveSummary is only ever safely generated as
+    // part of a full report, where the gate always runs.
+    if (!isFullReportRequest && reportField === "executiveSummary") {
+      return NextResponse.json(
+        {
+          error:
+            "Executive Summary reflects a decision computed from the full evidence graph and cannot be regenerated on its own. Request a full report regeneration instead.",
+        },
+        { status: 400 }
+      );
     }
 
     const instructions = buildMarketLanguageInstructions(responseLanguage);

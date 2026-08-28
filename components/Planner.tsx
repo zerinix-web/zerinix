@@ -67,6 +67,7 @@ import {
   normalizeReportPresentationText,
   readFounderReadinessMetricValue,
   readFounderReadinessScoreValue,
+  resolveMarketSizingCascade,
   stripLeadingTakeawaySentence,
 } from "@/app/lib/report-presentation";
 import type {
@@ -2138,18 +2139,87 @@ function extractMarketIntelligenceCompetitorNamesOnly(majorPlayersContent: strin
   // weaknesses here either. Mirrors page.tsx's identical fix.
   if (names.length === 0) {
     const proseWithoutUrls = normalized.replace(/https?:\/\/\S+/gi, "");
-    const listMatch = proseWithoutUrls.match(
-      /\b(?:include|includes|including|such as|like|named)\s+((?:[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})(?:\s*,\s*(?:and\s+)?[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})*(?:\s+and\s+[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})?)/
+    const nameListGroup =
+      "((?:[A-Z][\\w&.'-]*(?:\\s+[A-Z][\\w&.'-]*){0,3})(?:\\s*,\\s*(?:and\\s+)?[A-Z][\\w&.'-]*(?:\\s+[A-Z][\\w&.'-]*){0,3})*(?:\\s+and\\s+[A-Z][\\w&.'-]*(?:\\s+[A-Z][\\w&.'-]*){0,3})?)";
+    // Tier 2a: predicate-leading prose ("major players include X, Y, and
+    // Z", "such as X, Y, Z", "led by X, Y, Z").
+    const predicateLeadingMatch = proseWithoutUrls.match(
+      new RegExp(
+        `\\b(?:include|includes|including|such as|like|named|led by|dominated by|anchored by)\\s+${nameListGroup}`
+      )
     );
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence report-
+    // isolation-adjacent research-quality failure, Task #12): mirrors
+    // page.tsx's identical fix -- the predicate-leading pattern above only
+    // covers ONE of two equally common ways a model introduces a vendor
+    // list; the exact reported production shape ("Ironclad, Evisort,
+    // DocuSign CLM, and LawGeex are established competitors in this
+    // space") is SUBJECT-leading, which the prior pattern never matched
+    // at all. Tier 2b covers this second shape: a name list immediately
+    // followed by "are/is (adjective) competitors/players/vendors/...",
+    // reusing the EXACT SAME name-list capture group as tier 2a.
+    const subjectLeadingMatch = proseWithoutUrls.match(
+      new RegExp(
+        `${nameListGroup}\\s+(?:are|is)\\s+(?:the\\s+)?(?:established|leading|key|major|notable|primary|prominent|main|top)?\\s*(?:competitors?|players?|vendors?|providers?|companies|solutions?|options?)\\b`
+      )
+    );
+    // P0 PRODUCTION FIX -- confirmed live (Task #14): real Major Players
+    // prose can introduce its name list with neither a predicate trigger
+    // word before it NOR an "are/is ... competitors" clause after it --
+    // just a plain colon, e.g. "Only evidence-supported major players in
+    // the supplied registry: Ironclad, Evisort, DocuSign CLM, and
+    // LawGeex." Neither tier 2a/2b anchor matches this shape. Tier 2c
+    // anchors on the colon itself: a name list immediately after a colon,
+    // with nothing else before the sentence ends (period/newline/end of
+    // string) -- deliberately not open-ended, so a colon-introduced clause
+    // that continues past the list into further prose does not match at
+    // all, rather than truncating mid-sentence into a partial capture.
+    const colonLeadingMatch = proseWithoutUrls.match(new RegExp(`:\\s*${nameListGroup}\\s*(?:[.\\n]|$)`));
+    const listMatch = predicateLeadingMatch || subjectLeadingMatch || colonLeadingMatch;
 
     if (listMatch?.[1]) {
       const candidates = listMatch[1]
         .split(/\s*,\s*|\s+and\s+/)
-        .map((candidate) => candidate.replace(/^and\s+/i, "").trim())
+        .map((candidate) =>
+          candidate
+            .replace(/^and\s+/i, "")
+            // A name at the end of a captured list can swallow the
+            // sentence's own trailing period -- only stripped from the
+            // LAST character, never from the middle of a name (so real
+            // abbreviations like "Corp." elsewhere in the list survive).
+            .replace(/\.$/, "")
+            .trim()
+        )
         .filter(Boolean);
 
       for (const candidate of candidates) {
         if (!isImplausibleCompetitorNameOnScreen(`${candidate}:`) && !names.includes(candidate)) {
+          names.push(candidate);
+        }
+      }
+    }
+
+    // P0 PRODUCTION FIX -- confirmed live against the REAL regenerated
+    // report's own stored content (Task #15): Major Players is not always
+    // one combined comma-separated list -- the model wrote one "Vendor --
+    // description [citation]." entry per line, with the FIRST vendor
+    // sharing a line with the intro clause and no "-" bullet marker
+    // anywhere. None of the tiers above match this shape. This tier finds
+    // each vendor independently: a short capitalized phrase (1-4 words)
+    // immediately preceded by a line start, a newline, or a colon-
+    // introduced clause, and immediately followed by " -- " (an em dash),
+    // the model's own per-item label separator here. Anchoring on that
+    // exact separator -- not just any capitalized word -- keeps this
+    // safe: ordinary prose essentially never continues a colon or starts
+    // a new line with "Word -- " unless it is genuinely introducing a
+    // labeled item exactly like this.
+    if (names.length === 0) {
+      const emDashLabelPattern = /(?:^|\n|:\s+)([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})\s+—\s+/g;
+
+      for (const match of proseWithoutUrls.matchAll(emDashLabelPattern)) {
+        const candidate = match[1]?.trim();
+
+        if (candidate && !isImplausibleCompetitorNameOnScreen(`${candidate}:`) && !names.includes(candidate)) {
           names.push(candidate);
         }
       }
@@ -5081,31 +5151,51 @@ if (field === "swotAnalysis") {
 
       if (namesOnly.length > 0) {
         return (
-          <div className="mb-5 rounded-[2rem] border border-dashed border-white/15 bg-black/20 p-5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
-              Competitive Landscape
-            </p>
-            <div className="mt-4 flex items-center gap-3">
-              <span className="h-2 w-2 rounded-full bg-sky-300" />
-              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-200">
-                Relevant Players Identified — Not Validated as Direct Competitors
+          <div className="mb-5 overflow-hidden rounded-[2rem] border border-dashed border-white/15 bg-black/20">
+            <div className="p-5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+                Competitive Landscape
               </p>
+              <div className="mt-4 flex items-center gap-3">
+                <span className="h-2 w-2 rounded-full bg-sky-300" />
+                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-200">
+                  Relevant Players Identified — Detailed Comparison Requires Validation
+                </p>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-zinc-400">
+                These companies are identified in available evidence as active market participants.
+                Detailed competitive comparison — positioning, strengths, weaknesses, and market share —
+                has not yet been independently validated for this analysis.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {namesOnly.map((name) => (
+                  <span
+                    key={name}
+                    className="rounded-full border border-sky-300/20 bg-sky-300/10 px-3 py-1 text-xs font-semibold text-sky-100"
+                  >
+                    {name}
+                  </span>
+                ))}
+              </div>
             </div>
-            <p className="mt-3 text-sm leading-6 text-zinc-400">
-              These companies are named in available evidence as active in or adjacent to this market,
-              but current evidence does not independently validate them as direct, head-to-head
-              competitors for this analysis.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {namesOnly.map((name) => (
-                <span
-                  key={name}
-                  className="rounded-full border border-sky-300/20 bg-sky-300/10 px-3 py-1 text-xs font-semibold text-sky-100"
-                >
-                  {name}
-                </span>
-              ))}
-            </div>
+            {/* CRITICAL FIX (Task #14) -- the Market Map card used to
+                disappear entirely in this names-only state (not even its
+                own "Validation Needed" box), instead of staying present
+                and independently honest like it does for the full table.
+                Reusing it here with vendor-only pseudo-rows never
+                fabricates a position: inferMarketMapPosition requires a
+                signal from category/position/strengths/weaknesses text,
+                all empty here by design, so it naturally renders its own
+                "Validation Needed" state rather than plotting anything. */}
+            <MarketMap
+              rows={namesOnly.map((name) => ({
+                vendor: name,
+                category: "",
+                position: "",
+                strengths: "",
+                weaknesses: "",
+              }))}
+            />
           </div>
         );
       }
@@ -5157,14 +5247,20 @@ if (field === "swotAnalysis") {
                   className="grid grid-cols-[0.85fr_0.75fr_0.85fr_1fr_1fr_0.75fr_0.85fr] bg-black/35 text-sm leading-6 text-zinc-300"
                 >
                   <div className="px-4 py-4 font-semibold text-white">{row.vendor || "—"}</div>
-                  <div className="px-4 py-4">{row.category || "—"}</div>
-                  <div className="px-4 py-4">{row.position || "—"}</div>
-                  <div className="px-4 py-4">{row.strengths || "—"}</div>
-                  <div className="px-4 py-4">{row.weaknesses || "—"}</div>
+                  <div className="px-4 py-4">{row.category || "Validation Needed"}</div>
+                  <div className="px-4 py-4">{row.position || "Validation Needed"}</div>
+                  <div className="px-4 py-4">{row.strengths || "Validation Needed"}</div>
+                  <div className="px-4 py-4">{row.weaknesses || "Validation Needed"}</div>
                   <div className="px-4 py-4">
-                    <span className="rounded-full border border-teal-200/20 bg-teal-200/10 px-2.5 py-1 text-xs font-semibold text-teal-100">
-                      {row.relevance || "—"}
-                    </span>
+                    {row.relevance ? (
+                      <span className="rounded-full border border-teal-200/20 bg-teal-200/10 px-2.5 py-1 text-xs font-semibold text-teal-100">
+                        {row.relevance}
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-2.5 py-1 text-xs font-semibold text-amber-200">
+                        Validation Needed
+                      </span>
+                    )}
                   </div>
                   <div className="px-4 py-4">
                     {row.validationStatus ? (
@@ -8104,8 +8200,12 @@ const ReportPanel = memo(function ReportPanel({
 
         return { introLines, nameLines, totalHeight };
       };
+      // CRITICAL FIX (Task #15) -- see ReportPdfButton.tsx's own identical
+      // constant for the full rationale: the old wording cast doubt on
+      // whether these are evidence-supported named players at all, when
+      // only the structured attribute comparison was ever unvalidated.
       const adjacentPlayersOnlyIntro =
-        "These companies are named in available evidence as active in or adjacent to this market, but current evidence does not independently validate them as direct, head-to-head competitors for this analysis.";
+        "These companies are identified in available evidence as active market participants. Detailed competitive comparison -- positioning, strengths, weaknesses, and market share -- has not yet been independently validated for this analysis.";
       // Distinct from adjacentPlayersOnlyIntro above -- see
       // ReportPdfButton.tsx's own identical constant for the full
       // rationale: these rows ARE validated, named competitors, and the
@@ -8309,7 +8409,7 @@ const ReportPanel = memo(function ReportPanel({
             const compactCompetitorState =
               namesOnly.length > 0
                 ? {
-                    headerText: "RELEVANT PLAYERS IDENTIFIED — NOT VALIDATED AS DIRECT COMPETITORS",
+                    headerText: "RELEVANT PLAYERS IDENTIFIED — DETAILED COMPARISON REQUIRES VALIDATION",
                     layout: getNamesOnlyCompetitorLayout(namesOnly, visualWidth, adjacentPlayersOnlyIntro),
                   }
                 : miRows.length > 0 && miRows.length < minCompetitorTableRows
@@ -8485,7 +8585,7 @@ const ReportPanel = memo(function ReportPanel({
                 pdf.setFontSize(cellIndex === 0 ? 6.3 : 5.5);
                 pdf.setTextColor(cellIndex === 0 ? "#f4f4f5" : "#d4d4d8");
                 pdf.text(
-                  truncatePdfCellLines(pdf.splitTextToSize(value || "Validation required", width - 4) as string[], 2),
+                  truncatePdfCellLines(pdf.splitTextToSize(value || localizePdfPresentationLabel("Validation Required", pdfLocale), width - 4) as string[], 2),
                   cellX + 2,
                   rowY + 4.7,
                   { lineHeightFactor: 1.1, maxWidth: width - 4 }
@@ -8739,28 +8839,43 @@ const ReportPanel = memo(function ReportPanel({
           // three stacked text rows, mirrored from ReportPdfButton.tsx so
           // the in-app preview matches the exported PDF.
           const rows = getTamRows(section.content, visualWidth);
-          const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value));
+          const magnitudes = rows.map((row) => parseMarketSizeMagnitude(row.value)) as [
+            number | null,
+            number | null,
+            number | null,
+          ];
           // Plus 27mm (9mm per legend row) so each row has room for its
           // own two-line planning-assumption sentence beneath the value --
           // mirrors ReportPdfButton.tsx's own identical constant.
           const tamCircleVisualHeight = tamCircleMaxRadius * 2 + 8 + 27;
-          // Mirrors ReportPdfButton.tsx's own gate: a chart drawn from
-          // missing or non-nested (TAM >= SAM >= SOM) figures asserts a
-          // market shape that isn't real, so it is replaced with a plain
-          // explanatory state instead.
-          const [tamMagnitude, samMagnitude, somMagnitude] = magnitudes;
-          const isCoherentlyNested =
-            tamMagnitude !== null &&
-            samMagnitude !== null &&
-            somMagnitude !== null &&
-            tamMagnitude >= samMagnitude &&
-            samMagnitude >= somMagnitude;
+          // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
+          // decision/market-sizing consistency hardening): this used to
+          // require ALL THREE of TAM/SAM/SOM to parse and nest before
+          // drawing anything -- discarding an already-resolved TAM ($1.5B)
+          // and SAM ($375M) the moment SOM alone was unresolved, exactly
+          // the reported production defect ("PDF removes the validated
+          // TAM/SAM values... replaces the entire section with a generic
+          // validation message"). ReportPdfButton.tsx's own identical gate
+          // was already fixed to the per-layer resolveMarketSizingCascade
+          // rule (report-presentation.ts) some time ago -- this comment
+          // block's own claim of "mirrors ReportPdfButton.tsx's own gate"
+          // had gone stale, since this file was never updated to match.
+          // Now uses the SAME canonical function the web report uses, so
+          // web/PDF (both PDF exports) can never disagree about which
+          // layers are trustworthy: a layer resolves only when it has its
+          // own parseable value AND every layer above it in the hierarchy
+          // is also resolved and correctly nested -- an unresolved TAM
+          // still withholds SAM/SOM exactly as before, while SOM alone
+          // being unresolved no longer punishes an already-resolved TAM/SAM.
+          const cascade = resolveMarketSizingCascade(magnitudes);
+          const resolvedByIndex = [cascade.tamResolved, cascade.samResolved, cascade.somResolved];
 
-          if (!isCoherentlyNested) {
-            // Same wording as the on-screen "Validation Needed" state (see
-            // PremiumSectionVisual's own tamSamSom branch above) -- the
-            // exported PDF must match the UI, not show its own bespoke
-            // explanation.
+          if (!cascade.tamResolved && !cascade.samResolved && !cascade.somResolved) {
+            // Genuinely nothing to show -- same wording as the on-screen
+            // "Validation Needed" state (see PremiumSectionVisual's own
+            // tamSamSom branch above) -- the exported PDF must match the
+            // UI, not show its own bespoke explanation. Unchanged from
+            // prior behavior for this one case.
             const explanationText =
               pdfLocale === "tr"
                 ? "Boyutlandırmanın doğrulanabilmesi için ek pazar doğrulaması gereklidir."
@@ -8792,6 +8907,7 @@ const ReportPanel = memo(function ReportPanel({
 
           rows.forEach(({ label, color, value }, index) => {
             const rowY = visualY + 2 + index * legendRowHeight;
+            const isResolved = resolvedByIndex[index];
             const isEstimated = isMarketSizeEstimated(section.content, label);
             // The reader must see WHY the figure is what it is without
             // opening Details -- the same real planning-assumption
@@ -8807,8 +8923,21 @@ const ReportPanel = memo(function ReportPanel({
               legendX + 10,
               rowY + 3.8
             );
-            pdf.setTextColor("#ccfbf1");
-            drawSingleLine(value || "—", legendX + 10, rowY + 9.4, legendWidth - 10, 8, 5, false);
+            pdf.setTextColor(isResolved ? "#ccfbf1" : "#71717a");
+            // Mirrors ReportPdfButton.tsx's identical fix: an unresolved
+            // layer's own text is a gap-explanation sentence, which
+            // isMarketSizeValueMeaningful correctly filters out of `value`
+            // -- reusing this file's own established "Validation Required"
+            // convention instead of an unexplained bare "—".
+            drawSingleLine(
+              isResolved ? value : localizePdfPresentationLabel("Validation Required", pdfLocale),
+              legendX + 10,
+              rowY + 9.4,
+              legendWidth - 10,
+              8,
+              5,
+              false
+            );
             if (assumption) {
               pdf.setFontSize(5.2);
               pdf.setTextColor("#71717a");

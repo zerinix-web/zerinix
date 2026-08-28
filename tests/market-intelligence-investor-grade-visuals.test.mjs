@@ -128,7 +128,10 @@ test("page.tsx: TAM/SAM/SOM no longer shows a per-layer assumption excerpt inlin
 });
 
 test("Planner.tsx: the on-screen TAM/SAM/SOM visual reuses parseMarketSizeMagnitude (already correct in the PDF export) instead of a static bar-width array, with a per-layer cascading nesting check -- row.description (the real planning-assumption/sizing-explanation text) is rendered inline again per the later 'user must immediately see ... sizing explanation without opening DETAILS' requirement", () => {
-  assert.match(plannerSource, /const magnitudes = rows\.map\(\(row\) => parseMarketSizeMagnitude\(row\.value\)\);/);
+  // Task #11 fix: this line's PDF-export counterpart now carries an
+  // explicit tuple type-cast (needed for resolveMarketSizingCascade's
+  // stricter parameter type) -- the underlying computation is unchanged.
+  assert.match(plannerSource, /const magnitudes = rows\.map\(\(row\) => parseMarketSizeMagnitude\(row\.value\)\)/);
   assert.match(plannerSource, /const samResolved = tamResolved && magnitudes\[1\] !== null && magnitudes\[1\] <= \(magnitudes\[0\] as number\);/);
   assert.match(plannerSource, /const somResolved = samResolved && magnitudes\[2\] !== null && magnitudes\[2\] <= \(magnitudes\[1\] as number\);/);
   // A later ticket ("RESTORE PREMIUM ANALYTICAL DEPTH") removed the

@@ -503,7 +503,11 @@ function coverage(marketConfidence, competitiveEvidence, financialEvidence, prod
 test("E1: the exact reported shape -- neither decision-critical pillar resolved -- caps confidence severely, never reading as 'reasonably confident'", () => {
   const blend = coverage(70, 55, 60, 55);
   const raw = assessMarketEntryConfidence(blend);
-  const gated = assessMarketEntryConfidence(blend, { marketSizingResolved: false, competitiveEvidenceResolved: false });
+  const gated = assessMarketEntryConfidence(blend, {
+    marketSizingResolved: false,
+    competitiveEvidenceResolved: false,
+    obtainableShareResolved: false,
+  });
 
   assert.ok(raw.confidence > 50, "sanity check: the raw blend is the misleadingly-high number being fixed");
   assert.equal(gated.decision, "MONITOR");
@@ -513,7 +517,11 @@ test("E1: the exact reported shape -- neither decision-critical pillar resolved 
 
 test("E2: exactly one decision-critical pillar unresolved applies a moderate (not severe) cap", () => {
   const blend = coverage(70, 55, 60, 55);
-  const gated = assessMarketEntryConfidence(blend, { marketSizingResolved: true, competitiveEvidenceResolved: false });
+  const gated = assessMarketEntryConfidence(blend, {
+    marketSizingResolved: true,
+    competitiveEvidenceResolved: false,
+    obtainableShareResolved: true,
+  });
   assert.ok(gated.confidence <= 50);
   assert.ok(gated.confidence > 30, "one resolved pillar should not be penalized as severely as zero resolved pillars");
 });
@@ -521,7 +529,11 @@ test("E2: exactly one decision-critical pillar unresolved applies a moderate (no
 test("E3: both decision-critical pillars resolved -- confidence is completely unchanged (no unnecessary penalty)", () => {
   const blend = coverage(70, 55, 60, 55);
   const raw = assessMarketEntryConfidence(blend);
-  const gated = assessMarketEntryConfidence(blend, { marketSizingResolved: true, competitiveEvidenceResolved: true });
+  const gated = assessMarketEntryConfidence(blend, {
+    marketSizingResolved: true,
+    competitiveEvidenceResolved: true,
+    obtainableShareResolved: true,
+  });
   assert.equal(gated.confidence, raw.confidence);
 });
 
@@ -533,14 +545,22 @@ test("E4 (backward compatible): calling with no decisionCriticalEvidence argumen
 
 test("E5: a genuinely strong, fully-evidenced report can still reach ENTER at full confidence -- the fix never punishes real evidence", () => {
   const strong = coverage(95, 90, 90, 90);
-  const result = assessMarketEntryConfidence(strong, { marketSizingResolved: true, competitiveEvidenceResolved: true });
+  const result = assessMarketEntryConfidence(strong, {
+    marketSizingResolved: true,
+    competitiveEvidenceResolved: true,
+    obtainableShareResolved: true,
+  });
   assert.equal(result.decision, "ENTER");
   assert.ok(result.confidence >= 90);
 });
 
 test("E6: a strong raw blend that would independently cross the ENTER threshold is still forced to MONITOR with a capped number when evidence is missing -- label and number can never disagree", () => {
   const strong = coverage(95, 90, 90, 90);
-  const gated = assessMarketEntryConfidence(strong, { marketSizingResolved: false, competitiveEvidenceResolved: false });
+  const gated = assessMarketEntryConfidence(strong, {
+    marketSizingResolved: false,
+    competitiveEvidenceResolved: false,
+    obtainableShareResolved: false,
+  });
   assert.equal(gated.decision, "MONITOR");
   assert.equal(gated.evidenceGapBlocksStrongDecision, true);
   assert.ok(gated.confidence <= 30, "a report this evidence-poor must never display a high-90s confidence number regardless of the raw blend");

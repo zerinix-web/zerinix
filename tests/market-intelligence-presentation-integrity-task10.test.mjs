@@ -257,17 +257,23 @@ test("COMPLAND-T10-4 (no evidence-standard weakening, regression guard): a genui
   }
 });
 
-test("COMPLAND-T10-5: the sparse-table intro text is distinct from the adjacent-players-only intro text -- these ARE validated named competitors (not merely adjacent players), so conflating the two wording choices would incorrectly imply these vendors were never validated", () => {
+test("COMPLAND-T10-5: the sparse-table intro text and the adjacent-players-only intro text both frame the gap as unvalidated DETAILED COMPARISON, not unvalidated competitor identity (TASK #15: the old adjacent-players wording cast doubt on identity itself, contradicting Major Players' own more confident language for the same evidence-supported vendors)", () => {
   for (const source of [pdfSource, plannerSource]) {
     assert.match(source, /const adjacentPlayersOnlyIntro =/);
     assert.match(source, /const sparseCompetitorTableIntro =/);
 
     const adjacentIdx = source.indexOf("const adjacentPlayersOnlyIntro =");
     const sparseIdx = source.indexOf("const sparseCompetitorTableIntro =");
-    const adjacentText = source.slice(adjacentIdx, adjacentIdx + 300);
+    const adjacentText = source.slice(adjacentIdx, adjacentIdx + 400);
     const sparseText = source.slice(sparseIdx, sparseIdx + 800);
 
-    assert.match(adjacentText, /does not independently validate them as direct/);
+    assert.match(adjacentText, /identified in available evidence as active market participants/);
+    assert.match(adjacentText, /Detailed competitive comparison/);
+    assert.doesNotMatch(
+      adjacentText,
+      /does not independently validate them as direct/,
+      "must not cast doubt on competitor identity -- only on detailed comparison data"
+    );
     assert.match(sparseText, /validated, named competitors/);
   }
 });

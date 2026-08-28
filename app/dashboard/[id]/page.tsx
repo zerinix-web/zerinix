@@ -1141,18 +1141,108 @@ function extractMarketIntelligenceCompetitorNamesOnly(majorPlayersContent: strin
   // weaknesses here either.
   if (names.length === 0) {
     const proseWithoutUrls = normalized.replace(/https?:\/\/\S+/gi, "");
-    const listMatch = proseWithoutUrls.match(
-      /\b(?:include|includes|including|such as|like|named)\s+((?:[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})(?:\s*,\s*(?:and\s+)?[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})*(?:\s+and\s+[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})?)/
+    const nameListGroup =
+      "((?:[A-Z][\\w&.'-]*(?:\\s+[A-Z][\\w&.'-]*){0,3})(?:\\s*,\\s*(?:and\\s+)?[A-Z][\\w&.'-]*(?:\\s+[A-Z][\\w&.'-]*){0,3})*(?:\\s+and\\s+[A-Z][\\w&.'-]*(?:\\s+[A-Z][\\w&.'-]*){0,3})?)";
+    // Tier 2a: predicate-leading prose ("major players include X, Y, and
+    // Z", "such as X, Y, Z").
+    const predicateLeadingMatch = proseWithoutUrls.match(
+      new RegExp(
+        `\\b(?:include|includes|including|such as|like|named|led by|dominated by|anchored by)\\s+${nameListGroup}`
+      )
     );
+    // P0 PRODUCTION FIX -- confirmed live (Market Intelligence report-
+    // isolation-adjacent research-quality failure, Task #12): the
+    // predicate-leading pattern above only covers ONE of two equally
+    // common ways a model introduces a vendor list -- the exact reported
+    // production shape ("Ironclad, Evisort, DocuSign CLM, and LawGeex are
+    // established competitors in this space") is SUBJECT-leading, which
+    // the prior pattern never matched at all, so this tier returned zero
+    // names despite four real, well-formed vendor names sitting in plain
+    // sight -- reproducing the reported contradiction (Competitive
+    // Landscape claiming "no competitor data validated" while Major
+    // Players plainly named four real vendors). Tier 2b covers this
+    // second shape: a name list immediately followed by "are/is
+    // (adjective) competitors/players/vendors/providers/...", reusing the
+    // EXACT SAME name-list capture group as tier 2a for consistency.
+    const subjectLeadingMatch = proseWithoutUrls.match(
+      new RegExp(
+        `${nameListGroup}\\s+(?:are|is)\\s+(?:the\\s+)?(?:established|leading|key|major|notable|primary|prominent|main|top)?\\s*(?:competitors?|players?|vendors?|providers?|companies|solutions?|options?)\\b`
+      )
+    );
+    // P0 PRODUCTION FIX -- confirmed live (Task #14, the report regenerated
+    // after Task #12/#13 still reproduced the exact reported contradiction):
+    // real Major Players prose can introduce its name list with neither a
+    // predicate trigger word before it NOR an "are/is ... competitors"
+    // clause after it -- just a plain colon, e.g. "Only evidence-supported
+    // major players in the supplied registry: Ironclad, Evisort, DocuSign
+    // CLM, and LawGeex." Tiers 2a/2b both require one of those two anchors,
+    // so this shape matched neither and fell all the way through to zero
+    // names -- the section then showed "No competitor data could be
+    // validated" one line above Major Players plainly naming all four.
+    // Tier 2c anchors on the colon itself: a name list immediately after a
+    // colon, with nothing else before the sentence ends (period/newline/end
+    // of string) -- deliberately NOT open-ended, so a colon-introduced
+    // clause that continues past the list into further prose (e.g. "...:
+    // Acme and Beta are frequently mentioned but evidence quality
+    // varies...") does not match at all, rather than truncating mid-
+    // sentence into a partial, misleading capture.
+    const colonLeadingMatch = proseWithoutUrls.match(new RegExp(`:\\s*${nameListGroup}\\s*(?:[.\\n]|$)`));
+    const listMatch = predicateLeadingMatch || subjectLeadingMatch || colonLeadingMatch;
 
     if (listMatch?.[1]) {
       const candidates = listMatch[1]
         .split(/\s*,\s*|\s+and\s+/)
-        .map((candidate) => candidate.replace(/^and\s+/i, "").trim())
+        .map((candidate) =>
+          candidate
+            .replace(/^and\s+/i, "")
+            // A name at the end of a captured list can swallow the
+            // sentence's own trailing period (e.g. "...LawGeex." instead
+            // of "...LawGeex") -- the [\w&.'-] character class deliberately
+            // allows "." within a name for real abbreviations (e.g.
+            // "Corp."), so this only strips it from the LAST character,
+            // never from the middle of a name.
+            .replace(/\.$/, "")
+            .trim()
+        )
         .filter(Boolean);
 
       for (const candidate of candidates) {
         if (!isImplausibleCompetitorNameOnScreen(`${candidate}:`) && !names.includes(candidate)) {
+          names.push(candidate);
+        }
+      }
+    }
+
+    // P0 PRODUCTION FIX -- confirmed live against the REAL regenerated
+    // report's own stored content (Task #15): Major Players is not always
+    // one combined comma-separated list at all -- the model wrote one
+    // "Vendor -- description [citation]." entry per line ("Ironclad --
+    // product pages and pricing plan page indicate CLM + AI assistant +
+    // eSignature positioning...[R4].\nEvisort -- publishes an AI
+    // engine...[R39].\n..."), with the FIRST vendor sharing a line with
+    // the intro clause ("...in the supplied registry: Ironclad --
+    // ...") and no "-" bullet marker anywhere. None of the tiers above
+    // match this: it isn't bulleted (extractFlattenedMarketIntelligenceCompetitorRows
+    // requires a leading "-"), and it isn't a single name LIST (tiers
+    // 2a/2b/2c above all look for one comma-separated "A, B, and C"
+    // series). This tier finds each vendor independently: a short
+    // capitalized phrase (1-4 words) immediately preceded by a line start,
+    // a newline, or a colon-introduced clause, and immediately followed
+    // by " -- " (an em dash), which is the model's own per-item label
+    // separator here. Anchoring on that exact separator -- not just any
+    // capitalized word -- is what keeps this safe: ordinary prose
+    // essentially never continues a colon or starts a new line with
+    // "Word -- " unless it is genuinely introducing a labeled item exactly
+    // like this. Verified against this report's OTHER sections (Regional
+    // Analysis, TAM/SAM/SOM, etc.) to confirm none of their own colon-
+    // introduced clauses or line starts trigger a false match.
+    if (names.length === 0) {
+      const emDashLabelPattern = /(?:^|\n|:\s+)([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})\s+—\s+/g;
+
+      for (const match of proseWithoutUrls.matchAll(emDashLabelPattern)) {
+        const candidate = match[1]?.trim();
+
+        if (candidate && !isImplausibleCompetitorNameOnScreen(`${candidate}:`) && !names.includes(candidate)) {
           names.push(candidate);
         }
       }
@@ -2898,31 +2988,51 @@ function ReportSectionVisual({
 
       if (namesOnly.length > 0) {
         return (
-          <div className="mb-5 rounded-[2rem] border border-dashed border-white/15 bg-black/20 p-5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
-              Competitive Landscape
-            </p>
-            <div className="mt-4 flex items-center gap-3">
-              <span className="h-2 w-2 rounded-full bg-sky-300" />
-              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-200">
-                Relevant Players Identified — Not Validated as Direct Competitors
+          <div className="mb-5 overflow-hidden rounded-[2rem] border border-dashed border-white/15 bg-black/20">
+            <div className="p-5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+                Competitive Landscape
               </p>
+              <div className="mt-4 flex items-center gap-3">
+                <span className="h-2 w-2 rounded-full bg-sky-300" />
+                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-200">
+                  Relevant Players Identified — Detailed Comparison Requires Validation
+                </p>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-zinc-400">
+                These companies are identified in available evidence as active market participants.
+                Detailed competitive comparison — positioning, strengths, weaknesses, and market share —
+                has not yet been independently validated for this analysis.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {namesOnly.map((name) => (
+                  <span
+                    key={name}
+                    className="rounded-full border border-sky-300/20 bg-sky-300/10 px-3 py-1 text-xs font-semibold text-sky-100"
+                  >
+                    {name}
+                  </span>
+                ))}
+              </div>
             </div>
-            <p className="mt-3 text-sm leading-6 text-zinc-400">
-              These companies are named in available evidence as active in or adjacent to this market,
-              but current evidence does not independently validate them as direct, head-to-head
-              competitors for this analysis.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {namesOnly.map((name) => (
-                <span
-                  key={name}
-                  className="rounded-full border border-sky-300/20 bg-sky-300/10 px-3 py-1 text-xs font-semibold text-sky-100"
-                >
-                  {name}
-                </span>
-              ))}
-            </div>
+            {/* CRITICAL FIX (Task #14) -- the Market Map card used to
+                disappear entirely in this names-only state (not even its
+                own "Validation Needed" box), instead of staying present
+                and independently honest like it does for the full table.
+                Reusing it here with vendor-only pseudo-rows never
+                fabricates a position: inferMarketMapPosition requires a
+                signal from category/position/strengths/weaknesses text,
+                all empty here by design, so it naturally renders its own
+                "Validation Needed" state rather than plotting anything. */}
+            <MarketMap
+              rows={namesOnly.map((name) => ({
+                vendor: name,
+                category: "",
+                position: "",
+                strengths: "",
+                weaknesses: "",
+              }))}
+            />
           </div>
         );
       }
@@ -2974,14 +3084,20 @@ function ReportSectionVisual({
                   className="grid grid-cols-[0.85fr_0.75fr_0.85fr_1fr_1fr_0.75fr_0.85fr] bg-black/35 text-sm leading-6 text-zinc-300"
                 >
                   <div className="px-4 py-4 font-semibold text-white">{row.vendor || "—"}</div>
-                  <div className="px-4 py-4">{row.category || "—"}</div>
-                  <div className="px-4 py-4">{row.position || "—"}</div>
-                  <div className="px-4 py-4">{row.strengths || "—"}</div>
-                  <div className="px-4 py-4">{row.weaknesses || "—"}</div>
+                  <div className="px-4 py-4">{row.category || "Validation Needed"}</div>
+                  <div className="px-4 py-4">{row.position || "Validation Needed"}</div>
+                  <div className="px-4 py-4">{row.strengths || "Validation Needed"}</div>
+                  <div className="px-4 py-4">{row.weaknesses || "Validation Needed"}</div>
                   <div className="px-4 py-4">
-                    <span className="rounded-full border border-teal-200/20 bg-teal-200/10 px-2.5 py-1 text-xs font-semibold text-teal-100">
-                      {row.relevance || "—"}
-                    </span>
+                    {row.relevance ? (
+                      <span className="rounded-full border border-teal-200/20 bg-teal-200/10 px-2.5 py-1 text-xs font-semibold text-teal-100">
+                        {row.relevance}
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-2.5 py-1 text-xs font-semibold text-amber-200">
+                        Validation Needed
+                      </span>
+                    )}
                   </div>
                   <div className="px-4 py-4">
                     {row.validationStatus ? (
@@ -3295,7 +3411,24 @@ function ReportSectionVisual({
     );
   }
 
-  if (normalizedTitle.includes("executive recommendation") || normalizedTitle.includes("yönetici tavsiyesi")) {
+  // CRITICAL FIX -- Market Intelligence must never render a decision here.
+  // Every sibling MI-relevant branch in this function checks
+  // isMarketIntelligence before touching decision vocabulary (see the
+  // marketDecisionSignal comment above resolveMarketIntelligenceExecutiveDecision's
+  // call sites in this file); this one didn't. detectRecommendation is a
+  // bare `\b(GO|NO GO|WAIT|PIVOT|RAISE|BOOTSTRAP)\b` scan of this section's
+  // own raw content -- for MI it could disagree with the canonical
+  // ENTER/MONITOR/AVOID decision shown on the Decision Signal strip and
+  // Investment Decision Snapshot, which both resolve exclusively through
+  // resolveMarketIntelligenceExecutiveDecision. Current-generation MI
+  // reports don't carry a section titled "Executive Recommendation" (it's
+  // remapped to strategicRecommendations at generation time), so this only
+  // guards legacy/stored reports -- gated as defense in depth, matching
+  // the same policy already applied to ExecutiveDecisionIntelligencePanel.
+  if (
+    !isMarketIntelligence &&
+    (normalizedTitle.includes("executive recommendation") || normalizedTitle.includes("yönetici tavsiyesi"))
+  ) {
     const selected = detectRecommendation(content);
     const decisions = ["GO", "NO GO", "WAIT", "PIVOT", "RAISE", "BOOTSTRAP"];
     const recommendationLocale = detectPdfPresentationLocale(content);

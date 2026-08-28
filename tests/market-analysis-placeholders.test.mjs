@@ -108,8 +108,14 @@ test("Market Analysis visuals protect TAM cards, citations, and metric number wr
   assert.match(pdfSource, /getSwotLayout/);
   assert.match(plannerSource, /getFinancialLayout/);
   assert.match(pdfSource, /getFinancialLayout/);
-  assert.match(plannerSource, /drawSingleLine\(value \|\| "—"/);
-  assert.match(pdfSource, /drawSingleLine\(value \|\| "—"/);
+  // P0 PRODUCTION FIX -- confirmed live (Task #11, Market Intelligence
+  // decision/market-sizing consistency hardening): an unresolved layer's
+  // row now shows the already-localized "Validation Required" label
+  // instead of an unexplained bare "—", in both PDF exports.
+  assert.doesNotMatch(plannerSource, /drawSingleLine\(value \|\| "—"/);
+  assert.doesNotMatch(pdfSource, /drawSingleLine\(value \|\| "—"/);
+  assert.match(plannerSource, /isResolved \? value : localizePdfPresentationLabel\("Validation Required", pdfLocale\)/);
+  assert.match(pdfSource, /isResolved \? value : localizePdfPresentationLabel\("Validation Required", pdfLocale\)/);
   assert.doesNotMatch(pdfSource, /splitTextToSize\(value/);
   assert.match(pdfSource, /formatPdfCitationContent/);
   assert.match(pdfSource, /Publisher:/);

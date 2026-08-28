@@ -29,6 +29,7 @@ const pdfButtonSource = readFileSync(
   "utf8"
 );
 const pageSource = readFileSync(new URL("../app/dashboard/[id]/page.tsx", import.meta.url), "utf8");
+const plannerSource = readFileSync(new URL("../components/Planner.tsx", import.meta.url), "utf8");
 const reportPresentationSource = readFileSync(
   new URL("../app/lib/report-presentation.ts", import.meta.url),
   "utf8"
@@ -176,13 +177,25 @@ test("computeTamSamSomRadii's own existing null-safety already keeps the chart s
   assert.match(pdfButtonSource, /const radii = computeTamSamSomRadii\(magnitudes\[0\], magnitudes\[1\], magnitudes\[2\]\);/);
 });
 
-test("PDF row-level fallback: an unresolved layer never shows a fabricated value -- it uses the SAME existing, already-tested empty-value placeholder ('—') the PDF and Planner.tsx have always used, and the row is visually dimmed to distinguish it from a resolved layer", () => {
-  // getTamRows already leaves `value` empty for a layer with no
-  // parseable figure (its own text is a gap explanation, not a dollar
-  // amount) -- drawSingleLine(value || "—", ...) is the existing,
-  // unmodified fallback for that case (matching Planner.tsx's identical
-  // PDF export), and remains correct for every CASE this fix targets.
-  assert.match(pdfButtonSource, /drawSingleLine\(value \|\| "—", legendX \+ 10, rowY \+ 9\.4, legendWidth - 10, 8, 5, false\);/);
+// P0 PRODUCTION FIX -- confirmed live (Task #11, Market Intelligence
+// decision/market-sizing consistency hardening): the bare "—" placeholder
+// this test used to assert was ITSELF a residual instance of the exact
+// "unexplained dash instead of a semantic evidence state" bug class fixed
+// everywhere else in this codebase (Task #9/#10) -- an unresolved layer's
+// row now shows this file's own already-localized "Validation Required"
+// label instead, directly satisfying "Preserve evidence labels such as
+// Verified / Derived / Validation Needed where applicable." Nothing is
+// fabricated: a resolved layer still shows its own real value unchanged.
+test("PDF row-level fallback: an unresolved layer never shows a fabricated value OR an unexplained bare dash -- it shows this file's own established 'Validation Required' label, and the row is visually dimmed to distinguish it from a resolved layer", () => {
+  assert.doesNotMatch(
+    pdfButtonSource,
+    /drawSingleLine\(value \|\| "—", legendX \+ 10, rowY \+ 9\.4, legendWidth - 10, 8, 5, false\);/,
+    "the old unexplained bare-dash fallback must be gone"
+  );
+  assert.match(
+    pdfButtonSource,
+    /drawSingleLine\(\s*\n\s*isResolved \? value : localizePdfPresentationLabel\("Validation Required", pdfLocale\),\s*\n\s*legendX \+ 10,\s*\n\s*rowY \+ 9\.4,\s*\n\s*legendWidth - 10,\s*\n\s*8,\s*\n\s*5,\s*\n\s*false\s*\n\s*\);/
+  );
   // The row is still visually distinguished (dimmed) when unresolved,
   // so a reader can tell a real value from a placeholder at a glance.
   assert.match(pdfButtonSource, /pdf\.setTextColor\(isResolved \? "#ccfbf1" : "#71717a"\);/);
@@ -193,6 +206,60 @@ test("PDF full-section fallback now fires ONLY when nothing at all is resolved, 
     pdfButtonSource,
     /if \(!cascade\.tamResolved && !cascade\.samResolved && !cascade\.somResolved\) \{/
   );
+});
+
+// --- Planner.tsx (live plan-creation PDF export): the ACTUAL still-live ----
+// --- bug this ticket reported. ReportPdfButton.tsx (saved-report PDF) ------
+// --- was already fixed in a prior session; Planner.tsx's own tamSamSom -----
+// --- branch was never updated to match, and still had the exact old -------
+// --- all-or-nothing "isCoherentlyNested" gate (requiring ALL THREE of ------
+// --- TAM/SAM/SOM to parse before drawing anything) plus the same bare ------
+// --- "—" row fallback. This is almost certainly what the user actually -----
+// --- observed: TAM $1.5B / SAM $375M resolved, SOM unresolved, the whole ---
+// --- section replaced with a generic validation message. ------------------
+
+test("PARITY: Planner.tsx's own PDF export imports and calls the same canonical resolveMarketSizingCascade ReportPdfButton.tsx uses -- the two PDF generators (and the web report) can no longer independently disagree", () => {
+  assert.match(
+    plannerSource,
+    /resolveMarketSizingCascade[\s\S]{0,400}\} from "@\/app\/lib\/report-presentation"/,
+    "Planner.tsx must import the canonical cascade resolver"
+  );
+  assert.match(
+    plannerSource,
+    /const cascade = resolveMarketSizingCascade\(magnitudes\);/,
+    "Planner.tsx's TAM/SAM/SOM section must resolve layers via the canonical function, not its own bespoke all-or-nothing check"
+  );
+  // The old all-or-nothing gate must be gone, not merely bypassed.
+  assert.doesNotMatch(
+    plannerSource,
+    /const isCoherentlyNested =\s*\n\s*tamMagnitude !== null &&\s*\n\s*samMagnitude !== null &&\s*\n\s*somMagnitude !== null/,
+    "the all-or-nothing isCoherentlyNested gate must be fully removed from Planner.tsx, not left as dead code alongside the fix"
+  );
+});
+
+test("PARITY: Planner.tsx's full-section fallback now fires ONLY when nothing at all is resolved, exactly matching ReportPdfButton.tsx", () => {
+  assert.match(
+    plannerSource,
+    /if \(!cascade\.tamResolved && !cascade\.samResolved && !cascade\.somResolved\) \{/
+  );
+});
+
+test("PARITY: Planner.tsx's row-level fallback also shows 'Validation Required' (not a bare dash) for an unresolved layer, exactly matching ReportPdfButton.tsx's identical fix", () => {
+  assert.doesNotMatch(
+    plannerSource,
+    /drawSingleLine\(value \|\| "—", legendX \+ 10, rowY \+ 9\.4, legendWidth - 10, 8, 5, false\);/,
+    "the old unexplained bare-dash fallback must be gone from Planner.tsx too"
+  );
+  assert.match(
+    plannerSource,
+    /drawSingleLine\(\s*\n\s*isResolved \? value : localizePdfPresentationLabel\("Validation Required", pdfLocale\),/
+  );
+  assert.match(plannerSource, /pdf\.setTextColor\(isResolved \? "#ccfbf1" : "#71717a"\);/);
+});
+
+test("PARITY: Planner.tsx's resolved-layer evidence metadata (planning-assumption sentence, Planning Estimate label) is preserved, unchanged by this fix", () => {
+  assert.match(plannerSource, /const assumption = extractMarketSizeAssumption\(section\.content, label\);/);
+  assert.match(plannerSource, /const isEstimated = isMarketSizeEstimated\(section\.content, label\);/);
 });
 
 // --- Evidence metadata, confidence, and source references preserved --------

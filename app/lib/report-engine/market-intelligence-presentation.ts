@@ -67,13 +67,33 @@ function marketText(
 // intentionally has no dependency on the graph/evidence-extraction layer,
 // per this file's own top-of-file comment) stays decoupled -- the caller
 // (route.ts, which already has the graph) computes these two booleans.
+// P0 PRODUCTION FIX -- confirmed live (Task #11, decision-vs-evidence
+// consistency repair): marketSizingResolved only ever asked "does a
+// trustworthy TOTAL market-size figure exist" (a verified TAM, or any
+// planning estimate at all) -- it never inspected samMethod/somStatus, so
+// a report whose own planning-estimate chain explicitly left SOM/
+// obtainable-share unresolved ("Confidence: Validation Required" sitting
+// next to "Decision: ENTER", exactly the reported production defect)
+// still read as fully sizing-resolved. obtainableShareResolved is a THIRD,
+// separate pillar: "is there a real market" (marketSizingResolved) and
+// "can THIS entrant realistically capture a validated share of it" (this
+// field) are different questions -- a verified TAM says nothing about
+// obtainable share, and conflating the two would hide exactly the gap the
+// ticket reports. Trivially satisfied when no planning-estimate chain was
+// attempted at all (a report resting purely on a verified top-line figure
+// never claimed an obtainable-share figure, so there is no unresolved
+// claim to gate on) -- only a genuine "we tried to compute SOM and it
+// didn't clear the bar" state counts as a gap.
 export type DecisionCriticalEvidenceState = {
   marketSizingResolved: boolean;
   competitiveEvidenceResolved: boolean;
+  obtainableShareResolved: boolean;
 };
 
 function hasDecisionCriticalEvidenceGap(state: DecisionCriticalEvidenceState): boolean {
-  return !state.marketSizingResolved || !state.competitiveEvidenceResolved;
+  return (
+    !state.marketSizingResolved || !state.competitiveEvidenceResolved || !state.obtainableShareResolved
+  );
 }
 
 // Only the market-native evidence dimensions -- never founderReadiness or
@@ -120,6 +140,16 @@ function hasDecisionCriticalEvidenceGap(state: DecisionCriticalEvidenceState): b
 // unresolved, exactly mirroring the label gate's own scope: severity
 // scales with how much critical evidence is actually missing, never an
 // arbitrary flat penalty.
+// P0 PRODUCTION FIX -- confirmed live (Task #11): extended from a 2-pillar
+// to a 3-pillar gate (see DecisionCriticalEvidenceState's own comment for
+// why obtainableShareResolved is a genuinely separate pillar, not folded
+// into marketSizingResolved). Severity now scales by COUNT of unresolved
+// pillars rather than a fixed two-branch check, preserving the exact same
+// caps for the two pre-existing pillars' combinations (0 unresolved -> no
+// cap, 1 unresolved -> 50, both unresolved -> 30) while extending the same
+// proportional-severity principle to the new 3-pillar space: 2 of 3
+// unresolved is more severe than 1 of 3, but not yet the total-absence
+// floor reserved for all 3 missing.
 function capConfidenceForEvidenceGap(
   confidence: number,
   decisionCriticalEvidence?: DecisionCriticalEvidenceState
@@ -127,21 +157,31 @@ function capConfidenceForEvidenceGap(
   if (!decisionCriticalEvidence) {
     return confidence;
   }
-  const { marketSizingResolved, competitiveEvidenceResolved } = decisionCriticalEvidence;
-  if (!marketSizingResolved && !competitiveEvidenceResolved) {
-    // Neither of the two decision-critical pillars resolved -- the
-    // exact reported case (no defensible market size/CAGR/TAM-SAM-SOM
-    // AND no validated competitor). A confidence number this low can
-    // never read as "reasonably confident."
-    return Math.min(confidence, 30);
+  const { marketSizingResolved, competitiveEvidenceResolved, obtainableShareResolved } =
+    decisionCriticalEvidence;
+  const unresolvedCount = [marketSizingResolved, competitiveEvidenceResolved, obtainableShareResolved].filter(
+    (resolved) => !resolved
+  ).length;
+
+  if (unresolvedCount === 0) {
+    return confidence;
   }
-  if (!marketSizingResolved || !competitiveEvidenceResolved) {
-    // Exactly one pillar unresolved -- real evidence exists for half
-    // of what a market-entry decision needs, so a moderate (not
-    // severe) cap, still comfortably below the ENTER threshold.
+  if (unresolvedCount === 1) {
+    // Exactly one pillar unresolved -- real evidence exists for most of
+    // what a market-entry decision needs, so a moderate (not severe) cap,
+    // still comfortably below the ENTER threshold.
     return Math.min(confidence, 50);
   }
-  return confidence;
+  if (unresolvedCount === 2) {
+    // Two of three unresolved -- more severe than a single gap, but not
+    // yet the total-absence floor reserved for all three missing.
+    return Math.min(confidence, 40);
+  }
+  // All three decision-critical pillars unresolved -- the exact reported
+  // case this gate was originally built for (no defensible market size/
+  // CAGR/TAM-SAM-SOM AND no validated competitor). A confidence number
+  // this low can never read as "reasonably confident."
+  return Math.min(confidence, 30);
 }
 
 export function assessMarketEntryConfidence(
@@ -1036,6 +1076,28 @@ function identifyMarketInformationGaps(
         "Unabhängige, wettbewerberbezogene Daten (Marktanteil, Preisgestaltung oder Unit Economics) sind begrenzt -- die Wettbewerbsintensität ist hier abgeleitet, nicht direkt gemessen.",
         "Les données indépendantes au niveau des concurrents (part de marché, tarification ou économie unitaire) sont limitées -- l'intensité concurrentielle est ici déduite, non mesurée directement.",
         "Los datos independientes a nivel de competidores (cuota de mercado, precios o economía unitaria) son limitados; la intensidad competitiva aquí se infiere, no se mide directamente."
+      ),
+    });
+  }
+
+  // P0 PRODUCTION FIX -- confirmed live (Task #11, decision-vs-evidence
+  // consistency repair): mirrors the marketSizingResolved/
+  // competitiveEvidenceResolved branches above exactly -- without this,
+  // a report gated to MONITOR specifically because obtainableShareResolved
+  // is false (TAM/SAM and competitive evidence both otherwise resolved)
+  // fell through with NO matching gap explanation at all, showing
+  // "Decision: MONITOR" with no stated reason -- itself a form of the
+  // same decision/evidence incoherence this ticket reports.
+  if (decisionCriticalEvidence && !decisionCriticalEvidence.obtainableShareResolved) {
+    gaps.push({
+      weight: -1.5,
+      text: marketText(
+        language,
+        "Realistic obtainable market share (SOM) could not be established -- this depends on validating penetration/win-rate assumptions that are not yet evidenced, and keeps this recommendation at a conditional stance regardless of other positive signals elsewhere in this report.",
+        "Gerçekçi elde edilebilir pazar payı (SOM) belirlenemedi; bu, henüz kanıtlanmamış nüfuz etme/kazanma oranı varsayımlarının doğrulanmasına bağlıdır ve raporun başka yerlerindeki olumlu sinyallerden bağımsız olarak bu tavsiyeyi koşullu bir duruşta tutar.",
+        "Ein realistischer erzielbarer Marktanteil (SOM) konnte nicht ermittelt werden -- dies hängt von der Validierung noch nicht belegter Durchdringungs-/Gewinnraten-Annahmen ab und hält diese Empfehlung unabhängig von anderen positiven Signalen im übrigen Bericht auf einer bedingten Haltung.",
+        "La part de marché obtenable réaliste (SOM) n'a pas pu être établie -- cela dépend de la validation d'hypothèses de pénétration/taux de réussite non encore étayées, et maintient cette recommandation à une position conditionnelle, quels que soient les autres signaux positifs ailleurs dans ce rapport.",
+        "No se pudo establecer una cuota de mercado obtenible realista (SOM); esto depende de validar supuestos de penetración/tasa de éxito que aún no cuentan con evidencia, y mantiene esta recomendación en una postura condicional, sin importar otras señales positivas en el resto del informe."
       ),
     });
   }
