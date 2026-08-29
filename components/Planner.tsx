@@ -2879,9 +2879,22 @@ function extractMarketSizeValue(content: string, label: string) {
 // disagree on a TAM/SAM/SOM layer's resolved/nested state -- or the
 // "Data Confirmed" evidence badge derived from it -- purely because one
 // surface used a narrower unit parser than another.
+// CRITICAL FIX (Task #21) -- see page.tsx's own identical
+// parseMonetaryMagnitude for the full rationale: a trailing citation tag
+// ("[R12]") or bare year is itself an unmarked number that "always take
+// the LAST match" could mistake for the actual monetary figure.
+// Preferring the last match that carries an explicit scale unit --
+// falling back to the last bare number only when none exists -- keeps
+// the established range-upper-bound behavior intact while no longer
+// picking up a citation tag or year as the value itself. A trailing \b
+// on every unit token (including the single-letter shortcuts) further
+// prevents a bare number immediately followed by an unrelated word from
+// being misread through that word's own first letter (e.g. "2024
+// baseline" must never parse as "2024 billion").
 function parseMarketSizeMagnitude(value: string): number | null {
-  const matches = [...value.matchAll(/(\d+(?:[.,]\d+)?)\s*(thousand|million|billion|trillion|[kKmMbBtT])?/gi)];
-  const last = matches.at(-1);
+  const matches = [...value.matchAll(/(\d+(?:[.,]\d+)?)\s*(thousand\b|million\b|billion\b|trillion\b|[kKmMbBtT]\b)?/gi)];
+  const unitMatches = matches.filter((candidate) => candidate[2]);
+  const last = unitMatches.length > 0 ? unitMatches.at(-1) : matches.at(-1);
   if (!last) return null;
 
   const numeric = Number(last[1].replace(",", "."));

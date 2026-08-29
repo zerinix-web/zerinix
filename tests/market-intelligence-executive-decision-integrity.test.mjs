@@ -330,10 +330,10 @@ test("route.ts: resolveDecisionCriticalEvidenceState derives all three pillars f
 // existed, never whether the planning estimate's own SOM/obtainable-share
 // step actually resolved. obtainableShareResolved closes that gap as a
 // THIRD, independent pillar.
-test("route.ts: resolveDecisionCriticalEvidenceState derives obtainableShareResolved from the planning estimate's own samMethod/somStatus -- trivially true when no planning estimate was attempted at all, false only when one was attempted and SOM/obtainable-share did not resolve", () => {
+test("route.ts: resolveDecisionCriticalEvidenceState derives obtainableShareResolved from the planning estimate's own samMethod/somStatus -- trivially true when no planning estimate was attempted at all, false when one was attempted and SOM/obtainable-share did not resolve OR SAM itself was only a default assumption (Task #21: samMethod must be the genuine 'evidenceDerived' state, not merely 'not blocked')", () => {
   assert.match(
     routeSource,
-    /obtainableShareResolved:\s*\n\s*graph\.planningEstimate === null \|\|\s*\n\s*\(graph\.planningEstimate\.samMethod !== "blocked" &&\s*\n\s*graph\.planningEstimate\.somStatus === "calculated"\),/
+    /obtainableShareResolved:\s*\n\s*graph\.planningEstimate === null \|\|\s*\n\s*\(graph\.planningEstimate\.samMethod === "evidenceDerived" &&\s*\n\s*graph\.planningEstimate\.somStatus === "calculated"\),/
   );
 });
 

@@ -764,8 +764,23 @@ const competitorClaimSensitiveFields: MarketReportField[] = [
 // own type-level comment in market-intelligence-presentation.ts) is
 // trivially true when no planning-estimate chain was attempted at all --
 // only a genuine "we tried to compute SOM and it did not clear the bar"
-// state (samMethod === "blocked" or somStatus !== "calculated") counts as
-// a gap.
+// state counts as a gap.
+//
+// P0 PRODUCTION FIX (Task #21, TAM/SAM/SOM decision-integrity audit):
+// this used to accept `samMethod !== "blocked"` -- treating
+// "evidenceDerived" (a real segment/geography narrowing percentage) and
+// "defaultAssumption" (buildPlanningEstimate's own disclosed, un-evidenced
+// 25% default -- see its "SAM = TAM × 25% disclosed default
+// serviceable-share assumption" comment) as equally resolved, as long as
+// SOM's own obtainable-share percentage happened to be evidence-backed.
+// That let a report whose SAM was NEVER independently verified (just a
+// blind 25% guess) still read as fully sizing-resolved and clear a strong
+// ENTER/AVOID decision -- SOM = SAM × (real win-rate%) is only as
+// trustworthy as the SAM it was multiplied against, and an assumed SAM
+// must not be silently absorbed into an otherwise-evidenced SOM chain.
+// Now requires samMethod to be the genuine "evidenceDerived" state, not
+// merely "not blocked" -- a defaultAssumption SAM is exactly the kind of
+// unsupported sizing assumption this pillar exists to catch.
 function resolveDecisionCriticalEvidenceState(
   graph: MarketIntelligenceGraph
 ): DecisionCriticalEvidenceState {
@@ -777,7 +792,7 @@ function resolveDecisionCriticalEvidenceState(
       graph.vendorIntelligence.adjacentPlayers.length > 0,
     obtainableShareResolved:
       graph.planningEstimate === null ||
-      (graph.planningEstimate.samMethod !== "blocked" &&
+      (graph.planningEstimate.samMethod === "evidenceDerived" &&
         graph.planningEstimate.somStatus === "calculated"),
   };
 }

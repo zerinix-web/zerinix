@@ -310,11 +310,43 @@ function extractMarketSizeCardValue(content: string, label: string) {
 // exports/Planner.tsx for the identical field), which correctly resolves
 // a shared trailing unit. Also matches the full unit word first so
 // "thousand"/"trillion" (both starting with "t") can no longer collide.
+// CRITICAL FIX (Task #21) -- confirmed live against a REAL report: a
+// value string like "USD 1.5 billion (U.S., 2024 baseline...) [R12]."
+// carries a trailing citation tag ("R12") that is itself a bare,
+// unit-less number -- the prior "always take the LAST match" rule
+// (Task #19's own fix, for genuine ranges like "$2.1-2.8 billion" where
+// the upper bound is the correct figure to use) picked up "12" instead
+// of "1.5 billion", silently corrupting the parsed magnitude used by
+// this section's own TAM/SAM/SOM nesting check (SAM <= TAM, SOM <= SAM)
+// -- exactly the kind of "mathematically reproducible" failure this
+// ticket's audit specifically targets. A citation ID or a bare year
+// (e.g. "2024") is unit-less; a real monetary figure in this field
+// always carries an explicit scale word (thousand/million/billion/
+// trillion/k/m/b/t). Preferring the LAST match that DOES carry a unit --
+// falling back to the last bare number only when no unit-suffixed match
+// exists at all -- keeps Task #19's own range-upper-bound behavior
+// completely intact while no longer mistaking a trailing citation tag or
+// year for the monetary value itself.
+//
+// SECOND, MORE SEVERE BUG found while verifying the fix above against
+// this exact report's real text: without a trailing word-boundary, the
+// single-letter unit shortcuts ([kKmMbBtT]) matched the FIRST LETTER of
+// any adjacent word, not just a standalone abbreviation -- "2024
+// baseline" read as "2024" + "b" (from "baseline") = 2024 BILLION.
+// Requiring \b immediately after each unit token means a single-letter
+// shortcut only matches when it is a complete token on its own (a real
+// "50k"/"$3 B" abbreviation), never the opening letter of a longer word
+// -- verified this does not regress "50k" (no space) or "$3 B market"
+// (space before an unrelated word), and correctly ignores an orphaned
+// unit word with no adjacent number at all (e.g. "...in a
+// trillion-dollar economy" contributes nothing, since the numeric
+// capture group is not optional).
 function parseMonetaryMagnitude(value: string) {
-  const matches = [...(value || "").matchAll(/([\d.,]+)\s*(thousand|million|billion|trillion|[kKmMbBtT])?/g)];
-  const last = matches
-    .filter((candidate) => candidate[1] && Number.isFinite(parseFloat(candidate[1].replace(/,/g, ""))))
-    .at(-1);
+  const matches = [
+    ...(value || "").matchAll(/([\d.,]+)\s*(thousand\b|million\b|billion\b|trillion\b|[kKmMbBtT]\b)?/g),
+  ].filter((candidate) => candidate[1] && Number.isFinite(parseFloat(candidate[1].replace(/,/g, ""))));
+  const unitMatches = matches.filter((candidate) => candidate[2]);
+  const last = unitMatches.length > 0 ? unitMatches.at(-1) : matches.at(-1);
 
   if (!last) {
     return null;
