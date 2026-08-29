@@ -318,7 +318,14 @@ for (const [label, source] of [
       source,
       /first\\s\+90\\s\*-\?\\s\*days\?\|market entry recommendation\|why entry is not recommended now/
     );
-    assert.match(source, /\.filter\(\(line\) => line\.length > 8 && !isRecommendationHeadingLine\(line\)\)/);
+    // TASK #18 -- extended with a metadata-only-line filter (rejects
+    // trailing "(N words)" self-check footnotes), so the exact filter
+    // predicate grew a third condition. Both conditions are still
+    // present, just no longer the sole predicate.
+    assert.match(
+      source,
+      /\.filter\(\s*\(line\) => line\.length > 8 && !isRecommendationHeadingLine\(line\) && !isMetadataOnlyRecommendationLine\(line\)\s*\);/
+    );
   });
 }
 

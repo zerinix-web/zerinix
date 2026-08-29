@@ -98,8 +98,13 @@ function extractFunctionSource(source, functionName) {
 // helper, isRecommendationHeadingLine (rejects a section-intro/label
 // line the model wrote before its real numbered actions) -- it must
 // compile alongside the main function for this isolated module to run.
+// TASK #18 added a second sibling dependency, isMetadataOnlyRecommendationLine
+// (rejects a trailing "(N words)" self-check footnote) -- both are
+// captured in one contiguous span here since they are defined back to
+// back in the real source.
 const functionDependencies = {
-  extractRecommendationItems: /function isRecommendationHeadingLine\([\s\S]*?\n\}/,
+  extractRecommendationItems:
+    /function isRecommendationHeadingLine\([\s\S]*?\n\}\n[\s\S]*?function isMetadataOnlyRecommendationLine\([\s\S]*?\n\}/,
 };
 
 async function compileFunction(source, functionName) {

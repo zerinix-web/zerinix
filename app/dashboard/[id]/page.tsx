@@ -1358,13 +1358,48 @@ function isRecommendationHeadingLine(item: string) {
   return false;
 }
 
+// CRITICAL FIX (Task #18) -- confirmed live against a REAL report: every
+// Market Intelligence field prompt ends with "Max N words," which the
+// model often echoes back as a trailing self-check footnote ("(174
+// words)", "(Total 136 words)") -- a bare word-count disclosure, never a
+// real recommendation. Left unfiltered, this line passes every other
+// check (long enough, not a recognized heading) and gets rendered as a
+// malformed, content-free "Action" card. Anchored start-to-end so a real
+// sentence that happens to mention a word count mid-thought (e.g. "this
+// uses about 174 words") is never rejected -- only a line that is
+// ENTIRELY this footnote.
+function isMetadataOnlyRecommendationLine(item: string) {
+  return /^\(?\s*(?:total\s+)?\d+\s*words?\s*\)?\.?\s*$/i.test(item);
+}
+
 // Strategic Recommendations is inherently a list -- each real recommendation
 // line rendered as its own card, rather than one long paragraph block.
 // Falls back to sentence-splitting (same convention as extractBullets
 // below) when the content has no bullet/numbered markers.
 function extractRecommendationItems(content: string) {
   const source = content || "";
-  const bulletLines = source
+  // CRITICAL FIX (Task #18) -- confirmed live against a REAL report: "First
+  // 90 Days (three concrete actions): 1) Market-access validation --
+  // Owner: ...[R3]." was written as ONE physical line -- the heading and
+  // its own first numbered action sharing a line, with items 2 and 3 each
+  // on their own separate lines as normal. isRecommendationHeadingLine's
+  // own line-level check correctly identifies the line as heading-shaped
+  // (it starts with "First 90 Days"), but then discards the WHOLE line --
+  // silently losing the real first action along with the heading label
+  // it happened to share a line with. A numbered list marker ("1)", "2.",
+  // ...) immediately after a heading/list-punctuation boundary (":" or
+  // ".") always starts a new item structurally, regardless of what
+  // shares that physical line with it -- inserting a real line break
+  // there before any other parsing runs lets every downstream check
+  // operate on the heading and the action as separate lines, exactly as
+  // if the model had written them that way itself. Requiring the marker
+  // to follow ":"/"." (not just any digit anywhere) keeps this from
+  // misfiring on decimals ("3.2% market share") or citation-style
+  // parentheticals ("like R3)") -- verified directly against both the
+  // real report's own content and those exact false-positive shapes
+  // before this fix was written.
+  const normalizedSource = source.replace(/([:.])\s+(\d{1,2}[.)]\s+)/g, "$1\n$2");
+  const bulletLines = normalizedSource
     .split("\n")
     .map((line) =>
       line
@@ -1374,7 +1409,9 @@ function extractRecommendationItems(content: string) {
         .replace(/\*\*/g, "")
         .trim()
     )
-    .filter((line) => line.length > 8 && !isRecommendationHeadingLine(line));
+    .filter(
+      (line) => line.length > 8 && !isRecommendationHeadingLine(line) && !isMetadataOnlyRecommendationLine(line)
+    );
 
   if (bulletLines.length > 0) {
     return bulletLines.slice(0, 8);
@@ -1384,7 +1421,7 @@ function extractRecommendationItems(content: string) {
     .replace(/\*\*/g, "")
     .split(/(?<=[.!?])\s+/)
     .map((line) => line.trim())
-    .filter((line) => line.length > 8)
+    .filter((line) => line.length > 8 && !isMetadataOnlyRecommendationLine(line))
     .slice(0, 4);
 }
 

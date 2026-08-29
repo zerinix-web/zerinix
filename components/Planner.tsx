@@ -2335,6 +2335,17 @@ function isRecommendationHeadingLine(item: string) {
   return false;
 }
 
+// CRITICAL FIX (Task #18) -- see page.tsx's own identical function for the
+// full rationale: every Market Intelligence field prompt ends with "Max N
+// words," which the model often echoes back as a trailing self-check
+// footnote ("(174 words)", "(Total 136 words)") that would otherwise be
+// rendered as a malformed, content-free "Action" card. Anchored start-to-
+// end so a real sentence mentioning a word count mid-thought is never
+// rejected.
+function isMetadataOnlyRecommendationLine(item: string) {
+  return /^\(?\s*(?:total\s+)?\d+\s*words?\s*\)?\.?\s*$/i.test(item);
+}
+
 // Strategic Recommendations is inherently a list -- each real
 // recommendation line rendered as its own card, rather than one long
 // paragraph block. Falls back to sentence-splitting (same convention as
@@ -2342,7 +2353,17 @@ function isRecommendationHeadingLine(item: string) {
 // bullet/numbered markers.
 function extractRecommendationItems(content: string) {
   const source = content || "";
-  const bulletLines = source
+  // CRITICAL FIX (Task #18) -- see page.tsx's own identical block for the
+  // full rationale: a heading ("First 90 Days (three concrete
+  // actions):") can share one physical line with its own first numbered
+  // action, which the line-level heading check then discards entirely.
+  // Inserting a real line break before any numbered marker that follows
+  // a ":"/"." boundary lets the heading and the action be evaluated
+  // separately, without risking a false split on decimals or citation
+  // parentheticals (the marker must be preceded by list/sentence
+  // punctuation, not just any digit).
+  const normalizedSource = source.replace(/([:.])\s+(\d{1,2}[.)]\s+)/g, "$1\n$2");
+  const bulletLines = normalizedSource
     .split("\n")
     .map((line) =>
       line
@@ -2352,7 +2373,9 @@ function extractRecommendationItems(content: string) {
         .replace(/\*\*/g, "")
         .trim()
     )
-    .filter((line) => line.length > 8 && !isRecommendationHeadingLine(line));
+    .filter(
+      (line) => line.length > 8 && !isRecommendationHeadingLine(line) && !isMetadataOnlyRecommendationLine(line)
+    );
 
   if (bulletLines.length > 0) {
     return bulletLines.slice(0, 8);
@@ -2362,7 +2385,7 @@ function extractRecommendationItems(content: string) {
     .replace(/\*\*/g, "")
     .split(/(?<=[.!?])\s+/)
     .map((line) => line.trim())
-    .filter((line) => line.length > 8)
+    .filter((line) => line.length > 8 && !isMetadataOnlyRecommendationLine(line))
     .slice(0, 4);
 }
 

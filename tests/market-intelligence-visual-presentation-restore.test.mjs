@@ -87,8 +87,11 @@ const functionDependencies = {
     /function isImplausibleCompetitorName(?:OnScreen|Pdf)\([\s\S]*?\nfunction extractMarketIntelligenceCompetitorRowsFromTable\([\s\S]*?\n\}/,
   // A later ticket ("MARKET INTELLIGENCE -- ROOT-CAUSE DATA PIPELINE
   // REPAIR") made extractRecommendationItems depend on a new sibling
-  // helper, isRecommendationHeadingLine.
-  extractRecommendationItems: /function isRecommendationHeadingLine\([\s\S]*?\n\}/,
+  // helper, isRecommendationHeadingLine. TASK #18 added a second sibling
+  // dependency, isMetadataOnlyRecommendationLine, defined immediately
+  // after it -- both captured in one contiguous span.
+  extractRecommendationItems:
+    /function isRecommendationHeadingLine\([\s\S]*?\n\}\n[\s\S]*?function isMetadataOnlyRecommendationLine\([\s\S]*?\n\}/,
 };
 
 // Function bodies here contain their own inline TypeScript type

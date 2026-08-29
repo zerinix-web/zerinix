@@ -83,6 +83,8 @@ async function compileExtractRecommendationItems(source) {
   const harness = `
 ${extractFunctionSource(source, "isRecommendationHeadingLine")}
 
+${extractFunctionSource(source, "isMetadataOnlyRecommendationLine")}
+
 ${extractFunctionSource(source, "extractRecommendationItems")}
 
 export { extractRecommendationItems };
