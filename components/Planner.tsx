@@ -2453,7 +2453,11 @@ const forceAliases: Record<string, string[]> = {
   Buyer: ["buyer power", "bargaining power of buyers", "alıcı gücü"],
   "Supplier Power": ["supplier power", "bargaining power of suppliers", "tedarikçi gücü"],
   Supplier: ["supplier power", "bargaining power of suppliers", "tedarikçi gücü"],
-  Substitutes: ["threat of substitutes?", "substitute products?", "ikame ürün"],
+  // CRITICAL FIX (Task #19) -- see page.tsx's own identical entry for the
+  // full rationale: a bare "Substitutes -- Moderate: ..." heading matched
+  // neither existing alias, silently showing "Not specified" for real
+  // content the model actually wrote.
+  Substitutes: ["threat of substitutes?", "substitute products?", "substitutes", "ikame ürün"],
 };
 
 function extractForceIntensity(content: string, force: string) {
@@ -2502,6 +2506,27 @@ function extractForceImplication(content: string, force: string) {
   }
 
   return "";
+}
+
+// CRITICAL FIX (Task #19) -- see page.tsx's own identical function for
+// the full rationale: every Porter's Five Forces card rendered with
+// identical visual weight regardless of whether that specific force's
+// own sentence cited real evidence ("[R23][R95]") or explicitly admitted
+// it had none ("not evidenced directly in registry"). Reads only the
+// already-displayed implication sentence; nothing new is scanned, and
+// nothing is fabricated when neither signal is present.
+function getForceEvidenceLevel(implication: string): EvidenceLevel {
+  if (!implication) {
+    return "validationRequired";
+  }
+  if (/\bnot\s+(?:directly\s+)?evidenced\b|\bno\s+(?:direct\s+)?evidence\b|\bunevidenced\b/i.test(implication)) {
+    return "validationRequired";
+  }
+  if (/\[R\d+\]|\(R\d+(?:,\s*R\d+)*\)/.test(implication)) {
+    return "benchmarkDerived";
+  }
+
+  return "validationRequired";
 }
 
 function extractRoadmapAction(content: string, step: string) {
@@ -5843,7 +5868,12 @@ if (field === "swotAnalysis") {
 
             return (
               <div key={force} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
-                <p className="text-sm font-semibold text-white">{force}</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-white">{force}</p>
+                  {isMarketIntelligence ? (
+                    <EvidenceBadge level={getForceEvidenceLevel(implication)} locale={evidenceLocale} market />
+                  ) : null}
+                </div>
                 {intensity ? (
                   <>
                     <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-800">
@@ -9263,7 +9293,17 @@ const ReportPanel = memo(function ReportPanel({
             pdf.text(localizePdfPresentationLabel(force, pdfLocale), cardX + 2, cardY + 4);
             pdf.setFillColor("#27272a");
             pdf.roundedRect(cardX + 22, cardY + 2.2, visualWidth * 0.24, 1.4, 0.7, 0.7, "F");
-            pdf.setFillColor("#5eead4");
+            // CRITICAL FIX (Task #19) -- see ReportPdfButton.tsx's own
+            // identical block for the full rationale: Market Intelligence
+            // only ("portersFiveForces" is a shared field name with
+            // Business Plan, which has no [R#] citation convention to
+            // read). The bar color signals whether this force's own
+            // sentence cited real evidence or did not.
+            pdf.setFillColor(
+              isMarketIntelligence && getForceEvidenceLevel(implication) === "validationRequired"
+                ? "#fbbf24"
+                : "#5eead4"
+            );
             pdf.roundedRect(cardX + 22, cardY + 2.2, (visualWidth * 0.24 * score) / 100, 1.4, 0.7, 0.7, "F");
             if (implication) {
               pdf.setFontSize(4.6);

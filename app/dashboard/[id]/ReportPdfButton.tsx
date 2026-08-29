@@ -1951,7 +1951,11 @@ const forceAliases: Record<string, string[]> = {
   Buyer: ["buyer power", "bargaining power of buyers", "alıcı gücü"],
   "Supplier Power": ["supplier power", "bargaining power of suppliers", "tedarikçi gücü"],
   Supplier: ["supplier power", "bargaining power of suppliers", "tedarikçi gücü"],
-  Substitutes: ["threat of substitutes?", "substitute products?", "ikame ürün"],
+  // CRITICAL FIX (Task #19) -- see page.tsx's own identical entry for the
+  // full rationale: a bare "Substitutes -- Moderate: ..." heading matched
+  // neither existing alias, silently showing "Not specified" for real
+  // content the model actually wrote.
+  Substitutes: ["threat of substitutes?", "substitute products?", "substitutes", "ikame ürün"],
 };
 
 function extractForceIntensity(content: string, force: string) {
@@ -1997,6 +2001,23 @@ function extractForceImplication(content: string, force: string) {
   }
 
   return "";
+}
+
+// CRITICAL FIX (Task #19) -- see page.tsx's own identical function for
+// the full rationale: every Porter's Five Forces card drew its intensity
+// bar in the same teal regardless of whether that force's own sentence
+// cited real evidence or explicitly admitted it had none. Reused here as
+// a bar-fill-color signal (rather than a new badge element) since this
+// PDF card has no spare room for one without risking repagination.
+function isForceEvidenceCited(implication: string): boolean {
+  if (!implication) {
+    return false;
+  }
+  if (/\bnot\s+(?:directly\s+)?evidenced\b|\bno\s+(?:direct\s+)?evidence\b|\bunevidenced\b/i.test(implication)) {
+    return false;
+  }
+
+  return /\[R\d+\]|\(R\d+(?:,\s*R\d+)*\)/.test(implication);
 }
 
 function extractHeadlineCagrValue(content: string) {
@@ -5825,7 +5846,16 @@ export function buildStandardReportPdf({
             pdf.text(localizePdfPresentationLabel(force, pdfLocale), cardX + 2, cardY + 4);
             pdf.setFillColor("#27272a");
             pdf.roundedRect(cardX + 22, cardY + 2.2, bodyWidth * 0.24, 1.4, 0.7, 0.7, "F");
-            pdf.setFillColor("#5eead4");
+            // CRITICAL FIX (Task #19) -- Market Intelligence only: the bar
+            // color itself now signals whether THIS force's own sentence
+            // cited real evidence (teal, unchanged) or did not (amber,
+            // the same warning color this file already uses for
+            // "Validation Needed" elsewhere) -- no new element, no
+            // repagination risk. Every other report kind keeps the
+            // original unconditional teal fill.
+            pdf.setFillColor(
+              isMarketIntelligenceReport && !isForceEvidenceCited(implication) ? "#fbbf24" : "#5eead4"
+            );
             pdf.roundedRect(cardX + 22, cardY + 2.2, (bodyWidth * 0.24 * score) / 100, 1.4, 0.7, 0.7, "F");
             if (implication) {
               pdf.setFontSize(4.6);

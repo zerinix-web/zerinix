@@ -1489,7 +1489,15 @@ const forceAliases: Record<string, string[]> = {
   Buyer: ["buyer power", "bargaining power of buyers", "alıcı gücü"],
   "Supplier Power": ["supplier power", "bargaining power of suppliers", "tedarikçi gücü"],
   Supplier: ["supplier power", "bargaining power of suppliers", "tedarikçi gücü"],
-  Substitutes: ["threat of substitutes?", "substitute products?", "ikame ürün"],
+  // CRITICAL FIX (Task #19) -- confirmed live against a REAL report: the
+  // model wrote this force's own sentence as a bare "Substitutes --
+  // Moderate: ..." heading, matching neither "threat of substitutes" nor
+  // "substitute products" -- this force silently showed "Not specified"
+  // with no implication sentence at all, even though the model's real
+  // text plainly discussed it, purely because of an alias gap (Buyer/
+  // Supplier already include their own bare force names as aliases;
+  // Substitutes never did).
+  Substitutes: ["threat of substitutes?", "substitute products?", "substitutes", "ikame ürün"],
 };
 
 function extractForceIntensity(content: string, force: string) {
@@ -1538,6 +1546,40 @@ function extractForceImplication(content: string, force: string) {
   }
 
   return "";
+}
+
+// CRITICAL FIX (Task #19) -- confirmed live against a REAL Market
+// Intelligence report: every Porter's Five Forces card rendered with
+// identical visual weight (same bar style, same "intensity" label,
+// no distinguishing marker) regardless of whether that specific force's
+// own generated sentence cited real evidence or explicitly admitted it
+// had none. The real report's own text says, verbatim, "Supplier power
+// -- Low-to-moderate: key suppliers are cloud/AI model providers (not
+// evidenced directly in registry)..." right next to "Buyer power --
+// High... (buyer guides and legal ops surveys) [R23][R95]." -- two
+// forces with materially different evidentiary support, presented
+// identically. Porter's forces are inherently a qualitative synthesis,
+// never a hard verified fact even when well-cited, so this never claims
+// "verified" -- only whether THIS force's own sentence carries a visible
+// citation ([R#] or a "(R4, R5, R6)"-style reference list) or explicitly
+// flags itself as unevidenced/uncited, exactly what a careful reader
+// would already have to check the raw text to find. Extracted from
+// extractForceImplication's own already-displayed sentence -- no new
+// text is scanned, and nothing is fabricated when neither signal is
+// present (defaults to the same honest "Validation Needed" state the
+// rest of this file already uses for genuinely unsupported claims).
+function getForceEvidenceLevel(implication: string): EvidenceLevel {
+  if (!implication) {
+    return "validationRequired";
+  }
+  if (/\bnot\s+(?:directly\s+)?evidenced\b|\bno\s+(?:direct\s+)?evidence\b|\bunevidenced\b/i.test(implication)) {
+    return "validationRequired";
+  }
+  if (/\[R\d+\]|\(R\d+(?:,\s*R\d+)*\)/.test(implication)) {
+    return "benchmarkDerived";
+  }
+
+  return "validationRequired";
 }
 
 function extractFirstInsight(content: string) {
@@ -3680,7 +3722,12 @@ function ReportSectionVisual({
 
             return (
               <div key={force} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
-                <p className="text-sm font-semibold text-white">{force}</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-white">{force}</p>
+                  {isMarketIntelligence ? (
+                    <EvidenceBadge level={getForceEvidenceLevel(implication)} locale={evidenceLocale} market />
+                  ) : null}
+                </div>
                 {intensity ? (
                   <>
                     <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-800">
