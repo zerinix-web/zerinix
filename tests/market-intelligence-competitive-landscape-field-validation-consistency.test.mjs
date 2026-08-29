@@ -256,7 +256,7 @@ test("fix: page.tsx's legacy 'Executive Recommendation' visual no longer indepen
 test("scenario E, drift check: Planner.tsx's equivalent Executive Summary decision computation already resolves Market Intelligence exclusively through resolveMarketIntelligenceExecutiveDecision, never falling through to detectRecommendation for MI (pre-existing, correct -- confirms no equivalent gap exists there)", () => {
   assert.match(
     plannerSource,
-    /const marketDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecision\(section\.content, evidenceLocale\)\s*\n\s*: null;/
+    /const marketDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*section\.content,\s*\n\s*evidenceLocale\s*\n\s*\)\s*\n\s*: null;/
   );
   assert.match(
     plannerSource,

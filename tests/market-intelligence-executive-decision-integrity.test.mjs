@@ -289,8 +289,19 @@ const pdfButtonSource = readFileSync(
 );
 
 test("PARITY: page.tsx and ReportPdfButton.tsx both resolve the Market Intelligence decision through the SAME resolveMarketIntelligenceExecutiveDecision call against the SAME canonical executiveSummary text this fix's gate writes into -- neither surface independently reconstructs a stronger decision from prose (drift check: this shared architecture is untouched by this fix)", () => {
-  assert.match(pageSource, /resolveMarketIntelligenceExecutiveDecision\(/);
-  assert.match(pdfButtonSource, /resolveMarketIntelligenceExecutiveDecision\(/);
+  // TASK #24 -- both surfaces now call
+  // resolveMarketIntelligenceExecutiveDecisionWithCanonicalState, which
+  // prefers a persisted canonical decision and falls back to this exact
+  // same resolveMarketIntelligenceExecutiveDecision (still the shared
+  // vocabulary function underneath, confirmed exported unmodified) for
+  // every report without one -- the parity guarantee is unchanged.
+  assert.match(pageSource, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
+  assert.match(pdfButtonSource, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
+  const vocabularySource = readFileSync(
+    new URL("../app/lib/report-engine/executive-decision-vocabulary.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(vocabularySource, /export function resolveMarketIntelligenceExecutiveDecision\(/);
 });
 
 // --- Decision Engine V2 shadow safety (Section 6/11) -----------------------
@@ -459,7 +470,10 @@ test("DRIFT CHECK: assessMarketEntryConfidence remains fully backward-compatible
 test("DRIFT CHECK: P0 FIX #1 (TAM/SAM/SOM), #2 (CAGR), and #3 (Competitive Landscape/Major Players) canonical logic is untouched by this pass", () => {
   const reportPresentationSource = readFileSync("app/lib/report-presentation.ts", "utf8");
   assert.match(reportPresentationSource, /export function resolveMarketSizingCascade\(/);
-  assert.match(pdfButtonSource, /const cascade = resolveMarketSizingCascade\(magnitudes\);/);
+  assert.match(
+    pdfButtonSource,
+    /const cascade = constrainMarketSizingResolutionToCanonicalState\(\s*\n\s*resolveMarketSizingCascade\(magnitudes\),\s*\n\s*readMarketIntelligenceCanonicalState\(report\.metadata\)\s*\n\s*\);/
+  );
 
   assert.match(routeSource, /if \(field === "cagr"\) \{/);
   assert.match(

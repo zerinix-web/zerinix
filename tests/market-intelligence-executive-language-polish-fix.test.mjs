@@ -82,7 +82,7 @@ test("app/dashboard/[id]/page.tsx's ExecutiveSummaryVisual accepts an isMarketIn
   assert.match(fnBody, /isMarketIntelligence\??\s*:\s*boolean/);
   assert.match(
     fnBody,
-    /const marketDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecision\(content, evidenceLocale\)\s*\n\s*: null;/
+    /const marketDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*content,\s*\n\s*evidenceLocale\s*\n\s*\)\s*\n\s*: null;/
   );
   assert.match(
     fnBody,
@@ -100,7 +100,7 @@ test("components/Planner.tsx's ExecutiveSummaryVisual accepts an isMarketIntelli
   assert.match(fnBody, /isMarketIntelligence\??\s*:\s*boolean/);
   assert.match(
     fnBody,
-    /const marketDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecision\(section\.content, evidenceLocale\)\s*\n\s*: null;/
+    /const marketDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*section\.content,\s*\n\s*evidenceLocale\s*\n\s*\)\s*\n\s*: null;/
   );
   // Threaded: ReportPanel receives isMarketIntelligence from its two call
   // sites (activeReportMode === "market"), passes it to ReportSectionCard,

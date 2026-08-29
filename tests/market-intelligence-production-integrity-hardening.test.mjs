@@ -173,10 +173,9 @@ test("assessMarketEntryConfidence never manufactures ENTER or AVOID as a false-p
 });
 
 test("web/PDF decision vocabulary parity: page.tsx, Planner.tsx, and ReportPdfButton.tsx all resolve Market Intelligence's decision through the SAME resolveMarketIntelligenceExecutiveDecision call, and none of them independently hardcodes 'Proceed'/'Reject'/literal 'GO'/'NO-GO' text gated on isMarketIntelligence", () => {
-  for (const source of [pageSource, plannerSource]) {
-    assert.match(source, /resolveMarketIntelligenceExecutiveDecision\(/);
+  for (const source of [pageSource, plannerSource, pdfButtonSource]) {
+    assert.match(source, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
   }
-  assert.match(pdfButtonSource, /resolveMarketIntelligenceExecutiveDecision\(/);
 });
 
 // ---------------------------------------------------------------------------

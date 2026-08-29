@@ -174,7 +174,10 @@ test("Planner.tsx: the on-screen TAM/SAM/SOM visual no longer requires all three
     /isCoherentlyNested/,
     "isCoherentlyNested must be fully removed from Planner.tsx, including its PDF export -- not merely bypassed"
   );
-  assert.match(plannerSource, /const cascade = resolveMarketSizingCascade\(magnitudes\);/);
+  assert.match(
+    plannerSource,
+    /const cascade = constrainMarketSizingResolutionToCanonicalState\(\s*\n\s*resolveMarketSizingCascade\(magnitudes\),\s*\n\s*marketIntelligenceCanonicalState\s*\n\s*\);/
+  );
 });
 
 test("page.tsx: parseMonetaryMagnitude and the TAM/SAM/SOM bar computation are untouched (drift/regression guard)", async () => {

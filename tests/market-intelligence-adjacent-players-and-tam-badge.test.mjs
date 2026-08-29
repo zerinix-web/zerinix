@@ -89,6 +89,53 @@ function extractConstSource(source, constName) {
   return match[0];
 }
 
+// TASK #24 -- getTamSamSomSectionEvidence now calls
+// constrainMarketSizingResolutionToCanonicalState (market-intelligence-
+// canonical-state.ts), a real generic function (`export function
+// constrainMarketSizingResolutionToCanonicalState<T extends {...}>(...)`)
+// -- extractFunctionSource's own start-anchor regex requires `(`
+// immediately after the function name, which a generic type parameter
+// list breaks. Its generic constraint has no parentheses of its own, so
+// the very first `(` encountered after the function name IS the real
+// parameter list's open paren; this reuses the exact same balanced-
+// bracket scan, just with a looser start anchor that tolerates the
+// `<...>` in between.
+function extractGenericFunctionSource(source, functionName) {
+  const startMatch = source.match(new RegExp(`export function ${functionName}`));
+  assert.ok(startMatch, `${functionName} not found`);
+  const start = startMatch.index;
+  let i = source.indexOf("(", startMatch.index);
+  assert.ok(i > 0, `${functionName}'s parameter list not found`);
+
+  let parenDepth = 1;
+  while (parenDepth > 0) {
+    i += 1;
+    if (source[i] === "(") parenDepth += 1;
+    else if (source[i] === ")") parenDepth -= 1;
+  }
+  while (source[i] !== "{") {
+    i += 1;
+  }
+
+  let braceDepth = 0;
+  do {
+    if (source[i] === "{") braceDepth += 1;
+    else if (source[i] === "}") braceDepth -= 1;
+    i += 1;
+  } while (braceDepth > 0);
+
+  return source.slice(start, i);
+}
+
+const canonicalStateModuleSource = readFileSync(
+  new URL("../app/lib/report-engine/market-intelligence-canonical-state.ts", import.meta.url),
+  "utf8"
+);
+const constrainMarketSizingResolutionToCanonicalStateSource = extractGenericFunctionSource(
+  canonicalStateModuleSource,
+  "constrainMarketSizingResolutionToCanonicalState"
+);
+
 // Bundles the TAM/SAM/SOM evidence cascade's full, real dependency chain
 // (never a reimplementation) into one temp module and imports it. page.tsx's
 // chain is fully self-contained; Planner.tsx's extractMarketSizeValue needs
@@ -123,6 +170,7 @@ async function compileTamSamSomEvidenceModule(source, { external } = {}) {
     extractFunctionSource(source, "extractMarketSizeAssumption"),
     extractFunctionSource(source, "isMarketSizeEstimated"),
     extractFunctionSource(source, "resolveTamSamSomCascade"),
+    constrainMarketSizingResolutionToCanonicalStateSource,
     `export ${extractFunctionSource(source, "getTamSamSomSectionEvidence")}`,
   ].join("\n\n");
 
@@ -415,11 +463,24 @@ for (const [label, source, external] of [
 }
 
 test("page.tsx and Planner.tsx: getDashboardSectionEvidence/getSectionEvidenceLevel route TAM/SAM/SOM through the new canonical getTamSamSomSectionEvidence, and the per-layer bar visual now shares the exact same resolveTamSamSomCascade -- the badge and the visual can never diverge again", () => {
-  assert.match(pageSource, /if \(field\.includes\("tam"\) \|\| title\.includes\("tam \/ sam \/ som"\)\) \{\s*\n\s*return getTamSamSomSectionEvidence\(section\.content\);/);
-  assert.match(plannerSource, /if \(section\.field === "tamSamSom"\) \{\s*\n\s*return getTamSamSomSectionEvidence\(section\.content\);/);
+  // TASK #24 -- both call sites now also thread marketIntelligenceCanonicalState
+  // through, so a persisted samMethod/somStatus can narrow (never widen)
+  // what either the badge or the per-layer visual treats as resolved --
+  // see constrainMarketSizingResolutionToCanonicalState.
+  assert.match(
+    pageSource,
+    /if \(field\.includes\("tam"\) \|\| title\.includes\("tam \/ sam \/ som"\)\) \{\s*\n\s*return getTamSamSomSectionEvidence\(section\.content, marketIntelligenceCanonicalState\);/
+  );
+  assert.match(
+    plannerSource,
+    /if \(section\.field === "tamSamSom"\) \{\s*\n\s*return getTamSamSomSectionEvidence\(section\.content, marketIntelligenceCanonicalState\);/
+  );
 
   for (const source of [pageSource, plannerSource]) {
-    assert.match(source, /const \{ values, magnitudes, tamResolved, samResolved, somResolved \} = resolveTamSamSomCascade\(content\);|const \{ magnitudes, tamResolved, samResolved, somResolved \} = resolveTamSamSomCascade\(section\.content\);/);
+    assert.match(
+      source,
+      /const \{ values, magnitudes, tamResolved, samResolved, somResolved \} = constrainMarketSizingResolutionToCanonicalState\(\s*\n\s*resolveTamSamSomCascade\(content\),|const \{ magnitudes, tamResolved, samResolved, somResolved \} = constrainMarketSizingResolutionToCanonicalState\(\s*\n\s*resolveTamSamSomCascade\(section\.content\),/
+    );
   }
 });
 

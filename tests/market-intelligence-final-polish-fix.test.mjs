@@ -62,7 +62,11 @@ function sliceFrom(source, marker, length = 1600) {
 // --- "Planning Confidence", Market Intelligence only ------------------------
 
 test("app/dashboard/[id]/page.tsx's ExecutiveSnapshotPanel overrides 'Confidence Radar'/'Confidence' labels only when isMarketIntelligence is set", () => {
-  const fnBody = sliceFrom(dashboardReportSource, "function ExecutiveSnapshotPanel({");
+  // TASK #24 added a marketIntelligenceCanonicalState prop to this
+  // component's signature, pushing the labels this test checks for
+  // further into the function body -- widened the fixed-length slice
+  // rather than change the labels/logic themselves.
+  const fnBody = sliceFrom(dashboardReportSource, "function ExecutiveSnapshotPanel({", 1800);
   assert.ok(fnBody, "ExecutiveSnapshotPanel not found");
   assert.match(fnBody, /isMarketIntelligence\??\s*:\s*boolean/);
   assert.match(fnBody, /"Decision Factors"/);

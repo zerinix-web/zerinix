@@ -260,31 +260,36 @@ test("DRIFT GUARD: Market Intelligence's cover-page confidence and Executive Sum
 });
 
 test("PROPERTY A/B (web decision/confidence === PDF decision/confidence): every Market-Intelligence-gated decision surface -- page.tsx's ExecutiveSummaryVisual and ExecutiveSnapshotPanel, Planner.tsx's equivalents, and both PDF exports' cover + Executive Summary card -- calls resolveMarketIntelligenceExecutiveDecision, the ONE canonical source, over the executiveSummary section's own content only", () => {
-  // TASK #23 -- 6 of these 9 call sites now resolve through
+  // TASK #24 -- ALL 9 of these call sites now resolve through
   // resolveMarketIntelligenceExecutiveDecisionWithCanonicalState (prefers
   // a persisted canonical-state snapshot, falls back to the exact same
   // resolveMarketIntelligenceExecutiveDecision this test still exercises
   // directly for every report without one -- see
   // market-intelligence-canonical-state-persistence.test.mjs's own H1-H4
-  // for direct coverage of the wrapper itself). The remaining 3 sites
-  // (page.tsx's `section.content,`/`content, evidenceLocale` -- its own
-  // Porter's-Five-Forces-adjacent evidence check, unrelated to the top-
-  // level decision signal -- and Planner.tsx's `section.content,
-  // evidenceLocale` equivalent) are unchanged secondary/consistency-check
-  // usages, deliberately left on the direct resolver for this task -- see
-  // Task #23's final report for the documented remaining scope.
+  // and market-intelligence-canonical-state-consumption-audit.test.mjs's
+  // own STRUCTURAL AUDIT for direct coverage of the wrapper itself and
+  // confirmation zero bare call sites remain anywhere).
   const callSites = [
-    [pageSource, /resolveMarketIntelligenceExecutiveDecision\(\s*\n\s*section\.content,/],
-    [pageSource, /resolveMarketIntelligenceExecutiveDecision\(content, evidenceLocale\)/],
+    [
+      pageSource,
+      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*section\.content,/,
+    ],
+    [
+      pageSource,
+      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*content,\s*\n\s*evidenceLocale/,
+    ],
     [
       pageSource,
       /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*executiveSummary \|\| executiveRecommendation,/,
     ],
     [
       plannerSource,
-      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*section\.content,/,
+      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*section\.content,\s*\n\s*evidenceLocale/,
     ],
-    [plannerSource, /resolveMarketIntelligenceExecutiveDecision\(section\.content, evidenceLocale\)/],
+    [
+      plannerSource,
+      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*section\.content,\s*\n\s*isMarketIntelligenceTurkish/,
+    ],
     [
       pdfButtonSource,
       /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*readMarketIntelligenceCanonicalState\(report\.metadata\),\s*\n\s*marketExecutiveSummaryContent,/,
@@ -297,7 +302,10 @@ test("PROPERTY A/B (web decision/confidence === PDF decision/confidence): every 
       plannerSource,
       /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*marketExecutiveSummaryContent,/,
     ],
-    [plannerSource, /resolveMarketIntelligenceExecutiveDecision\(content, pdfLocale === "tr" \? "Turkish" : "English"\)/],
+    [
+      plannerSource,
+      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*content,\s*\n\s*pdfLocale === "tr" \? "Turkish" : "English"/,
+    ],
   ];
 
   for (const [source, pattern] of callSites) {

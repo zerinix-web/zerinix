@@ -357,7 +357,10 @@ test("DRIFT CHECK: P0 FIX #1 (TAM/SAM/SOM), #2 (CAGR), #3 (Competitive Landscape
     new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url),
     "utf8"
   );
-  assert.match(pdfButtonSource, /const cascade = resolveMarketSizingCascade\(magnitudes\);/);
+  assert.match(
+    pdfButtonSource,
+    /const cascade = constrainMarketSizingResolutionToCanonicalState\(\s*\n\s*resolveMarketSizingCascade\(magnitudes\),\s*\n\s*readMarketIntelligenceCanonicalState\(report\.metadata\)\s*\n\s*\);/
+  );
 
   assert.match(routeSource, /if \(field === "cagr"\) \{/);
   assert.match(

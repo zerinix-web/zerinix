@@ -119,10 +119,25 @@ test("SCENARIO E (web and PDF share one canonical decision state): page.tsx, Rep
   const pdfButtonSource = readSourceFile("app/dashboard/[id]/ReportPdfButton.tsx");
   const plannerSource = readSourceFile("components/Planner.tsx");
 
+  // TASK #24 -- all 3 surfaces now resolve exclusively through
+  // resolveMarketIntelligenceExecutiveDecisionWithCanonicalState (the
+  // canonical-state module), which internally still calls this exact
+  // same resolveMarketIntelligenceExecutiveDecision (from the shared
+  // vocabulary module) for every report without a persisted canonical
+  // state -- so the "one shared source, never independently reimplemented"
+  // guarantee holds one level deeper than before, not less strictly.
   for (const source of [pageSource, pdfButtonSource, plannerSource]) {
-    assert.match(source, /resolveMarketIntelligenceExecutiveDecision/);
-    assert.match(source, /from "@\/app\/lib\/report-engine\/executive-decision-vocabulary"/);
+    assert.match(source, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState/);
+    assert.match(source, /from "@\/app\/lib\/report-engine\/market-intelligence-canonical-state"/);
+    assert.doesNotMatch(
+      source,
+      /import\s*\{[^}]*\bresolveMarketIntelligenceExecutiveDecision\b(?!WithCanonicalState)[^}]*\}\s*from\s*"@\/app\/lib\/report-engine\/executive-decision-vocabulary"/,
+      "must not reimplement or directly re-import the bare resolver once every call site goes through the canonical-state wrapper"
+    );
   }
+  const canonicalStateModuleSource = readSourceFile("app/lib/report-engine/market-intelligence-canonical-state.ts");
+  assert.match(canonicalStateModuleSource, /resolveMarketIntelligenceExecutiveDecision/);
+  assert.match(canonicalStateModuleSource, /from "@\/app\/lib\/report-engine\/executive-decision-vocabulary"/);
 });
 
 test("regression guard, no evidence-standard weakening: a genuinely unavailable decision (no 'Decision:'/'Karar:' label anywhere) still resolves to '—', never guessed or downgraded to a fabricated value", () => {

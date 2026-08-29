@@ -56,12 +56,12 @@ import {
   getCanonicalDecisionLabel,
   reconcileMarketIntelligenceDecisionText,
   resolveCanonicalDecisionFromReportText,
-  resolveMarketIntelligenceExecutiveDecision,
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
 import { localizedLabelVariants } from "@/app/lib/report-engine/executive-decision-brief";
 import {
   readMarketIntelligenceCanonicalState,
   resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
+  constrainMarketSizingResolutionToCanonicalState,
   type MarketIntelligenceCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
@@ -431,8 +431,14 @@ function resolveTamSamSomCascade(content: string) {
 // [Estimated]/Planning Estimate figure -- a resolved-but-estimated stack
 // is a planning estimate, not verified data, and must not read as
 // confirmed either.
-function getTamSamSomSectionEvidence(content: string): EvidenceLevel {
-  const cascade = resolveTamSamSomCascade(content);
+function getTamSamSomSectionEvidence(
+  content: string,
+  marketIntelligenceCanonicalState: MarketIntelligenceCanonicalState | null = null
+): EvidenceLevel {
+  const cascade = constrainMarketSizingResolutionToCanonicalState(
+    resolveTamSamSomCascade(content),
+    marketIntelligenceCanonicalState
+  );
 
   if (!cascade.allResolved) {
     return "validationRequired";
@@ -675,7 +681,10 @@ function extractEvidenceLineForValue(content: string, value: string): string {
   return matchingLine ?? content;
 }
 
-function getDashboardSectionEvidence(section: { field?: string; title: string; content: string }): EvidenceLevel {
+function getDashboardSectionEvidence(
+  section: { field?: string; title: string; content: string },
+  marketIntelligenceCanonicalState: MarketIntelligenceCanonicalState | null = null
+): EvidenceLevel {
   const field = section.field?.toLowerCase() || "";
   const title = section.title.toLowerCase();
 
@@ -689,7 +698,7 @@ function getDashboardSectionEvidence(section: { field?: string; title: string; c
   // Margin-based derivation unchanged for Business Plan's Financial
   // Dashboard section.
   if (field.includes("tam") || title.includes("tam / sam / som")) {
-    return getTamSamSomSectionEvidence(section.content);
+    return getTamSamSomSectionEvidence(section.content, marketIntelligenceCanonicalState);
   }
 
   if (field.includes("financial") || title.includes("financial") || title.includes("finansal")) {
@@ -1902,8 +1911,16 @@ function getDecisionSummaryItems(
   // fields (locale-agnostic lookup, matching the PDF's own Executive
   // Decision card) -- read first, before ever falling through to the
   // generic scan.
+  // TASK #24 -- immediateNextAction is now part of the persisted
+  // canonical state (frozen at generation time, computed to match the
+  // canonical decision -- "never 'run a pilot'/'execute' under NO_GO",
+  // per ExecutiveDecisionBrief's own type comment); reading it directly
+  // avoids re-parsing this exact same fact from prose whenever a
+  // canonical snapshot is available. Falls back to the existing
+  // extraction for every degraded/legacy report, unchanged.
   const marketNextAction = isMarketIntelligence
-    ? extractMetricValueFromAliases(executiveSummary || fullContent, localizedLabelVariants("immediateNextAction"))
+    ? marketIntelligenceCanonicalState?.immediateNextAction ||
+      extractMetricValueFromAliases(executiveSummary || fullContent, localizedLabelVariants("immediateNextAction"))
     : "";
   const nextStep =
     marketNextAction ||
@@ -1929,8 +1946,14 @@ function getDecisionSummaryItems(
       "growth",
       "customer",
     ]);
+  // TASK #24 -- topRisks[0] is the same persisted, generation-time-frozen
+  // fact used for the Executive Decision card's own "Top Risk" line;
+  // reading it here means this tile can never name a DIFFERENT top risk
+  // than the canonical one just because this section's own prose happens
+  // to list risks in a different order.
   const marketMainRisk = isMarketIntelligence
-    ? takeFirstListItem(extractMetricValueFromAliases(executiveSummary || fullContent, localizedLabelVariants("topRisks")))
+    ? marketIntelligenceCanonicalState?.topRisks[0] ||
+      takeFirstListItem(extractMetricValueFromAliases(executiveSummary || fullContent, localizedLabelVariants("topRisks")))
     : "";
   const mainRisk =
     marketMainRisk ||
@@ -1939,7 +1962,23 @@ function getDecisionSummaryItems(
     (isMarketIntelligence
       ? ""
       : extractKeywordInsight(risks || fullContent, ["risk", "threat", "regulation", "competition"]));
-  const decisionConfidence = extractDecisionConfidenceValue(executiveRecommendation || fullContent);
+  // TASK #24 -- Market Intelligence reads its confidence directly from
+  // the canonical decision signal already resolved above
+  // (marketDecisionSignal's own source, resolveMarketIntelligenceExecutiveDecisionWithCanonicalState)
+  // instead of a second, independent extractDecisionConfidenceValue scan
+  // over the same content -- the two could otherwise report different
+  // numbers for the same report.
+  const marketDecisionConfidence = isMarketIntelligence
+    ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+        marketIntelligenceCanonicalState,
+        executiveSummary || executiveRecommendation,
+        dashboardLocale === "tr" ? "Turkish" : "English"
+      ).confidenceScore
+    : null;
+  const decisionConfidence =
+    marketDecisionConfidence !== null
+      ? `${marketDecisionConfidence}%`
+      : extractDecisionConfidenceValue(executiveRecommendation || fullContent);
   const positiveDrivers = extractDecisionDriverList(executiveRecommendation || fullContent, [
     "Positive signals",
     "Pozitif sinyaller",
@@ -2248,11 +2287,13 @@ function ExecutiveSummaryVisual({
   title,
   content,
   investmentScore,
+  marketIntelligenceCanonicalState = null,
   isMarketIntelligence = false,
 }: {
   title: string;
   content: string;
   investmentScore?: ReportInvestmentScore;
+  marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
   isMarketIntelligence?: boolean;
 }) {
   if (!title.toLowerCase().includes("executive summary") && !title.toLowerCase().includes("yönetici özeti")) {
@@ -2290,8 +2331,14 @@ function ExecutiveSummaryVisual({
   // Intelligence executive summary mentions when discussing entry
   // strategy, fabricating a "GO" verdict regardless of the report's real,
   // conservative recommendation.
+  // TASK #24 -- Investment Decision Snapshot now prefers the persisted
+  // canonical decision over re-parsing this section's own content.
   const marketDecision = isMarketIntelligence
-    ? resolveMarketIntelligenceExecutiveDecision(content, evidenceLocale)
+    ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+        marketIntelligenceCanonicalState,
+        content,
+        evidenceLocale
+      )
     : null;
   const resolvedDecision = isMarketIntelligence
     ? null
@@ -2515,6 +2562,7 @@ function ReportSectionVisual({
   isMarketIntelligence = false,
   majorPlayersContent = "",
   executiveSummaryContent = "",
+  marketIntelligenceCanonicalState = null,
 }: {
   title: string;
   content: string;
@@ -2535,6 +2583,7 @@ function ReportSectionVisual({
   // surface reads, rather than trusting its own section's possibly
   // stale/contradictory verdict line.
   executiveSummaryContent?: string;
+  marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
 }) {
   const normalizedTitle = title.toLowerCase();
   const evidenceLocale = getResponseLanguage(detectPdfPresentationLocale(content));
@@ -2570,7 +2619,17 @@ function ReportSectionVisual({
     // problem, not a cascade from above. Shared with the section-level
     // evidence badge (see resolveTamSamSomCascade's own comment) so the
     // two can never disagree.
-    const { values, magnitudes, tamResolved, samResolved, somResolved } = resolveTamSamSomCascade(content);
+    // TASK #24 -- constrainMarketSizingResolutionToCanonicalState can only
+    // ever turn a prose-parsed samResolved/somResolved=true into false
+    // (never the reverse), using the persisted canonical samMethod/
+    // somStatus -- so a SAM/SOM figure canonical state recorded as a
+    // disclosed assumption/pending explanation can never display as a
+    // resolved, nested bar just because this section's own prose happens
+    // to contain a number that parses as one.
+    const { values, magnitudes, tamResolved, samResolved, somResolved } = constrainMarketSizingResolutionToCanonicalState(
+      resolveTamSamSomCascade(content),
+      marketIntelligenceCanonicalState
+    );
     const maxMagnitude = Math.max(0, ...magnitudes.filter((magnitude): magnitude is number => magnitude !== null));
     const resolved = [tamResolved, samResolved, somResolved];
     const pendingLabels: Array<string | null> = [
@@ -3301,7 +3360,8 @@ function ReportSectionVisual({
     // executiveSummary content -- so Strategic Recommendations can never
     // display a decision Executive Summary itself disagrees with.
     const strategicRecommendationDecision = isMarketIntelligence
-      ? resolveMarketIntelligenceExecutiveDecision(
+      ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+          marketIntelligenceCanonicalState,
           executiveSummaryContent,
           detectPdfPresentationLocale(executiveSummaryContent || content) === "tr" ? "Turkish" : "English"
         )
@@ -4321,11 +4381,13 @@ function ExecutiveSnapshotPanel({
   section,
   investmentScore,
   reportQuality,
+  marketIntelligenceCanonicalState = null,
   isMarketIntelligence = false,
 }: {
   section: { field?: string; title: string; content: string };
   investmentScore?: ReportInvestmentScore;
   reportQuality?: ReportQualityScore;
+  marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
   isMarketIntelligence?: boolean;
 }) {
   if (!isExecutivePresentationSection(section)) {
@@ -4394,8 +4456,12 @@ function ExecutiveSnapshotPanel({
   // re-scanned for a keyword, never remapped), else an honest "—" with no
   // numeric confidence at all. Business Plan/Acquisition's own generic
   // buildExecutiveSnapshot values are completely untouched.
+  // TASK #24 -- this is the Decision/confidence/market-signal panel's own
+  // decision source: prefers the persisted canonical decision, falling
+  // back to the exact same prose parse for every degraded/legacy report.
   const marketDecision = isMarketIntelligence
-    ? resolveMarketIntelligenceExecutiveDecision(
+    ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+        marketIntelligenceCanonicalState,
         section.content,
         isMarketIntelligenceTurkish ? "Turkish" : "English"
       )
@@ -5527,6 +5593,14 @@ export default async function ReportDetailPage({
   // is the final defensive pass against any other internal artifact
   // buildLegalReportSections' reconstruction might reintroduce.
   const isMarketIntelligenceReport = report.type === "Market Analysis";
+  // TASK #24 -- computed once and threaded to every decision-critical
+  // surface in this page (Investment Decision Snapshot, Executive
+  // Snapshot, TAM/SAM/SOM evidence badge, Strategic Recommendations
+  // badge, ...) instead of each one independently calling
+  // readMarketIntelligenceCanonicalState(report.metadata) -- one source
+  // of truth per render, not N copies that could theoretically read
+  // report.metadata at different points if this were ever refactored.
+  const marketIntelligenceCanonicalState = readMarketIntelligenceCanonicalState(report.metadata);
   const visibleSections = uniqueReportSections
     .filter((section) => isUniversalCustomerFacingSection(section))
     .map((section) => ({
@@ -5542,7 +5616,7 @@ export default async function ReportDetailPage({
   const decisionSummaryItems = getDecisionSummaryItems(
     visibleSections,
     isMarketIntelligenceReport,
-    readMarketIntelligenceCanonicalState(report.metadata)
+    marketIntelligenceCanonicalState
   );
   const decisionSignalItem =
     decisionSummaryItems.find((item) => item.label === "Decision Signal") ||
@@ -5770,6 +5844,7 @@ export default async function ReportDetailPage({
                                 executiveSummaryContent={
                                   visibleSections.find((entry) => entry.field === "executiveSummary")?.content
                                 }
+                                marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
                               />
                             ) : null}
                           </div>
@@ -6165,7 +6240,7 @@ export default async function ReportDetailPage({
 	                                </span>
 	                                {!isLegalReport ? (
 	                                  <div className="mt-2">
-	                                    <EvidenceBadge level={getDashboardSectionEvidence(section)} locale={reportEvidenceLocale} market={report.type === "Market Analysis"} />
+	                                    <EvidenceBadge level={getDashboardSectionEvidence(section, marketIntelligenceCanonicalState)} locale={reportEvidenceLocale} market={report.type === "Market Analysis"} />
 	                                  </div>
 	                                ) : null}
 	                                <h2 className="mt-3 text-2xl font-semibold tracking-[-0.025em] text-white">
@@ -6190,12 +6265,14 @@ export default async function ReportDetailPage({
                                 title={section.title}
                                 content={section.content}
                                 investmentScore={report.investmentScore}
+                                marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
                                 isMarketIntelligence={report.type === "Market Analysis"}
                               />
                               <ExecutiveSnapshotPanel
                                 section={section}
                                 investmentScore={report.investmentScore}
                                 reportQuality={report.metadata?.reportQuality}
+                                marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
                                 isMarketIntelligence={report.type === "Market Analysis"}
                               />
                               {/* CRITICAL FIX -- confirmed live: the Executive Decision
@@ -6237,6 +6314,7 @@ export default async function ReportDetailPage({
                                 executiveSummaryContent={
                                   visibleSections.find((entry) => entry.field === "executiveSummary")?.content
                                 }
+                                marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
                               />
                               {/* Card-first sections (see cardFirstReportFields) already
                                   surface their COMPLETE content via a dedicated visual

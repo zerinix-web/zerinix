@@ -57,7 +57,19 @@ import {
   type MarketIntelligenceExecutiveDecision,
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
 
-export const MARKET_INTELLIGENCE_CANONICAL_STATE_VERSION = 1;
+// TASK #24 -- bumped from 1 to 2: added why/missingEvidence/
+// whatWouldChangeThisDecision/immediateNextAction (see
+// MarketIntelligenceCanonicalState below) so the Executive Decision
+// card's "Next Action" -- explicitly named in this task's audit -- has a
+// canonical source instead of falling back to prose extraction even when
+// canonical state is otherwise available. Safe to bump with zero
+// migration concern: no report persisted before this task carries ANY
+// canonical state at all (confirmed against the real persisted report
+// used throughout this session), so there is no existing v1 data to
+// stop reading -- readMarketIntelligenceCanonicalState's version gate
+// means a hypothetical v1 object would simply be treated as absent
+// (identical to a legacy report), never partially trusted.
+export const MARKET_INTELLIGENCE_CANONICAL_STATE_VERSION = 2;
 
 // A lean projection of MarketPlanningEstimate -- every field a reader-
 // facing surface actually needs to show TAM/SAM/SOM and their evidence
@@ -108,6 +120,21 @@ export type MarketIntelligenceCanonicalState = {
   confidenceDirection: ExecutiveDecisionBrief["confidenceDirection"];
   topRisks: string[];
   topReasons: string[];
+  // TASK #24 -- the Executive Decision card's remaining prose-derived
+  // fields (its "Why", "Missing Evidence", "What Would Change This
+  // Decision", and -- explicitly named in this task's audit -- "Next
+  // Action"). Each is already a single, decision-consistent sentence
+  // ExecutiveDecisionBrief computed once at generation time (e.g.
+  // immediateNextAction "must match the decision -- never 'run a pilot'/
+  // 'execute' under NO_GO", per its own type comment); persisting them
+  // verbatim closes the same class of drift risk as `decision` itself,
+  // for the one card field this task found still falling back to prose
+  // extraction (extractMetricValueFromAliases) even when canonical state
+  // was otherwise available.
+  why: string;
+  missingEvidence: string[];
+  whatWouldChangeThisDecision: string;
+  immediateNextAction: string;
   // The 3-pillar gate resolveDecisionCriticalEvidenceState (route.ts)
   // already computes from the graph -- persisted verbatim so "Validation
   // Required -> Verified" drift is impossible: a reader on reload sees
@@ -157,6 +184,10 @@ export function buildMarketIntelligenceCanonicalState(input: {
     confidenceDirection: decisionBrief.confidenceDirection,
     topRisks: [...decisionBrief.topRisks],
     topReasons: [...decisionBrief.topReasons],
+    why: decisionBrief.why,
+    missingEvidence: [...decisionBrief.missingEvidence],
+    whatWouldChangeThisDecision: decisionBrief.whatWouldChangeThisDecision,
+    immediateNextAction: decisionBrief.immediateNextAction,
     decisionCriticalEvidence: { ...decisionCriticalEvidence },
     marketSizing: planningEstimate
       ? {
@@ -316,4 +347,59 @@ export function getMarketIntelligenceCanonicalStateAvailability(
   return readMarketIntelligenceCanonicalStateStatus(metadata) === "unavailable_no_graph"
     ? "unavailable_degraded"
     : "legacy_unknown";
+}
+
+// TASK #24 -- TAM/SAM/SOM decision implications. Every UI/PDF surface
+// that shows a TAM/SAM/SOM "resolved" (Data Confirmed) vs "Validation
+// Required" badge derives that boolean from the SECTION'S OWN PROSE
+// (parsing displayed dollar figures back into magnitudes and checking
+// SAM <= TAM, SOM <= SAM) -- a check that is completely independent of
+// whether canonical state's own samMethod/somStatus say the figure is
+// actually evidence-derived or a disclosed default assumption/pending
+// explanation. A prose-formatting quirk that happens to make an
+// ASSUMED SAM or a PENDING SOM look like a resolvable number to that
+// magnitude check would let this surface display "resolved"/"verified"
+// for a fact canonical state explicitly does not consider resolved --
+// the exact "reconstructs a stronger... fact" failure mode this task
+// audits for.
+//
+// This is a pure, one-directional NARROWING function: canonical state
+// can only ever turn a prose-parsed samResolved/somResolved=true into
+// false, never the reverse. It has no opinion at all when canonical
+// state (or its marketSizing) is unavailable -- the existing prose-only
+// resolution is untouched for every degraded/legacy report, preserving
+// current behavior exactly. Applied at every TAM/SAM/SOM resolution call
+// site across page.tsx, Planner.tsx (web + PDF), and ReportPdfButton.tsx
+// so a single, shared rule replaces four independent copy-pasted checks.
+export function constrainMarketSizingResolutionToCanonicalState<
+  T extends {
+    samResolved: boolean;
+    somResolved: boolean;
+    tamResolved?: boolean;
+    allResolved?: boolean;
+  }
+>(resolution: T, canonicalState: MarketIntelligenceCanonicalState | null): T {
+  const marketSizing = canonicalState?.marketSizing;
+  if (!marketSizing) return resolution;
+
+  const samResolved = resolution.samResolved && marketSizing.samMethod === "evidenceDerived";
+  const somResolved = resolution.somResolved && marketSizing.somStatus === "calculated";
+
+  return {
+    ...resolution,
+    samResolved,
+    somResolved,
+    // `allResolved` (when the caller's own shape has one -- both
+    // resolveTamSamSomCascade local variants and the shared
+    // resolveMarketSizingCascade all compute it as tamResolved &&
+    // samResolved && somResolved) must be recomputed from the NEWLY
+    // constrained sam/somResolved, never left at its pre-constraint
+    // value -- otherwise a caller reading only `allResolved` (e.g. an
+    // evidence-badge dispatcher) would still see a stale "fully
+    // resolved" verdict even though this function just downgraded one
+    // of its inputs.
+    ...("allResolved" in resolution
+      ? { allResolved: Boolean(resolution.tamResolved) && samResolved && somResolved }
+      : {}),
+  };
 }

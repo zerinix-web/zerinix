@@ -157,9 +157,13 @@ test("EvidenceBadge accepts a 'market' prop in both files and uses getMarketEvid
 });
 
 test("the main per-section EvidenceBadge (the badge shown on every section card) passes market={report.type === \"Market Analysis\"} in the dashboard view", () => {
+  // TASK #24 -- getDashboardSectionEvidence now also threads
+  // marketIntelligenceCanonicalState through (so a persisted samMethod/
+  // somStatus can narrow the TAM/SAM/SOM branch's own resolution) --
+  // the market={...} prop this test protects is unaffected.
   assert.match(
     dashboardReportSource,
-    /getDashboardSectionEvidence\(section\)\} locale=\{reportEvidenceLocale\} market=\{report\.type === "Market Analysis"\}/
+    /getDashboardSectionEvidence\(section, marketIntelligenceCanonicalState\)\} locale=\{reportEvidenceLocale\} market=\{report\.type === "Market Analysis"\}/
   );
 });
 

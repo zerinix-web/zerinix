@@ -396,7 +396,10 @@ test("DRIFT CHECK: validateVendorCandidate's 5-path existence bar is untouched -
 test("DRIFT CHECK: P0 FIX #1 (TAM/SAM/SOM) and P0 FIX #2 (CAGR) are untouched by this pass", () => {
   const reportPresentationSource = readFileSync("app/lib/report-presentation.ts", "utf8");
   assert.match(reportPresentationSource, /export function resolveMarketSizingCascade\(/);
-  assert.match(pdfButtonSource, /const cascade = resolveMarketSizingCascade\(magnitudes\);/);
+  assert.match(
+    pdfButtonSource,
+    /const cascade = constrainMarketSizingResolutionToCanonicalState\(\s*\n\s*resolveMarketSizingCascade\(magnitudes\),\s*\n\s*readMarketIntelligenceCanonicalState\(report\.metadata\)\s*\n\s*\);/
+  );
 
   const routeSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
   assert.match(

@@ -131,7 +131,7 @@ test("PARITY: ReportPdfButton.tsx imports and calls the same canonical resolveMa
   );
   assert.match(
     pdfButtonSource,
-    /const cascade = resolveMarketSizingCascade\(magnitudes\);/,
+    /const cascade = constrainMarketSizingResolutionToCanonicalState\(\s*\n\s*resolveMarketSizingCascade\(magnitudes\),\s*\n\s*readMarketIntelligenceCanonicalState\(report\.metadata\)\s*\n\s*\);/,
     "the PDF's TAM/SAM/SOM section must resolve layers via the canonical function, not its own bespoke all-or-nothing check"
   );
   // The old all-or-nothing gate must be gone, not merely bypassed.
@@ -226,7 +226,7 @@ test("PARITY: Planner.tsx's own PDF export imports and calls the same canonical 
   );
   assert.match(
     plannerSource,
-    /const cascade = resolveMarketSizingCascade\(magnitudes\);/,
+    /const cascade = constrainMarketSizingResolutionToCanonicalState\(\s*\n\s*resolveMarketSizingCascade\(magnitudes\),\s*\n\s*marketIntelligenceCanonicalState\s*\n\s*\);/,
     "Planner.tsx's TAM/SAM/SOM section must resolve layers via the canonical function, not its own bespoke all-or-nothing check"
   );
   // The old all-or-nothing gate must be gone, not merely bypassed.

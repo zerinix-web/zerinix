@@ -305,13 +305,18 @@ for (const [label, source] of [
 }
 
 test("page.tsx: getDecisionSummaryItems reads Market Intelligence's real 'Immediate Next Action'/'Top 3 Risks' labeled fields before ever falling back to a bare keyword scan across the ENTIRE report (fullContent) -- the scan that could surface a wholly unrelated sentence as 'the' next action or main risk", () => {
+  // TASK #24 -- both tiles now prefer the persisted canonical-state field
+  // (immediateNextAction / topRisks[0], frozen at generation time to
+  // match the canonical decision) before ever falling back to this exact
+  // same labeled-field extraction, which remains the fallback for every
+  // report without a canonical state.
   assert.match(
     pageSource,
-    /const marketNextAction = isMarketIntelligence\s*\n\s*\? extractMetricValueFromAliases\([^,]+, localizedLabelVariants\("immediateNextAction"\)\)\s*\n\s*: "";/
+    /const marketNextAction = isMarketIntelligence\s*\n\s*\? marketIntelligenceCanonicalState\?\.immediateNextAction \|\|\s*\n\s*extractMetricValueFromAliases\([^,]+, localizedLabelVariants\("immediateNextAction"\)\)\s*\n\s*: "";/
   );
   assert.match(
     pageSource,
-    /const marketMainRisk = isMarketIntelligence\s*\n\s*\? takeFirstListItem\(extractMetricValueFromAliases\([^,]+, localizedLabelVariants\("topRisks"\)\)\)\s*\n\s*: "";/
+    /const marketMainRisk = isMarketIntelligence\s*\n\s*\? marketIntelligenceCanonicalState\?\.topRisks\[0\] \|\|\s*\n\s*takeFirstListItem\(extractMetricValueFromAliases\([^,]+, localizedLabelVariants\("topRisks"\)\)\)\s*\n\s*: "";/
   );
   // The generic fullContent keyword-scan fallback is now explicitly
   // skipped for Market Intelligence (isMarketIntelligence ? "" : ...),

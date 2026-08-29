@@ -155,7 +155,7 @@ test("STRATEGIC RECOMMENDATIONS remains MONITOR: unaffected by this fix, still r
   for (const source of [pageSource, plannerSource]) {
     assert.match(source, /const strategicRecommendationDecision = isMarketIntelligence/);
   }
-  assert.match(pdfButtonSource, /const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecision\(/);
+  assert.match(pdfButtonSource, /const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
   assert.equal(decision.decisionLabel, "MONITOR");
 });
 

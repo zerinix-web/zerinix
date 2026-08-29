@@ -73,10 +73,10 @@ import {
   extractExecutiveDecisionFromText,
   localizedLabelVariants,
 } from "@/app/lib/report-engine/executive-decision-brief";
-import { resolveMarketIntelligenceExecutiveDecision } from "@/app/lib/report-engine/executive-decision-vocabulary";
 import {
   readMarketIntelligenceCanonicalState,
   resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
+  constrainMarketSizingResolutionToCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
   repairReportLanguageSections,
@@ -5039,7 +5039,12 @@ export function buildStandardReportPdf({
           // gating (an unresolved TAM still withholds SAM/SOM here, same
           // as it always has), while no longer punishing SAM/TAM for an
           // unrelated, independently-missing SOM.
-          const cascade = resolveMarketSizingCascade(magnitudes);
+          // TASK #24 -- canonical state can only ever narrow (never
+          // widen) what this cascade treats as resolved.
+          const cascade = constrainMarketSizingResolutionToCanonicalState(
+            resolveMarketSizingCascade(magnitudes),
+            readMarketIntelligenceCanonicalState(report.metadata)
+          );
           const resolvedByIndex = [cascade.tamResolved, cascade.samResolved, cascade.somResolved];
 
           if (!cascade.tamResolved && !cascade.samResolved && !cascade.somResolved) {
@@ -5702,7 +5707,8 @@ export function buildStandardReportPdf({
           // bearing surface per this ticket's own requirement, so it
           // explicitly states the SAME canonical decision every other
           // surface reads, rather than asserting nothing at all.
-          const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecision(
+          const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+            readMarketIntelligenceCanonicalState(report.metadata),
             pdfSections.find((entry) => entry.field === "executiveSummary")?.content || "",
             pdfLocale === "tr" ? "Turkish" : "English"
           );

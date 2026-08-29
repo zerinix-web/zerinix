@@ -251,9 +251,22 @@ test("G) UI and PDF receive the same resolved sizing state: page.tsx's and Plann
   // function directly with already-extracted magnitudes -- structurally
   // impossible for the PDF's own nesting check to drift from the web
   // report's, since neither reimplements the math for PDF specifically.
-  for (const source of [plannerSource, pdfButtonSource]) {
+  // TASK #24 -- both PDF paths now also constrain the shared cascade's
+  // output against a persisted canonical samMethod/somStatus (narrowing
+  // only, never widening) -- see constrainMarketSizingResolutionToCanonicalState.
+  // Planner.tsx reads its already-in-scope marketIntelligenceCanonicalState
+  // (a ReportPanel prop); ReportPdfButton.tsx re-derives it from report.metadata.
+  for (const [source, canonicalStateExpression] of [
+    [plannerSource, "marketIntelligenceCanonicalState"],
+    [pdfButtonSource, "readMarketIntelligenceCanonicalState\\(report\\.metadata\\)"],
+  ]) {
     assert.match(source, /resolveMarketSizingCascade,/);
-    assert.match(source, /const cascade = resolveMarketSizingCascade\(magnitudes\);/);
+    assert.match(
+      source,
+      new RegExp(
+        `const cascade = constrainMarketSizingResolutionToCanonicalState\\(\\s*\\n\\s*resolveMarketSizingCascade\\(magnitudes\\),\\s*\\n\\s*${canonicalStateExpression}\\s*\\n\\s*\\);`
+      )
+    );
   }
 });
 

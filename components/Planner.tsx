@@ -153,11 +153,11 @@ import {
   getCanonicalDecisionLabel,
   reconcileMarketIntelligenceDecisionText,
   resolveCanonicalDecisionFromReportText,
-  resolveMarketIntelligenceExecutiveDecision,
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
 import {
   readMarketIntelligenceCanonicalState,
   resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
+  constrainMarketSizingResolutionToCanonicalState,
   type MarketIntelligenceCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
@@ -2718,7 +2718,10 @@ function getFinancialMetricDisplayLabel(metricLabel: string, evidence: EvidenceL
   return `Planning ${metricLabel}`;
 }
 
-function getSectionEvidenceLevel(section: ReportSection): EvidenceLevel {
+function getSectionEvidenceLevel(
+  section: ReportSection,
+  marketIntelligenceCanonicalState: MarketIntelligenceCanonicalState | null = null
+): EvidenceLevel {
   if (section.field === "sources" || section.field === "sourcesAssumptions") {
     return "verified";
   }
@@ -2728,7 +2731,7 @@ function getSectionEvidenceLevel(section: ReportSection): EvidenceLevel {
   // financialDashboard/unitEconomics below, which keep their prior,
   // unrelated Gross Margin-based derivation unchanged.
   if (section.field === "tamSamSom") {
-    return getTamSamSomSectionEvidence(section.content);
+    return getTamSamSomSectionEvidence(section.content, marketIntelligenceCanonicalState);
   }
 
   if (section.field === "financialDashboard" || section.field === "unitEconomics") {
@@ -2954,8 +2957,14 @@ function resolveTamSamSomCascade(content: string) {
 // [Estimated]/Planning Estimate figure -- a resolved-but-estimated stack
 // is a planning estimate, not verified data, and must not read as
 // confirmed either.
-function getTamSamSomSectionEvidence(content: string): EvidenceLevel {
-  const cascade = resolveTamSamSomCascade(content);
+function getTamSamSomSectionEvidence(
+  content: string,
+  marketIntelligenceCanonicalState: MarketIntelligenceCanonicalState | null = null
+): EvidenceLevel {
+  const cascade = constrainMarketSizingResolutionToCanonicalState(
+    resolveTamSamSomCascade(content),
+    marketIntelligenceCanonicalState
+  );
 
   if (!cascade.allResolved) {
     return "validationRequired";
@@ -4396,10 +4405,12 @@ function KpiValueContent({ value }: { value: string }) {
 function ExecutiveSummaryVisual({
   section,
   investmentScore,
+  marketIntelligenceCanonicalState = null,
   isMarketIntelligence = false,
 }: {
   section: ReportSection;
   investmentScore?: ReportInvestmentScore;
+  marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
   isMarketIntelligence?: boolean;
 }) {
   if (section.field !== "executiveSummary") {
@@ -4439,8 +4450,14 @@ function ExecutiveSummaryVisual({
   // Intelligence executive summary mentions when discussing entry
   // strategy, fabricating a "GO" verdict regardless of the report's real,
   // conservative recommendation.
+  // TASK #24 -- Investment Decision Snapshot (web) now prefers the
+  // persisted canonical decision over re-parsing this section's content.
   const marketDecision = isMarketIntelligence
-    ? resolveMarketIntelligenceExecutiveDecision(section.content, evidenceLocale)
+    ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+        marketIntelligenceCanonicalState,
+        section.content,
+        evidenceLocale
+      )
     : null;
   const resolvedDecision = isMarketIntelligence
     ? null
@@ -4472,7 +4489,7 @@ function ExecutiveSummaryVisual({
       label: "Decision",
       value: recommendation,
       accent: "from-emerald-300/20 to-teal-300/5",
-      evidence: getSectionEvidenceLevel(section),
+      evidence: getSectionEvidenceLevel(section, marketIntelligenceCanonicalState),
     },
     {
       // CRITICAL FIX -- confirmed live: Market Intelligence's
@@ -4650,6 +4667,7 @@ function PremiumSectionVisual({
   isMarketIntelligence = false,
   majorPlayersContent = "",
   executiveSummaryContent = "",
+  marketIntelligenceCanonicalState = null,
 }: {
   section: ReportSection;
   investmentScore?: ReportInvestmentScore;
@@ -4669,6 +4687,7 @@ function PremiumSectionVisual({
   // surface reads, rather than trusting its own section's possibly
   // stale/contradictory verdict line.
   executiveSummaryContent?: string;
+  marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
 }) {
   const field = section.field;
 
@@ -4717,7 +4736,13 @@ function PremiumSectionVisual({
     // own data problem, not a cascade from above. Shared with the
     // section-level evidence badge (see resolveTamSamSomCascade's own
     // comment) so the two can never disagree.
-    const { magnitudes, tamResolved, samResolved, somResolved } = resolveTamSamSomCascade(section.content);
+    // TASK #24 -- canonical state can only ever narrow (never widen) what
+    // this cascade treats as resolved -- see
+    // constrainMarketSizingResolutionToCanonicalState's own comment.
+    const { magnitudes, tamResolved, samResolved, somResolved } = constrainMarketSizingResolutionToCanonicalState(
+      resolveTamSamSomCascade(section.content),
+      marketIntelligenceCanonicalState
+    );
     const maxMagnitude = Math.max(0, ...magnitudes.filter((magnitude): magnitude is number => magnitude !== null));
     const resolved = [tamResolved, samResolved, somResolved];
     const pendingLabels: Array<string | null> = [
@@ -4772,7 +4797,7 @@ function PremiumSectionVisual({
                 {isResolved && magnitude !== null ? (
                   <>
                     <div className="mt-3">
-                      <EvidenceBadge level={getSectionEvidenceLevel(section)} locale={evidenceLocale} market={isMarketIntelligence} />
+                      <EvidenceBadge level={getSectionEvidenceLevel(section, marketIntelligenceCanonicalState)} locale={evidenceLocale} market={isMarketIntelligence} />
                     </div>
                     <p className="mt-5 truncate whitespace-nowrap text-3xl font-semibold tracking-tight text-white">
                       {row.value}
@@ -5395,7 +5420,8 @@ if (field === "swotAnalysis") {
     // the SAME executiveSummary content, so this section can never
     // display a decision Executive Summary itself disagrees with.
     const strategicRecommendationDecision = isMarketIntelligence
-      ? resolveMarketIntelligenceExecutiveDecision(
+      ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+          marketIntelligenceCanonicalState,
           executiveSummaryContent,
           detectPdfPresentationLocale(executiveSummaryContent || section.content) === "tr" ? "Turkish" : "English"
         )
@@ -7206,7 +7232,7 @@ const ReportSectionCard = memo(
                 {section.title}
               </h3>
               <div className="flex w-fit flex-wrap items-center gap-2">
-                <EvidenceBadge level={getSectionEvidenceLevel(section)} locale={sectionEvidenceLocale} market={isMarketIntelligence} />
+                <EvidenceBadge level={getSectionEvidenceLevel(section, marketIntelligenceCanonicalState)} locale={sectionEvidenceLocale} market={isMarketIntelligence} />
                 <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
                   {sectionPdfLocale === "tr" ? "Bölüm" : "Section"} {String(index + 1).padStart(2, "0")}
                 </span>
@@ -7217,6 +7243,7 @@ const ReportSectionCard = memo(
                 <ExecutiveSummaryVisual
                   section={section}
                   investmentScore={investmentScore}
+                  marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
                   isMarketIntelligence={isMarketIntelligence}
                 />
               ) : null}
@@ -7248,6 +7275,7 @@ const ReportSectionCard = memo(
                   isMarketIntelligence={isMarketIntelligence}
                   majorPlayersContent={majorPlayersContent}
                   executiveSummaryContent={executiveSummaryContent}
+                  marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
                 />
               ) : null}
               {/* Card-first sections (see cardFirstReportFields) already
@@ -8327,8 +8355,17 @@ const ReportPanel = memo(function ReportPanel({
         // resolveMarketIntelligenceExecutiveDecision -- the ONE
         // canonical decision/confidence source for Market Intelligence,
         // which never falls through to either unsafe scan.
+        // TASK #24 -- Planner.tsx's own Executive Decision PDF card
+        // (getExecutiveDecisionCardLayout) prefers the persisted
+        // canonical decision, fed by the SAME ReportPanel-level
+        // marketIntelligenceCanonicalState the web snapshot and cover
+        // page already use.
         const marketDecision = isMarketIntelligence
-          ? resolveMarketIntelligenceExecutiveDecision(content, pdfLocale === "tr" ? "Turkish" : "English")
+          ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+              marketIntelligenceCanonicalState,
+              content,
+              pdfLocale === "tr" ? "Turkish" : "English"
+            )
           : null;
         const decisionMatch = extractExecutiveDecisionFromText(content);
         const decisionLabel = marketDecision
@@ -9009,7 +9046,8 @@ const ReportPanel = memo(function ReportPanel({
           // that sentence from the cards below, but this remains a
           // decision-bearing surface, so it explicitly states the SAME
           // canonical decision every other surface reads.
-          const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecision(
+          const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+            marketIntelligenceCanonicalState,
             pdfSections.find((entry) => entry.field === "executiveSummary")?.content || "",
             pdfLocale === "tr" ? "Turkish" : "English"
           );
@@ -9161,7 +9199,12 @@ const ReportPanel = memo(function ReportPanel({
           // is also resolved and correctly nested -- an unresolved TAM
           // still withholds SAM/SOM exactly as before, while SOM alone
           // being unresolved no longer punishes an already-resolved TAM/SAM.
-          const cascade = resolveMarketSizingCascade(magnitudes);
+          // TASK #24 -- canonical state can only ever narrow (never
+          // widen) what this cascade treats as resolved.
+          const cascade = constrainMarketSizingResolutionToCanonicalState(
+            resolveMarketSizingCascade(magnitudes),
+            marketIntelligenceCanonicalState
+          );
           const resolvedByIndex = [cascade.tamResolved, cascade.samResolved, cascade.somResolved];
 
           if (!cascade.tamResolved && !cascade.samResolved && !cascade.somResolved) {

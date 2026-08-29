@@ -427,7 +427,11 @@ test("I2. a legacy report (no canonical state) still resolves a decision via the
 });
 
 test("I3. a real (non-legacy) version number matches the module's own exported constant", () => {
-  assert.equal(MARKET_INTELLIGENCE_CANONICAL_STATE_VERSION, 1);
+  // TASK #24 -- bumped 1 -> 2 (why/missingEvidence/whatWouldChangeThisDecision/
+  // immediateNextAction added); zero real data affected, see
+  // market-intelligence-canonical-state-consumption-audit.test.mjs's own
+  // SCHEMA test for the full rationale.
+  assert.equal(MARKET_INTELLIGENCE_CANONICAL_STATE_VERSION, 2);
   const built = buildMarketIntelligenceCanonicalState({
     graph: realGraphFixture(),
     decisionCriticalEvidence: { marketSizingResolved: true, competitiveEvidenceResolved: true, obtainableShareResolved: true },

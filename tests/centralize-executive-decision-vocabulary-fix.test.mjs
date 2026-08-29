@@ -297,7 +297,22 @@ test("ReportPdfButton.tsx (PDF layout) now deliberately imports the canonical de
     new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url),
     "utf8"
   );
-  assert.match(pdfSource, /from "@\/app\/lib\/report-engine\/executive-decision-vocabulary"/);
+  // TASK #24 -- ReportPdfButton.tsx's last remaining bare
+  // resolveMarketIntelligenceExecutiveDecision call site (the Strategic
+  // Recommendations badge) was upgraded to
+  // resolveMarketIntelligenceExecutiveDecisionWithCanonicalState, so it no
+  // longer imports anything directly from executive-decision-vocabulary --
+  // the canonical-state module is now the sole decision-resolution entry
+  // point for this file, and it internally still calls
+  // resolveMarketIntelligenceExecutiveDecision from that same vocabulary
+  // module for every report without a persisted canonical state.
+  assert.doesNotMatch(pdfSource, /from "@\/app\/lib\/report-engine\/executive-decision-vocabulary"/);
+  assert.match(pdfSource, /from "@\/app\/lib\/report-engine\/market-intelligence-canonical-state"/);
+  const canonicalStateModuleSource = readFileSync(
+    new URL("../app/lib/report-engine/market-intelligence-canonical-state.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(canonicalStateModuleSource, /from "@\/app\/lib\/report-engine\/executive-decision-vocabulary"/);
 });
 
 test("report generation prompts, financial calculations, and domain routing are untouched (drift check)", async () => {
