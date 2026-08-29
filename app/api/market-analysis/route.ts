@@ -69,7 +69,12 @@ import {
 } from "@/app/lib/report-engine/market-intelligence-presentation";
 import { assertNoDecisionContradiction } from "@/app/lib/report-engine/decision-contradiction-gate";
 import { assertReportIsolation } from "@/app/lib/report-engine/report-isolation-validator";
-import { assertNoOrphanEvidenceReferences } from "@/app/lib/report-engine/evidence-reference-integrity";
+import {
+  assertNoOrphanEvidenceReferences,
+  assertNoDuplicateCitationSources,
+  assertCitationsResolveInBibliography,
+  neutralizeUnverifiableEvidenceReferences,
+} from "@/app/lib/report-engine/evidence-reference-integrity";
 import {
   assertStrategicRecommendationsNumbering,
   findStrategicRecommendationsStructureIssues,
@@ -86,7 +91,7 @@ import {
   assertExecutiveQualityGate,
   runExecutiveQualityGate,
 } from "@/app/lib/report-engine/executive-quality-gate";
-import { enforceInlineRawUrlLimitAcrossSections } from "@/app/lib/report-engine/inline-source-url-limit";
+import { enforceInlineRawUrlLimit, buildSourceLookupByUrl } from "@/app/lib/report-engine/inline-source-url-limit";
 import {
   buildMarketIntelligenceBibliography,
   buildMarketIntelligenceGraph,
@@ -1448,20 +1453,64 @@ function ensureMarketReportQuality(
     }
   }
 
+  // Enforce the same one-inline-URL ceiling assertExecutiveQualityGate's
+  // no_long_source_lists check is about to require, rather than letting a
+  // section that wrote several raw citation URLs inline fail generation
+  // outright. Only rewrites additional URLs into bracketed references and
+  // moves any without a known record into a running extra-lines list --
+  // see inline-source-url-limit.ts for exactly what is (and isn't) done.
+  //
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence citation
+  // integrity audit): this used to run AFTER the deterministic bibliography
+  // below via enforceInlineRawUrlLimitAcrossSections's own all-in-one
+  // sources-field handling. Its "known source" branch rewrites a
+  // second-or-later inline URL in any body field into a real, valid [R#]
+  // bracket citation (`[${known.evidenceId}]`) -- but the bibliography had
+  // already finished scanning `deduped` for [R#] tags by that point, so
+  // that newly-introduced, perfectly valid (non-orphan) citation never
+  // received its own "Reference: [R#]" entry: it would pass
+  // assertNoOrphanEvidenceReferences below (a real, citable id) while
+  // remaining permanently absent from the one bibliography a reader --
+  // and the deterministic self-consistency check just below -- actually
+  // resolves citations against. Rewriting URLs FIRST, then building the
+  // bibliography from that output, guarantees every [R#] that survives
+  // into the final report body, however it got there, is captured by the
+  // same single bibliography pass. Inlined here (rather than keeping the
+  // shared enforceInlineRawUrlLimitAcrossSections wrapper, whose own
+  // sources-field-folding step assumes it runs last) so the shared,
+  // report-type-agnostic module and every other caller of it are
+  // untouched.
+  const inlineUrlSourceLookup = buildSourceLookupByUrl(graph?.sources);
+  const inlineUrlExtraLines: string[] = [];
+  for (const field of reportFields) {
+    if (field === "sources") continue;
+    const { content, extraSourceLines } = enforceInlineRawUrlLimit(
+      deduped[field],
+      1,
+      inlineUrlSourceLookup
+    );
+    deduped[field] = content;
+    inlineUrlExtraLines.push(...extraSourceLines);
+  }
+
   // The final, deterministic Sources bibliography: every [R#] reference
   // actually cited anywhere in the now-fully-normalized report body,
   // resolved to its real record in the verified evidence registry --
   // never the model's own free-form citation prose, never a category+
   // count compression. Built here (after dedup/consistency/filler/
-  // degradation have all finished mutating the other fields) so it
-  // reflects exactly the citations that survived into the truly-final
-  // report, not an intermediate draft. Falls back to the previous
-  // category+count Evidence Summary only when there is no graph at all
-  // (a cached/degraded report with nothing to build a bibliography from),
-  // preserving prior behavior for that one edge case.
+  // degradation/inline-URL-rewriting have all finished mutating the other
+  // fields) so it reflects exactly the citations that survived into the
+  // truly-final report, not an intermediate draft. Falls back to the
+  // previous category+count Evidence Summary only when there is no graph
+  // at all (a cached/degraded report with nothing to build a bibliography
+  // from), preserving prior behavior for that one edge case.
   deduped.sources = graph
     ? buildMarketIntelligenceBibliography(deduped, graph, language)
     : buildEvidenceSummary(deduped.sources, language);
+
+  if (inlineUrlExtraLines.length > 0) {
+    deduped.sources = `${deduped.sources}\n${inlineUrlExtraLines.join("\n")}`.trim();
+  }
 
   // Deterministic closing verdict, built from the exact same brief object
   // as the opening Executive Decision layer -- appended to Sources because
@@ -1471,22 +1520,6 @@ function ensureMarketReportQuality(
   if (marketExecutiveDecisionBrief) {
     deduped.sources = `${deduped.sources}\n\n${buildMarketFinalVerdictParagraph(marketExecutiveDecisionBrief, language)}`.trim();
   }
-
-  // Enforce the same one-inline-URL ceiling assertExecutiveQualityGate's
-  // no_long_source_lists check is about to require, rather than letting a
-  // section that wrote several raw citation URLs inline fail generation
-  // outright. Only rewrites additional URLs into bracketed references and
-  // moves any without a known record into Sources -- see
-  // inline-source-url-limit.ts for exactly what is (and isn't) done.
-  Object.assign(
-    deduped,
-    enforceInlineRawUrlLimitAcrossSections({
-      sections: deduped,
-      sourceFields: ["sources"],
-      maxInlineUrls: 1,
-      knownSources: graph?.sources,
-    })
-  );
 
   // Fail fast instead of silently returning a mixed report: throws if any
   // section contains Business Idea Validation's or Strategic Advisory's
@@ -1501,8 +1534,53 @@ function ensureMarketReportQuality(
   // `graph` for the same reason the other graph-dependent checks are --
   // a cached/degraded report with no graph has nothing to validate
   // references against.
+  //
+  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence citation
+  // integrity audit): the `graph` branch above was previously the ONLY
+  // handling for [R#] markers -- when graph is unavailable, nothing ran
+  // at all, and the model's freeform [R#] citations (executiveSummary,
+  // majorPlayers, competitiveLandscape, strategicRecommendations, ...)
+  // shipped to the reader completely unverified, sitting next to a
+  // Sources field that had already degraded to a generic category+count
+  // summary (buildEvidenceSummary, above) with no relationship to those
+  // specific reference numbers. Confirmed against a real persisted report
+  // reconstructed from a graph-less cache hit: six distinct [R#] markers
+  // ([R3][R4][R5][R6][R12][R39]) appeared across the report body while
+  // Sources read "1 verified source used" -- every one was an
+  // unresolvable dead end. With no registry to check them against, a
+  // [R#] marker in this state cannot be told apart from a hallucinated
+  // reference number, so it must not reach the reader looking like a
+  // resolvable citation -- see neutralizeUnverifiableEvidenceReferences's
+  // own comment for why the number itself is dropped, not preserved.
   if (graph) {
     assertNoOrphanEvidenceReferences(deduped, graph.citableEvidenceIds);
+
+    // Fail fast instead of shipping two separate bibliography entries
+    // (two different [R#] numbers) for what is, by exact title and
+    // publisher, the same underlying document reached via two different
+    // URLs -- see assertNoDuplicateCitationSources's own comment for why
+    // this match key can never incorrectly merge genuinely distinct
+    // evidence. Detection only: this never merges or mutates
+    // graph.sources itself, it only fails generation so the underlying
+    // research-pipeline duplicate can be investigated and fixed at its
+    // source rather than shipped to a reader as two citations.
+    assertNoDuplicateCitationSources(graph.sources);
+
+    // Fail fast instead of shipping a report where a citation is a real,
+    // registry-valid evidence id (just proven non-orphan above) but still
+    // has no "Reference: [R#]" entry in the actual persisted Sources text
+    // -- the one place a reader (and every UI/PDF renderer, which all
+    // read this exact persisted string with no numbering logic of their
+    // own) can resolve it against. This is the runtime invariant that
+    // makes "UI and PDF resolve citation IDs from the same persisted
+    // canonical mapping" true by construction: as long as this passes,
+    // every current and future renderer that only ever displays this
+    // text inherits a complete, self-consistent citation mapping for
+    // free, with nothing left for it to independently derive or
+    // renumber.
+    assertCitationsResolveInBibliography(deduped, deduped.sources);
+  } else {
+    Object.assign(deduped, neutralizeUnverifiableEvidenceReferences(deduped, language));
   }
 
   // Fail generation rather than ship a report whose Executive Decision
