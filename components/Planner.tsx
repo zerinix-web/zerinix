@@ -6336,6 +6336,15 @@ function getRiskIndicatorClass(level: string) {
     return "border-amber-300/25 bg-amber-300/10 text-amber-100";
   }
 
+  // CRITICAL FIX (Task #20) -- see page.tsx's own identical function for
+  // the full rationale: a risk dimension with no defensible severity
+  // signal must never share this file's "Low" (safe-looking teal)
+  // styling -- that would visually claim "checked, found safe" for
+  // something never actually evaluated.
+  if (level === "Validation Needed" || level === "Doğrulama Gerekli") {
+    return "border-white/10 bg-white/[0.04] text-zinc-300";
+  }
+
   return "border-teal-300/25 bg-teal-300/10 text-teal-100";
 }
 
@@ -6496,15 +6505,55 @@ function ExecutiveSnapshotPanel({
     ? extractMetricValueFromAliases(section.content, localizedLabelVariants("immediateNextAction")) ||
       snapshot.nextAction
     : snapshot.nextAction;
+  // CRITICAL FIX (Task #20) -- see page.tsx's own identical block for the
+  // full rationale: snapshot.riskLevel's generic full-content keyword
+  // scan is not a principled Market-Intelligence-specific derivation --
+  // a coincidental match elsewhere in the text is not a defensible
+  // severity signal.
   const marketRiskLevel = isMarketIntelligence
     ? (() => {
         const severity = extractRiskLevel(marketMainRisk);
         if (severity === "High") return "High";
         if (severity === "Moderate") return "Medium";
         if (severity === "Low") return "Low";
-        return snapshot.riskLevel;
+        return isMarketIntelligenceTurkish ? "Doğrulama Gerekli" : "Validation Needed";
       })()
     : snapshot.riskLevel;
+  // CRITICAL FIX (Task #20) -- see page.tsx's own identical block for the
+  // full rationale: snapshot.riskHeatmap is built entirely from
+  // Business-Plan/startup risk categories Market Intelligence never
+  // discusses, silently defaulting every category to "Low" purely
+  // because its keyword never appeared. Rebuilt from the same canonical
+  // Top 3 Risks list Main Risk already reads, falling back to a single
+  // row reusing the already-resolved Main Risk/Risk Level so the heatmap
+  // can never disagree with the tile next to it.
+  const marketRiskHeatmap = isMarketIntelligence
+    ? (() => {
+        const topRisksBlock = extractMetricValueFromAliases(section.content, localizedLabelVariants("topRisks"));
+        const riskItems = topRisksBlock
+          ? topRisksBlock
+              .split("\n")
+              .map((line) => line.trim().replace(/^[-*•]\s+/, "").replace(/^\d+[.)]\s+/, ""))
+              .filter((line) => line.length > 8)
+              .slice(0, 3)
+          : [];
+
+        if (riskItems.length > 0) {
+          return riskItems.map((item, index) => ({
+            label: `${isMarketIntelligenceTurkish ? "Risk" : "Risk"} ${index + 1}`,
+            level:
+              extractRiskLevel(item) || (isMarketIntelligenceTurkish ? "Doğrulama Gerekli" : "Validation Needed"),
+          }));
+        }
+
+        return [
+          {
+            label: isMarketIntelligenceTurkish ? "Ana Risk" : "Main Risk",
+            level: marketRiskLevel,
+          },
+        ];
+      })()
+    : snapshot.riskHeatmap;
   const groups = [
     { label: labels.why, items: snapshot.why },
     { label: labels.mainRisks, items: snapshot.risks },
@@ -6604,7 +6653,7 @@ function ExecutiveSnapshotPanel({
             {labels.riskHeatmap}
           </p>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {snapshot.riskHeatmap.map((risk) => (
+            {marketRiskHeatmap.map((risk) => (
               <div key={risk.label} className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2">
                 <span className="text-xs text-zinc-300">{risk.label}</span>
                 <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getRiskIndicatorClass(risk.level)}`}>
@@ -7659,6 +7708,60 @@ const ReportPanel = memo(function ReportPanel({
             ? localizePdfPresentationLabel("Validation Required", pdfLocale)
             : `${marketConfidenceScore}%`;
 
+        // CRITICAL FIX (Task #20) -- confirmed live: the Risk Heatmap
+        // panel drawn below (see its own "executiveSnapshot.riskHeatmap"
+        // fallback) was never gated for Market Intelligence -- it drew
+        // Business-Plan/startup risk categories ("CAC", "Capital
+        // efficiency", "Execution", ...) that Market Intelligence's own
+        // prompts never discuss, silently defaulting every category to
+        // "Low" purely because its keyword never appeared. Rebuilt from
+        // the same canonical Top 3 Risks list the web report's own Risk
+        // Posture tile reads, falling back to a single row reusing the
+        // resolved Main Risk/severity so the heatmap can never disagree
+        // with any other Risk Level surface for this same report.
+        const marketMainRiskForHeatmap = isMarketIntelligence
+          ? takeFirstListItem(extractMetricValueFromAliases(marketExecutiveSummaryContent, localizedLabelVariants("topRisks"))) ||
+            executiveSnapshot.mainRisk
+          : "";
+        const marketRiskLevelForHeatmap = isMarketIntelligence
+          ? (() => {
+              const severity = extractRiskLevel(marketMainRiskForHeatmap);
+              if (severity === "High") return "High";
+              if (severity === "Moderate") return "Medium";
+              if (severity === "Low") return "Low";
+              return pdfLocale === "tr" ? "Doğrulama Gerekli" : "Validation Needed";
+            })()
+          : "";
+        const marketRiskHeatmap = isMarketIntelligence
+          ? (() => {
+              const topRisksBlock = extractMetricValueFromAliases(
+                marketExecutiveSummaryContent,
+                localizedLabelVariants("topRisks")
+              );
+              const riskItems = topRisksBlock
+                ? topRisksBlock
+                    .split("\n")
+                    .map((line) => line.trim().replace(/^[-*•]\s+/, "").replace(/^\d+[.)]\s+/, ""))
+                    .filter((line) => line.length > 8)
+                    .slice(0, 3)
+                : [];
+
+              if (riskItems.length > 0) {
+                return riskItems.map((item, index) => ({
+                  label: `Risk ${index + 1}`,
+                  level: extractRiskLevel(item) || (pdfLocale === "tr" ? "Doğrulama Gerekli" : "Validation Needed"),
+                }));
+              }
+
+              return [
+                {
+                  label: pdfLocale === "tr" ? "Ana Risk" : "Main Risk",
+                  level: marketRiskLevelForHeatmap,
+                },
+              ];
+            })()
+          : executiveSnapshot.riskHeatmap;
+
         const metricCards = isRealEstateReport
           ? [
               ["Decision", executiveSnapshot.decision],
@@ -7801,7 +7904,7 @@ const ReportPanel = memo(function ReportPanel({
                       ? "Partial"
                       : "Weak",
             }))
-          : executiveSnapshot.riskHeatmap).forEach((risk, index) => {
+          : marketRiskHeatmap).forEach((risk, index) => {
           const rowY = heatmapY + 14 + index * 5;
           pdf.setFontSize(6.4);
           pdf.setTextColor("#d4d4d8");
@@ -7811,7 +7914,9 @@ const ReportPanel = memo(function ReportPanel({
               ? "#7f1d1d"
               : risk.level === "Medium" || risk.level === "Partial"
                 ? "#713f12"
-                : risk.level.toLowerCase() === "unknown"
+                : risk.level.toLowerCase() === "unknown" ||
+                    risk.level === "Validation Needed" ||
+                    risk.level === "Doğrulama Gerekli"
                   ? "#3f3f46"
                   : "#064e3b"
           );
