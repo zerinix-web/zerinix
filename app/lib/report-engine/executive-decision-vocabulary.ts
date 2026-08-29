@@ -278,16 +278,31 @@ export function resolveCanonicalDecisionFromReportText(
 //   confidence figure to read safely.
 //   Tier 3: neither found -- decision is "—" (unavailable) and confidence
 //   is null. No surface may guess a value here.
-export type MarketIntelligenceExecutiveDecisionSource = "canonical-banner" | "raw-label" | "unavailable";
+// TASK #23 (persisted canonical-state hardening) -- "canonical-state" is a
+// NEW, strictly additive fourth tier, produced only by
+// market-intelligence-canonical-state.ts's
+// resolveMarketIntelligenceExecutiveDecisionWithCanonicalState wrapper
+// (never by resolveMarketIntelligenceExecutiveDecision below, which is
+// unmodified). It ranks ABOVE canonical-banner: the persisted, versioned
+// ExecutiveDecisionCode snapshotted at generation time, never a re-parse
+// of the banner text at all. Existing callers that only ever received
+// "canonical-banner" | "raw-label" | "unavailable" are unaffected -- this
+// value only appears when a caller explicitly opts into the new wrapper.
+export type MarketIntelligenceExecutiveDecisionSource =
+  | "canonical-state"
+  | "canonical-banner"
+  | "raw-label"
+  | "unavailable";
 
 export interface MarketIntelligenceExecutiveDecision {
   decisionLabel: string;
   decisionSource: MarketIntelligenceExecutiveDecisionSource;
-  // Only populated for decisionSource === "canonical-banner" -- a raw
-  // labeled fallback's free text has no reliable enum mapping (never
-  // guessed via keyword remapping), so callers that need a color/category
-  // bucket for the raw-label/unavailable tiers should treat null as
-  // "neutral", not silently default it to any one of the four values.
+  // Only populated for decisionSource === "canonical-state" or
+  // "canonical-banner" -- a raw labeled fallback's free text has no
+  // reliable enum mapping (never guessed via keyword remapping), so
+  // callers that need a color/category bucket for the raw-label/
+  // unavailable tiers should treat null as "neutral", not silently
+  // default it to any one of the four values.
   canonicalDecision: CanonicalExecutiveDecision | null;
   confidenceScore: number | null;
   language: ResponseLanguage;

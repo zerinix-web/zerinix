@@ -60,6 +60,11 @@ import {
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
 import { localizedLabelVariants } from "@/app/lib/report-engine/executive-decision-brief";
 import {
+  readMarketIntelligenceCanonicalState,
+  resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
+  type MarketIntelligenceCanonicalState,
+} from "@/app/lib/report-engine/market-intelligence-canonical-state";
+import {
   detectPdfPresentationLocale,
   localizePdfPresentationLabel,
   localizePdfPresentationText,
@@ -1808,7 +1813,8 @@ function extractDecisionDriverList(content: string, labels: string[]) {
 
 function getDecisionSummaryItems(
   sections: Array<{ field?: string; title: string; content: string }>,
-  isMarketIntelligence = false
+  isMarketIntelligence = false,
+  marketIntelligenceCanonicalState: MarketIntelligenceCanonicalState | null = null
 ) {
   const fullContent = sections.map((section) => `${section.title}\n${section.content}`).join("\n\n");
   const executiveSummary = getSectionContentByFieldOrTitle(sections, [
@@ -1855,8 +1861,16 @@ function getDecisionSummaryItems(
   // Market Intelligence report mentions somewhere across its full text,
   // fabricating a "GO" verdict on this top-of-page decision strip
   // regardless of the report's real, conservative recommendation.
+  //
+  // TASK #23 -- when a persisted canonical state exists (generated
+  // reports going forward), the decision is read directly from it
+  // instead of re-parsing this prose -- see
+  // resolveMarketIntelligenceExecutiveDecisionWithCanonicalState's own
+  // comment. Falls back to the exact same prose parse below for every
+  // report without one (100% of reports persisted before this task).
   const marketDecisionSignal = isMarketIntelligence
-    ? resolveMarketIntelligenceExecutiveDecision(
+    ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+        marketIntelligenceCanonicalState,
         executiveSummary || executiveRecommendation,
         dashboardLocale === "tr" ? "Turkish" : "English"
       ).decisionLabel
@@ -5525,7 +5539,11 @@ export default async function ReportDetailPage({
   const sourceSections: typeof uniqueReportSections = [];
   const getReportSectionKey = (section: (typeof report.sections)[number]) =>
     `${report.id}:${section.field || section.title}`;
-  const decisionSummaryItems = getDecisionSummaryItems(visibleSections, isMarketIntelligenceReport);
+  const decisionSummaryItems = getDecisionSummaryItems(
+    visibleSections,
+    isMarketIntelligenceReport,
+    readMarketIntelligenceCanonicalState(report.metadata)
+  );
   const decisionSignalItem =
     decisionSummaryItems.find((item) => item.label === "Decision Signal") ||
     decisionSummaryItems[0];

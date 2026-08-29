@@ -311,8 +311,22 @@ test("plan-executor.ts runs the consistency validation pass as the last step bef
 test("market-analysis route.ts runs the consistency validation pass as the last step before returning the finalized report", () => {
   assert.match(marketSource, /runConsistencyValidationPass/);
   const lastPassIndex = marketSource.indexOf("runConsistencyValidationPass(");
-  const returnDedupedIndex = marketSource.indexOf("return deduped;", lastPassIndex);
-  assert.ok(lastPassIndex > 0 && returnDedupedIndex > lastPassIndex);
+  // TASK #23 (+follow-up) -- ensureMarketReportQuality's final return was
+  // extended twice: first from a bare `return deduped;` to also carry the
+  // persisted canonical-state snapshot, then again to also carry the
+  // always-populated canonicalStateStatus marker (see
+  // market-intelligence-canonical-state.ts) -- the literal return
+  // statement has changed shape twice now, but the ordering guarantee
+  // this test protects (consistency validation runs before the function
+  // returns) is unaffected: `deduped` is still the exact same, fully-
+  // validated sections object, now just one property of the returned
+  // object instead of the object itself. Matched by regex rather than an
+  // exact literal so a future additive field on this same return doesn't
+  // require updating this test a third time.
+  const returnMatch = marketSource
+    .slice(lastPassIndex)
+    .match(/return \{\s*sections: deduped,\s*canonicalState: marketIntelligenceCanonicalState,\s*canonicalStateStatus: marketIntelligenceCanonicalStateStatus,\s*\};/);
+  assert.ok(lastPassIndex > 0 && returnMatch, "expected the final return (carrying deduped) after the consistency pass");
 });
 
 test("neither plan-executor.ts nor market-analysis route.ts writes the consistency score/corrections into report content", () => {

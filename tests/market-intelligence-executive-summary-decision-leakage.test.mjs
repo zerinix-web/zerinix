@@ -166,7 +166,16 @@ test("PDF PRESENTATION remains aligned: ReportPdfButton.tsx and Planner.tsx's PD
   // first-line-of-content fallback the way extractFirstInsight does --
   // structurally incapable of reproducing this specific leak shape.
   assert.doesNotMatch(pdfButtonSource, /function extractFirstInsight/);
-  assert.match(pdfButtonSource, /const marketDecision = isMarketIntelligenceReport\s*\n\s*\? resolveMarketIntelligenceExecutiveDecision\(content, pdfLocale === "tr" \? "Turkish" : "English"\)/);
+  // TASK #23 -- this call site now prefers a persisted canonical-state
+  // snapshot over re-parsing content, via
+  // resolveMarketIntelligenceExecutiveDecisionWithCanonicalState; it
+  // still falls back to the exact same resolveMarketIntelligenceExecutiveDecision
+  // for every report without one, so this leak class remains structurally
+  // impossible either way.
+  assert.match(
+    pdfButtonSource,
+    /const marketDecision = isMarketIntelligenceReport\s*\n\s*\? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*readMarketIntelligenceCanonicalState\(report\.metadata\),\s*\n\s*content,\s*\n\s*pdfLocale === "tr" \? "Turkish" : "English"\s*\n\s*\)/
+  );
 
   // Planner.tsx DOES define extractFirstInsight, but only for its web JSX
   // rendering (both call sites already fixed above); its separate PDF-

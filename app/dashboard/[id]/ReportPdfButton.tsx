@@ -75,6 +75,10 @@ import {
 } from "@/app/lib/report-engine/executive-decision-brief";
 import { resolveMarketIntelligenceExecutiveDecision } from "@/app/lib/report-engine/executive-decision-vocabulary";
 import {
+  readMarketIntelligenceCanonicalState,
+  resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
+} from "@/app/lib/report-engine/market-intelligence-canonical-state";
+import {
   repairReportLanguageSections,
   resolveMarketPdfLanguage,
   resolveReportLanguage,
@@ -3649,8 +3653,13 @@ export function buildStandardReportPdf({
         // fallback tier returns the raw "Decision:" labeled text
         // verbatim, never re-scanned for a keyword) -- over the SAME
         // executiveSummary section content the web dashboard uses.
+        //
+        // TASK #23 -- prefer the persisted canonical decision snapshot
+        // over re-parsing the banner text; falls back to the exact same
+        // prose parse for every report without one.
         const marketDecision = isMarketIntelligenceReport
-          ? resolveMarketIntelligenceExecutiveDecision(
+          ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+              readMarketIntelligenceCanonicalState(report.metadata),
               marketExecutiveSummaryContent,
               pdfLocale === "tr" ? "Turkish" : "English"
             )
@@ -4712,8 +4721,16 @@ export function buildStandardReportPdf({
         // resolveMarketIntelligenceExecutiveDecision -- the ONE
         // canonical decision/confidence source for Market Intelligence,
         // which never falls through to either unsafe scan.
+        //
+        // TASK #23 -- prefer the persisted canonical decision snapshot
+        // over re-parsing the banner text; falls back to the exact same
+        // prose parse for every report without one.
         const marketDecision = isMarketIntelligenceReport
-          ? resolveMarketIntelligenceExecutiveDecision(content, pdfLocale === "tr" ? "Turkish" : "English")
+          ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+              readMarketIntelligenceCanonicalState(report.metadata),
+              content,
+              pdfLocale === "tr" ? "Turkish" : "English"
+            )
           : null;
         const decisionMatch = extractExecutiveDecisionFromText(content);
         const decisionLabel = marketDecision

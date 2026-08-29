@@ -103,6 +103,23 @@ export type ReportMetadata = {
   reportExplainability?: import("@/app/lib/report-engine/explainability-engine").ExplainabilityEngineResult;
   reportReproducibility?: import("@/app/lib/report-engine/decision-reproducibility-engine").ReproducibilityRecord;
   reportVersion?: import("@/app/lib/report-engine/report-versioning-engine").ReportVersionManifest;
+  // TASK #23 -- the versioned, frozen snapshot of Market Intelligence's
+  // decision-critical structured facts (decision, confidence, TAM/SAM/SOM
+  // + evidence methods, competitor evidence, citation registry) captured
+  // once at generation time. Absent on every report persisted before this
+  // field existed, and on any report whose generation didn't have a full
+  // graph + decision brief available -- both are legacy/degraded states
+  // handled by the existing prose-parsing fallback, never migrated or
+  // backfilled. See market-intelligence-canonical-state.ts.
+  marketIntelligenceCanonicalState?: import("@/app/lib/report-engine/market-intelligence-canonical-state").MarketIntelligenceCanonicalState;
+  // TASK #23 (follow-up) -- always set alongside (or instead of)
+  // marketIntelligenceCanonicalState whenever a full Market Intelligence
+  // report actually runs ensureMarketReportQuality: "available" when a
+  // real canonical state was built, "unavailable_no_graph" when
+  // generation itself had no graph/evidence to snapshot (deliberately not
+  // fabricated -- see market-intelligence-canonical-state.ts). Absent
+  // entirely only for a report persisted before this mechanism existed.
+  marketIntelligenceCanonicalStateStatus?: import("@/app/lib/report-engine/market-intelligence-canonical-state").MarketIntelligenceCanonicalStateStatus;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

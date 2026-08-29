@@ -156,6 +156,11 @@ import {
   resolveMarketIntelligenceExecutiveDecision,
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
 import {
+  readMarketIntelligenceCanonicalState,
+  resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
+  type MarketIntelligenceCanonicalState,
+} from "@/app/lib/report-engine/market-intelligence-canonical-state";
+import {
   SourcesCard,
   getFinalDedupePdfSources,
   parseCitations,
@@ -6398,11 +6403,13 @@ function ExecutiveSnapshotPanel({
   section,
   investmentScore,
   reportQuality,
+  marketIntelligenceCanonicalState = null,
   isMarketIntelligence = false,
 }: {
   section: ReportSection;
   investmentScore?: ReportInvestmentScore;
   reportQuality?: ReportQualityScore;
+  marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
   isMarketIntelligence?: boolean;
 }) {
   if (!isExecutivePresentationSection(section)) {
@@ -6464,8 +6471,12 @@ function ExecutiveSnapshotPanel({
   // (the ONE canonical source for this report kind), which never falls
   // through to either unsafe scan. Business Plan/Acquisition's own
   // generic buildExecutiveSnapshot values are completely untouched.
+  // TASK #23 -- prefer the persisted canonical decision snapshot over
+  // re-parsing the banner text; falls back to the exact same prose parse
+  // for every report without one.
   const marketDecision = isMarketIntelligence
-    ? resolveMarketIntelligenceExecutiveDecision(
+    ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+        marketIntelligenceCanonicalState,
         section.content,
         isMarketIntelligenceTurkish ? "Turkish" : "English"
       )
@@ -7138,6 +7149,7 @@ const ReportSectionCard = memo(
     isDomainDecisionReport,
     isMarketIntelligence,
     reportQuality,
+    marketIntelligenceCanonicalState = null,
     waitingMessage,
     majorPlayersContent,
     executiveSummaryContent,
@@ -7148,6 +7160,7 @@ const ReportSectionCard = memo(
     isDomainDecisionReport: boolean;
     isMarketIntelligence: boolean;
     reportQuality?: ReportQualityScore;
+    marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
     waitingMessage: string;
     majorPlayersContent?: string;
     executiveSummaryContent?: string;
@@ -7212,6 +7225,7 @@ const ReportSectionCard = memo(
                   section={section}
                   investmentScore={investmentScore}
                   reportQuality={reportQuality}
+                  marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
                   isMarketIntelligence={isMarketIntelligence}
                 />
               ) : null}
@@ -7291,6 +7305,7 @@ const ReportPanel = memo(function ReportPanel({
   benchmarkFit,
   benchmarkScore,
   reportQuality,
+  marketIntelligenceCanonicalState = null,
   isMarketIntelligence = false,
   onContinueAsChat,
   onBackToWorkspace,
@@ -7314,6 +7329,14 @@ const ReportPanel = memo(function ReportPanel({
   benchmarkFit?: ReportBenchmarkFit;
   benchmarkScore?: ReportBenchmarkScore;
   reportQuality?: ReportQualityScore;
+  // TASK #23 -- persisted canonical-state snapshot (see
+  // market-intelligence-canonical-state.ts), already resolved by the
+  // caller via readMarketIntelligenceCanonicalState the same way
+  // benchmarkFit/benchmarkScore/reportQuality already are. null for
+  // every report generated before this task, or mid-generation before
+  // a metadata chunk has arrived -- both fall back to the existing
+  // prose-parsing path unchanged.
+  marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
   isMarketIntelligence?: boolean;
   onContinueAsChat: () => void;
   onBackToWorkspace: () => void;
@@ -7700,8 +7723,13 @@ const ReportPanel = memo(function ReportPanel({
         const marketExecutiveSummaryContent = isMarketIntelligence
           ? pdfSections.find((section) => section.field === "executiveSummary")?.content || ""
           : "";
+        // TASK #23 -- prefer the persisted canonical decision snapshot
+        // (generated reports going forward) over re-parsing the banner
+        // text; falls back to the exact same prose parse for every report
+        // without one. See resolveMarketIntelligenceExecutiveDecisionWithCanonicalState.
         const marketDecision = isMarketIntelligence
-          ? resolveMarketIntelligenceExecutiveDecision(
+          ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+              marketIntelligenceCanonicalState,
               marketExecutiveSummaryContent,
               pdfLocale === "tr" ? "Turkish" : "English"
             )
@@ -9940,6 +9968,7 @@ const ReportPanel = memo(function ReportPanel({
             isDomainDecisionReport={isDomainDecisionReport}
             isMarketIntelligence={isMarketIntelligence}
             reportQuality={reportQuality}
+            marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
             waitingMessage={waitingMessage}
             majorPlayersContent={sections.find((entry) => entry.field === "majorPlayers")?.content}
             executiveSummaryContent={sections.find((entry) => entry.field === "executiveSummary")?.content}
@@ -12947,6 +12976,9 @@ export default function Planner({
             reportQuality={
               currentReportMetadata?.reportQuality || initialReport?.metadata?.reportQuality
             }
+            marketIntelligenceCanonicalState={readMarketIntelligenceCanonicalState(
+              currentReportMetadata || initialReport?.metadata
+            )}
             isMarketIntelligence={activeReportMode === "market"}
             onContinueAsChat={continueRestrictedReportAsChat}
             onBackToWorkspace={backToWorkspaceFromReportRestriction}
@@ -13198,6 +13230,9 @@ export default function Planner({
                   benchmarkFit={currentReportMetadata?.benchmarkFit || initialReport?.metadata?.benchmarkFit}
                   benchmarkScore={currentReportMetadata?.benchmarkScore || initialReport?.metadata?.benchmarkScore}
                   reportQuality={currentReportMetadata?.reportQuality || initialReport?.metadata?.reportQuality}
+                  marketIntelligenceCanonicalState={readMarketIntelligenceCanonicalState(
+                    currentReportMetadata || initialReport?.metadata
+                  )}
                   isMarketIntelligence={activeReportMode === "market"}
                   onContinueAsChat={continueRestrictedReportAsChat}
                   onBackToWorkspace={backToWorkspaceFromReportRestriction}

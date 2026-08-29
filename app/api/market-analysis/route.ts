@@ -76,6 +76,11 @@ import {
   neutralizeUnverifiableEvidenceReferences,
 } from "@/app/lib/report-engine/evidence-reference-integrity";
 import {
+  buildMarketIntelligenceCanonicalState,
+  type MarketIntelligenceCanonicalState,
+  type MarketIntelligenceCanonicalStateStatus,
+} from "@/app/lib/report-engine/market-intelligence-canonical-state";
+import {
   assertStrategicRecommendationsNumbering,
   findStrategicRecommendationsStructureIssues,
 } from "@/app/lib/report-engine/strategic-recommendations-integrity";
@@ -439,6 +444,33 @@ function serializeNormalizedReportChunk(
 
 function serializeWarningChunk(warning: MarketReportWarningChunk) {
   return serializeReportStreamChunk(warning);
+}
+
+// TASK #23 -- Market Intelligence never previously emitted a
+// `reportMetadata` stream chunk at all (unlike Business Plan's own
+// serializePlanReportMetadataChunk in plan-executor.ts), so
+// worker.ts's readExecutionResponse (which only sets `report.metadata`
+// when it sees this exact key) never had anything to persist for this
+// report type -- confirmed the root cause of reports.metadata carrying
+// zero Market-Intelligence-specific structured data.
+//
+// TASK #23 (follow-up) -- always emits now, even when canonicalState is
+// null: `canonicalStateStatus` records explicitly WHY (generation had no
+// graph/evidence to snapshot -- "unavailable_no_graph") rather than
+// leaving that report indistinguishable from one persisted before this
+// mechanism ever existed (which carries neither field at all). The
+// canonical state object itself is still only ever included when real --
+// never a fabricated or partially-populated one for the unavailable case.
+function serializeMarketReportMetadataChunk(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  canonicalStateStatus: MarketIntelligenceCanonicalStateStatus
+) {
+  return serializeReportStreamChunk({
+    reportMetadata: {
+      ...(canonicalState ? { marketIntelligenceCanonicalState: canonicalState } : {}),
+      marketIntelligenceCanonicalStateStatus: canonicalStateStatus,
+    },
+  });
 }
 
 function serializeMarketReportChunks(report: Record<MarketReportField, string>) {
@@ -1635,7 +1667,48 @@ function ensureMarketReportQuality(
     });
   }
 
-  return deduped;
+  // TASK #23 -- persisted canonical-state hardening: only ever built when
+  // BOTH a full graph AND a full decision brief were actually computed
+  // (the "healthy" generation path) -- a cached/degraded report missing
+  // either has nothing genuinely canonical to snapshot, and returning
+  // null here (rather than a partially-populated object) is what makes
+  // readMarketIntelligenceCanonicalState's version-gated fallback the
+  // ONLY path for that report, exactly like a legacy report predating
+  // this field entirely.
+  //
+  // TASK #23 (follow-up) -- confirmed via direct trace of both the fresh-
+  // generation and cache-hit-reconstruction call paths: `graph` truthy
+  // always implies `marketExecutiveDecisionBrief` truthy in this
+  // codebase's actual data flow (coverage is always derived using
+  // graph.coverage as its override, and the decision brief only requires
+  // coverage) -- so this is really one condition, not two, and it is
+  // never partially satisfied. When it's false, there is no evidence, no
+  // coverage, and nothing genuinely structured to reconstruct -- only raw
+  // model prose -- so canonicalStateStatus records that explicitly
+  // (`unavailable_no_graph`) rather than silently returning nothing and
+  // leaving this report indistinguishable from one persisted before this
+  // mechanism ever existed. See market-intelligence-canonical-state.ts's
+  // own comment for the full investigation.
+  const marketIntelligenceCanonicalState =
+    graph && marketExecutiveDecisionBrief
+      ? buildMarketIntelligenceCanonicalState({
+          graph,
+          decisionCriticalEvidence: decisionCriticalEvidence || {
+            marketSizingResolved: false,
+            competitiveEvidenceResolved: false,
+            obtainableShareResolved: false,
+          },
+          decisionBrief: marketExecutiveDecisionBrief,
+        })
+      : null;
+  const marketIntelligenceCanonicalStateStatus: MarketIntelligenceCanonicalStateStatus =
+    marketIntelligenceCanonicalState ? "available" : "unavailable_no_graph";
+
+  return {
+    sections: deduped,
+    canonicalState: marketIntelligenceCanonicalState,
+    canonicalStateStatus: marketIntelligenceCanonicalStateStatus,
+  };
 }
 
 function parseFullMarketReport(
@@ -1647,6 +1720,8 @@ function parseFullMarketReport(
   report: Record<MarketReportField, string>;
   missingFields: MarketReportField[];
   invalidFields: MarketReportField[];
+  canonicalState: MarketIntelligenceCanonicalState | null;
+  canonicalStateStatus: MarketIntelligenceCanonicalStateStatus;
 } {
   const parsed = JSON.parse(value) as Record<string, unknown>;
 
@@ -1676,10 +1751,14 @@ function parseFullMarketReport(
     report[field] = sanitizeMarketReportContent(content.trim());
   }
 
+  const quality = ensureMarketReportQuality(report, coverage, language, graph);
+
   return {
-    report: ensureMarketReportQuality(report, coverage, language, graph),
+    report: quality.sections,
     missingFields,
     invalidFields,
+    canonicalState: quality.canonicalState,
+    canonicalStateStatus: quality.canonicalStateStatus,
   };
 }
 
@@ -2226,6 +2305,8 @@ Write only this section's content. Do not write a JSON object, field name, headi
         let parsedCachedReport: Record<MarketReportField, string> | null = null;
         let cachedMissingFields: MarketReportField[] = [];
         let cachedInvalidFields: MarketReportField[] = [];
+        let cachedCanonicalState: MarketIntelligenceCanonicalState | null = null;
+        let cachedCanonicalStateStatus: MarketIntelligenceCanonicalStateStatus = "unavailable_no_graph";
 
         try {
           const parsedCachePayload =
@@ -2246,6 +2327,8 @@ Write only this section's content. Do not write a JSON object, field name, headi
           parsedCachedReport = parsedCachePayload.report;
           cachedMissingFields = parsedCachePayload.missingFields;
           cachedInvalidFields = parsedCachePayload.invalidFields;
+          cachedCanonicalState = parsedCachePayload.canonicalState;
+          cachedCanonicalStateStatus = parsedCachePayload.canonicalStateStatus;
           if (cachedDomainResearch) {
             validateDomainResearchQuality({
               report: parsedCachedReport,
@@ -2279,6 +2362,8 @@ Write only this section's content. Do not write a JSON object, field name, headi
           // below is genuinely taken instead of silently serving what this
           // catch block just logged as rejected.
           parsedCachedReport = null;
+          cachedCanonicalState = null;
+          cachedCanonicalStateStatus = "unavailable_no_graph";
         }
 
         if (!parsedCachedReport) {
@@ -2350,7 +2435,8 @@ Write only this section's content. Do not write a JSON object, field name, headi
 
           return new Response(encoder.encode(
             cachedWarning +
-              serializeMarketReportChunks(parsedCachedReport)
+              serializeMarketReportChunks(parsedCachedReport) +
+              serializeMarketReportMetadataChunk(cachedCanonicalState, cachedCanonicalStateStatus)
           ), {
             headers: {
               "Content-Type": "application/x-ndjson; charset=utf-8",
@@ -2673,6 +2759,8 @@ Do not include markdown code fences, braces inside string values, or commentary 
               report: parsedReport,
               missingFields,
               invalidFields,
+              canonicalState: freshCanonicalState,
+              canonicalStateStatus: freshCanonicalStateStatus,
             } =
               responseLanguage === "English"
                 ? parseFullMarketReport(
@@ -2764,7 +2852,11 @@ Do not include markdown code fences, braces inside string values, or commentary 
                   })
                 : "";
 
-            enqueue(warning + serializeMarketReportChunks(parsedReport));
+            enqueue(
+              warning +
+                serializeMarketReportChunks(parsedReport) +
+                serializeMarketReportMetadataChunk(freshCanonicalState, freshCanonicalStateStatus)
+            );
 
             await withReportTimeout(
               (async () => {
