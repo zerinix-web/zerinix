@@ -228,9 +228,17 @@ test("H3. no raw '(unverified)'/'[Unverified reference]' and no dangling '*' can
 
   for (const [field, content] of Object.entries(auditedFixtures)) {
     const rendered = normalizePdfText(content);
-    assert.doesNotMatch(rendered, /\(unverified\)/, `${field}: no raw marker may remain`);
+    assert.doesNotMatch(rendered, /\(unverified\)/i, `${field}: no raw marker may remain`);
     assert.doesNotMatch(rendered, /\*/, `${field}: no dangling reference mark may remain`);
-    assert.match(rendered, /\(Evidence status: Unverified\)/, `${field}: the professional label must still be present`);
+    // TASK #28/#28B -- each fixture has 2 occurrences and no citation, so
+    // the professional disclosure now appears once, as the compact
+    // section-level note, instead of twice inline -- the underlying
+    // evidence-status disclosure must still be present in some form.
+    assert.match(
+      rendered,
+      /\(Evidence status: Unverified\)|Evidence note: Some claims require independent validation\./,
+      `${field}: the professional evidence-status disclosure must still be present`
+    );
   }
 });
 

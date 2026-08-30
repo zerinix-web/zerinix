@@ -1,5 +1,5 @@
 export function normalizePdfText(value) {
-  return presentUnverifiedEvidenceStatus(preservePdfInlineTokens(value
+  return consolidateRepeatedEvidenceStatusLabels(presentUnverifiedEvidenceStatus(preservePdfInlineTokens(value
     .normalize("NFC")
     // The embedded Geist font has no glyph for U+20BA (Turkish Lira
     // sign) -- jsPDF silently drops the character entirely rather than
@@ -116,7 +116,7 @@ export function normalizePdfText(value) {
     .replace(/(\d)\.\s+(\d)(\s*[kKmMbB%])?/g, "$1.$2$3")
     .replace(/(\d),\s+(\d{3})/g, "$1,$2")
     .replace(/\n{3,}/g, "\n\n")
-    .trim()));
+    .trim())));
 }
 
 // TASK #27 -- confirmed live (manual PDF inspection): a section or card
@@ -163,6 +163,109 @@ export function presentUnverifiedEvidenceStatus(value) {
     (acc, [marker, label]) => acc.split(marker).join(label),
     value
   );
+}
+
+// TASK #28 -- confirmed live (real persisted report, id
+// 4c0b5786-357c-4927-b7ff-3d38664b6495): Task #27B deliberately chose to
+// repeat the same inline "(Evidence status: Unverified)" label after
+// every unresolved claim rather than pull it out into a shared footnote,
+// specifically because an earlier attempt at a footnote (a bare "*" per
+// claim plus one explanation at the end) left the mark visually
+// disconnected from its meaning -- see that fix's own comment just above.
+// That reasoning still holds for a MIXED section (some claims backed by
+// a real [R#] citation, others not) -- removing the individual labels
+// there really would erase the one thing a reader needs, which claim is
+// which. But it does not hold for a field where EVERY substantive claim
+// already shares the identical status: Major Players, CAGR, Market
+// Drivers and Industry Trends in the real report each end nearly every
+// line with the same "(Evidence status: Unverified)" text (up to 7
+// times in one field), with no [R#]-cited claim anywhere in the same
+// field to distinguish from. Repeating an identical disclosure that
+// applies uniformly to the whole field is not the same disclosure Task
+// #27B was protecting -- there is no per-claim distinction left to lose,
+// only visual noise. So: only when a field has NO resolved [R#]/[Verified]
+// citation anywhere (meaning nothing in it is being held out as more
+// verified than anything else) AND the same unverified label repeats 2+
+// times is it collapsed into a single, freestanding section-level
+// sentence -- never a bare mark referring back to individual claims, so
+// the earlier "dangling asterisk" defect cannot recur. A field with even
+// one resolved citation is left completely untouched, exactly as Task
+// #27B set it, because collapsing it there would blur real
+// verified/unverified claims together. The citation shape is matched
+// both bracketed ("[R12]") and bare ("R12", "like R3") -- confirmed live,
+// Strategic Recommendations cites sources both ways in the same field
+// ("see R12, R4, R5, R3" and "evidence path: state contract templates
+// like R3") -- so only requiring brackets would miss a real mixed field.
+// Erring toward treating something as a citation when it might not be
+// only ever costs a missed consolidation (cosmetic); erring the other
+// way would blur a genuine verified/unverified distinction, which is the
+// one outcome this guard exists to prevent.
+const resolvedEvidenceCitationPattern = /\[R\d+\]|\bR\d+\b|\[Verified\]/;
+
+// TASK #28B -- confirmed live (real persisted report,
+// 4c0b5786-357c-4927-b7ff-3d38664b6495): the Task #28 note ("Evidence
+// status: several claims in this section reference vendor or public
+// materials that have not been independently verified.") is accurate but
+// reads as mechanical once it repeats, verbatim, across most sections of
+// the same report -- investor-grade means each disclosure is disclosed
+// once, briefly, not once per section in the SAME long sentence. Shortened
+// to a compact, consistent label per the ticket's own preferred wording
+// ("Evidence note: Some claims require independent validation.") -- still
+// an unambiguous disclosure of unresolved evidence, never phrased as if
+// anything were verified, just no longer a full sentence repeated
+// section after section.
+const repeatedUnverifiedEvidenceNotes = [
+  ["(Evidence status: Unverified)", "Evidence note: Some claims require independent validation."],
+  ["(Kanıt durumu: Doğrulanmamış)", "Kanıt notu: Bazı iddialar bağımsız doğrulama gerektirir."],
+  ["(Evidenzstatus: Nicht verifiziert)", "Evidenzhinweis: Einige Aussagen erfordern eine unabhängige Prüfung."],
+  ["(État des preuves : non vérifié)", "Note sur les preuves : certaines affirmations nécessitent une validation indépendante."],
+  ["(Estado de la evidencia: no verificado)", "Nota sobre la evidencia: algunas afirmaciones requieren validación independiente."],
+];
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// TASK #28B -- confirmed live: Strategic Recommendations' own "First 90
+// Days" action shape ("... — Owner: X, Budget ceiling: Y; KPI: Z; Success
+// criterion: W (Evidence status: Unverified).") is short, structured
+// action prose meant to read as a single directive, not a paragraph of
+// evidentiary claims -- so a SINGLE inline "(Evidence status: Unverified)"
+// still reads as raw internal metadata bolted onto the end of an
+// otherwise clean instruction (the exact live defect: Action 2). This is
+// different from a general report section (Major Players, CAGR, ...),
+// where a lone label at the end of one sentence among several others is
+// normal, expected professional disclosure (Task #27B) and stays inline.
+// Detected structurally, not by section name, since the same normalization
+// path is shared by every field: this exact combination of field-style
+// labels ("Owner:", "Budget ceiling:", "KPI:", "Success criterion:") is
+// unique to a recommendation action and does not occur in ordinary
+// narrative prose elsewhere in the report.
+const recommendationActionShapePattern =
+  /\bOwner:|\bBudget ceiling:|\bSuccess criterion:|\bKPI:/i;
+
+export function consolidateRepeatedEvidenceStatusLabels(value) {
+  if (resolvedEvidenceCitationPattern.test(value)) {
+    return value;
+  }
+
+  const minimumOccurrences = recommendationActionShapePattern.test(value) ? 1 : 2;
+
+  return repeatedUnverifiedEvidenceNotes.reduce((acc, [label, note]) => {
+    const pattern = new RegExp(`\\s*${escapeRegExp(label)}`, "g");
+    const occurrences = (acc.match(pattern) || []).length;
+    if (occurrences < minimumOccurrences) {
+      return acc;
+    }
+
+    const stripped = acc
+      .replace(pattern, "")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
+    return stripped ? `${stripped}\n\n${note}` : note;
+  }, value);
 }
 
 const pdfPresentationLabelPairs = [

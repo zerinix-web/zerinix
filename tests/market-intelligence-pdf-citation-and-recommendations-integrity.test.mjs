@@ -170,23 +170,42 @@ test("A2c. normalizePdfText also collapses the duplicate at PDF render time, for
   );
 });
 
-test("A2d. non-adjacent mentions of the same label (genuinely two separate evidentiary gaps) are NOT merged into one claim -- TASK #27B: each keeps its own complete, self-contained inline label, no asterisk, no shared footnote", () => {
+test("A2d. non-adjacent mentions of the same label (genuinely two separate evidentiary gaps) are NOT merged into one claim's text -- TASK #27B: no asterisk, no dangling mark; TASK #28: with no citation anywhere, both collapse into one section-level disclosure instead of two identical inline copies", () => {
   const result = normalizePdfText(
     "First gap [Unverified reference]. Unrelated sentence in between. Second gap [Unverified reference]."
   );
   // Two textually-separated evidentiary gaps are two DIFFERENT claims and
-  // must never be merged into one -- confirmed by two separate, complete
-  // inline labels, one per claim, each still exactly where its own
-  // "(unverified)" used to be. No asterisk and no separate footnote are
-  // ever introduced (Task #27's first attempt at exactly this produced a
-  // "dangling" bare "*" in real reports -- see Task #27B).
+  // their own TEXT must never be merged into one sentence -- confirmed by
+  // "First gap" and "Second gap" surviving as distinct, unmodified
+  // sentences. Task #27's first attempt at deduplicating this shape
+  // produced a "dangling" bare "*" in real reports (see Task #27B); this
+  // field has no [R#]/bare-R#/[Verified] citation anywhere, so Task #28's
+  // consolidation now applies -- the repeated label is replaced by one
+  // freestanding, self-contained section-level sentence (not a mark
+  // referring back to either claim), so that defect cannot recur either.
+  assert.match(result, /First gap\. Unrelated sentence in between\. Second gap\./, "both claims survive as distinct, unmerged sentences");
+  assert.equal(
+    (result.match(/\(Evidence status: Unverified\)/g) || []).length,
+    0,
+    "no per-claim label survives once consolidated"
+  );
+  assert.match(result, /Evidence note: Some claims require independent validation\.$/);
+  assert.doesNotMatch(result, /\*/, "no asterisk/reference-mark mechanism may be used");
+  assert.doesNotMatch(result, /\(unverified\)/i, "the raw lowercase label text must not survive");
+  assert.doesNotMatch(result, /\[Unverified reference\]/);
+});
+
+test("A2d2. non-adjacent mentions of the same label, WITH a citation present in the field, each keep their own complete inline label", () => {
+  const result = normalizePdfText(
+    "First gap [Unverified reference]. A cited claim [R9]. Second gap [Unverified reference]."
+  );
   const labelOccurrences = result.match(/\(Evidence status: Unverified\)/g) || [];
-  assert.equal(labelOccurrences.length, 2, "two textually-separated evidentiary gaps must each keep their own complete inline label");
+  assert.equal(labelOccurrences.length, 2, "two textually-separated evidentiary gaps must each keep their own complete inline label when the field also cites a real source");
   assert.match(result, /First gap \(Evidence status: Unverified\)\./, "the first claim's own label must stay attached to it");
   assert.match(result, /Second gap \(Evidence status: Unverified\)\./, "the second claim's own label must stay attached to it");
+  assert.match(result, /\[R9\]/);
   assert.doesNotMatch(result, /\*/, "no asterisk/reference-mark mechanism may be used");
-  assert.doesNotMatch(result, /\(unverified\)/, "the raw lowercase label text must not survive");
-  assert.doesNotMatch(result, /\[Unverified reference\]/);
+  assert.doesNotMatch(result, /\(unverified\)/i, "the raw lowercase label text must not survive");
 });
 
 // --- A5. "[Unverified reference]" investor-facing epistemic treatment -------

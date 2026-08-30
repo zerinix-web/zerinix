@@ -1441,7 +1441,26 @@ function isEvidenceStatusDisclaimerLine(item: string): boolean {
     /^Some external sources could not be verified,?\s*so\b/i.test(item) ||
     /^Some assumptions require additional validation before a final conclusion\.?$/i.test(item) ||
     /^Bazı dış kaynaklar doğrulanamadığı için\b/i.test(item) ||
-    /^Bazı varsayımlar nihai bir sonuca varılmadan önce ek doğrulama gerektiriyor\.?$/i.test(item)
+    /^Bazı varsayımlar nihai bir sonuca varılmadan önce ek doğrulama gerektiriyor\.?$/i.test(item) ||
+    // TASK #28 -- the consolidated section-level evidence-status
+    // disclosure (pdf-normalization.mjs's consolidateRepeatedEvidenceStatusLabels)
+    // is appended as the LAST line of a field, exactly where the older
+    // disclaimers above already were -- it needs the same exclusion so it
+    // is never mistaken for a real, actionable Strategic Recommendation.
+    // TASK #28B shortened the note's wording for new/re-rendered output
+    // (see pdf-normalization.mjs); both the old and new wording are
+    // matched here since an already-persisted report may still carry the
+    // longer Task #28 text verbatim until it is regenerated.
+    /^Evidence status: several claims\b/i.test(item) ||
+    /^Kanıt durumu: Bu bölümdeki bazı iddialar\b/i.test(item) ||
+    /^Evidenzstatus: Mehrere Aussagen\b/i.test(item) ||
+    /^État des preuves : plusieurs affirmations\b/i.test(item) ||
+    /^Estado de la evidencia: varias afirmaciones\b/i.test(item) ||
+    /^Evidence note: Some claims require independent validation\.?$/i.test(item) ||
+    /^Kanıt notu: Bazı iddialar bağımsız doğrulama gerektirir\.?$/i.test(item) ||
+    /^Evidenzhinweis: Einige Aussagen erfordern eine unabhängige Prüfung\.?$/i.test(item) ||
+    /^Note sur les preuves : certaines affirmations nécessitent une validation indépendante\.?$/i.test(item) ||
+    /^Nota sobre la evidencia: algunas afirmaciones requieren validación independiente\.?$/i.test(item)
   );
 }
 

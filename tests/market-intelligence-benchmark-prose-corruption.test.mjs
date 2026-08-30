@@ -229,9 +229,12 @@ test("4. Task #27D content-restoration regressions remain fixed after this chang
   for (const vendor of ["Ironclad", "Evisort", "DocuSign CLM", "LawGeex"]) {
     assert.match(output, new RegExp(vendor));
   }
-  assert.equal(
-    output.split("\n").filter(Boolean).length,
-    4,
+  // TASK #28 -- this field now also collapses its repeated per-claim
+  // evidence-status labels into one consolidated disclosure line, so the
+  // line count may be 4 (vendor lines only) or 5 (vendor lines + the
+  // single consolidated note); it must never drop below 4.
+  assert.ok(
+    output.split("\n").filter(Boolean).length >= 4,
     "all 4 vendor lines must survive, matching Task #27D's own guarantee"
   );
 });

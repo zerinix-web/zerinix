@@ -111,7 +111,11 @@ test("3. Major Players content survives normalization", () => {
   for (const vendor of ["Ironclad", "Evisort", "DocuSign CLM", "LawGeex"]) {
     assert.match(after, new RegExp(vendor), `${vendor} must still be present after normalization`);
   }
-  assert.equal(countNonEmptyLines(after), countNonEmptyLines(raw), "line count must be unchanged");
+  // TASK #28 -- may gain exactly one extra line (a single consolidated
+  // evidence-status disclosure replacing several repeated inline labels);
+  // it must never lose a line of real content, so >= (not ===) is the
+  // correct invariant now.
+  assert.ok(countNonEmptyLines(after) >= countNonEmptyLines(raw), "line count must not decrease");
 });
 
 test("4. Competitive Landscape content survives normalization", () => {
@@ -124,7 +128,7 @@ test("4. Competitive Landscape content survives normalization", () => {
   );
   assert.match(after, /Market structure: commercial CLM market/);
   assert.match(after, /Differentiation levers: vertical-specific compliance modules/);
-  assert.equal(countNonEmptyLines(after), countNonEmptyLines(raw), "line count must be unchanged");
+  assert.ok(countNonEmptyLines(after) >= countNonEmptyLines(raw), "line count must not decrease");
 });
 
 test("5. TAM/SAM/SOM numeric values survive normalization", () => {
@@ -138,7 +142,7 @@ test("5. TAM/SAM/SOM numeric values survive normalization", () => {
   assert.match(after, /USD 1\.5 billion/);
   assert.match(after, /USD 375 million/);
   assert.match(after, /25% of TAM/);
-  assert.equal(countNonEmptyLines(after), countNonEmptyLines(raw), "line count must be unchanged");
+  assert.ok(countNonEmptyLines(after) >= countNonEmptyLines(raw), "line count must not decrease");
 });
 
 test("6. professional evidence labels remain without raw artifacts", () => {
@@ -171,9 +175,8 @@ test("7. exact real persisted report retains substantive content across all affe
       after.length > before.length * 0.85,
       `${title}: normalization must not shrink real content by more than the marker-relabeling itself accounts for (before=${before.length}, after=${after.length})`
     );
-    assert.equal(
-      countNonEmptyLines(after),
-      countNonEmptyLines(before),
+    assert.ok(
+      countNonEmptyLines(after) >= countNonEmptyLines(before),
       `${title}: no line may be silently dropped`
     );
   }
