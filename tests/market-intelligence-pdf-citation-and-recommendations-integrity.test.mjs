@@ -151,42 +151,52 @@ test("A2b. collapseAdjacentDuplicateCitationMarkers (render-time counterpart) cl
   assert.equal(tokens.length, 1);
 });
 
-test("A2c. normalizePdfText also collapses the duplicate at PDF render time, for any language's label, and for a whitespace-separated duplicate too -- then restyles the surviving marker into its clean, unbracketed investor-facing form", () => {
+test("A2c. normalizePdfText also collapses the duplicate at PDF render time, for any language's label, and for a whitespace-separated duplicate too -- then restyles the surviving marker into its clean, professional, unbracketed investor-facing form (TASK #27B: no asterisk/footnote, one self-contained inline label)", () => {
   assert.match(
     normalizePdfText("gap noted [Unverified reference][Unverified reference]."),
-    /^gap noted \(unverified\)\.$/
+    /^gap noted \(Evidence status: Unverified\)\.$/
   );
   assert.match(
     normalizePdfText("gap noted [Doğrulanamayan referans][Doğrulanamayan referans]."),
-    /^gap noted \(doğrulanmamış\)\.$/
+    /^gap noted \(Kanıt durumu: Doğrulanmamış\)\.$/
   );
   assert.match(
     normalizePdfText("gap noted [Unverified reference] [Unverified reference]."),
-    /^gap noted \(unverified\)\.$/
+    /^gap noted \(Evidence status: Unverified\)\.$/
   );
   assert.match(
     normalizePdfText("triple [Unverified reference][Unverified reference][Unverified reference]."),
-    /^triple \(unverified\)\.$/
+    /^triple \(Evidence status: Unverified\)\.$/
   );
 });
 
-test("A2d. non-adjacent mentions of the same label (genuinely two separate evidentiary gaps) are NOT collapsed, and each is independently restyled", () => {
+test("A2d. non-adjacent mentions of the same label (genuinely two separate evidentiary gaps) are NOT merged into one claim -- TASK #27B: each keeps its own complete, self-contained inline label, no asterisk, no shared footnote", () => {
   const result = normalizePdfText(
     "First gap [Unverified reference]. Unrelated sentence in between. Second gap [Unverified reference]."
   );
-  const tokens = result.match(/\(unverified\)/g) || [];
-  assert.equal(tokens.length, 2, "two textually-separated evidentiary gaps must remain two distinct markers");
+  // Two textually-separated evidentiary gaps are two DIFFERENT claims and
+  // must never be merged into one -- confirmed by two separate, complete
+  // inline labels, one per claim, each still exactly where its own
+  // "(unverified)" used to be. No asterisk and no separate footnote are
+  // ever introduced (Task #27's first attempt at exactly this produced a
+  // "dangling" bare "*" in real reports -- see Task #27B).
+  const labelOccurrences = result.match(/\(Evidence status: Unverified\)/g) || [];
+  assert.equal(labelOccurrences.length, 2, "two textually-separated evidentiary gaps must each keep their own complete inline label");
+  assert.match(result, /First gap \(Evidence status: Unverified\)\./, "the first claim's own label must stay attached to it");
+  assert.match(result, /Second gap \(Evidence status: Unverified\)\./, "the second claim's own label must stay attached to it");
+  assert.doesNotMatch(result, /\*/, "no asterisk/reference-mark mechanism may be used");
+  assert.doesNotMatch(result, /\(unverified\)/, "the raw lowercase label text must not survive");
   assert.doesNotMatch(result, /\[Unverified reference\]/);
 });
 
 // --- A5. "[Unverified reference]" investor-facing epistemic treatment -------
 
-test("A5a. normalizePdfText restyles every language's raw bracketed unverified-reference label into a clean, unbracketed parenthetical, without touching valid [R#] references", () => {
-  assert.equal(normalizePdfText("driven by vendor docs [Unverified reference]."), "driven by vendor docs (unverified).");
-  assert.equal(normalizePdfText("bir bulgu [Doğrulanamayan referans]."), "bir bulgu (doğrulanmamış).");
-  assert.equal(normalizePdfText("ein Befund [Nicht verifizierbarer Verweis]."), "ein Befund (nicht verifiziert).");
-  assert.equal(normalizePdfText("un constat [Référence non vérifiable]."), "un constat (non vérifié).");
-  assert.equal(normalizePdfText("un hallazgo [Referencia no verificable]."), "un hallazgo (no verificado).");
+test("A5a. normalizePdfText restyles every language's raw bracketed unverified-reference label into a clean, professional, self-contained inline label (TASK #27B), without touching valid [R#] references", () => {
+  assert.equal(normalizePdfText("driven by vendor docs [Unverified reference]."), "driven by vendor docs (Evidence status: Unverified).");
+  assert.equal(normalizePdfText("bir bulgu [Doğrulanamayan referans]."), "bir bulgu (Kanıt durumu: Doğrulanmamış).");
+  assert.equal(normalizePdfText("ein Befund [Nicht verifizierbarer Verweis]."), "ein Befund (Evidenzstatus: Nicht verifiziert).");
+  assert.equal(normalizePdfText("un constat [Référence non vérifiable]."), "un constat (État des preuves : non vérifié).");
+  assert.equal(normalizePdfText("un hallazgo [Referencia no verificable]."), "un hallazgo (Estado de la evidencia: no verificado).");
   assert.equal(normalizePdfText("named vendors [R4][R5]."), "named vendors [R4][R5].");
 });
 
@@ -270,6 +280,7 @@ async function compileExtractRecommendationItems(source) {
     `const SENTENCE_ABBREVIATIONS = ${JSON.stringify(SENTENCE_ABBREVIATIONS)};`,
     extractFunctionSource(source, "isRecommendationHeadingLine"),
     extractFunctionSource(source, "isMetadataOnlyRecommendationLine"),
+    extractFunctionSource(source, "isEvidenceStatusDisclaimerLine"),
     `export ${extractFunctionSource(source, "extractRecommendationItems")}`,
   ].join("\n\n");
 

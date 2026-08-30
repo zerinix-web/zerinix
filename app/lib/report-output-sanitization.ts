@@ -107,7 +107,31 @@ export function stripInternalImplementationTokens(content: string): string {
 }
 
 const internalResearchDiagnosticPattern =
-  /(?:\bprovider_unavailable\b|\bcompleted_no_evidence\b|\brequest (?:was )?aborted\b|\bprovider disabled\b|\bresult\s*=\s*failed\b|\breason\s*=\s*request was aborted\b|\bresearch attempts?\b|\battempt\s*\||\bnext provider\b|\bsearch query\b|\b(?:provider|query|result|reason|status)\s*[:=|]|\b(?:stack trace|request payload|api response|execution log)\b|\b(?:tavily|perplexity|firecrawl|serper|exa)\b)/i;
+  /(?:\bprovider_unavailable\b|\bcompleted_no_evidence\b|\brequest (?:was )?aborted\b|\bprovider disabled\b|\bresult\s*=\s*failed\b|\breason\s*=\s*request was aborted\b|\bresearch attempts?\b|\battempt\s*\||\bnext provider\b|\bsearch query\b|\b(?:stack trace|request payload|api response|execution log)\b|\b(?:tavily|perplexity|firecrawl|serper|exa)\b)/i;
+
+// TASK #27D -- confirmed live against a real persisted report: the
+// generic "key: value" shape below is how every genuine debug-log-style
+// diagnostic line the research pipeline actually emits is shaped (e.g.
+// "provider=tavily query=... result=failed"), always starting the line
+// with the key itself. But "status"/"reason"/"result"/"query"/"provider"
+// are also ordinary English words that can appear naturally in the
+// MIDDLE of a real, substantive sentence -- confirmed live: this
+// project's own "(Evidence status: Unverified)" epistemic label, present
+// on nearly every real line of a section like Major Players, was matched
+// by this branch purely because it contains "status:", which silently
+// deleted the section's entire substance. Anchoring to the start of the
+// line (matching how internalRoutingMetadataPattern below already
+// anchors its own metadata-heading detection) keeps this catching real
+// diagnostic dumps while never matching the same words mid-sentence.
+const internalResearchDiagnosticKeyValuePattern =
+  /^\s*(?:provider|query|result|reason|status)\s*[:=|]/i;
+
+function isInternalResearchDiagnosticLine(line: string) {
+  return (
+    internalResearchDiagnosticPattern.test(line) ||
+    internalResearchDiagnosticKeyValuePattern.test(line)
+  );
+}
 
 const internalRoutingMetadataPattern =
   /^\s*(?:(?:ZERINIX validated request context|validated request context|Private expertise routing context|prompt diagnostics|planner\/debug metadata|routing metadata|execution metadata|Conversation Context|Current Session|Analysis Type|Recent Outputs|developer\/debug panel)\b|(?:[-*•]\s*)?(?:Likely domain|Likely content type|Inferred decision goal|Unresolved information|Classified user intent|Selected expert|Authoritative user-selected mode|Expert perspective|Domain scope|Jurisdiction or geography|User goal|Required analysis|Decision criteria|Required evidence|Forbidden analysis topics|Critical clarifications|Profile confidence|Internal asset identifiers?|Asset identifiers?|Routing metadata|Execution metadata)\s*:)/i;
@@ -306,7 +330,7 @@ export function sanitizeInternalResearchDiagnostics(
     .split("\n")
     .map((line) => line.trimEnd())
     .filter((line) => {
-      if (internalResearchDiagnosticPattern.test(line)) {
+      if (isInternalResearchDiagnosticLine(line)) {
         removedDiagnostic = true;
         return false;
       }

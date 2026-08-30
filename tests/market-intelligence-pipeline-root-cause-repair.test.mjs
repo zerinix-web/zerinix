@@ -320,12 +320,14 @@ for (const [label, source] of [
     );
     // TASK #18 -- extended with a metadata-only-line filter (rejects
     // trailing "(N words)" self-check footnotes), so the exact filter
-    // predicate grew a third condition. Both conditions are still
-    // present, just no longer the sole predicate.
-    assert.match(
-      source,
-      /\.filter\(\s*\(line\) => line\.length > 8 && !isRecommendationHeadingLine\(line\) && !isMetadataOnlyRecommendationLine\(line\)\s*\);/
-    );
+    // predicate grew a third condition. TASK #27C -- extended again with
+    // an evidence-status-disclaimer filter. All conditions are still
+    // present, just no longer the sole predicate, and no longer
+    // necessarily on one physical line.
+    assert.match(source, /line\.length > 8/);
+    assert.match(source, /!isRecommendationHeadingLine\(line\)/);
+    assert.match(source, /!isMetadataOnlyRecommendationLine\(line\)/);
+    assert.match(source, /!isEvidenceStatusDisclaimerLine\(line\)/);
   });
 }
 

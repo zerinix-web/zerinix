@@ -89,9 +89,11 @@ const functionDependencies = {
   // REPAIR") made extractRecommendationItems depend on a new sibling
   // helper, isRecommendationHeadingLine. TASK #18 added a second sibling
   // dependency, isMetadataOnlyRecommendationLine, defined immediately
-  // after it -- both captured in one contiguous span.
+  // after it. TASK #27C added a third, isEvidenceStatusDisclaimerLine,
+  // defined immediately after that -- all three captured in one
+  // contiguous span.
   extractRecommendationItems:
-    /function isRecommendationHeadingLine\([\s\S]*?\n\}\n[\s\S]*?function isMetadataOnlyRecommendationLine\([\s\S]*?\n\}/,
+    /function isRecommendationHeadingLine\([\s\S]*?\n\}\n[\s\S]*?function isMetadataOnlyRecommendationLine\([\s\S]*?\n\}\n[\s\S]*?function isEvidenceStatusDisclaimerLine\([\s\S]*?\n\}/,
 };
 
 // Function bodies here contain their own inline TypeScript type

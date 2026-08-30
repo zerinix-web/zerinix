@@ -348,7 +348,21 @@ const marketReportTermReplacements: Array<[RegExp, string]> = [
   [/\[\s*AI[\s-]+Assumptions?\s*\]/gi, "[Planning inputs]"],
   [/\[\s*Assumptions?\s*\]/gi, "[Planning inputs]"],
   [/\bAI[\s-]+Assumptions?\b(?=\s*\**\s*:)/gi, "Planning inputs"],
-  [/\bBenchmarks?\b/gi, "Market references"],
+  // TASK #27E -- confirmed live (real persisted report, id
+  // 4c0b5786-357c-4927-b7ff-3d38664b6495 and every regenerated sibling):
+  // this row had the exact same defect P0 FIX #8 above already fixed for
+  // "Assumption" -- it matched the ordinary English word "benchmark"/
+  // "benchmarks" ANYWHERE in the text, not just as a label, rewriting
+  // real prose like "independent accuracy benchmark report" into
+  // "independent accuracy Market references report" (then relabeled
+  // again by normalizePdfText's own "Market references" -> "Market
+  // sources" rule into the final, grammatically corrupted "independent
+  // accuracy Market sources report"). Unlike "Assumption", this word has
+  // no bracketed-tag or line-heading use in this pipeline at all --
+  // report-quality-directives.ts only ever instructs the model to emit
+  // [Verified]/[Estimated]/[Assumption] as evidence tags, never
+  // "Benchmark" -- so there is no label position left to scope this rule
+  // to. The rule is removed entirely rather than narrowed.
   [/\bAssumptions?\b(?=\s*\**\s*:)/gi, "Planning inputs"],
   [/\bSource unavailable\b/gi, ""],
   [/\bConfidence unavailable\b/gi, ""],

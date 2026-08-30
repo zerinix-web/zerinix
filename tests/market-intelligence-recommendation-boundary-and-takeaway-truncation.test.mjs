@@ -129,6 +129,7 @@ async function compileExtractRecommendationItems(source) {
     `const SENTENCE_ABBREVIATIONS = ${JSON.stringify(SENTENCE_ABBREVIATIONS)};`,
     extractFunctionSource(source, "isRecommendationHeadingLine"),
     extractFunctionSource(source, "isMetadataOnlyRecommendationLine"),
+    extractFunctionSource(source, "isEvidenceStatusDisclaimerLine"),
     `export ${extractFunctionSource(source, "extractRecommendationItems")}`,
   ].join("\n\n");
 

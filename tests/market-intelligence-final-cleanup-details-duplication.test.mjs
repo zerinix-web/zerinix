@@ -101,10 +101,12 @@ function extractFunctionSource(source, functionName) {
 // TASK #18 added a second sibling dependency, isMetadataOnlyRecommendationLine
 // (rejects a trailing "(N words)" self-check footnote) -- both are
 // captured in one contiguous span here since they are defined back to
-// back in the real source.
+// back in the real source. TASK #27C added a third sibling dependency,
+// isEvidenceStatusDisclaimerLine (rejects a codebase-generated evidence-
+// quality disclaimer sentence), defined immediately after the other two.
 const functionDependencies = {
   extractRecommendationItems:
-    /function isRecommendationHeadingLine\([\s\S]*?\n\}\n[\s\S]*?function isMetadataOnlyRecommendationLine\([\s\S]*?\n\}/,
+    /function isRecommendationHeadingLine\([\s\S]*?\n\}\n[\s\S]*?function isMetadataOnlyRecommendationLine\([\s\S]*?\n\}\n[\s\S]*?function isEvidenceStatusDisclaimerLine\([\s\S]*?\n\}/,
 };
 
 async function compileFunction(source, functionName) {

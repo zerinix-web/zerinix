@@ -1,5 +1,5 @@
 export function normalizePdfText(value) {
-  return preservePdfInlineTokens(value
+  return presentUnverifiedEvidenceStatus(preservePdfInlineTokens(value
     .normalize("NFC")
     // The embedded Geist font has no glyph for U+20BA (Turkish Lira
     // sign) -- jsPDF silently drops the character entirely rather than
@@ -116,7 +116,53 @@ export function normalizePdfText(value) {
     .replace(/(\d)\.\s+(\d)(\s*[kKmMbB%])?/g, "$1.$2$3")
     .replace(/(\d),\s+(\d{3})/g, "$1,$2")
     .replace(/\n{3,}/g, "\n\n")
-    .trim());
+    .trim()));
+}
+
+// TASK #27 -- confirmed live (manual PDF inspection): a section or card
+// with several unresolved claims repeats the identical "(unverified)"
+// parenthetical after every single one of them -- technically honest, but
+// visually noisy and not an investor-grade presentation.
+//
+// TASK #27B -- Task #27's first attempt (a "*" reference mark per claim
+// plus one shared footnote appended at the end of the text block) created
+// two NEW real defects instead: (1) a text block with only ONE occurrence
+// was left as raw "(unverified)" (confirmed live: Strategic
+// Recommendations action 2), since the old logic only acted on 2+
+// occurrences -- but the acceptance bar is "no raw '(unverified)' in
+// investor-facing prose" unconditionally, not "unless there's only one";
+// (2) confirmed live across 9 real sections: a bare "*" reading as a
+// meaningless, disconnected mark to an investor scanning the page, since
+// nothing about a lone asterisk mid-sentence visually ties it to an
+// explanation that may be a full paragraph away. Both problems share one
+// root cause -- splitting the "mark" from its "meaning" into two separate
+// pieces of text. The fix removes that split entirely: every occurrence,
+// however many, is replaced in place with the SAME self-contained,
+// professional phrase Task #27 already introduced ("Evidence status:
+// Unverified") -- no asterisk, no footnote, nothing that can ever end up
+// looking "dangling" or unexplained, and nothing that depends on whether
+// this is the only occurrence or one of several. Each claim keeps its own
+// inline label exactly where its own uncertainty was already disclosed,
+// so claim-level distinction (mixed verified/unresolved content) and the
+// underlying epistemic honesty are both preserved unconditionally --
+// never fabricating, upgrading, or removing a disclosure, only rewording
+// it. Repeating a short, standard qualifier per claim (the way "(unaudited)"
+// or "(estimated)" repeats across a real financial document) is normal,
+// expected professional practice, not noise -- unlike a bare symbol with
+// no local explanation.
+const unverifiedEvidenceLabels = [
+  ["(unverified)", "(Evidence status: Unverified)"],
+  ["(doğrulanmamış)", "(Kanıt durumu: Doğrulanmamış)"],
+  ["(nicht verifiziert)", "(Evidenzstatus: Nicht verifiziert)"],
+  ["(non vérifié)", "(État des preuves : non vérifié)"],
+  ["(no verificado)", "(Estado de la evidencia: no verificado)"],
+];
+
+export function presentUnverifiedEvidenceStatus(value) {
+  return unverifiedEvidenceLabels.reduce(
+    (acc, [marker, label]) => acc.split(marker).join(label),
+    value
+  );
 }
 
 const pdfPresentationLabelPairs = [

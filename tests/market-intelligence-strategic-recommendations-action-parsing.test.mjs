@@ -94,6 +94,8 @@ ${extractFunctionSource(source, "isRecommendationHeadingLine")}
 
 ${extractFunctionSource(source, "isMetadataOnlyRecommendationLine")}
 
+${extractFunctionSource(source, "isEvidenceStatusDisclaimerLine")}
+
 ${extractFunctionSource(source, "extractRecommendationItems")}
 
 export { extractRecommendationItems, isMetadataOnlyRecommendationLine };

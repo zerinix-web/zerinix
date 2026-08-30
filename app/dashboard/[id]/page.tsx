@@ -1419,6 +1419,32 @@ function isMetadataOnlyRecommendationLine(item: string) {
   return /^\(?\s*(?:total\s+)?\d+\s*words?\s*\)?\.?\s*$/i.test(item);
 }
 
+// TASK #27C -- confirmed live (real persisted report): a deterministic,
+// codebase-generated evidence-quality disclaimer sentence -- emitted by
+// report-output-sanitization.ts (sanitizeInternalResearchDiagnostics,
+// generation time) when a field's own research degraded, and separately
+// relabeled into its investor-facing wording by
+// sanitizeMarketIntelligencePresentationText -- can end up as the LAST
+// physical line of strategicRecommendations' own content. It has no
+// bullet/numbered marker and passes every other check here, so it was
+// being rendered as a fake, content-free "Action" card. This is
+// meta-commentary about the REPORT's evidence quality as a whole, never
+// an actionable recommendation -- it must never be treated as one,
+// regardless of which of the known trailing-clause variants or the
+// relabeled canonical form actually appears, and regardless of which
+// language the report is in. Kept as its own, separately-named function
+// (rather than folded into isRecommendationHeadingLine) so evidence-
+// status metadata stays a clearly distinct concern from recommendation-
+// heading detection, matching how the two are separately generated.
+function isEvidenceStatusDisclaimerLine(item: string): boolean {
+  return (
+    /^Some external sources could not be verified,?\s*so\b/i.test(item) ||
+    /^Some assumptions require additional validation before a final conclusion\.?$/i.test(item) ||
+    /^Bazı dış kaynaklar doğrulanamadığı için\b/i.test(item) ||
+    /^Bazı varsayımlar nihai bir sonuca varılmadan önce ek doğrulama gerektiriyor\.?$/i.test(item)
+  );
+}
+
 // Strategic Recommendations is inherently a list -- each real recommendation
 // line rendered as its own card, rather than one long paragraph block.
 // Falls back to sentence-splitting (same convention as extractBullets
@@ -1488,7 +1514,11 @@ function extractRecommendationItems(content: string) {
         .trim()
     )
     .filter(
-      (line) => line.length > 8 && !isRecommendationHeadingLine(line) && !isMetadataOnlyRecommendationLine(line)
+      (line) =>
+        line.length > 8 &&
+        !isRecommendationHeadingLine(line) &&
+        !isMetadataOnlyRecommendationLine(line) &&
+        !isEvidenceStatusDisclaimerLine(line)
     );
 
   if (bulletLines.length > 0) {
@@ -1511,7 +1541,7 @@ function extractRecommendationItems(content: string) {
   return protectedSource
     .split(/(?<=[.!?])\s+/)
     .map((line) => line.split(abbreviationSentinel).join(".").trim())
-    .filter((line) => line.length > 8 && !isMetadataOnlyRecommendationLine(line))
+    .filter((line) => line.length > 8 && !isMetadataOnlyRecommendationLine(line) && !isEvidenceStatusDisclaimerLine(line))
     .slice(0, 4);
 }
 
