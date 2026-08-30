@@ -485,7 +485,12 @@ test("ReportPdfButton.tsx: draws the Market Metrics dashboard (Market Growth Sig
 });
 
 test("ReportPdfButton.tsx: draws Strategic Recommendation cards with Action, Owner, Timeline, Budget, Success Metric, and Decision Gate -- reusing the same extraction helpers as page.tsx/Planner.tsx, never fabricating a signal", async () => {
-  assert.match(pdfButtonSource, /isMarketIntelligenceReport && normalizedTitle\.includes\("strategic recommendation"\)/);
+  // TASK #25C -- this branch moved out of drawSectionVisual/getVisualHeight
+  // into its own dedicated, row-pagination-aware branch in the top-level
+  // pdfSections.forEach loop (see that branch's own comment for why); the
+  // title check itself is unchanged, just inlined rather than reading a
+  // pre-computed `normalizedTitle` local.
+  assert.match(pdfButtonSource, /isMarketIntelligenceReport && section\.title\.toLowerCase\(\)\.includes\("strategic recommendation"\)/);
   assert.match(pdfButtonSource, /localizePdfPresentationLabel\("ACTION", pdfLocale\)/);
   assert.match(pdfButtonSource, /\["Owner", owner\],\s*\n\s*\["Timeline", timeframe\],\s*\n\s*\["Budget", budget\],\s*\n\s*\["Success Metric", metric\],/);
   assert.match(pdfButtonSource, /localizePdfPresentationLabel\("DECISION GATE", pdfLocale\)/);
@@ -502,25 +507,28 @@ test("ReportPdfButton.tsx: draws Strategic Recommendation cards with Action, Own
 // hardening, round 2): the fixed "const recommendationCardHeight = 36;"
 // this test used to assert was ITSELF the truncation bug for Strategic
 // Recommendation cards 3-4 -- replaced with computeRecommendationRowHeights,
-// a single shared function (still one declaration, reused by both
-// drawSectionVisual and getVisualHeight via closure) that derives each
-// card's real height from its own content instead of a hardcoded number.
-test("ReportPdfButton.tsx: drawSectionVisual and getVisualHeight share the same fixed-height constant for Market Metrics, and the same shared computeRecommendationRowHeights function (not a hardcoded height) for Strategic Recommendations, so drawing and pagination budgeting never disagree (regression guard)", () => {
+// a single shared function that derives each card's real height from its
+// own content instead of a hardcoded number.
+//
+// TASK #25C -- updated for the follow-on fix: computeRecommendationRowHeights
+// is still declared exactly once, but drawing and pagination-budgeting are
+// no longer two separate call sites reading it independently (the old
+// drawSectionVisual/getVisualHeight split) -- they were merged into one
+// dedicated pagination-aware branch, so there is now exactly ONE call site,
+// which is structurally even less able to disagree with itself than two
+// call sites reading a shared function ever were.
+test("ReportPdfButton.tsx: Strategic Recommendations' single pagination/drawing branch (and Market Metrics' shared height constant) never hardcode a card/row height, so drawing and pagination budgeting can never disagree (regression guard)", () => {
   const occurrences = pdfButtonSource.match(/marketMetricsDashboardHeight/g) || [];
   assert.ok(occurrences.length >= 3, "expected the const declaration plus at least one use in each of drawSectionVisual/getVisualHeight");
   const layoutFnOccurrences = pdfButtonSource.match(/const computeRecommendationCardLayout = /g) || [];
   const rowsFnOccurrences = pdfButtonSource.match(/const computeRecommendationRowHeights = /g) || [];
-  assert.equal(layoutFnOccurrences.length, 1, "expected exactly one shared computeRecommendationCardLayout declaration, reused by both functions via closure");
-  assert.equal(rowsFnOccurrences.length, 1, "expected exactly one shared computeRecommendationRowHeights declaration, reused by both functions via closure");
+  assert.equal(layoutFnOccurrences.length, 1, "expected exactly one shared computeRecommendationCardLayout declaration");
+  assert.equal(rowsFnOccurrences.length, 1, "expected exactly one shared computeRecommendationRowHeights declaration");
   assert.match(pdfButtonSource, /const recommendationCardGap = 3;/);
-  assert.match(
-    pdfButtonSource,
-    /const \{ cards, rowHeights \} = computeRecommendationRowHeights\(items, cardWidth\);/,
-    "drawSectionVisual must draw using the shared computed rowHeights"
-  );
-  assert.match(
-    pdfButtonSource,
-    /const \{ rowHeights \} = computeRecommendationRowHeights\(items, cardWidth\);/,
-    "getVisualHeight must budget space from the shared computed rowHeights"
+  const callSiteOccurrences = pdfButtonSource.match(/const \{ cards, rowHeights \} = computeRecommendationRowHeights\(items, cardWidth\);/g) || [];
+  assert.equal(
+    callSiteOccurrences.length,
+    1,
+    "expected exactly one call site (in the unified pagination/drawing branch) computing both cards and rowHeights together"
   );
 });

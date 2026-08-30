@@ -4,6 +4,7 @@ import { readFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { SENTENCE_ABBREVIATIONS } from "../app/lib/report-presentation.ts";
 
 // TASK #18 -- Fix malformed Strategic Recommendations / First 90 Days
 // action parsing.
@@ -87,6 +88,8 @@ async function compileExtractors(source) {
   const dir = mkdtempSync(join(tmpdir(), "zerinix-action-parsing-"));
   const outPath = join(dir, "extract.mts");
   const harness = `
+const SENTENCE_ABBREVIATIONS = ${JSON.stringify(SENTENCE_ABBREVIATIONS)};
+
 ${extractFunctionSource(source, "isRecommendationHeadingLine")}
 
 ${extractFunctionSource(source, "isMetadataOnlyRecommendationLine")}

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { resolveMarketIntelligenceExecutiveDecision } from "../app/lib/report-engine/executive-decision-vocabulary.ts";
+import { SENTENCE_ABBREVIATIONS } from "../app/lib/report-presentation.ts";
 
 // TASK #17 -- Enforce one canonical decision across the entire Market
 // Intelligence report.
@@ -81,6 +82,8 @@ async function compileExtractRecommendationItems(source) {
   const dir = mkdtempSync(join(tmpdir(), "zerinix-strategic-rec-"));
   const outPath = join(dir, "extract.mts");
   const harness = `
+const SENTENCE_ABBREVIATIONS = ${JSON.stringify(SENTENCE_ABBREVIATIONS)};
+
 ${extractFunctionSource(source, "isRecommendationHeadingLine")}
 
 ${extractFunctionSource(source, "isMetadataOnlyRecommendationLine")}
@@ -213,18 +216,20 @@ test("WEB PRESENTATION: page.tsx and Planner.tsx thread executiveSummaryContent 
   }
 });
 
-test("PDF PRESENTATION: ReportPdfButton.tsx and Planner.tsx's PDF drawer both draw the same 'Current Decision' text above the recommendation cards, and reserve matching height in both the pagination-budgeting and drawing passes so they can never disagree", () => {
+test("PDF PRESENTATION: ReportPdfButton.tsx and Planner.tsx's PDF drawer both draw the same 'Current Decision' text above the recommendation cards, reserving height for it via one shared constant", () => {
+  // TASK #25C -- the height-budgeting and drawing passes for this badge
+  // were merged into ONE dedicated pagination-aware branch (see that
+  // branch's own comment), so strategicRecommendationDecisionBadgeHeight
+  // is now read from exactly one call site instead of two independent
+  // ones -- still structurally impossible to drift, since there is only
+  // one place left that could.
   for (const source of [pdfButtonSource, plannerSource]) {
     assert.match(source, /const strategicRecommendationDecisionBadgeHeight = 7;/);
     assert.match(source, /localizePdfPresentationLabel\("Current Decision", pdfLocale\)/);
-    // The same constant name must appear in both the height-calculation
-    // return value and the actual card Y-offset used while drawing --
-    // structurally impossible for the two to drift apart, since both read
-    // the identical fixed constant declared once.
     const occurrences = source.match(/strategicRecommendationDecisionBadgeHeight/g) || [];
     assert.ok(
-      occurrences.length >= 3,
-      `expected the badge-height constant to be declared once and used in both the calc and draw paths, got ${occurrences.length} occurrences`
+      occurrences.length >= 2,
+      `expected the badge-height constant to be declared once and used at least once, got ${occurrences.length} occurrences`
     );
   }
 });
@@ -237,11 +242,21 @@ test("requirement 9 (preserve evidence-first behavior): the badge never fabricat
       "the web badge must be omitted entirely when the canonical decision is genuinely unavailable"
     );
   }
+  // TASK #25C -- the PDF badge text is now computed once as a ternary
+  // (decisionBadgeText), then only drawn `if (isFirstChunk &&
+  // decisionBadgeText)` -- an empty string is falsy, so the badge is still
+  // completely omitted (not drawn as an empty line) whenever
+  // decisionLabel is genuinely "—". Same guarantee, different shape.
   for (const source of [pdfButtonSource, plannerSource]) {
     assert.match(
       source,
-      /if \(strategicRecommendationDecision\.decisionLabel !== "—"\) \{/,
-      "the PDF badge must be omitted entirely when the canonical decision is genuinely unavailable"
+      /strategicRecommendationDecision\.decisionLabel !== "—"\s*\n\s*\? `\$\{localizePdfPresentationLabel\("Current Decision", pdfLocale\)\}: \$\{strategicRecommendationDecision\.decisionLabel\}`\s*\n\s*: "";/,
+      "the PDF badge text must resolve to an empty string (never drawn) when the canonical decision is genuinely unavailable"
+    );
+    assert.match(
+      source,
+      /if \(isFirstChunk && decisionBadgeText\) \{/,
+      "the PDF badge must only be drawn when a real decision badge text was computed"
     );
   }
 });

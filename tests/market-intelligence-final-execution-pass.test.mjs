@@ -112,7 +112,20 @@ test("Planner.tsx's downloadPdf: Strategic Recommendations now has real Action/O
   const visualFieldsMatch = plannerSource.match(/const visualFields = new Set<ReportSection\["field"\]>\(\[([\s\S]*?)\]\);/);
   assert.match(visualFieldsMatch[1], /"strategicRecommendations",/);
 
-  assert.match(plannerSource, /if \(section\.field === "strategicRecommendations"\) \{\s*\n\s*const items = extractRecommendationItems\(section\.content\)\.slice\(0, 4\);/);
+  // TASK #25 -- confirmed live: the `.slice(0, 4)` here silently dropped
+  // recommendations 5+ from the PDF while the web view (which never
+  // applied this second, PDF-only cap on top of extractRecommendationItems'
+  // own already-shared ceiling) correctly showed all of them. Removed --
+  // `items` is now whatever extractRecommendationItems actually returns.
+  assert.match(
+    plannerSource,
+    /if \(section\.field === "strategicRecommendations"\) \{[\s\S]{0,700}const items = extractRecommendationItems\(section\.content\);/
+  );
+  assert.doesNotMatch(
+    plannerSource,
+    /const items = extractRecommendationItems\(section\.content\)\.slice\(0, 4\);/,
+    "the PDF-only 4-item cap must not be reintroduced"
+  );
   assert.match(plannerSource, /const \{ timeframe, metric, budget, owner, gate \} = extractRecommendationSignals\(item\);/);
   assert.match(plannerSource, /localizePdfPresentationLabel\("DECISION GATE", pdfLocale\)/);
 });
@@ -133,27 +146,31 @@ test("Planner.tsx's downloadPdf: Strategic Recommendations now has real Action/O
 // cards with more Owner/Timeline/Budget/Success-Metric fields or a
 // Decision Gate needed more than 36mm and visibly truncated/overlapped
 // (confirmed live, especially cards 3-4). Replaced with
-// computeRecommendationRowHeights, a single shared function (still one
-// declaration, reused by both getPdfVisualHeight and drawPdfVisual via
-// closure -- the same "one source of truth" guarantee this test always
-// checked for) that derives each card's real height from its own content
-// instead of a hardcoded number.
-test("Planner.tsx's downloadPdf: getPdfVisualHeight and drawPdfVisual read the SAME shared computeRecommendationRowHeights function for the Strategic Recommendations visual (rather than each independently hard-coding their own height), so a divergence between drawing and pagination budgeting is structurally impossible", () => {
+// computeRecommendationRowHeights, a single shared function that derives
+// each card's real height from its own content instead of a hardcoded
+// number.
+//
+// TASK #25C -- updated for the follow-on fix: getPdfVisualHeight and
+// drawPdfVisual are no longer two separate call sites independently
+// reading computeRecommendationRowHeights for this section -- they were
+// merged into one dedicated, row-pagination-aware branch directly in
+// pdfSections.forEach (see that branch's own comment), so there is now
+// exactly ONE call site computing rowHeights for Strategic
+// Recommendations, which both budgets pagination and draws from the same
+// values by construction (not by convention).
+test("Planner.tsx: Strategic Recommendations' single pagination/drawing branch reads computeRecommendationRowHeights exactly once (rather than two independently hard-coded heights), so a divergence between drawing and pagination budgeting is structurally impossible", () => {
   const layoutFnOccurrences = plannerSource.match(/const computeRecommendationCardLayout = /g) || [];
   const rowsFnOccurrences = plannerSource.match(/const computeRecommendationRowHeights = /g) || [];
   const gapOccurrences = plannerSource.match(/const recommendationCardGap = 3;/g) || [];
-  assert.equal(layoutFnOccurrences.length, 1, "expected exactly one shared computeRecommendationCardLayout declaration, reused by both functions via closure");
-  assert.equal(rowsFnOccurrences.length, 1, "expected exactly one shared computeRecommendationRowHeights declaration, reused by both functions via closure");
-  assert.equal(gapOccurrences.length, 1, "expected exactly one shared recommendationCardGap declaration, reused by both functions via closure");
-  assert.match(
-    plannerSource,
-    /return \(\s*\n\s*strategicRecommendationDecisionBadgeHeight \+\s*\n\s*rowHeights\.reduce\(\(sum, height\) => sum \+ height, 0\) \+\s*\n\s*Math\.max\(0, rowHeights\.length - 1\) \* recommendationCardGap\s*\n\s*\);/,
-    "getPdfVisualHeight must budget space from the same computed rowHeights (plus the Task #17 Current Decision badge, reserved identically in both functions)"
-  );
-  assert.match(
-    plannerSource,
-    /const \{ cards, rowHeights \} = computeRecommendationRowHeights\(items, cardWidth\);/,
-    "drawPdfVisual must draw using the same computed rowHeights"
+  assert.equal(layoutFnOccurrences.length, 1, "expected exactly one shared computeRecommendationCardLayout declaration");
+  assert.equal(rowsFnOccurrences.length, 1, "expected exactly one shared computeRecommendationRowHeights declaration");
+  assert.equal(gapOccurrences.length, 1, "expected exactly one shared recommendationCardGap declaration");
+  const callSiteOccurrences =
+    plannerSource.match(/const \{ cards, rowHeights \} = computeRecommendationRowHeights\(items, cardWidth\);/g) || [];
+  assert.equal(
+    callSiteOccurrences.length,
+    1,
+    "expected exactly one call site (in the unified pagination/drawing branch) computing both cards and rowHeights together"
   );
 });
 

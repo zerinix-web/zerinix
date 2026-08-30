@@ -238,7 +238,17 @@ function stripMarkdown(value: string) {
 // truncating the takeaway (and, transitively, the PDF Key Takeaway box) to
 // a fragment ending mid-thought. Protect known abbreviations' periods with
 // a sentinel before splitting, then restore them afterward.
-const SENTENCE_ABBREVIATIONS = [
+// TASK #26 -- exported (was module-private) so callers outside this file
+// that need to recognize the SAME "this period is not a real sentence/line
+// boundary" abbreviations -- without re-implementing splitSentences' own
+// stripMarkdown + length>24 filtering, which is tuned specifically for
+// takeaway extraction -- can reuse this single list rather than
+// maintaining a second, driftable copy. See extractRecommendationItems
+// (page.tsx/Planner.tsx/ReportPdfButton.tsx) for the confirmed real-world
+// case this unblocked: a model-wrapped line break landing right after
+// "U.S." (e.g. "Owner: Head of Sales (U.S.\nmid-market)...") was being
+// treated as a genuine recommendation-item boundary.
+export const SENTENCE_ABBREVIATIONS = [
   "U.S.", "U.K.", "U.N.", "E.U.", "U.A.E.",
   "e.g.", "i.e.", "etc.", "vs.", "cf.",
   "Inc.", "Corp.", "Ltd.", "Co.", "LLC.",
@@ -1071,14 +1081,31 @@ export function buildExecutiveSnapshot(
   };
 }
 
+// TASK #26 -- confirmed live (real persisted report, Opportunities
+// section): a blind `slice(0, 217)` cut wherever the 217th character
+// happened to fall, with no regard for word boundaries -- when a word
+// (observed live: the "(unverified)" epistemic marker Task #25C
+// introduced, but this could just as easily land mid-word on any other
+// token) straddled that exact position, the result was a fragment like
+// "(unverifi..." reaching the reader as a visibly broken word.
+//
+// TASK #26B -- confirmed live AGAIN: word-boundary-safe truncation still
+// truncates -- a real Key Takeaway card for the same Opportunities
+// section was still cut off mid-sentence ("...mid-sized firms..."),
+// which is a real, user-visible loss of content, not a cosmetic wording
+// choice. The length cap itself was the remaining root cause, not just
+// where it cut. Removed entirely: this now always returns the complete
+// first sentence, however long. Callers that draw this inside a visual
+// (the PDF Key Takeaway box) already derive their box height from the
+// actual wrapped line count returned by wrapping THIS value (see
+// ReportPdfButton.tsx/Planner.tsx's own getVisualHeight/drawSectionVisual
+// pdfKeyTakeawayCardFields branches), so a longer sentence safely grows
+// the box instead of being cut -- the same "let it grow, height already
+// tracks it" fix already applied to Strategic Recommendations.
 export function getSectionTakeaway(content: string) {
   const [firstSentence] = splitSentences(normalizeReportPresentationText(content));
 
-  if (!firstSentence) {
-    return "";
-  }
-
-  return firstSentence.length > 220 ? `${firstSentence.slice(0, 217).trim()}...` : firstSentence;
+  return firstSentence || "";
 }
 
 // P0 FIX #8 -- confirmed live (Key Takeaway / body duplication repair):

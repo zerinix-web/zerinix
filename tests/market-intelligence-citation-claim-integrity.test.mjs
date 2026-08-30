@@ -76,7 +76,11 @@ test("F1. graph unavailable: every [R#] marker is neutralized instead of shippin
   const result = neutralizeUnverifiableEvidenceReferences(sections, "English");
 
   assert.doesNotMatch(result.majorPlayers, /\[R\d+\]/);
-  assert.match(result.majorPlayers, /\[Unverified reference\]/);
+  // TASK #25C -- the label itself must never reach the reader as raw
+  // bracketed technical placeholder syntax; a clean, unbracketed
+  // parenthetical preserves the exact same epistemic meaning.
+  assert.match(result.majorPlayers, /\(unverified\)/);
+  assert.doesNotMatch(result.majorPlayers, /\[Unverified reference\]/);
   // A field with no bracketed citation at all (loose "see R12, R4" prose
   // without brackets) is untouched -- the pattern only ever matches the
   // bracketed [R#] shape, matching findOrphanEvidenceReferences' own scope.
@@ -87,12 +91,15 @@ test("F1. graph unavailable: every [R#] marker is neutralized instead of shippin
 });
 
 test("F2. neutralization is localized for every supported report language", () => {
+  // TASK #25C -- these are now the clean, unbracketed investor-facing
+  // forms (see unverifiableReferenceLabel's own comment for why the raw
+  // bracketed form was replaced).
   const localizedLabel = {
-    English: "[Unverified reference]",
-    Turkish: "[Doğrulanamayan referans]",
-    German: "[Nicht verifizierbarer Verweis]",
-    French: "[Référence non vérifiable]",
-    Spanish: "[Referencia no verificable]",
+    English: "(unverified)",
+    Turkish: "(doğrulanmamış)",
+    German: "(nicht verifiziert)",
+    French: "(non vérifié)",
+    Spanish: "(no verificado)",
   };
   for (const [language, label] of Object.entries(localizedLabel)) {
     const result = neutralizeUnverifiableEvidenceReferences(
@@ -109,7 +116,7 @@ test("F3. neutralization never fabricates content for an undefined section", () 
     "English"
   );
   assert.equal(result.barriers, undefined);
-  assert.equal(result.opportunities, "Entry barrier evidence [Unverified reference].");
+  assert.equal(result.opportunities, "Entry barrier evidence (unverified).");
 });
 
 test("F4. graph available: orphan detection still throws exactly as before (no regression from the new fallback)", () => {
@@ -203,11 +210,13 @@ test("F7. end-to-end simulation against the real defect: six distinct [R#] citat
   for (const field of ["majorPlayers"]) {
     assert.doesNotMatch(result[field], /\[R\d+\]/, `${field} must have no resolvable-looking [R#] marker left`);
   }
-  // Every bracketed reference is now the same honest label, never a number
-  // a reader could mistake for something Sources should (but doesn't) list.
-  const bracketedTokens = result.majorPlayers.match(/\[[^\]]+\]/g) || [];
-  assert.ok(bracketedTokens.length > 0);
-  assert.ok(bracketedTokens.every((token) => token === "[Unverified reference]"));
+  // Every reference is now the same honest, clean (unbracketed -- TASK
+  // #25C) label, never a number a reader could mistake for something
+  // Sources should (but doesn't) list, and never left as raw bracketed
+  // technical placeholder syntax.
+  assert.doesNotMatch(result.majorPlayers, /\[[^\]]+\]/);
+  const unverifiedTokens = result.majorPlayers.match(/\(unverified\)/g) || [];
+  assert.ok(unverifiedTokens.length > 0);
 });
 
 // --- G. Regeneration preserves claim-to-source provenance --------------------

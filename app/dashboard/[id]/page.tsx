@@ -42,6 +42,7 @@ import {
   readFounderReadinessScoreValue,
   resolveCagrHeadlinePresentation,
   stripLeadingTakeawaySentence,
+  SENTENCE_ABBREVIATIONS,
 } from "@/app/lib/report-presentation";
 import type {
   ReportBenchmarkFit,
@@ -1445,11 +1446,42 @@ function extractRecommendationItems(content: string) {
   // real report's own content and those exact false-positive shapes
   // before this fix was written.
   const normalizedSource = source.replace(/([:.])\s+(\d{1,2}[.)]\s+)/g, "$1\n$2");
-  const bulletLines = normalizedSource
-    .split("\n")
+  // TASK #26 -- confirmed live (real persisted report): the model's own
+  // generated prose sometimes wraps a physical line mid-sentence -- seen
+  // twice in the SAME report, both immediately after "U.S." (e.g. "Owner:
+  // Head of Sales (U.S.\nmid-market)..."), which is not a real
+  // recommendation boundary. A blind per-line split treated the wrapped
+  // continuation as its own separate "action", cutting the real
+  // recommendation short (ending at "...(U.S.") and fabricating an
+  // incomplete second one from whatever text was left after the wrap. A
+  // line only starts a genuinely NEW recommendation when it begins with a
+  // bullet/numbered marker; a marker-less line is rejoined onto whichever
+  // item is already open -- but ONLY when that item's text so far ends in
+  // a known abbreviation (SENTENCE_ABBREVIATIONS, the same list
+  // splitSentences/getSectionTakeaway already trust for this exact "not a
+  // real sentence end" signal), so a genuinely separate closing/summary
+  // sentence that just happens to lack its own bullet marker (which ends
+  // in ordinary terminal punctuation, not an abbreviation) is never
+  // incorrectly merged into the preceding action.
+  const itemStartPattern = /^(?:[-*•]|\d{1,2}[.)])\s+/;
+  const rawLines = normalizedSource.split("\n").map((line) => line.trim());
+  const mergedLines: string[] = [];
+  for (const line of rawLines) {
+    const previous = mergedLines[mergedLines.length - 1];
+    const isSpuriousWrap =
+      previous !== undefined &&
+      !itemStartPattern.test(line) &&
+      SENTENCE_ABBREVIATIONS.some((abbreviation) => previous.endsWith(abbreviation));
+
+    if (isSpuriousWrap) {
+      mergedLines[mergedLines.length - 1] = `${previous} ${line}`;
+    } else {
+      mergedLines.push(line);
+    }
+  }
+  const bulletLines = mergedLines
     .map((line) =>
       line
-        .trim()
         .replace(/^[-*•]\s+/, "")
         .replace(/^\d+[.)]\s+/, "")
         .replace(/\*\*/g, "")
@@ -1463,10 +1495,22 @@ function extractRecommendationItems(content: string) {
     return bulletLines.slice(0, 8);
   }
 
-  return source
-    .replace(/\*\*/g, "")
+  // TASK #26 -- same abbreviation-protection as the bullet-line path
+  // above, applied here too since this fallback also splits on
+  // sentence-ending punctuation and would otherwise cut a sentence short
+  // right after "U.S."/"Inc."/etc. The sentinel (a literal NUL) can never
+  // collide with real report text, so restoring it to "." afterward can
+  // never corrupt anything else in the sentence.
+  const abbreviationSentinel = "\x00";
+  const protectedSource = SENTENCE_ABBREVIATIONS.reduce(
+    (acc, abbreviation) =>
+      acc.split(abbreviation).join(abbreviation.replace(/\./g, abbreviationSentinel)),
+    source.replace(/\*\*/g, "")
+  );
+
+  return protectedSource
     .split(/(?<=[.!?])\s+/)
-    .map((line) => line.trim())
+    .map((line) => line.split(abbreviationSentinel).join(".").trim())
     .filter((line) => line.length > 8 && !isMetadataOnlyRecommendationLine(line))
     .slice(0, 4);
 }

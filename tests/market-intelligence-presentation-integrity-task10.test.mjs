@@ -193,10 +193,10 @@ test("REC-T10-1: both PDF exports replaced the fixed recommendationCardHeight co
   }
 });
 
-test("REC-T10-2: both PDF exports' drawing and pagination-budgeting code paths for Strategic Recommendations call the SAME computeRecommendationRowHeights function (structurally impossible for the two to disagree, unlike the old constant which was merely conventionally kept in sync)", () => {
+test("REC-T10-2: both PDF exports' Strategic Recommendations pagination/drawing logic calls computeRecommendationRowHeights exactly once (TASK #25C merged the former separate drawing and pagination-budgeting code paths into one dedicated, row-pagination-aware branch, so there is structurally only one row-height computation left to call it -- not two copies that could drift, and not zero)", () => {
   for (const source of [pdfSource, plannerSource]) {
     const occurrences = source.match(/computeRecommendationRowHeights\(items, cardWidth\)/g) || [];
-    assert.equal(occurrences.length, 2, "expected exactly 2 call sites: drawing and pagination budgeting");
+    assert.equal(occurrences.length, 1, "expected exactly 1 call site in the unified pagination/drawing branch");
   }
 });
 

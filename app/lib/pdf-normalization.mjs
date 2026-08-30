@@ -37,6 +37,80 @@ export function normalizePdfText(value) {
     .replace(/(\d+)(müşteri)/gi, "$1 $2")
     .replace(/\bfiyat\s+sıkıştırma\s+by\s+yerel\s+danışmanlar\b/gi, "yerel danışmanların fiyat baskısı")
     .replace(/\b(\d+(?:[.,]\d+)?)b\b/g, "$1B")
+    // TASK #25 -- malformed citation bracket syntax (e.g. "[, R12]" -- a
+    // leading empty entry before a real reference number, confirmed live
+    // across many real persisted reports' own "barriers" field). This is
+    // the render-time counterpart of sanitizeCitationBracketSyntax
+    // (evidence-reference-integrity.ts, applied at generation time) --
+    // ReportPdfButton.tsx and Planner.tsx both call normalizePdfText
+    // again at PDF-render time, so this same fix also cleans up reports
+    // persisted BEFORE the generation-time fix existed, without needing
+    // regeneration. See that function's own comment for exactly why the
+    // pattern is scoped this narrowly (only ever touches a bracket whose
+    // entire content is whitespace/digits/R/commas AND contains an "R" --
+    // "[Estimated]", "[Verified from official source]", and an unrelated
+    // bare "[12]" are never matched). Keep in sync with that function if
+    // either one changes.
+    .replace(/\[([\sR0-9,]*R[\sR0-9,]*)\]/g, (fullMatch, inner) => {
+      const refs = inner
+        .split(",")
+        .map((part) => part.trim())
+        .filter((part) => /^R\d+$/.test(part));
+      if (refs.length === 0) {
+        // No real "R<digits>" token survived cleaning (a bare "[R]", a
+        // pure comma/whitespace group, ...) -- remove rather than leave
+        // meaningless bracket noise or fabricate a number never written.
+        return "";
+      }
+      return refs.map((ref) => `[${ref}]`).join("");
+    })
+    // A bracket containing ONLY whitespace and/or commas (no "R" at all,
+    // so the rule above never reaches it) can never be a legitimate
+    // anything in this report format -- not a citation, not an
+    // "[Estimated]"-style tag, not a page reference -- an unambiguous
+    // empty citation group left behind by a dropped reference.
+    .replace(/\[[\s,]+\]/g, "")
+    // TASK #25 -- collapses a run of 2+ identical, textually-adjacent
+    // bracketed tokens into one (e.g. "[Unverified reference][Unverified
+    // reference]" -> "[Unverified reference]", confirmed live whenever a
+    // claim originally cited multiple references and each was replaced
+    // independently). Render-time counterpart of the root-cause fix in
+    // neutralizeUnverifiableEvidenceReferences (evidence-reference-
+    // integrity.ts), which prevents the duplicate for every future
+    // report; this cleans up reports persisted before that fix existed.
+    // Language-agnostic (matches whatever text is actually there, never
+    // needs to know the label) and never touches two DIFFERENT adjacent
+    // citations like "[R5][R6]" -- the backreference only matches an
+    // EXACT repeat of the same bracket content.
+    .replace(/(\[[^\]]+\])(?:\s*\1)+/g, "$1")
+    // TASK #25C -- confirmed live (manual PDF inspection of a real
+    // report): the bracketed "[Unverified reference]" form (and its 4
+    // other language variants) reads as a raw technical placeholder to
+    // an investor, not an intentional editorial disclosure. Render-time
+    // counterpart of the label change in evidence-reference-integrity.ts
+    // (unverifiableReferenceLabel) -- that fix only changes what NEW
+    // reports write; this converts the same 5 known OLD literal bracketed
+    // strings already baked into reports persisted before this fix
+    // existed into their new clean, unbracketed, parenthetical form,
+    // without regenerating anything. Runs AFTER the duplicate-collapse
+    // rule above so an already-persisted duplicate (e.g. "[Unverified
+    // reference][Unverified reference]") is merged to one occurrence
+    // before being restyled, never leaving "(unverified) (unverified)"
+    // behind. Plain literal replacement (no regex metacharacters, no
+    // dynamic construction), so it can never match a valid "[R#]"
+    // reference or an unrelated bracketed tag like "[Estimated]". Keep in
+    // sync with evidence-reference-integrity.ts's own copy of this map if
+    // either changes.
+    .replace(/\[Unverified reference\]/g, "(unverified)")
+    .replace(/\[Doğrulanamayan referans\]/g, "(doğrulanmamış)")
+    .replace(/\[Nicht verifizierbarer Verweis\]/g, "(nicht verifiziert)")
+    .replace(/\[Référence non vérifiable\]/g, "(non vérifié)")
+    .replace(/\[Referencia no verificable\]/g, "(no verificado)")
+    // Removing a bracket entirely (the empty-citation-group and
+    // collapsed-duplicate rules above) can leave a doubled space behind
+    // where the bracket used to sit -- collapse it back to one before the
+    // final whitespace/punctuation cleanup below runs.
+    .replace(/ {2,}/g, " ")
     .replace(/([.!?])\s+\1/g, "$1")
     .replace(/\s+([,.;:)])/g, "$1")
     .replace(/(\d)\.\s+(\d)(\s*[kKmMbB%])?/g, "$1.$2$3")

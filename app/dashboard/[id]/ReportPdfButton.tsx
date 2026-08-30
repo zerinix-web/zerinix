@@ -36,6 +36,7 @@ import {
   resolveMarketSizingCascade,
   resolveCagrHeadlinePresentation,
   stripLeadingTakeawaySentence,
+  SENTENCE_ABBREVIATIONS,
 } from "@/app/lib/report-presentation";
 import {
   cleanPdfLegacyValidationIntelligenceContent,
@@ -2127,11 +2128,42 @@ function extractRecommendationItems(content: string) {
   // parentheticals (the marker must be preceded by list/sentence
   // punctuation, not just any digit).
   const normalizedSource = source.replace(/([:.])\s+(\d{1,2}[.)]\s+)/g, "$1\n$2");
-  const bulletLines = normalizedSource
-    .split("\n")
+  // TASK #26 -- confirmed live (real persisted report): the model's own
+  // generated prose sometimes wraps a physical line mid-sentence -- seen
+  // twice in the SAME report, both immediately after "U.S." (e.g. "Owner:
+  // Head of Sales (U.S.\nmid-market)..."), which is not a real
+  // recommendation boundary. A blind per-line split treated the wrapped
+  // continuation as its own separate "action", cutting the real
+  // recommendation short (ending at "...(U.S.") and fabricating an
+  // incomplete second one from whatever text was left after the wrap. A
+  // line only starts a genuinely NEW recommendation when it begins with a
+  // bullet/numbered marker; a marker-less line is rejoined onto whichever
+  // item is already open -- but ONLY when that item's text so far ends in
+  // a known abbreviation (SENTENCE_ABBREVIATIONS, the same list
+  // splitSentences/getSectionTakeaway already trust for this exact "not a
+  // real sentence end" signal), so a genuinely separate closing/summary
+  // sentence that just happens to lack its own bullet marker (which ends
+  // in ordinary terminal punctuation, not an abbreviation) is never
+  // incorrectly merged into the preceding action.
+  const itemStartPattern = /^(?:[-*•]|\d{1,2}[.)])\s+/;
+  const rawLines = normalizedSource.split("\n").map((line) => line.trim());
+  const mergedLines: string[] = [];
+  for (const line of rawLines) {
+    const previous = mergedLines[mergedLines.length - 1];
+    const isSpuriousWrap =
+      previous !== undefined &&
+      !itemStartPattern.test(line) &&
+      SENTENCE_ABBREVIATIONS.some((abbreviation) => previous.endsWith(abbreviation));
+
+    if (isSpuriousWrap) {
+      mergedLines[mergedLines.length - 1] = `${previous} ${line}`;
+    } else {
+      mergedLines.push(line);
+    }
+  }
+  const bulletLines = mergedLines
     .map((line) =>
       line
-        .trim()
         .replace(/^[-*•]\s+/, "")
         .replace(/^\d+[.)]\s+/, "")
         .replace(/\*\*/g, "")
@@ -2145,10 +2177,20 @@ function extractRecommendationItems(content: string) {
     return bulletLines.slice(0, 8);
   }
 
-  return source
-    .replace(/\*\*/g, "")
+  // TASK #26 -- same abbreviation-protection as the bullet-line path above
+  // (see its own comment), applied here too since this fallback also
+  // splits on sentence-ending punctuation and would otherwise cut a
+  // sentence short right after "U.S."/"Inc."/etc.
+  const abbreviationSentinel = "\x00";
+  const protectedSource = SENTENCE_ABBREVIATIONS.reduce(
+    (acc, abbreviation) =>
+      acc.split(abbreviation).join(abbreviation.replace(/\./g, abbreviationSentinel)),
+    source.replace(/\*\*/g, "")
+  );
+
+  return protectedSource
     .split(/(?<=[.!?])\s+/)
-    .map((line) => line.trim())
+    .map((line) => line.split(abbreviationSentinel).join(".").trim())
     .filter((line) => line.length > 8 && !isMetadataOnlyRecommendationLine(line))
     .slice(0, 4);
 }
@@ -4520,10 +4562,17 @@ export function buildStandardReportPdf({
       const computeRecommendationCardLayout = (item: string, cardWidth: number) => {
         const { timeframe, metric, budget, owner, gate } = extractRecommendationSignals(item);
         pdf.setFontSize(6);
-        const actionLines = truncatePdfCellLines(
-          wrapPdfText(localizePdfPresentationText(item, pdfLocale), cardWidth - 13),
-          2
-        );
+        // TASK #25C -- confirmed live (real persisted report): capping
+        // this at 2 lines silently ellipsized real action text whenever
+        // a recommendation's actual sentence needed more room, which
+        // Task #25's requirement explicitly forbids ("do not silently
+        // truncate content to make it fit"). The card's own height
+        // below is already fully derived from actionLines.length, so
+        // removing the cap simply lets the card grow to fit its real
+        // text -- no other call site re-truncates this array (see the
+        // draw call in the strategic-recommendation pagination branch),
+        // so the full, untruncated action always reaches the page.
+        const actionLines = wrapPdfText(localizePdfPresentationText(item, pdfLocale), cardWidth - 13);
         const fields = (
           [
             ["Owner", owner],
@@ -4987,8 +5036,16 @@ export function buildStandardReportPdf({
           // size, so measuring before drawing the label (rather than
           // after) keeps the wrap count consistent with what is actually
           // rendered.
+          //
+          // TASK #26B -- confirmed live: this used to additionally cap at
+          // 3 wrapped lines on top of getSectionTakeaway's own now-removed
+          // 220-char cap, silently dropping any remaining wrapped lines
+          // with no visual cue. takeawayBoxHeight below is already fully
+          // derived from takeawayLines.length, so removing the cap simply
+          // lets the box grow to fit the complete sentence -- same fix
+          // already applied to Strategic Recommendations.
           pdf.setFontSize(8.4);
-          const takeawayLines = wrapPdfText(localizePdfPresentationText(takeaway, pdfLocale), bodyWidth - 12).slice(0, 3);
+          const takeawayLines = wrapPdfText(localizePdfPresentationText(takeaway, pdfLocale), bodyWidth - 12);
           const takeawayBoxHeight = Math.max(16, 8 + takeawayLines.length * 4.4);
 
           pdf.setFillColor("#101f1d");
@@ -5684,115 +5741,18 @@ export function buildStandardReportPdf({
           return marketMetricsDashboardHeight;
         }
 
-        // Strategic Recommendations is inherently a list -- rendered as
-        // Action/Owner/Timeline/Budget/Success Metric/Decision Gate
-        // cards rather than one long paragraph block. Each card's signals
-        // are read directly out of this recommendation's own generated
-        // sentence (extractRecommendationSignals never fabricates a value
-        // it cannot find). The section's full prose still renders below
-        // this visual, unchanged.
-        if (isMarketIntelligenceReport && normalizedTitle.includes("strategic recommendation")) {
-          const items = extractRecommendationItems(content).slice(0, 4);
-
-          if (items.length === 0) {
-            return 0;
-          }
-
-          // CRITICAL FIX (Task #17) -- confirmed live: this section's own
-          // raw text used to carry an independently-written decision
-          // verdict ("Recommendation: Enter") that could disagree with
-          // Executive Summary's canonical decision -- isRecommendationHeadingLine
-          // now excludes that sentence from the cards below entirely (see
-          // its own comment), but this section is still a decision-
-          // bearing surface per this ticket's own requirement, so it
-          // explicitly states the SAME canonical decision every other
-          // surface reads, rather than asserting nothing at all.
-          const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
-            readMarketIntelligenceCanonicalState(report.metadata),
-            pdfSections.find((entry) => entry.field === "executiveSummary")?.content || "",
-            pdfLocale === "tr" ? "Turkish" : "English"
-          );
-          if (strategicRecommendationDecision.decisionLabel !== "—") {
-            pdf.setFontSize(5.6);
-            pdf.setTextColor("#a1a1aa");
-            pdf.text(
-              `${localizePdfPresentationLabel("Current Decision", pdfLocale)}: ${strategicRecommendationDecision.decisionLabel}`,
-              bodyX,
-              visualY + 3.6,
-              { maxWidth: bodyWidth }
-            );
-          }
-          const recommendationCardsTopY = visualY + strategicRecommendationDecisionBadgeHeight;
-
-          const columns = 2;
-          const cardGap = recommendationCardGap;
-          const cardWidth = (bodyWidth - (columns - 1) * cardGap) / columns;
-          const { cards, rowHeights } = computeRecommendationRowHeights(items, cardWidth);
-
-          cards.forEach(({ gate, actionLines, fields }, index) => {
-            const col = index % columns;
-            const row = Math.floor(index / columns);
-            const x = bodyX + col * (cardWidth + cardGap);
-            const cardY = recommendationCardsTopY + rowHeights.slice(0, row).reduce((sum, height) => sum + height + cardGap, 0);
-            const cardHeight = rowHeights[row];
-
-            pdf.setFillColor("#18181b");
-            pdf.setDrawColor("#27272a");
-            pdf.roundedRect(x, cardY, cardWidth, cardHeight, 2.5, 2.5, "FD");
-
-            pdf.setFillColor("#042f2e");
-            pdf.setDrawColor("#5eead4");
-            pdf.circle(x + 6, cardY + 6, 3, "FD");
-            pdf.setFontSize(5.6);
-            pdf.setTextColor("#ccfbf1");
-            pdf.text(String(index + 1), x + 4.7, cardY + 7.4);
-
-            pdf.setFontSize(5.2);
-            pdf.setTextColor("#71717a");
-            pdf.text(localizePdfPresentationLabel("ACTION", pdfLocale), x + 11, cardY + 4);
-            pdf.setFontSize(6);
-            pdf.setTextColor("#e4e4e7");
-            pdf.text(actionLines, x + 11, cardY + 7.8, {
-              lineHeightFactor: 1.15,
-              maxWidth: cardWidth - 13,
-            });
-
-            const fieldsTopY = cardY + 7.8 + actionLines.length * 3.3 + 2.5;
-            const fieldColWidth = (cardWidth - 6) / 2;
-
-            if (fields.length > 0) {
-              pdf.setDrawColor("#27272a");
-              pdf.line(x + 3, fieldsTopY - 1.6, x + cardWidth - 3, fieldsTopY - 1.6);
-
-              fields.slice(0, 4).forEach(([label, value], fieldIndex) => {
-                const fx = x + 3 + (fieldIndex % 2) * fieldColWidth;
-                const fy = fieldsTopY + Math.floor(fieldIndex / 2) * 5.6;
-
-                pdf.setFontSize(4.4);
-                pdf.setTextColor("#71717a");
-                pdf.text(localizePdfPresentationLabel(label, pdfLocale).toUpperCase(), fx, fy);
-                pdf.setFontSize(5.2);
-                pdf.setTextColor("#5eead4");
-                drawSingleLine(value, fx, fy + 2.8, fieldColWidth - 2, 5.2, 4);
-              });
-            }
-
-            if (gate) {
-              pdf.setFontSize(4.4);
-              pdf.setTextColor("#71717a");
-              pdf.text(localizePdfPresentationLabel("DECISION GATE", pdfLocale), x + 3, cardY + cardHeight - 5.4);
-              pdf.setFontSize(5);
-              pdf.setTextColor("#fbbf24");
-              drawSingleLine(gate, x + 3, cardY + cardHeight - 2, cardWidth - 6, 5, 4);
-            }
-          });
-
-          return (
-            strategicRecommendationDecisionBadgeHeight +
-            rowHeights.reduce((sum, height) => sum + height, 0) +
-            Math.max(0, rowHeights.length - 1) * cardGap
-          );
-        }
+        // TASK #25C -- Strategic Recommendations moved out of this
+        // generic single-call visual dispatch entirely: its card grid's
+        // total height is genuinely data-dependent and, once each card's
+        // height reflects its own real untruncated action text (see
+        // computeRecommendationCardLayout), can exceed a single page --
+        // something this function's single drawSectionVisual(section, y)
+        // call site has no way to react to (it always draws everything
+        // it's given in one pass at one Y). Handled instead by its own
+        // dedicated, row-pagination-aware branch directly in the
+        // top-level pdfSections.forEach loop below, which can start a
+        // fresh "continued" card and keep drawing remaining rows exactly
+        // like the generic body-text path already does for long prose.
 
         // Acquisition Due Diligence's own postMergerIntegrationPlan field
         // must never draw the fixed Business-Plan founder timeline
@@ -6118,7 +6078,7 @@ export function buildStandardReportPdf({
           }
           const previousFontSize = pdf.getFontSize();
           pdf.setFontSize(8.4);
-          const takeawayLines = wrapPdfText(localizePdfPresentationText(takeaway, pdfLocale), bodyWidth - 12).slice(0, 3);
+          const takeawayLines = wrapPdfText(localizePdfPresentationText(takeaway, pdfLocale), bodyWidth - 12);
           pdf.setFontSize(previousFontSize);
           return Math.max(16, 8 + takeawayLines.length * 4.4);
         }
@@ -6246,19 +6206,11 @@ export function buildStandardReportPdf({
           return marketMetricsDashboardHeight;
         }
 
-        if (isMarketIntelligenceReport && normalizedTitle.includes("strategic recommendation")) {
-          const items = extractRecommendationItems(section.content).slice(0, 4);
-          if (items.length === 0) {
-            return 0;
-          }
-          const cardWidth = (bodyWidth - recommendationCardGap) / 2;
-          const { rowHeights } = computeRecommendationRowHeights(items, cardWidth);
-          return (
-            strategicRecommendationDecisionBadgeHeight +
-            rowHeights.reduce((sum, height) => sum + height, 0) +
-            Math.max(0, rowHeights.length - 1) * recommendationCardGap
-          );
-        }
+        // TASK #25C -- Strategic Recommendations' own dedicated
+        // pagination branch (pdfSections.forEach below) computes and
+        // consumes its row heights directly and never reads this
+        // function's return value for that section, so no branch is
+        // needed here any more; see that branch's own comment.
 
         return /founder score|founder readiness|scenario|roadmap|competitor|porter|kpi|risk|unit economics/i.test(section.title)
           ? 22
@@ -6421,6 +6373,201 @@ export function buildStandardReportPdf({
           // its own comment) -- the visual's per-layer real assumption
           // sentence, drawn above, is already this section's complete
           // presentation, so hasBodyText is always false at this point.
+
+          return;
+        }
+
+        // TASK #25C -- Strategic Recommendations gets its own dedicated
+        // branch, drawn as one or more "continued" cards instead of a
+        // single drawSectionVisual(section, y) call. Root cause of the
+        // reported defect: once computeRecommendationCardLayout no
+        // longer truncates action text to 2 lines (see its own comment),
+        // the card grid's total height is genuinely data-dependent and
+        // can exceed a single page -- something the generic single-call
+        // visual dispatch above has no way to react to mid-draw. This
+        // paginates by whole ROWS (a row is 2 cards): as many complete
+        // rows as fit in the space left on the current page are drawn
+        // in one card, then a fresh "continued" card picks up the
+        // remaining rows, exactly like the generic body-text loop below
+        // already does for long prose. A row (and therefore every card
+        // and its full action text) is never split across two pages.
+        // Every action is read from extractRecommendationItems' own
+        // already-shared, order-preserving list exactly once, for
+        // whatever count it returns -- nothing here hardcodes a count.
+        if (isMarketIntelligenceReport && section.title.toLowerCase().includes("strategic recommendation")) {
+          const items = extractRecommendationItems(section.content);
+
+          if (items.length === 0) {
+            return;
+          }
+
+          const columns = 2;
+          const cardGap = recommendationCardGap;
+          const cardWidth = (bodyWidth - (columns - 1) * cardGap) / columns;
+          const { cards, rowHeights } = computeRecommendationRowHeights(items, cardWidth);
+
+          const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+            readMarketIntelligenceCanonicalState(report.metadata),
+            pdfSections.find((entry) => entry.field === "executiveSummary")?.content || "",
+            pdfLocale === "tr" ? "Turkish" : "English"
+          );
+          const decisionBadgeText =
+            strategicRecommendationDecision.decisionLabel !== "—"
+              ? `${localizePdfPresentationLabel("Current Decision", pdfLocale)}: ${strategicRecommendationDecision.decisionLabel}`
+              : "";
+
+          const drawRecommendationFieldValue = (
+            text: string,
+            x: number,
+            lineY: number,
+            maxWidth: number,
+            size: number,
+            minSize = 5.4
+          ) => {
+            let fontSize = size;
+            pdf.setFontSize(fontSize);
+            while (fontSize > minSize && pdf.getTextWidth(text) > maxWidth) {
+              fontSize -= 0.35;
+              pdf.setFontSize(fontSize);
+            }
+            const safeText =
+              pdf.getTextWidth(text) > maxWidth
+                ? `${text.slice(0, Math.max(4, Math.floor(text.length * (maxWidth / Math.max(pdf.getTextWidth(text), 1))) - 1))}…`
+                : text;
+            pdf.text(safeText, x, lineY);
+          };
+
+          let rowCursor = 0;
+          let isFirstChunk = true;
+
+          while (rowCursor < rowHeights.length) {
+            const chunkBadgeHeight = isFirstChunk ? strategicRecommendationDecisionBadgeHeight : 0;
+            let rowsInChunk = 0;
+            let chunkRowsHeight = 0;
+
+            for (let candidate = rowCursor; candidate < rowHeights.length; candidate += 1) {
+              const candidateGap = candidate > rowCursor ? cardGap : 0;
+              const candidateRowsHeight = chunkRowsHeight + candidateGap + rowHeights[candidate];
+              const candidateCardHeight =
+                cardHeaderHeight + chunkBadgeHeight + candidateRowsHeight + cardBottomPadding;
+
+              // Always keep at least one row per chunk -- a single
+              // pathologically tall row still gets its own page rather
+              // than looping forever trying to find a chunk that fits.
+              if (rowsInChunk > 0 && candidateCardHeight > maxUsableCardHeight) {
+                break;
+              }
+
+              chunkRowsHeight = candidateRowsHeight;
+              rowsInChunk += 1;
+            }
+
+            const chunkCardHeight = Math.max(
+              31,
+              cardHeaderHeight + chunkBadgeHeight + chunkRowsHeight + cardBottomPadding
+            );
+
+            ensureSpace(chunkCardHeight);
+
+            if (isFirstChunk) {
+              tocEntries.push({
+                title: getPdfTocEntryTitle(section, pdfLocale),
+                page: pdf.getCurrentPageInfo().pageNumber,
+              });
+            }
+
+            drawPdfSectionCardFrame(pdf, { margin, y, contentWidth, cardHeight: chunkCardHeight });
+
+            pdf.setFontSize(14);
+            pdf.setTextColor("#ffffff");
+            const displaySectionTitle = getPdfSectionCardTitle(section, pdfLocale);
+            const chunkTitle = isFirstChunk
+              ? displaySectionTitle
+              : `${displaySectionTitle}${pdfLocale === "tr" ? " devamı" : " continued"}`;
+            if (chunkTitle) {
+              pdf.text(chunkTitle, bodyX, y + 12.5, { maxWidth: bodyWidth });
+            }
+
+            const contentTopY = y + 18 + minHeadingToContentGap;
+
+            if (isFirstChunk && decisionBadgeText) {
+              pdf.setFontSize(5.6);
+              pdf.setTextColor("#a1a1aa");
+              pdf.text(decisionBadgeText, bodyX, contentTopY + 3.6, { maxWidth: bodyWidth });
+            }
+
+            const rowsTopY = contentTopY + chunkBadgeHeight;
+
+            cards
+              .slice(rowCursor * columns, (rowCursor + rowsInChunk) * columns)
+              .forEach((card, indexInChunk) => {
+                const absoluteIndex = rowCursor * columns + indexInChunk;
+                const col = indexInChunk % columns;
+                const rowInChunk = Math.floor(indexInChunk / columns);
+                const x = bodyX + col * (cardWidth + cardGap);
+                const cardY =
+                  rowsTopY +
+                  rowHeights
+                    .slice(rowCursor, rowCursor + rowInChunk)
+                    .reduce((sum, height) => sum + height + cardGap, 0);
+                const cardHeight = rowHeights[rowCursor + rowInChunk];
+                const { gate, actionLines, fields } = card;
+
+                pdf.setFillColor("#18181b");
+                pdf.setDrawColor("#27272a");
+                pdf.roundedRect(x, cardY, cardWidth, cardHeight, 2.5, 2.5, "FD");
+
+                pdf.setFillColor("#042f2e");
+                pdf.setDrawColor("#5eead4");
+                pdf.circle(x + 6, cardY + 6, 3, "FD");
+                pdf.setFontSize(5.6);
+                pdf.setTextColor("#ccfbf1");
+                pdf.text(String(absoluteIndex + 1), x + 4.7, cardY + 7.4);
+
+                pdf.setFontSize(5.2);
+                pdf.setTextColor("#71717a");
+                pdf.text(localizePdfPresentationLabel("ACTION", pdfLocale), x + 11, cardY + 4);
+                pdf.setFontSize(6);
+                pdf.setTextColor("#e4e4e7");
+                pdf.text(actionLines, x + 11, cardY + 7.8, {
+                  lineHeightFactor: 1.15,
+                  maxWidth: cardWidth - 13,
+                });
+
+                const fieldsTopY = cardY + 7.8 + actionLines.length * 3.3 + 2.5;
+                const fieldColWidth = (cardWidth - 6) / 2;
+
+                if (fields.length > 0) {
+                  pdf.setDrawColor("#27272a");
+                  pdf.line(x + 3, fieldsTopY - 1.6, x + cardWidth - 3, fieldsTopY - 1.6);
+
+                  fields.slice(0, 4).forEach(([label, value], fieldIndex) => {
+                    const fx = x + 3 + (fieldIndex % 2) * fieldColWidth;
+                    const fy = fieldsTopY + Math.floor(fieldIndex / 2) * 5.6;
+
+                    pdf.setFontSize(4.4);
+                    pdf.setTextColor("#71717a");
+                    pdf.text(localizePdfPresentationLabel(label, pdfLocale).toUpperCase(), fx, fy);
+                    pdf.setFontSize(5.2);
+                    pdf.setTextColor("#5eead4");
+                    drawRecommendationFieldValue(value, fx, fy + 2.8, fieldColWidth - 2, 5.2, 4);
+                  });
+                }
+
+                if (gate) {
+                  pdf.setFontSize(4.4);
+                  pdf.setTextColor("#71717a");
+                  pdf.text(localizePdfPresentationLabel("DECISION GATE", pdfLocale), x + 3, cardY + cardHeight - 5.4);
+                  pdf.setFontSize(5);
+                  pdf.setTextColor("#fbbf24");
+                  drawRecommendationFieldValue(gate, x + 3, cardY + cardHeight - 2, cardWidth - 6, 5, 4);
+                }
+              });
+
+            y += chunkCardHeight + minSectionGap;
+            rowCursor += rowsInChunk;
+            isFirstChunk = false;
+          }
 
           return;
         }

@@ -74,6 +74,7 @@ import {
   assertNoDuplicateCitationSources,
   assertCitationsResolveInBibliography,
   neutralizeUnverifiableEvidenceReferences,
+  sanitizeCitationBracketSyntax,
 } from "@/app/lib/report-engine/evidence-reference-integrity";
 import {
   buildMarketIntelligenceCanonicalState,
@@ -1227,6 +1228,20 @@ function ensureMarketReportQuality(
     normalized[field] = field === "sources"
       ? cleanInternalMarketSourceFallbacks(sanitized, language)
       : enforceMarketReportLanguage(sanitized, language, marketAssessment?.confidence);
+    // TASK #25 -- confirmed live: the model itself sometimes writes a
+    // malformed citation bracket like "[, R12]" (a leading empty entry
+    // before a real reference number), which the standard [R#] pattern
+    // every citation-integrity check below relies on cannot see at all --
+    // not merely a display glitch, a complete blind spot for orphan
+    // detection and bibliography linking alike. Normalizing it back to
+    // the standard "[R12]" shape here, before any of those checks run,
+    // restores it to every existing protection. sanitizeMarketReportContent
+    // (above) already applies the same fix via normalizePdfText's own
+    // copy of this pattern -- this explicit call is redundant-by-design
+    // (a no-op on already-clean text) so this fix stays visible and
+    // independently testable in this file rather than relying solely on
+    // an implicit side effect of a general-purpose text normalizer.
+    normalized[field] = sanitizeCitationBracketSyntax(normalized[field]) || "";
   }
 
   // Apply the server-owned graph after generic model-output cleanup so its

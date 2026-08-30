@@ -100,7 +100,11 @@ test("ReportPdfButton.tsx: Executive dashboard, TAM/SAM/SOM, Porter, Competitive
     pdfButtonSource,
     /normalizedTitle\.includes\("competitor"\) \|\| normalizedTitle\.includes\("competitive landscape"\)/
   );
-  assert.match(pdfButtonSource, /isMarketIntelligenceReport && normalizedTitle\.includes\("strategic recommendation"\)/);
+  // TASK #25C -- Strategic Recommendations' branch moved to its own
+  // dedicated pagination-aware code path in pdfSections.forEach; the
+  // title check itself is unchanged, just inlined rather than reading a
+  // pre-computed `normalizedTitle` local.
+  assert.match(pdfButtonSource, /isMarketIntelligenceReport && section\.title\.toLowerCase\(\)\.includes\("strategic recommendation"\)/);
   assert.match(pdfButtonSource, /const executiveSnapshot = buildExecutiveSnapshot\(/);
 });
 
