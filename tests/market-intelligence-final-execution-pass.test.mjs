@@ -126,7 +126,9 @@ test("Planner.tsx's downloadPdf: Strategic Recommendations now has real Action/O
     /const items = extractRecommendationItems\(section\.content\)\.slice\(0, 4\);/,
     "the PDF-only 4-item cap must not be reintroduced"
   );
-  assert.match(plannerSource, /const \{ timeframe, metric, budget, owner, gate \} = extractRecommendationSignals\(item\);/);
+  // TASK #29H -- extractRecommendationSignals gained 2 more destructured
+  // fields (activity, evidenceTie); the pre-existing 5 are unchanged.
+  assert.match(plannerSource, /const \{ timeframe, metric, budget, owner, gate, activity, evidenceTie \} = extractRecommendationSignals\(item\);/);
   assert.match(plannerSource, /localizePdfPresentationLabel\("DECISION GATE", pdfLocale\)/);
 });
 

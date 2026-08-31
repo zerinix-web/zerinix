@@ -139,9 +139,11 @@ test("ReportPdfButton.tsx's per-section render loop wraps the final sectionBodyC
   // sectionContentWithoutTakeawayDuplication computation (plus its
   // documentation) between the loop start and this wrap, widening the
   // distance -- the window is widened to still confirm the wrap remains
-  // inside the same forEach loop, not moved outside it.
+  // inside the same forEach loop, not moved outside it. TASK #29E added a
+  // further CAGR "Validation Required" override (with its own explanatory
+  // comment) in the same span, widening it again.
   assert.ok(
-    wrapIndex > loopStart && wrapIndex < loopStart + 2800,
+    wrapIndex > loopStart && wrapIndex < loopStart + 4600,
     "the stripReportPresentationArtifacts wrap is not inside the render loop"
   );
 });

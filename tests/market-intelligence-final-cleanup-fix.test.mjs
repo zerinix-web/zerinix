@@ -77,8 +77,15 @@ test("page.tsx's ExecutiveSnapshotPanel remaps the 'Evidence'/'Kanıt' confidenc
 });
 
 test("Planner.tsx's on-screen executive snapshot panel has the same Market-Intelligence-only remap", () => {
-  const onScreenMatch = /const confidenceRadarDimensions = isMarketIntelligence[\s\S]{0,400}/.exec(plannerSource);
+  // TASK #29B -- confidenceRadarDimensions now tries a real, canonical-
+  // state-derived factor breakdown FIRST (resolveMarketIntelligenceConfidenceFactors),
+  // falling back to this exact pre-existing "Evidence"/"Kanıt" ->
+  // "Market Signals"/"Pazar Sinyalleri" remap only when no canonical
+  // state is available -- the remap itself, and the panel rendering
+  // confidenceRadarDimensions (not the raw snapshot), are both unchanged.
+  const onScreenMatch = /const confidenceRadarDimensions = isMarketIntelligence[\s\S]{0,700}/.exec(plannerSource);
   assert.ok(onScreenMatch, "confidenceRadarDimensions remap not found in Planner.tsx");
+  assert.match(plannerSource, /resolveMarketIntelligenceConfidenceFactors/);
   assert.match(onScreenMatch[0], /dimension\.label === "Evidence" \|\| dimension\.label === "Kanıt"/);
   assert.match(onScreenMatch[0], /"Market Signals"/);
   assert.match(onScreenMatch[0], /"Pazar Sinyalleri"/);
@@ -86,13 +93,20 @@ test("Planner.tsx's on-screen executive snapshot panel has the same Market-Intel
 });
 
 test("Planner.tsx's own PDF export also remaps the Evidence/Kanıt dimension for Market Intelligence (it does not share ReportPdfButton.tsx's MI-specific data source)", () => {
+  // TASK #29B -- the PDF's own confidenceRadar fallback is unchanged, but
+  // it is now only reached when no canonical-state-derived factor row
+  // array is available (marketIntelligenceConfidenceFactorRows), and the
+  // forEach's array expression itself now prefers that row array first.
   const pdfRemapMatch = /const marketIntelligenceConfidenceRadarDimensions = isMarketIntelligence[\s\S]{0,500}/.exec(
     plannerSource
   );
   assert.ok(pdfRemapMatch, "marketIntelligenceConfidenceRadarDimensions remap not found in Planner.tsx");
   assert.match(pdfRemapMatch[0], /dimension\.label === "Evidence" \|\| dimension\.label === "Kanıt"/);
   assert.match(pdfRemapMatch[0], /"Market Signals"/);
-  assert.match(plannerSource, /: marketIntelligenceConfidenceRadarDimensions\)\.forEach\(\(dimension, index\)/);
+  assert.match(
+    plannerSource,
+    /: marketIntelligenceConfidenceFactorRows \|\| marketIntelligenceConfidenceRadarDimensions\s*\n\s*\)\.forEach\(\(dimension, index\)/
+  );
 });
 
 test("Planner.tsx's PDF export also relabels the panel title itself ('Confidence Radar' -> 'Confidence Factors') for Market Intelligence, matching ReportPdfButton.tsx's established MI label", () => {

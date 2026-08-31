@@ -40,6 +40,13 @@ const pdfButtonSource = readFileSync(
   new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url),
   "utf8"
 );
+// TASK #29J -- isRecommendationHeadingLine/isMetadataOnlyRecommendationLine/
+// isEvidenceStatusDisclaimerLine/extractRecommendationItems were
+// consolidated into this single shared module.
+const reportPresentationSource = readFileSync(
+  new URL("../app/lib/report-presentation.ts", import.meta.url),
+  "utf8"
+);
 
 // Realistic Market Intelligence competitiveLandscape content, matching
 // market-intelligence-graph.ts's actual generated table shape (Vendor /
@@ -96,15 +103,23 @@ const functionDependencies = {
     /function isRecommendationHeadingLine\([\s\S]*?\n\}\n[\s\S]*?function isMetadataOnlyRecommendationLine\([\s\S]*?\n\}\n[\s\S]*?function isEvidenceStatusDisclaimerLine\([\s\S]*?\n\}/,
 };
 
+// TASK #29J -- extractRecommendationItems (and its 3 sibling dependencies
+// above) now live solely in report-presentation.ts; look there
+// regardless of which surface's source was passed in for labeling.
+const functionSourceOverrides = {
+  extractRecommendationItems: reportPresentationSource,
+};
+
 // Function bodies here contain their own inline TypeScript type
 // annotations (e.g. a typed arrow-function local), too much for the
 // simple signature-line stripping used elsewhere in this suite -- so
 // this writes the extracted source to a real .ts file and lets tsx
 // transpile it properly, then imports the compiled function directly.
 async function compileFunction(source, functionName) {
-  const raw = extractFunctionSource(source, functionName);
+  const effectiveSource = functionSourceOverrides[functionName] ?? source;
+  const raw = extractFunctionSource(effectiveSource, functionName);
   const dependencyPattern = functionDependencies[functionName];
-  const dependency = dependencyPattern ? source.match(dependencyPattern)?.[0] : null;
+  const dependency = dependencyPattern ? effectiveSource.match(dependencyPattern)?.[0] : null;
   if (dependencyPattern) {
     assert.ok(dependency, `dependency for ${functionName} not found`);
   }

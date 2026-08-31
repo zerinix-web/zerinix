@@ -52,6 +52,12 @@ const pdfButtonSource = readFileSync(
   new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url),
   "utf8"
 );
+// TASK #29J -- extractRecommendationSignals (and recommendationOwnerRolePattern,
+// its dependency) was consolidated into this single shared module.
+const reportPresentationSource = readFileSync(
+  new URL("../app/lib/report-presentation.ts", import.meta.url),
+  "utf8"
+);
 
 function extractFunctionSource(source, functionName) {
   const match = source.match(new RegExp(`function ${functionName}\\([\\s\\S]*?\\n\\}`));
@@ -65,7 +71,7 @@ function extractFunctionSource(source, functionName) {
 // function itself so the compiled module has everything it references.
 const functionDependencies = {
   extractForceIntensity: /const forceAliases: Record<string, string\[\]> = \{[\s\S]*?\n\};/,
-  extractRecommendationSignals: /const recommendationOwnerRolePattern =[\s\S]*?;/,
+  extractRecommendationSignals: /export const recommendationOwnerRolePattern =[\s\S]*?;/,
   // A later ticket ("RESTORE PREMIUM ANALYTICAL DEPTH") split
   // extractMarketIntelligenceCompetitorRows into a 3-tier fallback chain
   // (table -> flattened bullets -> Major Players' own bullets), each its
@@ -218,7 +224,8 @@ test("page.tsx and Planner.tsx: the Competitive Landscape visual renders a real 
 
 test("page.tsx and Planner.tsx: extractRecommendationSignals now extracts a best-effort Owner role/title from real prose, never fabricating one when absent", async () => {
   for (const source of [pageSource, plannerSource]) {
-    const fn = await compileFunction(source, "extractRecommendationSignals");
+    void source;
+    const fn = await compileFunction(reportPresentationSource, "extractRecommendationSignals");
     const withOwner = fn(
       "Launch a 90-day pilot in the DACH region, owned by the Regional GM, targeting a 15% trial-to-paid conversion rate."
     );

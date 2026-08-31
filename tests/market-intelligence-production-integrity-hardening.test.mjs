@@ -166,9 +166,14 @@ test("assessMarketEntryConfidence never manufactures ENTER or AVOID as a false-p
   // rawConfidence (the uncapped blend), not `confidence` -- the
   // thresholds (65/40) and the ENTER/MONITOR/AVOID band structure this
   // test protects are otherwise unchanged.
+  // TASK #29B -- 65/40 extracted into named constants, reused by the new
+  // per-factor confidence-level derivation -- literal shape changed,
+  // thresholds/branches did not.
+  assert.match(presentationSource, /const STRONG_CONFIDENCE_THRESHOLD = 65;/);
+  assert.match(presentationSource, /const MODERATE_CONFIDENCE_THRESHOLD = 40;/);
   assert.match(
     presentationSource,
-    /rawConfidence >= 65 \? "ENTER" : rawConfidence >= 40 \? "MONITOR" : "AVOID"/
+    /rawConfidence >= STRONG_CONFIDENCE_THRESHOLD\s*\n\s*\? "ENTER"\s*\n\s*: rawConfidence >= MODERATE_CONFIDENCE_THRESHOLD\s*\n\s*\? "MONITOR"\s*\n\s*: "AVOID";/
   );
 });
 

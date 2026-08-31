@@ -295,12 +295,16 @@ function extractFunctionSource(source, functionName) {
 }
 
 async function compileExtractRecommendationItems(source) {
+  // TASK #29J -- these functions now live solely in report-presentation.ts;
+  // `source` (the calling surface's own file) is accepted for the
+  // caller's own labeling/looping but no longer used for extraction.
+  void source;
   const pieces = [
     `const SENTENCE_ABBREVIATIONS = ${JSON.stringify(SENTENCE_ABBREVIATIONS)};`,
-    extractFunctionSource(source, "isRecommendationHeadingLine"),
-    extractFunctionSource(source, "isMetadataOnlyRecommendationLine"),
-    extractFunctionSource(source, "isEvidenceStatusDisclaimerLine"),
-    `export ${extractFunctionSource(source, "extractRecommendationItems")}`,
+    extractFunctionSource(reportPresentationSource, "isRecommendationHeadingLine"),
+    extractFunctionSource(reportPresentationSource, "isMetadataOnlyRecommendationLine"),
+    extractFunctionSource(reportPresentationSource, "isEvidenceStatusDisclaimerLine"),
+    `export ${extractFunctionSource(reportPresentationSource, "extractRecommendationItems")}`,
   ].join("\n\n");
 
   const dir = mkdtempSync(join(tmpdir(), "zerinix-recommendation-items-"));
@@ -313,6 +317,10 @@ async function compileExtractRecommendationItems(source) {
 const pageSource = readFileSync(new URL("../app/dashboard/[id]/page.tsx", import.meta.url), "utf8");
 const plannerSource = readFileSync(new URL("../components/Planner.tsx", import.meta.url), "utf8");
 const pdfButtonSource = readFileSync(new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url), "utf8");
+// TASK #29J -- isRecommendationHeadingLine/isMetadataOnlyRecommendationLine/
+// isEvidenceStatusDisclaimerLine/extractRecommendationItems were
+// consolidated into this single shared module.
+const reportPresentationSource = readFileSync(new URL("../app/lib/report-presentation.ts", import.meta.url), "utf8");
 
 function sixActionRecommendations() {
   return [

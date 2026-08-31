@@ -57,6 +57,10 @@ const pdfButtonSource = readFileSync(
   "utf8"
 );
 const plannerSource = readFileSync(new URL("../components/Planner.tsx", import.meta.url), "utf8");
+// TASK #29J -- isRecommendationHeadingLine/isMetadataOnlyRecommendationLine/
+// isEvidenceStatusDisclaimerLine/extractRecommendationItems were
+// consolidated into this single shared module.
+const reportPresentationSource = readFileSync(new URL("../app/lib/report-presentation.ts", import.meta.url), "utf8");
 
 function extractFunctionSource(source, functionName) {
   const startMatch = source.match(new RegExp(`function ${functionName}\\(`));
@@ -85,18 +89,22 @@ function extractFunctionSource(source, functionName) {
 }
 
 async function compileExtractors(source) {
+  // TASK #29J -- these functions now live solely in report-presentation.ts;
+  // `source` (the calling surface's own file) is accepted for the
+  // caller's own labeling/looping but no longer used for extraction.
+  void source;
   const dir = mkdtempSync(join(tmpdir(), "zerinix-action-parsing-"));
   const outPath = join(dir, "extract.mts");
   const harness = `
 const SENTENCE_ABBREVIATIONS = ${JSON.stringify(SENTENCE_ABBREVIATIONS)};
 
-${extractFunctionSource(source, "isRecommendationHeadingLine")}
+${extractFunctionSource(reportPresentationSource, "isRecommendationHeadingLine")}
 
-${extractFunctionSource(source, "isMetadataOnlyRecommendationLine")}
+${extractFunctionSource(reportPresentationSource, "isMetadataOnlyRecommendationLine")}
 
-${extractFunctionSource(source, "isEvidenceStatusDisclaimerLine")}
+${extractFunctionSource(reportPresentationSource, "isEvidenceStatusDisclaimerLine")}
 
-${extractFunctionSource(source, "extractRecommendationItems")}
+${extractFunctionSource(reportPresentationSource, "extractRecommendationItems")}
 
 export { extractRecommendationItems, isMetadataOnlyRecommendationLine };
 `;

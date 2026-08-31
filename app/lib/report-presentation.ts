@@ -244,7 +244,8 @@ function stripMarkdown(value: string) {
 // stripMarkdown + length>24 filtering, which is tuned specifically for
 // takeaway extraction -- can reuse this single list rather than
 // maintaining a second, driftable copy. See extractRecommendationItems
-// (page.tsx/Planner.tsx/ReportPdfButton.tsx) for the confirmed real-world
+// below (TASK #29J -- now defined once in this file, consumed by
+// page.tsx/Planner.tsx/ReportPdfButton.tsx) for the confirmed real-world
 // case this unblocked: a model-wrapped line break landing right after
 // "U.S." (e.g. "Owner: Head of Sales (U.S.\nmid-market)...") was being
 // treated as a genuine recommendation-item boundary.
@@ -1667,3 +1668,376 @@ export function compactExecutiveDecisionMemoSections<T extends { field?: string;
     ];
   });
 }
+
+// =============================================================================
+// TASK #29J -- Strategic Recommendations extraction/grouping, consolidated.
+//
+// Before this task, the 5 functions/constants below existed as byte-for-
+// byte (modulo comments) IDENTICAL copies in THREE separate files
+// (ReportPdfButton.tsx, Planner.tsx, page.tsx) -- the exact "duplicated
+// logic, fixed in one surface but not the others" pattern that caused
+// real UI/PDF drift bugs across Tasks #29E-#29I (each of those tasks had
+// to apply its fix three times, by hand, to keep all three in sync).
+// This is now the SINGLE source of truth: recommendation action
+// extraction, Owner/Budget/Budget-ceiling/KPI/Success-criterion/
+// Timeline/Activity/Evidence-tie metadata grouping, rationale/context/
+// evidence-disclaimer filtering, and the legacy marker-free prose
+// fallback. All three consumers import these directly instead of
+// maintaining their own copies -- a future fix now only needs to be
+// written once, and UI/PDF cannot drift apart on this logic again.
+//
+// Semantics are UNCHANGED from the pre-consolidation copies (verified via
+// byte-for-byte, comment-stripped diff across all three original copies
+// before this move) -- this is a pure relocation, not a rewrite.
+// =============================================================================
+
+// CRITICAL FIX -- confirmed live: a real Market Intelligence report's
+// strategicRecommendations content began with "Recommendation: Enter
+// (evidence supports entering...)" -- Business Plan/Acquisition
+// vocabulary the Market Intelligence prompt never uses for its OWN
+// decision, but which this generic extractor treated as an ordinary
+// bulleted action line and rendered as this section's own first
+// numbered "Action" card -- reproducing the exact reported
+// contradiction (this section's own "Action #1" literally read
+// "Recommendation: Enter" while Executive Summary's canonical decision
+// was MONITOR). These are Executive-Summary-owned verdict language, not
+// action items, regardless of which decision they happen to state --
+// excluded here unconditionally, the same way the deterministic heading
+// strings above already are.
+export function isRecommendationHeadingLine(item: string) {
+  if (/:$/.test(item)) return true;
+  if (/^(?:first\s+90\s*-?\s*days?|market entry recommendation|why entry is not recommended now)\b/i.test(item)) {
+    return true;
+  }
+  if (/^(?:recommendation|conviction|trade-?offs?)\s*:/i.test(item)) {
+    return true;
+  }
+  // TASK #29F -- confirmed live (real persisted report): "Market Entry
+  // Recommendation" (already excluded above as a heading) is always
+  // followed by its own fixed 4-line Why/Where/When/How recap template --
+  // rationale, geographic scope, timing, and a restatement of the
+  // Decision line, never a genuine First-90-Days action (those are
+  // labeled Owner/Budget ceiling/KPI/Success criterion, per that field's
+  // own generation contract, never bare "Why:"/"Where:"/"When:"/"How:").
+  // Left unfiltered, whichever of these 4 lines happened to fall within
+  // the numbered-card display cap rendered as a spurious duplicate
+  // "ACTION" restating context already shown by the Decision/Rationale
+  // cards. Excluding all 4 here (not just the heading) keeps the real
+  // numbered actions and their order completely unaffected.
+  if (/^(?:why|where|when|how)\s*:/i.test(item)) {
+    return true;
+  }
+
+  return false;
+}
+
+// CRITICAL FIX (Task #18) -- every Market Intelligence field prompt ends
+// with "Max N words," which the model often echoes back as a trailing
+// self-check footnote ("(174 words)", "(Total 136 words)") that would
+// otherwise be rendered as a malformed, content-free "Action" card.
+// Anchored start-to-end so a real sentence mentioning a word count
+// mid-thought is never rejected.
+export function isMetadataOnlyRecommendationLine(item: string) {
+  return /^\(?\s*(?:total\s+)?\d+\s*words?\s*\)?\.?\s*$/i.test(item);
+}
+
+// TASK #27C -- confirmed live (real persisted report): a deterministic,
+// codebase-generated evidence-quality disclaimer sentence -- emitted by
+// report-output-sanitization.ts (sanitizeInternalResearchDiagnostics,
+// generation time) when a field's own research degraded, and separately
+// relabeled into its investor-facing wording by a Market-Intelligence-only
+// presentation pass -- can end up as the LAST physical line of
+// strategicRecommendations' own content. It has no bullet/numbered
+// marker and passes every other check here, so it was being rendered as
+// a fake, content-free "Action" card. This is meta-commentary about the
+// REPORT's evidence quality as a whole, never an actionable
+// recommendation -- it must never be treated as one, regardless of
+// which of the known trailing-clause variants or the relabeled
+// canonical form actually appears, and regardless of which language the
+// report is in. Kept as its own, separately-named function (rather than
+// folded into isRecommendationHeadingLine) so evidence-status metadata
+// stays a clearly distinct concern from recommendation-heading
+// detection, matching how the two are separately generated.
+export function isEvidenceStatusDisclaimerLine(item: string): boolean {
+  return (
+    /^Some external sources could not be verified,?\s*so\b/i.test(item) ||
+    /^Some assumptions require additional validation before a final conclusion\.?$/i.test(item) ||
+    /^Bazı dış kaynaklar doğrulanamadığı için\b/i.test(item) ||
+    /^Bazı varsayımlar nihai bir sonuca varılmadan önce ek doğrulama gerektiriyor\.?$/i.test(item) ||
+    // TASK #28 -- the consolidated section-level evidence-status
+    // disclosure (pdf-normalization.mjs's consolidateRepeatedEvidenceStatusLabels)
+    // is appended as the LAST line of a field, exactly where the older
+    // disclaimers above already were -- it needs the same exclusion so it
+    // is never mistaken for a real, actionable Strategic Recommendation.
+    // TASK #28B shortened the note's wording for new/re-rendered output
+    // (see pdf-normalization.mjs); both the old and new wording are
+    // matched here since an already-persisted report may still carry the
+    // longer Task #28 text verbatim until it is regenerated.
+    /^Evidence status: several claims\b/i.test(item) ||
+    /^Kanıt durumu: Bu bölümdeki bazı iddialar\b/i.test(item) ||
+    /^Evidenzstatus: Mehrere Aussagen\b/i.test(item) ||
+    /^État des preuves : plusieurs affirmations\b/i.test(item) ||
+    /^Estado de la evidencia: varias afirmaciones\b/i.test(item) ||
+    /^Evidence note: Some claims require independent validation\.?$/i.test(item) ||
+    /^Kanıt notu: Bazı iddialar bağımsız doğrulama gerektirir\.?$/i.test(item) ||
+    /^Evidenzhinweis: Einige Aussagen erfordern eine unabhängige Prüfung\.?$/i.test(item) ||
+    /^Note sur les preuves : certaines affirmations nécessitent une validation indépendante\.?$/i.test(item) ||
+    /^Nota sobre la evidencia: algunas afirmaciones requieren validación independiente\.?$/i.test(item) ||
+    // TASK #29E -- confirmed live (real persisted report): the model
+    // sometimes appends a standalone "Evidence cited: [R21][R3][R4]..."
+    // line after its real numbered actions -- a citation-listing footer
+    // for the whole recommendation set, not an action itself. It has no
+    // bullet/numbered marker and passed every other check here, so it
+    // was rendered as a fake, near-empty "Action" card once its own
+    // citation brackets were separately stripped for display elsewhere
+    // in the pipeline (leaving just "Evidence cited:."). Anchored to
+    // BOTH ends so it only ever matches a line that is nothing but this
+    // label plus citation brackets -- a genuine action that happens to
+    // mention "evidence cited" mid-sentence is never affected.
+    /^Evidence (?:cited|collected)\s*:\s*(?:\[R\d+\]\s*)*\.?\s*$/i.test(item) ||
+    // TASK #29G -- confirmed live (real persisted report): a competitor/
+    // evidence-validation disclaimer ("Specific named rivals could not be
+    // independently validated within available evidence; competitive
+    // intensity is inferred from category-level signals.") matched none
+    // of the exact-sentence disclaimer templates above and was promoted
+    // to its own numbered "ACTION" card -- evidence/validation context
+    // about the report's own research, never an executable step. Rather
+    // than adding yet another hardcoded sentence, this is a general
+    // structural pattern for the whole semantic family ("X could not be
+    // independently validated/verified/confirmed", in any tense/subject),
+    // so a future report phrasing this caveat differently is still
+    // caught. A genuine action never asserts that something COULD NOT be
+    // validated/verified/confirmed -- it states owners, budgets, KPIs,
+    // and success criteria -- so this can't misfire on real content.
+    /\b(?:could not|cannot|couldn't|can't|is not|isn't|are not|aren't|was not|wasn't|were not|weren't|has not|hasn't|have not|haven't)\s+(?:be\s+|been\s+)?(?:independently\s+)?(?:validated|verified|confirmed|corroborated)\b/i.test(item)
+  );
+}
+
+// Strategic Recommendations is inherently a list -- each real recommendation
+// line is rendered as its own card, rather than one long paragraph block.
+// Falls back to sentence-splitting when the content has no bullet/numbered
+// markers.
+export function extractRecommendationItems(content: string) {
+  const source = content || "";
+  // CRITICAL FIX (Task #18) -- a heading ("First 90 Days (three concrete
+  // actions):") can share one physical line with its own first numbered
+  // action, which the line-level heading check then discards entirely.
+  // Inserting a real line break before any numbered marker that follows
+  // a ":"/"." boundary lets the heading and the action be evaluated
+  // separately, without risking a false split on decimals or citation
+  // parentheticals (the marker must be preceded by list/sentence
+  // punctuation, not just any digit).
+  const normalizedSource = source.replace(/([:.])\s+(\d{1,2}[.)]\s+)/g, "$1\n$2");
+  // TASK #26 -- confirmed live (real persisted report): the model's own
+  // generated prose sometimes wraps a physical line mid-sentence -- seen
+  // twice in the SAME report, both immediately after "U.S." (e.g. "Owner:
+  // Head of Sales (U.S.\nmid-market)..."), which is not a real
+  // recommendation boundary. A blind per-line split treated the wrapped
+  // continuation as its own separate "action", cutting the real
+  // recommendation short (ending at "...(U.S.") and fabricating an
+  // incomplete second one from whatever text was left after the wrap. A
+  // line only starts a genuinely NEW recommendation when it begins with a
+  // bullet/numbered marker; a marker-less line is rejoined onto whichever
+  // item is already open -- but ONLY when that item's text so far ends in
+  // a known abbreviation (SENTENCE_ABBREVIATIONS, the same list
+  // splitSentences/getSectionTakeaway already trust for this exact "not a
+  // real sentence end" signal), so a genuinely separate closing/summary
+  // sentence that just happens to lack its own bullet marker (which ends
+  // in ordinary terminal punctuation, not an abbreviation) is never
+  // incorrectly merged into the preceding action.
+  const itemStartPattern = /^(?:[-*•]|\d{1,2}[.)])\s+/;
+  // TASK #29G -- confirmed live (real persisted report): the model
+  // sometimes attaches a per-action rationale as its own bracketed aside
+  // ON ITS OWN PHYSICAL LINE -- e.g. "[Why: establishes achievable
+  // outreach-to-win ratios and closes SOM gap]." right after the action
+  // it explains. It has no bullet/numbered marker and its previous line
+  // doesn't end in a SENTENCE_ABBREVIATIONS entry, so the abbreviation-
+  // only merge rule above never caught it, and it was promoted to its
+  // own numbered "ACTION" card -- rationale/context rendered as if it
+  // were an executable step, incrementing the action count. A line that
+  // is ENTIRELY a bracketed clause is, by this pipeline's own consistent
+  // convention (the same "[Estimated]"/"[R12]" inline-annotation shape
+  // used throughout every Market Intelligence field), always a qualifier
+  // on the thought immediately before it, never a new standalone thought
+  // -- so it is rejoined onto whichever action is already open instead of
+  // starting a new one. This generalizes to ANY bracketed label ("[Why:
+  // ...]", "[Rationale: ...]", "[Note: ...]", ...), not a hardcoded match
+  // on the word "Why" -- future generated wording in this exact shape is
+  // handled without further changes. A line that is NOT fully bracketed
+  // (e.g. the pre-existing "If all three succeed, ..." closing sentence)
+  // is completely unaffected and keeps its own established behavior.
+  const isBracketedAnnotationLine = (line: string) => /^\[.+\]\.?$/.test(line);
+  // TASK #29H -- confirmed live (real persisted report structure): a
+  // recommendation's own metadata (Owner, Budget/Budget cap/Budget
+  // ceiling, Activity, Success criterion, Evidence tie/to collect) is
+  // sometimes written by the model as its OWN bulleted sub-line under a
+  // numbered action heading, e.g. "1) Market-size & SOM validation\n-
+  // Owner: Head of Market Research\n- Budget cap: $50,000\n..." -- rather
+  // than folded inline into one sentence (the OTHER, equally valid shape
+  // this same prompt sometimes produces, e.g. "Account Validation Sprint
+  // -- Owner: Head of Sales; Budget ceiling: $75,000; ..."). Because a
+  // bulleted sub-field line has its OWN "-" marker, it always matched
+  // itemStartPattern and was treated as a brand-new top-level
+  // recommendation -- flattening one real recommendation's 5 metadata
+  // fields into 5 separate fake "ACTION" cards. A line -- regardless of
+  // whether it happens to carry a bullet marker -- whose content (after
+  // stripping that marker) IS ENTIRELY one of this field's own recognized
+  // metadata labels is structurally a sub-field of whichever
+  // recommendation is already open, never a new recommendation: a
+  // genuine recommendation's own title is a noun phrase/action name, not
+  // a bare "Label:" line. Joined with "; " to match the SAME inline
+  // separator the one-sentence format already uses, so
+  // extractRecommendationSignals below reads both shapes identically --
+  // this is the single structural fix that lets UI and PDF render one
+  // grouped card with its own Owner/Budget/Activity/Success Criterion/
+  // Evidence Tie fields, instead of one card per fragment, regardless of
+  // which of the two shapes a given generation happens to use.
+  // TASK #29I -- confirmed live (real persisted report): the label
+  // family only covered "Evidence tie:"/"Evidence to collect:"/"Evidence
+  // link:" -- a BARE "Evidence: ..." line (and "Evidence basis:"/
+  // "Supporting evidence:", the same semantic field under other real
+  // wordings) fell through unrecognized and was promoted to its own
+  // numbered "ACTION" card. Extended to the whole "Evidence" family
+  // generically (any single word after "Evidence", or none at all,
+  // before the colon) plus "Supporting evidence:" -- never the separate,
+  // already-excluded "Evidence cited:"/"Evidence collected:" citation
+  // footer shape (Task #29E), which has no colon directly after
+  // "Evidence" or one of these specific suffixes and is handled by
+  // isEvidenceStatusDisclaimerLine instead.
+  const recommendationFieldLabelPattern =
+    /^(?:Owner|Owned by|Budget(?:\s+cap|\s+ceiling)?|Spend(?:\s+cap|\s+ceiling)?|Activity|Action|Scope|Success criterion|Success metric|KPI|Evidence(?:\s+tie|\s+to\s+collect|\s+link|\s+basis)?|Supporting evidence|Target|Geography(?:\/segment)?|Segment|Timeline)\s*:/i;
+  const rawLines = normalizedSource.split("\n").map((line) => line.trim());
+  const mergedLines: string[] = [];
+  for (const line of rawLines) {
+    const previous = mergedLines[mergedLines.length - 1];
+    const strippedForFieldCheck = line.replace(/^[-*•]\s+/, "").replace(/^\d+[.)]\s+/, "");
+    const isFieldLabelLine = previous !== undefined && recommendationFieldLabelPattern.test(strippedForFieldCheck);
+    const isSpuriousWrap =
+      previous !== undefined &&
+      !itemStartPattern.test(line) &&
+      (SENTENCE_ABBREVIATIONS.some((abbreviation) => previous.endsWith(abbreviation)) ||
+        isBracketedAnnotationLine(line));
+
+    if (isFieldLabelLine) {
+      mergedLines[mergedLines.length - 1] = `${previous}; ${strippedForFieldCheck}`;
+    } else if (isSpuriousWrap) {
+      mergedLines[mergedLines.length - 1] = `${previous} ${line}`;
+    } else {
+      mergedLines.push(line);
+    }
+  }
+  const bulletLines = mergedLines
+    .map((line) =>
+      line
+        .replace(/^[-*•]\s+/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .replace(/\*\*/g, "")
+        .trim()
+    )
+    .filter(
+      (line) =>
+        line.length > 8 &&
+        !isRecommendationHeadingLine(line) &&
+        !isMetadataOnlyRecommendationLine(line) &&
+        !isEvidenceStatusDisclaimerLine(line)
+    );
+
+  if (bulletLines.length > 0) {
+    return bulletLines.slice(0, 8);
+  }
+
+  // TASK #26 -- same abbreviation-protection as the bullet-line path above
+  // (see its own comment), applied here too since this fallback also
+  // splits on sentence-ending punctuation and would otherwise cut a
+  // sentence short right after "U.S."/"Inc."/etc.
+  const abbreviationSentinel = "\x00";
+  const protectedSource = SENTENCE_ABBREVIATIONS.reduce(
+    (acc, abbreviation) =>
+      acc.split(abbreviation).join(abbreviation.replace(/\./g, abbreviationSentinel)),
+    source.replace(/\*\*/g, "")
+  );
+
+  return protectedSource
+    .split(/(?<=[.!?])\s+/)
+    .map((line) => line.split(abbreviationSentinel).join(".").trim())
+    .filter((line) => line.length > 8 && !isMetadataOnlyRecommendationLine(line) && !isEvidenceStatusDisclaimerLine(line))
+    .slice(0, 4);
+}
+
+// Best-effort inline signal extraction for a single recommendation line --
+// strategicRecommendations' own prompt requires each First-90-Days action
+// to name owners, a KPI, a success criterion, and a budget/spend ceiling
+// as prose, not as machine-parseable "Owner: X" labels, so this surfaces
+// only the signals that can be confidently read back out of that prose,
+// never fabricating a value when the line does not genuinely contain one.
+export const recommendationOwnerRolePattern =
+  "(?:CEO|CMO|CFO|COO|CTO|CPO|VP of \\w+|Head of \\w+|(?:regional|country|global) (?:GM|general manager)|product (?:lead|manager|owner)|growth (?:lead|manager)|sales (?:lead|manager)|marketing (?:lead|manager)|founder)";
+
+export function extractRecommendationSignals(line: string) {
+  const timeframe = line.match(
+    /\b\d+[\s-](?:day|days|week|weeks|month|months|gün|hafta|ay)\b|\bQ[1-4]\b|\b(?:this|next)\s+quarter\b/i
+  )?.[0];
+  // TASK #29H -- prefer an explicit "Budget cap:"/"Budget ceiling:"/
+  // "Spend cap:" label's own value first (this pipeline's real
+  // generation contract already names the field this way) -- falls back
+  // to the old bare currency-amount scan unchanged for content that
+  // doesn't use the label, so a report that just writes "$75,000"
+  // inline still resolves exactly as before.
+  const explicitBudget = line.match(/\b(?:Budget(?:\s+cap|\s+ceiling)?|Spend(?:\s+cap|\s+ceiling)?)\s*:\s*([^;]+?)(?:;|\.\s|\.$|$)/i)?.[1]?.trim();
+  const budget = explicitBudget || line.match(/[€$₺]\s*\d+(?:[.,]\d+)*(?:\s*[kKmMbB])?/)?.[0];
+  // TASK #29H -- prefer an explicit "Success criterion:"/"Success
+  // metric:" label's own value first -- the old bare percentage/count
+  // scan below only ever caught a narrow set of phrasings and missed
+  // real success criteria stated in other terms (e.g. "at least one
+  // comparable public price schedule secured").
+  const explicitSuccessCriterion = line.match(/\bSuccess\s+(?:criterion|metric)\s*:\s*([^;]+?)(?:;|\.\s|\.$|$)/i)?.[1]?.trim();
+  const metric =
+    explicitSuccessCriterion ||
+    line.match(/\d+(?:[.,]\d+)?\s*%/)?.[0] ||
+    line.match(/\b\d+\s+(?:paying\s+)?(?:pilots?|customers?|interviews?|conversions?|sign-?ups?|users?|leads?|deals?)\b/i)?.[0];
+  // TASK #29H -- prefer an explicit "Owner:"/"Owned by:" label's own
+  // value verbatim first -- the old role-keyword match below only ever
+  // recognized a fixed, narrow list of role titles (Head of X, VP of X,
+  // ...) and silently dropped a real owner name/role stated in any other
+  // words (e.g. "Pilot Lead"). Falls back to the role-keyword scan
+  // unchanged for content with no explicit label at all.
+  const explicitOwner = line.match(/\b(?:Owner|Owned by)\s*:\s*([^;]+?)(?:;|\.\s|\.$|$)/i)?.[1]?.trim();
+  const owner =
+    explicitOwner ||
+    line.match(new RegExp(`\\b(?:owned by|led by|driven by|owner:)\\s+(?:the\\s+)?(${recommendationOwnerRolePattern})\\b`, "i"))?.[1] ||
+    line.match(new RegExp(`\\b(${recommendationOwnerRolePattern})\\b`, "i"))?.[1];
+  const gate = line.match(
+    /\bbefore\s+(?:committing\s+(?:further\s+)?(?:budget|spend)|scaling(?:\s+further)?|the\s+next\s+decision|proceeding|expanding|the\s+next\s+phase)\b[^.]*/i
+  )?.[0];
+  // TASK #29H -- the ticket's own "conceptual structure" (title/action,
+  // owner, budget, activity, successCriterion, evidenceTie) explicitly
+  // wants Activity and Evidence Tie surfaced as their own fields, not
+  // left buried in the flowing action paragraph now that the merge fix
+  // above (recommendationFieldLabelPattern) keeps them attached to the
+  // right recommendation. Explicit-label-only (no guess fallback) since,
+  // unlike owner/budget, there is no reliable keyword-free way to infer
+  // these two from free prose without risking fabrication.
+  const activity = line.match(/\b(?:Activity|Action|Scope)\s*:\s*([^;]+?)(?:;|\.\s|\.$|$)/i)?.[1]?.trim();
+  // TASK #29I -- extended from "Evidence tie:"/"Evidence to collect:"/
+  // "Evidence link:" to also recognize a BARE "Evidence:" label and
+  // "Evidence basis:"/"Supporting evidence:" (the same semantic field
+  // under other real wordings). The optional suffix group only ever
+  // matches "tie"/"to collect"/"link"/"basis" -- "Evidence cited:"/
+  // "Evidence collected:" (Task #29E's citation-footer shape) can never
+  // satisfy either that suffix or the bare "Evidence:" form (there is
+  // always a non-whitespace word between "Evidence" and the colon in
+  // that shape), so this can never re-capture what #29E already excludes.
+  const evidenceTie = line.match(/\b(?:Evidence(?:\s+(?:tie|to\s+collect|link|basis))?|Supporting evidence)\s*:\s*([^;]+?)(?:;|\.\s|\.$|$)/i)?.[1]?.trim();
+
+  return {
+    timeframe: timeframe?.trim() || "",
+    metric: metric?.trim() || "",
+    budget: budget?.trim() || "",
+    owner: owner?.trim() || "",
+    gate: gate?.trim() || "",
+    activity: activity?.trim() || "",
+    evidenceTie: evidenceTie?.trim() || "",
+  };
+}
+
+export type RecommendationSignals = ReturnType<typeof extractRecommendationSignals>;

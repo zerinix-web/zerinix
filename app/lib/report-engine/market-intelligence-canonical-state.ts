@@ -45,7 +45,11 @@ import type {
   MarketIntelligenceSource,
   MarketPlanningEstimate,
 } from "@/app/lib/ai/market-intelligence-graph";
-import type { DecisionCriticalEvidenceState } from "@/app/lib/report-engine/market-intelligence-presentation";
+import {
+  type DecisionCriticalEvidenceState,
+  type MarketIntelligenceConfidenceFactors,
+  buildMarketIntelligenceConfidenceFactors,
+} from "@/app/lib/report-engine/market-intelligence-presentation";
 import {
   type ExecutiveDecisionBrief,
   type ExecutiveDecisionCode,
@@ -269,6 +273,30 @@ export function resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
   }
 
   return resolveMarketIntelligenceExecutiveDecision(executiveSummaryContent, language);
+}
+
+// TASK #29B -- the single shared source for the cover's per-dimension
+// confidence-factor breakdown (Market/Financial/Execution/Product/Market
+// Signals). Both inputs buildMarketIntelligenceConfidenceFactors needs
+// (coverage.dimensions, decisionCriticalEvidence) are already part of
+// MarketIntelligenceCanonicalState (see its own comment for why -- Task
+// #23 persisted them for exactly this kind of derivation, no new field or
+// version bump required), so this is a pure re-packaging: canonical state
+// present -> real, deterministic factor levels; absent -> null, and every
+// caller falls back to whatever it already rendered for a report with no
+// canonical state (never a fabricated guess). page.tsx, ReportPdfButton.tsx,
+// and Planner.tsx must all call this SAME function rather than invoking
+// buildMarketIntelligenceConfidenceFactors directly with their own
+// independently-sourced coverage/evidence values, so the three surfaces
+// are structurally unable to disagree.
+export function resolveMarketIntelligenceConfidenceFactors(
+  canonicalState: MarketIntelligenceCanonicalState | null
+): MarketIntelligenceConfidenceFactors | null {
+  if (!canonicalState) return null;
+  return buildMarketIntelligenceConfidenceFactors(
+    canonicalState.coverage,
+    canonicalState.decisionCriticalEvidence
+  );
 }
 
 // TASK #23 (follow-up) -- the degraded/graph-less persistence gap.

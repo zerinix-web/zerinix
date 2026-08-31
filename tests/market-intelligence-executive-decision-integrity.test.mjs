@@ -433,9 +433,15 @@ test("DRIFT CHECK: the weighted-blend formula and its ENTER/MONITOR/AVOID thresh
   // deliberate: it guarantees the label-gating logic (this exact
   // ternary, thresholds unchanged) can never be affected by the
   // separate confidence-number cap added below it.
+  // TASK #29B -- 65/40 extracted into named constants
+  // (STRONG_CONFIDENCE_THRESHOLD/MODERATE_CONFIDENCE_THRESHOLD), reused
+  // by the new per-factor confidence-level derivation -- the literal
+  // shape changed, the thresholds and branches did not.
+  assert.match(presentationSource, /const STRONG_CONFIDENCE_THRESHOLD = 65;/);
+  assert.match(presentationSource, /const MODERATE_CONFIDENCE_THRESHOLD = 40;/);
   assert.match(
     presentationSource,
-    /rawConfidence >= 65 \? "ENTER" : rawConfidence >= 40 \? "MONITOR" : "AVOID"/
+    /rawConfidence >= STRONG_CONFIDENCE_THRESHOLD\s*\n\s*\? "ENTER"\s*\n\s*: rawConfidence >= MODERATE_CONFIDENCE_THRESHOLD\s*\n\s*\? "MONITOR"\s*\n\s*: "AVOID";/
   );
 });
 

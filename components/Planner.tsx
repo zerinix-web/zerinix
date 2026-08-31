@@ -58,6 +58,8 @@ import {
 import {
   buildExecutiveSnapshot,
   compactExecutiveDecisionMemoSections,
+  extractRecommendationItems,
+  extractRecommendationSignals,
   extractSectionMainExplanation,
   getReportQualityBreakdown,
   getReportPresentationLabels,
@@ -69,7 +71,6 @@ import {
   readFounderReadinessScoreValue,
   resolveMarketSizingCascade,
   stripLeadingTakeawaySentence,
-  SENTENCE_ABBREVIATIONS,
 } from "@/app/lib/report-presentation";
 import type {
   ReportBenchmarkFit,
@@ -158,9 +159,21 @@ import {
 import {
   readMarketIntelligenceCanonicalState,
   resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
+  resolveMarketIntelligenceConfidenceFactors,
   constrainMarketSizingResolutionToCanonicalState,
   type MarketIntelligenceCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
+import {
+  localizeMarketConfidenceFactorLevel,
+  type MarketConfidenceFactorLevel,
+} from "@/app/lib/report-engine/market-intelligence-presentation";
+
+const confidenceFactorLevelToGaugePercent: Record<MarketConfidenceFactorLevel, number | null> = {
+  Strong: 90,
+  Moderate: 60,
+  Weak: 30,
+  "Validation Required": null,
+};
 import {
   SourcesCard,
   getFinalDedupePdfSources,
@@ -2301,238 +2314,15 @@ function extractMarketIntelligenceCompetitorRows(content: string, majorPlayersCo
   return extractMarketIntelligenceCompetitorRowsFromMajorPlayers(majorPlayersContent);
 }
 
-// CRITICAL FIX -- confirmed live (root-cause pipeline repair): a
-// section-intro/label line the model writes before its real numbered
-// actions (e.g. "First 90 Days (three actions with owners, budgets,
-// KPIs, and success criteria):", closely echoing this field's own prompt
-// wording -- a known LLM failure mode) or the deterministic "Market Entry
-// Recommendation"/"Why Entry Is Not Recommended Now" heading route.ts
-// appends were both being treated as if they were themselves real
-// recommendation sentences, rendering a fake "Action" card with prompt/
-// heading scaffolding instead of real content. Mirrors market-
-// intelligence-presentation.ts's own isHeadingOnlyLine heuristic (a line
-// ending in ":" is a label, not a sentence) plus an explicit reject for
-// the two known deterministic heading strings.
-//
-// CRITICAL FIX (Task #17) -- confirmed live against a REAL regenerated
-// report: strategicRecommendations' own prompt (market.ts) asks the
-// model to "state plainly whether the evidence supports entering,
-// piloting, or avoiding this market" as its own opening verdict --
-// which the model routinely writes as "Recommendation: Enter (evidence
-// supports...)." / "Conviction: ..." / "Trade-offs: ..." sentences. These
-// have a colon in the MIDDLE, not at the end, so the ":$" heading check
-// above never caught them, and they were rendered verbatim as fake
-// numbered "Action" cards -- reproducing the exact reported
-// contradiction (this section's own "Action #1" literally read
-// "Recommendation: Enter" while Executive Summary's canonical decision
-// was MONITOR). These are Executive-Summary-owned verdict language, not
-// action items, regardless of which decision they happen to state --
-// excluded here unconditionally, the same way the deterministic heading
-// strings above already are.
-function isRecommendationHeadingLine(item: string) {
-  if (/:$/.test(item)) return true;
-  if (/^(?:first\s+90\s*-?\s*days?|market entry recommendation|why entry is not recommended now)\b/i.test(item)) {
-    return true;
-  }
-  if (/^(?:recommendation|conviction|trade-?offs?)\s*:/i.test(item)) {
-    return true;
-  }
-
-  return false;
-}
-
-// CRITICAL FIX (Task #18) -- see page.tsx's own identical function for the
-// full rationale: every Market Intelligence field prompt ends with "Max N
-// words," which the model often echoes back as a trailing self-check
-// footnote ("(174 words)", "(Total 136 words)") that would otherwise be
-// rendered as a malformed, content-free "Action" card. Anchored start-to-
-// end so a real sentence mentioning a word count mid-thought is never
-// rejected.
-function isMetadataOnlyRecommendationLine(item: string) {
-  return /^\(?\s*(?:total\s+)?\d+\s*words?\s*\)?\.?\s*$/i.test(item);
-}
-
-// TASK #27C -- confirmed live (real persisted report): a deterministic,
-// codebase-generated evidence-quality disclaimer sentence -- emitted by
-// report-output-sanitization.ts (sanitizeInternalResearchDiagnostics,
-// generation time) when a field's own research degraded, and separately
-// relabeled into its investor-facing wording by
-// sanitizeMarketIntelligencePresentationText -- can end up as the LAST
-// physical line of strategicRecommendations' own content. It has no
-// bullet/numbered marker and passes every other check here, so it was
-// being rendered as a fake, content-free "Action" card. This is
-// meta-commentary about the REPORT's evidence quality as a whole, never
-// an actionable recommendation -- it must never be treated as one,
-// regardless of which of the known trailing-clause variants or the
-// relabeled canonical form actually appears, and regardless of which
-// language the report is in. Kept as its own, separately-named function
-// (rather than folded into isRecommendationHeadingLine) so evidence-
-// status metadata stays a clearly distinct concern from recommendation-
-// heading detection, matching how the two are separately generated.
-function isEvidenceStatusDisclaimerLine(item: string): boolean {
-  return (
-    /^Some external sources could not be verified,?\s*so\b/i.test(item) ||
-    /^Some assumptions require additional validation before a final conclusion\.?$/i.test(item) ||
-    /^Bazı dış kaynaklar doğrulanamadığı için\b/i.test(item) ||
-    /^Bazı varsayımlar nihai bir sonuca varılmadan önce ek doğrulama gerektiriyor\.?$/i.test(item) ||
-    // TASK #28 -- the consolidated section-level evidence-status
-    // disclosure (pdf-normalization.mjs's consolidateRepeatedEvidenceStatusLabels)
-    // is appended as the LAST line of a field, exactly where the older
-    // disclaimers above already were -- it needs the same exclusion so it
-    // is never mistaken for a real, actionable Strategic Recommendation.
-    // TASK #28B shortened the note's wording for new/re-rendered output
-    // (see pdf-normalization.mjs); both the old and new wording are
-    // matched here since an already-persisted report may still carry the
-    // longer Task #28 text verbatim until it is regenerated.
-    /^Evidence status: several claims\b/i.test(item) ||
-    /^Kanıt durumu: Bu bölümdeki bazı iddialar\b/i.test(item) ||
-    /^Evidenzstatus: Mehrere Aussagen\b/i.test(item) ||
-    /^État des preuves : plusieurs affirmations\b/i.test(item) ||
-    /^Estado de la evidencia: varias afirmaciones\b/i.test(item) ||
-    /^Evidence note: Some claims require independent validation\.?$/i.test(item) ||
-    /^Kanıt notu: Bazı iddialar bağımsız doğrulama gerektirir\.?$/i.test(item) ||
-    /^Evidenzhinweis: Einige Aussagen erfordern eine unabhängige Prüfung\.?$/i.test(item) ||
-    /^Note sur les preuves : certaines affirmations nécessitent une validation indépendante\.?$/i.test(item) ||
-    /^Nota sobre la evidencia: algunas afirmaciones requieren validación independiente\.?$/i.test(item)
-  );
-}
-
-// Strategic Recommendations is inherently a list -- each real
-// recommendation line rendered as its own card, rather than one long
-// paragraph block. Falls back to sentence-splitting (same convention as
-// extractBullets elsewhere in this file) when the content has no
-// bullet/numbered markers.
-function extractRecommendationItems(content: string) {
-  const source = content || "";
-  // CRITICAL FIX (Task #18) -- see page.tsx's own identical block for the
-  // full rationale: a heading ("First 90 Days (three concrete
-  // actions):") can share one physical line with its own first numbered
-  // action, which the line-level heading check then discards entirely.
-  // Inserting a real line break before any numbered marker that follows
-  // a ":"/"." boundary lets the heading and the action be evaluated
-  // separately, without risking a false split on decimals or citation
-  // parentheticals (the marker must be preceded by list/sentence
-  // punctuation, not just any digit).
-  const normalizedSource = source.replace(/([:.])\s+(\d{1,2}[.)]\s+)/g, "$1\n$2");
-  // TASK #26 -- confirmed live (real persisted report): the model's own
-  // generated prose sometimes wraps a physical line mid-sentence -- seen
-  // twice in the SAME report, both immediately after "U.S." (e.g. "Owner:
-  // Head of Sales (U.S.\nmid-market)..."), which is not a real
-  // recommendation boundary. A blind per-line split treated the wrapped
-  // continuation as its own separate "action", cutting the real
-  // recommendation short (ending at "...(U.S.") and fabricating an
-  // incomplete second one from whatever text was left after the wrap. A
-  // line only starts a genuinely NEW recommendation when it begins with a
-  // bullet/numbered marker; a marker-less line is rejoined onto whichever
-  // item is already open -- but ONLY when that item's text so far ends in
-  // a known abbreviation (SENTENCE_ABBREVIATIONS, the same list
-  // splitSentences/getSectionTakeaway already trust for this exact "not a
-  // real sentence end" signal), so a genuinely separate closing/summary
-  // sentence that just happens to lack its own bullet marker (which ends
-  // in ordinary terminal punctuation, not an abbreviation) is never
-  // incorrectly merged into the preceding action.
-  const itemStartPattern = /^(?:[-*•]|\d{1,2}[.)])\s+/;
-  const rawLines = normalizedSource.split("\n").map((line) => line.trim());
-  const mergedLines: string[] = [];
-  for (const line of rawLines) {
-    const previous = mergedLines[mergedLines.length - 1];
-    const isSpuriousWrap =
-      previous !== undefined &&
-      !itemStartPattern.test(line) &&
-      SENTENCE_ABBREVIATIONS.some((abbreviation) => previous.endsWith(abbreviation));
-
-    if (isSpuriousWrap) {
-      mergedLines[mergedLines.length - 1] = `${previous} ${line}`;
-    } else {
-      mergedLines.push(line);
-    }
-  }
-  const bulletLines = mergedLines
-    .map((line) =>
-      line
-        .replace(/^[-*•]\s+/, "")
-        .replace(/^\d+[.)]\s+/, "")
-        .replace(/\*\*/g, "")
-        .trim()
-    )
-    .filter(
-      (line) =>
-        line.length > 8 &&
-        !isRecommendationHeadingLine(line) &&
-        !isMetadataOnlyRecommendationLine(line) &&
-        !isEvidenceStatusDisclaimerLine(line)
-    );
-
-  if (bulletLines.length > 0) {
-    return bulletLines.slice(0, 8);
-  }
-
-  // TASK #26 -- same abbreviation-protection as the bullet-line path
-  // above, applied here too since this fallback also splits on
-  // sentence-ending punctuation and would otherwise cut a sentence short
-  // right after "U.S."/"Inc."/etc. The sentinel (a literal NUL) can never
-  // collide with real report text, so restoring it to "." afterward can
-  // never corrupt anything else in the sentence.
-  const abbreviationSentinel = "\x00";
-  const protectedSource = SENTENCE_ABBREVIATIONS.reduce(
-    (acc, abbreviation) =>
-      acc.split(abbreviation).join(abbreviation.replace(/\./g, abbreviationSentinel)),
-    source.replace(/\*\*/g, "")
-  );
-
-  return protectedSource
-    .split(/(?<=[.!?])\s+/)
-    .map((line) => line.split(abbreviationSentinel).join(".").trim())
-    .filter((line) => line.length > 8 && !isMetadataOnlyRecommendationLine(line) && !isEvidenceStatusDisclaimerLine(line))
-    .slice(0, 4);
-}
-
-// Best-effort inline signal extraction for a single recommendation line --
-// strategicRecommendations' own prompt requires each First-90-Days action
-// to name owners, a KPI, a success criterion, and a budget/spend ceiling
-// as prose, not as machine-parseable "Owner: X" labels, so this surfaces
-// only the signals that can be confidently read back out of that prose
-// (an owner role/title, a timeframe, a percentage/numeric KPI) as small
-// badges -- it never fabricates a value when the line does not genuinely
-// contain one.
-const recommendationOwnerRolePattern =
-  "(?:CEO|CMO|CFO|COO|CTO|CPO|VP of \\w+|Head of \\w+|(?:regional|country|global) (?:GM|general manager)|product (?:lead|manager|owner)|growth (?:lead|manager)|sales (?:lead|manager)|marketing (?:lead|manager)|founder)";
-
-function extractRecommendationSignals(line: string) {
-  const timeframe = line.match(
-    /\b\d+[\s-](?:day|days|week|weeks|month|months|gün|hafta|ay)\b|\bQ[1-4]\b|\b(?:this|next)\s+quarter\b/i
-  )?.[0];
-  // Budget (a spend ceiling) and success metric (a KPI/countable target)
-  // are distinct signals strategicRecommendations' own prompt requires
-  // separately -- kept apart here rather than one shared "metric" match,
-  // so a line naming both (e.g. "$50K budget ... targeting 10 paying
-  // pilots") surfaces both instead of only whichever pattern matched
-  // first.
-  const budget = line.match(/[€$₺]\s*\d+(?:[.,]\d+)*(?:\s*[kKmMbB])?/)?.[0];
-  const metric =
-    line.match(/\d+(?:[.,]\d+)?\s*%/)?.[0] ||
-    line.match(/\b\d+\s+(?:paying\s+)?(?:pilots?|customers?|interviews?|conversions?|sign-?ups?|users?|leads?|deals?)\b/i)?.[0];
-  const owner =
-    line.match(new RegExp(`\\b(?:owned by|led by|driven by|owner:)\\s+(?:the\\s+)?(${recommendationOwnerRolePattern})\\b`, "i"))?.[1] ||
-    line.match(new RegExp(`\\b(${recommendationOwnerRolePattern})\\b`, "i"))?.[1];
-  // Decision Gate -- the checkpoint that determines whether to continue,
-  // e.g. "... before committing further budget"/"before scaling
-  // further". strategicRecommendations' own prompt requires a "numeric
-  // or evidence-based success criterion that determines whether to
-  // continue" for each action, so this phrasing is a real, expected
-  // shape -- never fabricated when absent.
-  const gate = line.match(
-    /\bbefore\s+(?:committing\s+(?:further\s+)?(?:budget|spend)|scaling(?:\s+further)?|the\s+next\s+decision|proceeding|expanding|the\s+next\s+phase)\b[^.]*/i
-  )?.[0];
-
-  return {
-    timeframe: timeframe?.trim() || "",
-    metric: metric?.trim() || "",
-    budget: budget?.trim() || "",
-    owner: owner?.trim() || "",
-    gate: gate?.trim() || "",
-  };
-}
+// TASK #29J -- isRecommendationHeadingLine, isMetadataOnlyRecommendationLine,
+// isEvidenceStatusDisclaimerLine, extractRecommendationItems,
+// recommendationOwnerRolePattern, and extractRecommendationSignals were
+// consolidated into app/lib/report-presentation.ts (the single shared
+// source of truth for Strategic Recommendations extraction/grouping,
+// now imported above) -- previously duplicated, byte-for-byte identical
+// copies lived here, in ReportPdfButton.tsx, and in page.tsx, which is
+// exactly what let Tasks #29E-#29I's fixes drift out of sync across
+// surfaces.
 
 // CRITICAL FIX -- do not reintroduce old fake-data behavior. Porter's
 // Five Forces' intensity bars were a static, hardcoded array
@@ -2686,17 +2476,53 @@ function getFinancialMetricConfidenceBadge(
   return inferEvidenceLevel({ label, value, context: metricContext });
 }
 
+// TASK #29E -- confirmed live (real persisted report, Market Overview):
+// "confidence"/"evidence" ("güven"/"referans" in Turkish) are ordinary
+// English/Turkish words a genuine sentence can start with or use as a
+// natural lead-in ("Evidence: market reports and vendor product pages
+// show AI-enabled CLM offerings and U.S. buyer population counts...") --
+// unlike every OTHER keyword below (formula, assumptions, raw validation
+// context, ...), which only ever appear in this pipeline as genuine
+// internal/debug metadata labels the model occasionally leaks verbatim.
+// The old, single shared pattern matched "evidence:"/"confidence:" at
+// the start of ANY line unconditionally, which silently deleted that
+// entire real Market Overview sentence (it happens to open with
+// "Evidence:") -- and, on the same real report's CAGR field, the
+// mid-line variant deleted "| Confidence: 64/100 (Medium) | Evidence:
+// [R12]" for the RIGHT reason (that line genuinely is metadata) but with
+// no distinction from the wrong case above.
+//
+// Fix: "confidence"/"evidence"/"güven"/"referans" are now only treated
+// as metadata when what immediately follows the colon is METADATA-
+// SHAPED -- a bare number/fraction/parenthetical for confidence (e.g.
+// "64/100", "(Medium)"), or a citation-bracket list for evidence (e.g.
+// "[R12]") -- never when it introduces ordinary prose. Every other
+// keyword's existing (unconditional, start-of-line) matching is
+// completely unchanged.
+const metadataShapedConfidenceEvidenceLinePattern =
+  /^(?:[-*•]\s*)?(?:confidence|güven)\s*[:=]\s*(?=\d|\()|^(?:[-*•]\s*)?(?:evidence|referans)\s*[:=]\s*(?=\[|$)/i;
+const midLineMetadataShapedConfidenceEvidencePattern =
+  /\s*\|\s*(?:confidence|güven)\s*[:=]\s*(?:\d|\()[^|\n]*|\s*\|\s*(?:evidence|referans)\s*[:=]\s*(?:\[[^|\n]*)?/gi;
+const otherMetadataLineKeywordsPattern =
+  /^(?:[-*•]\s*)?(?:formula|assumptions?|varsayımlar|validation evidence|validation needed|metadata|raw evidence metadata|raw validation text|raw validation context|raw benchmark context|internal evidence keys?|benchmark(?:source| source| comparison)?)\s*[:=]/i;
+const midLineOtherMetadataKeywordsPattern =
+  /\s*\|\s*(?:formula|assumptions?|varsayımlar|validation evidence|validation needed|metadata|raw evidence metadata|raw validation text|raw validation context|raw benchmark context|internal evidence keys?|benchmark(?:source| source| comparison)?)\s*[:=][^|\n]+/gi;
+
 function cleanPdfEvidenceMetadataText(value: string) {
   return normalizePdfText(value)
     .split("\n")
     .filter((line) => {
       const trimmed = line.trim();
 
-      return !/^(?:[-*•]\s*)?(?:formula|assumptions?|varsayımlar|confidence|güven|evidence|validation evidence|validation needed|metadata|referans|raw evidence metadata|raw validation text|raw validation context|raw benchmark context|internal evidence keys?|benchmark(?:source| source| comparison)?)\s*[:=]/i.test(trimmed);
+      return (
+        !metadataShapedConfidenceEvidenceLinePattern.test(trimmed) &&
+        !otherMetadataLineKeywordsPattern.test(trimmed)
+      );
     })
     .map((line) =>
       line
-        .replace(/\s*\|\s*(?:formula|assumptions?|varsayımlar|confidence|güven|evidence|validation evidence|validation needed|metadata|referans|raw evidence metadata|raw validation text|raw validation context|raw benchmark context|internal evidence keys?|benchmark(?:source| source| comparison)?)\s*[:=][^|\n]+/gi, "")
+        .replace(midLineOtherMetadataKeywordsPattern, "")
+        .replace(midLineMetadataShapedConfidenceEvidencePattern, "")
         .replace(/\b(?:formula|assumptions?|varsayımlar|confidence|güven|evidence|validation evidence|validation needed|metadata|referans|raw evidence metadata|raw validation text|raw validation context|raw benchmark context|internal evidence keys?|benchmarkSource|benchmark)\s*=\s*[^|;\n]+/gi, "")
         .replace(/\bplanning assumptions require validation\b[.;]?/gi, "")
         .trimEnd()
@@ -4030,7 +3856,8 @@ function formatPdfCitationContent(content: string, realEstate = false) {
 function formatPdfReadableContent(
   section: ReportSection,
   founderReadinessScore?: number | null,
-  realEstate = false
+  realEstate = false,
+  pdfLocale: string = "en"
 ) {
   if (isSourceLikeSection(section)) {
     return formatPdfCitationContent(section.content, realEstate);
@@ -4046,6 +3873,25 @@ function formatPdfReadableContent(
     isTamSamSomTitle(section.title)
   ) {
     return "";
+  }
+
+  // TASK #29E -- confirmed live (real persisted report, mirrors the
+  // identical fix in ReportPdfButton.tsx): the CAGR section's own raw
+  // content can genuinely state no growth-rate percentage anywhere -- a
+  // real generation-time content gap, the same raw text this file's own
+  // Market Metrics tile already reads via extractHeadlineCagrValue and
+  // safely falls back to a blank/"Validation Needed" tile for. Left to
+  // the generic cleanup pipeline below, that same content still carries a
+  // source citation/URL fragment which upstream stripping legitimately
+  // removes piece by piece, leaving a dangling, unprofessional remainder
+  // instead of full prose. Detecting this BEFORE any of that cleanup runs
+  // and substituting one explicit "Validation Required" sentence never
+  // fires when a real percentage is present (untouched, same pipeline as
+  // before) and can never itself be reduced to a fragment.
+  if (section.field === "cagr" && !extractHeadlineCagrValue(section.content)) {
+    return pdfLocale === "tr"
+      ? "Bu rapordaki kaynaklarda bir CAGR (yıllık bileşik büyüme oranı) yüzdesi belirtilmemiştir. Doğrulanana kadar bu değer Doğrulama Gerekli olarak işaretlenmiştir."
+      : "A CAGR percentage was not stated in this report's own sources. This value is marked Validation Required until it can be confirmed.";
   }
 
   // P0 PRODUCTION FIX -- confirmed live (Market Intelligence production
@@ -5535,12 +5381,14 @@ if (field === "swotAnalysis") {
         {items.length > 0 ? (
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {items.map((item, index) => {
-              const { timeframe, metric, budget, owner, gate } = extractRecommendationSignals(item);
+              const { timeframe, metric, budget, owner, gate, activity, evidenceTie } = extractRecommendationSignals(item);
               const fields = [
                 { label: "Owner", value: owner },
                 { label: "Timeline", value: timeframe },
                 { label: "Budget", value: budget },
                 { label: "Success Metric", value: metric },
+                { label: "Activity", value: activity },
+                { label: "Evidence Tie", value: evidenceTie },
               ].filter((field) => field.value);
 
               return (
@@ -5863,10 +5711,23 @@ if (field === "swotAnalysis") {
     const missingEvidenceLabels = localizedLabelVariants("missingEvidence");
     const whatWouldChangeLabels = localizedLabelVariants("whatWouldChangeThisDecision");
     const immediateNextActionLabels = localizedLabelVariants("immediateNextAction");
+    // TASK #29F -- confirmed live (real persisted report): extractAliasedSectionSnippet
+    // captures the WHOLE "Top 3 Risks:" block for Market Intelligence
+    // (all three numbered items concatenated), not just the first --
+    // this "Top Risk" card ran on into the next risk's text and could
+    // disagree with the cover's own canonical-state-first Main Risk.
+    // Reads the exact same canonical topRisks[0] field the cover/PDF
+    // adapter already prefer, falling back to just the first item of the
+    // legacy snippet only when no canonical state was persisted. Every
+    // other report kind's identical extraction is unchanged.
+    const marketExecutiveSummaryTopRisk = isMarketIntelligence
+      ? marketIntelligenceCanonicalState?.topRisks?.[0] ||
+        takeFirstListItem(extractAliasedSectionSnippet(section.content, topRisksLabels, missingEvidenceLabels))
+      : extractAliasedSectionSnippet(section.content, topRisksLabels, missingEvidenceLabels);
     const recommendationMetrics = [
       ["Confidence", extractConfidence(section.content) ? `${extractConfidence(section.content)}%` : "—"],
       ["Why", extractMetricValueFromAliases(section.content, whyLabels) || "—"],
-      ["Top Risk", extractAliasedSectionSnippet(section.content, topRisksLabels, missingEvidenceLabels) || "—"],
+      ["Top Risk", marketExecutiveSummaryTopRisk || "—"],
       // CRITICAL FIX -- "Missing Evidence" reads as an internal audit
       // label, not a board-level card title. The underlying extraction
       // (missingEvidenceLabels) is unchanged -- only the displayed label
@@ -6556,6 +6417,27 @@ function ExecutiveSnapshotPanel({
         }
       : {}),
   };
+  // TASK #29B -- confirmed live (real Market Intelligence report): every
+  // one of buildConfidenceRadar's 5 dimensions sources its score from
+  // investmentScore.decisionEngine.*Score.score (a founder/company-
+  // viability object Market Intelligence never populates) with a prose-
+  // label fallback matching labels Market Intelligence's generation
+  // prompts never write -- both fail unconditionally, which is why this
+  // panel always showed "--" for all five. When a canonical state is
+  // available, this now derives real, deterministic, evidence-backed
+  // categorical levels (Strong/Moderate/Weak/Validation Required) from
+  // the SAME resolveMarketIntelligenceConfidenceFactors every other
+  // surface (PDF, Executive Summary) calls -- see that function's own
+  // comment for the per-factor derivation rules. Falls back to the
+  // pre-existing relabeled-radar behavior (still "--" for every legacy
+  // report with no canonical state) exactly as before, never a
+  // fabricated guess.
+  const marketIntelligenceConfidenceFactors = isMarketIntelligence
+    ? resolveMarketIntelligenceConfidenceFactors(marketIntelligenceCanonicalState)
+    : null;
+  const marketIntelligenceConfidenceFactorLabels = isMarketIntelligenceTurkish
+    ? { market: "Pazar", financial: "Finansal", execution: "Uygulama", product: "Ürün", marketSignals: "Pazar Sinyalleri" }
+    : { market: "Market", financial: "Financial", execution: "Execution", product: "Product", marketSignals: "Market Signals" };
   // CRITICAL FIX -- one of buildConfidenceRadar's 5 dimensions is
   // literally labeled "Evidence"/"Kanıt" (it scores competitive-evidence
   // strength for Business Plan/Acquisition's founder-viability score).
@@ -6563,11 +6445,16 @@ function ExecutiveSnapshotPanel({
   // kinds, so only Market Intelligence's rendered copy of the array is
   // remapped here; the underlying score computation is untouched.
   const confidenceRadarDimensions = isMarketIntelligence
-    ? snapshot.confidenceRadar.map((dimension) =>
-        dimension.label === "Evidence" || dimension.label === "Kanıt"
-          ? { ...dimension, label: isMarketIntelligenceTurkish ? "Pazar Sinyalleri" : "Market Signals" }
-          : dimension
-      )
+    ? marketIntelligenceConfidenceFactors
+      ? (["market", "financial", "execution", "product", "marketSignals"] as const).map((key) => ({
+          label: marketIntelligenceConfidenceFactorLabels[key],
+          level: marketIntelligenceConfidenceFactors[key],
+        }))
+      : snapshot.confidenceRadar.map((dimension) =>
+          dimension.label === "Evidence" || dimension.label === "Kanıt"
+            ? { ...dimension, label: isMarketIntelligenceTurkish ? "Pazar Sinyalleri" : "Market Signals" }
+            : dimension
+        )
     : snapshot.confidenceRadar;
   const reportQualityBreakdown = getReportQualityBreakdown(
     reportQuality,
@@ -6640,8 +6527,15 @@ function ExecutiveSnapshotPanel({
   // Threats-derived tile) rather than a fabricated classification --
   // falls back to the generic snapshot value only if the banner truly has
   // neither field (never invents a severity that isn't in the text).
+  // TASK #29E -- prefer the persisted MarketIntelligenceCanonicalState's
+  // own topRisks[0] first (the exact field the Executive Summary itself
+  // is built from) so this web panel's Main Risk can never disagree with
+  // the PDF cover's own canonical-state-first marketMainRisk (see
+  // ReportPanel's identical fix) -- falling back to this same prose
+  // extraction only when no canonical state was persisted.
   const marketMainRisk = isMarketIntelligence
-    ? takeFirstListItem(extractMetricValueFromAliases(section.content, localizedLabelVariants("topRisks"))) ||
+    ? marketIntelligenceCanonicalState?.topRisks?.[0] ||
+      takeFirstListItem(extractMetricValueFromAliases(section.content, localizedLabelVariants("topRisks"))) ||
       snapshot.mainRisk
     : snapshot.mainRisk;
   const marketNextAction = isMarketIntelligence
@@ -6733,13 +6627,22 @@ function ExecutiveSnapshotPanel({
         {isMarketIntelligence ? (
           <SnapshotGauge
             label={isMarketIntelligenceTurkish ? "Pazar Sinyali" : "Market Signal"}
-            value={marketSignalDimension?.score ?? null}
+            value={
+              marketSignalDimension && "level" in marketSignalDimension
+                ? confidenceFactorLevelToGaugePercent[marketSignalDimension.level]
+                : marketSignalDimension?.score ?? null
+            }
             display={
-              marketSignalDimension?.score === null || marketSignalDimension?.score === undefined
-                ? isMarketIntelligenceTurkish
-                  ? "Doğrulama Gerekli"
-                  : "Validation Needed"
-                : `${marketSignalDimension.score}%`
+              marketSignalDimension && "level" in marketSignalDimension
+                ? localizeMarketConfidenceFactorLevel(
+                    marketSignalDimension.level,
+                    isMarketIntelligenceTurkish ? "Turkish" : "English"
+                  )
+                : marketSignalDimension?.score === null || marketSignalDimension?.score === undefined
+                  ? isMarketIntelligenceTurkish
+                    ? "Doğrulama Gerekli"
+                    : "Validation Needed"
+                  : `${marketSignalDimension.score}%`
             }
           />
         ) : (
@@ -6811,20 +6714,42 @@ function ExecutiveSnapshotPanel({
             {labels.confidenceRadar}
           </p>
           <div className="mt-3 space-y-2">
-            {confidenceRadarDimensions.map((dimension) => (
-              <div key={dimension.label} className="grid grid-cols-[5.75rem_minmax(0,1fr)_2.5rem] items-center gap-2">
-                <span className="text-xs text-zinc-400">{dimension.label}</span>
-                <span className="h-2 overflow-hidden rounded-full bg-white/10">
-                  <span
-                    className="block h-full rounded-full bg-teal-200"
-                    style={{ width: `${dimension.score ?? 0}%` }}
-                  />
-                </span>
-                <span className="text-right text-xs font-semibold text-zinc-300">
-                  {dimension.score === null ? "--" : dimension.score}
-                </span>
-              </div>
-            ))}
+            {confidenceRadarDimensions.map((dimension) => {
+              // TASK #29B -- "level" rows (Market Intelligence with a
+              // canonical state) show a category word ("Validation
+              // Required"/"Doğrulama Gerekli" at its longest) instead of
+              // a 2-3 character number, so the trailing column is widened
+              // to fit it -- a purely cosmetic width increase that also
+              // still comfortably fits every existing numeric/"--" value
+              // for every other report kind, unaffected otherwise.
+              const hasLevel = "level" in dimension;
+              const barPercent = hasLevel
+                ? confidenceFactorLevelToGaugePercent[dimension.level] ?? 0
+                : dimension.score ?? 0;
+              const displayText = hasLevel
+                ? localizeMarketConfidenceFactorLevel(
+                    dimension.level,
+                    isMarketIntelligenceTurkish ? "Turkish" : "English"
+                  )
+                : dimension.score === null
+                  ? "--"
+                  : dimension.score;
+              return (
+                <div
+                  key={dimension.label}
+                  className={`grid items-center gap-2 ${hasLevel ? "grid-cols-[5.75rem_minmax(0,1fr)_7rem]" : "grid-cols-[5.75rem_minmax(0,1fr)_2.5rem]"}`}
+                >
+                  <span className="text-xs text-zinc-400">{dimension.label}</span>
+                  <span className="h-2 overflow-hidden rounded-full bg-white/10">
+                    <span
+                      className="block h-full rounded-full bg-teal-200"
+                      style={{ width: `${barPercent}%` }}
+                    />
+                  </span>
+                  <span className="text-right text-xs font-semibold text-zinc-300">{displayText}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -7870,6 +7795,29 @@ const ReportPanel = memo(function ReportPanel({
             ? localizePdfPresentationLabel("Validation Required", pdfLocale)
             : `${marketConfidenceScore}%`;
 
+        // TASK #29E -- confirmed live (real persisted report): the PDF
+        // cover's Main Risk metric card (below, metricCards' own
+        // isMarketIntelligence branch) used raw executiveSnapshot.mainRisk
+        // directly -- a generic, unscoped keyword bullet-search across the
+        // WHOLE report (buildExecutiveSnapshot's collectBullets) -- while
+        // this SAME file's Risk Heatmap panel already resolved its own,
+        // correctly market-scoped risk value a few lines below. On the
+        // real report, that generic search picked up a "Top 3 Reasons"
+        // item instead of the real Top Risk, so the cover's Main Risk
+        // openly disagreed with the Executive Summary's own Top Risk one
+        // section later. marketMainRisk is now the single canonical
+        // source for BOTH the metric card and the heatmap below: it
+        // prefers the persisted MarketIntelligenceCanonicalState's own
+        // topRisks[0] (the exact field the Executive Summary itself is
+        // built from -- see market-intelligence-canonical-state.ts),
+        // falling back to the same prose extraction already used here
+        // only when no canonical state was persisted (older reports), and
+        // only as a last resort to the generic executiveSnapshot value.
+        const marketMainRisk = isMarketIntelligence
+          ? marketIntelligenceCanonicalState?.topRisks?.[0] ||
+            takeFirstListItem(extractMetricValueFromAliases(marketExecutiveSummaryContent, localizedLabelVariants("topRisks"))) ||
+            executiveSnapshot.mainRisk
+          : "";
         // CRITICAL FIX (Task #20) -- confirmed live: the Risk Heatmap
         // panel drawn below (see its own "executiveSnapshot.riskHeatmap"
         // fallback) was never gated for Market Intelligence -- it drew
@@ -7877,14 +7825,10 @@ const ReportPanel = memo(function ReportPanel({
         // efficiency", "Execution", ...) that Market Intelligence's own
         // prompts never discuss, silently defaulting every category to
         // "Low" purely because its keyword never appeared. Rebuilt from
-        // the same canonical Top 3 Risks list the web report's own Risk
-        // Posture tile reads, falling back to a single row reusing the
-        // resolved Main Risk/severity so the heatmap can never disagree
-        // with any other Risk Level surface for this same report.
-        const marketMainRiskForHeatmap = isMarketIntelligence
-          ? takeFirstListItem(extractMetricValueFromAliases(marketExecutiveSummaryContent, localizedLabelVariants("topRisks"))) ||
-            executiveSnapshot.mainRisk
-          : "";
+        // the same canonical Main Risk this file now shares with the
+        // metric card above, so the heatmap can never disagree with any
+        // other Risk Level surface for this same report.
+        const marketMainRiskForHeatmap = marketMainRisk;
         const marketRiskLevelForHeatmap = isMarketIntelligence
           ? (() => {
               const severity = extractRiskLevel(marketMainRiskForHeatmap);
@@ -7947,7 +7891,7 @@ const ReportPanel = memo(function ReportPanel({
               [localizePdfPresentationLabel("Decision", pdfLocale), marketDecisionDisplay],
               [localizePdfPresentationLabel("Confidence Score", pdfLocale), marketConfidenceDisplay],
               [localizePdfPresentationLabel("Report Quality", pdfLocale), executiveSnapshot.reportQuality],
-              [localizePdfPresentationLabel("Main Risk", pdfLocale), executiveSnapshot.mainRisk],
+              [localizePdfPresentationLabel("Main Risk", pdfLocale), marketMainRisk],
               [localizePdfPresentationLabel("Next Action", pdfLocale), executiveSnapshot.nextAction],
             ]
           : isDomainDecisionReport
@@ -8101,6 +8045,33 @@ const ReportPanel = memo(function ReportPanel({
           margin + 26 + panelWidth,
           heatmapY + 7
         );
+        // TASK #29B -- confirmed live (real Market Intelligence PDF): every
+        // one of executiveSnapshot.confidenceRadar's 5 dimensions sources
+        // its score from investmentScore.decisionEngine.*Score.score (a
+        // founder/company-viability object Market Intelligence never
+        // populates) with a prose-label fallback matching labels Market
+        // Intelligence's own generation prompts never write -- both fail
+        // unconditionally, which is why the cover always showed "--" for
+        // all five. When a canonical state is available, this now derives
+        // real, deterministic, evidence-backed categorical levels
+        // (Strong/Moderate/Weak/Validation Required) from the SAME
+        // resolveMarketIntelligenceConfidenceFactors every other surface
+        // calls -- see that function's own comment. Falls back to the
+        // pre-existing relabeled-radar behavior (still "--" for every
+        // legacy report with no canonical state) exactly as before, never
+        // a fabricated guess.
+        const marketIntelligenceConfidenceFactors = isMarketIntelligence
+          ? resolveMarketIntelligenceConfidenceFactors(marketIntelligenceCanonicalState)
+          : null;
+        const marketIntelligenceConfidenceFactorLabels = pdfLocale === "tr"
+          ? { market: "Pazar", financial: "Finansal", execution: "Uygulama", product: "Ürün", marketSignals: "Pazar Sinyalleri" }
+          : { market: "Market", financial: "Financial", execution: "Execution", product: "Product", marketSignals: "Market Signals" };
+        const marketIntelligenceConfidenceFactorRows = marketIntelligenceConfidenceFactors
+          ? (["market", "financial", "execution", "product", "marketSignals"] as const).map((key) => ({
+              label: marketIntelligenceConfidenceFactorLabels[key],
+              level: marketIntelligenceConfidenceFactors[key],
+            }))
+          : null;
         // CRITICAL FIX -- one of executiveSnapshot.confidenceRadar's 5
         // dimensions is literally labeled "Evidence"/"Kanıt" (see
         // buildConfidenceRadar in report-presentation.ts). Only Market
@@ -8123,9 +8094,13 @@ const ReportPanel = memo(function ReportPanel({
               { label: "Environmental Risk", score: extractScore(fullReportContent, "Environmental and Geotechnical Risk") },
               { label: "Development Potential", score: extractScore(fullReportContent, "Development Potential") },
             ]
-          : marketIntelligenceConfidenceRadarDimensions).forEach((dimension, index) => {
+          : marketIntelligenceConfidenceFactorRows || marketIntelligenceConfidenceRadarDimensions
+        ).forEach((dimension, index) => {
           const rowY = heatmapY + 14 + index * 5;
-          const score = Math.max(0, Math.min(100, dimension.score ?? 0));
+          const hasLevel = "level" in dimension;
+          const score = hasLevel
+            ? confidenceFactorLevelToGaugePercent[dimension.level] ?? 10
+            : Math.max(0, Math.min(100, dimension.score ?? 0));
           pdf.setFontSize(6.4);
           pdf.setTextColor("#d4d4d8");
           pdf.text(localizePdfPresentationLabel(dimension.label, pdfLocale), margin + 26 + panelWidth, rowY, { maxWidth: 34 });
@@ -8135,7 +8110,24 @@ const ReportPanel = memo(function ReportPanel({
           pdf.roundedRect(margin + 58 + panelWidth, rowY - 2.8, ((panelWidth - 50) * score) / 100, 2, 1, 1, "F");
           pdf.setFontSize(5.8);
           pdf.setTextColor("#a1a1aa");
-          pdf.text(dimension.score === null ? "--" : String(dimension.score), margin + contentWidth - 11, rowY - 0.8);
+          pdf.text(
+            hasLevel
+              ? localizeMarketConfidenceFactorLevel(dimension.level, pdfLocale === "tr" ? "Turkish" : "English")
+              : dimension.score === null
+                ? "--"
+                : String(dimension.score),
+            margin + contentWidth - 11,
+            rowY - 0.8,
+            // TASK #29B -- "Validation Required"/"Doğrulama Gerekli" (the
+            // longest possible value here) is far longer than the "NN%"/
+            // "--" text this box previously ever showed. Right-aligning
+            // at the existing anchor (already tuned to sit at this box's
+            // own right edge) makes longer text grow leftward, into the
+            // bar's own free space, instead of overflowing the page edge
+            // -- the numeric case's rendering is unaffected since a 2-3
+            // character number is unchanged by right-alignment.
+            hasLevel ? { align: "right" } : undefined
+          );
         });
 
         drawFooter();
@@ -8363,7 +8355,7 @@ const ReportPanel = memo(function ReportPanel({
       // (drawing) can never disagree about how much space it needs.
       const strategicRecommendationDecisionBadgeHeight = 7;
       const computeRecommendationCardLayout = (item: string, cardWidth: number) => {
-        const { timeframe, metric, budget, owner, gate } = extractRecommendationSignals(item);
+        const { timeframe, metric, budget, owner, gate, activity, evidenceTie } = extractRecommendationSignals(item);
         pdf.setFontSize(6);
         // TASK #25C -- confirmed live (real persisted report): capping
         // this at 2 lines silently ellipsized real action text whenever
@@ -8377,22 +8369,29 @@ const ReportPanel = memo(function ReportPanel({
           localizePdfPresentationText(item, pdfLocale),
           cardWidth - 13
         ) as string[];
+        // TASK #29H -- Activity/Evidence Tie added alongside the
+        // pre-existing 4 fields, mirroring the identical fix in
+        // ReportPdfButton.tsx.
         const fields = (
           [
             ["Owner", owner],
             ["Timeline", timeframe],
             ["Budget", budget],
             ["Success Metric", metric],
+            ["Activity", activity],
+            ["Evidence Tie", evidenceTie],
           ] as const
         ).filter(([, value]) => value);
         const fieldsTopY = 7.8 + actionLines.length * 3.3 + 2.5;
-        const fieldsRows = fields.length > 0 ? Math.ceil(Math.min(fields.length, 4) / 2) : 0;
+        // TASK #29H -- raised from 4 to 6 (3 rows of 2) to match the 2
+        // new fields above.
+        const fieldsRows = fields.length > 0 ? Math.ceil(Math.min(fields.length, 6) / 2) : 0;
         const contentBottom =
           fieldsRows > 0 ? fieldsTopY + (fieldsRows - 1) * 5.6 + 5.5 : fieldsTopY + 3;
         const gateReservedHeight = gate ? 9 : 0;
         const height = Math.max(recommendationCardMinHeight, contentBottom + gateReservedHeight);
 
-        return { timeframe, metric, budget, owner, gate, actionLines, fields, fieldsTopY, height };
+        return { timeframe, metric, budget, owner, gate, activity, evidenceTie, actionLines, fields, fieldsTopY, height };
       };
       const computeRecommendationRowHeights = (items: string[], cardWidth: number) => {
         const cards = items.map((item) => computeRecommendationCardLayout(item, cardWidth));
@@ -8434,7 +8433,21 @@ const ReportPanel = memo(function ReportPanel({
         const whatWouldChangeLabels = localizedLabelVariants("whatWouldChangeThisDecision");
         const immediateNextActionLabels = localizedLabelVariants("immediateNextAction");
         const why = extractMetricValueFromAliases(content, whyLabels);
-        const topRisk = extractAliasedSectionSnippet(content, topRisksLabels, missingEvidenceLabels);
+        // TASK #29F -- confirmed live (real persisted report, mirrors the
+        // identical fix in ReportPdfButton.tsx): for Market Intelligence,
+        // extractAliasedSectionSnippet captures EVERYTHING between "Top 3
+        // Risks:" and the next stop label -- all three numbered risk
+        // items concatenated, not just the first -- producing a "Top
+        // Risk" card that ran on into the NEXT risk's text and could
+        // never match the cover's own canonical-state-first Main Risk.
+        // Reads the exact same canonical topRisks[0] field marketMainRisk
+        // (drawCoverPage, above) already prefers, falling back to just
+        // the FIRST item of the legacy snippet only when no canonical
+        // state was persisted. Every other report kind is unchanged.
+        const topRisk = isMarketIntelligence
+          ? marketIntelligenceCanonicalState?.topRisks?.[0] ||
+            takeFirstListItem(extractAliasedSectionSnippet(content, topRisksLabels, missingEvidenceLabels))
+          : extractAliasedSectionSnippet(content, topRisksLabels, missingEvidenceLabels);
         const missingEvidence = extractAliasedSectionSnippet(content, missingEvidenceLabels, whatWouldChangeLabels);
         const whatWouldChange = extractMetricValueFromAliases(content, whatWouldChangeLabels);
         const nextAction = extractMetricValueFromAliases(content, immediateNextActionLabels);
@@ -9756,7 +9769,8 @@ const ReportPanel = memo(function ReportPanel({
                 formatPdfReadableContent(
                   section,
                   executiveSnapshot.founderScoreValue,
-                  isRealEstateReport
+                  isRealEstateReport,
+                  pdfLocale
                 ),
                 pdfLocale
               );
@@ -9934,7 +9948,7 @@ const ReportPanel = memo(function ReportPanel({
 	                  pdf.setDrawColor("#27272a");
 	                  pdf.line(x + 3, fieldsTopY - 1.6, x + cardWidth - 3, fieldsTopY - 1.6);
 
-	                  fields.slice(0, 4).forEach(([label, value], fieldIndex) => {
+	                  fields.slice(0, 6).forEach(([label, value], fieldIndex) => {
 	                    const fx = x + 3 + (fieldIndex % 2) * fieldColWidth;
 	                    const fy = fieldsTopY + Math.floor(fieldIndex / 2) * 5.6;
 

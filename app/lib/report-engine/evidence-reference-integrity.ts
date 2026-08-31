@@ -284,25 +284,51 @@ export function collapseAdjacentDuplicateCitationMarkers(
 // merged by canonicalUrl equality, the pre-existing same-URL merge that
 // buildMarketIntelligenceBibliography/sourceRecordByEvidenceId already
 // handle) can still be the identical underlying document reached via two
-// different URLs (a syndicated wire story mirrored on two domains, a
-// tracking-wrapped redirect link the URL canonicalizer doesn't unwrap, a
-// research-pipeline artifact that fetched the same page twice under
-// different query strings). Left undetected, the reader sees the same
-// document cited under two different [R#] numbers with two separate
-// bibliography entries -- a duplicate citation, not a fabricated one, but
-// still a break in "one source, one identity."
+// slightly different URL strings (a protocol/www/trailing-slash/tracking-
+// parameter variant the upstream canonicalizer left untouched, or a
+// research-pipeline artifact that fetched the same page twice). Left
+// undetected, the reader sees the same document cited under two different
+// [R#] numbers with two separate bibliography entries -- a duplicate
+// citation, not a fabricated one, but still a break in "one source, one
+// identity."
 //
-// The match key is deliberately narrow -- exact title AND exact publisher,
-// both normalized only for case/whitespace, never fuzzy/similarity-based --
-// specifically so this can NEVER incorrectly merge genuinely distinct
-// evidence: two unrelated documents essentially never share both an exact
-// title and an exact publisher. A source with an empty title or publisher
-// is excluded entirely from matching (too weak a signal on its own; two
-// untitled sources are not evidence they're the same document). This never
-// merges anything itself -- see assertNoDuplicateCitationSources below --
-// it only detects, matching this file's report-only-detect-don't-mutate
-// convention for a signal too rare and too consequential (blocking
-// generation) to risk resolving automatically.
+// TASK #29D -- confirmed live (real generation failure): the match key
+// used to be exact title AND exact publisher alone, on the theory that
+// "two unrelated documents essentially never share both an exact title
+// and an exact publisher." That theory holds for byline journalism but
+// not for user-generated/forum platforms (Reddit, and any site shaped
+// like it) -- when the evidence pipeline cannot extract a real per-page
+// title, it falls back to the bare domain for BOTH title and publisher
+// (e.g. "reddit.com" / "reddit.com"), so every distinct, unrelated thread
+// on that domain collided onto the exact same key and was flagged as a
+// duplicate of every other one -- confirmed live: two genuinely different
+// Reddit threads, R40 and R87, blocked an otherwise-complete report.
+// Title+publisher is a proxy for "is this the same document" -- URL
+// identity is the actual fact being proxied for, so this now keys
+// directly on the normalized URL instead: two sources are the "same
+// source" if and only if they resolve to the same document location,
+// regardless of what title or publisher string happens to be attached to
+// them. This is stricter in the correct direction (a real document
+// identity check, not a title heuristic) and cannot regress into the
+// same false-positive class again, for Reddit or any other UGC/forum
+// domain, without special-casing anything -- the check has no knowledge
+// of Reddit or any other publisher at all.
+//
+// normalizeUrlForIdentity performs a SEPARATE, more thorough
+// canonicalization than market-intelligence-graph.ts's own canonicalUrl
+// (used for display/storage) specifically for identity comparison here:
+// scheme and "www." are identity-irrelevant (http/https and the www.
+// subdomain never change which document a URL points to), so both are
+// stripped in addition to the hash/tracking-parameter/trailing-slash
+// normalization already applied upstream. It deliberately never touches
+// the path or any non-tracking query parameter -- those often ARE what
+// distinguishes two genuinely different documents on the same domain
+// (different thread ids, different article slugs, different page
+// numbers), so stripping them would reintroduce exactly the false-
+// positive risk this fix removes, just via a different mechanism. A
+// source with no parseable URL is excluded entirely from matching (no
+// identity signal to compare at all; being unable to compare two sources
+// is not evidence they are the same document).
 export type DuplicateCitationSourceGroup = {
   title: string;
   publisher: string;
@@ -310,8 +336,28 @@ export type DuplicateCitationSourceGroup = {
   urls: string[];
 };
 
-function normalizeCitationKeyPart(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
+const identityTrackingParamPattern = /^(?:utm_|fbclid|gclid)/i;
+
+function normalizeUrlForIdentity(value: string): string {
+  const trimmed = (value || "").trim();
+  if (!trimmed) return "";
+
+  try {
+    const url = new URL(trimmed);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    for (const key of [...url.searchParams.keys()]) {
+      if (identityTrackingParamPattern.test(key)) url.searchParams.delete(key);
+    }
+    const search = url.searchParams.toString();
+    const path = url.pathname.replace(/\/+$/, "");
+    return `${host}${path}${search ? `?${search}` : ""}`.toLowerCase();
+  } catch {
+    // Not a parseable absolute URL (e.g. a bare "reddit.com" with no
+    // scheme) -- fall back to a plain case/whitespace-normalized string
+    // rather than discarding it, so two identical bare strings still
+    // compare equal, but never crash on malformed input.
+    return trimmed.toLowerCase().replace(/\s+/g, " ").replace(/\/+$/, "");
+  }
 }
 
 export function findDuplicateCitationSources(
@@ -323,12 +369,10 @@ export function findDuplicateCitationSources(
   >();
 
   for (const source of sources) {
-    const title = normalizeCitationKeyPart(source.title || "");
-    const publisher = normalizeCitationKeyPart(source.publisher || "");
-    if (!title || !publisher) continue;
+    const urlKey = normalizeUrlForIdentity(source.url || "");
+    if (!urlKey) continue;
 
-    const key = `${title} ${publisher}`;
-    const entry = groups.get(key) || {
+    const entry = groups.get(urlKey) || {
       title: source.title,
       publisher: source.publisher,
       evidenceIds: [],
@@ -336,10 +380,10 @@ export function findDuplicateCitationSources(
     };
     entry.evidenceIds.push(source.evidenceId);
     if (!entry.urls.includes(source.url)) entry.urls.push(source.url);
-    groups.set(key, entry);
+    groups.set(urlKey, entry);
   }
 
-  return [...groups.values()].filter((entry) => entry.urls.length > 1);
+  return [...groups.values()].filter((entry) => entry.evidenceIds.length > 1);
 }
 
 export class DuplicateCitationSourceError extends Error {
@@ -349,11 +393,11 @@ export class DuplicateCitationSourceError extends Error {
     const summary = duplicates
       .map(
         (group) =>
-          `"${group.title}" (${group.publisher}): ${group.evidenceIds.join(", ")} across ${group.urls.length} distinct URLs`
+          `"${group.title}" (${group.publisher}): ${group.evidenceIds.join(", ")} share the same underlying document across ${group.urls.length} URL representation(s)`
       )
       .join("; ");
     super(
-      `Report cites ${duplicates.length} source(s) with an identical title and publisher under more than one URL/evidence id: ${summary}`
+      `Report cites ${duplicates.length} source(s) whose distinct evidence ids resolve to the same underlying document: ${summary}`
     );
     this.name = "DuplicateCitationSourceError";
     this.duplicates = duplicates;
@@ -361,7 +405,7 @@ export class DuplicateCitationSourceError extends Error {
 }
 
 // Fail fast instead of silently shipping two separate bibliography entries
-// (and two separate [R#] numbers) for what is, by title and publisher, the
+// (and two separate [R#] numbers) for what is, by normalized URL, the
 // same underlying document -- see findDuplicateCitationSources above for
 // why the match key is safe against false positives.
 export function assertNoDuplicateCitationSources(

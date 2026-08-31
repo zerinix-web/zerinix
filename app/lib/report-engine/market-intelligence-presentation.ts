@@ -184,24 +184,40 @@ function capConfidenceForEvidenceGap(
   return Math.min(confidence, 30);
 }
 
-export function assessMarketEntryConfidence(
-  coverage: MarketResearchCoverage,
-  decisionCriticalEvidence?: DecisionCriticalEvidenceState
-) {
+// Shared with buildMarketIntelligenceConfidenceFactors below -- extracted
+// so both the overall decision/confidence AND each individual factor's
+// numeric-to-categorical mapping are driven by the SAME weighted blend
+// and the SAME strong/moderate boundary, rather than two independently
+// maintained copies that could silently drift apart.
+const STRONG_CONFIDENCE_THRESHOLD = 65;
+const MODERATE_CONFIDENCE_THRESHOLD = 40;
+
+function blendMarketResearchCoverage(coverage: MarketResearchCoverage) {
   const { marketConfidence, competitiveEvidence, financialEvidence, productEvidence } =
     coverage.dimensions;
-  const rawConfidence = Math.round(
+  return Math.round(
     marketConfidence * 0.4 +
       competitiveEvidence * 0.25 +
       financialEvidence * 0.2 +
       productEvidence * 0.15
   );
+}
+
+export function assessMarketEntryConfidence(
+  coverage: MarketResearchCoverage,
+  decisionCriticalEvidence?: DecisionCriticalEvidenceState
+) {
+  const rawConfidence = blendMarketResearchCoverage(coverage);
   // blendedDecision is computed from the RAW, uncapped score -- this
   // preserves the exact pre-existing decision-label logic and its own
   // ENTER/AVOID gating below completely unchanged; the cap only affects
   // the NUMBER ultimately returned, never which branch this decides.
   const blendedDecision: MarketEntryDecision =
-    rawConfidence >= 65 ? "ENTER" : rawConfidence >= 40 ? "MONITOR" : "AVOID";
+    rawConfidence >= STRONG_CONFIDENCE_THRESHOLD
+      ? "ENTER"
+      : rawConfidence >= MODERATE_CONFIDENCE_THRESHOLD
+        ? "MONITOR"
+        : "AVOID";
   const evidenceGapBlocksStrongDecision =
     blendedDecision !== "MONITOR" &&
     Boolean(decisionCriticalEvidence) &&
@@ -213,6 +229,165 @@ export function assessMarketEntryConfidence(
     decision: evidenceGapBlocksStrongDecision ? "MONITOR" : blendedDecision,
     evidenceGapBlocksStrongDecision,
   } as { confidence: number; decision: MarketEntryDecision; evidenceGapBlocksStrongDecision: boolean };
+}
+
+// TASK #29B -- confirmed live (real Market Intelligence PDF): the cover's
+// per-dimension confidence-factor breakdown (Market/Financial/Execution/
+// Product/Market Signals) was reusing Business Plan/Acquisition's own
+// buildConfidenceRadar (report-presentation.ts), whose every dimension is
+// sourced from the founder-scoring engine's own `decisionEngine.*Score.score`
+// fields (report-investment-score.ts) -- a founder/company-viability
+// object Market Intelligence never populates
+// (per this module's own top-of-file isolation policy) -- with a fallback
+// that scans the report's own prose for labels
+// ("Market Confidence:"/"Financial Quality:"/etc.) Market Intelligence's
+// generation prompts never write. Both paths fail for every Market
+// Intelligence report, unconditionally, which is why the cover always
+// showed "--" for all five: not a display bug, a genuine absence of any
+// wired-up MI-native source.
+//
+// FIX: derive all 5 factors from the exact same structured inputs
+// already computed for, and persisted alongside, the overall decision --
+// MarketResearchCoverage's own evidence-derived dimensions (marketConfidence/
+// competitiveEvidence/financialEvidence/productEvidence -- confirmed
+// computed purely from classified DomainResearchEvidence items, never
+// founder-prompt keyword scanning, unlike coverage.dimensions'
+// executionReadiness/founderReadiness, which ARE founder-signal-derived
+// and are deliberately never read here) and the SAME 3-pillar
+// DecisionCriticalEvidenceState the overall decision gates on. No new
+// persisted field and no canonical-state version bump were needed: both
+// inputs are already part of MarketIntelligenceCanonicalState.coverage
+// and .decisionCriticalEvidence, so this is a pure, deterministic
+// function of already-canonical data -- callable identically from
+// generation time or from a reloaded canonical state, guaranteeing every
+// surface that calls it agrees.
+//
+// Per-factor derivation (ticket's own worked examples):
+// - Market: gated on marketSizingResolved (a real TAM/SAM/SOM chain or
+//   verified market size exists at all); scored from marketConfidence.
+// - Financial: gated on obtainableShareResolved (SOM's own economics
+//   were evidence-derived and calculated, the ticket's named example of
+//   "obtainable-share economics"); scored from financialEvidence (pricing/
+//   revenue/unit-economics evidence coverage).
+// - Execution: gated on obtainableShareResolved (whether the entrant can
+//   operationally realize the SAME obtainable share -- market access,
+//   procurement, pilot conversion -- is the direct real-world
+//   counterpart of whether that share was ever evidence-derived in the
+//   first place; there is no separate MI-safe "execution" coverage
+//   dimension to score from without either fabricating one or reusing
+//   the founder-contaminated executionReadiness field, so this reuses
+//   the SAME overall evidence blend every other surface already trusts).
+// - Product: scored from productEvidence (accuracy/differentiation/buyer-
+//   requirement evidence coverage); not gated on a decision-critical
+//   pillar, since the ticket does not tie Product to TAM/SAM/SOM/
+//   competitive resolution -- it is its own evidence axis.
+// - Market Signals: gated on competitiveEvidenceResolved (named vendor/
+//   adjacent-player evidence exists at all -- demand/adoption signals
+//   have no substance to assess without it); scored from
+//   competitiveEvidence.
+//
+// A factor's gate failing always forces "Validation Required" regardless
+// of how high its own numeric score is -- satisfies "one strong factor
+// must not override a critical unresolved factor" per-factor, exactly
+// mirroring how hasDecisionCriticalEvidenceGap/capConfidenceForEvidenceGap
+// already gate the OVERALL decision/confidence above. This function
+// never feeds back into, or is averaged into, assessMarketEntryConfidence's
+// own overall number -- the two are computed independently from the same
+// source data, per requirement 6.
+export type MarketConfidenceFactorLevel = "Strong" | "Moderate" | "Weak" | "Validation Required";
+
+export type MarketIntelligenceConfidenceFactors = {
+  market: MarketConfidenceFactorLevel;
+  financial: MarketConfidenceFactorLevel;
+  execution: MarketConfidenceFactorLevel;
+  product: MarketConfidenceFactorLevel;
+  marketSignals: MarketConfidenceFactorLevel;
+};
+
+function categorizeConfidenceScore(score: number): MarketConfidenceFactorLevel {
+  if (score >= STRONG_CONFIDENCE_THRESHOLD) return "Strong";
+  if (score >= MODERATE_CONFIDENCE_THRESHOLD) return "Moderate";
+  return "Weak";
+}
+
+const marketConfidenceFactorLevelTranslations: Record<
+  ResponseLanguage,
+  Record<MarketConfidenceFactorLevel, string>
+> = {
+  English: {
+    Strong: "Strong",
+    Moderate: "Moderate",
+    Weak: "Weak",
+    "Validation Required": "Validation Required",
+  },
+  Turkish: {
+    Strong: "Güçlü",
+    Moderate: "Orta",
+    Weak: "Zayıf",
+    "Validation Required": "Doğrulama Gerekli",
+  },
+  German: {
+    Strong: "Stark",
+    Moderate: "Moderat",
+    Weak: "Schwach",
+    "Validation Required": "Validierung erforderlich",
+  },
+  French: {
+    Strong: "Fort",
+    Moderate: "Modéré",
+    Weak: "Faible",
+    "Validation Required": "Validation requise",
+  },
+  Spanish: {
+    Strong: "Fuerte",
+    Moderate: "Moderado",
+    Weak: "Débil",
+    "Validation Required": "Validación requerida",
+  },
+};
+
+export function localizeMarketConfidenceFactorLevel(
+  level: MarketConfidenceFactorLevel,
+  language: ResponseLanguage
+) {
+  return marketConfidenceFactorLevelTranslations[language][level];
+}
+
+export function buildMarketIntelligenceConfidenceFactors(
+  coverage: Pick<MarketResearchCoverage, "dimensions"> | undefined,
+  decisionCriticalEvidence: DecisionCriticalEvidenceState | undefined
+): MarketIntelligenceConfidenceFactors {
+  const validationRequired: MarketConfidenceFactorLevel = "Validation Required";
+
+  if (!coverage || !decisionCriticalEvidence) {
+    return {
+      market: validationRequired,
+      financial: validationRequired,
+      execution: validationRequired,
+      product: validationRequired,
+      marketSignals: validationRequired,
+    };
+  }
+
+  const { marketConfidence, competitiveEvidence, financialEvidence, productEvidence } =
+    coverage.dimensions;
+  const blendedConfidence = blendMarketResearchCoverage({ dimensions: coverage.dimensions } as MarketResearchCoverage);
+
+  return {
+    market: decisionCriticalEvidence.marketSizingResolved
+      ? categorizeConfidenceScore(marketConfidence)
+      : validationRequired,
+    financial: decisionCriticalEvidence.obtainableShareResolved
+      ? categorizeConfidenceScore(financialEvidence)
+      : validationRequired,
+    execution: decisionCriticalEvidence.obtainableShareResolved
+      ? categorizeConfidenceScore(blendedConfidence)
+      : validationRequired,
+    product: categorizeConfidenceScore(productEvidence),
+    marketSignals: decisionCriticalEvidence.competitiveEvidenceResolved
+      ? categorizeConfidenceScore(competitiveEvidence)
+      : validationRequired,
+  };
 }
 
 // Injected into the generation prompt BEFORE the model writes a single
@@ -520,12 +695,26 @@ function keyFindings(sections: MarketSections) {
 // segments, regional opportunity, and market risk -- per report-engine
 // isolation policy, it must never mention a founder, a validation gate, a
 // funding decision, or any startup-readiness concept.
+//
+// TASK #29 -- confirmed live (decision-confidence pipeline audit): this
+// called assessMarketEntryConfidence with no decisionCriticalEvidence at
+// all, unlike its sibling buildMarketEntryRecommendation a few lines
+// below (already fixed for the identical reason -- see that function's
+// own comment). Not currently reached by the live generation pipeline
+// (route.ts builds its Executive Summary/Bottom-Line banner through
+// buildMarketExecutiveDecisionBrief instead), but this function is
+// exported, directly exercised by tests, and is exactly the "Executive
+// Summary" surface this task requires to consume the SAME canonical
+// evidence-gated confidence state as every other surface -- so it is
+// fixed here too, symmetrically with buildMarketEntryRecommendation,
+// rather than left as a latent landmine for whoever wires it back in.
 export function buildMarketExecutiveSummary(
   sections: MarketSections,
   language: ResponseLanguage,
-  coverage: MarketResearchCoverage
+  coverage: MarketResearchCoverage,
+  decisionCriticalEvidence?: DecisionCriticalEvidenceState
 ) {
-  const { confidence, decision } = assessMarketEntryConfidence(coverage);
+  const { confidence, decision } = assessMarketEntryConfidence(coverage, decisionCriticalEvidence);
   const localizedDecision = localizeMarketEntryDecision(decision, language);
   const opportunity = biggestOpportunity(sections, language);
   const risk = biggestRisk(sections, language);

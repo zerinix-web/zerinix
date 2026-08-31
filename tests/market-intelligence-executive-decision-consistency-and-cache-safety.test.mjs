@@ -149,9 +149,15 @@ for (const [label, source] of [
   ["Planner.tsx", plannerSource],
 ]) {
   test(`${label}: ExecutiveSnapshotPanel's Main Risk/Next Action are wired to the identical canonical alias extraction as the Risk Posture tile / Executive Highlights (never a separate generic scan)`, () => {
+    // TASK #29E -- marketMainRisk now additionally prefers the persisted
+    // MarketIntelligenceCanonicalState's own topRisks[0] first (so this
+    // panel can never disagree with the PDF cover's own canonical-state-
+    // first value either); the SAME alias-extraction fallback this test
+    // originally pinned is unchanged and still runs whenever no canonical
+    // state was persisted.
     assert.match(
       source,
-      /const marketMainRisk = isMarketIntelligence\s*\n\s*\? takeFirstListItem\(extractMetricValueFromAliases\(section\.content, localizedLabelVariants\("topRisks"\)\)\) \|\|\s*\n\s*snapshot\.mainRisk\s*\n\s*: snapshot\.mainRisk;/
+      /const marketMainRisk = isMarketIntelligence\s*\n\s*\? marketIntelligenceCanonicalState\?\.topRisks\?\.\[0\] \|\|\s*\n\s*takeFirstListItem\(extractMetricValueFromAliases\(section\.content, localizedLabelVariants\("topRisks"\)\)\) \|\|\s*\n\s*snapshot\.mainRisk\s*\n\s*: snapshot\.mainRisk;/
     );
     assert.match(
       source,

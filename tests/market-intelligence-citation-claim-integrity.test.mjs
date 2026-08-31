@@ -418,18 +418,44 @@ test("E2. ReportPdfButton's CitationData.referenceTag is documented as sourced o
 
 // --- F (follow-up). Deterministic duplicate-citation detection --------------
 //
-// Different evidence ids / URLs that resolve to the same underlying
-// claim/source (a syndicated document mirrored on two domains, a tracking
-// redirect the URL canonicalizer doesn't unwrap, a research-pipeline
-// double-fetch) must be DETECTED, never silently merged -- merging carries
-// real risk of collapsing two genuinely distinct sources that happen to
-// share a title or publisher by coincidence.
+// Different evidence ids that resolve to the same underlying document
+// (the exact same canonical URL, or a protocol/www/trailing-slash/
+// tracking-parameter variant of it) must be DETECTED, never silently
+// merged. TASK #29D -- superseded the original title+publisher match key:
+// confirmed live, a real generation failure showed two GENUINELY DIFFERENT
+// Reddit threads (different URLs, real distinct documents) both falling
+// back to the same generic "reddit.com"/"reddit.com" title+publisher pair
+// and being incorrectly flagged as duplicates of each other. Identity is
+// now keyed on the normalized URL alone -- title/publisher no longer
+// factor into whether two sources are considered the same document at
+// all, so two sources can share any title/publisher, however generic or
+// identical, and still coexist as long as their URLs genuinely differ.
 
 function citationSource({ evidenceId, title, publisher, url }) {
   return { evidenceId, title, publisher, url };
 }
 
-test("F9. two different evidence ids/URLs with an identical title and publisher are detected as a duplicate citation", () => {
+test("F9. two different evidence ids that share an identical, generic title and publisher (the real Reddit-shaped failure) are NOT flagged as duplicates when their URLs are genuinely different documents", () => {
+  const sources = [
+    citationSource({
+      evidenceId: "R40",
+      title: "reddit.com",
+      publisher: "reddit.com",
+      url: "https://www.reddit.com/r/legaltech/comments/abc123/clm_vendor_comparison/",
+    }),
+    citationSource({
+      evidenceId: "R87",
+      title: "reddit.com",
+      publisher: "reddit.com",
+      url: "https://www.reddit.com/r/saas/comments/xyz789/ai_contract_review_pricing/",
+    }),
+  ];
+
+  assert.equal(findDuplicateCitationSources(sources).length, 0, "genuinely distinct threads on the same domain, same generic title/publisher, must never be flagged");
+  assert.doesNotThrow(() => assertNoDuplicateCitationSources(sources));
+});
+
+test("F9b. a syndicated document mirrored on two DIFFERENT domains (a real, different URL host) is not a duplicate -- these are two distinct pages regardless of shared title/publisher", () => {
   const sources = [
     citationSource({
       evidenceId: "R4",
@@ -445,40 +471,31 @@ test("F9. two different evidence ids/URLs with an identical title and publisher 
     }),
   ];
 
-  const duplicates = findDuplicateCitationSources(sources);
-  assert.equal(duplicates.length, 1);
-  assert.deepEqual(duplicates[0].evidenceIds.sort(), ["R11", "R4"]);
-  assert.equal(duplicates[0].urls.length, 2);
-
-  assert.throws(() => assertNoDuplicateCitationSources(sources), DuplicateCitationSourceError);
+  assert.equal(findDuplicateCitationSources(sources).length, 0, "a different host is a genuinely different URL, not the same document, even with identical title/publisher");
+  assert.doesNotThrow(() => assertNoDuplicateCitationSources(sources));
 });
 
-test("F10. matching is case/whitespace-insensitive but never fuzzy -- a near-identical (not exact) title is not flagged", () => {
-  const exactMatch = [
-    citationSource({ evidenceId: "R1", title: "  Legal AI Market Report 2026  ", publisher: "Gartner", url: "https://a.com/1" }),
-    citationSource({ evidenceId: "R2", title: "LEGAL AI MARKET REPORT 2026", publisher: "gartner", url: "https://b.com/1" }),
-  ];
-  assert.equal(findDuplicateCitationSources(exactMatch).length, 1, "case/whitespace-only differences must still match");
-
-  const nearMiss = [
+test("F10. matching is title/publisher-blind -- identical titles never trigger a match on their own, and differing titles never prevent a match when the URL is the same document", () => {
+  const sameTitleDifferentUrl = [
     citationSource({ evidenceId: "R1", title: "Legal AI Market Report 2026", publisher: "Gartner", url: "https://a.com/1" }),
-    citationSource({ evidenceId: "R2", title: "Legal AI Market Report 2027", publisher: "Gartner", url: "https://b.com/1" }),
+    citationSource({ evidenceId: "R2", title: "Legal AI Market Report 2026", publisher: "Gartner", url: "https://a.com/2" }),
   ];
-  assert.equal(findDuplicateCitationSources(nearMiss).length, 0, "a different year in the title is a genuinely distinct document, not a duplicate");
+  assert.equal(findDuplicateCitationSources(sameTitleDifferentUrl).length, 0, "identical title/publisher alone must never trigger a match -- the URLs are genuinely different pages");
+
+  const differentTitleSameUrl = [
+    citationSource({ evidenceId: "R1", title: "Legal AI Market Report 2026", publisher: "Gartner", url: "https://a.com/report" }),
+    citationSource({ evidenceId: "R2", title: "Completely Different Title", publisher: "Someone Else", url: "https://a.com/report" }),
+  ];
+  assert.equal(findDuplicateCitationSources(differentTitleSameUrl).length, 1, "the exact same URL must be flagged regardless of how different the title/publisher strings are");
+  assert.throws(() => assertNoDuplicateCitationSources(differentTitleSameUrl), DuplicateCitationSourceError);
 });
 
-test("F11. do not incorrectly merge genuinely distinct evidence: different publishers, or an empty title/publisher, are never matched", () => {
-  const differentPublishers = [
-    citationSource({ evidenceId: "R1", title: "CLM Vendor Landscape", publisher: "Gartner", url: "https://a.com/1" }),
-    citationSource({ evidenceId: "R2", title: "CLM Vendor Landscape", publisher: "Forrester", url: "https://b.com/1" }),
+test("F11. an empty/unparseable URL is excluded entirely from matching, even when title and publisher are identical", () => {
+  const emptyUrls = [
+    citationSource({ evidenceId: "R1", title: "CLM Vendor Landscape", publisher: "Gartner", url: "" }),
+    citationSource({ evidenceId: "R2", title: "CLM Vendor Landscape", publisher: "Gartner", url: "" }),
   ];
-  assert.equal(findDuplicateCitationSources(differentPublishers).length, 0, "different publishers with a shared generic title are genuinely distinct");
-
-  const emptyTitles = [
-    citationSource({ evidenceId: "R1", title: "", publisher: "Gartner", url: "https://a.com/1" }),
-    citationSource({ evidenceId: "R2", title: "", publisher: "Gartner", url: "https://b.com/1" }),
-  ];
-  assert.equal(findDuplicateCitationSources(emptyTitles).length, 0, "an empty title is too weak a signal to match on, even with a shared publisher");
+  assert.equal(findDuplicateCitationSources(emptyUrls).length, 0, "no URL means no identity signal to compare -- never flagged, never crashes");
 });
 
 test("F12. two ids already merged onto the same canonical URL (graph.sources' own pre-existing dedup) are never re-flagged as a NEW duplicate", () => {

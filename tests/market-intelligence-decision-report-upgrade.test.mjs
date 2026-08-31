@@ -56,6 +56,13 @@ const pdfButtonSource = readFileSync(
   new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url),
   "utf8"
 );
+// TASK #29J -- extractRecommendationSignals (and recommendationOwnerRolePattern,
+// its dependency) was consolidated into this single shared module; all
+// three surfaces above now import it rather than defining their own copy.
+const reportPresentationSource = readFileSync(
+  new URL("../app/lib/report-presentation.ts", import.meta.url),
+  "utf8"
+);
 
 // Balanced-bracket extraction (not a non-greedy regex) -- some of these
 // functions have a multi-line destructured/typed parameter list with its
@@ -96,7 +103,7 @@ function extractFunctionSource(source, functionName) {
 const functionDependencies = {
   extractForceIntensity: /const forceAliases: Record<string, string\[\]> = \{[\s\S]*?\n\};/,
   extractForceImplication: /const forceAliases: Record<string, string\[\]> = \{[\s\S]*?\n\};/,
-  extractRecommendationSignals: /const recommendationOwnerRolePattern =[\s\S]*?;/,
+  extractRecommendationSignals: /export const recommendationOwnerRolePattern =[\s\S]*?;/,
   // A later ticket ("RESTORE PREMIUM ANALYTICAL DEPTH") split
   // extractMarketIntelligenceCompetitorRows into a 3-tier fallback chain
   // (table -> flattened bullets -> Major Players' own bullets), each its
@@ -295,7 +302,8 @@ test("ReportPdfButton.tsx and Planner.tsx's own PDF export still draw real (not 
 
 test("page.tsx and Planner.tsx: extractRecommendationSignals now separates Budget from Success Metric, and extracts a best-effort Decision Gate checkpoint", async () => {
   for (const source of [pageSource, plannerSource]) {
-    const fn = await compileFunction(source, "extractRecommendationSignals");
+    void source;
+    const fn = await compileFunction(reportPresentationSource, "extractRecommendationSignals");
     const signals = fn(
       "Launch a 90-day pilot in the DACH region with a $50K budget, owned by the Regional GM, targeting 10 paying pilots before committing further budget."
     );
@@ -495,7 +503,7 @@ test("ReportPdfButton.tsx: draws Strategic Recommendation cards with Action, Own
   assert.match(pdfButtonSource, /\["Owner", owner\],\s*\n\s*\["Timeline", timeframe\],\s*\n\s*\["Budget", budget\],\s*\n\s*\["Success Metric", metric\],/);
   assert.match(pdfButtonSource, /localizePdfPresentationLabel\("DECISION GATE", pdfLocale\)/);
 
-  const fn = await compileFunction(pdfButtonSource, "extractRecommendationSignals");
+  const fn = await compileFunction(reportPresentationSource, "extractRecommendationSignals");
   const signals = fn(
     "Launch a 90-day pilot in the DACH region with a $50K budget, owned by the Regional GM, targeting 10 paying pilots before committing further budget."
   );

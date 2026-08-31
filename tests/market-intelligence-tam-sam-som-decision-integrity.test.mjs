@@ -288,9 +288,22 @@ test("drift check: buildPlanningEstimate's percentage extractors remain bounded 
 });
 
 test("drift check: decisionCriticalEvidence is still computed once and passed identically into both the Executive Summary banner and Strategic Recommendations (Task #13's established single-source-of-truth), unaffected by this pass", () => {
+  // TASK #29 -- the no-graph branch no longer falls back to `undefined`
+  // (which silently disabled the evidence gate for both consumers below
+  // whenever a report generated with no MarketIntelligenceGraph at all --
+  // see this line's own comment in route.ts) -- it now falls back to the
+  // explicit, fully-unresolved DecisionCriticalEvidenceState, the most
+  // conservative real gap this pipeline can express. The single-source-
+  // of-truth property this test guards (one computation, shared
+  // identically by both consumers) is unchanged by that fix.
   assert.match(
     routeSource,
-    /const decisionCriticalEvidence = graph \? resolveDecisionCriticalEvidenceState\(graph\) : undefined;/
+    /const decisionCriticalEvidence: DecisionCriticalEvidenceState = graph\s*\n\s*\? resolveDecisionCriticalEvidenceState\(graph\)\s*\n\s*: \{ marketSizingResolved: false, competitiveEvidenceResolved: false, obtainableShareResolved: false \};/
+  );
+  assert.doesNotMatch(
+    routeSource,
+    /const decisionCriticalEvidence[^=]*=\s*graph\s*\?\s*resolveDecisionCriticalEvidenceState\(graph\)\s*:\s*undefined/,
+    "the no-graph branch must never silently disable the evidence gate again"
   );
 });
 

@@ -1222,7 +1222,31 @@ function ensureMarketReportQuality(
   graph?: MarketIntelligenceGraph
 ) {
   const normalized = { ...report };
-  const decisionCriticalEvidence = graph ? resolveDecisionCriticalEvidenceState(graph) : undefined;
+  // TASK #29 -- confirmed live (decision-confidence pipeline audit): this
+  // used to fall back to `undefined` whenever `graph` was unavailable (the
+  // acknowledged, real "unavailable_no_graph" degraded generation state --
+  // see market-intelligence-canonical-state.ts's own comment on why it is
+  // deliberately NOT safe to reconstruct canonical state in that case).
+  // But `undefined` here does not mean "we don't know" to
+  // assessMarketEntryConfidence/hasDecisionCriticalEvidenceGap/
+  // capConfidenceForEvidenceGap downstream -- it means "skip the gate
+  // entirely," letting the raw, citation-count-driven coverage blend
+  // alone decide confidence and an ENTER/AVOID label, completely
+  // ungated, in exactly the state where NO decision-critical evidence
+  // (market sizing, competitive landscape, obtainable share) could
+  // possibly have been verified. A missing graph is the most severe
+  // evidence gap this pipeline can encounter, not a neutral unknown --
+  // it must gate at least as strongly as a graph whose own sizing/
+  // competitive/SOM fields all independently failed to resolve, so the
+  // explicit all-unresolved state (not undefined) is passed through
+  // instead. This is the single shared variable both
+  // buildMarketExecutiveDecisionBrief and buildMarketEntryRecommendation
+  // read below, so both surfaces are gated identically, and it can never
+  // be reconstructed as a weaker signal than what a resolved graph would
+  // have produced.
+  const decisionCriticalEvidence: DecisionCriticalEvidenceState = graph
+    ? resolveDecisionCriticalEvidenceState(graph)
+    : { marketSizingResolved: false, competitiveEvidenceResolved: false, obtainableShareResolved: false };
   const marketAssessment = coverage
     ? assessMarketEntryConfidence(coverage, decisionCriticalEvidence)
     : undefined;
@@ -1722,11 +1746,15 @@ function ensureMarketReportQuality(
     graph && marketExecutiveDecisionBrief
       ? buildMarketIntelligenceCanonicalState({
           graph,
-          decisionCriticalEvidence: decisionCriticalEvidence || {
-            marketSizingResolved: false,
-            competitiveEvidenceResolved: false,
-            obtainableShareResolved: false,
-          },
+          // TASK #29 -- decisionCriticalEvidence (ensureMarketReportQuality,
+          // above) is now always a real, fully-typed
+          // DecisionCriticalEvidenceState -- never undefined, even in the
+          // no-graph state -- so the `|| { ...fully unresolved }` fallback
+          // this line used to need (duplicating that same all-false shape
+          // independently, and only for the PERSISTED copy, leaving the
+          // NUMBER already baked into marketExecutiveDecisionBrief above
+          // ungated) is no longer reachable and has been removed.
+          decisionCriticalEvidence,
           decisionBrief: marketExecutiveDecisionBrief,
         })
       : null;
@@ -2318,8 +2346,40 @@ Write only this section's content. Do not write a JSON object, field name, headi
           }
         : canonicalFinancialAssumptions;
 
+      // TASK #29C -- confirmed live (real localhost regeneration, decision-
+      // confidence-state audit): `ai_response_cache` (governance.ts,
+      // upsert_global_ai_response_cache_entry) has no column at all for a
+      // research bundle or MarketIntelligenceGraph -- it only ever stores
+      // the response TEXT plus token/cost bookkeeping. So
+      // `cachedFullReport?.responseData` (used by
+      // getCachedResearchFromReportData/getCachedMarketIntelligenceGraphFromReportData
+      // just above) is unconditionally undefined for any cache hit served
+      // from that table, and cachedMarketGraph can only ever be non-null
+      // via conversationResearch?.marketIntelligenceGraph -- the LIVE,
+      // conversation-scoped snapshot, which is absent for a genuinely new
+      // conversation reusing an old, cross-session cached response (the
+      // exact real case reproduced: a report regenerated days after the
+      // original request, same prompt/model/financial-assumptions
+      // fingerprint, therefore the same cache key). Serving that cached
+      // TEXT without a graph is exactly the state the P0 PRODUCTION FIX a
+      // few lines above already hardened against for a PARTIALLY missing
+      // cache (graph present, domain-research bundle absent) -- but it
+      // still assumed a graph would be present at all. When neither a
+      // graph nor a domain-research bundle can be recovered, there is no
+      // partial evidence left to degrade gracefully with: coverage,
+      // decisionCriticalEvidence, and therefore the entire canonical
+      // confidence-factor state, cannot be built at all, permanently
+      // stuck at "unavailable_no_graph" every time this exact cache entry
+      // is served, no matter how correct the presentation-layer code is.
+      // Requiring cachedMarketGraph here falls through to the fresh-
+      // generation path below instead (which always builds a real,
+      // current MarketIntelligenceGraph -- see marketIntelligenceGraph's
+      // own construction further down), so a "regenerate" can always
+      // produce a report with genuine, evidence-derived canonical state
+      // rather than resurrecting text with none.
       if (
         cachedFullReport &&
+        cachedMarketGraph &&
         !isReportGenerationFailureText(cachedFullReport.responseText) &&
         detectLanguage(cachedFullReport.responseText) === responseLanguage
       ) {
@@ -2475,7 +2535,19 @@ Write only this section's content. Do not write a JSON object, field name, headi
         }
       }
 
-      if (cachedFullReport) {
+      if (cachedFullReport && !cachedMarketGraph) {
+        // TASK #29C -- distinct from the pre-existing "failed content"
+        // log below: the cached text itself is fine, but no research
+        // bundle/graph could be recovered for it (see this file's own
+        // comment on the cache-hit condition above), so it is skipped in
+        // favor of a fresh generation that can build real canonical
+        // confidence-factor state.
+        console.error("[api:market-analysis] Ignoring cached full report with no recoverable research graph", {
+          endpoint: "/api/market-analysis",
+          reportField: FULL_REPORT_FIELD,
+          cacheKey: fullReportCacheKey,
+        });
+      } else if (cachedFullReport) {
         console.error("[api:market-analysis] Ignoring cached failed full report content", {
           endpoint: "/api/market-analysis",
           reportField: FULL_REPORT_FIELD,

@@ -102,6 +102,10 @@ test("E1e. STRUCTURAL AUDIT: neither PDF file's Key Takeaway box caps wrapped li
 const pageSource = readFileSync(new URL("../app/dashboard/[id]/page.tsx", import.meta.url), "utf8");
 const plannerSource = readFileSync(new URL("../components/Planner.tsx", import.meta.url), "utf8");
 const pdfButtonSource = readFileSync(new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url), "utf8");
+// TASK #29J -- isRecommendationHeadingLine/isMetadataOnlyRecommendationLine/
+// isEvidenceStatusDisclaimerLine/extractRecommendationItems were
+// consolidated into this single shared module.
+const reportPresentationSource = readFileSync(new URL("../app/lib/report-presentation.ts", import.meta.url), "utf8");
 
 function extractFunctionSource(source, functionName) {
   const startMatch = source.match(new RegExp(`function ${functionName}\\(`));
@@ -125,12 +129,16 @@ function extractFunctionSource(source, functionName) {
 }
 
 async function compileExtractRecommendationItems(source) {
+  // TASK #29J -- these functions now live solely in report-presentation.ts;
+  // `source` (the calling surface's own file) is accepted for the
+  // caller's own labeling/looping but no longer used for extraction.
+  void source;
   const pieces = [
     `const SENTENCE_ABBREVIATIONS = ${JSON.stringify(SENTENCE_ABBREVIATIONS)};`,
-    extractFunctionSource(source, "isRecommendationHeadingLine"),
-    extractFunctionSource(source, "isMetadataOnlyRecommendationLine"),
-    extractFunctionSource(source, "isEvidenceStatusDisclaimerLine"),
-    `export ${extractFunctionSource(source, "extractRecommendationItems")}`,
+    extractFunctionSource(reportPresentationSource, "isRecommendationHeadingLine"),
+    extractFunctionSource(reportPresentationSource, "isMetadataOnlyRecommendationLine"),
+    extractFunctionSource(reportPresentationSource, "isEvidenceStatusDisclaimerLine"),
+    `export ${extractFunctionSource(reportPresentationSource, "extractRecommendationItems")}`,
   ].join("\n\n");
 
   const dir = mkdtempSync(join(tmpdir(), "zerinix-recommendation-boundary-"));
@@ -373,12 +381,14 @@ test("E4. Strategic Recommendations' row-chunking algorithm, run against REAL js
     "const pdf = new jsPDF();",
     "const pdfLocale = \"en\";",
     "const wrapPdfText = (text: string, width: number) => wrapPdfTextWithEngine({ pdf, text, width, normalizeText: normalizePdfText });",
+    // TASK #29J -- recommendationOwnerRolePattern/extractRecommendationSignals
+    // now live solely in report-presentation.ts.
     (() => {
-      const startMatch = pdfButtonSource2.match(/const recommendationOwnerRolePattern =\s*\n?\s*"[^;]*;/);
+      const startMatch = reportPresentationSource.match(/export const recommendationOwnerRolePattern =\s*\n?\s*"[^;]*;/);
       assert.ok(startMatch, "recommendationOwnerRolePattern not found");
       return startMatch[0];
     })(),
-    extractFunctionSource(pdfButtonSource2, "extractRecommendationSignals").replace(
+    extractFunctionSource(reportPresentationSource, "extractRecommendationSignals").replace(
       "function extractRecommendationSignals(line: string) {",
       "export function extractRecommendationSignals(line: string) {"
     ),

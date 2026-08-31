@@ -105,7 +105,11 @@ test("DUP5: source drift check -- Planner.tsx's PDF export (formatPdfReadableCon
   const fnIndex = plannerSource.indexOf("function formatPdfReadableContent(");
   assert.notEqual(fnIndex, -1, "formatPdfReadableContent must still exist in Planner.tsx");
 
-  const fnWindow = plannerSource.slice(fnIndex, fnIndex + 1600);
+  // TASK #29E widened this window: a new CAGR "Validation Required"
+  // early-return check (with its own explanatory comment) was inserted
+  // earlier in this same function, pushing the takeaway-stripping line
+  // further from the function start than the original fixed window covered.
+  const fnWindow = plannerSource.slice(fnIndex, fnIndex + 3200);
 
   assert.match(
     fnWindow,

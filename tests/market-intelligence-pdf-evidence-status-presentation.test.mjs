@@ -208,7 +208,13 @@ test("G5c. an action with zero unresolved markers is completely unaffected by th
 
 test("G5d. STRUCTURAL AUDIT: extractRecommendationItems' item count is untouched by this presentation-only change (Task #26/#26B parsing logic is not part of this file)", () => {
   const source = readFileSync(new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url), "utf8");
-  assert.match(source, /function extractRecommendationItems/, "recommendation parsing must remain in ReportPdfButton.tsx, untouched by this PDF-presentation-only task");
+  // TASK #29J -- extractRecommendationItems was consolidated into
+  // app/lib/report-presentation.ts (the single shared source of truth);
+  // ReportPdfButton.tsx now imports it rather than defining its own copy
+  // -- the parsing logic itself is unchanged, only its location moved.
+  assert.match(source, /\bextractRecommendationItems\b[\s\S]{0,700}from "@\/app\/lib\/report-presentation"/, "recommendation parsing must be imported from the shared module");
+  const reportPresentationSource = readFileSync(new URL("../app/lib/report-presentation.ts", import.meta.url), "utf8");
+  assert.match(reportPresentationSource, /function extractRecommendationItems/, "extractRecommendationItems must exist in the shared module");
 });
 
 // --- G6. real-persisted-report path verification -------------------------
@@ -244,7 +250,10 @@ test("G6. real-report-shaped Strategic Recommendations action 2 (the exact Task 
   assert.match(renderedOpportunities, /Measurable accuracy benchmarking: few vendors publish independent accuracy metrics/, "the unflagged 4th opportunity must remain fully intact, with no label added");
 
   // Full recommendation-extraction + rendering path for all 4 real items.
-  const pdfButtonSource = readFileSync(new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url), "utf8");
+  // TASK #29J -- isRecommendationHeadingLine/isMetadataOnlyRecommendationLine/
+  // isEvidenceStatusDisclaimerLine/extractRecommendationItems were
+  // consolidated into this single shared module.
+  const reportPresentationSource = readFileSync(new URL("../app/lib/report-presentation.ts", import.meta.url), "utf8");
   function extractFunctionSource(source, functionName) {
     const startMatch = source.match(new RegExp(`function ${functionName}\\(`));
     assert.ok(startMatch, `${functionName} not found`);
@@ -271,10 +280,10 @@ test("G6. real-report-shaped Strategic Recommendations action 2 (the exact Task 
       "Inc.", "Corp.", "Ltd.", "Co.", "LLC.", "Dr.", "Mr.", "Mrs.", "Ms.", "Jr.", "Sr.",
       "St.", "Prof.", "Ph.D.", "a.m.", "p.m.", "No.", "approx.",
     ])};`,
-    extractFunctionSource(pdfButtonSource, "isRecommendationHeadingLine"),
-    extractFunctionSource(pdfButtonSource, "isMetadataOnlyRecommendationLine"),
-    extractFunctionSource(pdfButtonSource, "isEvidenceStatusDisclaimerLine"),
-    `export ${extractFunctionSource(pdfButtonSource, "extractRecommendationItems")}`,
+    extractFunctionSource(reportPresentationSource, "isRecommendationHeadingLine"),
+    extractFunctionSource(reportPresentationSource, "isMetadataOnlyRecommendationLine"),
+    extractFunctionSource(reportPresentationSource, "isEvidenceStatusDisclaimerLine"),
+    `export ${extractFunctionSource(reportPresentationSource, "extractRecommendationItems")}`,
   ].join("\n\n");
   const dir = mkdtempSync(join(tmpdir(), "zerinix-task27b-"));
   const outPath = join(dir, "extractRecommendationItems.ts");

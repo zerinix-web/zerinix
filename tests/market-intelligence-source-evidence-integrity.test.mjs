@@ -337,8 +337,16 @@ test("DRIFT CHECK: P0 FIX #1 (TAM/SAM/SOM), #2 (CAGR), #3 (Competitive Landscape
   // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
   // quality failure): reads from rawConfidence (the uncapped blend)
   // now, not `confidence` -- thresholds unchanged.
+  // TASK #29B -- the 65/40 thresholds were extracted into named
+  // constants (STRONG_CONFIDENCE_THRESHOLD/MODERATE_CONFIDENCE_THRESHOLD)
+  // and the blend itself into blendMarketResearchCoverage, reused by the
+  // new per-factor confidence-level derivation -- the exact inline
+  // literal shape changed, but the thresholds and decision branches
+  // themselves did not.
+  assert.match(presentationSource, /const STRONG_CONFIDENCE_THRESHOLD = 65;/);
+  assert.match(presentationSource, /const MODERATE_CONFIDENCE_THRESHOLD = 40;/);
   assert.match(
     presentationSource,
-    /rawConfidence >= 65 \? "ENTER" : rawConfidence >= 40 \? "MONITOR" : "AVOID"/
+    /rawConfidence >= STRONG_CONFIDENCE_THRESHOLD\s*\n\s*\? "ENTER"\s*\n\s*: rawConfidence >= MODERATE_CONFIDENCE_THRESHOLD\s*\n\s*\? "MONITOR"\s*\n\s*: "AVOID";/
   );
 });

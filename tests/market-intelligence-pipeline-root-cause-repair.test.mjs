@@ -85,6 +85,14 @@ const pdfButtonSource = readFileSync(
   new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url),
   "utf8"
 );
+// TASK #29J -- isRecommendationHeadingLine/isMetadataOnlyRecommendationLine/
+// isEvidenceStatusDisclaimerLine/extractRecommendationItems were
+// consolidated into this single shared module; all three surfaces above
+// now import them rather than defining their own copies.
+const reportPresentationSource = readFileSync(
+  new URL("../app/lib/report-presentation.ts", import.meta.url),
+  "utf8"
+);
 const marketGraphSource = readFileSync(
   new URL("../app/lib/ai/market-intelligence-graph.ts", import.meta.url),
   "utf8"
@@ -311,25 +319,41 @@ for (const [label, source] of [
   ["Planner.tsx", plannerSource],
   ["ReportPdfButton.tsx", pdfButtonSource],
 ]) {
-  test(`${label}: extractRecommendationItems now rejects heading-shaped lines via isRecommendationHeadingLine before treating anything as a real recommendation item`, () => {
-    assert.match(source, /function isRecommendationHeadingLine\(item: string\)/);
-    assert.match(source, /if \(\/:\$\/\.test\(item\)\) return true;/);
-    assert.match(
-      source,
-      /first\\s\+90\\s\*-\?\\s\*days\?\|market entry recommendation\|why entry is not recommended now/
-    );
-    // TASK #18 -- extended with a metadata-only-line filter (rejects
-    // trailing "(N words)" self-check footnotes), so the exact filter
-    // predicate grew a third condition. TASK #27C -- extended again with
-    // an evidence-status-disclaimer filter. All conditions are still
-    // present, just no longer the sole predicate, and no longer
-    // necessarily on one physical line.
-    assert.match(source, /line\.length > 8/);
-    assert.match(source, /!isRecommendationHeadingLine\(line\)/);
-    assert.match(source, /!isMetadataOnlyRecommendationLine\(line\)/);
-    assert.match(source, /!isEvidenceStatusDisclaimerLine\(line\)/);
+  // TASK #29J -- isRecommendationHeadingLine/isMetadataOnlyRecommendationLine/
+  // isEvidenceStatusDisclaimerLine/extractRecommendationItems were
+  // consolidated into app/lib/report-presentation.ts; each surface now
+  // imports extractRecommendationItems (the only one of these it calls
+  // directly) instead of defining its own copy, so the actual filter
+  // wiring is checked once against the shared module below --
+  // isRecommendationHeadingLine itself is an internal implementation
+  // detail of the shared module, never imported directly by a surface
+  // that has no other use for it.
+  test(`${label}: imports extractRecommendationItems from the shared report-presentation module instead of defining its own copy (and does not redefine isRecommendationHeadingLine either)`, () => {
+    assert.match(source, /\bextractRecommendationItems\b[\s\S]{0,700}from "@\/app\/lib\/report-presentation"/);
+    assert.doesNotMatch(source, /^function isRecommendationHeadingLine\(/m);
+    assert.doesNotMatch(source, /^function extractRecommendationItems\(/m);
   });
 }
+
+test("shared module: extractRecommendationItems rejects heading-shaped lines via isRecommendationHeadingLine before treating anything as a real recommendation item", () => {
+  const source = reportPresentationSource;
+  assert.match(source, /function isRecommendationHeadingLine\(item: string\)/);
+  assert.match(source, /if \(\/:\$\/\.test\(item\)\) return true;/);
+  assert.match(
+    source,
+    /first\\s\+90\\s\*-\?\\s\*days\?\|market entry recommendation\|why entry is not recommended now/
+  );
+  // TASK #18 -- extended with a metadata-only-line filter (rejects
+  // trailing "(N words)" self-check footnotes), so the exact filter
+  // predicate grew a third condition. TASK #27C -- extended again with
+  // an evidence-status-disclaimer filter. All conditions are still
+  // present, just no longer the sole predicate, and no longer
+  // necessarily on one physical line.
+  assert.match(source, /line\.length > 8/);
+  assert.match(source, /!isRecommendationHeadingLine\(line\)/);
+  assert.match(source, /!isMetadataOnlyRecommendationLine\(line\)/);
+  assert.match(source, /!isEvidenceStatusDisclaimerLine\(line\)/);
+});
 
 test("market-intelligence-presentation.ts: buildMarketEntryRecommendation's own deterministic headings ('Market Entry Recommendation' / 'Why Entry Is Not Recommended Now') are exactly what the new heading filter's explicit phrase check rejects -- this is not a hypothetical, it is the same literal strings route.ts splices into strategicRecommendations", () => {
   const presentationSource = readFileSync(
@@ -379,8 +403,16 @@ test("web/PDF parity: every fix that touches a shared report field (Major Player
 test("web/PDF parity: the vendor-plausibility gate, the recommendation heading gate, and the market-size currency/range parsing fixes are present in ALL THREE render surfaces (page.tsx, Planner.tsx, ReportPdfButton.tsx) with matching logic, not just one -- a fix in only one surface would leave the others still exhibiting the bug", () => {
   for (const source of [pageSource, plannerSource, pdfButtonSource]) {
     assert.match(source, /function isImplausibleCompetitorName(?:OnScreen|Pdf)\(name: string\)/);
-    assert.match(source, /function isRecommendationHeadingLine\(item: string\)/);
+    // TASK #29J -- isRecommendationHeadingLine was consolidated into
+    // app/lib/report-presentation.ts; each surface now imports
+    // extractRecommendationItems (which uses it internally) instead of
+    // defining its own copy, so "matching logic, not just one" is now
+    // structurally guaranteed (one shared implementation) rather than
+    // verified by comparing three separate copies.
+    assert.match(source, /\bextractRecommendationItems\b[\s\S]{0,700}from "@\/app\/lib\/report-presentation"/);
+    assert.doesNotMatch(source, /^function isRecommendationHeadingLine\(/m);
   }
+  assert.match(reportPresentationSource, /function isRecommendationHeadingLine\(item: string\)/);
 });
 
 // --- Requirement: missing market-size evidence cannot silently produce ----

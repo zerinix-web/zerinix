@@ -47,6 +47,11 @@ import { normalizePdfText, presentUnverifiedEvidenceStatus } from "../app/lib/pd
 const pageSource = readFileSync(new URL("../app/dashboard/[id]/page.tsx", import.meta.url), "utf8");
 const plannerSource = readFileSync(new URL("../components/Planner.tsx", import.meta.url), "utf8");
 const pdfButtonSource = readFileSync(new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url), "utf8");
+// TASK #29J -- isRecommendationHeadingLine/isMetadataOnlyRecommendationLine/
+// isEvidenceStatusDisclaimerLine/extractRecommendationItems were
+// consolidated into this single shared module; all three surfaces above
+// now import them rather than defining their own copies.
+const reportPresentationSource = readFileSync(new URL("../app/lib/report-presentation.ts", import.meta.url), "utf8");
 
 function extractFunctionSource(source, functionName) {
   const startMatch = source.match(new RegExp(`function ${functionName}\\(`));
@@ -70,16 +75,20 @@ function extractFunctionSource(source, functionName) {
 }
 
 async function compileExtractRecommendationItems(source) {
+  // TASK #29J -- these functions now live solely in report-presentation.ts;
+  // `source` (the calling surface's own file) is accepted for the
+  // caller's own labeling/looping but no longer used for extraction.
+  void source;
   const pieces = [
     `const SENTENCE_ABBREVIATIONS = ${JSON.stringify([
       "U.S.", "U.K.", "U.N.", "E.U.", "U.A.E.", "e.g.", "i.e.", "etc.", "vs.", "cf.",
       "Inc.", "Corp.", "Ltd.", "Co.", "LLC.", "Dr.", "Mr.", "Mrs.", "Ms.", "Jr.", "Sr.",
       "St.", "Prof.", "Ph.D.", "a.m.", "p.m.", "No.", "approx.",
     ])};`,
-    extractFunctionSource(source, "isRecommendationHeadingLine"),
-    extractFunctionSource(source, "isMetadataOnlyRecommendationLine"),
-    extractFunctionSource(source, "isEvidenceStatusDisclaimerLine"),
-    `export ${extractFunctionSource(source, "extractRecommendationItems")}`,
+    extractFunctionSource(reportPresentationSource, "isRecommendationHeadingLine"),
+    extractFunctionSource(reportPresentationSource, "isMetadataOnlyRecommendationLine"),
+    extractFunctionSource(reportPresentationSource, "isEvidenceStatusDisclaimerLine"),
+    `export ${extractFunctionSource(reportPresentationSource, "extractRecommendationItems")}`,
   ].join("\n\n");
 
   const dir = mkdtempSync(join(tmpdir(), "zerinix-evidence-isolation-"));
@@ -150,11 +159,23 @@ test("H1d. a genuine recommendation that merely MENTIONS 'validation' or 'eviden
   }
 });
 
-test("H1e. STRUCTURAL AUDIT: isEvidenceStatusDisclaimerLine exists as its own, separately-named function in all 3 files (evidence-status metadata kept structurally distinct from heading/metadata detection, per the ticket's own 'separate evidence-status metadata from recommendation extraction' requirement)", () => {
+// TASK #29J -- isEvidenceStatusDisclaimerLine/extractRecommendationItems
+// were consolidated into app/lib/report-presentation.ts (the single
+// shared source of truth) -- the dedicated-function and dual-wiring
+// invariants below now live there, checked once instead of three
+// (previously identical) times; each surface is separately checked here
+// to import, not redefine, both.
+test("H1e. STRUCTURAL AUDIT: isEvidenceStatusDisclaimerLine exists as its own, separately-named function in the shared report-presentation module (evidence-status metadata kept structurally distinct from heading/metadata detection), wired into BOTH of extractRecommendationItems' filter paths", () => {
+  assert.match(reportPresentationSource, /function isEvidenceStatusDisclaimerLine\(item: string\): boolean \{/, "expected a dedicated isEvidenceStatusDisclaimerLine function");
+  const filterOccurrences = reportPresentationSource.match(/!isEvidenceStatusDisclaimerLine\(line\)/g) || [];
+  assert.equal(filterOccurrences.length, 2, "expected the check wired into BOTH the bullet-line and fallback filter paths");
+});
+
+test("H1e2. all 3 surfaces import extractRecommendationItems (which internally uses isEvidenceStatusDisclaimerLine) from the shared module instead of redefining either locally -- isEvidenceStatusDisclaimerLine is an internal implementation detail of the shared module, never imported directly by a surface that has no other use for it", () => {
   for (const [name, source] of surfaces) {
-    assert.match(source, /function isEvidenceStatusDisclaimerLine\(item: string\): boolean \{/, `${name}: expected a dedicated isEvidenceStatusDisclaimerLine function`);
-    const filterOccurrences = source.match(/!isEvidenceStatusDisclaimerLine\(line\)/g) || [];
-    assert.equal(filterOccurrences.length, 2, `${name}: expected the new check wired into BOTH the bullet-line and fallback filter paths`);
+    assert.match(source, /\bextractRecommendationItems\b[\s\S]{0,700}from "@\/app\/lib\/report-presentation"/, `${name}: must import extractRecommendationItems`);
+    assert.doesNotMatch(source, /^function isEvidenceStatusDisclaimerLine\(/m, `${name}: must not redefine isEvidenceStatusDisclaimerLine locally`);
+    assert.doesNotMatch(source, /^function extractRecommendationItems\(/m, `${name}: must not redefine extractRecommendationItems locally`);
   }
 });
 

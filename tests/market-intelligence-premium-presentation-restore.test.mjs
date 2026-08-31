@@ -49,6 +49,12 @@ const pdfButtonSource = readFileSync(
   new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url),
   "utf8"
 );
+// TASK #29J -- extractRecommendationSignals (and recommendationOwnerRolePattern,
+// its dependency) was consolidated into this single shared module.
+const reportPresentationSource = readFileSync(
+  new URL("../app/lib/report-presentation.ts", import.meta.url),
+  "utf8"
+);
 
 function extractFunctionSource(source, functionName) {
   const match = source.match(new RegExp(`function ${functionName}\\([\\s\\S]*?\\n\\}`));
@@ -63,10 +69,16 @@ function extractFunctionSource(source, functionName) {
 // captured by extractFunctionSource alone. Pulled in here too so this
 // file's own pre-existing timeframe/metric assertions keep working.
 async function compileFunction(source, functionName) {
-  const raw = extractFunctionSource(source, functionName);
+  // TASK #29J -- extractRecommendationSignals now lives solely in
+  // report-presentation.ts; extract it from there regardless of which
+  // surface's source was passed in for labeling/looping.
+  const raw = extractFunctionSource(
+    functionName === "extractRecommendationSignals" ? reportPresentationSource : source,
+    functionName
+  );
   const dependency =
     functionName === "extractRecommendationSignals"
-      ? source.match(/const recommendationOwnerRolePattern =[\s\S]*?;/)?.[0]
+      ? reportPresentationSource.match(/export const recommendationOwnerRolePattern =[\s\S]*?;/)?.[0]
       : functionName === "extractHeadlineMonetaryValue"
         ? [
             source.match(/const marketSizeExclusionContext =[\s\S]*?;/)?.[0],

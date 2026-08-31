@@ -4,7 +4,7 @@ import { readFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { extractSectionMainExplanation } from "../app/lib/report-presentation.ts";
+import { extractSectionMainExplanation, extractRecommendationItems } from "../app/lib/report-presentation.ts";
 
 // FINAL CLEANUP -- REMOVE ALL REDUNDANT "DETAILS" DUPLICATION FROM MARKET
 // INTELLIGENCE.
@@ -205,7 +205,9 @@ test("page.tsx and Planner.tsx: source drift check -- both files import extractS
       "no local duplicate definition should exist any more"
     );
 
-    const importBlockMatch = source.match(/import \{[\s\S]{0,600}?\} from "@\/app\/lib\/report-presentation";/);
+    // TASK #29J widened this window: the shared import block grew to
+    // include the consolidated recommendation-extraction exports.
+    const importBlockMatch = source.match(/import \{[\s\S]{0,2000}?\} from "@\/app\/lib\/report-presentation";/);
     assert.ok(importBlockMatch, "a report-presentation import block must exist");
     assert.match(
       importBlockMatch[0],
@@ -242,15 +244,18 @@ test("Porter's Five Forces: the radar + force cards remain the canonical present
   assert.match(plannerSource, /const implication = extractForceImplication\(section\.content, force\);/);
 });
 
-test("Strategic Recommendations: the action cards (Action, Owner, Timeline, Budget, Success Metric, Decision Gate) remain the canonical presentation on-screen and in both PDF exports -- verified this does not silently drop content by confirming extractRecommendationItems captures every non-empty line (verdict prose included), not just marker-prefixed action lines", async () => {
-  for (const source of [pageSource, plannerSource]) {
-    const fn = await compileFunction(source, "extractRecommendationItems");
-    const withVerdictLine =
-      "This market supports a cautious pilot entry.\n\n1. Launch a 90-day pilot in the DACH region.\n\n2. Validate pricing with 10 design partners.\n\n3. Secure a compliance certification before scaling.";
-    const items = fn(withVerdictLine);
-    assert.ok(items.some((item) => /cautious pilot entry/.test(item)), "the verdict line must not be silently dropped");
-    assert.ok(items.some((item) => /Launch a 90-day pilot/.test(item)));
-  }
+test("Strategic Recommendations: the action cards (Action, Owner, Timeline, Budget, Success Metric, Decision Gate) remain the canonical presentation on-screen and in both PDF exports -- verified this does not silently drop content by confirming extractRecommendationItems captures every non-empty line (verdict prose included), not just marker-prefixed action lines", () => {
+  // TASK #29J -- extractRecommendationItems now lives once in
+  // app/lib/report-presentation.ts (shared by page.tsx/Planner.tsx/
+  // ReportPdfButton.tsx -- see that module's own consolidation comment)
+  // rather than as a per-file duplicate, so its behavior is exercised
+  // once via the real, shared implementation, exactly like
+  // extractSectionMainExplanation above.
+  const withVerdictLine =
+    "This market supports a cautious pilot entry.\n\n1. Launch a 90-day pilot in the DACH region.\n\n2. Validate pricing with 10 design partners.\n\n3. Secure a compliance certification before scaling.";
+  const items = extractRecommendationItems(withVerdictLine);
+  assert.ok(items.some((item) => /cautious pilot entry/.test(item)), "the verdict line must not be silently dropped");
+  assert.ok(items.some((item) => /Launch a 90-day pilot/.test(item)));
 });
 
 test("Market Drivers/Barriers/Opportunities/Threats: rendered as the Key Takeaway + explanation + bullets card, containing the decision-useful content directly -- the same numbered paragraphs are never ALSO rendered inside a Details block below them", () => {
