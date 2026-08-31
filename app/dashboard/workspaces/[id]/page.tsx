@@ -24,6 +24,11 @@ import {
   loadWorkspaceReports,
   type DashboardReport,
 } from "../../report-utils";
+import {
+  readMarketIntelligenceCanonicalState,
+  resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
+} from "@/app/lib/report-engine/market-intelligence-canonical-state";
+import { detectPdfPresentationLocale } from "@/app/lib/pdf-normalization.mjs";
 
 export const dynamic = "force-dynamic";
 
@@ -136,6 +141,46 @@ function extractWorkspaceInsight(content: string, keywords: string[]) {
 }
 
 function detectWorkspaceSignal(report: DashboardReport) {
+  // TASK #30 -- confirmed live (canonical-decision-pipeline audit): this
+  // function used investmentScore.recommendation (a generic business-
+  // viability GO/WAIT/PASS score) with NO report-type guard at all --
+  // the exact leak every other Market Intelligence surface in this
+  // codebase explicitly excludes (Market Intelligence never evaluates a
+  // founder/business-viability score; it has its own, more conservative
+  // ENTER/MONITOR/AVOID market-entry verdict instead). Reports fell
+  // through from there to an unscoped `/\b(GO|NO GO|WAIT|...)\b/i` scan
+  // of the ENTIRE recommendation+summary text -- the "Go-to-Market"
+  // false-positive class of bug already fixed on every other Market
+  // Intelligence surface, never closed on this workspace "Decision
+  // Overview" panel. Market Intelligence now resolves through the SAME
+  // canonical-state-first resolver every other surface uses, before
+  // either of the two unsafe paths below ever runs.
+  if (report.type === "Market Analysis") {
+    const recommendation = getWorkspaceSection(report, [
+      "executiverecommendation",
+      "executive recommendation",
+      "recommendation",
+    ]);
+    const summary = getWorkspaceSection(report, [
+      "executivesummary",
+      "executive summary",
+      "marketoverview",
+      "market overview",
+    ]);
+    const content = `${recommendation}\n${summary}`;
+    const canonicalState = readMarketIntelligenceCanonicalState(report.metadata);
+    const locale = detectPdfPresentationLocale(content);
+    const marketDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+      canonicalState,
+      content,
+      locale === "tr" ? "Turkish" : "English"
+    );
+
+    return marketDecision.decisionLabel !== "—"
+      ? cleanWorkspaceText(marketDecision.decisionLabel, 70)
+      : cleanWorkspaceText(`${report.type} signal`, 70);
+  }
+
   if (report.investmentScore?.recommendation) {
     return cleanWorkspaceText(report.investmentScore.recommendation, 70);
   }

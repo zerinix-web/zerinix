@@ -229,9 +229,23 @@ test("a reject decision renders the identical label whether it came from Busines
 // tests/market-intelligence-executive-language-polish-fix.test.mjs for
 // the full, current assertion.
 test("app/dashboard/page.tsx's reports-list decision signal resolves through the centralized vocabulary before any legacy fallback", () => {
-  assert.match(
-    dashboardListSource,
-    /resolveCanonicalDecisionFromReportText\(\s*content,\s*report\.type === "Market Analysis" \? undefined : report\.investmentScore\?\.recommendation\s*\)/
+  // TASK #30 -- confirmed live (canonical-decision-pipeline audit):
+  // Market Analysis now resolves through the canonical-state-aware
+  // resolver and RETURNS before this centralized-vocabulary resolver is
+  // ever reached, rather than reaching this same call with a per-call
+  // ternary swapping in `undefined`. The ternary this assertion
+  // previously checked for is now moot -- Market Analysis never executes
+  // this line at all -- so the invariant is now proven by ordering
+  // instead of by the (now-removed) inline ternary.
+  const marketBranchIndex = dashboardListSource.indexOf('report.type === "Market Analysis"');
+  const genericResolverIndex = dashboardListSource.indexOf(
+    "resolveCanonicalDecisionFromReportText(content, report.investmentScore?.recommendation)"
+  );
+  assert.ok(marketBranchIndex >= 0, "Market Analysis branch not found");
+  assert.ok(genericResolverIndex >= 0, "generic resolver call not found");
+  assert.ok(
+    marketBranchIndex < genericResolverIndex,
+    "Market Analysis must be resolved and returned before the centralized-vocabulary resolver is ever reached"
   );
   assert.match(dashboardListSource, /getCanonicalDecisionLabel\(resolved\.decision, resolved\.language\)/);
 });

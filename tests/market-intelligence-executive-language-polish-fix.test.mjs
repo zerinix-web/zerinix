@@ -56,9 +56,26 @@ const marketPresentationSource = readFileSync(
 // --- the generic investmentScore.recommendation ----------------------------
 
 test("app/dashboard/page.tsx's reports-list decision signal skips the investmentScore fallback for Market Analysis reports", () => {
-  assert.match(
-    dashboardListSource,
-    /resolveCanonicalDecisionFromReportText\(\s*content,\s*report\.type === "Market Analysis" \? undefined : report\.investmentScore\?\.recommendation\s*\)/
+  // TASK #30 -- confirmed live (canonical-decision-pipeline audit):
+  // Market Analysis now resolves through the canonical-state-aware
+  // resolver and RETURNS before this generic resolver is ever reached
+  // (see getDecisionSignal's own early-return branch), rather than
+  // reaching this same call with a per-call ternary swapping in
+  // `undefined`. The per-call ternary this assertion previously checked
+  // for is now moot -- Market Analysis never executes this line at all
+  // -- so the invariant this test guards (Market Analysis never uses the
+  // generic investmentScore fallback) is now proven by ordering instead.
+  // Full behavioral coverage of the new early-return branch itself lives
+  // in tests/task30-canonical-decision-structural-authority.test.mjs.
+  const marketBranchIndex = dashboardListSource.indexOf('report.type === "Market Analysis"');
+  const genericResolverIndex = dashboardListSource.indexOf(
+    "resolveCanonicalDecisionFromReportText(content, report.investmentScore?.recommendation)"
+  );
+  assert.ok(marketBranchIndex >= 0, "Market Analysis branch not found");
+  assert.ok(genericResolverIndex >= 0, "generic resolver call not found");
+  assert.ok(
+    marketBranchIndex < genericResolverIndex,
+    "Market Analysis must be resolved and returned before the generic investmentScore fallback is ever reached"
   );
 });
 

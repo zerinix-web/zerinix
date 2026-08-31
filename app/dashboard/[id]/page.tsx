@@ -2218,6 +2218,24 @@ function ExecutiveSummaryVisual({
     : resolvedDecision
       ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
       : detectRecommendation(content) || "—";
+  // TASK #30 -- confirmed live (canonical-decision-pipeline audit):
+  // getDecisionClasses only ever recognized the generic GO/CONDITIONAL_GO/
+  // NO_GO-family words and the canonical PROCEED/PROCEED_WITH_CONDITIONS/
+  // REJECT vocabulary -- Market Intelligence's OWN vocabulary
+  // (ENTER/MONITOR/AVOID, the literal text `recommendation` holds above)
+  // matched none of them, so an ENTER, MONITOR, and AVOID badge were all
+  // rendered with the SAME neutral default color, never visually
+  // distinguishing a strong positive verdict from an explicit rejection.
+  // marketDecision.canonicalDecision is the SAME 4-value enum this
+  // resolver already computes from the identical canonical decision
+  // (GO->PROCEED, CONDITIONAL_GO->PROCEED_WITH_CONDITIONS, NO_GO->REJECT)
+  // -- reusing it here (instead of the raw ENTER/MONITOR/AVOID label
+  // text) gives getDecisionClasses a value it already correctly colors,
+  // with zero new color-mapping logic. Only populated for a genuinely
+  // resolved decision (canonical-state or canonical-banner); a raw-label
+  // or unavailable decision correctly falls through to the same neutral
+  // default as before, never fabricating a color for an unresolved case.
+  const decisionColorKey = marketDecision?.canonicalDecision || resolvedDecision?.decision || recommendation;
   const highlights = isMarketIntelligence
     ? getMarketIntelligenceExecutiveHighlights(content)
     : getExecutiveHighlights(content);
@@ -2295,7 +2313,7 @@ function ExecutiveSummaryVisual({
               Investment Decision Snapshot
             </h4>
           </div>
-          <span className={`w-fit rounded-full border px-4 py-2 text-xs font-semibold tracking-[0.18em] ${getDecisionClasses(recommendation)}`}>
+          <span className={`w-fit rounded-full border px-4 py-2 text-xs font-semibold tracking-[0.18em] ${getDecisionClasses(decisionColorKey)}`}>
             {recommendation}
           </span>
         </div>
@@ -2320,7 +2338,7 @@ function ExecutiveSummaryVisual({
               </div>
             </div>
             <div>
-              <span className={`inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.18em] ${getDecisionClasses(recommendation)}`}>
+              <span className={`inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.18em] ${getDecisionClasses(decisionColorKey)}`}>
                 {recommendation}
               </span>
               <p className="mt-3 text-sm leading-6 text-zinc-300">

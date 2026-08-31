@@ -4406,7 +4406,20 @@ function ExecutiveSummaryVisual({
     : resolvedDecision
       ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
       : detectRecommendation(section.content) || "—";
-  const decisionColorKey = resolvedDecision?.decision || recommendation;
+  // TASK #30 -- confirmed live (canonical-decision-pipeline audit):
+  // getDecisionClasses only recognizes the generic GO/CONDITIONAL_GO/
+  // NO_GO-family words and the canonical PROCEED/PROCEED_WITH_CONDITIONS/
+  // REJECT vocabulary -- Market Intelligence's OWN vocabulary
+  // (ENTER/MONITOR/AVOID, what `recommendation` holds for this report
+  // kind) matched none of them, so every Market Intelligence decision
+  // rendered the SAME neutral default badge color regardless of whether
+  // it was ENTER, MONITOR, or AVOID. marketDecision.canonicalDecision is
+  // the SAME 4-value enum this resolver already computes from the
+  // identical canonical decision -- reusing it here gives
+  // getDecisionClasses a value it already correctly colors, with zero
+  // new color-mapping logic, and only for a genuinely resolved decision
+  // (never fabricating a color for a raw-label/unavailable case).
+  const decisionColorKey = marketDecision?.canonicalDecision || resolvedDecision?.decision || recommendation;
   const highlights = isMarketIntelligence
     ? getMarketIntelligenceExecutiveHighlights(section.content)
     : getExecutiveHighlights(section.content);
@@ -4502,7 +4515,7 @@ function ExecutiveSummaryVisual({
               </div>
             </div>
             <div>
-              <span className={`inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.18em] ${getDecisionClasses(recommendation)}`}>
+              <span className={`inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.18em] ${getDecisionClasses(decisionColorKey)}`}>
                 {recommendation}
               </span>
               <p className="mt-3 text-sm leading-6 text-zinc-300">

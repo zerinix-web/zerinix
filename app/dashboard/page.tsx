@@ -22,6 +22,11 @@ import {
   resolveCanonicalDecisionFromReportText,
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
 import {
+  readMarketIntelligenceCanonicalState,
+  resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
+} from "@/app/lib/report-engine/market-intelligence-canonical-state";
+import { detectPdfPresentationLocale } from "@/app/lib/pdf-normalization.mjs";
+import {
   getUserPlanTier,
   loadUserUsageSummary,
 } from "@/app/lib/ai/governance";
@@ -185,18 +190,48 @@ function getDecisionSignal(report: DashboardReport | undefined) {
   // kind on this list. Falls back to the pre-existing text-extraction
   // heuristic only when no report kind's recognizable decision
   // vocabulary is present at all.
+  // TASK #30 -- confirmed live (canonical-decision-pipeline audit):
+  // resolveCanonicalDecisionFromReportText's own Tier 3
+  // (extractExecutiveDecisionFromText) defaults to the "standard"
+  // GO/CONDITIONAL_GO/NO_GO vocabulary -- Market Intelligence's real
+  // banner text says "Decision: ENTER/MONITOR/AVOID (Confidence: NN%)",
+  // which never matches those tokens, so `resolved` was always null for
+  // an ENTER or MONITOR verdict here (AVOID happened to coincidentally
+  // satisfy Real Estate's own "Decision: BUY|WAIT|AVOID" pattern a few
+  // lines up in that same function, purely by accident of vocabulary
+  // overlap -- never a real Market Intelligence code path). Every
+  // Market-Intelligence report therefore fell all the way through to the
+  // unscoped `keywordSignal` regex below, scanning the ENTIRE executive
+  // summary/recommendation text for a bare "GO"/"REVIEW"/"HOLD"/etc.
+  // token anywhere -- the exact "Go-to-Market" false-positive class of
+  // bug already fixed on every other Market Intelligence surface, just
+  // never closed on this dashboard home card. Market Intelligence now
+  // resolves through the SAME canonical-state-first resolver every other
+  // surface uses (web report page, PDF, Strategic Recommendations
+  // badge), so this card can never show a decision that disagrees with,
+  // or is independently re-derived from, the one canonical decision.
+  if (report.type === "Market Analysis") {
+    const canonicalState = readMarketIntelligenceCanonicalState(report.metadata);
+    const locale = detectPdfPresentationLocale(content);
+    const marketDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+      canonicalState,
+      content,
+      locale === "tr" ? "Turkish" : "English"
+    );
+
+    return marketDecision.decisionLabel !== "—"
+      ? cleanMobileDashboardText(marketDecision.decisionLabel, 92)
+      : `${report.type} ready for review`;
+  }
+
   // CRITICAL FIX -- Market Intelligence must never fall back to
   // investmentScore.recommendation, a generic business-viability GO/
   // WAIT/PASS score computed by investment-score.ts that Market
   // Intelligence does not evaluate (it has its own, more conservative
-  // ENTER/MONITOR/AVOID market-entry verdict instead). Only the
-  // report's own deterministic decision text is trusted for Market
-  // Intelligence, so a monitor-stage or avoid verdict is never
-  // overridden by an unrelated founder-viability score.
-  const resolved = resolveCanonicalDecisionFromReportText(
-    content,
-    report.type === "Market Analysis" ? undefined : report.investmentScore?.recommendation
-  );
+  // ENTER/MONITOR/AVOID market-entry verdict instead) -- moot for this
+  // report kind now that it returns above, kept here unchanged for
+  // every other report kind.
+  const resolved = resolveCanonicalDecisionFromReportText(content, report.investmentScore?.recommendation);
   if (resolved) {
     return getCanonicalDecisionLabel(resolved.decision, resolved.language);
   }
