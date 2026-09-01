@@ -145,8 +145,11 @@ test("page.tsx and Planner.tsx: an empty Competitive Landscape (0 validated comp
 });
 
 test("Competitive Landscape with real competitor rows is unaffected -- the full table and MarketMap still render exactly as before (regression guard)", () => {
+  // TASK #32 -- "Validation" renamed to "Vendor Confidence" -- see
+  // tests/market-intelligence-decision-report-upgrade.test.mjs for that
+  // fix's own dedicated coverage.
   for (const source of [pageSource, plannerSource]) {
-    assert.match(source, /\["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Validation"\]/);
+    assert.match(source, /\["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Vendor Confidence"\]/);
     assert.match(source, /<MarketMap rows=\{rows\} \/>/);
   }
 });

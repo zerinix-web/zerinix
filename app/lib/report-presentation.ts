@@ -4,6 +4,7 @@ import {
   sanitizeInternalRoutingMetadata,
 } from "@/app/lib/report-output-sanitization";
 import { extractExecutiveDecisionFromText } from "@/app/lib/report-engine/executive-decision-brief";
+import { type EvidenceLevel, inferEvidenceLevel } from "@/app/lib/report-evidence";
 
 export type ExecutiveSnapshot = {
   decision: string;
@@ -1437,6 +1438,53 @@ export function resolveCagrHeadlinePresentation(content: string): CagrHeadlinePr
     displayValue: `${lowValue.toFixed(1)}%–${highValue.toFixed(1)}%`,
     isMultiEstimate: true,
   };
+}
+
+// TASK #32 -- Market Size / CAGR evidence-classification audit.
+//
+// PROBLEM (confirmed via full audit): page.tsx's own line-isolation
+// helper (extractEvidenceLineForValue) fell back to the field's ENTIRE
+// content whenever no line contained the exact displayed value verbatim
+// -- reopening the exact whole-content "bare \bverified\b regex" hazard
+// this line-isolation was built to prevent (a section merely containing
+// the sentence "the SAM figure has not been independently verified"
+// could flip an unrelated, completely unsupported CAGR/Market Size
+// number to "Data Confirmed"). Separately, Planner.tsx never had this
+// line-isolation at all -- it scanned section.content directly
+// (components/Planner.tsx's own Market Size/CAGR card), a genuine web/
+// web drift independent of the over-confidence risk.
+//
+// FIX: one canonical function, reused by both page.tsx and Planner.tsx.
+// A displayed figure with no isolated evidence line of its own -- found
+// by CAGR/Market Size's bare numeric-pattern scan with nothing tying it
+// to a citation, an explanatory sentence, or an [Estimated]/[Verified]
+// tag -- is classified "planningAssumption" directly, never the whole-
+// content re-scan, and never inferEvidenceLevel's own generic
+// "benchmarkDerived" fallback (which would read "Estimated"/"Market
+// Support", implying some real benchmark backs it -- too confident for a
+// figure with literally zero supporting text). A figure that DOES have
+// its own evidence line is classified from that isolated line alone, via
+// the existing inferEvidenceLevel, exactly as before.
+export function extractEvidenceLineForMetricValue(content: string, value: string): string {
+  if (!value) return "";
+  const lines = (content || "").split("\n");
+  const matchingLine = lines.find((line) => line.includes(value));
+  return matchingLine ?? "";
+}
+
+export function deriveMarketSizeMetricEvidenceLevel(
+  label: string,
+  value: string,
+  content: string
+): EvidenceLevel {
+  if (!value) return "validationRequired";
+
+  const evidenceLine = extractEvidenceLineForMetricValue(content, value);
+  if (!evidenceLine) {
+    return "planningAssumption";
+  }
+
+  return inferEvidenceLevel({ label, value, context: evidenceLine });
 }
 
 // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-

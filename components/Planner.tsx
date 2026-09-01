@@ -70,6 +70,7 @@ import {
   readFounderReadinessMetricValue,
   readFounderReadinessScoreValue,
   resolveMarketSizingCascade,
+  deriveMarketSizeMetricEvidenceLevel,
   stripLeadingTakeawaySentence,
 } from "@/app/lib/report-presentation";
 import type {
@@ -162,6 +163,7 @@ import {
   resolveMarketIntelligenceConfidenceFactors,
   constrainMarketSizingResolutionToCanonicalState,
   classifyStrategicRecommendationAction,
+  resolveMarketIntelligenceDecisionEvidenceLevel,
   type MarketIntelligenceCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
@@ -2671,11 +2673,20 @@ function getSectionEvidenceLevel(
   }
 
   if (section.field === "executiveSummary") {
-    return inferEvidenceLevel({
-      label: section.title,
-      value: extractMetricValue(section.content, "Decision") || extractMetricValue(section.content, "Recommendation") || section.title,
-      context: section.content,
-    });
+    // TASK #32 -- see resolveMarketIntelligenceDecisionEvidenceLevel's own
+    // comment (mirrors the identical fix in app/dashboard/[id]/page.tsx's
+    // getDashboardSectionEvidence): reads the same decisionCriticalEvidence
+    // pillars every other canonical-state consumer already uses, instead
+    // of re-scanning this section's own prose, whenever canonical state
+    // is available.
+    return (
+      resolveMarketIntelligenceDecisionEvidenceLevel(marketIntelligenceCanonicalState) ||
+      inferEvidenceLevel({
+        label: section.title,
+        value: extractMetricValue(section.content, "Decision") || extractMetricValue(section.content, "Recommendation") || section.title,
+        context: section.content,
+      })
+    );
   }
 
   return "planningAssumption";
@@ -4730,6 +4741,21 @@ function PremiumSectionVisual({
             const magnitude = magnitudes[index];
             const isResolved = resolved[index];
             const isEstimated = estimated[index];
+            // TASK #32 -- confirmed live (evidence-classification audit):
+            // this badge previously called getSectionEvidenceLevel, which
+            // for tamSamSom routes to the SECTION-WIDE cascade result --
+            // all three layers showed the identical badge (e.g. a
+            // fully-resolved TAM showed the same "Validation Status" badge
+            // as an unresolved SOM, since one unresolved layer collapses
+            // the whole section's shared verdict). Derived directly from
+            // THIS layer's own isResolved/isEstimated instead, mirroring
+            // the identical fix in app/dashboard/[id]/page.tsx so web
+            // never disagrees with itself, let alone with the PDF.
+            const layerEvidenceLevel: EvidenceLevel = !isResolved
+              ? "validationRequired"
+              : isEstimated
+                ? "benchmarkDerived"
+                : "verified";
 
             return (
               <div
@@ -4750,7 +4776,7 @@ function PremiumSectionVisual({
                 {isResolved && magnitude !== null ? (
                   <>
                     <div className="mt-3">
-                      <EvidenceBadge level={getSectionEvidenceLevel(section, marketIntelligenceCanonicalState)} locale={evidenceLocale} market={isMarketIntelligence} />
+                      <EvidenceBadge level={layerEvidenceLevel} locale={evidenceLocale} market={isMarketIntelligence} />
                     </div>
                     <p className="mt-5 truncate whitespace-nowrap text-3xl font-semibold tracking-tight text-white">
                       {row.value}
@@ -4973,21 +4999,17 @@ function PremiumSectionVisual({
   if (field === "marketSize" || field === "cagr") {
     const isCagr = field === "cagr";
     const value = isCagr ? extractHeadlineCagrValue(section.content) : extractHeadlineMonetaryValue(section.content);
-    // CRITICAL FIX -- confirmed live: this card previously classified ANY
-    // extracted figure as "verified" (Data Confirmed) by default, only
-    // downgrading it when the content contained the literal
-    // "[Estimated]"/"tahmini" tag -- a figure hedged in prose ("could not
-    // be independently verified", "requires validation", an assumption
-    // or benchmark) with no literal tag still rendered as confirmed
-    // evidence. Reuses the SAME canonical evidence classifier
-    // (inferEvidenceLevel) TAM/SAM/SOM already uses correctly via
-    // getSectionEvidenceLevel, whose default for ambiguous/unlabeled
-    // context is "benchmarkDerived", never "verified".
-    const evidence = inferEvidenceLevel({
-      label: isCagr ? "CAGR" : "Market Size",
-      value,
-      context: section.content,
-    });
+    // TASK #32 -- confirmed live (evidence-classification audit): this
+    // used to scan the ENTIRE marketSize/cagr field content for the bare
+    // word "verified" (inferEvidenceLevel over section.content directly)
+    // -- a genuine over-confidence hazard, AND a drift from
+    // app/dashboard/[id]/page.tsx's own (previously line-isolated,
+    // now-shared) evidence derivation for the same card. Both files now
+    // call the SAME function -- see deriveMarketSizeMetricEvidenceLevel's
+    // own comment (report-presentation.ts) for the full fix: a figure
+    // with no isolated evidence line of its own is classified
+    // "planningAssumption" directly, never a whole-content re-scan.
+    const evidence = deriveMarketSizeMetricEvidenceLevel(isCagr ? "CAGR" : "Market Size", value, section.content);
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.1),transparent_30%),rgba(255,255,255,0.025)] p-5">
@@ -5308,11 +5330,18 @@ if (field === "swotAnalysis") {
             Vendors, category, position, strengths, weaknesses, market relevance and validation status
             from the generated analysis.
           </p>
+          {/* TASK #32 -- see app/dashboard/[id]/page.tsx's identical
+              Competitive Landscape table for the full comment. */}
+          <p className="mt-2 text-xs leading-5 text-zinc-500">
+            Vendor Confidence reflects how well each company&apos;s existence and market relevance are
+            independently corroborated -- it does not verify the category, position, strengths, or
+            weaknesses text next to it, which is the report&apos;s own analysis.
+          </p>
         </div>
         <div className="overflow-x-auto">
           <div className="min-w-[1020px]">
             <div className="grid grid-cols-[0.85fr_0.75fr_0.85fr_1fr_1fr_0.75fr_0.85fr] gap-px bg-white/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-              {["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Validation"].map(
+              {["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Vendor Confidence"].map(
                 (label) => (
                   <div key={label} className="bg-zinc-950/80 px-4 py-3">
                     {label}
@@ -8917,7 +8946,8 @@ const ReportPanel = memo(function ReportPanel({
               { label: localizePdfPresentationLabel("Strengths", pdfLocale), width: visualWidth * 0.17 },
               { label: localizePdfPresentationLabel("Weaknesses", pdfLocale), width: visualWidth * 0.17 },
               { label: localizePdfPresentationLabel("Relevance", pdfLocale), width: visualWidth * 0.11 },
-              { label: localizePdfPresentationLabel("Validation", pdfLocale), width: visualWidth * 0.12 },
+              // TASK #32 -- see ReportPdfButton.tsx's identical fix.
+              { label: localizePdfPresentationLabel("Vendor Confidence", pdfLocale), width: visualWidth * 0.12 },
             ];
             let miX = bodyX;
 

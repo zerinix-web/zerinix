@@ -168,10 +168,17 @@ test("the main per-section EvidenceBadge (the badge shown on every section card)
 });
 
 test("the TAM/SAM/SOM visualization badge is wired to isMarketIntelligence in both files (ReportSectionVisual / PremiumSectionVisual)", () => {
+  // TASK #32 -- confirmed live (evidence-classification audit): the
+  // per-layer badge no longer re-scans the section's own prose
+  // (getDashboardMetricEvidence) -- it now derives layerEvidenceLevel
+  // directly from that layer's own isResolved/isEstimated (see
+  // tests/task32-evidence-classification-authoritative.test.mjs for that
+  // fix's own dedicated coverage). The market={isMarketIntelligence} prop
+  // this test protects is unaffected.
   assert.match(dashboardReportSource, /function ReportSectionVisual\(\{[\s\S]{0,300}isMarketIntelligence\??\s*:\s*boolean/);
   assert.match(
     dashboardReportSource,
-    /getDashboardMetricEvidence\(bar\.label, isResolved \? value : "", content\)\} locale=\{evidenceLocale\} market=\{isMarketIntelligence\}/
+    /<EvidenceBadge level=\{layerEvidenceLevel\} locale=\{evidenceLocale\} market=\{isMarketIntelligence\}/
   );
   assert.match(plannerSource, /function PremiumSectionVisual\(\{[\s\S]{0,300}isMarketIntelligence\??\s*:\s*boolean/);
 });

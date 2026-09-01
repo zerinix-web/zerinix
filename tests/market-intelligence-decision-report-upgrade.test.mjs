@@ -216,11 +216,16 @@ test("page.tsx and Planner.tsx: the Competitive Landscape table supports up to 2
   }
 });
 
-test("the Competitive Landscape table header includes all 7 required columns: Vendor, Category, Position, Strengths, Weaknesses, Relevance, Validation", () => {
+test("the Competitive Landscape table header includes all 7 required columns: Vendor, Category, Position, Strengths, Weaknesses, Relevance, Vendor Confidence", () => {
+  // TASK #32 -- confirmed live (evidence-classification audit): renamed
+  // from the ambiguous "Validation" (which read as validating the whole
+  // row, including the category/position/strengths/weaknesses text) to
+  // "Vendor Confidence" -- it is a vendor-existence corroboration score,
+  // never a check on this row's other attribute claims.
   for (const source of [pageSource, plannerSource]) {
     assert.match(
       source,
-      /\["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Validation"\]/
+      /\["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Vendor Confidence"\]/
     );
   }
 });

@@ -292,24 +292,29 @@ test("routing (classifyReportDomain, applyPromptIntentModeOverride) and the deci
 // tests/market-intelligence-semantic-field-mapping-fix.test.mjs for that
 // fix's own dedicated coverage.
 test("validation/uncertainty labeling (Estimated tags, evidence badges) is untouched -- the Market Size/CAGR cards classify evidence via the shared canonical evidence classifier, which still reads hedging/estimate language rather than suppressing it", () => {
-  // P0 FIX #5 (source/evidence integrity repair) scoped the `content`
-  // argument to extractEvidenceLineForValue(content, value) -- the single
-  // line that actually produced the displayed headline, not the raw
-  // multi-line field -- so a [Verified] line elsewhere in the same field
-  // can no longer confirm a DIFFERENT, [Estimated] line's own figure. See
+  // P0 FIX #5 (source/evidence integrity repair) originally scoped the
+  // `content` argument to a page.tsx-local extractEvidenceLineForValue --
+  // the single line that actually produced the displayed headline, not
+  // the raw multi-line field -- so a [Verified] line elsewhere in the
+  // same field can no longer confirm a DIFFERENT, [Estimated] line's own
+  // figure.
+  // TASK #32 -- that logic (plus Planner.tsx's own, previously
+  // unscoped whole-content scan) was consolidated into ONE shared
+  // function, deriveMarketSizeMetricEvidenceLevel (report-presentation.ts),
+  // now called identically by both files -- see
   // tests/market-intelligence-source-evidence-integrity.test.mjs for that
   // fix's own dedicated coverage.
   // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair): a
-  // multi-estimate CAGR range is forced to "benchmarkDerived" before
+  // multi-estimate CAGR range is still forced to "benchmarkDerived" before
   // reaching the classifier below (no single evidence line supports a
-  // two-number range); the single-estimate case this test protects still
-  // routes through this exact pinned getDashboardMetricEvidence(...) call.
+  // two-number range); the single-estimate case this test protects
+  // routes through this exact pinned call.
   assert.match(
     pageSource,
-    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
+    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, content\);/
   );
   assert.match(
     plannerSource,
-    /const evidence = inferEvidenceLevel\(\{\s*\n\s*label: isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*context: section\.content,\s*\n\s*\}\);/
+    /const evidence = deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, section\.content\);/
   );
 });

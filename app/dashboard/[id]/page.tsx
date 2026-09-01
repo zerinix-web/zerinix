@@ -43,6 +43,7 @@ import {
   readFounderReadinessMetricValue,
   readFounderReadinessScoreValue,
   resolveCagrHeadlinePresentation,
+  deriveMarketSizeMetricEvidenceLevel,
   stripLeadingTakeawaySentence,
 } from "@/app/lib/report-presentation";
 import type {
@@ -66,6 +67,7 @@ import {
   resolveMarketIntelligenceConfidenceFactors,
   constrainMarketSizingResolutionToCanonicalState,
   classifyStrategicRecommendationAction,
+  resolveMarketIntelligenceDecisionEvidenceLevel,
   type MarketIntelligenceCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
@@ -669,33 +671,6 @@ function getDashboardMetricEvidence(label: string, value: string, content: strin
   });
 }
 
-// P0 FIX -- confirmed live (source/evidence integrity repair): a Market
-// Intelligence field like `cagr` can legitimately contain MULTIPLE
-// independently-classified evidence items on separate lines (graph.cagr in
-// market-intelligence-graph.ts computes confidenceClassification per item,
-// e.g. one evidence sentence using "forecast" language classifies
-// [Estimated] while another, differently-worded sentence about the SAME
-// market classifies [Verified]). getDashboardMetricEvidence's own
-// inferEvidenceLevel call scans the ENTIRE multi-line content for the word
-// "verified" -- so whenever the headline value extracted by
-// extractHeadlineCagrValue/extractHeadlineMonetaryValue happens to come
-// from the [Estimated] line (array order is research-discovery order, not
-// sorted by classification), the card still shows "Data Confirmed" purely
-// because a DIFFERENT line elsewhere in the same field happens to be
-// [Verified] -- a source that supports a DIFFERENT claim being used to
-// confirm this one. Isolating evidence-level detection to the single line
-// that actually contains the extracted headline value (falling back to the
-// full content when no single line contains it, e.g. unstructured model
-// prose with no graph-derived per-item tags) ties the badge to the exact
-// claim actually displayed, never a claim merely present somewhere else in
-// the same field.
-function extractEvidenceLineForValue(content: string, value: string): string {
-  if (!value) return content;
-  const lines = (content || "").split("\n");
-  const matchingLine = lines.find((line) => line.includes(value));
-  return matchingLine ?? content;
-}
-
 function getDashboardSectionEvidence(
   section: { field?: string; title: string; content: string },
   marketIntelligenceCanonicalState: MarketIntelligenceCanonicalState | null = null
@@ -733,7 +708,14 @@ function getDashboardSectionEvidence(
   }
 
   if (field.includes("executive") || title.includes("executive") || title.includes("summary")) {
-    return getDashboardMetricEvidence(section.title, extractMetricValue(section.content, "Decision") || section.title, section.content);
+    // TASK #32 -- see resolveMarketIntelligenceDecisionEvidenceLevel's own
+    // comment: reads the same decisionCriticalEvidence pillars every other
+    // canonical-state consumer already uses, instead of re-scanning this
+    // section's own prose, whenever canonical state is available.
+    return (
+      resolveMarketIntelligenceDecisionEvidenceLevel(marketIntelligenceCanonicalState) ||
+      getDashboardMetricEvidence(section.title, extractMetricValue(section.content, "Decision") || section.title, section.content)
+    );
   }
 
   return "planningAssumption";
@@ -2265,7 +2247,19 @@ function ExecutiveSummaryVisual({
       label: "Decision",
       value: recommendation,
       accent: "from-emerald-300/20 to-teal-300/5",
-      evidence: getDashboardMetricEvidence("Decision", recommendation, content),
+      // TASK #32 -- confirmed live (evidence-classification audit): this
+      // used to scan the ENTIRE executive summary prose for bare
+      // "verified"/"validate" keywords (getDashboardMetricEvidence),
+      // independent of the SAME decisionCriticalEvidence pillars already
+      // used to compute `recommendation` a few lines above. For Market
+      // Intelligence, this badge now reads directly from those pillars
+      // (resolveMarketIntelligenceDecisionEvidenceLevel) -- never
+      // upgraded by confident-sounding prose -- falling back to the
+      // original prose scan only for a legacy report with no canonical
+      // state, or for every non-MI report kind, exactly as before.
+      evidence:
+        (isMarketIntelligence && resolveMarketIntelligenceDecisionEvidenceLevel(marketIntelligenceCanonicalState)) ||
+        getDashboardMetricEvidence("Decision", recommendation, content),
     },
     {
       // CRITICAL FIX -- confirmed live: Market Intelligence's deterministic
@@ -2565,6 +2559,23 @@ function ReportSectionVisual({
             const width = isResolved && magnitude !== null ? `${Math.max(8, (magnitude / maxMagnitude) * 100)}%` : null;
             const isEstimated = estimated[index];
             const assumption = assumptions[index];
+            // TASK #32 -- confirmed live (evidence-classification audit):
+            // this badge used to re-scan the ENTIRE tamSamSom prose for the
+            // bare word "verified" (getDashboardMetricEvidence ->
+            // inferEvidenceLevel) instead of reading the per-layer
+            // isResolved/isEstimated values already computed two lines
+            // above -- a section merely mentioning "has not been
+            // independently verified" anywhere could flip this to a
+            // "Data Confirmed" badge on an unresolved layer. Derived
+            // directly from the same canonical-narrowed resolution every
+            // other element on this row already reads, so a disclosed
+            // default-assumption SAM or a pending SOM can never display a
+            // more confident badge than the bar/value next to it.
+            const layerEvidenceLevel: EvidenceLevel = !isResolved
+              ? "validationRequired"
+              : isEstimated
+                ? "benchmarkDerived"
+                : "verified";
 
             return (
               <div key={bar.label} className="space-y-2">
@@ -2572,7 +2583,7 @@ function ReportSectionVisual({
                   <div className="rounded-2xl border border-white/10 bg-black/35 p-3 text-center">
                     <p className="text-xs font-semibold tracking-[0.2em] text-zinc-400">{bar.label}</p>
                     <div className="mt-2 flex justify-center">
-                      <EvidenceBadge level={getDashboardMetricEvidence(bar.label, isResolved ? value : "", content)} locale={evidenceLocale} market={isMarketIntelligence} />
+                      <EvidenceBadge level={layerEvidenceLevel} locale={evidenceLocale} market={isMarketIntelligence} />
                     </div>
                   </div>
                   {width ? (
@@ -2843,27 +2854,28 @@ function ReportSectionVisual({
     //
     // P0 FIX -- a multi-item field (e.g. cagr with one [Verified] and one
     // [Estimated] line) must not let a DIFFERENT line confirm this one --
-    // see extractEvidenceLineForValue's own comment.
+    // see deriveMarketSizeMetricEvidenceLevel's own comment
+    // (report-presentation.ts).
     // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair): a
     // range built from two genuinely disagreeing estimates can never
     // classify as "verified" ("Data Confirmed") -- no single evidence
-    // line supports a two-number range, so scanning either underlying
-    // line for "[Verified]" (extractEvidenceLineForValue's own line-match
-    // would fail to find any line containing this range value and fall
-    // back to the whole field anyway) would let a downstream summary
-    // strengthen what is honestly a directional, multi-sourced read.
+    // line supports a two-number range, so scanning for one (which would
+    // now correctly classify as "planningAssumption" rather than finding
+    // any matching line) would let a downstream summary strengthen what
+    // is honestly a directional, multi-sourced read.
     // Forced to "benchmarkDerived" ("Market Support") -- an existing,
     // already-correct evidence tier for exactly this shape, never a new
     // one, and never "validationRequired" either: real, sourced evidence
     // for the range DOES exist, it just does not agree on one figure.
+    // TASK #32 -- see deriveMarketSizeMetricEvidenceLevel's own comment
+    // (report-presentation.ts): a figure with no isolated evidence line of
+    // its own is classified "planningAssumption" directly, never a
+    // whole-content re-scan and never a too-confident "benchmarkDerived"
+    // default. The multi-estimate range case is unchanged.
     const evidence =
       isCagr && cagrPresentation?.isMultiEstimate
         ? ("benchmarkDerived" as const)
-        : getDashboardMetricEvidence(
-            isCagr ? "CAGR" : "Market Size",
-            value,
-            extractEvidenceLineForValue(content, value)
-          );
+        : deriveMarketSizeMetricEvidenceLevel(isCagr ? "CAGR" : "Market Size", value, content);
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.1),transparent_30%),rgba(255,255,255,0.025)] p-5">
@@ -3181,11 +3193,25 @@ function ReportSectionVisual({
             Vendors, category, position, strengths, weaknesses, market relevance and validation status
             from the generated analysis.
           </p>
+          {/* TASK #32 -- confirmed live (evidence-classification audit):
+              "Vendor Confidence" is a corroboration score for the
+              vendor's own existence/relevance (independent source count),
+              never a check on this row's category/position/strengths/
+              weaknesses claims -- those are the model's own analysis and
+              carry no separate evidence classification of their own. One
+              caption here, not a badge on every cell, states that scope
+              plainly rather than leaving a reader to assume the whole row
+              is equally verified. */}
+          <p className="mt-2 text-xs leading-5 text-zinc-500">
+            Vendor Confidence reflects how well each company&apos;s existence and market relevance are
+            independently corroborated -- it does not verify the category, position, strengths, or
+            weaknesses text next to it, which is the report&apos;s own analysis.
+          </p>
         </div>
         <div className="overflow-x-auto">
           <div className="min-w-[1020px]">
             <div className="grid grid-cols-[0.85fr_0.75fr_0.85fr_1fr_1fr_0.75fr_0.85fr] gap-px bg-white/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-              {["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Validation"].map(
+              {["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Vendor Confidence"].map(
                 (label) => (
                   <div key={label} className="bg-zinc-950/80 px-4 py-3">
                     {label}

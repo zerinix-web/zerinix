@@ -388,9 +388,14 @@ test("DRIFT CHECK: P0 FIX #1 (TAM/SAM/SOM), #2 (CAGR), #3 (Competitive Landscape
   // it ever reaches the canonical classifier (no single evidence line
   // supports a two-number range), but the single-estimate case -- the
   // one this drift check protects -- still routes through the exact
-  // pinned getDashboardMetricEvidence(...) call below, unchanged.
+  // pinned evidence-classification call below.
+  // TASK #32 -- getDashboardMetricEvidence(..., extractEvidenceLineForValue(...))
+  // was superseded by the shared deriveMarketSizeMetricEvidenceLevel
+  // (report-presentation.ts), reused identically by Planner.tsx -- see
+  // tests/market-intelligence-source-evidence-integrity.test.mjs for that
+  // fix's own dedicated coverage.
   assert.match(
     pageSource,
-    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
+    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, content\);/
   );
 });

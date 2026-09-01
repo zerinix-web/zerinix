@@ -270,7 +270,13 @@ test("drift check: TAM/SAM/SOM's own evidence badge and per-layer assumption sen
   assert.match(pageSource, /Planning Estimate \/ Not Verified/);
 });
 
-test("drift check: Market Size/CAGR's evidence classification path (getDashboardMetricEvidence, extractEvidenceLineForValue) is untouched by this pass", () => {
-  assert.match(pageSource, /function extractEvidenceLineForValue\(content: string, value: string\): string \{/);
+test("drift check: Market Size/CAGR's evidence classification path (getDashboardMetricEvidence, deriveMarketSizeMetricEvidenceLevel) is untouched by this pass", () => {
+  // TASK #32 -- extractEvidenceLineForValue's page.tsx-local
+  // implementation was superseded by the shared
+  // deriveMarketSizeMetricEvidenceLevel/extractEvidenceLineForMetricValue
+  // in report-presentation.ts (see tests/market-intelligence-source-
+  // evidence-integrity.test.mjs for that fix's own dedicated coverage) --
+  // this drift check now pins the current shared-function shape instead.
+  assert.match(pageSource, /deriveMarketSizeMetricEvidenceLevel,/);
   assert.match(pageSource, /function getDashboardMetricEvidence\(label: string, value: string, content: string\): EvidenceLevel \{/);
 });

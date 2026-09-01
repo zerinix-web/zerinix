@@ -39,6 +39,7 @@
 // backfill, no destructive change to any existing persisted report.
 
 import type { ResponseLanguage } from "@/app/lib/report-language";
+import type { EvidenceLevel } from "@/app/lib/report-evidence";
 import type {
   MarketIntelligenceGraph,
   MarketIntelligenceCompetitor,
@@ -297,6 +298,65 @@ export function resolveMarketIntelligenceConfidenceFactors(
     canonicalState.coverage,
     canonicalState.decisionCriticalEvidence
   );
+}
+
+// TASK #32 -- Executive Summary evidence-classification audit.
+//
+// PROBLEM (confirmed via full audit of every render site): the Executive
+// Summary's own "Decision" KPI badge, and the Executive Summary section's
+// header badge, both re-derived their evidence level by scanning the
+// section's raw prose for bare keywords (inferEvidenceLevel's
+// `\bverified\b`/`\bvalidate\b` regexes) -- even though
+// canonicalState.decisionCriticalEvidence is already resolved and
+// already used, in the SAME render, to compute the decision label two
+// lines above. This is the exact "reconstructs classification from prose
+// instead of structured state" failure mode: a summary that happens to
+// contain the word "verified" anywhere (a real risk -- "no independent
+// win-rate data has been verified" is exactly the kind of sentence this
+// report style writes) could show "Data Confirmed" on a report whose
+// real decision-critical evidence is incomplete. Separately, page.tsx and
+// Planner.tsx used two DIFFERENT functions for the "Decision" badge
+// (getDashboardMetricEvidence vs getSectionEvidenceLevel), a drift risk
+// independent of the over-confidence one.
+//
+// FIX: a pure, deterministic mapping from the SAME 3-pillar
+// decisionCriticalEvidence + confidence every other canonical-state
+// consumer already reads, onto the EXISTING EvidenceLevel taxonomy
+// (report-evidence.ts) -- no new taxonomy invented. All 3 pillars
+// resolved and confidence at/above the same "strong" bar the decision
+// engine itself uses (STRONG_CONFIDENCE_THRESHOLD,
+// market-intelligence-presentation.ts) is the only path to "verified";
+// a full pillar count at weaker confidence, or a partial pillar count,
+// reads as "benchmarkDerived" (directional/partially supported); a
+// single resolved pillar reads as "planningAssumption"; zero resolved
+// pillars reads as "validationRequired". Returns null when no canonical
+// state exists, so every caller's existing prose-scan fallback continues
+// to run completely unchanged for legacy/degraded reports -- this never
+// upgrades what a legacy report already showed, only replaces the
+// re-derivation for reports that actually have canonical state.
+export function resolveMarketIntelligenceDecisionEvidenceLevel(
+  canonicalState: MarketIntelligenceCanonicalState | null
+): EvidenceLevel | null {
+  if (!canonicalState) return null;
+
+  const evidence = canonicalState.decisionCriticalEvidence;
+  const resolvedCount = [
+    evidence.marketSizingResolved,
+    evidence.competitiveEvidenceResolved,
+    evidence.obtainableShareResolved,
+  ].filter(Boolean).length;
+  // Mirrors STRONG_CONFIDENCE_THRESHOLD (market-intelligence-presentation.ts)
+  // -- the same "strong" bar the decision engine itself requires, reused
+  // here (as in classifyStrategicRecommendationAction) rather than a new
+  // arbitrary number.
+  const hasStrongConfidence = canonicalState.confidence >= 65;
+
+  if (resolvedCount === 3) {
+    return hasStrongConfidence ? "verified" : "benchmarkDerived";
+  }
+  if (resolvedCount === 2) return "benchmarkDerived";
+  if (resolvedCount === 1) return "planningAssumption";
+  return "validationRequired";
 }
 
 // TASK #23 (follow-up) -- the degraded/graph-less persistence gap.

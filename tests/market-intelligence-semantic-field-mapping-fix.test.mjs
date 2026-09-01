@@ -147,23 +147,28 @@ test("page.tsx and Planner.tsx: the Market Size/CAGR card no longer classifies e
       `${label}: the old binary evidence default must be gone`
     );
   }
-  // P0 FIX #5 (source/evidence integrity repair) scoped page.tsx's
-  // `content` argument to extractEvidenceLineForValue(content, value) --
-  // see tests/market-intelligence-source-evidence-integrity.test.mjs.
-  // Planner.tsx (Business Plan/Acquisition, out of scope for that
-  // Market-Intelligence-specific fix) keeps its original, unscoped call.
+  // P0 FIX #5 (source/evidence integrity repair) originally scoped
+  // page.tsx's `content` argument to a page.tsx-local
+  // extractEvidenceLineForValue(content, value) -- Planner.tsx kept its
+  // original, unscoped call at the time (out of scope for that
+  // Market-Intelligence-specific fix).
+  // TASK #32 -- both files now call the SAME shared function,
+  // deriveMarketSizeMetricEvidenceLevel (report-presentation.ts), closing
+  // that exact gap -- see
+  // tests/market-intelligence-source-evidence-integrity.test.mjs for that
+  // fix's own dedicated coverage.
   // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair): a
-  // multi-estimate CAGR range is forced to "benchmarkDerived" before
+  // multi-estimate CAGR range is still forced to "benchmarkDerived" before
   // reaching the classifier below (no single evidence line supports a
-  // two-number range); the single-estimate case this test protects still
-  // routes through this exact pinned getDashboardMetricEvidence(...) call.
+  // two-number range); the single-estimate case this test protects
+  // routes through this exact pinned call.
   assert.match(
     pageSource,
-    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
+    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, content\);/
   );
   assert.match(
     plannerSource,
-    /const evidence = inferEvidenceLevel\(\{\s*\n\s*label: isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*context: section\.content,\s*\n\s*\}\);/
+    /const evidence = deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, section\.content\);/
   );
 });
 

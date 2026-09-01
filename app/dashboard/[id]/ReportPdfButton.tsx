@@ -5358,7 +5358,12 @@ export function buildStandardReportPdf({
               { label: localizePdfPresentationLabel("Strengths", pdfLocale), width: bodyWidth * 0.17 },
               { label: localizePdfPresentationLabel("Weaknesses", pdfLocale), width: bodyWidth * 0.17 },
               { label: localizePdfPresentationLabel("Relevance", pdfLocale), width: bodyWidth * 0.11 },
-              { label: localizePdfPresentationLabel("Validation", pdfLocale), width: bodyWidth * 0.12 },
+              // TASK #32 -- see the web table's identical fix (page.tsx /
+              // Planner.tsx): renamed from "Validation" to make clear
+              // this column reflects vendor existence/relevance
+              // corroboration, not the category/position/strengths/
+              // weaknesses text in the same row.
+              { label: localizePdfPresentationLabel("Vendor Confidence", pdfLocale), width: bodyWidth * 0.12 },
             ];
             let miX = bodyX;
 

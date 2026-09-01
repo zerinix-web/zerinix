@@ -211,10 +211,13 @@ test("page.tsx and Planner.tsx: the Competitive Landscape table now includes a P
 });
 
 test("page.tsx and Planner.tsx: the Competitive Landscape visual renders a real structured table/card component, not raw markdown pipe syntax", () => {
+  // TASK #32 -- "Validation" renamed to "Vendor Confidence" -- see
+  // tests/market-intelligence-decision-report-upgrade.test.mjs for that
+  // fix's own dedicated coverage.
   for (const source of [pageSource, plannerSource]) {
     assert.match(
       source,
-      /\["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Validation"\]/
+      /\["Vendor", "Category", "Position", "Strengths", "Weaknesses", "Relevance", "Vendor Confidence"\]/
     );
     assert.doesNotMatch(source, /\{row\.vendor\}\s*\|\s*\{row\.category\}/);
   }

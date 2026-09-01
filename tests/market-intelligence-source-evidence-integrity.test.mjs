@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { readFileSync } from "node:fs";
 import { inferEvidenceLevel } from "../app/lib/report-evidence.ts";
 import {
   buildMarketIntelligenceGraph,
   projectMarketIntelligenceGraphToReport,
 } from "../app/lib/ai/market-intelligence-graph.ts";
+import {
+  deriveMarketSizeMetricEvidenceLevel,
+  extractEvidenceLineForMetricValue,
+} from "../app/lib/report-presentation.ts";
 
 // P0 FIX #5 -- Market Intelligence source/evidence integrity repair.
 //
@@ -95,41 +96,6 @@ function verifiedEvidence({ id, field, claim, value }) {
 
 const pageSource = readFileSync(new URL("../app/dashboard/[id]/page.tsx", import.meta.url), "utf8");
 
-function extractFunctionSource(source, functionName) {
-  const startMatch = source.match(new RegExp(`function ${functionName}\\(`));
-  assert.ok(startMatch, `${functionName} not found`);
-  const start = startMatch.index;
-
-  let i = start + startMatch[0].length - 1;
-  let parenDepth = 1;
-  while (parenDepth > 0) {
-    i += 1;
-    if (source[i] === "(") parenDepth += 1;
-    else if (source[i] === ")") parenDepth -= 1;
-  }
-  while (source[i] !== "{") {
-    i += 1;
-  }
-
-  let braceDepth = 0;
-  do {
-    if (source[i] === "{") braceDepth += 1;
-    else if (source[i] === "}") braceDepth -= 1;
-    i += 1;
-  } while (braceDepth > 0);
-
-  return source.slice(start, i);
-}
-
-async function loadExtractEvidenceLineForValue() {
-  const body = `export ${extractFunctionSource(pageSource, "extractEvidenceLineForValue")}`;
-  const dir = mkdtempSync(join(tmpdir(), "zerinix-evidence-line-"));
-  const outPath = join(dir, "extractEvidenceLineForValue.ts");
-  writeFileSync(outPath, `${body}\n`);
-  const mod = await import(pathToFileURL(outPath).href);
-  return mod.extractEvidenceLineForValue;
-}
-
 // ---------------------------------------------------------------------------
 // Root cause #1: claim-evidence mismatch on a multi-item CAGR field
 // ---------------------------------------------------------------------------
@@ -185,29 +151,48 @@ test("REGRESSION (root cause #1): a CAGR field with one [Estimated] and one [Ver
   assert.notEqual(afterFix, "verified", "the [Estimated] line's own figure must never classify as verified merely because a different line elsewhere is Verified");
 });
 
-test("extractEvidenceLineForValue isolates the single line containing the extracted value, and falls back to full content when no line contains it", async () => {
-  const extractEvidenceLineForValue = await loadExtractEvidenceLineForValue();
-
+// TASK #32 -- extractEvidenceLineForValue's own page.tsx-local
+// implementation (whose "no matching line -> fall back to full content"
+// behavior this test used to pin) was superseded by
+// extractEvidenceLineForMetricValue (report-presentation.ts), the ONE
+// shared function both page.tsx and Planner.tsx now call. Its fallback
+// was deliberately fixed FROM full-content TO an empty string -- see its
+// own comment: falling back to the whole field reopened exactly the
+// whole-content "bare \bverified\b regex" hazard this isolation exists
+// to prevent.
+test("extractEvidenceLineForMetricValue isolates the single line containing the extracted value, and returns an empty string (never the full content) when no line contains it", () => {
   const multiLine = "- [Estimated] Forecast CAGR of 15% through 2030 | Confidence: 55/100 (Medium) | Evidence: [R1]\n- [Verified] CAGR of 8%, independently reported | Confidence: 82/100 (High) | Evidence: [R2]";
-  assert.match(extractEvidenceLineForValue(multiLine, "15%"), /\[Estimated\]/);
-  assert.match(extractEvidenceLineForValue(multiLine, "8%"), /\[Verified\]/);
+  assert.match(extractEvidenceLineForMetricValue(multiLine, "15%"), /\[Estimated\]/);
+  assert.match(extractEvidenceLineForMetricValue(multiLine, "8%"), /\[Verified\]/);
 
-  // No matching line -> fall back to the full content unchanged.
-  assert.equal(extractEvidenceLineForValue(multiLine, "42%"), multiLine);
-  // No value at all (empty headline) -> fall back to the full content.
-  assert.equal(extractEvidenceLineForValue(multiLine, ""), multiLine);
+  // No matching line -> empty string, never the full content.
+  assert.equal(extractEvidenceLineForMetricValue(multiLine, "42%"), "");
+  // No value at all (empty headline) -> empty string.
+  assert.equal(extractEvidenceLineForMetricValue(multiLine, ""), "");
 });
 
-test("PARITY: the Market Metrics card (CAGR/Market Size) now scopes getDashboardMetricEvidence's context to extractEvidenceLineForValue(content, value), not the raw multi-line content", () => {
+test("PARITY: the Market Metrics card (CAGR/Market Size) now scopes evidence classification to deriveMarketSizeMetricEvidenceLevel(label, value, content), the ONE shared function both page.tsx and Planner.tsx call, not the raw multi-line content", () => {
   // P0 FIX #8 -- confirmed live (CAGR scope/KPI semantics repair): a
-  // multi-estimate CAGR range is forced to "benchmarkDerived" before
-  // reaching the classifier below (no single evidence line supports a
-  // two-number range); the single-estimate case this test protects still
-  // routes through this exact pinned getDashboardMetricEvidence(...) call.
+  // multi-estimate CAGR range is still forced to "benchmarkDerived"
+  // before reaching the classifier below (no single evidence line
+  // supports a two-number range); the single-estimate case this test
+  // protects now routes through this exact pinned call in both files.
+  const pattern =
+    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, content\);/;
+  assert.match(pageSource, pattern);
+
+  const plannerSource = readFileSync(new URL("../components/Planner.tsx", import.meta.url), "utf8");
   assert.match(
-    pageSource,
-    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*getDashboardMetricEvidence\(\s*\n\s*isCagr \? "CAGR" : "Market Size",\s*\n\s*value,\s*\n\s*extractEvidenceLineForValue\(content, value\)\s*\n\s*\);/
+    plannerSource,
+    /const evidence = deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, section\.content\);/
   );
+
+  // Behavioral proof the shared function itself reproduces root cause #1's
+  // fix: the [Estimated] line's own figure must never classify as
+  // verified merely because a [Verified] line exists elsewhere in the
+  // same multi-line field.
+  const multiLine = "- [Estimated] Forecast CAGR of 15% through 2030 | Confidence: 55/100 (Medium) | Evidence: [R1]\n- [Verified] CAGR of 8%, independently reported | Confidence: 82/100 (High) | Evidence: [R2]";
+  assert.notEqual(deriveMarketSizeMetricEvidenceLevel("CAGR", "15%", multiLine), "verified");
 });
 
 // ---------------------------------------------------------------------------
