@@ -65,6 +65,7 @@ import {
   resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
   resolveMarketIntelligenceConfidenceFactors,
   constrainMarketSizingResolutionToCanonicalState,
+  classifyStrategicRecommendationAction,
   type MarketIntelligenceCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
@@ -3270,15 +3271,42 @@ function ReportSectionVisual({
         {items.length > 0 ? (
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {items.map((item, index) => {
-              const { timeframe, metric, budget, owner, gate, activity, evidenceTie } = extractRecommendationSignals(item);
+              const signals = extractRecommendationSignals(item);
+              const { timeframe, metric, budget, owner, gate, activity, evidenceTie } = signals;
+              // TASK #31 -- confirmed live (real MONITOR/50%-confidence
+              // report): a card's own action text, budget, and KPI were
+              // never checked against the canonical decision or its
+              // evidence pillars -- only the section-level "Current
+              // Decision" badge above was decision-aware. Classifies each
+              // card into an explicit action type, conservatively
+              // downgraded (never upgraded) by the SAME canonical
+              // decision/evidence state every other MI surface reads, and
+              // marks any unlabeled numeric budget/KPI/timeline figure as
+              // a planning assumption rather than presenting fake
+              // precision as fact.
+              const classification = isMarketIntelligence
+                ? classifyStrategicRecommendationAction({
+                    item,
+                    signals,
+                    canonicalState: marketIntelligenceCanonicalState,
+                    language: strategicRecommendationDecision?.language || "English",
+                  })
+                : null;
+              const numericAssumptionSuffix =
+                classification?.numericBasis === "planning_assumption"
+                  ? strategicRecommendationDecision?.language === "Turkish"
+                    ? " (Planlama Varsayımı)"
+                    : " (Planning Assumption)"
+                  : "";
               const fields = [
                 { label: "Owner", value: owner },
-                { label: "Timeline", value: timeframe },
-                { label: "Budget", value: budget },
-                { label: "Success Metric", value: metric },
+                { label: "Timeline", value: timeframe ? `${timeframe}${numericAssumptionSuffix}` : "" },
+                { label: "Budget", value: budget ? `${budget}${numericAssumptionSuffix}` : "" },
+                { label: "Success Metric", value: metric ? `${metric}${numericAssumptionSuffix}` : "" },
                 { label: "Activity", value: activity },
                 { label: "Evidence Tie", value: evidenceTie },
               ].filter((field) => field.value);
+              const effectiveGate = gate || classification?.downgradeReason || "";
 
               return (
                 <div key={index} className="rounded-2xl border border-white/10 bg-black/25 p-4">
@@ -3287,7 +3315,14 @@ function ReportSectionVisual({
                       {index + 1}
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Action</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Action</p>
+                        {classification ? (
+                          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-zinc-400">
+                            {classification.actionTypeLabel}
+                          </span>
+                        ) : null}
+                      </div>
                       <p className="mt-1 text-sm leading-6 text-zinc-300">{item}</p>
                     </div>
                   </div>
@@ -3303,12 +3338,12 @@ function ReportSectionVisual({
                       ))}
                     </div>
                   ) : null}
-                  {gate ? (
+                  {effectiveGate ? (
                     <div className={fields.length > 0 ? "mt-3" : "mt-3 border-t border-white/10 pt-3"}>
                       <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
                         Decision Gate
                       </p>
-                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-amber-200">{gate}</p>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-amber-200">{effectiveGate}</p>
                     </div>
                   ) : null}
                 </div>

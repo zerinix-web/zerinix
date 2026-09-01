@@ -79,6 +79,7 @@ import {
   readMarketIntelligenceCanonicalState,
   resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
   constrainMarketSizingResolutionToCanonicalState,
+  classifyStrategicRecommendationAction,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
   repairReportLanguageSections,
@@ -4450,8 +4451,34 @@ export function buildStandardReportPdf({
       // getVisualHeight (pagination budgeting) and drawSectionVisual
       // (drawing) can never disagree about how much space it needs.
       const strategicRecommendationDecisionBadgeHeight = 7;
+      // TASK #31 -- read once, reused by both computeRecommendationCardLayout
+      // (height math) and the strategic-recommendation draw branch below
+      // (decision badge + per-card classification), so layout and drawing
+      // can never classify or gate a card differently from each other.
+      const recommendationCanonicalState = readMarketIntelligenceCanonicalState(report.metadata);
       const computeRecommendationCardLayout = (item: string, cardWidth: number) => {
-        const { timeframe, metric, budget, owner, gate, activity, evidenceTie } = extractRecommendationSignals(item);
+        const signals = extractRecommendationSignals(item);
+        const { timeframe, metric, budget, owner, gate, activity, evidenceTie } = signals;
+        // TASK #31 -- see app/dashboard/[id]/page.tsx's identical
+        // strategic-recommendation branch for the full comment. The
+        // effective gate (model's own gate text, or the conservative
+        // downgrade reason when none was written) must be computed HERE,
+        // not just at draw time, since it directly affects gateReservedHeight
+        // below -- drawing a longer auto-generated caution line than the
+        // card reserved room for would silently overlap the next card.
+        const classification = classifyStrategicRecommendationAction({
+          item,
+          signals,
+          canonicalState: recommendationCanonicalState,
+          language: pdfLocale === "tr" ? "Turkish" : "English",
+        });
+        const numericAssumptionSuffix =
+          classification.numericBasis === "planning_assumption"
+            ? pdfLocale === "tr"
+              ? " (Planlama Varsayımı)"
+              : " (Planning Assumption)"
+            : "";
+        const effectiveGate = gate || classification.downgradeReason || "";
         pdf.setFontSize(6);
         // TASK #25C -- confirmed live (real persisted report): capping
         // this at 2 lines silently ellipsized real action text whenever
@@ -4472,9 +4499,9 @@ export function buildStandardReportPdf({
         const fields = (
           [
             ["Owner", owner],
-            ["Timeline", timeframe],
-            ["Budget", budget],
-            ["Success Metric", metric],
+            ["Timeline", timeframe ? `${timeframe}${numericAssumptionSuffix}` : ""],
+            ["Budget", budget ? `${budget}${numericAssumptionSuffix}` : ""],
+            ["Success Metric", metric ? `${metric}${numericAssumptionSuffix}` : ""],
             ["Activity", activity],
             ["Evidence Tie", evidenceTie],
           ] as const
@@ -4488,10 +4515,23 @@ export function buildStandardReportPdf({
         const fieldsRows = fields.length > 0 ? Math.ceil(Math.min(fields.length, 6) / 2) : 0;
         const contentBottom =
           fieldsRows > 0 ? fieldsTopY + (fieldsRows - 1) * 5.6 + 5.5 : fieldsTopY + 3;
-        const gateReservedHeight = gate ? 9 : 0;
+        const gateReservedHeight = effectiveGate ? 9 : 0;
         const height = Math.max(recommendationCardMinHeight, contentBottom + gateReservedHeight);
 
-        return { timeframe, metric, budget, owner, gate, activity, evidenceTie, actionLines, fields, fieldsTopY, height };
+        return {
+          timeframe,
+          metric,
+          budget,
+          owner,
+          gate: effectiveGate,
+          activity,
+          evidenceTie,
+          actionLines,
+          fields,
+          fieldsTopY,
+          height,
+          classification,
+        };
       };
       const computeRecommendationRowHeights = (items: string[], cardWidth: number) => {
         const cards = items.map((item) => computeRecommendationCardLayout(item, cardWidth));
@@ -6357,7 +6397,7 @@ export function buildStandardReportPdf({
           const { cards, rowHeights } = computeRecommendationRowHeights(items, cardWidth);
 
           const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
-            readMarketIntelligenceCanonicalState(report.metadata),
+            recommendationCanonicalState,
             pdfSections.find((entry) => entry.field === "executiveSummary")?.content || "",
             pdfLocale === "tr" ? "Turkish" : "English"
           );
@@ -6461,7 +6501,7 @@ export function buildStandardReportPdf({
                     .slice(rowCursor, rowCursor + rowInChunk)
                     .reduce((sum, height) => sum + height + cardGap, 0);
                 const cardHeight = rowHeights[rowCursor + rowInChunk];
-                const { gate, actionLines, fields } = card;
+                const { gate, actionLines, fields, classification } = card;
 
                 pdf.setFillColor("#18181b");
                 pdf.setDrawColor("#27272a");
@@ -6476,7 +6516,20 @@ export function buildStandardReportPdf({
 
                 pdf.setFontSize(5.2);
                 pdf.setTextColor("#71717a");
-                pdf.text(localizePdfPresentationLabel("ACTION", pdfLocale), x + 11, cardY + 4);
+                // TASK #31 -- explicit action-type classification appended
+                // next to the existing "ACTION" label (never a new
+                // element/row -- see this task's own "without cluttering
+                // the UI" requirement), truncated to the card's own
+                // available width exactly like every other field value
+                // already does via drawRecommendationFieldValue.
+                drawRecommendationFieldValue(
+                  `${localizePdfPresentationLabel("ACTION", pdfLocale)} · ${classification.actionTypeLabel.toUpperCase()}`,
+                  x + 11,
+                  cardY + 4,
+                  cardWidth - 13,
+                  5.2,
+                  4
+                );
                 pdf.setFontSize(6);
                 pdf.setTextColor("#e4e4e7");
                 pdf.text(actionLines, x + 11, cardY + 7.8, {

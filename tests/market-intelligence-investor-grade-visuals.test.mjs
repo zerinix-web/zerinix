@@ -241,8 +241,11 @@ test("page.tsx and Planner.tsx: extractRecommendationSignals now extracts a best
 test("page.tsx and Planner.tsx: recommendation cards render an explicit Action/Owner/Timeline/Success Metric structure", () => {
   for (const source of [pageSource, plannerSource]) {
     assert.match(source, /\{ label: "Owner", value: owner \}/);
-    assert.match(source, /\{ label: "Timeline", value: timeframe \}/);
-    assert.match(source, /\{ label: "Success Metric", value: metric \}/);
+    // TASK #31 -- see market-intelligence-decision-report-upgrade.test.mjs
+    // for the full comment on the planning-assumption suffix these two
+    // values now carry.
+    assert.match(source, /\{ label: "Timeline", value: timeframe \? `\$\{timeframe\}\$\{numericAssumptionSuffix\}` : "" \}/);
+    assert.match(source, /\{ label: "Success Metric", value: metric \? `\$\{metric\}\$\{numericAssumptionSuffix\}` : "" \}/);
     assert.match(source, />Action</);
   }
 });

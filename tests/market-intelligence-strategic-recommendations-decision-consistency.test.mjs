@@ -192,9 +192,14 @@ test("CANONICAL DECISION SCENARIO: MONITOR + validation-required SOM -- Strategi
   // report without one) -- still against the same executiveSummary
   // content, still never re-deriving its own separate verdict.
   for (const source of [pageSource, plannerSource, pdfButtonSource]) {
+    // TASK #31 -- ReportPdfButton.tsx now reads canonical state once into
+    // `recommendationCanonicalState` (reused by the new per-card
+    // classification too) instead of a fresh inline
+    // readMarketIntelligenceCanonicalState(report.metadata) call at this
+    // exact site -- same underlying data, read once instead of twice.
     assert.match(
       source,
-      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n?\s*(?:marketIntelligenceCanonicalState|readMarketIntelligenceCanonicalState\(report\.metadata\)),\s*\n?\s*(?:executiveSummaryContent|pdfSections\.find\(\(entry\) => entry\.field === "executiveSummary"\)\?\.content \|\| "")/,
+      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n?\s*(?:marketIntelligenceCanonicalState|readMarketIntelligenceCanonicalState\(report\.metadata\)|recommendationCanonicalState),\s*\n?\s*(?:executiveSummaryContent|pdfSections\.find\(\(entry\) => entry\.field === "executiveSummary"\)\?\.content \|\| "")/,
       "Strategic Recommendations must resolve its decision through the same canonical resolver, against the same executiveSummary content"
     );
   }

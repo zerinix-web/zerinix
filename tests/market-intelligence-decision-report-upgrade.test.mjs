@@ -322,9 +322,14 @@ test("page.tsx and Planner.tsx: extractRecommendationSignals now separates Budge
 test("recommendation cards render Action/Owner/Timeline/Budget/Success Metric/Decision Gate", () => {
   for (const source of [pageSource, plannerSource]) {
     assert.match(source, /\{ label: "Owner", value: owner \}/);
-    assert.match(source, /\{ label: "Timeline", value: timeframe \}/);
-    assert.match(source, /\{ label: "Budget", value: budget \}/);
-    assert.match(source, /\{ label: "Success Metric", value: metric \}/);
+    // TASK #31 -- Timeline/Budget/Success Metric values now append an
+    // explicit "(Planning Assumption)" suffix whenever the figure has no
+    // real evidence tie (classifyStrategicRecommendationAction's own
+    // numericBasis) -- the underlying timeframe/budget/metric value is
+    // still the one and only source, never a second independent read.
+    assert.match(source, /\{ label: "Timeline", value: timeframe \? `\$\{timeframe\}\$\{numericAssumptionSuffix\}` : "" \}/);
+    assert.match(source, /\{ label: "Budget", value: budget \? `\$\{budget\}\$\{numericAssumptionSuffix\}` : "" \}/);
+    assert.match(source, /\{ label: "Success Metric", value: metric \? `\$\{metric\}\$\{numericAssumptionSuffix\}` : "" \}/);
     assert.match(source, /Decision Gate\s*\n\s*<\/p>/);
     assert.match(source, />Action</);
   }
@@ -500,7 +505,14 @@ test("ReportPdfButton.tsx: draws Strategic Recommendation cards with Action, Own
   // pre-computed `normalizedTitle` local.
   assert.match(pdfButtonSource, /isMarketIntelligenceReport && section\.title\.toLowerCase\(\)\.includes\("strategic recommendation"\)/);
   assert.match(pdfButtonSource, /localizePdfPresentationLabel\("ACTION", pdfLocale\)/);
-  assert.match(pdfButtonSource, /\["Owner", owner\],\s*\n\s*\["Timeline", timeframe\],\s*\n\s*\["Budget", budget\],\s*\n\s*\["Success Metric", metric\],/);
+  // TASK #31 -- Timeline/Budget/Success Metric values now append the same
+  // "(Planning Assumption)" suffix as the web cards whenever the figure
+  // has no real evidence tie -- see market-intelligence-decision-report-
+  // upgrade.test.mjs's own web-side assertion for the identical fix.
+  assert.match(
+    pdfButtonSource,
+    /\["Owner", owner\],\s*\n\s*\["Timeline", timeframe \? `\$\{timeframe\}\$\{numericAssumptionSuffix\}` : ""\],\s*\n\s*\["Budget", budget \? `\$\{budget\}\$\{numericAssumptionSuffix\}` : ""\],\s*\n\s*\["Success Metric", metric \? `\$\{metric\}\$\{numericAssumptionSuffix\}` : ""\],/
+  );
   assert.match(pdfButtonSource, /localizePdfPresentationLabel\("DECISION GATE", pdfLocale\)/);
 
   const fn = await compileFunction(reportPresentationSource, "extractRecommendationSignals");

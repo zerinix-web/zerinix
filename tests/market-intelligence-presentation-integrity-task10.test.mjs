@@ -203,7 +203,12 @@ test("REC-T10-2: both PDF exports' Strategic Recommendations pagination/drawing 
 test("REC-T10-3 (no regression): a card's height is never less than the original 36mm minimum, and Decision Gate presence still reserves real space at the bottom of the card rather than being silently dropped", () => {
   for (const source of [pdfSource, plannerSource]) {
     assert.match(source, /const recommendationCardMinHeight = 36;/);
-    assert.match(source, /const gateReservedHeight = gate \? 9 : 0;/);
+    // TASK #31 -- gateReservedHeight now keys off the effective gate (the
+    // model's own gate text, or the conservative downgrade reason a
+    // conservatively-reclassified action gets when the model wrote none)
+    // rather than the raw extracted `gate` alone -- Decision Gate space is
+    // still reserved and drawn identically either way.
+    assert.match(source, /const gateReservedHeight = effectiveGate \? 9 : 0;/);
   }
 });
 

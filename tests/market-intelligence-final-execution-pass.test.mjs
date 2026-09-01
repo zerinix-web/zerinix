@@ -128,7 +128,10 @@ test("Planner.tsx's downloadPdf: Strategic Recommendations now has real Action/O
   );
   // TASK #29H -- extractRecommendationSignals gained 2 more destructured
   // fields (activity, evidenceTie); the pre-existing 5 are unchanged.
-  assert.match(plannerSource, /const \{ timeframe, metric, budget, owner, gate, activity, evidenceTie \} = extractRecommendationSignals\(item\);/);
+  // TASK #31 -- the extraction result is now held as `signals` first (so
+  // it can also be passed whole into classifyStrategicRecommendationAction)
+  // before being destructured, rather than destructured inline.
+  assert.match(plannerSource, /const signals = extractRecommendationSignals\(item\);\s*\n\s*const \{ timeframe, metric, budget, owner, gate, activity, evidenceTie \} = signals;/);
   assert.match(plannerSource, /localizePdfPresentationLabel\("DECISION GATE", pdfLocale\)/);
 });
 

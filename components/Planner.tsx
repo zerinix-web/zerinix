@@ -161,6 +161,7 @@ import {
   resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
   resolveMarketIntelligenceConfidenceFactors,
   constrainMarketSizingResolutionToCanonicalState,
+  classifyStrategicRecommendationAction,
   type MarketIntelligenceCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
@@ -5394,15 +5395,35 @@ if (field === "swotAnalysis") {
         {items.length > 0 ? (
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {items.map((item, index) => {
-              const { timeframe, metric, budget, owner, gate, activity, evidenceTie } = extractRecommendationSignals(item);
+              const signals = extractRecommendationSignals(item);
+              const { timeframe, metric, budget, owner, gate, activity, evidenceTie } = signals;
+              // TASK #31 -- see app/dashboard/[id]/page.tsx's identical
+              // strategic-recommendation branch for the full comment;
+              // both files must classify and gate cards identically so
+              // web and PDF never disagree.
+              const classification = isMarketIntelligence
+                ? classifyStrategicRecommendationAction({
+                    item,
+                    signals,
+                    canonicalState: marketIntelligenceCanonicalState,
+                    language: strategicRecommendationDecision?.language || "English",
+                  })
+                : null;
+              const numericAssumptionSuffix =
+                classification?.numericBasis === "planning_assumption"
+                  ? strategicRecommendationDecision?.language === "Turkish"
+                    ? " (Planlama Varsayımı)"
+                    : " (Planning Assumption)"
+                  : "";
               const fields = [
                 { label: "Owner", value: owner },
-                { label: "Timeline", value: timeframe },
-                { label: "Budget", value: budget },
-                { label: "Success Metric", value: metric },
+                { label: "Timeline", value: timeframe ? `${timeframe}${numericAssumptionSuffix}` : "" },
+                { label: "Budget", value: budget ? `${budget}${numericAssumptionSuffix}` : "" },
+                { label: "Success Metric", value: metric ? `${metric}${numericAssumptionSuffix}` : "" },
                 { label: "Activity", value: activity },
                 { label: "Evidence Tie", value: evidenceTie },
               ].filter((field) => field.value);
+              const effectiveGate = gate || classification?.downgradeReason || "";
 
               return (
                 <div key={index} className="rounded-2xl border border-white/10 bg-black/25 p-4">
@@ -5411,7 +5432,14 @@ if (field === "swotAnalysis") {
                       {index + 1}
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Action</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Action</p>
+                        {classification ? (
+                          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-zinc-400">
+                            {classification.actionTypeLabel}
+                          </span>
+                        ) : null}
+                      </div>
                       <p className="mt-1 text-sm leading-6 text-zinc-300">{item}</p>
                     </div>
                   </div>
@@ -5427,12 +5455,12 @@ if (field === "swotAnalysis") {
                       ))}
                     </div>
                   ) : null}
-                  {gate ? (
+                  {effectiveGate ? (
                     <div className={fields.length > 0 ? "mt-3" : "mt-3 border-t border-white/10 pt-3"}>
                       <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
                         Decision Gate
                       </p>
-                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-amber-200">{gate}</p>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-amber-200">{effectiveGate}</p>
                     </div>
                   ) : null}
                 </div>
@@ -8368,7 +8396,25 @@ const ReportPanel = memo(function ReportPanel({
       // (drawing) can never disagree about how much space it needs.
       const strategicRecommendationDecisionBadgeHeight = 7;
       const computeRecommendationCardLayout = (item: string, cardWidth: number) => {
-        const { timeframe, metric, budget, owner, gate, activity, evidenceTie } = extractRecommendationSignals(item);
+        const signals = extractRecommendationSignals(item);
+        const { timeframe, metric, budget, owner, gate, activity, evidenceTie } = signals;
+        // TASK #31 -- see app/dashboard/[id]/ReportPdfButton.tsx's
+        // identical strategic-recommendation layout function for the full
+        // comment. Computed HERE (not just at draw time) since the
+        // effective gate directly affects gateReservedHeight below.
+        const classification = classifyStrategicRecommendationAction({
+          item,
+          signals,
+          canonicalState: marketIntelligenceCanonicalState,
+          language: pdfLocale === "tr" ? "Turkish" : "English",
+        });
+        const numericAssumptionSuffix =
+          classification.numericBasis === "planning_assumption"
+            ? pdfLocale === "tr"
+              ? " (Planlama Varsayımı)"
+              : " (Planning Assumption)"
+            : "";
+        const effectiveGate = gate || classification.downgradeReason || "";
         pdf.setFontSize(6);
         // TASK #25C -- confirmed live (real persisted report): capping
         // this at 2 lines silently ellipsized real action text whenever
@@ -8388,9 +8434,9 @@ const ReportPanel = memo(function ReportPanel({
         const fields = (
           [
             ["Owner", owner],
-            ["Timeline", timeframe],
-            ["Budget", budget],
-            ["Success Metric", metric],
+            ["Timeline", timeframe ? `${timeframe}${numericAssumptionSuffix}` : ""],
+            ["Budget", budget ? `${budget}${numericAssumptionSuffix}` : ""],
+            ["Success Metric", metric ? `${metric}${numericAssumptionSuffix}` : ""],
             ["Activity", activity],
             ["Evidence Tie", evidenceTie],
           ] as const
@@ -8401,10 +8447,23 @@ const ReportPanel = memo(function ReportPanel({
         const fieldsRows = fields.length > 0 ? Math.ceil(Math.min(fields.length, 6) / 2) : 0;
         const contentBottom =
           fieldsRows > 0 ? fieldsTopY + (fieldsRows - 1) * 5.6 + 5.5 : fieldsTopY + 3;
-        const gateReservedHeight = gate ? 9 : 0;
+        const gateReservedHeight = effectiveGate ? 9 : 0;
         const height = Math.max(recommendationCardMinHeight, contentBottom + gateReservedHeight);
 
-        return { timeframe, metric, budget, owner, gate, activity, evidenceTie, actionLines, fields, fieldsTopY, height };
+        return {
+          timeframe,
+          metric,
+          budget,
+          owner,
+          gate: effectiveGate,
+          activity,
+          evidenceTie,
+          actionLines,
+          fields,
+          fieldsTopY,
+          height,
+          classification,
+        };
       };
       const computeRecommendationRowHeights = (items: string[], cardWidth: number) => {
         const cards = items.map((item) => computeRecommendationCardLayout(item, cardWidth));
@@ -9931,7 +9990,7 @@ const ReportPanel = memo(function ReportPanel({
 	                    .slice(rowCursor, rowCursor + rowInChunk)
 	                    .reduce((sum, height) => sum + height + cardGap, 0);
 	                const cardHeight = rowHeights[rowCursor + rowInChunk];
-	                const { gate, actionLines, fields } = card;
+	                const { gate, actionLines, fields, classification } = card;
 
 	                pdf.setFillColor("#18181b");
 	                pdf.setDrawColor("#27272a");
@@ -9946,7 +10005,16 @@ const ReportPanel = memo(function ReportPanel({
 
 	                pdf.setFontSize(5.2);
 	                pdf.setTextColor("#71717a");
-	                pdf.text(localizePdfPresentationLabel("ACTION", pdfLocale), x + 11, cardY + 4);
+	                // TASK #31 -- see ReportPdfButton.tsx's identical draw
+	                // branch for the full comment.
+	                drawRecommendationFieldValue(
+	                  `${localizePdfPresentationLabel("ACTION", pdfLocale)} · ${classification.actionTypeLabel.toUpperCase()}`,
+	                  x + 11,
+	                  cardY + 4,
+	                  cardWidth - 13,
+	                  5.2,
+	                  4
+	                );
 	                pdf.setFontSize(6);
 	                pdf.setTextColor("#e4e4e7");
 	                pdf.text(actionLines, x + 11, cardY + 7.8, {

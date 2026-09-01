@@ -378,8 +378,14 @@ test("E4. Strategic Recommendations' row-chunking algorithm, run against REAL js
     "import { jsPDF } from \"jspdf\";",
     "import { localizePdfPresentationText, normalizePdfText } from \"/Users/iyslv/Desktop/zerinix/app/lib/pdf-normalization.mjs\";",
     "import { wrapPdfText as wrapPdfTextWithEngine } from \"/Users/iyslv/Desktop/zerinix/app/lib/pdf-engine/utils.ts\";",
+    // TASK #31 -- computeRecommendationCardLayout now calls this real,
+    // imported function (and closes over recommendationCanonicalState,
+    // provided below) to classify each action and compute its effective
+    // gate -- both provided here exactly as the real module scope does.
+    "import { classifyStrategicRecommendationAction } from \"/Users/iyslv/Desktop/zerinix/app/lib/report-engine/market-intelligence-canonical-state.ts\";",
     "const pdf = new jsPDF();",
     "const pdfLocale = \"en\";",
+    "const recommendationCanonicalState = null;",
     "const wrapPdfText = (text: string, width: number) => wrapPdfTextWithEngine({ pdf, text, width, normalizeText: normalizePdfText });",
     // TASK #29J -- recommendationOwnerRolePattern/extractRecommendationSignals
     // now live solely in report-presentation.ts.

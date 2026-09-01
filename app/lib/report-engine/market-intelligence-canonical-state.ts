@@ -399,6 +399,247 @@ export function getMarketIntelligenceCanonicalStateAvailability(
 // current behavior exactly. Applied at every TAM/SAM/SOM resolution call
 // site across page.tsx, Planner.tsx (web + PDF), and ReportPdfButton.tsx
 // so a single, shared rule replaces four independent copy-pasted checks.
+// TASK #31 -- Strategic Recommendation evidence discipline.
+//
+// PROBLEM (confirmed via full audit of generation, extraction, and all 4
+// render sites -- page.tsx web, Planner.tsx web + PDF, ReportPdfButton.tsx
+// PDF): Strategic Recommendations' own action cards are built purely from
+// AI-generated prose (extractRecommendationItems/extractRecommendationSignals
+// in report-presentation.ts), with zero connection to the canonical
+// decision or its underlying evidence pillars. The only decision-aware
+// element on the whole section is the "Current Decision: X" badge drawn
+// once above the card grid -- individual cards' own action text, budget,
+// KPI, and timeline are never checked against the decision or against
+// decisionCriticalEvidence, so a MONITOR (or even AVOID) report's own
+// recommendation cards can read exactly like an unconditional ENTER
+// scale-up plan. Confirmed against the real MONITOR/50%-confidence,
+// SOM-unresolved CLM report used throughout Tasks #29-#30: its own First
+// 90 Days actions name five-figure budgets and hard day-count KPIs with
+// no evidence tie at all -- exactly the fake-precision, decision-
+// inconsistent pattern this task closes.
+//
+// FIX: a pure, deterministic classification layer applied AFTER
+// extraction (report-presentation.ts's extraction itself is untouched --
+// this never re-parses prose that function didn't already parse). Given
+// one action's raw text and its already-extracted signals, this assigns
+// an actionType (validation/research/pilot/conditional_execution/scale)
+// from the action's own language, then conservatively DOWNGRADES that
+// classification -- never upgrades it -- using the SAME canonical state
+// and decision-critical-evidence pillars every other MI surface already
+// reads: AVOID (NO_GO) never keeps a pilot/conditional_execution/scale
+// classification; MONITOR (CONDITIONAL_GO) never keeps an unconditional
+// scale classification; and a scale classification survives under ANY
+// decision (including ENTER, or an unavailable/legacy canonical state)
+// only when every decision-critical evidence pillar is genuinely resolved
+// and confidence clears the same "strong" threshold
+// (STRONG_CONFIDENCE_THRESHOLD, market-intelligence-presentation.ts) the
+// decision engine itself already uses for its own ENTER/MONITOR/AVOID
+// split. Separately, every numeric budget/KPI/timeline figure is
+// classified by its own evidence basis: tied to a stated Evidence Tie,
+// already explicitly labeled a planning assumption by the model, or --
+// the conservative default -- surfaced AS a planning assumption rather
+// than presented as an unqualified fact. Applied identically at all 4
+// render sites via this one shared function, so none of them can
+// classify or gate a card differently from the others.
+export type StrategicRecommendationActionType =
+  | "validation"
+  | "research"
+  | "pilot"
+  | "conditional_execution"
+  | "scale";
+
+export type StrategicRecommendationNumericBasis = "evidence" | "planning_assumption" | "none";
+
+export type StrategicRecommendationClassification = {
+  actionType: StrategicRecommendationActionType;
+  actionTypeLabel: string;
+  wasDowngraded: boolean;
+  downgradeReason: string;
+  numericBasis: StrategicRecommendationNumericBasis;
+  // Whether the classification/downgrade decision above was informed by
+  // real persisted canonical state, or applied as the conservative
+  // default for a report with none -- mirrors
+  // MarketIntelligenceExecutiveDecision's own decisionSource distinction,
+  // exposed here so a caller can (optionally, without cluttering the UI)
+  // surface why a scale action reads as conditional execution instead.
+  evidenceBasis: "canonical-state" | "unavailable";
+};
+
+const STRATEGIC_RECOMMENDATION_ACTION_TYPE_LABELS: Record<
+  StrategicRecommendationActionType,
+  Record<ResponseLanguage, string>
+> = {
+  validation: {
+    English: "Validation Action",
+    Turkish: "Doğrulama Eylemi",
+    German: "Validierungsmaßnahme",
+    French: "Action de validation",
+    Spanish: "Acción de validación",
+  },
+  research: {
+    English: "Research Action",
+    Turkish: "Araştırma Eylemi",
+    German: "Recherchemaßnahme",
+    French: "Action de recherche",
+    Spanish: "Acción de investigación",
+  },
+  pilot: {
+    English: "Pilot Action",
+    Turkish: "Pilot Eylem",
+    German: "Pilotmaßnahme",
+    French: "Action pilote",
+    Spanish: "Acción piloto",
+  },
+  conditional_execution: {
+    English: "Conditional Execution",
+    Turkish: "Koşullu Uygulama",
+    German: "Bedingte Umsetzung",
+    French: "Exécution conditionnelle",
+    Spanish: "Ejecución condicional",
+  },
+  scale: {
+    English: "Scale Action",
+    Turkish: "Ölçeklendirme Eylemi",
+    German: "Skalierungsmaßnahme",
+    French: "Action de mise à l'échelle",
+    Spanish: "Acción de escalado",
+  },
+};
+
+const STRATEGIC_RECOMMENDATION_DOWNGRADE_REASONS: Record<"avoid" | "monitor" | "evidence", Record<ResponseLanguage, string>> = {
+  avoid: {
+    English: "AVOID decision: execution-framed actions are downgraded to research until this market-entry call changes.",
+    Turkish: "AVOID kararı: uygulamaya yönelik eylemler, bu pazara giriş kararı değişene kadar araştırmaya indirgendi.",
+    German: "AVOID-Entscheidung: umsetzungsorientierte Maßnahmen werden auf Recherche zurückgestuft, bis sich diese Markteintrittsentscheidung ändert.",
+    French: "Décision AVOID : les actions orientées exécution sont ramenées à la recherche tant que cette décision d'entrée sur le marché ne change pas.",
+    Spanish: "Decisión AVOID: las acciones orientadas a la ejecución se degradan a investigación hasta que cambie esta decisión de entrada al mercado.",
+  },
+  monitor: {
+    English: "MONITOR decision: unconditional scale is downgraded to conditional execution until the stated evidence gate is met.",
+    Turkish: "MONITOR kararı: koşulsuz ölçeklendirme, belirtilen kanıt eşiği sağlanana kadar koşullu uygulamaya indirgendi.",
+    German: "MONITOR-Entscheidung: bedingungslose Skalierung wird auf bedingte Umsetzung zurückgestuft, bis die genannte Nachweisschwelle erreicht ist.",
+    French: "Décision MONITOR : la mise à l'échelle inconditionnelle est ramenée à une exécution conditionnelle jusqu'à ce que le seuil de preuve indiqué soit atteint.",
+    Spanish: "Decisión MONITOR: el escalado incondicional se degrada a ejecución condicional hasta que se cumpla el umbral de evidencia indicado.",
+  },
+  evidence: {
+    English: "Scale is downgraded to conditional execution until every decision-critical evidence pillar is confirmed at strong confidence.",
+    Turkish: "Ölçeklendirme, karar açısından kritik tüm kanıt unsurları güçlü güven düzeyinde doğrulanana kadar koşullu uygulamaya indirgendi.",
+    German: "Die Skalierung wird auf bedingte Umsetzung zurückgestuft, bis jede entscheidungskritische Nachweissäule mit hoher Zuversicht bestätigt ist.",
+    French: "La mise à l'échelle est ramenée à une exécution conditionnelle tant que chaque pilier de preuve déterminant pour la décision n'est pas confirmé avec une forte confiance.",
+    Spanish: "El escalado se degrada a ejecución condicional hasta que se confirme con alta confianza cada pilar de evidencia crítico para la decisión.",
+  },
+};
+
+const STRATEGIC_RECOMMENDATION_VALIDATION_PATTERN =
+  /\b(validate|validating|validation|confirm|confirming|verify|verifying|customer discovery|discovery interviews?|interview \d+|survey(?:ing)?|test(?:ing)? the (?:hypothesis|assumption))\b/i;
+const STRATEGIC_RECOMMENDATION_RESEARCH_PATTERN =
+  /\b(research(?:ing)?|investigat(?:e|ing)|analy[sz]e|analy[sz]ing|benchmark(?:ing)?|commission(?:ing)? (?:a |an )?(?:study|report|audit)|gather(?:ing)? (?:data|evidence)|desk research)\b/i;
+const STRATEGIC_RECOMMENDATION_PILOT_PATTERN =
+  /\b(pilot(?:ing)?|trial(?:s|ing)?|proof[- ]of[- ]concept|\bpoc\b|beta(?:\s+program)?|limited rollout|controlled test)\b/i;
+const STRATEGIC_RECOMMENDATION_SCALE_PATTERN =
+  /\b(scale(?:s|d|ing)?(?:\s+up)?|national(?:ly)? launch|full[- ]scale|full market entry|hire (?:a |an )?(?:team|dozens|\d+)|expand(?:ing)? the team|mass hiring|nationwide rollout|open(?:ing)? (?:\d+|multiple) (?:new )?(?:offices|locations)|series [ab] raise|go[- ]to[- ]market (?:broadly|nationally|at scale))\b/i;
+
+// Mirrors extractRecommendationSignals' own numeric-figure vocabulary
+// (report-presentation.ts) -- any dollar amount, percentage, day/week/
+// month count, or named-unit count (customers, SOWs, LOIs, ...) inside a
+// card's own budget/success-metric/timeline fields.
+const STRATEGIC_RECOMMENDATION_NUMERIC_PRECISION_PATTERN =
+  /[$€₺]\s?\d[\d,.]*\s?[kKmMbB]?\b|\b\d+(?:\.\d+)?\s?%|\b\d+\+?\s?(?:days?|weeks?|months?|hours?|gün|hafta|ay)\b|\b\d+\+?\s?(?:customers?|accounts?|leads?|users?|trials?|pilots?|sign-?ups?|SOWs?|LOIs?|meetings?|calls?|responses?|interviews?|deals?|conversions?)\b/i;
+const STRATEGIC_RECOMMENDATION_PLANNING_ASSUMPTION_MARKER_PATTERN =
+  /\(?\s*planning assumption\s*\)?|\[\s*assumption\s*\]|\bassumed\b|\bestimated\b|\bplanning estimate\b|\bplanlama varsayımı\b|\bvarsayım\b/i;
+
+function classifyRawStrategicRecommendationActionType(
+  item: string,
+  activity: string
+): StrategicRecommendationActionType {
+  const text = activity ? `${activity} ${item}` : item;
+  if (STRATEGIC_RECOMMENDATION_VALIDATION_PATTERN.test(text)) return "validation";
+  if (STRATEGIC_RECOMMENDATION_RESEARCH_PATTERN.test(text)) return "research";
+  if (STRATEGIC_RECOMMENDATION_PILOT_PATTERN.test(text)) return "pilot";
+  if (STRATEGIC_RECOMMENDATION_SCALE_PATTERN.test(text)) return "scale";
+  return "conditional_execution";
+}
+
+// Conservative-default numeric-precision basis: a budget/KPI/timeline
+// figure is only ever treated as evidence-linked when the card names a
+// real Evidence Tie or the model already labeled it a planning
+// assumption itself -- an unlabeled, untied number defaults to
+// "planning_assumption" rather than being presented as an unqualified
+// fact. Mirrors this codebase's existing TAM/SAM/SOM "Planning Estimate"
+// convention (report-evidence-confidence.ts) rather than inventing a new
+// one.
+function deriveStrategicRecommendationNumericBasis(
+  item: string,
+  signals: { budget: string; metric: string; timeframe: string; evidenceTie: string }
+): StrategicRecommendationNumericBasis {
+  const numericFields = [signals.budget, signals.metric, signals.timeframe].filter(Boolean).join(" | ");
+  if (!numericFields || !STRATEGIC_RECOMMENDATION_NUMERIC_PRECISION_PATTERN.test(numericFields)) {
+    return "none";
+  }
+  if (
+    STRATEGIC_RECOMMENDATION_PLANNING_ASSUMPTION_MARKER_PATTERN.test(numericFields) ||
+    STRATEGIC_RECOMMENDATION_PLANNING_ASSUMPTION_MARKER_PATTERN.test(item)
+  ) {
+    return "planning_assumption";
+  }
+  return signals.evidenceTie.trim() ? "evidence" : "planning_assumption";
+}
+
+export function classifyStrategicRecommendationAction(input: {
+  item: string;
+  signals: {
+    budget: string;
+    metric: string;
+    timeframe: string;
+    owner: string;
+    gate: string;
+    activity: string;
+    evidenceTie: string;
+  };
+  canonicalState: MarketIntelligenceCanonicalState | null;
+  language?: ResponseLanguage;
+}): StrategicRecommendationClassification {
+  const { item, signals, canonicalState, language = "English" } = input;
+  const rawType = classifyRawStrategicRecommendationActionType(item, signals.activity);
+
+  let actionType = rawType;
+  let wasDowngraded = false;
+  let downgradeReasonKey: "avoid" | "monitor" | "evidence" | null = null;
+
+  const decision = canonicalState?.decision ?? null;
+  const evidence = canonicalState?.decisionCriticalEvidence ?? null;
+  const allEvidenceResolved = Boolean(
+    evidence?.marketSizingResolved && evidence?.competitiveEvidenceResolved && evidence?.obtainableShareResolved
+  );
+  // Mirrors STRONG_CONFIDENCE_THRESHOLD (market-intelligence-presentation.ts)
+  // -- the same "strong" bar the decision engine itself requires before
+  // an ENTER verdict, reused here rather than a new arbitrary number.
+  const hasStrongConfidence = (canonicalState?.confidence ?? 0) >= 65;
+
+  if (decision === "NO_GO" && actionType !== "validation" && actionType !== "research") {
+    actionType = "research";
+    wasDowngraded = true;
+    downgradeReasonKey = "avoid";
+  } else if (decision === "CONDITIONAL_GO" && actionType === "scale") {
+    actionType = "conditional_execution";
+    wasDowngraded = true;
+    downgradeReasonKey = "monitor";
+  } else if (actionType === "scale" && !(allEvidenceResolved && hasStrongConfidence)) {
+    actionType = "conditional_execution";
+    wasDowngraded = true;
+    downgradeReasonKey = "evidence";
+  }
+
+  return {
+    actionType,
+    actionTypeLabel: STRATEGIC_RECOMMENDATION_ACTION_TYPE_LABELS[actionType][language],
+    wasDowngraded,
+    downgradeReason: downgradeReasonKey ? STRATEGIC_RECOMMENDATION_DOWNGRADE_REASONS[downgradeReasonKey][language] : "",
+    numericBasis: deriveStrategicRecommendationNumericBasis(item, signals),
+    evidenceBasis: canonicalState ? "canonical-state" : "unavailable",
+  };
+}
+
 export function constrainMarketSizingResolutionToCanonicalState<
   T extends {
     samResolved: boolean;
