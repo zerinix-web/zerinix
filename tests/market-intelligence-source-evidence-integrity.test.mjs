@@ -177,14 +177,19 @@ test("PARITY: the Market Metrics card (CAGR/Market Size) now scopes evidence cla
   // before reaching the classifier below (no single evidence line
   // supports a two-number range); the single-estimate case this test
   // protects now routes through this exact pinned call in both files.
+  // TASK #33 -- both files now try a canonical-first check
+  // (resolveMarketIntelligenceCagrEvidenceLevel) before that shared
+  // prose-based fallback -- see
+  // tests/task33-source-provenance-authoritative.test.mjs for that fix's
+  // own dedicated coverage.
   const pattern =
-    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, content\);/;
+    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*\(isCagr && resolveMarketIntelligenceCagrEvidenceLevel\(marketIntelligenceCanonicalState, Boolean\(value\)\)\)\s*\|\|\s*\n\s*deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, content\);/;
   assert.match(pageSource, pattern);
 
   const plannerSource = readFileSync(new URL("../components/Planner.tsx", import.meta.url), "utf8");
   assert.match(
     plannerSource,
-    /const evidence = deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, section\.content\);/
+    /const evidence =\s*\n\s*\(isCagr && resolveMarketIntelligenceCagrEvidenceLevel\(marketIntelligenceCanonicalState, Boolean\(value\)\)\)\s*\|\|\s*\n\s*deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, section\.content\);/
   );
 
   // Behavioral proof the shared function itself reproduces root cause #1's

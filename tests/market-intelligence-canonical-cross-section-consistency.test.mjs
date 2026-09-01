@@ -394,8 +394,12 @@ test("DRIFT CHECK: P0 FIX #1 (TAM/SAM/SOM), #2 (CAGR), #3 (Competitive Landscape
   // (report-presentation.ts), reused identically by Planner.tsx -- see
   // tests/market-intelligence-source-evidence-integrity.test.mjs for that
   // fix's own dedicated coverage.
+  // TASK #33 -- a canonical-first check (resolveMarketIntelligenceCagrEvidenceLevel)
+  // now runs before that shared prose-based fallback -- see
+  // tests/task33-source-provenance-authoritative.test.mjs for that fix's
+  // own dedicated coverage.
   assert.match(
     pageSource,
-    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, content\);/
+    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*\(isCagr && resolveMarketIntelligenceCagrEvidenceLevel\(marketIntelligenceCanonicalState, Boolean\(value\)\)\)\s*\|\|\s*\n\s*deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, content\);/
   );
 });

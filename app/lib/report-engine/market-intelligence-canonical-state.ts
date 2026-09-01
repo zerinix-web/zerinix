@@ -74,7 +74,18 @@ import {
 // stop reading -- readMarketIntelligenceCanonicalState's version gate
 // means a hypothetical v1 object would simply be treated as absent
 // (identical to a legacy report), never partially trusted.
-export const MARKET_INTELLIGENCE_CANONICAL_STATE_VERSION = 2;
+// TASK #33 -- bumped from 2 to 3: source-provenance audit found
+// marketSizing silently dropped planningEstimate's own evidenceIds (the
+// TAM/SAM/SOM figure's real upstream source link -- present in the
+// generated graph, discarded on persistence), and there was no canonical
+// representation of CAGR's evidence at all. Both are added below. Safe
+// to bump with zero migration concern, for the same reason Task #24's
+// 1->2 bump was safe: no report persisted before this task carries
+// version 3, so there is no existing v2 data to stop reading --
+// readMarketIntelligenceCanonicalState's version gate means a
+// hypothetical v2 object is simply treated as absent (identical to a
+// legacy report), never partially trusted.
+export const MARKET_INTELLIGENCE_CANONICAL_STATE_VERSION = 3;
 
 // A lean projection of MarketPlanningEstimate -- every field a reader-
 // facing surface actually needs to show TAM/SAM/SOM and their evidence
@@ -104,12 +115,36 @@ export type MarketIntelligenceCanonicalMarketSizing = Pick<
   | "conflictNote"
   | "confidence"
   | "confidenceLevel"
+  // TASK #33 -- the real upstream evidence-id link backing this TAM/SAM/
+  // SOM figure (shared across all 3 layers -- see MarketPlanningEstimate's
+  // own comment; there is no per-layer split in the generated graph
+  // either). Previously generated but silently dropped on persistence --
+  // a derived value with no way to trace its own derivation once
+  // reloaded. Never widens what's already resolved: an empty array here
+  // means exactly what it always meant (no qualifying evidence backs
+  // this estimate), same as before this field existed.
+  | "evidenceIds"
 >;
 
 export type MarketIntelligenceCanonicalCitationSource = Pick<
   MarketIntelligenceSource,
   "evidenceId" | "title" | "publisher" | "url" | "sourceType" | "confidenceLevel"
 >;
+
+// TASK #33 -- CAGR had no canonical representation at all: a growth-rate
+// figure could be extracted from the cagr field's own prose (a bare
+// percentage regex, report-presentation.ts) with zero way to confirm
+// whether generation ever actually found a qualifying CAGR evidence item
+// for it. Mirrors graph.cagr's own real shape (market-intelligence-
+// graph.ts) reduced to what a reader-facing surface needs: the
+// description text, its evidence-id link, and whether it was Verified or
+// Estimated -- never a new classification, the SAME one generation
+// already computed.
+export type MarketIntelligenceCanonicalCagrEstimate = {
+  description: string;
+  evidenceIds: string[];
+  confidenceClassification: "Verified" | "Estimated";
+};
 
 export type MarketIntelligenceCanonicalState = {
   version: typeof MARKET_INTELLIGENCE_CANONICAL_STATE_VERSION;
@@ -148,6 +183,13 @@ export type MarketIntelligenceCanonicalState = {
   // prose happens to say today.
   decisionCriticalEvidence: DecisionCriticalEvidenceState;
   marketSizing: MarketIntelligenceCanonicalMarketSizing | null;
+  // TASK #33 -- every qualifying CAGR evidence item generation found for
+  // this market (graph.cagr, verbatim) -- an empty array is itself
+  // meaningful: it means no CAGR evidence qualified at all, which lets a
+  // render-time consumer distinguish "no real CAGR evidence exists" from
+  // "a number happens to appear somewhere in this section's prose" (a
+  // bare percentage regex cannot tell the two apart on its own).
+  cagr: MarketIntelligenceCanonicalCagrEstimate[];
   coverage: {
     overallConfidence: number;
     dimensions: MarketIntelligenceGraph["coverage"]["dimensions"];
@@ -207,8 +249,14 @@ export function buildMarketIntelligenceCanonicalState(input: {
           conflictNote: planningEstimate.conflictNote,
           confidence: planningEstimate.confidence,
           confidenceLevel: planningEstimate.confidenceLevel,
+          evidenceIds: [...planningEstimate.evidenceIds],
         }
       : null,
+    cagr: graph.cagr.map((item) => ({
+      description: item.description,
+      evidenceIds: [...item.evidenceIds],
+      confidenceClassification: item.confidenceClassification,
+    })),
     coverage: {
       overallConfidence: graph.coverage.overallConfidence,
       dimensions: { ...graph.coverage.dimensions },
@@ -357,6 +405,36 @@ export function resolveMarketIntelligenceDecisionEvidenceLevel(
   if (resolvedCount === 2) return "benchmarkDerived";
   if (resolvedCount === 1) return "planningAssumption";
   return "validationRequired";
+}
+
+// TASK #33 -- canonical-first CAGR evidence classification. A displayed
+// CAGR figure's own evidence badge (deriveMarketSizeMetricEvidenceLevel,
+// report-presentation.ts) is a prose-only heuristic: it can only tell
+// whether the SPECIFIC line containing the extracted number mentions
+// evidence-sounding language, never whether generation actually found a
+// qualifying CAGR evidence item at all. canonicalState.cagr is ground
+// truth for that: an EMPTY array means no CAGR evidence qualified,
+// regardless of what a bare percentage regex happens to match elsewhere
+// in the same field's prose (a real risk -- e.g. an unrelated SAM/SOM
+// percentage aside, or a KPI target percentage). The zero-item case is
+// this function's own whole point (handled explicitly below); when
+// MULTIPLE items exist, the caller's own existing multi-estimate
+// handling (forcing "benchmarkDerived" when the prose-level scan detects
+// genuinely disagreeing figures) already handles it correctly and is
+// left untouched -- this function returns null in that case so the
+// caller's existing logic runs unmodified.
+export function resolveMarketIntelligenceCagrEvidenceLevel(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  hasDisplayValue: boolean
+): EvidenceLevel | null {
+  if (!canonicalState || !hasDisplayValue) return null;
+  if (canonicalState.cagr.length === 0) {
+    return "planningAssumption";
+  }
+  if (canonicalState.cagr.length === 1) {
+    return canonicalState.cagr[0].confidenceClassification === "Verified" ? "verified" : "benchmarkDerived";
+  }
+  return null;
 }
 
 // TASK #23 (follow-up) -- the degraded/graph-less persistence gap.
@@ -620,17 +698,53 @@ function classifyRawStrategicRecommendationActionType(
   return "conditional_execution";
 }
 
+// TASK #33 -- confirmed live (source-provenance audit): extractRecommendationSignals'
+// own `evidenceTie` field is deliberately explicit-label-only free text
+// (report-presentation.ts's own comment: "no guess fallback") -- it
+// captures whatever follows an "Evidence tie/to collect/link/basis:"
+// label VERBATIM, with no requirement that it name a real citation.
+// The real 171cf10d... fixture's own evidenceTie is literally "signed
+// SOWs and pilot KPIs" -- FUTURE evidence to be collected, not a
+// citation to anything that exists yet. Treating any non-empty
+// evidenceTie as sufficient to call a number "evidence"-based (the prior
+// behavior) let a recommendation's budget/timeline look externally
+// sourced merely because the action NAMED what evidence it intends to
+// gather -- exactly the fake-precision pattern this task closes. A
+// citation marker embedded in evidenceTie (e.g. "supported by [R4]") is
+// only trusted when it resolves against the SAME citationSources
+// registry every other MI surface already reads -- never a bare
+// non-empty-string check.
+const STRATEGIC_RECOMMENDATION_CITATION_MARKER_PATTERN = /\[R(\d+)\]/g;
+
+export function isKnownCitationId(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  evidenceId: string
+): boolean {
+  if (!canonicalState || !evidenceId) return false;
+  return canonicalState.citationSources.some((source) => source.evidenceId === evidenceId);
+}
+
+function evidenceTieReferencesKnownCitation(
+  evidenceTie: string,
+  canonicalState: MarketIntelligenceCanonicalState | null
+): boolean {
+  if (!evidenceTie || !canonicalState) return false;
+  const matches = [...evidenceTie.matchAll(STRATEGIC_RECOMMENDATION_CITATION_MARKER_PATTERN)];
+  return matches.some((match) => isKnownCitationId(canonicalState, `R${match[1]}`));
+}
+
 // Conservative-default numeric-precision basis: a budget/KPI/timeline
-// figure is only ever treated as evidence-linked when the card names a
-// real Evidence Tie or the model already labeled it a planning
-// assumption itself -- an unlabeled, untied number defaults to
-// "planning_assumption" rather than being presented as an unqualified
-// fact. Mirrors this codebase's existing TAM/SAM/SOM "Planning Estimate"
-// convention (report-evidence-confidence.ts) rather than inventing a new
-// one.
+// figure is only ever treated as evidence-linked when the card's own
+// Evidence Tie names a citation that actually resolves in the canonical
+// source registry, or the model already labeled it a planning assumption
+// itself -- an unlabeled, untied, or unresolvable-citation number
+// defaults to "planning_assumption" rather than being presented as an
+// unqualified fact. Mirrors this codebase's existing TAM/SAM/SOM
+// "Planning Estimate" convention rather than inventing a new one.
 function deriveStrategicRecommendationNumericBasis(
   item: string,
-  signals: { budget: string; metric: string; timeframe: string; evidenceTie: string }
+  signals: { budget: string; metric: string; timeframe: string; evidenceTie: string },
+  canonicalState: MarketIntelligenceCanonicalState | null
 ): StrategicRecommendationNumericBasis {
   const numericFields = [signals.budget, signals.metric, signals.timeframe].filter(Boolean).join(" | ");
   if (!numericFields || !STRATEGIC_RECOMMENDATION_NUMERIC_PRECISION_PATTERN.test(numericFields)) {
@@ -642,7 +756,7 @@ function deriveStrategicRecommendationNumericBasis(
   ) {
     return "planning_assumption";
   }
-  return signals.evidenceTie.trim() ? "evidence" : "planning_assumption";
+  return evidenceTieReferencesKnownCitation(signals.evidenceTie, canonicalState) ? "evidence" : "planning_assumption";
 }
 
 export function classifyStrategicRecommendationAction(input: {
@@ -695,7 +809,7 @@ export function classifyStrategicRecommendationAction(input: {
     actionTypeLabel: STRATEGIC_RECOMMENDATION_ACTION_TYPE_LABELS[actionType][language],
     wasDowngraded,
     downgradeReason: downgradeReasonKey ? STRATEGIC_RECOMMENDATION_DOWNGRADE_REASONS[downgradeReasonKey][language] : "",
-    numericBasis: deriveStrategicRecommendationNumericBasis(item, signals),
+    numericBasis: deriveStrategicRecommendationNumericBasis(item, signals, canonicalState),
     evidenceBasis: canonicalState ? "canonical-state" : "unavailable",
   };
 }

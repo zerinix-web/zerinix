@@ -164,6 +164,7 @@ import {
   constrainMarketSizingResolutionToCanonicalState,
   classifyStrategicRecommendationAction,
   resolveMarketIntelligenceDecisionEvidenceLevel,
+  resolveMarketIntelligenceCagrEvidenceLevel,
   type MarketIntelligenceCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
@@ -5009,7 +5010,13 @@ function PremiumSectionVisual({
     // own comment (report-presentation.ts) for the full fix: a figure
     // with no isolated evidence line of its own is classified
     // "planningAssumption" directly, never a whole-content re-scan.
-    const evidence = deriveMarketSizeMetricEvidenceLevel(isCagr ? "CAGR" : "Market Size", value, section.content);
+    // TASK #33 -- see the identical fix in app/dashboard/[id]/page.tsx
+    // for the full comment: canonicalState.cagr is ground truth for
+    // whether generation found ANY qualifying CAGR evidence at all,
+    // preferred over the prose-only heuristic when available.
+    const evidence =
+      (isCagr && resolveMarketIntelligenceCagrEvidenceLevel(marketIntelligenceCanonicalState, Boolean(value))) ||
+      deriveMarketSizeMetricEvidenceLevel(isCagr ? "CAGR" : "Market Size", value, section.content);
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.1),transparent_30%),rgba(255,255,255,0.025)] p-5">

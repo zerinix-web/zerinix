@@ -110,6 +110,21 @@ export type VendorIntelligence = {
   pricingEvidence: string;
   strength: string;
   weakness: string;
+  // TASK #33 -- confirmed live (source-provenance audit): strength/
+  // weakness/pricingEvidence above are each already selected from ONE
+  // specific evidence item (strengthItem/weaknessItem/pricingItem) at
+  // build time -- but only their .claim/.value TEXT was ever copied
+  // forward, discarding which evidence item actually produced each
+  // claim. That meant a vendor's overall existence corroboration
+  // (evidenceSources/evidenceCount) was the only per-competitor
+  // provenance that survived to the report, silently standing in for
+  // attribute-level provenance it was never computed from. Persisting
+  // the specific id per attribute (null when no qualifying item existed
+  // for that attribute) closes that gap with data already computed here,
+  // not a new inference.
+  strengthEvidenceId: string | null;
+  weaknessEvidenceId: string | null;
+  pricingEvidenceId: string | null;
   featureEvidenceCount: number;
   productEvidenceCount: number;
   customerEvidenceCount: number;
@@ -773,6 +788,9 @@ export function buildVendorIntelligenceGraph(
           weakness: weaknessItem?.claim
             ? concise(weaknessItem.claim)
             : "No validated weakness evidence",
+          strengthEvidenceId: strengthItem?.id ?? null,
+          weaknessEvidenceId: weaknessItem?.id ?? null,
+          pricingEvidenceId: pricingItem?.id ?? null,
           featureEvidenceCount: featureItems.length,
           productEvidenceCount: featureItems.length,
           customerEvidenceCount: customerItems.length,

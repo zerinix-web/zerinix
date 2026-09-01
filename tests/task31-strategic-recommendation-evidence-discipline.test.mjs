@@ -295,7 +295,18 @@ test("REGRESSION: a numeric figure already explicitly labeled a planning assumpt
   assert.equal(result.numericBasis, "planning_assumption");
 });
 
-test("REGRESSION: supported numeric values (a real Evidence Tie present) remain usable, never flagged as an assumption", () => {
+// TASK #33 -- confirmed live (source-provenance audit): a non-empty
+// Evidence Tie previously upgraded any number to "evidence" basis with
+// zero check that it names a real, resolvable citation. The real
+// 171cf10d... report's own evidenceTie ("signed SOWs and pilot KPIs") is
+// FUTURE evidence to be collected, not a citation to anything that
+// exists yet -- treating it as sufficient let a recommendation's budget
+// look externally sourced merely because the action named what evidence
+// it intends to gather. Corrected: descriptive evidenceTie text with no
+// resolvable citation marker now stays "planning_assumption"; see the
+// next test for the genuine positive case (a citation that actually
+// resolves in the canonical source registry).
+test("REGRESSION: an Evidence Tie that is descriptive future-validation text (no resolvable citation) does NOT upgrade a number to 'evidence' -- it remains a planning assumption", () => {
   const canonicalState = canonicalStateFor("CONDITIONAL_GO");
   const item = "Account Validation Sprint -- Owner: Head of Sales; Budget ceiling: $75,000.";
   const signals = baseSignals({
@@ -305,7 +316,34 @@ test("REGRESSION: supported numeric values (a real Evidence Tie present) remain 
     evidenceTie: "signed SOWs and pilot KPIs",
   });
   const result = classifyStrategicRecommendationAction({ item, signals, canonicalState });
+  assert.equal(result.numericBasis, "planning_assumption");
+  assert.notEqual(result.numericBasis, "evidence");
+});
+
+test("REGRESSION: an Evidence Tie naming a citation that actually resolves in the canonical source registry DOES count as 'evidence'", () => {
+  const canonicalState = canonicalStateFor("CONDITIONAL_GO");
+  assert.ok(canonicalState.citationSources.some((source) => source.evidenceId === "R4"), "sanity check: R4 must be a real known citation in this fixture");
+  const item = "Account Validation Sprint -- Owner: Head of Sales; Budget ceiling: $75,000.";
+  const signals = baseSignals({
+    budget: "$75,000",
+    metric: "≥6 signed paid trials within 90 days",
+    timeframe: "90 days",
+    evidenceTie: "Ironclad pricing page [R4]",
+  });
+  const result = classifyStrategicRecommendationAction({ item, signals, canonicalState });
   assert.equal(result.numericBasis, "evidence");
+});
+
+test("REGRESSION: an Evidence Tie naming a citation id that does NOT exist in the canonical source registry (a dangling reference) does not count as 'evidence'", () => {
+  const canonicalState = canonicalStateFor("CONDITIONAL_GO");
+  assert.ok(!canonicalState.citationSources.some((source) => source.evidenceId === "R999"), "sanity check: R999 must not be a real known citation in this fixture");
+  const item = "Account Validation Sprint -- Owner: Head of Sales; Budget ceiling: $75,000.";
+  const signals = baseSignals({
+    budget: "$75,000",
+    evidenceTie: "supported by [R999]",
+  });
+  const result = classifyStrategicRecommendationAction({ item, signals, canonicalState });
+  assert.equal(result.numericBasis, "planning_assumption");
 });
 
 test("REGRESSION: an action with no numeric budget/KPI/timeline at all is neither evidence-tied nor a planning assumption -- 'none'", () => {
@@ -374,14 +412,20 @@ test("REAL PERSISTED REPORT (171cf10d-538a-4ad3-9ed9-b30e85914e85): none of this
   }
 });
 
-test("REAL PERSISTED REPORT: Action 1's evidence-tied $75,000 budget stays evidence-based; Action 3's untied $150,000 budget and 120-day KPI are marked planning assumptions", () => {
+// TASK #33 -- confirmed live: Action 1's "signed SOWs and pilot KPIs" is
+// FUTURE evidence to be collected, not a citation to anything that
+// exists -- it names no [R#] at all, so it can never resolve against
+// the canonical source registry. Both actions now correctly read as
+// planning assumptions; see tests/task33-source-provenance-authoritative.test.mjs
+// for the corresponding genuine-citation positive case.
+test("REAL PERSISTED REPORT: Action 1's descriptive (non-citation) evidence tie and Action 3's untied $150,000 budget/120-day KPI are BOTH marked planning assumptions -- neither is a real citation", () => {
   const canonicalState = canonicalStateFor("CONDITIONAL_GO", { confidence: 50 });
   const items = extractRecommendationItems(REAL_STRATEGIC_RECOMMENDATIONS_CONTENT);
 
   const action1Signals = extractRecommendationSignals(items[2]);
   assert.equal(action1Signals.evidenceTie, "signed SOWs and pilot KPIs");
   const action1Classification = classifyStrategicRecommendationAction({ item: items[2], signals: action1Signals, canonicalState });
-  assert.equal(action1Classification.numericBasis, "evidence");
+  assert.equal(action1Classification.numericBasis, "planning_assumption");
 
   const action3Signals = extractRecommendationSignals(items[4]);
   assert.equal(action3Signals.evidenceTie, "", "Action 3 names no evidence tie in the real report");

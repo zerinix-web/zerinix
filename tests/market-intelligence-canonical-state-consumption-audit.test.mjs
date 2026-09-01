@@ -437,21 +437,26 @@ test("SCENARIO 5d: page.tsx's Decision Confidence tile reads the SAME canonical-
 
 // --- Canonical state schema: version bump + new decision-brief fields -----
 
-test("SCHEMA: version bumped to 2 for the new why/missingEvidence/whatWouldChangeThisDecision/immediateNextAction fields, with zero real v1 data affected", () => {
-  assert.equal(MARKET_INTELLIGENCE_CANONICAL_STATE_VERSION, 2);
+// TASK #33 -- bumped again, 2 -> 3, for marketSizing.evidenceIds and the
+// new top-level `cagr` array (source-provenance audit) -- see this
+// module's own top-of-file comment for why that bump is zero-migration-
+// risk, for the same reason this test's own original 1 -> 2 bump was.
+test("SCHEMA: version bumped to 3 for the new why/missingEvidence/whatWouldChangeThisDecision/immediateNextAction fields (Task #24) and marketSizing.evidenceIds/cagr (Task #33), with zero real prior-version data affected", () => {
+  assert.equal(MARKET_INTELLIGENCE_CANONICAL_STATE_VERSION, 3);
   const built = buildMarketIntelligenceCanonicalState({
     graph: realGraphFixture(),
     decisionCriticalEvidence: { marketSizingResolved: true, competitiveEvidenceResolved: true, obtainableShareResolved: true },
     decisionBrief: decisionBriefFixture(),
   });
-  assert.equal(built.version, 2);
+  assert.equal(built.version, 3);
   assert.equal(typeof built.why, "string");
   assert.ok(Array.isArray(built.missingEvidence));
   assert.equal(typeof built.whatWouldChangeThisDecision, "string");
   assert.equal(typeof built.immediateNextAction, "string");
+  assert.ok(Array.isArray(built.cagr));
 
-  // A hypothetical v1-shaped object (missing the new fields) must be
-  // rejected by the version gate, not partially trusted.
+  // A hypothetical v1-shaped object (missing fields added by later
+  // bumps) must be rejected by the version gate, not partially trusted.
   const v1Shaped = { ...built, version: 1 };
   delete v1Shaped.immediateNextAction;
   assert.equal(readMarketIntelligenceCanonicalState({ marketIntelligenceCanonicalState: v1Shaped }), null);

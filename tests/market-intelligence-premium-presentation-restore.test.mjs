@@ -309,12 +309,17 @@ test("validation/uncertainty labeling (Estimated tags, evidence badges) is untou
   // reaching the classifier below (no single evidence line supports a
   // two-number range); the single-estimate case this test protects
   // routes through this exact pinned call.
+  // TASK #33 -- both files now try a canonical-first check
+  // (resolveMarketIntelligenceCagrEvidenceLevel) before that shared
+  // prose-based fallback -- see
+  // tests/task33-source-provenance-authoritative.test.mjs for that fix's
+  // own dedicated coverage.
   assert.match(
     pageSource,
-    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, content\);/
+    /const evidence =\s*\n\s*isCagr && cagrPresentation\?\.isMultiEstimate\s*\n\s*\?\s*\("benchmarkDerived" as const\)\s*\n\s*:\s*\(isCagr && resolveMarketIntelligenceCagrEvidenceLevel\(marketIntelligenceCanonicalState, Boolean\(value\)\)\)\s*\|\|\s*\n\s*deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, content\);/
   );
   assert.match(
     plannerSource,
-    /const evidence = deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, section\.content\);/
+    /const evidence =\s*\n\s*\(isCagr && resolveMarketIntelligenceCagrEvidenceLevel\(marketIntelligenceCanonicalState, Boolean\(value\)\)\)\s*\|\|\s*\n\s*deriveMarketSizeMetricEvidenceLevel\(isCagr \? "CAGR" : "Market Size", value, section\.content\);/
   );
 });

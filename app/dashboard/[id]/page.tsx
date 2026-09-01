@@ -68,6 +68,7 @@ import {
   constrainMarketSizingResolutionToCanonicalState,
   classifyStrategicRecommendationAction,
   resolveMarketIntelligenceDecisionEvidenceLevel,
+  resolveMarketIntelligenceCagrEvidenceLevel,
   type MarketIntelligenceCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
@@ -2872,10 +2873,18 @@ function ReportSectionVisual({
     // its own is classified "planningAssumption" directly, never a
     // whole-content re-scan and never a too-confident "benchmarkDerived"
     // default. The multi-estimate range case is unchanged.
+    // TASK #33 -- confirmed live (source-provenance audit): for the
+    // single-CAGR-item case, canonicalState.cagr is ground truth for
+    // whether generation found ANY qualifying CAGR evidence at all --
+    // preferred over the prose-only heuristic when available (a report
+    // with zero qualifying CAGR evidence can no longer show a
+    // "benchmarkDerived"/"Market Support" badge for a number that turned
+    // out to come from an unrelated percentage elsewhere in the field).
     const evidence =
       isCagr && cagrPresentation?.isMultiEstimate
         ? ("benchmarkDerived" as const)
-        : deriveMarketSizeMetricEvidenceLevel(isCagr ? "CAGR" : "Market Size", value, content);
+        : (isCagr && resolveMarketIntelligenceCagrEvidenceLevel(marketIntelligenceCanonicalState, Boolean(value))) ||
+          deriveMarketSizeMetricEvidenceLevel(isCagr ? "CAGR" : "Market Size", value, content);
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(94,234,212,0.1),transparent_30%),rgba(255,255,255,0.025)] p-5">

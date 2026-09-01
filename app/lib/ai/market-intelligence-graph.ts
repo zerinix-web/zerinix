@@ -48,6 +48,21 @@ export type MarketIntelligenceCompetitor = {
   confidenceScore: number;
   confidenceLevel: MarketConfidenceLevel;
   evidenceIds: string[];
+  // TASK #33 -- confirmed live (source-provenance audit): `evidenceIds`
+  // above is the vendor's overall EXISTENCE corroboration set (how many
+  // independent sources establish this company is real and relevant) --
+  // it says nothing about which specific evidence backs `positioning`'s
+  // category/strengths/weaknesses text or pricingEvidence, and none of
+  // those attributes carried their own evidence id at all. A vendor
+  // being verified as an existing player must not imply its strengths/
+  // weaknesses/pricing claims are independently verified too. These 3
+  // fields carry the SAME evidence item ids vendor-intelligence.ts
+  // already selects to write the strength/weakness/pricingEvidence TEXT
+  // (null when no qualifying item existed for that attribute) -- never a
+  // new inference, just no longer discarded.
+  strengthEvidenceId: string | null;
+  weaknessEvidenceId: string | null;
+  pricingEvidenceId: string | null;
 };
 
 // How the TAM figure was actually produced -- retained for calculation
@@ -1324,6 +1339,9 @@ export function buildMarketIntelligenceGraph(
       confidenceScore: vendor.confidence,
       confidenceLevel: vendor.confidenceLevel,
       evidenceIds: vendor.evidenceSources,
+      strengthEvidenceId: vendor.strengthEvidenceId,
+      weaknessEvidenceId: vendor.weaknessEvidenceId,
+      pricingEvidenceId: vendor.pricingEvidenceId,
     });
   }
 

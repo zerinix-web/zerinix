@@ -70,7 +70,9 @@ for (const [label, source] of [
     // this branch's start and its "Evidence & Analysis" block -- the
     // window is widened to still capture it, the underlying JSX asserted
     // below is otherwise unchanged.
-    const block = source.slice(marketSizeBlockStart, marketSizeBlockStart + 5500);
+    // TASK #33 -- widened again for the canonical-first CAGR evidence
+    // check (resolveMarketIntelligenceCagrEvidenceLevel) and its comment.
+    const block = source.slice(marketSizeBlockStart, marketSizeBlockStart + 6500);
 
     assert.match(block, /Evidence &amp; Analysis/);
     assert.doesNotMatch(block, /line-clamp-3 text-sm leading-6 text-zinc-400">\{(?:section\.)?content\}/);
