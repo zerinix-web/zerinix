@@ -317,7 +317,15 @@ test("ReportPdfButton.tsx (PDF generation logic) is untouched by this fix (drift
     new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url),
     "utf8"
   );
-  assert.doesNotMatch(pdfSource, /marketEvidenceBadgeLabels|sanitizeMarketIntelligencePresentationText/);
+  // TASK #34 -- confirmed live (citation-integrity audit): deliberately
+  // wired in sanitizeMarketIntelligencePresentationText to close a
+  // genuine web/PDF asymmetry (see
+  // tests/task34-citation-integrity-authoritative.test.mjs for that
+  // fix's own dedicated coverage). This file still never uses page.tsx's
+  // MI-specific badge-relabeling wrapper (marketEvidenceBadgeLabels/
+  // getMarketEvidenceBadgeLabel) -- it uses the plain, generic
+  // getEvidenceLabel instead, so those two checks remain valid.
+  assert.doesNotMatch(pdfSource, /marketEvidenceBadgeLabels/);
   assert.doesNotMatch(pdfSource, /getMarketEvidenceBadgeLabel/);
 });
 

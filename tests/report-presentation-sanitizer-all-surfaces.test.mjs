@@ -132,19 +132,33 @@ test("ReportPdfButton.tsx filters pdfSections through isUniversalCustomerFacingS
 
 test("ReportPdfButton.tsx's per-section render loop wraps the final sectionBodyContent in stripReportPresentationArtifacts as a last-line-of-defense pass (drift check)", () => {
   const loopStart = pdfButtonSource.indexOf("pdfSections.forEach((section) => {");
-  const wrapIndex = pdfButtonSource.indexOf("const sectionBodyContent = stripReportPresentationArtifacts(");
+  // TASK #34 -- confirmed live (citation-integrity audit): this wrap is
+  // now named `rawSectionBodyContent`, with `sectionBodyContent` itself
+  // derived one step further by also running
+  // sanitizeMarketIntelligencePresentationText for Market Intelligence
+  // (closing a genuine web/PDF asymmetry -- see
+  // tests/task34-citation-integrity-authoritative.test.mjs for that
+  // fix's own dedicated coverage). The strip pass itself is still the
+  // last-line-of-defense over the exact same computed value as before.
+  const wrapIndex = pdfButtonSource.indexOf("const rawSectionBodyContent = stripReportPresentationArtifacts(");
   assert.ok(loopStart > -1, "pdfSections.forEach loop not found");
-  assert.ok(wrapIndex > -1, "sectionBodyContent is not wrapped in stripReportPresentationArtifacts");
+  assert.ok(wrapIndex > -1, "rawSectionBodyContent is not wrapped in stripReportPresentationArtifacts");
   // P0 FIX #8 added the isKeyTakeawayCardSection/
   // sectionContentWithoutTakeawayDuplication computation (plus its
   // documentation) between the loop start and this wrap, widening the
   // distance -- the window is widened to still confirm the wrap remains
   // inside the same forEach loop, not moved outside it. TASK #29E added a
   // further CAGR "Validation Required" override (with its own explanatory
-  // comment) in the same span, widening it again.
+  // comment) in the same span, widening it again. TASK #34 added its own
+  // explanatory comment ahead of the (renamed) wrap, widening it once
+  // more.
   assert.ok(
-    wrapIndex > loopStart && wrapIndex < loopStart + 4600,
+    wrapIndex > loopStart && wrapIndex < loopStart + 5300,
     "the stripReportPresentationArtifacts wrap is not inside the render loop"
+  );
+  assert.match(
+    pdfButtonSource,
+    /const sectionBodyContent = isMarketIntelligenceReport\s*\n\s*\? sanitizeMarketIntelligencePresentationText\(rawSectionBodyContent\)\s*\n\s*: rawSectionBodyContent;/
   );
 });
 

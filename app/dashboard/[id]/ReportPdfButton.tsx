@@ -70,6 +70,7 @@ import {
 import {
   isUniversalCustomerFacingSection,
   stripReportPresentationArtifacts,
+  sanitizeMarketIntelligencePresentationText,
 } from "@/app/lib/report-engine/report-presentation-sanitizer";
 import {
   extractExecutiveDecisionFromText,
@@ -6299,7 +6300,14 @@ export function buildStandardReportPdf({
         // cleanPdfLegacyValidationIntelligenceContent, ...) might
         // reintroduce or fail to catch, on every rendering surface, not
         // just the ones already sanitized upstream.
-        const sectionBodyContent = stripReportPresentationArtifacts(
+        // TASK #34 -- confirmed live (citation-integrity audit): this PDF
+        // path never called sanitizeMarketIntelligencePresentationText at
+        // all, unlike page.tsx (:5634) and Planner.tsx's web view (:7494)
+        // -- a genuine web/PDF asymmetry for Market Intelligence's own
+        // dangling "| Evidence: ,"-shaped residue and internal heading
+        // relabeling. Mirrors the identical ordering (MI pass wraps the
+        // already-stripped result) both other surfaces already use.
+        const rawSectionBodyContent = stripReportPresentationArtifacts(
           isPdfCompleteVisualSection
             ? ""
             : isCagrSection && !cagrHeadlineValue
@@ -6325,6 +6333,9 @@ export function buildStandardReportPdf({
                   pdfLocale
                 )
         );
+        const sectionBodyContent = isMarketIntelligenceReport
+          ? sanitizeMarketIntelligencePresentationText(rawSectionBodyContent)
+          : rawSectionBodyContent;
         // Same font-measurement bug the SWOT/financial layouts above
         // already document: splitPdfReadableLines measures wrapping at
         // whatever font is active on `pdf` right now, which is whatever
@@ -6706,6 +6717,14 @@ export function buildStandardReportPdf({
           y += cardHeight + minSectionGap;
         }
       });
+
+      // TASK #34 FOLLOW-UP -- the Sources PDF page this block used to draw
+      // (resolveMarketIntelligenceSourcesForDisplay) is deliberately
+      // removed: Sources is never rendered on any surface, for every
+      // report kind (presentation-only decision). The underlying
+      // structured citationSources registry and
+      // resolveMarketIntelligenceSourcesForDisplay itself remain fully
+      // intact in market-intelligence-canonical-state.ts.
 
       drawFooter();
       const finalPage = pdf.getCurrentPageInfo().pageNumber;

@@ -201,7 +201,15 @@ test("ReportPdfButton.tsx (PDF structure) is untouched by this fix (drift check)
     new URL("../app/dashboard/[id]/ReportPdfButton.tsx", import.meta.url),
     "utf8"
   );
-  assert.doesNotMatch(pdfSource, /Validation Count|sanitizeMarketIntelligencePresentationText/);
+  // TASK #34 -- confirmed live (citation-integrity audit): ReportPdfButton.tsx
+  // never called sanitizeMarketIntelligencePresentationText at all, a
+  // genuine web/PDF asymmetry for Market Intelligence's own dangling
+  // "| Evidence: ,"-shaped residue and internal heading relabeling --
+  // fixed by deliberately wiring it in (see
+  // tests/task34-citation-integrity-authoritative.test.mjs for that
+  // fix's own dedicated coverage). "Validation Count" remains a real
+  // drift check for this ticket's own, unrelated fix.
+  assert.doesNotMatch(pdfSource, /Validation Count/);
 });
 
 test("acquisition routing and financial calculations are untouched (drift check)", async () => {

@@ -235,6 +235,17 @@ const confidenceScorePattern = /\bconfidence\s*\d{1,3}\/100\b/gi;
 // the same line).
 const promptWordBudgetLeakPattern = /\s*\(?\b(?:max|maximum)\.?\s+\d{1,4}\s+words\)?\.?\s*$/gim;
 
+// TASK #34 -- confirmed live: citationBracketTagPattern (and the other
+// bracket/vocabulary removals above) leave the space that used to
+// separate the removed tag from the surrounding text dangling directly
+// before whatever punctuation follows -- e.g. "...models alone [R5][R39]."
+// becomes "...models alone ." (a single leftover space before the
+// period; collapseWhitespace below only collapses RUNS of 2+ spaces/tabs,
+// not exactly one). Collapses any run of spaces/tabs immediately before a
+// closing/terminal punctuation mark down to zero -- never removes real
+// content, only closes the gap the removal passes above already opened.
+const spaceBeforeTerminalPunctuationPattern = /[ \t]+([.,;:!?)\]}])/g;
+
 function collapseWhitespace(value: string): string {
   return value
     .split("\n")
@@ -282,10 +293,13 @@ const emptyAfterSanitizationFallback =
 // doesn't get stripped in isolation, leaving an orphaned rest-of-line
 // fragment behind); then inline bracket tags (now including bare
 // [Verified]/[Derived]), the unbracketed "Verified from X" phrase,
-// standalone vocabulary, confidence scores, and bare URLs; then any
-// remaining raw snake_case identifier is naturalized as the last polish
-// pass; and finally, if a genuinely non-empty input sanitized down to
-// nothing, the schema-preservation fallback above takes its place.
+// standalone vocabulary, confidence scores, and bare URLs; then the
+// dangling-space-before-punctuation cleanup (TASK #34) closes the gap
+// those removals just opened, once all of them have already run; then
+// any remaining raw snake_case identifier is naturalized as the last
+// polish pass; and finally, if a genuinely non-empty input sanitized
+// down to nothing, the schema-preservation fallback above takes its
+// place.
 export function stripReportPresentationArtifacts(content: string): string {
   if (!content) return content;
 
@@ -303,6 +317,7 @@ export function stripReportPresentationArtifacts(content: string): string {
   sanitized = sanitized.replace(confidenceScorePattern, "");
   sanitized = sanitized.replace(bareUrlPattern, "");
   sanitized = sanitized.replace(promptWordBudgetLeakPattern, "");
+  sanitized = sanitized.replace(spaceBeforeTerminalPunctuationPattern, "$1");
   sanitized = naturalizeSnakeCaseIdentifiers(sanitized);
 
   return collapseWhitespace(sanitized) || emptyAfterSanitizationFallback;

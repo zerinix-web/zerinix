@@ -338,7 +338,11 @@ export type DuplicateCitationSourceGroup = {
 
 const identityTrackingParamPattern = /^(?:utm_|fbclid|gclid)/i;
 
-function normalizeUrlForIdentity(value: string): string {
+// TASK #34 -- exported (previously module-private) so a real Sources UI
+// can deduplicate its own display list using the SAME identity
+// normalization this file's own duplicate-detection gate already uses,
+// rather than a second, parallel URL-comparison implementation.
+export function normalizeUrlForIdentity(value: string): string {
   const trimmed = (value || "").trim();
   if (!trimmed) return "";
 

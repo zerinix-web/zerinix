@@ -5626,6 +5626,14 @@ export default async function ReportDetailPage({
   // of truth per render, not N copies that could theoretically read
   // report.metadata at different points if this were ever refactored.
   const marketIntelligenceCanonicalState = readMarketIntelligenceCanonicalState(report.metadata);
+  // TASK #34 FOLLOW-UP -- Sources is deliberately never rendered on any
+  // surface, for every report kind including Market Intelligence
+  // (presentation-only decision; see this task's own report). The
+  // underlying structured citationSources registry, resolveMarketIntelligenceSourcesForDisplay,
+  // and every claim -> source relationship it reads remain fully intact
+  // in app/lib/report-engine/market-intelligence-canonical-state.ts --
+  // this file simply no longer calls it, matching every other report
+  // kind's own (always-hidden) Sources behavior exactly.
   const visibleSections = uniqueReportSections
     .filter((section) => isUniversalCustomerFacingSection(section))
     .map((section) => ({

@@ -7528,6 +7528,13 @@ const ReportPanel = memo(function ReportPanel({
       section.content &&
       section.content !== waitingMessage
   );
+  // TASK #34 FOLLOW-UP -- Sources is deliberately never rendered on any
+  // surface, for every report kind including Market Intelligence
+  // (presentation-only decision). The underlying structured
+  // citationSources registry and resolveMarketIntelligenceSourcesForDisplay
+  // remain fully intact in market-intelligence-canonical-state.ts -- this
+  // component simply no longer calls it, matching every other report
+  // kind's own (always-hidden) Sources behavior exactly.
   const isRealEstateReport = reportFields.some(
     ({ field }) => field === "assetIdentification"
   );
@@ -10165,6 +10172,14 @@ const ReportPanel = memo(function ReportPanel({
           y += cardHeight + 5;
         }
       });
+
+      // TASK #34 FOLLOW-UP -- the Sources PDF page this block used to draw
+      // (resolveMarketIntelligenceSourcesForDisplay) is deliberately
+      // removed: Sources is never rendered on any surface, for every
+      // report kind (presentation-only decision). The underlying
+      // structured citationSources registry and
+      // resolveMarketIntelligenceSourcesForDisplay itself remain fully
+      // intact in market-intelligence-canonical-state.ts.
 
       drawFooter();
       const finalPage = pdf.getCurrentPageInfo().pageNumber;

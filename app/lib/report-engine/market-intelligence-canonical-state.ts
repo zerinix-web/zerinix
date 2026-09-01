@@ -39,7 +39,9 @@
 // backfill, no destructive change to any existing persisted report.
 
 import type { ResponseLanguage } from "@/app/lib/report-language";
-import type { EvidenceLevel } from "@/app/lib/report-evidence";
+import { type EvidenceLevel, sourceTypeToEvidenceLevel } from "@/app/lib/report-evidence";
+import { stripReportPresentationArtifacts } from "@/app/lib/report-engine/report-presentation-sanitizer";
+import { normalizeUrlForIdentity } from "@/app/lib/report-engine/evidence-reference-integrity";
 import type {
   MarketIntelligenceGraph,
   MarketIntelligenceCompetitor,
@@ -126,9 +128,29 @@ export type MarketIntelligenceCanonicalMarketSizing = Pick<
   | "evidenceIds"
 >;
 
+// TASK #34 -- publishedDate/accessedAt added: a real Sources UI ("expose
+// useful information when available: source title, publisher/domain,
+// publication date, URL, evidence classification") needs both, and both
+// already exist on the generated MarketIntelligenceSource -- they were
+// simply never picked into this persisted projection. Never invented
+// when the underlying evidence item has none: both remain empty strings
+// in that case (MarketIntelligenceSource's own generation-time default),
+// which the Sources UI must render as an omission, never a fabricated
+// date.
+//
+// Deliberately NOT a version bump: MARKET_INTELLIGENCE_CANONICAL_STATE_VERSION's
+// gate is exact equality, so bumping it would drop canonical state
+// entirely (falling back to legacy prose-parsing) for every report
+// already persisted at the current version -- including whatever report
+// this task is being verified against. A purely additive, always-
+// optional display field does not need that gate: any citationSources
+// entry persisted before this task simply has publishedDate/accessedAt
+// as empty strings at runtime (structurally identical to a source that
+// genuinely has no known date), which the Sources UI must already
+// handle as an omission either way.
 export type MarketIntelligenceCanonicalCitationSource = Pick<
   MarketIntelligenceSource,
-  "evidenceId" | "title" | "publisher" | "url" | "sourceType" | "confidenceLevel"
+  "evidenceId" | "title" | "publisher" | "url" | "sourceType" | "confidenceLevel" | "publishedDate" | "accessedAt"
 >;
 
 // TASK #33 -- CAGR had no canonical representation at all: a growth-rate
@@ -269,6 +291,8 @@ export function buildMarketIntelligenceCanonicalState(input: {
       url: source.url,
       sourceType: source.sourceType,
       confidenceLevel: source.confidenceLevel,
+      publishedDate: source.publishedDate,
+      accessedAt: source.accessedAt,
     })),
   };
 }
@@ -281,6 +305,41 @@ export function buildMarketIntelligenceCanonicalState(input: {
 // version this build predates) -- in every one of those cases the caller
 // must fall back to the pre-existing prose-parsing path, never guess or
 // partially trust a shape it can't verify.
+// TASK #34 -- confirmed live (source-provenance audit): topRisks/
+// topReasons/why/missingEvidence/whatWouldChangeThisDecision/
+// immediateNextAction are persisted VERBATIM from the generation-time
+// decision brief (buildMarketIntelligenceCanonicalState, below), which is
+// free-form narrative text that can legitimately contain the same
+// [R#]-shaped citation markers report SECTION prose does -- but unlike
+// section content, this metadata payload is read directly by every
+// render site (page.tsx, Planner.tsx web + PDF, ReportPdfButton.tsx) and
+// was never run through stripReportPresentationArtifacts, the exact
+// sanitizer that already cleans every report SECTION on all 4 surfaces.
+// The real 171cf10d... report's own persisted topRisks contain
+// "...models alone [R5][R39]." verbatim, and the Executive Decision
+// card's "Top Risk"/"Immediate Next Action" fields draw this text
+// directly -- confirmed the one path a raw "[R21][R5]"-shaped token
+// could still reach a rendered PDF.
+//
+// Fixed at THIS read boundary rather than only at build time: every
+// render site loads canonical state through this one function, so a
+// single fix here retroactively cleans already-persisted reports (like
+// 171cf10d...) without requiring regeneration, and automatically covers
+// every surface at once -- no per-render-site patch, no separate PDF
+// citation-cleanup system. Only the free-text narrative fields are
+// sanitized; structured, machine-readable data (decision,
+// decisionCriticalEvidence, marketSizing.evidenceIds, cagr, competitors,
+// citationSources) is returned completely unmodified -- this never
+// removes or weakens a real claim -> source relationship, since none of
+// those structured fields ever held a rendered [R#] token to begin with.
+function sanitizeCanonicalNarrativeText(value: string): string {
+  return stripReportPresentationArtifacts(value);
+}
+
+function sanitizeCanonicalNarrativeList(values: readonly string[]): string[] {
+  return values.map(sanitizeCanonicalNarrativeText);
+}
+
 export function readMarketIntelligenceCanonicalState(
   metadata: unknown
 ): MarketIntelligenceCanonicalState | null {
@@ -290,10 +349,23 @@ export function readMarketIntelligenceCanonicalState(
     .marketIntelligenceCanonicalState;
   if (!state || typeof state !== "object" || Array.isArray(state)) return null;
 
-  return (state as Partial<MarketIntelligenceCanonicalState>).version ===
+  if (
+    (state as Partial<MarketIntelligenceCanonicalState>).version !==
     MARKET_INTELLIGENCE_CANONICAL_STATE_VERSION
-    ? (state as MarketIntelligenceCanonicalState)
-    : null;
+  ) {
+    return null;
+  }
+
+  const typedState = state as MarketIntelligenceCanonicalState;
+  return {
+    ...typedState,
+    why: sanitizeCanonicalNarrativeText(typedState.why),
+    missingEvidence: sanitizeCanonicalNarrativeList(typedState.missingEvidence),
+    whatWouldChangeThisDecision: sanitizeCanonicalNarrativeText(typedState.whatWouldChangeThisDecision),
+    immediateNextAction: sanitizeCanonicalNarrativeText(typedState.immediateNextAction),
+    topRisks: sanitizeCanonicalNarrativeList(typedState.topRisks),
+    topReasons: sanitizeCanonicalNarrativeList(typedState.topReasons),
+  };
 }
 
 // Canonical-first decision resolution: when a persisted canonical state
@@ -722,6 +794,84 @@ export function isKnownCitationId(
 ): boolean {
   if (!canonicalState || !evidenceId) return false;
   return canonicalState.citationSources.some((source) => source.evidenceId === evidenceId);
+}
+
+// TASK #34 -- the single, shared, structured Sources list every render
+// surface (web page.tsx, Planner.tsx web + PDF, ReportPdfButton.tsx PDF)
+// must read instead of independently reconstructing a citation list from
+// prose (the prior, now-confirmed-dead-code parseCitations/Citations.tsx
+// approach every surface used to have its own copy of). Reads
+// canonicalState.citationSources ONLY -- never re-parses [R#] out of any
+// section's text -- so there is exactly one place "which sources exist,
+// deduplicated, with what display name" can be decided.
+//
+// - displayName never falls back to evidenceId ("R21") -- title, then
+//   publisher, then the URL's own domain, then sourceType, then a plain
+//   "Source" placeholder, in that order. An internal reference id is
+//   never a legitimate source NAME.
+// - Deduplicated by normalizeUrlForIdentity (evidence-reference-
+//   integrity.ts) -- the SAME identity comparison the generation-time
+//   duplicate-source gate already uses, not a second implementation. A
+//   source with no parseable URL can never be deduplicated against
+//   another (no identity signal to compare), matching that module's own
+//   stated reasoning.
+// - evidenceLevel reuses sourceTypeToEvidenceLevel (report-evidence.ts),
+//   the SAME classifier already used for PDF citation labels elsewhere
+//   in this codebase -- no new evidence taxonomy.
+// - publishedDate is surfaced only when the underlying source genuinely
+//   has one; never fabricated (see MarketIntelligenceCanonicalCitationSource's
+//   own comment).
+export type MarketIntelligenceDisplaySource = {
+  evidenceId: string;
+  displayName: string;
+  publisher: string;
+  url: string;
+  publishedDate: string;
+  evidenceLevel: EvidenceLevel;
+};
+
+function deriveDomainFromUrl(url: string): string {
+  if (!url) return "";
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+export function resolveMarketIntelligenceSourcesForDisplay(
+  canonicalState: MarketIntelligenceCanonicalState | null
+): MarketIntelligenceDisplaySource[] {
+  if (!canonicalState) return [];
+
+  const seenIdentityKeys = new Set<string>();
+  const displaySources: MarketIntelligenceDisplaySource[] = [];
+
+  for (const source of canonicalState.citationSources) {
+    const identityKey = source.url ? normalizeUrlForIdentity(source.url) : "";
+    if (identityKey) {
+      if (seenIdentityKeys.has(identityKey)) continue;
+      seenIdentityKeys.add(identityKey);
+    }
+
+    const displayName =
+      source.title.trim() ||
+      source.publisher.trim() ||
+      deriveDomainFromUrl(source.url) ||
+      source.sourceType.trim() ||
+      "Source";
+
+    displaySources.push({
+      evidenceId: source.evidenceId,
+      displayName,
+      publisher: source.publisher.trim(),
+      url: source.url.trim(),
+      publishedDate: source.publishedDate.trim(),
+      evidenceLevel: sourceTypeToEvidenceLevel(source.sourceType, Boolean(source.url)),
+    });
+  }
+
+  return displaySources;
 }
 
 function evidenceTieReferencesKnownCitation(
