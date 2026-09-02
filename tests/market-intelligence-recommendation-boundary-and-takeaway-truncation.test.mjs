@@ -382,7 +382,12 @@ test("E4. Strategic Recommendations' row-chunking algorithm, run against REAL js
     // imported function (and closes over recommendationCanonicalState,
     // provided below) to classify each action and compute its effective
     // gate -- both provided here exactly as the real module scope does.
-    "import { classifyStrategicRecommendationAction } from \"/Users/iyslv/Desktop/zerinix/app/lib/report-engine/market-intelligence-canonical-state.ts\";",
+    // TASK #38 -- the real function now calls
+    // classifyStrategicRecommendationValidation (market-intelligence-evidence-gaps.ts),
+    // which wraps classifyStrategicRecommendationAction unchanged and adds
+    // gap-linkage/provenance -- the extracted source's own call site was
+    // renamed to match, so this harness's stub import must be too.
+    "import { classifyStrategicRecommendationValidation, localizeRecommendationProvenance } from \"/Users/iyslv/Desktop/zerinix/app/lib/report-engine/market-intelligence-evidence-gaps.ts\";",
     "const pdf = new jsPDF();",
     "const pdfLocale = \"en\";",
     "const recommendationCanonicalState = null;",

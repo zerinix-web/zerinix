@@ -132,19 +132,32 @@ const pdfButtonSource = readSourceFile("../app/dashboard/[id]/ReportPdfButton.ts
 
 // --- Structural audit: all 4 render sites are wired to the same function -
 
-test("STRUCTURAL AUDIT: all 4 render sites import and call classifyStrategicRecommendationAction", () => {
+// TASK #38 -- all 4 render sites now call classifyStrategicRecommendationValidation
+// (market-intelligence-evidence-gaps.ts) instead of calling
+// classifyStrategicRecommendationAction directly. This is a pure wrap,
+// not a replacement: classifyStrategicRecommendationValidation's very
+// first line calls classifyStrategicRecommendationAction internally and
+// spreads its ENTIRE result onto the returned object unchanged (see
+// tests/task38-recommendation-evidence-linkage.test.mjs), so every
+// actionType/numericBasis/downgradeReason assertion elsewhere in THIS
+// file (which calls classifyStrategicRecommendationAction directly, not
+// through a render site) still exercises the exact same classification
+// logic this task originally verified -- only the render-site CALL SITE
+// name changed, to add the gap-linkage/provenance layer Task #38
+// requires.
+test("STRUCTURAL AUDIT: all 4 render sites import and call classifyStrategicRecommendationValidation (which itself wraps classifyStrategicRecommendationAction unchanged)", () => {
   for (const [name, source] of [
     ["page.tsx", dashboardReportSource],
     ["Planner.tsx", plannerSource],
     ["ReportPdfButton.tsx", pdfButtonSource],
   ]) {
-    const callSites = source.match(/classifyStrategicRecommendationAction\(/g) || [];
-    assert.ok(callSites.length >= 1, `${name}: expected at least one classifyStrategicRecommendationAction( call site`);
+    const callSites = source.match(/classifyStrategicRecommendationValidation\(/g) || [];
+    assert.ok(callSites.length >= 1, `${name}: expected at least one classifyStrategicRecommendationValidation( call site`);
   }
   // Planner.tsx has 2 call sites (web PremiumSectionVisual + PDF
   // computeRecommendationCardLayout) -- both must exist so web and PDF
   // can never classify a card differently.
-  const plannerCallSites = plannerSource.match(/classifyStrategicRecommendationAction\(/g) || [];
+  const plannerCallSites = plannerSource.match(/classifyStrategicRecommendationValidation\(/g) || [];
   assert.equal(plannerCallSites.length, 2, "Planner.tsx must classify identically in both its web and PDF render paths");
 });
 
@@ -158,7 +171,10 @@ test("STRUCTURAL AUDIT: the PDF layout function computes the effective gate (mod
     );
     assert.ok(layoutFnMatch, `${name}: computeRecommendationCardLayout not found`);
     const body = layoutFnMatch[0];
-    const classifyIndex = body.indexOf("const classification = classifyStrategicRecommendationAction(");
+    // TASK #38 -- renamed call site (classifyStrategicRecommendationValidation
+    // wraps classifyStrategicRecommendationAction unchanged; see this
+    // file's own STRUCTURAL AUDIT test above for the full comment).
+    const classifyIndex = body.indexOf("const classification = classifyStrategicRecommendationValidation(");
     const gateReservedIndex = body.indexOf("const gateReservedHeight =");
     assert.ok(classifyIndex >= 0, `${name}: classification call missing from layout function`);
     assert.ok(gateReservedIndex >= 0, `${name}: gateReservedHeight declaration missing`);

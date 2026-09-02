@@ -40,14 +40,17 @@
 // evidence does not justify them."
 
 import type { ResponseLanguage } from "@/app/lib/report-language";
+import { type EvidenceLevel, sourceTypeToEvidenceLevel } from "@/app/lib/report-evidence";
 import {
   localizeExecutiveDecision,
   type ExecutiveDecisionCode,
 } from "@/app/lib/report-engine/executive-decision-brief";
 import type { DecisionCriticalEvidenceState } from "@/app/lib/report-engine/market-intelligence-presentation";
-import type {
-  MarketIntelligenceCanonicalState,
-  MarketIntelligenceCanonicalMarketSizing,
+import {
+  classifyStrategicRecommendationAction,
+  type MarketIntelligenceCanonicalState,
+  type MarketIntelligenceCanonicalMarketSizing,
+  type StrategicRecommendationClassification,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 
 export type MarketIntelligenceDecisionFactor =
@@ -1037,5 +1040,238 @@ export function resolveMarketIntelligenceDecisionThresholdState(
     unresolvedConditions,
     evidenceRequirements,
     controllingUnresolvedCondition: unresolvedConditions.length === 1 ? unresolvedConditions[0] : null,
+  };
+}
+
+// TASK #38 -- Structurally connect Strategic Recommendation metrics to
+// Evidence Gaps and decision thresholds.
+//
+// PROBLEM (confirmed via audit): every Strategic Recommendation card's
+// own KPI/budget/timeline (e.g. "≥40% review-time reduction," "8-week
+// pilot," a budget ceiling) is extracted from the model's own free-text
+// prose (extractRecommendationSignals, report-presentation.ts) and, until
+// now, classified only as "evidence" vs "planning_assumption" numeric
+// basis (Task #31) -- with NO structural connection to which canonical
+// evidence gap (if any) that action is meant to close, and no distinction
+// between "an unevidenced number presented as fact" (a stale planning
+// assumption) and "the explicit target a validation/pilot action is
+// DESIGNED to test" (a validation target -- a legitimate, different
+// concept this task's own requirement #2 calls out by name).
+//
+// FIX: classifyStrategicRecommendationValidation wraps (never replaces)
+// classifyStrategicRecommendationAction's existing classification with:
+// (a) a finer 4-way provenance (verifiedEvidence / benchmarkDerived /
+// planningAssumption / validationTarget) derived from the SAME
+// numericBasis Task #31 already computes, refined by actionType and, for
+// genuinely evidence-tied cards, the REAL cited source's own
+// sourceTypeToEvidenceLevel classification (report-evidence.ts) -- never
+// a new, independently invented evidence taxonomy; (b) a link to a
+// canonical evidence gap using a STABLE STRUCTURED IDENTIFIER
+// (MarketIntelligenceEvidenceGapId), never fragile prose/keyword
+// matching against the card's own free text -- see
+// resolveLinkedEvidenceGapId's own comment for exactly how narrow and
+// safe that link is; (c) the SAME MarketIntelligenceDecisionThreshold
+// object (Task #36/#37) for the linked gap, when one exists, so a reader
+// can see not just "this closes gap X" but "here is what ENTER/MONITOR/
+// AVOID actually require for X."
+
+export type MarketIntelligenceRecommendationProvenance =
+  | "verifiedEvidence"
+  | "benchmarkDerived"
+  | "planningAssumption"
+  | "validationTarget";
+
+const RECOMMENDATION_PROVENANCE_LABELS: Record<
+  MarketIntelligenceRecommendationProvenance,
+  Record<ResponseLanguage, string>
+> = {
+  verifiedEvidence: {
+    English: "Verified Evidence",
+    Turkish: "Doğrulanmış Kanıt",
+    German: "Verifizierter Nachweis",
+    French: "Preuve vérifiée",
+    Spanish: "Evidencia verificada",
+  },
+  benchmarkDerived: {
+    English: "Benchmark-Derived",
+    Turkish: "Kıyaslamadan Türetilmiş",
+    German: "Benchmark-abgeleitet",
+    French: "Dérivé d'un référentiel",
+    Spanish: "Derivado de referencia",
+  },
+  planningAssumption: {
+    English: "Planning Assumption",
+    Turkish: "Planlama Varsayımı",
+    German: "Planungsannahme",
+    French: "Hypothèse de planification",
+    Spanish: "Supuesto de planificación",
+  },
+  validationTarget: {
+    English: "Validation Target",
+    Turkish: "Doğrulama Hedefi",
+    German: "Validierungsziel",
+    French: "Cible de validation",
+    Spanish: "Objetivo de validación",
+  },
+};
+
+export function localizeRecommendationProvenance(
+  provenance: MarketIntelligenceRecommendationProvenance,
+  language: ResponseLanguage = "English"
+): string {
+  return RECOMMENDATION_PROVENANCE_LABELS[provenance][language];
+}
+
+// Mirrors STRATEGIC_RECOMMENDATION_CITATION_MARKER_PATTERN
+// (market-intelligence-canonical-state.ts, not exported) -- the same
+// literal [R#] shape, reused here only to look up which REAL citation
+// (if any) an evidenceTie names, never to re-decide whether it resolves
+// (isKnownCitationId-equivalent logic is already baked into
+// classifyStrategicRecommendationAction's own numericBasis).
+const RECOMMENDATION_CITATION_MARKER_PATTERN = /\[R(\d+)\]/g;
+
+function resolveEvidenceTieCitationLevel(
+  evidenceTie: string,
+  canonicalState: MarketIntelligenceCanonicalState
+): EvidenceLevel | null {
+  if (!evidenceTie) return null;
+  const matches = [...evidenceTie.matchAll(RECOMMENDATION_CITATION_MARKER_PATTERN)];
+  for (const match of matches) {
+    const source = canonicalState.citationSources.find((entry) => entry.evidenceId === `R${match[1]}`);
+    if (source) return sourceTypeToEvidenceLevel(source.sourceType, Boolean(source.url));
+  }
+  return null;
+}
+
+// Requirement #2: "≥40% review-time reduction"-class numbers must remain
+// a validation target or planning assumption unless real evidence
+// verifies them -- never silently promoted to fact. numericBasis "none"
+// (no numeric content at all) classifies as null: there is nothing to
+// label. numericBasis "evidence" (the card's evidenceTie already
+// resolves to a real citation, per Task #31/#33) reads as
+// "verifiedEvidence", downgraded to "benchmarkDerived" only when that
+// SAME cited source's own sourceType classifies that way -- never a
+// separate, weaker check. numericBasis "planning_assumption" splits on
+// actionType: a validation/pilot action's own number is what that
+// action is explicitly DESIGNED to measure ("validationTarget"), never
+// presented as an existing fact; any other action type's unevidenced
+// number remains a plain "planningAssumption", exactly Task #31's
+// original, unchanged meaning.
+function resolveRecommendationProvenance(
+  classification: StrategicRecommendationClassification,
+  evidenceTie: string,
+  canonicalState: MarketIntelligenceCanonicalState | null
+): MarketIntelligenceRecommendationProvenance | null {
+  if (classification.numericBasis === "none") return null;
+
+  if (classification.numericBasis === "evidence") {
+    const citationLevel = canonicalState ? resolveEvidenceTieCitationLevel(evidenceTie, canonicalState) : null;
+    return citationLevel === "benchmarkDerived" ? "benchmarkDerived" : "verifiedEvidence";
+  }
+
+  return classification.actionType === "validation" || classification.actionType === "pilot"
+    ? "validationTarget"
+    : "planningAssumption";
+}
+
+// Requirement #3: connect to canonical Evidence Gaps by a STABLE
+// STRUCTURED IDENTIFIER, never fragile prose/keyword matching against a
+// card's own free text (e.g. never scanning the action sentence for
+// "SOM"/"obtainable share"/"pilot" and guessing it means THIS gap). The
+// only structurally safe moment to draw that link without guessing is
+// when there is EXACTLY ONE decision-critical (material) evidence gap in
+// the whole report -- the real, common "single controlling factor" case
+// this report style actually produces (e.g. Obtainable Share alone
+// keeping a report at MONITOR, Task #37's own controllingUnresolvedCondition).
+// In that state there is no second candidate a validation/pilot action
+// could possibly be advancing instead, so the link is a structural fact,
+// not an inference. Whenever 0 or 2+ material gaps exist, this returns
+// null rather than guess which one (or none) a given card relates to --
+// identical discipline to controllingUnresolvedCondition itself. Only
+// "validation"/"pilot" actionTypes ever link: those are the only two
+// action types whose entire purpose is gathering NEW decision-critical
+// evidence (a "scale"/"conditional_execution"/"research" action's
+// relationship to a specific gap is not structurally guaranteed the same
+// way).
+function resolveLinkedEvidenceGap(
+  actionType: StrategicRecommendationClassification["actionType"],
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  language: ResponseLanguage
+): MarketIntelligenceEvidenceGap | null {
+  if (!canonicalState) return null;
+  if (actionType !== "validation" && actionType !== "pilot") return null;
+
+  const materialGaps = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).filter(
+    (gap) => gap.decisionFactor !== null
+  );
+  return materialGaps.length === 1 ? materialGaps[0] : null;
+}
+
+// The single, structured record every render surface must read for a
+// recommendation card's decision-relevant fields (requirement #1) --
+// a pure superset of StrategicRecommendationClassification (Task #31),
+// so every existing caller's `.actionType`/`.actionTypeLabel`/
+// `.numericBasis`/`.downgradeReason`/`.wasDowngraded`/`.evidenceBasis`
+// usage continues to work completely unchanged.
+export type MarketIntelligenceRecommendationValidation = StrategicRecommendationClassification & {
+  owner: string;
+  activity: string;
+  timeline: string;
+  budget: string;
+  // KPI and success criterion are deliberately the SAME underlying value
+  // (extractRecommendationSignals' own `metric` field) -- this report
+  // style's generation prompt never produces two independently-labeled
+  // numbers for "what is measured" vs. "what counts as success"; exposing
+  // both names (rather than inventing an artificial second figure) keeps
+  // the type honest about what the data actually contains.
+  kpi: string;
+  successCriterion: string;
+  evidenceTie: string;
+  provenance: MarketIntelligenceRecommendationProvenance | null;
+  relatedEvidenceGapId: MarketIntelligenceEvidenceGapId | null;
+  // Requirement #4: represents "what would need to be true for this
+  // action's result to move MONITOR -> ENTER (or -> AVOID)" using the
+  // SAME threshold object every other surface already reads -- never a
+  // fabricated threshold, and never populated unless relatedEvidenceGapId
+  // itself resolved (which already requires the gap to be genuinely
+  // decision-critical/material).
+  relatedDecisionThreshold: MarketIntelligenceDecisionThreshold | null;
+};
+
+export function classifyStrategicRecommendationValidation(input: {
+  item: string;
+  signals: {
+    budget: string;
+    metric: string;
+    timeframe: string;
+    owner: string;
+    gate: string;
+    activity: string;
+    evidenceTie: string;
+  };
+  canonicalState: MarketIntelligenceCanonicalState | null;
+  language?: ResponseLanguage;
+}): MarketIntelligenceRecommendationValidation {
+  const { item, signals, canonicalState, language = "English" } = input;
+  const classification = classifyStrategicRecommendationAction({ item, signals, canonicalState, language });
+  const provenance = resolveRecommendationProvenance(classification, signals.evidenceTie, canonicalState);
+  const linkedGap = resolveLinkedEvidenceGap(classification.actionType, canonicalState, language);
+  const relatedDecisionThreshold =
+    linkedGap && canonicalState
+      ? resolveMarketIntelligenceDecisionThresholds(canonicalState, language).find((t) => t.gapId === linkedGap.id) ?? null
+      : null;
+
+  return {
+    ...classification,
+    owner: signals.owner,
+    activity: signals.activity,
+    timeline: signals.timeframe,
+    budget: signals.budget,
+    kpi: signals.metric,
+    successCriterion: signals.metric,
+    evidenceTie: signals.evidenceTie,
+    provenance,
+    relatedEvidenceGapId: linkedGap?.id ?? null,
+    relatedDecisionThreshold,
   };
 }

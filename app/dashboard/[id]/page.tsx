@@ -66,7 +66,6 @@ import {
   resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
   resolveMarketIntelligenceConfidenceFactors,
   constrainMarketSizingResolutionToCanonicalState,
-  classifyStrategicRecommendationAction,
   resolveMarketIntelligenceDecisionEvidenceLevel,
   resolveMarketIntelligenceCagrEvidenceLevel,
   type MarketIntelligenceCanonicalState,
@@ -76,6 +75,8 @@ import {
   selectTopMarketIntelligenceEvidenceGaps,
   buildMarketIntelligenceGapDrivenActions,
   resolveMarketIntelligenceDecisionThresholdState,
+  classifyStrategicRecommendationValidation,
+  localizeRecommendationProvenance,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
   localizeMarketConfidenceFactorLevel,
@@ -3349,20 +3350,23 @@ function ReportSectionVisual({
               // marks any unlabeled numeric budget/KPI/timeline figure as
               // a planning assumption rather than presenting fake
               // precision as fact.
+              // TASK #38 -- classifyStrategicRecommendationValidation
+              // wraps the same Task #31 classification with a finer
+              // evidence/benchmark/planning-assumption/validation-target
+              // provenance and, when structurally safe (a single
+              // controlling evidence gap, never prose-matched), a link to
+              // that canonical gap and its decision threshold.
               const classification = isMarketIntelligence
-                ? classifyStrategicRecommendationAction({
+                ? classifyStrategicRecommendationValidation({
                     item,
                     signals,
                     canonicalState: marketIntelligenceCanonicalState,
                     language: strategicRecommendationDecision?.language || "English",
                   })
                 : null;
-              const numericAssumptionSuffix =
-                classification?.numericBasis === "planning_assumption"
-                  ? strategicRecommendationDecision?.language === "Turkish"
-                    ? " (Planlama Varsayımı)"
-                    : " (Planning Assumption)"
-                  : "";
+              const numericAssumptionSuffix = classification?.provenance
+                ? ` (${localizeRecommendationProvenance(classification.provenance, strategicRecommendationDecision?.language || "English")})`
+                : "";
               const fields = [
                 { label: "Owner", value: owner },
                 { label: "Timeline", value: timeframe ? `${timeframe}${numericAssumptionSuffix}` : "" },
@@ -3385,6 +3389,11 @@ function ReportSectionVisual({
                         {classification ? (
                           <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-zinc-400">
                             {classification.actionTypeLabel}
+                          </span>
+                        ) : null}
+                        {classification?.relatedEvidenceGapId ? (
+                          <span className="rounded-full border border-teal-200/20 bg-teal-200/[0.06] px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-teal-200">
+                            → {classification.relatedDecisionThreshold?.gapLabel}
                           </span>
                         ) : null}
                       </div>

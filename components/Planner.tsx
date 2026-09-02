@@ -162,7 +162,6 @@ import {
   resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
   resolveMarketIntelligenceConfidenceFactors,
   constrainMarketSizingResolutionToCanonicalState,
-  classifyStrategicRecommendationAction,
   resolveMarketIntelligenceDecisionEvidenceLevel,
   resolveMarketIntelligenceCagrEvidenceLevel,
   type MarketIntelligenceCanonicalState,
@@ -172,6 +171,8 @@ import {
   selectTopMarketIntelligenceEvidenceGaps,
   buildMarketIntelligenceGapDrivenActions,
   resolveMarketIntelligenceDecisionThresholdState,
+  classifyStrategicRecommendationValidation,
+  localizeRecommendationProvenance,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
   localizeMarketConfidenceFactorLevel,
@@ -5466,20 +5467,23 @@ if (field === "swotAnalysis") {
               // strategic-recommendation branch for the full comment;
               // both files must classify and gate cards identically so
               // web and PDF never disagree.
+              // TASK #38 -- classifyStrategicRecommendationValidation
+              // wraps the same Task #31 classification with a finer
+              // evidence/benchmark/planning-assumption/validation-target
+              // provenance and, when structurally safe (a single
+              // controlling evidence gap, never prose-matched), a link to
+              // that canonical gap and its decision threshold.
               const classification = isMarketIntelligence
-                ? classifyStrategicRecommendationAction({
+                ? classifyStrategicRecommendationValidation({
                     item,
                     signals,
                     canonicalState: marketIntelligenceCanonicalState,
                     language: strategicRecommendationDecision?.language || "English",
                   })
                 : null;
-              const numericAssumptionSuffix =
-                classification?.numericBasis === "planning_assumption"
-                  ? strategicRecommendationDecision?.language === "Turkish"
-                    ? " (Planlama Varsayımı)"
-                    : " (Planning Assumption)"
-                  : "";
+              const numericAssumptionSuffix = classification?.provenance
+                ? ` (${localizeRecommendationProvenance(classification.provenance, strategicRecommendationDecision?.language || "English")})`
+                : "";
               const fields = [
                 { label: "Owner", value: owner },
                 { label: "Timeline", value: timeframe ? `${timeframe}${numericAssumptionSuffix}` : "" },
@@ -5502,6 +5506,11 @@ if (field === "swotAnalysis") {
                         {classification ? (
                           <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-zinc-400">
                             {classification.actionTypeLabel}
+                          </span>
+                        ) : null}
+                        {classification?.relatedEvidenceGapId ? (
+                          <span className="rounded-full border border-teal-200/20 bg-teal-200/[0.06] px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-teal-200">
+                            → {classification.relatedDecisionThreshold?.gapLabel}
                           </span>
                         ) : null}
                       </div>
@@ -8547,18 +8556,21 @@ const ReportPanel = memo(function ReportPanel({
         // identical strategic-recommendation layout function for the full
         // comment. Computed HERE (not just at draw time) since the
         // effective gate directly affects gateReservedHeight below.
-        const classification = classifyStrategicRecommendationAction({
+        // TASK #38 -- classifyStrategicRecommendationValidation wraps
+        // the same Task #31 classification with a finer evidence/
+        // benchmark/planning-assumption/validation-target provenance and,
+        // when structurally safe, a link to the single controlling
+        // evidence gap and its decision threshold. Mirrors the identical
+        // fix in ReportPdfButton.tsx.
+        const classification = classifyStrategicRecommendationValidation({
           item,
           signals,
           canonicalState: marketIntelligenceCanonicalState,
           language: pdfLocale === "tr" ? "Turkish" : "English",
         });
-        const numericAssumptionSuffix =
-          classification.numericBasis === "planning_assumption"
-            ? pdfLocale === "tr"
-              ? " (Planlama Varsayımı)"
-              : " (Planning Assumption)"
-            : "";
+        const numericAssumptionSuffix = classification.provenance
+          ? ` (${localizeRecommendationProvenance(classification.provenance, pdfLocale === "tr" ? "Turkish" : "English")})`
+          : "";
         const effectiveGate = gate || classification.downgradeReason || "";
         pdf.setFontSize(6);
         // TASK #25C -- confirmed live (real persisted report): capping
@@ -10173,7 +10185,7 @@ const ReportPanel = memo(function ReportPanel({
 	                // TASK #31 -- see ReportPdfButton.tsx's identical draw
 	                // branch for the full comment.
 	                drawRecommendationFieldValue(
-	                  `${localizePdfPresentationLabel("ACTION", pdfLocale)} · ${classification.actionTypeLabel.toUpperCase()}`,
+	                  `${localizePdfPresentationLabel("ACTION", pdfLocale)} · ${classification.actionTypeLabel.toUpperCase()}${classification.relatedEvidenceGapId ? ` → ${classification.relatedDecisionThreshold?.gapLabel.toUpperCase()}` : ""}`,
 	                  x + 11,
 	                  cardY + 4,
 	                  cardWidth - 13,

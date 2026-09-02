@@ -80,12 +80,13 @@ import {
   readMarketIntelligenceCanonicalState,
   resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
   constrainMarketSizingResolutionToCanonicalState,
-  classifyStrategicRecommendationAction,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
   resolveMarketIntelligenceDecisionChangeState,
   buildMarketIntelligenceGapDrivenActions,
   resolveMarketIntelligenceDecisionThresholdState,
+  classifyStrategicRecommendationValidation,
+  localizeRecommendationProvenance,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
   repairReportLanguageSections,
@@ -4472,18 +4473,20 @@ export function buildStandardReportPdf({
         // not just at draw time, since it directly affects gateReservedHeight
         // below -- drawing a longer auto-generated caution line than the
         // card reserved room for would silently overlap the next card.
-        const classification = classifyStrategicRecommendationAction({
+        // TASK #38 -- classifyStrategicRecommendationValidation wraps
+        // the same Task #31 classification with a finer evidence/
+        // benchmark/planning-assumption/validation-target provenance and,
+        // when structurally safe, a link to the single controlling
+        // evidence gap and its decision threshold.
+        const classification = classifyStrategicRecommendationValidation({
           item,
           signals,
           canonicalState: recommendationCanonicalState,
           language: pdfLocale === "tr" ? "Turkish" : "English",
         });
-        const numericAssumptionSuffix =
-          classification.numericBasis === "planning_assumption"
-            ? pdfLocale === "tr"
-              ? " (Planlama Varsayımı)"
-              : " (Planning Assumption)"
-            : "";
+        const numericAssumptionSuffix = classification.provenance
+          ? ` (${localizeRecommendationProvenance(classification.provenance, pdfLocale === "tr" ? "Turkish" : "English")})`
+          : "";
         const effectiveGate = gate || classification.downgradeReason || "";
         pdf.setFontSize(6);
         // TASK #25C -- confirmed live (real persisted report): capping
@@ -6563,7 +6566,7 @@ export function buildStandardReportPdf({
                 // available width exactly like every other field value
                 // already does via drawRecommendationFieldValue.
                 drawRecommendationFieldValue(
-                  `${localizePdfPresentationLabel("ACTION", pdfLocale)} · ${classification.actionTypeLabel.toUpperCase()}`,
+                  `${localizePdfPresentationLabel("ACTION", pdfLocale)} · ${classification.actionTypeLabel.toUpperCase()}${classification.relatedEvidenceGapId ? ` → ${classification.relatedDecisionThreshold?.gapLabel.toUpperCase()}` : ""}`,
                   x + 11,
                   cardY + 4,
                   cardWidth - 13,
