@@ -2054,8 +2054,17 @@ export function extractRecommendationSignals(line: string) {
     explicitOwner ||
     line.match(new RegExp(`\\b(?:owned by|led by|driven by|owner:)\\s+(?:the\\s+)?(${recommendationOwnerRolePattern})\\b`, "i"))?.[1] ||
     line.match(new RegExp(`\\b(${recommendationOwnerRolePattern})\\b`, "i"))?.[1];
+  // TASK #42 -- confirmed live: `[^.]*` stopped at the FIRST period
+  // found, with no concept of a decimal point, so a gate sentence naming
+  // a real figure ("before committing further budget beyond $1.5M in
+  // this cycle.") was silently cut at the decimal point ("before
+  // committing further budget beyond $1"). The inline alternative
+  // `(?<=\d)\.(?=\d)` treats a period as "safe to continue past" only
+  // when it sits between two digits (a genuine decimal point) -- a real
+  // sentence-ending period (never preceded-and-followed by digits) still
+  // stops the match exactly as before.
   const gate = line.match(
-    /\bbefore\s+(?:committing\s+(?:further\s+)?(?:budget|spend)|scaling(?:\s+further)?|the\s+next\s+decision|proceeding|expanding|the\s+next\s+phase)\b[^.]*/i
+    /\bbefore\s+(?:committing\s+(?:further\s+)?(?:budget|spend)|scaling(?:\s+further)?|the\s+next\s+decision|proceeding|expanding|the\s+next\s+phase)\b(?:[^.]|(?<=\d)\.(?=\d))*/i
   )?.[0];
   // TASK #29H -- the ticket's own "conceptual structure" (title/action,
   // owner, budget, activity, successCriterion, evidenceTie) explicitly

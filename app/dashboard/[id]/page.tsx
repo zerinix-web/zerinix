@@ -407,8 +407,41 @@ function parseMonetaryMagnitude(value: string) {
 // sentence back out -- the same "sentence containing the label" technique
 // extractForceImplication uses for Porter's Five Forces -- rather than
 // fabricating a generic assumption line when none exists.
+//
+// TASK #42 -- confirmed live (root cause of the reported "TAM: $1."
+// truncation): `[^.\n]*` stops at the FIRST period found, with no
+// concept of a decimal point -- for "TAM: $1.5B is the total addressable
+// market...", the decimal point in "$1.5B" itself was mistaken for the
+// sentence's own terminating period, silently cutting the match down to
+// "TAM: $1." before this function's own caller ever draws anything.
+// sentenceSafeSegmentPattern replaces the plain `[^.\n]*` with a version
+// that also accepts a period specifically when it sits BETWEEN two
+// digits (a decimal point, per the lookbehind/lookahead) -- so only a
+// genuine sentence-ending period (never preceded-and-followed by digits)
+// can end the match. Never widens what this function returns beyond the
+// real sentence boundary: a real period elsewhere (a true sentence end)
+// still stops the match exactly as before. Declared locally (not at
+// module scope) so the function stays self-contained if ever isolated.
 function extractMarketSizeAssumption(content: string, label: string) {
-  const match = content.match(new RegExp(`[^.\\n]*\\b${label}\\b[^.\\n]*\\.`, "i"));
+  const sentenceSafeSegmentPattern = "(?:[^.\\n]|(?<=\\d)\\.(?=\\d))*";
+  // TASK #42A -- confirmed live: a bare `\.` terminator still lets the
+  // regex engine BACKTRACK onto a decimal point as "the sentence-ending
+  // period" whenever the row has no real trailing sentence of its own
+  // (the real production shape, e.g. "TAM: $1.5B\nSAM: ...\nSOM: ...",
+  // reproduces "TAM: $1." even with sentenceSafeSegmentPattern, since
+  // consuming the decimal in the safe segment is only OPTIONAL and the
+  // greedy match backtracks to the nearest available period once it
+  // finds no real sentence end). sentenceTerminatorPattern refuses to
+  // let a decimal point (digit before AND after) ever satisfy the
+  // terminator itself, so a row with no genuine trailing sentence
+  // simply fails to match (returns "") instead of truncating mid-number.
+  const sentenceTerminatorPattern = "(?:(?<!\\d)\\.|\\.(?!\\d))";
+  const match = content.match(
+    new RegExp(
+      `${sentenceSafeSegmentPattern}\\b${label}\\b${sentenceSafeSegmentPattern}${sentenceTerminatorPattern}`,
+      "i"
+    )
+  );
 
   return match ? match[0].trim().replace(/^[-*•]\s+/, "") : "";
 }
@@ -1443,11 +1476,31 @@ function extractForceIntensity(content: string, force: string) {
 // card's investor interpretation, rather than only a bare intensity
 // label. Returns "" (never a fabricated implication) when the force
 // isn't discussed in its own sentence.
+//
+// TASK #42 -- defines its own local sentenceSafeSegmentPattern (see
+// extractMarketSizeAssumption's own comment above) for the identical
+// reason: a force's own implication sentence routinely names a real
+// figure ("...given average deal sizes of $2.5M across named
+// accounts."), and the plain `[^.\n]*` this used to use would mistake
+// that decimal point for the sentence's own end.
+//
+// TASK #42A -- also mirrors extractMarketSizeAssumption's
+// sentenceTerminatorPattern fix: a bare `\.` terminator still lets the
+// match backtrack onto a decimal point when the force's own sentence
+// has no real trailing period within this safe segment's reach, so the
+// terminator itself must refuse to accept a digit-digit decimal point.
 function extractForceImplication(content: string, force: string) {
+  const sentenceSafeSegmentPattern = "(?:[^.\\n]|(?<=\\d)\\.(?=\\d))*";
+  const sentenceTerminatorPattern = "(?:(?<!\\d)\\.|\\.(?!\\d))";
   const aliases = forceAliases[force] || [force];
 
   for (const alias of aliases) {
-    const match = content.match(new RegExp(`[^.\\n]*\\b(?:${alias})\\b[^.\\n]*\\.`, "i"));
+    const match = content.match(
+      new RegExp(
+        `${sentenceSafeSegmentPattern}\\b(?:${alias})\\b${sentenceSafeSegmentPattern}${sentenceTerminatorPattern}`,
+        "i"
+      )
+    );
 
     if (match) {
       return match[0].trim().replace(/^[-*•]\s+/, "");

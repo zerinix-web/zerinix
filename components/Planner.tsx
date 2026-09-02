@@ -1712,8 +1712,48 @@ function extractMarketLevelDescription(content: string, label: string) {
 // deliberately strips out anything after an "assumption:"/"confidence:"
 // label, so it cannot supply this on its own; used only as the fallback
 // when no full assumption sentence is present.
+//
+// TASK #42 -- confirmed live: this is the exact root cause of the
+// reported "TAM: $1." PDF truncation (this file draws its own PDF
+// separately from ReportPdfButton.tsx, via an identical copy of this
+// function). `[^.\n]*` stopped at the FIRST period found, with no
+// concept of a decimal point -- for "TAM: $1.5B is the total addressable
+// market...", the decimal point in "$1.5B" itself was mistaken for the
+// sentence's own terminating period, cutting the match down to "TAM:
+// $1." before this function's own caller ever drew anything.
+// sentenceSafeSegmentPattern replaces the plain `[^.\n]*` with a version
+// that also accepts a period specifically when it sits BETWEEN two
+// digits (a decimal point, per the lookbehind/lookahead) -- so only a
+// genuine sentence-ending period (never preceded-and-followed by digits)
+// can end the match. Never widens what this function returns beyond the
+// real sentence boundary: a real period elsewhere (a true sentence end)
+// still stops the match exactly as before. Mirrors the identical fix in
+// page.tsx/ReportPdfButton.tsx. Declared locally (not at module scope)
+// so the function stays self-contained if ever isolated.
 function extractMarketSizeAssumption(content: string, label: string) {
-  const match = content.match(new RegExp(`[^.\\n]*\\b${label}\\b[^.\\n]*\\.`, "i"));
+  const sentenceSafeSegmentPattern = "(?:[^.\\n]|(?<=\\d)\\.(?=\\d))*";
+  // TASK #42A -- confirmed live against the ACTUAL Download PDF path:
+  // this is the exact reason the reported "TAM: $1." defect still
+  // reproduced after Task #42. A bare `\.` terminator still lets the
+  // regex engine BACKTRACK onto a decimal point as "the sentence-ending
+  // period" whenever the row has no real trailing sentence of its own
+  // -- and the REAL production section content is exactly that shape:
+  // "TAM: $1.5B\nSAM: ...\nSOM: ..." (each layer its own line, no
+  // trailing explanation sentence on the TAM line itself). Consuming
+  // the decimal in the safe segment is only OPTIONAL, so the greedy
+  // match backtracks to the nearest available period once it finds no
+  // real sentence end, and that nearest period is the decimal itself.
+  // sentenceTerminatorPattern refuses to let a decimal point (digit
+  // before AND after) ever satisfy the terminator, so a row with no
+  // genuine trailing sentence simply fails to match (returns "", drawn
+  // as no supporting line at all) instead of truncating mid-number.
+  const sentenceTerminatorPattern = "(?:(?<!\\d)\\.|\\.(?!\\d))";
+  const match = content.match(
+    new RegExp(
+      `${sentenceSafeSegmentPattern}\\b${label}\\b${sentenceSafeSegmentPattern}${sentenceTerminatorPattern}`,
+      "i"
+    )
+  );
 
   return match ? match[0].trim().replace(/^[-*•]\s+/, "") : "";
 }
@@ -2395,11 +2435,31 @@ function extractForceIntensity(content: string, force: string) {
 // card's investor interpretation, rather than only a bare intensity
 // label. Returns "" (never a fabricated implication) when the force
 // isn't discussed in its own sentence.
+//
+// TASK #42 -- defines its own local sentenceSafeSegmentPattern (see
+// extractMarketSizeAssumption's own comment above) for the identical
+// reason: a force's own implication sentence routinely names a real
+// figure ("...given average deal sizes of $2.5M across named
+// accounts."), and the plain `[^.\n]*` this used to use would mistake
+// that decimal point for the sentence's own end.
+//
+// TASK #42A -- also mirrors extractMarketSizeAssumption's
+// sentenceTerminatorPattern fix: a bare `\.` terminator still lets the
+// match backtrack onto a decimal point when the force's own sentence
+// has no real trailing period within this safe segment's reach, so the
+// terminator itself must refuse to accept a digit-digit decimal point.
 function extractForceImplication(content: string, force: string) {
+  const sentenceSafeSegmentPattern = "(?:[^.\\n]|(?<=\\d)\\.(?=\\d))*";
+  const sentenceTerminatorPattern = "(?:(?<!\\d)\\.|\\.(?!\\d))";
   const aliases = forceAliases[force] || [force];
 
   for (const alias of aliases) {
-    const match = content.match(new RegExp(`[^.\\n]*\\b(?:${alias})\\b[^.\\n]*\\.`, "i"));
+    const match = content.match(
+      new RegExp(
+        `${sentenceSafeSegmentPattern}\\b(?:${alias})\\b${sentenceSafeSegmentPattern}${sentenceTerminatorPattern}`,
+        "i"
+      )
+    );
 
     if (match) {
       return match[0].trim().replace(/^[-*•]\s+/, "");
