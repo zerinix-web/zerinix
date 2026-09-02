@@ -71,6 +71,8 @@ import {
   readFounderReadinessScoreValue,
   resolveMarketSizingCascade,
   deriveMarketSizeMetricEvidenceLevel,
+  protectSentenceAbbreviations,
+  restoreSentenceAbbreviations,
   stripLeadingTakeawaySentence,
 } from "@/app/lib/report-presentation";
 import type {
@@ -3840,13 +3842,25 @@ function removeDuplicatePdfExecutiveInsightText(content: string) {
     .trim();
 }
 
+// TASK #45A -- confirmed live against the real Download PDF path: this
+// used to split on ANY period/!/? with no abbreviation awareness at
+// all, so a sentence like "...documented price lists (e.g. South
+// Carolina)..." was split right after "e.g." into two fragments. The
+// caller (formatPdfReadableContent) then injects a synthetic "Key
+// insights" heading between whichever two sentences happen to fall on
+// either side of the split -- for this exact defect, that heading (and
+// its own leading bullet on the next fragment) landed INSIDE the
+// original sentence's own parenthetical, producing the reported
+// "documented price lists (e.g. Key insights •, South Carolina)"
+// artifact. protectSentenceAbbreviations/restoreSentenceAbbreviations
+// (report-presentation.ts's own established fix for the identical
+// problem in splitSentences/extractRecommendationSignals) protects
+// every known abbreviation's periods before splitting, so "e.g." (and
+// "U.S.", "Mr.", etc.) can never be mistaken for a sentence boundary.
 function splitPdfSentences(content: string) {
-  return (
-    normalizePdfText(content)
-      .replace(/\n+/g, " ")
-      .match(/[^.!?]+[.!?]+|[^.!?]+$/g) || []
-  )
-    .map((sentence) => sentence.trim())
+  const flattened = normalizePdfText(content).replace(/\n+/g, " ");
+  return (protectSentenceAbbreviations(flattened).match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [])
+    .map((sentence) => restoreSentenceAbbreviations(sentence.trim()))
     .filter(Boolean);
 }
 
@@ -4006,9 +4020,28 @@ function formatPdfReadableContent(
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+  // TASK #45A -- confirmed live against the real Download PDF path:
+  // this check only ever recognized bullet markers (-*•) or a pipe
+  // table as "already structured" -- a genuinely enumerated section
+  // (e.g. Opportunities' own "1) ... 2) ... 3) ... 4) ..." items,
+  // written as ONE continuous paragraph rather than one item per line)
+  // fell through as "unstructured" and was destructively re-flowed by
+  // the sentence-splitting below into a synthetic paragraph + "Key
+  // insights" + bullet list -- corrupting the original numbering and
+  // prefixing a stray "• " directly in front of whichever items landed
+  // in the bullet slice (the reported "stray bullet markers before
+  // items 3 and 4"). Bounded to 1-20 (a realistic item-count range) and
+  // requiring a following capital letter to avoid misreading a year
+  // ("2024.") or a decimal figure ("3.5%") as a list marker; requiring
+  // at least 2 occurrences so a single incidental "1." in running prose
+  // doesn't false-positive.
+  const numberedListMarkerCount = (
+    normalized.match(/(?:^|\n|\s)(?:[1-9]|1\d|20)[).]\s+[A-Z]/g) || []
+  ).length;
   const alreadyStructured =
     lines.some((line) => /^[-*•]\s+/.test(line) || /^\|/.test(line)) ||
-    lines.length >= 4;
+    lines.length >= 4 ||
+    numberedListMarkerCount >= 2;
 
   if (normalized.length < 520 || alreadyStructured) {
     return normalized;
@@ -8690,6 +8723,15 @@ const ReportPanel = memo(function ReportPanel({
       // space the visual needs.
       const competitorHeaderHeight = 8;
       const competitorRowHeight = 15;
+      // TASK #45 -- a SEPARATE header height (not competitorHeaderHeight,
+      // which the generic Business Plan/Acquisition table and the MI
+      // genuinely-empty state both still use unchanged) for the real
+      // Market Intelligence full-table state only, wide enough to fit
+      // the new "Vendor Confidence... does not verify..." scoping
+      // caption above the column headers -- shared here (not declared
+      // locally inside drawPdfVisual) so getPdfVisualHeight's budget and
+      // drawPdfVisual's own drawing can never independently drift apart.
+      const miCompetitorHeaderHeight = 12;
       // P0 PRODUCTION FIX -- confirmed live (Market Intelligence PDF
       // layout hardening): mirrors the identical fix in
       // ReportPdfButton.tsx -- see its own comment for the full root
@@ -9212,7 +9254,16 @@ const ReportPanel = memo(function ReportPanel({
                 50
               );
             }
-            return competitorHeaderHeight + Math.max(1, rows.length) * competitorRowHeight + 4 + 8 + 50;
+            // TASK #45 -- must match drawPdfVisual's own two distinct
+            // header heights exactly: the genuinely-empty state
+            // (rows.length === 0, falls through here) still draws
+            // through the ORIGINAL 8mm competitorHeaderHeight with no
+            // caption/columns of its own; the real full-table state
+            // (rows.length >= minCompetitorTableRows) now draws through
+            // the wider 12mm miCompetitorHeaderHeight to fit the new
+            // "Vendor Confidence... does not verify..." scoping caption
+            // above the column headers.
+            return (rows.length === 0 ? competitorHeaderHeight : miCompetitorHeaderHeight) + Math.max(1, rows.length) * competitorRowHeight + 4 + 8 + 50;
           }
           const rows = extractCompetitorRows(section.content);
           if (rows.length === 0) {
@@ -9281,6 +9332,22 @@ const ReportPanel = memo(function ReportPanel({
         if (section.field === "competitiveLandscape") {
           const marketMapGap = 8;
           const marketMapHeight = 50;
+          // TASK #45 -- mirrors the identical fix in ReportPdfButton.tsx:
+          // page.tsx/Planner.tsx's own WEB table already states, in
+          // text, that "Vendor Confidence" only corroborates a vendor's
+          // existence/market relevance -- it does not verify that same
+          // row's Category/Position/Strengths/Weaknesses text (Task
+          // #32). This file's own separate PDF drawer (downloadPdf,
+          // here) only ever renamed the column label to match but never
+          // carried the caption itself over, so a PDF-only reader had
+          // no signal that citation-backed vendor existence does not
+          // verify every other attribute in the same row. See
+          // miCompetitorHeaderHeight's own declaration above (shared
+          // with getPdfVisualHeight) for the reserved-height fix.
+          const vendorConfidenceScopeCaption =
+            pdfLocale === "tr"
+              ? "Tedarikçi Güveni yalnızca şirketin varlığını ve pazar ilgisini yansıtır -- kategori, konum, güçlü veya zayıf yönleri doğrulamaz."
+              : "Vendor Confidence reflects existence and market relevance only -- not category, position, strengths, or weaknesses.";
 
           // Market Intelligence gets its own real column set (see
           // extractMarketIntelligenceCompetitorRows' own comment) -- the
@@ -9348,7 +9415,7 @@ const ReportPanel = memo(function ReportPanel({
               bodyX,
               visualY,
               visualWidth,
-              namesLayout ? namesLayout.totalHeight : competitorHeaderHeight + Math.max(1, miRows.length) * competitorRowHeight,
+              namesLayout ? namesLayout.totalHeight : miCompetitorHeaderHeight + Math.max(1, miRows.length) * competitorRowHeight,
               3,
               3,
               "FD"
@@ -9376,10 +9443,16 @@ const ReportPanel = memo(function ReportPanel({
                 maxWidth: visualWidth - 6,
               });
             } else {
+              // TASK #45 -- see this branch's own top-of-block comment.
+              pdf.setFontSize(4.6);
+              pdf.setTextColor("#71717a");
+              pdf.text(localizePdfPresentationText(vendorConfidenceScopeCaption, pdfLocale), bodyX + 3, visualY + 3.6, {
+                maxWidth: visualWidth - 6,
+              });
               pdf.setFontSize(5.8);
               pdf.setTextColor("#5eead4");
               miColumns.forEach((column) => {
-                pdf.text(column.label.toUpperCase(), miX + 2, visualY + 5.2, { maxWidth: column.width - 4 });
+                pdf.text(column.label.toUpperCase(), miX + 2, visualY + 9.5, { maxWidth: column.width - 4 });
                 miX += column.width;
               });
             }
@@ -9479,7 +9552,7 @@ const ReportPanel = memo(function ReportPanel({
             }
 
             miRows.forEach((row, rowIndex) => {
-              const rowY = visualY + competitorHeaderHeight + rowIndex * competitorRowHeight;
+              const rowY = visualY + miCompetitorHeaderHeight + rowIndex * competitorRowHeight;
               const values = [row.vendor, row.category, row.position, row.strengths, row.weaknesses, row.relevance, row.validationStatus];
               let cellX = bodyX;
 
@@ -9500,10 +9573,10 @@ const ReportPanel = memo(function ReportPanel({
             });
 
             drawMarketMap(
-              visualY + competitorHeaderHeight + Math.max(1, miRows.length) * competitorRowHeight + 4 + marketMapGap
+              visualY + miCompetitorHeaderHeight + Math.max(1, miRows.length) * competitorRowHeight + 4 + marketMapGap
             );
             return (
-              competitorHeaderHeight +
+              miCompetitorHeaderHeight +
               Math.max(1, miRows.length) * competitorRowHeight +
               4 +
               marketMapGap +

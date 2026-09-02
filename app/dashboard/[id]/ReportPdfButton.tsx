@@ -5532,6 +5532,29 @@ export function buildStandardReportPdf({
           const rowHeight = 15;
           const marketMapGap = 8;
           const marketMapHeight = 50;
+          // TASK #45 -- confirmed live: page.tsx/Planner.tsx's web table
+          // already states, in text, that "Vendor Confidence" only
+          // corroborates a vendor's own existence/market relevance -- it
+          // does NOT verify that same row's Category/Position/Strengths/
+          // Weaknesses text (Task #32's own fix). The PDF's identical
+          // full 7-column table only ever renamed the column label (see
+          // miColumns below) but never carried this caption over, so a
+          // PDF-only reader had no signal that citation-backed vendor
+          // existence does not verify every other attribute in the same
+          // row -- exactly the "citation exists = claim verified" risk
+          // this ticket exists to close, and the one place web and PDF
+          // genuinely disagreed on it (the compact/sparse competitor
+          // states below already carry equivalent scoping language of
+          // their own -- adjacentPlayersOnlyIntro/sparseCompetitorTableIntro
+          // -- so only the full-table header band needs this addition).
+          // miHeaderHeight is a SEPARATE constant from headerHeight
+          // (used unchanged by the generic Business Plan/Acquisition
+          // table below) so this stays Market-Intelligence-scoped.
+          const vendorConfidenceScopeCaption =
+            pdfLocale === "tr"
+              ? "Tedarikçi Güveni yalnızca şirketin varlığını ve pazar ilgisini yansıtır -- kategori, konum, güçlü veya zayıf yönleri doğrulamaz."
+              : "Vendor Confidence reflects existence and market relevance only -- not category, position, strengths, or weaknesses.";
+          const miHeaderHeight = 12;
 
           // Market Intelligence gets its own real column set (see
           // extractMarketIntelligenceCompetitorRows' own comment) -- the
@@ -5609,7 +5632,7 @@ export function buildStandardReportPdf({
               bodyX,
               visualY,
               bodyWidth,
-              namesLayout ? namesLayout.totalHeight : headerHeight + Math.max(1, miRows.length) * rowHeight,
+              namesLayout ? namesLayout.totalHeight : miHeaderHeight + Math.max(1, miRows.length) * rowHeight,
               3,
               3,
               "FD"
@@ -5637,10 +5660,16 @@ export function buildStandardReportPdf({
                 maxWidth: bodyWidth - 6,
               });
             } else {
+              // TASK #45 -- see this branch's own top-of-block comment.
+              pdf.setFontSize(4.6);
+              pdf.setTextColor("#71717a");
+              pdf.text(localizePdfPresentationText(vendorConfidenceScopeCaption, pdfLocale), bodyX + 3, visualY + 3.6, {
+                maxWidth: bodyWidth - 6,
+              });
               pdf.setFontSize(5.8);
               pdf.setTextColor("#5eead4");
               miColumns.forEach((column) => {
-                pdf.text(column.label.toUpperCase(), miX + 2, visualY + 5.2, { maxWidth: column.width - 4 });
+                pdf.text(column.label.toUpperCase(), miX + 2, visualY + 9.5, { maxWidth: column.width - 4 });
                 miX += column.width;
               });
             }
@@ -5746,7 +5775,7 @@ export function buildStandardReportPdf({
             }
 
             miRows.forEach((row, rowIndex) => {
-              const rowY = visualY + headerHeight + rowIndex * rowHeight;
+              const rowY = visualY + miHeaderHeight + rowIndex * rowHeight;
               const values = [row.vendor, row.category, row.position, row.strengths, row.weaknesses, row.relevance, row.validationStatus];
               let cellX = bodyX;
 
@@ -5764,8 +5793,8 @@ export function buildStandardReportPdf({
               });
             });
 
-            drawMarketMap(visualY + headerHeight + Math.max(1, miRows.length) * rowHeight + 4 + marketMapGap);
-            return headerHeight + Math.max(1, miRows.length) * rowHeight + 4 + marketMapGap + marketMapHeight;
+            drawMarketMap(visualY + miHeaderHeight + Math.max(1, miRows.length) * rowHeight + 4 + marketMapGap);
+            return miHeaderHeight + Math.max(1, miRows.length) * rowHeight + 4 + marketMapGap + marketMapHeight;
           }
 
           const rows = extractCompetitorRows(content);
@@ -6365,7 +6394,16 @@ export function buildStandardReportPdf({
                 50
               );
             }
-            return 8 + Math.max(1, rows.length) * 15 + 4 + 8 + 50;
+            // TASK #45 -- must match drawSectionVisual's own two distinct
+            // header heights exactly: the genuinely-empty state (rows.length
+            // === 0, falls through here) still draws through the ORIGINAL
+            // 8mm headerHeight with no caption/columns of its own; the real
+            // full-table state (rows.length >= minCompetitorTableRows) now
+            // draws through the wider 12mm miHeaderHeight to fit the new
+            // "Vendor Confidence... does not verify..." scoping caption
+            // above the column headers. Sharing one flat constant here
+            // would silently under-report the full table's real height.
+            return (rows.length === 0 ? 8 : 12) + Math.max(1, rows.length) * 15 + 4 + 8 + 50;
           }
           const rows = extractCompetitorRows(section.content);
           if (rows.length === 0) {

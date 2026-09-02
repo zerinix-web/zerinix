@@ -86,7 +86,7 @@ async function compileFunction(source, functionName) {
           // terminator, so this isolated module needs them too.
           reportPresentationSource.match(/export const SENTENCE_ABBREVIATIONS = \[[\s\S]*?\n\];/)?.[0],
           reportPresentationSource.match(
-            /function protectSentenceAbbreviations\([\s\S]*?\n\}\n\nfunction restoreSentenceAbbreviations\([\s\S]*?\n\}/
+            /(?:export )?function protectSentenceAbbreviations\([\s\S]*?\n\}\n\n(?:export )?function restoreSentenceAbbreviations\([\s\S]*?\n\}/
           )?.[0],
           reportPresentationSource.match(/export const recommendationOwnerRolePattern =[\s\S]*?;/)?.[0],
         ].join("\n\n")

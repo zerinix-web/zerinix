@@ -258,14 +258,23 @@ export const SENTENCE_ABBREVIATIONS = [
   "a.m.", "p.m.", "No.", "approx.",
 ];
 
-function protectSentenceAbbreviations(value: string) {
+// TASK #45A -- exported (was module-private) so other files' own
+// sentence-splitting logic can reuse this SAME abbreviation-protection
+// primitive instead of maintaining a second, driftable copy or (worse)
+// splitting sentences with no abbreviation awareness at all. See
+// components/Planner.tsx's splitPdfSentences for the confirmed real
+// defect this unblocked: a PDF-only paragraph-to-bullets restructuring
+// pass split "...documented price lists (e.g. South Carolina)..."
+// right after "e.g.", splicing a synthetic "Key insights" heading into
+// the middle of that sentence's own parenthetical.
+export function protectSentenceAbbreviations(value: string) {
   return SENTENCE_ABBREVIATIONS.reduce((acc, abbreviation) => {
     const escaped = abbreviation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return acc.replace(new RegExp(escaped, "g"), abbreviation.replace(/\./g, "\u0000"));
   }, value);
 }
 
-function restoreSentenceAbbreviations(value: string) {
+export function restoreSentenceAbbreviations(value: string) {
   return value.replace(/\u0000/g, ".");
 }
 

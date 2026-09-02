@@ -111,7 +111,7 @@ const functionDependencies = {
   // both alongside the pre-existing dependency.
   extractRecommendationSignals: [
     /export const SENTENCE_ABBREVIATIONS = \[[\s\S]*?\n\];/,
-    /function protectSentenceAbbreviations\([\s\S]*?\n\}\n\nfunction restoreSentenceAbbreviations\([\s\S]*?\n\}/,
+    /(?:export )?function protectSentenceAbbreviations\([\s\S]*?\n\}\n\n(?:export )?function restoreSentenceAbbreviations\([\s\S]*?\n\}/,
     /export const recommendationOwnerRolePattern =[\s\S]*?;/,
   ],
   // A later ticket ("RESTORE PREMIUM ANALYTICAL DEPTH") split

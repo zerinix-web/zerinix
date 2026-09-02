@@ -181,7 +181,11 @@ test("ReportPdfButton.tsx: the competitor-table drawing branch forks on isMarket
 test("ReportPdfButton.tsx: getVisualHeight's competitor-table branch computes height from the SAME row source AND the SAME names-only/sparse fallbacks the drawing branch will actually use for each report type (isMarketIntelligenceReport gates the row source, both fallback tiers, and the Market Map height addend)", () => {
   const heightBlock = pdfButtonSource.slice(
     pdfButtonSource.lastIndexOf('if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {'),
-    pdfButtonSource.lastIndexOf('if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {') + 2400
+    // TASK #45 -- widened from 2400: the getVisualHeight return line grew
+    // a short explanatory comment when its header-height budget was
+    // split between the empty state (8) and the real full-table state
+    // (12, to fit the new Vendor Confidence scoping caption).
+    pdfButtonSource.lastIndexOf('if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {') + 3000
   );
   assert.match(
     heightBlock,
@@ -200,7 +204,13 @@ test("ReportPdfButton.tsx: getVisualHeight's competitor-table branch computes he
     /\} else if \(rows\.length < minCompetitorTableRows\) \{\s*\n\s*return \(\s*\n\s*getNamesOnlyCompetitorLayout\(\s*\n\s*rows\.map\(\(row\) => row\.vendor \|\| "Vendor"\),\s*\n\s*bodyWidth,\s*\n\s*sparseCompetitorTableIntro\s*\n\s*\)\.totalHeight/,
     "the sparse-rows tier must use the same sparseCompetitorTableIntro-based layout"
   );
-  assert.match(heightBlock, /return 8 \+ Math\.max\(1, rows\.length\) \* 15 \+ 4 \+ 8 \+ 50;/);
+  // TASK #45 -- the full-table state's header height grew from 8 to 12
+  // (both here and in the matching drawing branch) to fit the new
+  // "Vendor Confidence... does not verify..." scoping caption; the
+  // genuinely-empty state (rows.length === 0, falling through to this
+  // same return) still uses the original 8, since it draws no caption
+  // or columns at all.
+  assert.match(heightBlock, /return \(rows\.length === 0 \? 8 : 12\) \+ Math\.max\(1, rows\.length\) \* 15 \+ 4 \+ 8 \+ 50;/);
   assert.match(heightBlock, /const rows = extractCompetitorRows\(section\.content\);\s*\n\s*if \(rows\.length === 0\) \{\s*\n\s*return 8 \+ 15 \+ 4;\s*\n\s*\}/);
   assert.match(
     heightBlock,
@@ -218,7 +228,11 @@ test("ReportPdfButton.tsx: the old generic company/positioning-shaped inferMarke
 test("Planner.tsx's downloadPdf: the competitor-table drawing branch (drawPdfVisual, field === \"competitiveLandscape\") forks on isMarketIntelligence BEFORE falling back to the generic extractCompetitorRows path", () => {
   const block = plannerSource.slice(
     plannerSource.indexOf('if (section.field === "competitiveLandscape") {\n          const marketMapGap = 8;'),
-    plannerSource.indexOf('if (section.field === "competitiveLandscape") {\n          const marketMapGap = 8;') + 13000
+    // TASK #45 -- widened from 13000: this block grew a new
+    // vendorConfidenceScopeCaption constant and its own drawing/height
+    // logic (the PDF-carried "Vendor Confidence... does not verify..."
+    // scoping caption, mirroring ReportPdfButton.tsx's identical fix).
+    plannerSource.indexOf('if (section.field === "competitiveLandscape") {\n          const marketMapGap = 8;') + 14000
   );
   const miForkIndex = block.indexOf("if (isMarketIntelligence) {");
   const miExtractorIndex = block.indexOf("extractMarketIntelligenceCompetitorRows(\n              section.content,");
@@ -239,7 +253,12 @@ test("Planner.tsx's downloadPdf: the competitor-table drawing branch (drawPdfVis
 test("Planner.tsx's downloadPdf: getPdfVisualHeight's competitiveLandscape branch computes height from the SAME row source AND the SAME names-only/sparse fallbacks drawPdfVisual will actually use for each report type", () => {
   const heightBlock = plannerSource.slice(
     plannerSource.indexOf('if (section.field === "competitiveLandscape") {\n          // Row source'),
-    plannerSource.indexOf('if (section.field === "competitiveLandscape") {\n          // Row source') + 2400
+    // TASK #45 -- widened from 2400: the return line grew a short
+    // explanatory comment when its header-height budget was split
+    // between the empty state (competitorHeaderHeight) and the real
+    // full-table state (miCompetitorHeaderHeight, to fit the new
+    // Vendor Confidence scoping caption).
+    plannerSource.indexOf('if (section.field === "competitiveLandscape") {\n          // Row source') + 3000
   );
   assert.match(
     heightBlock,
@@ -258,7 +277,13 @@ test("Planner.tsx's downloadPdf: getPdfVisualHeight's competitiveLandscape branc
     /\} else if \(rows\.length < minCompetitorTableRows\) \{\s*\n\s*return \(\s*\n\s*getNamesOnlyCompetitorLayout\(\s*\n\s*rows\.map\(\(row\) => row\.vendor \|\| "Vendor"\),\s*\n\s*bodyWidth,\s*\n\s*sparseCompetitorTableIntro\s*\n\s*\)\.totalHeight/,
     "the sparse-rows tier must use the same sparseCompetitorTableIntro-based layout"
   );
-  assert.match(heightBlock, /return competitorHeaderHeight \+ Math\.max\(1, rows\.length\) \* competitorRowHeight \+ 4 \+ 8 \+ 50;/);
+  // TASK #45 -- the full-table state's header height grew from
+  // competitorHeaderHeight(8) to miCompetitorHeaderHeight(12) to fit
+  // the new "Vendor Confidence... does not verify..." scoping caption;
+  // the genuinely-empty state (rows.length === 0, falling through to
+  // this same return) still uses the original competitorHeaderHeight,
+  // since it draws no caption or columns at all.
+  assert.match(heightBlock, /return \(rows\.length === 0 \? competitorHeaderHeight : miCompetitorHeaderHeight\) \+ Math\.max\(1, rows\.length\) \* competitorRowHeight \+ 4 \+ 8 \+ 50;/);
   assert.match(heightBlock, /const rows = extractCompetitorRows\(section\.content\);\s*\n\s*if \(rows\.length === 0\) \{\s*\n\s*return competitorHeaderHeight \+ competitorRowHeight \+ 4;\s*\n\s*\}/);
   assert.match(
     heightBlock,
