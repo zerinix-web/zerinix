@@ -6628,7 +6628,11 @@ export function buildStandardReportPdf({
 
           if (marketGapDrivenActions.length > 0) {
             const gapsLabel = pdfLocale === "tr" ? "Kapatılması Gereken Kanıt Boşlukları" : "Evidence Gaps to Close";
-            const gapRowHeight = 20;
+            const thresholdLabel = pdfLocale === "tr" ? "KARAR EŞİĞİ" : "DECISION THRESHOLD";
+            const enterIfLabel = pdfLocale === "tr" ? "GİR EĞER" : "ENTER IF";
+            const monitorIfLabel = pdfLocale === "tr" ? "İZLE EĞER" : "MONITOR IF";
+            const avoidIfLabel = pdfLocale === "tr" ? "KAÇIN EĞER" : "AVOID IF";
+            const gapRowHeight = 36;
 
             let gapCursor = 0;
             let isFirstGapChunk = true;
@@ -6683,6 +6687,51 @@ export function buildStandardReportPdf({
                   pdf.setFontSize(5.4);
                   pdf.setTextColor("#fbbf24");
                   drawRecommendationFieldValue(gapAction.decisionConsequence, bodyX, rowY + 13.8, bodyWidth, 5.4, 4.2);
+
+                  // TASK #36 -- the SAME structured per-gap decision
+                  // threshold the web Strategic Recommendations card
+                  // already renders (resolveMarketIntelligenceDecisionThresholds,
+                  // attached to this action by buildMarketIntelligenceGapDrivenActions)
+                  // -- never a second, independently derived PDF-only
+                  // threshold. "Threshold requires validation" is drawn
+                  // verbatim, exactly like the web card, rather than
+                  // inventing a number for the PDF alone.
+                  pdf.setFontSize(4.2);
+                  pdf.setTextColor("#71717a");
+                  pdf.text(thresholdLabel, bodyX, rowY + 18.2);
+
+                  pdf.setFontSize(4.6);
+                  pdf.setTextColor("#5eead4");
+                  drawRecommendationFieldValue(
+                    `${enterIfLabel} — ${gapAction.threshold.enterCondition.description}`,
+                    bodyX,
+                    rowY + 22.4,
+                    bodyWidth,
+                    4.6,
+                    3.8
+                  );
+
+                  pdf.setFontSize(4.6);
+                  pdf.setTextColor("#a1a1aa");
+                  drawRecommendationFieldValue(
+                    `${monitorIfLabel} — ${gapAction.threshold.monitorCondition.description}`,
+                    bodyX,
+                    rowY + 26.8,
+                    bodyWidth,
+                    4.6,
+                    3.8
+                  );
+
+                  pdf.setFontSize(4.6);
+                  pdf.setTextColor("#fca5a5");
+                  drawRecommendationFieldValue(
+                    `${avoidIfLabel} — ${gapAction.threshold.avoidCondition.description}`,
+                    bodyX,
+                    rowY + 31.2,
+                    bodyWidth,
+                    4.6,
+                    3.8
+                  );
                 });
 
               y += chunkCardHeight + minSectionGap;

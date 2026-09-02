@@ -624,12 +624,239 @@ export function selectTopMarketIntelligenceEvidenceGaps(
 // gating) gaps produce an action here -- a non-gating gap like growth-rate
 // does not warrant a "close this to change the decision" action, since it
 // structurally cannot change the decision on its own.
+// TASK #36 -- Make Market Intelligence decision thresholds explicit and
+// structurally tied to evidence gaps.
+//
+// PROBLEM: Task #35 explains WHAT is missing and WHY it matters, but not
+// WHAT MEASURABLE RESULT from closing that gap would actually move the
+// canonical decision -- a reader knows Obtainable Share is unresolved and
+// that it is "the only unresolved decision-critical factor keeping the
+// decision at MONITOR instead of ENTER," but not what a validation effort
+// would need to show to earn ENTER, what result leaves it at MONITOR, or
+// what result would support AVOID.
+//
+// FIX: a per-gap "decision threshold" -- three conditions (ENTER/MONITOR/
+// AVOID), each either a real number the report's OWN generation-time
+// decision brief (whatWouldChangeThisDecision) already states, or an
+// honest "Threshold requires validation" placeholder. This NEVER invents
+// a universal numeric bar: the only source of a quantified condition is
+// text this exact report already generated for itself, confirmed to
+// actually reference that specific decision token (see
+// extractDecisionLinkedThresholdPhrase below) so a coincidental nearby
+// number is never misattributed to the wrong direction. MONITOR's
+// condition never needs a number at all -- "the status quo persists
+// while this gap stays unresolved" is always true and requires no
+// fabrication.
+//
+// This is NOT a second decision engine: it reads the SAME
+// decisionCriticalEvidence pillars, the SAME canonicalState.decision, and
+// the SAME per-gap data resolveMarketIntelligenceEvidenceGaps already
+// computes -- it only explains, per gap, what result would move each of
+// those existing pillars. No new persisted field and no canonical-state
+// version bump are needed: every input (decision, decisionCriticalEvidence,
+// marketSizing, cagr, whatWouldChangeThisDecision) is already part of
+// MarketIntelligenceCanonicalState, so this is a pure, deterministic
+// function of already-canonical, already-persisted data -- correct
+// immediately for every existing persisted report, not just newly
+// generated ones.
+
+const THRESHOLD_REQUIRES_VALIDATION: Record<ResponseLanguage, string> = {
+  English: "Threshold requires validation.",
+  Turkish: "Eşik değeri doğrulama gerektiriyor.",
+  German: "Schwellenwert erfordert Validierung.",
+  French: "Le seuil nécessite une validation.",
+  Spanish: "El umbral requiere validación.",
+};
+
+// Only ever captures a DIRECTIONAL phrase (e.g. "above 5%", "below 10%")
+// that already exists verbatim in the report's own text -- never a bare
+// number torn from its context, and never invented independently of that
+// text.
+const DIRECTIONAL_THRESHOLD_PATTERN =
+  /\b(?:above|over|exceeding|beyond|at least|below|under|less than)\s+[\d.,]+\s?%|\b[\d.,]+\s?%\s+(?:or\s+(?:higher|more|above|lower|less))/i;
+
+function escapeRegExpLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Confirms a quantified phrase is actually LINKED to the given decision --
+// i.e. it appears in the same sentence as that decision's own localized
+// token (ENTER/MONITOR/AVOID in English, GİR/İZLE/KAÇIN in Turkish, ...) --
+// so a number that happens to sit elsewhere in the same paragraph, about a
+// different outcome, is never misattributed. Returns null (never a guess)
+// whenever no sentence names both the decision and a directional figure.
+function extractDecisionLinkedThresholdPhrase(
+  text: string,
+  decision: ExecutiveDecisionCode,
+  language: ResponseLanguage
+): string | null {
+  if (!text) return null;
+  const token = localizeExecutiveDecision(decision, language, "market");
+  const tokenPattern = new RegExp(`\\b${escapeRegExpLiteral(token)}\\b`, "i");
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  for (const sentence of sentences) {
+    if (tokenPattern.test(sentence)) {
+      const match = sentence.match(DIRECTIONAL_THRESHOLD_PATTERN);
+      if (match) return match[0].trim();
+    }
+  }
+  return null;
+}
+
+function buildQuantifiedThresholdDescription(
+  gapLabel: string,
+  directionalPhrase: string,
+  language: ResponseLanguage
+): string {
+  const templates: Record<ResponseLanguage, string> = {
+    English: `${gapLabel} ${directionalPhrase} (stated in this report's own decision brief).`,
+    Turkish: `${gapLabel} ${directionalPhrase} (bu raporun kendi karar özetinde belirtilmiştir).`,
+    German: `${gapLabel} ${directionalPhrase} (in der eigenen Entscheidungszusammenfassung dieses Berichts angegeben).`,
+    French: `${gapLabel} ${directionalPhrase} (indiqué dans la note de décision de ce rapport).`,
+    Spanish: `${gapLabel} ${directionalPhrase} (indicado en el resumen de decisión de este informe).`,
+  };
+  return templates[language];
+}
+
+function buildMonitorStatusQuoDescription(gapLabel: string, language: ResponseLanguage): string {
+  const templates: Record<ResponseLanguage, string> = {
+    English: `Remains unchanged while ${gapLabel} stays unresolved.`,
+    Turkish: `${gapLabel} çözümlenmeden kaldığı sürece değişmeden kalır.`,
+    German: `Bleibt unverändert, solange ${gapLabel} ungeklärt bleibt.`,
+    French: `Reste inchangé tant que ${gapLabel} n'est pas résolu.`,
+    Spanish: `Permanece sin cambios mientras ${gapLabel} siga sin resolver.`,
+  };
+  return templates[language];
+}
+
+export type MarketIntelligenceDecisionThresholdConditionStatus = "defined" | "requiresValidation";
+
+export type MarketIntelligenceDecisionThresholdCondition = {
+  status: MarketIntelligenceDecisionThresholdConditionStatus;
+  description: string;
+  // Inherited directly from the gap's own isPlanningAssumption (never a
+  // separate assessment) -- if the current unresolved state rests on a
+  // disclosed planning assumption (e.g. SAM's default share ratio), any
+  // threshold built around it rests on that same assumption until it is
+  // replaced with real evidence.
+  isPlanningAssumption: boolean;
+};
+
+// One gap's decision threshold -- answers this task's own 6 questions:
+// (1)/(2) evidenceRequired/measurementMethod (reused verbatim from the
+// gap, never re-derived); (3)/(4)/(5) enter/monitor/avoidCondition; (6)
+// affectedFactor (the real gating pillar this threshold, if satisfied,
+// would change).
+export type MarketIntelligenceDecisionThreshold = {
+  gapId: MarketIntelligenceEvidenceGapId;
+  gapLabel: string;
+  affectedFactor: MarketIntelligenceDecisionFactor;
+  // Always "unresolved" today, since a threshold is only ever built for a
+  // gap that resolveMarketIntelligenceEvidenceGaps already found
+  // unresolved -- kept as an explicit field (rather than implied) so a
+  // future partially-resolved state has somewhere to be represented
+  // without a breaking type change.
+  currentStatus: "unresolved";
+  enterCondition: MarketIntelligenceDecisionThresholdCondition;
+  monitorCondition: MarketIntelligenceDecisionThresholdCondition;
+  avoidCondition: MarketIntelligenceDecisionThresholdCondition;
+  measurementMethod: string;
+  evidenceRequired: string;
+};
+
+function buildDecisionThresholdForGap(
+  gap: MarketIntelligenceEvidenceGap,
+  canonicalState: MarketIntelligenceCanonicalState,
+  language: ResponseLanguage
+): MarketIntelligenceDecisionThreshold {
+  const whatWouldChange = canonicalState.whatWouldChangeThisDecision;
+  const enterPhrase = extractDecisionLinkedThresholdPhrase(whatWouldChange, "GO", language);
+  const monitorPhrase = extractDecisionLinkedThresholdPhrase(whatWouldChange, "CONDITIONAL_GO", language);
+  const avoidPhrase = extractDecisionLinkedThresholdPhrase(whatWouldChange, "NO_GO", language);
+
+  return {
+    gapId: gap.id,
+    gapLabel: gap.label,
+    affectedFactor: gap.decisionFactor as MarketIntelligenceDecisionFactor,
+    currentStatus: "unresolved",
+    enterCondition: enterPhrase
+      ? {
+          status: "defined",
+          description: buildQuantifiedThresholdDescription(gap.label, enterPhrase, language),
+          isPlanningAssumption: gap.isPlanningAssumption,
+        }
+      : {
+          status: "requiresValidation",
+          description: THRESHOLD_REQUIRES_VALIDATION[language],
+          isPlanningAssumption: gap.isPlanningAssumption,
+        },
+    // MONITOR's condition never requires a fabricated number -- "the
+    // status quo persists while this gap is unresolved" is always
+    // defensible on its own. Still checked against the report's own text
+    // first (a report can, in principle, explicitly state what keeps it
+    // at MONITOR with a real figure), falling back to that structural
+    // statement in the overwhelming majority of real reports.
+    monitorCondition: monitorPhrase
+      ? {
+          status: "defined",
+          description: buildQuantifiedThresholdDescription(gap.label, monitorPhrase, language),
+          isPlanningAssumption: gap.isPlanningAssumption,
+        }
+      : {
+          status: "defined",
+          description: buildMonitorStatusQuoDescription(gap.label, language),
+          isPlanningAssumption: gap.isPlanningAssumption,
+        },
+    avoidCondition: avoidPhrase
+      ? {
+          status: "defined",
+          description: buildQuantifiedThresholdDescription(gap.label, avoidPhrase, language),
+          isPlanningAssumption: gap.isPlanningAssumption,
+        }
+      : {
+          status: "requiresValidation",
+          description: THRESHOLD_REQUIRES_VALIDATION[language],
+          isPlanningAssumption: gap.isPlanningAssumption,
+        },
+    // Reused verbatim from the gap -- "reuse structured assumptions
+    // rather than creating unrelated new numbers": validationMethod
+    // already names the concrete real-world validation approach (a paid
+    // pilot, an LOI campaign, comparable-company benchmarking, ...) this
+    // report's own architecture already assigns to this evidence class,
+    // never a second, independently invented method.
+    measurementMethod: gap.validationMethod,
+    evidenceRequired: gap.evidenceRequired,
+  };
+}
+
+// The single, canonical-state-only entry point every render surface must
+// call for decision-threshold data -- never independently reconstructed
+// from prose. Only material (decision-gating) gaps get a threshold: a
+// non-gating gap (growth-rate) cannot move the canonical decision on its
+// own, so attaching ENTER/MONITOR/AVOID conditions to it would falsely
+// imply it could.
+export function resolveMarketIntelligenceDecisionThresholds(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  language: ResponseLanguage = "English"
+): MarketIntelligenceDecisionThreshold[] {
+  if (!canonicalState) return [];
+  return resolveMarketIntelligenceEvidenceGaps(canonicalState, language)
+    .filter((gap) => gap.decisionFactor !== null)
+    .map((gap) => buildDecisionThresholdForGap(gap, canonicalState, language));
+}
+
 export type MarketIntelligenceGapDrivenAction = {
   gapId: MarketIntelligenceEvidenceGapId;
   gapLabel: string;
   action: string;
   measurableResult: string;
   decisionConsequence: string;
+  // TASK #36 -- the SAME per-gap decision threshold
+  // resolveMarketIntelligenceDecisionThresholds computes, attached
+  // directly here so every render site gets action + threshold as one
+  // paired unit instead of computing and matching two separate arrays
+  // (a second, avoidable per-surface reconciliation step).
+  threshold: MarketIntelligenceDecisionThreshold;
 };
 
 export function buildMarketIntelligenceGapDrivenActions(
@@ -645,5 +872,6 @@ export function buildMarketIntelligenceGapDrivenActions(
       action: gap.validationMethod,
       measurableResult: gap.successThreshold || gap.evidenceRequired,
       decisionConsequence: gap.decisionImpact,
+      threshold: buildDecisionThresholdForGap(gap, canonicalState, language),
     }));
 }

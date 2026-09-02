@@ -3419,6 +3419,20 @@ function ReportSectionVisual({
                   <p className="mt-1 text-xs leading-5 text-zinc-300">{gapAction.action}</p>
                   <p className="mt-1 text-xs leading-5 text-zinc-400">{gapAction.measurableResult}</p>
                   <p className="mt-1 text-xs leading-5 text-amber-200">{gapAction.decisionConsequence}</p>
+                  <div className="mt-2 space-y-1 rounded-xl border border-white/10 bg-black/20 p-2.5">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                      Decision Threshold
+                    </p>
+                    <p className="text-[11px] leading-5 text-zinc-300">
+                      <span className="font-semibold text-zinc-100">ENTER IF</span> — {gapAction.threshold.enterCondition.description}
+                    </p>
+                    <p className="text-[11px] leading-5 text-zinc-300">
+                      <span className="font-semibold text-zinc-100">MONITOR IF</span> — {gapAction.threshold.monitorCondition.description}
+                    </p>
+                    <p className="text-[11px] leading-5 text-zinc-300">
+                      <span className="font-semibold text-zinc-100">AVOID IF</span> — {gapAction.threshold.avoidCondition.description}
+                    </p>
+                  </div>
                 </div>
               ))}
             </div>
