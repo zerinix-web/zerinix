@@ -88,6 +88,7 @@ import {
   classifyStrategicRecommendationValidation,
   localizeRecommendationProvenance,
   resolveMarketIntelligenceControllingDecisionThreshold,
+  resolveMarketIntelligenceConfidenceState,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
   repairReportLanguageSections,
@@ -4736,6 +4737,11 @@ export function buildStandardReportPdf({
           marketDecisionChangeState && marketDecisionChangeState.materialGaps.length > 0
             ? marketDecisionChangeState.materialGaps[0]
             : null;
+        // TASK #40 -- the single canonical confidence-explanation state
+        // every surface reads. Never a second confidence calculation.
+        const marketConfidenceState = isMarketIntelligenceReport
+          ? resolveMarketIntelligenceConfidenceState(recommendationCanonicalState, pdfLocale === "tr" ? "Turkish" : "English")
+          : null;
         const marketInformationRequired = marketTopEvidenceGap
           ? `${marketTopEvidenceGap.label}: ${marketTopEvidenceGap.evidenceRequired}`
           : null;
@@ -4870,6 +4876,17 @@ export function buildStandardReportPdf({
               (isTurkishPdf ? "Acil sonraki adım için yönetici kararı bölümüne bakın" : "See the Immediate Next Action in the executive decision"),
           ],
         ];
+
+        // TASK #40 -- requirement #10 (web/PDF parity): the SAME
+        // canonical confidence rationale the web card reads, appended as
+        // its own labeled row -- never a second, independently
+        // reconstructed confidence explanation for the PDF.
+        if (marketConfidenceState) {
+          recItems.push([
+            isTurkishPdf ? "Güven Gerekçesi" : "Confidence Rationale",
+            `${marketConfidenceState.level}. ${marketConfidenceState.rationale}`,
+          ]);
+        }
 
         const itemWidth = (width - 68) / 2;
         const previousFontSize = pdf.getFontSize();

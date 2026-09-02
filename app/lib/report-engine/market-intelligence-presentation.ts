@@ -304,7 +304,13 @@ export type MarketIntelligenceConfidenceFactors = {
   marketSignals: MarketConfidenceFactorLevel;
 };
 
-function categorizeConfidenceScore(score: number): MarketConfidenceFactorLevel {
+// TASK #40 -- exported (value/logic unchanged) so the new canonical
+// confidence-explanation layer (market-intelligence-evidence-gaps.ts)
+// can categorize the OVERALL confidence score using this exact same
+// Strong/Moderate/Weak boundary, rather than duplicating the
+// STRONG_CONFIDENCE_THRESHOLD/MODERATE_CONFIDENCE_THRESHOLD constants a
+// second time and risking drift between the two.
+export function categorizeConfidenceScore(score: number): MarketConfidenceFactorLevel {
   if (score >= STRONG_CONFIDENCE_THRESHOLD) return "Strong";
   if (score >= MODERATE_CONFIDENCE_THRESHOLD) return "Moderate";
   return "Weak";

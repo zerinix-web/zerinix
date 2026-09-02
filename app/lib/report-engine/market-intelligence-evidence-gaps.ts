@@ -45,7 +45,11 @@ import {
   localizeExecutiveDecision,
   type ExecutiveDecisionCode,
 } from "@/app/lib/report-engine/executive-decision-brief";
-import type { DecisionCriticalEvidenceState } from "@/app/lib/report-engine/market-intelligence-presentation";
+import {
+  categorizeConfidenceScore,
+  type DecisionCriticalEvidenceState,
+  type MarketConfidenceFactorLevel,
+} from "@/app/lib/report-engine/market-intelligence-presentation";
 import {
   classifyStrategicRecommendationAction,
   type MarketIntelligenceCanonicalState,
@@ -1556,5 +1560,229 @@ export function resolveMarketIntelligenceControllingDecisionThreshold(
     enterSummary: enterConditions.map((criterion) => criterion.description).join(" "),
     monitorSummary: monitorConditions.map((criterion) => criterion.description).join(" "),
     avoidSummary: avoidConditions.map((criterion) => criterion.description).join(" "),
+  };
+}
+
+// TASK #40 -- Make Market Intelligence confidence scoring structurally
+// authoritative and explainable.
+//
+// AUDIT FINDING (confirmed via full trace: generation -> normalization ->
+// canonical state -> persistence/reload -> Executive Summary -> Executive
+// Snapshot -> Strategic Recommendations -> PDF): the confidence SCORE
+// itself was already 100% structurally calculated, deterministic, and
+// never AI-generated or prose-inferred. buildMarketExecutiveDecisionBrief
+// (market-intelligence-presentation.ts) sets `confidence` to exactly
+// `assessMarketEntryConfidence(coverage, decisionCriticalEvidence).confidence`
+// -- a pure function of coverage.dimensions (a weighted blend:
+// marketConfidence*0.4 + competitiveEvidence*0.25 + financialEvidence*0.2
+// + productEvidence*0.15) capped by capConfidenceForEvidenceGap based on
+// how many of the 3 decision-critical pillars are unresolved (0 -> no
+// cap, 1 -> <=50, 2 -> <=40, 3 -> <=30). This module does NOT change, or
+// duplicate, that calculation anywhere -- canonicalState.confidence
+// (persisted verbatim from that one computation) remains the single
+// source of truth for the NUMBER.
+//
+// THE ACTUAL GAP: confidence's own EXPLANATION was not structurally
+// persisted or reproducible. buildMarketExecutiveDecisionBrief also
+// computes confidenceFactors (buildConfidenceExplanation) at generation
+// time, but MarketIntelligenceCanonicalState only ever persisted
+// confidenceDirection, never the factors array itself -- so on reload,
+// any surface wanting to explain "why is confidence X%" had no
+// structured source and would have had to re-scan this report's own
+// "Confidence Reduced Because"/"Confidence Supported By" rendered prose
+// bullets -- exactly the keyword-matching-generated-prose anti-pattern
+// this task forbids.
+//
+// FIX: resolveMarketIntelligenceConfidenceState is a PURE, read-time
+// function of fields the canonical state has already persisted since
+// version 3 (confidence, decision, decisionCriticalEvidence, and --
+// through resolveMarketIntelligenceEvidenceGaps -- coverage/marketSizing/
+// cagr) -- no new persisted field, no version bump, so it is correct
+// immediately for every already-persisted report on reload (requirement
+// #11/#12). Contributors (resolved pillars) and constraints (unresolved
+// pillars) are built from the EXACT SAME 3-pillar decisionCriticalEvidence
+// gate the score itself is capped on, and constraints reuse
+// resolveMarketIntelligenceEvidenceGaps' own already-deduplicated
+// material-gap list verbatim (requirement #8: "SOM unresolved"/
+// "Obtainable Share unresolved"/"controlling factor" are the SAME single
+// gap object here, never three independently-derived penalty lines).
+export type MarketIntelligenceConfidenceContributor = {
+  factor: MarketIntelligenceDecisionFactor;
+  label: string;
+  description: string;
+};
+
+export type MarketIntelligenceConfidenceConstraint = {
+  factor: MarketIntelligenceDecisionFactor;
+  label: string;
+  description: string;
+  // True only when this is the SOLE unresolved decision-critical pillar
+  // (Task #37's own controllingUnresolvedCondition/Task #39's
+  // controllingFactor discipline) -- never a guess among several.
+  isControllingFactor: boolean;
+};
+
+// "structural" is the only value this module ever produces -- confidence
+// here is always derived from canonical structured state, never from
+// generated prose. Kept as an explicit field (rather than assumed)
+// so a consumer never has to trust that by convention alone.
+export type MarketIntelligenceConfidenceProvenance = "structural";
+
+export type MarketIntelligenceConfidenceState = {
+  // Verbatim canonicalState.confidence -- this module never recomputes,
+  // second-guesses, or independently derives the number itself (that
+  // would be "multiple independent confidence calculations", exactly
+  // what this task forbids). See this module's own audit comment above
+  // for how that number is actually produced upstream.
+  score: number;
+  level: MarketConfidenceFactorLevel;
+  decision: ExecutiveDecisionCode;
+  contributors: MarketIntelligenceConfidenceContributor[];
+  constraints: MarketIntelligenceConfidenceConstraint[];
+  rationale: string;
+  provenance: MarketIntelligenceConfidenceProvenance;
+};
+
+function decisionFactorLabel(factor: MarketIntelligenceDecisionFactor, language: ResponseLanguage): string {
+  if (factor === "marketSizingResolved") return MARKET_SIZING_GAP_COPY[language].label;
+  if (factor === "competitiveEvidenceResolved") return COMPETITIVE_EVIDENCE_GAP_COPY[language].label;
+  return OBTAINABLE_SHARE_GAP_COPY[language].label;
+}
+
+// The positive mirror of each gap's own "why it matters" framing --
+// stated as a fact about what already resolved, never a new evidence
+// classification. Deliberately short (one sentence), matching this
+// report's own existing confidence-explanation prose style
+// (buildConfidenceExplanation, market-intelligence-presentation.ts).
+const CONFIDENCE_CONTRIBUTOR_DESCRIPTIONS: Record<MarketIntelligenceDecisionFactor, Record<ResponseLanguage, string>> = {
+  marketSizingResolved: {
+    English: "A verified market-size figure or defensible planning estimate exists for this market.",
+    Turkish: "Bu pazar için doğrulanmış bir pazar büyüklüğü rakamı veya savunulabilir bir planlama tahmini mevcut.",
+    German: "Für diesen Markt liegt eine verifizierte Marktgröße oder eine belastbare Planungsschätzung vor.",
+    French: "Un chiffre de taille de marché vérifié ou une estimation de planification défendable existe pour ce marché.",
+    Spanish: "Existe una cifra de tamaño de mercado verificada o una estimación de planificación defendible para este mercado.",
+  },
+  competitiveEvidenceResolved: {
+    English: "At least one named, evidenced competitor or adjacent player was identified.",
+    Turkish: "En az bir adı belirtilmiş, kanıtlanmış rakip veya yakın oyuncu tespit edildi.",
+    German: "Mindestens ein benannter, belegter Wettbewerber oder angrenzender Akteur wurde identifiziert.",
+    French: "Au moins un concurrent nommé et étayé, ou un acteur adjacent, a été identifié.",
+    Spanish: "Se identificó al menos un competidor nombrado y respaldado por evidencia, o un actor adyacente.",
+  },
+  obtainableShareResolved: {
+    English: "Obtainable share (SAM/SOM) was calculated from evidence-derived inputs.",
+    Turkish: "Ulaşılabilir pay (SAM/SOM), kanıta dayalı girdilerden hesaplandı.",
+    German: "Der erzielbare Anteil (SAM/SOM) wurde aus evidenzbasierten Eingaben berechnet.",
+    French: "La part accessible (SAM/SOM) a été calculée à partir de données fondées sur des preuves.",
+    Spanish: "La cuota alcanzable (SAM/SOM) se calculó a partir de datos basados en evidencia.",
+  },
+};
+
+const CONFIDENCE_PILLAR_ORDER: readonly MarketIntelligenceDecisionFactor[] = [
+  "marketSizingResolved",
+  "competitiveEvidenceResolved",
+  "obtainableShareResolved",
+];
+
+const CONFIDENCE_RATIONALE_ALL_RESOLVED_TEMPLATES: Record<ResponseLanguage, (score: number) => string> = {
+  English: (score) => `${score}% confidence reflects all 3 decision-critical evidence pillars resolved.`,
+  Turkish: (score) => `%${score} güven, karar açısından kritik 3 kanıt unsurunun tamamının çözümlendiğini yansıtır.`,
+  German: (score) => `Eine Konfidenz von ${score}% spiegelt wider, dass alle 3 entscheidungskritischen Nachweissäulen geklärt sind.`,
+  French: (score) => `Une confiance de ${score}% reflète les 3 piliers de preuves déterminants résolus.`,
+  Spanish: (score) => `Una confianza del ${score}% refleja que se resolvieron los 3 pilares de evidencia críticos para la decisión.`,
+};
+
+const CONFIDENCE_RATIONALE_SINGLE_CONSTRAINT_TEMPLATES: Record<
+  ResponseLanguage,
+  (score: number, resolvedCount: number, constraintLabel: string) => string
+> = {
+  English: (score, resolvedCount, label) =>
+    `${score}% confidence reflects ${resolvedCount} of 3 decision-critical evidence pillars resolved; ${label} remains the principal constraint.`,
+  Turkish: (score, resolvedCount, label) =>
+    `%${score} güven, karar açısından kritik 3 unsurdan ${resolvedCount} tanesinin çözümlendiğini yansıtır; temel kısıt ${label} olmaya devam ediyor.`,
+  German: (score, resolvedCount, label) =>
+    `Eine Konfidenz von ${score}% spiegelt wider, dass ${resolvedCount} von 3 entscheidungskritischen Nachweissäulen geklärt sind; ${label} bleibt die Hauptbeschränkung.`,
+  French: (score, resolvedCount, label) =>
+    `Une confiance de ${score}% reflète ${resolvedCount} des 3 piliers de preuves déterminants résolus ; ${label} demeure la principale contrainte.`,
+  Spanish: (score, resolvedCount, label) =>
+    `Una confianza del ${score}% refleja ${resolvedCount} de los 3 pilares de evidencia críticos resueltos; ${label} sigue siendo la principal limitación.`,
+};
+
+const CONFIDENCE_RATIONALE_MULTI_CONSTRAINT_TEMPLATES: Record<
+  ResponseLanguage,
+  (score: number, resolvedCount: number, unresolvedCount: number) => string
+> = {
+  English: (score, resolvedCount, unresolvedCount) =>
+    `${score}% confidence reflects ${resolvedCount} of 3 decision-critical evidence pillars resolved; ${unresolvedCount} pillars remain unresolved.`,
+  Turkish: (score, resolvedCount, unresolvedCount) =>
+    `%${score} güven, karar açısından kritik 3 unsurdan ${resolvedCount} tanesinin çözümlendiğini yansıtır; ${unresolvedCount} unsur çözümlenmemiş durumda.`,
+  German: (score, resolvedCount, unresolvedCount) =>
+    `Eine Konfidenz von ${score}% spiegelt wider, dass ${resolvedCount} von 3 entscheidungskritischen Nachweissäulen geklärt sind; ${unresolvedCount} Säulen bleiben ungeklärt.`,
+  French: (score, resolvedCount, unresolvedCount) =>
+    `Une confiance de ${score}% reflète ${resolvedCount} des 3 piliers de preuves déterminants résolus ; ${unresolvedCount} piliers restent non résolus.`,
+  Spanish: (score, resolvedCount, unresolvedCount) =>
+    `Una confianza del ${score}% refleja ${resolvedCount} de los 3 pilares de evidencia críticos resueltos; ${unresolvedCount} pilares permanecen sin resolver.`,
+};
+
+function buildConfidenceRationale(
+  score: number,
+  resolvedCount: number,
+  constraints: readonly MarketIntelligenceConfidenceConstraint[],
+  language: ResponseLanguage
+): string {
+  if (constraints.length === 0) {
+    return CONFIDENCE_RATIONALE_ALL_RESOLVED_TEMPLATES[language](score);
+  }
+  if (constraints.length === 1) {
+    return CONFIDENCE_RATIONALE_SINGLE_CONSTRAINT_TEMPLATES[language](score, resolvedCount, constraints[0].label);
+  }
+  return CONFIDENCE_RATIONALE_MULTI_CONSTRAINT_TEMPLATES[language](score, resolvedCount, constraints.length);
+}
+
+// The single, canonical, structured confidence model every render
+// surface must read (requirement #2). Never a second confidence
+// calculation: `score`/`decision` are read verbatim from canonicalState;
+// everything else is a pure reshape of the SAME 3-pillar
+// decisionCriticalEvidence gate and the SAME deduplicated material-gap
+// list every other Task #35-#39 resolver already computes.
+export function resolveMarketIntelligenceConfidenceState(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  language: ResponseLanguage = "English"
+): MarketIntelligenceConfidenceState | null {
+  if (!canonicalState) return null;
+
+  const evidence = canonicalState.decisionCriticalEvidence;
+  const materialGaps = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).filter(
+    (gap) => gap.decisionFactor !== null
+  );
+
+  const contributors: MarketIntelligenceConfidenceContributor[] = CONFIDENCE_PILLAR_ORDER.filter(
+    (factor) => evidence[factor]
+  ).map((factor) => ({
+    factor,
+    label: decisionFactorLabel(factor, language),
+    description: CONFIDENCE_CONTRIBUTOR_DESCRIPTIONS[factor][language],
+  }));
+
+  // requirement #8 -- reusing resolveMarketIntelligenceEvidenceGaps'
+  // already-deduplicated list (one entry per unresolved pillar) is what
+  // makes double-counting structurally impossible here: there is no
+  // second, independently-built "unresolved factors" list this could
+  // ever disagree with.
+  const constraints: MarketIntelligenceConfidenceConstraint[] = materialGaps.map((gap) => ({
+    factor: gap.decisionFactor as MarketIntelligenceDecisionFactor,
+    label: gap.label,
+    description: gap.currentStatus,
+    isControllingFactor: materialGaps.length === 1,
+  }));
+
+  return {
+    score: canonicalState.confidence,
+    level: categorizeConfidenceScore(canonicalState.confidence),
+    decision: canonicalState.decision,
+    contributors,
+    constraints,
+    rationale: buildConfidenceRationale(canonicalState.confidence, contributors.length, constraints, language),
+    provenance: "structural",
   };
 }

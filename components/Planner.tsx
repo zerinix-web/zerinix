@@ -174,6 +174,7 @@ import {
   classifyStrategicRecommendationValidation,
   localizeRecommendationProvenance,
   resolveMarketIntelligenceControllingDecisionThreshold,
+  resolveMarketIntelligenceConfidenceState,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
   localizeMarketConfidenceFactorLevel,
@@ -5945,6 +5946,11 @@ if (field === "swotAnalysis") {
       marketDecisionChangeState && marketDecisionChangeState.materialGaps.length > 0
         ? marketDecisionChangeState.materialGaps[0].label
         : extractAliasedSectionSnippet(section.content, missingEvidenceLabels, whatWouldChangeLabels) || "—";
+    // TASK #40 -- the single canonical confidence-explanation state
+    // every surface reads. Never a second confidence calculation.
+    const marketConfidenceState = isMarketIntelligence
+      ? resolveMarketIntelligenceConfidenceState(marketIntelligenceCanonicalState, evidenceLocale)
+      : null;
     const recommendationMetrics = [
       ["Confidence", extractConfidence(section.content) ? `${extractConfidence(section.content)}%` : "—"],
       ["Why", extractMetricValueFromAliases(section.content, whyLabels) || "—"],
@@ -6000,6 +6006,11 @@ if (field === "swotAnalysis") {
             <div className="mt-4 h-3 overflow-hidden rounded-full bg-white/10">
               <div className="h-full rounded-full bg-teal-200" style={{ width: `${extractConfidence(section.content) ?? 50}%` }} />
             </div>
+            {marketConfidenceState ? (
+              <p className="mt-3 text-xs leading-5 text-zinc-400">
+                <span className="font-semibold text-zinc-300">{marketConfidenceState.level}.</span> {marketConfidenceState.rationale}
+              </p>
+            ) : null}
           </div>
           <div className="rounded-3xl border border-white/10 bg-black/30 p-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Immediate Next Action</p>
@@ -8744,6 +8755,11 @@ const ReportPanel = memo(function ReportPanel({
         const marketInformationRequired = marketTopEvidenceGap
           ? `${marketTopEvidenceGap.label}: ${marketTopEvidenceGap.evidenceRequired}`
           : null;
+        // TASK #40 -- the single canonical confidence-explanation state
+        // every surface reads. Never a second confidence calculation.
+        const marketConfidenceState = isMarketIntelligence
+          ? resolveMarketIntelligenceConfidenceState(marketIntelligenceCanonicalState, pdfLocale === "tr" ? "Turkish" : "English")
+          : null;
 
         // CRITICAL FIX -- root-cause repair (ticket: "Fix the canonical
         // decision consistency bug"): confirmed live -- the PREVIOUS fix
@@ -8853,6 +8869,17 @@ const ReportPanel = memo(function ReportPanel({
               (isTurkishPdf ? "Acil sonraki adım için yönetici kararı bölümüne bakın" : "See the Immediate Next Action in the executive decision"),
           ],
         ];
+
+        // TASK #40 -- requirement #10 (web/PDF parity): the SAME
+        // canonical confidence rationale the web card reads, appended as
+        // its own labeled row -- never a second, independently
+        // reconstructed confidence explanation for the PDF.
+        if (marketConfidenceState) {
+          recItems.push([
+            isTurkishPdf ? "Güven Gerekçesi" : "Confidence Rationale",
+            `${marketConfidenceState.level}. ${marketConfidenceState.rationale}`,
+          ]);
+        }
 
         const itemWidth = (width - 68) / 2;
         const previousFontSize = pdf.getFontSize();

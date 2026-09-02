@@ -78,6 +78,7 @@ import {
   classifyStrategicRecommendationValidation,
   localizeRecommendationProvenance,
   resolveMarketIntelligenceControllingDecisionThreshold,
+  resolveMarketIntelligenceConfidenceState,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
   localizeMarketConfidenceFactorLevel,
@@ -4728,6 +4729,18 @@ function ExecutiveSnapshotPanel({
         2
       )
     : [];
+  // TASK #40 -- the single canonical confidence-explanation state every
+  // surface reads. Never a second confidence calculation: score/decision
+  // are read verbatim from canonical state; contributors/constraints
+  // reuse the SAME 3-pillar decisionCriticalEvidence gate and
+  // deduplicated material-gap list every other resolver above already
+  // computes.
+  const marketConfidenceState = isMarketIntelligence
+    ? resolveMarketIntelligenceConfidenceState(
+        marketIntelligenceCanonicalState,
+        isMarketIntelligenceTurkish ? "Turkish" : "English"
+      )
+    : null;
   const groups = [
     { label: labels.why, items: snapshot.why },
     { label: labels.mainRisks, items: snapshot.risks },
@@ -4753,6 +4766,7 @@ function ExecutiveSnapshotPanel({
         </div>
         <span className="w-fit rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-xs font-semibold text-zinc-200">
           {labels.confidence}: {snapshotConfidenceDisplay}
+          {marketConfidenceState ? ` (${marketConfidenceState.level})` : ""}
         </span>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-3">
@@ -4828,6 +4842,14 @@ function ExecutiveSnapshotPanel({
               </li>
             ))}
           </ul>
+        </div>
+      ) : null}
+      {marketConfidenceState ? (
+        <div className="mt-3 rounded-2xl border border-white/10 bg-black/25 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-200/70">
+            {isMarketIntelligenceTurkish ? "Güven Gerekçesi" : "Confidence Rationale"}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-zinc-300">{marketConfidenceState.rationale}</p>
         </div>
       ) : null}
       {reportQualityBreakdown.length > 0 ? (
