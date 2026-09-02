@@ -171,6 +171,7 @@ import {
   resolveMarketIntelligenceDecisionChangeState,
   selectTopMarketIntelligenceEvidenceGaps,
   buildMarketIntelligenceGapDrivenActions,
+  resolveMarketIntelligenceDecisionThresholdState,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
   localizeMarketConfidenceFactorLevel,
@@ -5433,6 +5434,16 @@ if (field === "swotAnalysis") {
           strategicRecommendationDecision?.language || "English"
         )
       : [];
+    // TASK #37 -- requirement #4: MONITOR must explicitly identify which
+    // unresolved decision-critical condition(s) are preventing ENTER.
+    // Reads the SAME canonical threshold-state object every other
+    // surface reads -- never independently re-derived here.
+    const marketDecisionThresholdState = isMarketIntelligence
+      ? resolveMarketIntelligenceDecisionThresholdState(
+          marketIntelligenceCanonicalState,
+          strategicRecommendationDecision?.language || "English"
+        )
+      : null;
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-white/[0.025] p-5">
@@ -5526,9 +5537,16 @@ if (field === "swotAnalysis") {
         )}
         {marketGapDrivenActions.length > 0 ? (
           <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/[0.04] p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200/80">
-              Evidence Gaps to Close
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200/80">
+                Evidence Gaps to Close
+              </p>
+              {marketDecisionThresholdState?.controllingUnresolvedCondition ? (
+                <span className="rounded-full border border-amber-300/20 bg-black/20 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-amber-100">
+                  Controlling Factor: {marketDecisionThresholdState.controllingUnresolvedCondition.label}
+                </span>
+              ) : null}
+            </div>
             <div className="mt-3 space-y-3">
               {marketGapDrivenActions.map((gapAction) => (
                 <div key={gapAction.gapId} className="border-t border-white/10 pt-3 first:border-t-0 first:pt-0">
@@ -10218,6 +10236,17 @@ const ReportPanel = memo(function ReportPanel({
 	            marketIntelligenceCanonicalState,
 	            pdfLocale === "tr" ? "Turkish" : "English"
 	          );
+	          // TASK #37 -- requirement #4: MONITOR must explicitly identify
+	          // which unresolved decision-critical condition(s) are preventing
+	          // ENTER. Reads the SAME canonical threshold-state object the web
+	          // card reads -- never independently re-derived.
+	          const marketDecisionThresholdState = resolveMarketIntelligenceDecisionThresholdState(
+	            marketIntelligenceCanonicalState,
+	            pdfLocale === "tr" ? "Turkish" : "English"
+	          );
+	          const controllingFactorText = marketDecisionThresholdState?.controllingUnresolvedCondition
+	            ? `${pdfLocale === "tr" ? "Kontrol Eden Faktör" : "Controlling Factor"}: ${marketDecisionThresholdState.controllingUnresolvedCondition.label}`
+	            : "";
 
 	          if (marketGapDrivenActions.length > 0) {
 	            const gapsLabel = pdfLocale === "tr" ? "Kapatılması Gereken Kanıt Boşlukları" : "Evidence Gaps to Close";
@@ -10253,6 +10282,12 @@ const ReportPanel = memo(function ReportPanel({
 	              pdf.setTextColor("#ffffff");
 	              const chunkTitle = isFirstGapChunk ? gapsLabel : `${gapsLabel}${pdfLocale === "tr" ? " devamı" : " continued"}`;
 	              pdf.text(chunkTitle, bodyX, y + 12.5, { maxWidth: bodyWidth });
+
+	              if (isFirstGapChunk && controllingFactorText) {
+	                pdf.setFontSize(5.6);
+	                pdf.setTextColor("#a1a1aa");
+	                pdf.text(controllingFactorText, bodyX, y + 17, { maxWidth: bodyWidth });
+	              }
 
 	              const rowsTopY = y + 19;
 

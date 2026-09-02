@@ -660,13 +660,27 @@ export function selectTopMarketIntelligenceEvidenceGaps(
 // immediately for every existing persisted report, not just newly
 // generated ones.
 
-const THRESHOLD_REQUIRES_VALIDATION: Record<ResponseLanguage, string> = {
-  English: "Threshold requires validation.",
-  Turkish: "Eşik değeri doğrulama gerektiriyor.",
-  German: "Schwellenwert erfordert Validierung.",
-  French: "Le seuil nécessite une validation.",
-  Spanish: "El umbral requiere validación.",
-};
+// TASK #37 -- named per decision type ("ENTER threshold requires
+// validation." rather than a generic "Threshold requires validation.")
+// so a reader (and a test) can tell at a glance WHICH direction's
+// condition is unsupported, per this task's own explicit example
+// wording. Uses the SAME localized ENTER/MONITOR/AVOID token
+// (localizeExecutiveDecision, "market") every other Market Intelligence
+// surface already displays.
+function buildThresholdRequiresValidationText(
+  decision: ExecutiveDecisionCode,
+  language: ResponseLanguage
+): string {
+  const token = localizeExecutiveDecision(decision, language, "market");
+  const templates: Record<ResponseLanguage, string> = {
+    English: `${token} threshold requires validation.`,
+    Turkish: `${token} eşiği doğrulama gerektiriyor.`,
+    German: `${token}-Schwellenwert erfordert Validierung.`,
+    French: `Le seuil ${token} nécessite une validation.`,
+    Spanish: `El umbral de ${token} requiere validación.`,
+  };
+  return templates[language];
+}
 
 // Only ever captures a DIRECTIONAL phrase (e.g. "above 5%", "below 10%")
 // that already exists verbatim in the report's own text -- never a bare
@@ -787,7 +801,7 @@ function buildDecisionThresholdForGap(
         }
       : {
           status: "requiresValidation",
-          description: THRESHOLD_REQUIRES_VALIDATION[language],
+          description: buildThresholdRequiresValidationText("GO", language),
           isPlanningAssumption: gap.isPlanningAssumption,
         },
     // MONITOR's condition never requires a fabricated number -- "the
@@ -815,7 +829,7 @@ function buildDecisionThresholdForGap(
         }
       : {
           status: "requiresValidation",
-          description: THRESHOLD_REQUIRES_VALIDATION[language],
+          description: buildThresholdRequiresValidationText("NO_GO", language),
           isPlanningAssumption: gap.isPlanningAssumption,
         },
     // Reused verbatim from the gap -- "reuse structured assumptions
@@ -874,4 +888,154 @@ export function buildMarketIntelligenceGapDrivenActions(
       decisionConsequence: gap.decisionImpact,
       threshold: buildDecisionThresholdForGap(gap, canonicalState, language),
     }));
+}
+
+// TASK #37 -- Make Market Intelligence ENTER / MONITOR / AVOID decision
+// thresholds structurally authoritative.
+//
+// PROBLEM: Task #36 already makes each individual gap's threshold
+// structured (never fabricated), but there was no SINGLE canonical
+// object a caller could read to get "every ENTER condition across the
+// whole report," "every unresolved decision-critical condition," or "the
+// one condition currently controlling MONITOR" -- callers had to loop
+// over resolveMarketIntelligenceDecisionThresholds themselves and
+// reconstruct that view ad hoc, risking a second, slightly different
+// aggregation per render site.
+//
+// FIX: one aggregate, resolveMarketIntelligenceDecisionThresholdState,
+// built ONLY by re-shaping resolveMarketIntelligenceDecisionThresholds'
+// and resolveMarketIntelligenceEvidenceGaps' own already-computed,
+// already-tested output -- zero new interpretation logic, zero new
+// numeric extraction. This is a pure reshape/aggregation layer, not a
+// second decision engine: it never reads decisionCriticalEvidence,
+// marketSizing, or whatWouldChangeThisDecision directly, only the
+// threshold/gap objects those functions already derived from them.
+export type MarketIntelligenceDecisionCondition = {
+  // null only in principle (every condition this module actually
+  // produces comes from a real gap, which always has a factor or is
+  // explicitly non-gating) -- kept nullable so a future non-pillar-based
+  // condition has somewhere to represent "does not gate the decision"
+  // without a breaking type change.
+  factor: MarketIntelligenceDecisionFactor | null;
+  label: string;
+  requiredEvidence: string;
+  currentStatus: string;
+  isDecisionCritical: boolean;
+  // True only when a real, report-specific number was found (never a
+  // universal constant) -- mirrors the underlying condition's own
+  // "defined" vs "requiresValidation" status.
+  isThresholdSupported: boolean;
+  description: string;
+  isPlanningAssumption: boolean;
+};
+
+function toDecisionCondition(
+  threshold: MarketIntelligenceDecisionThreshold,
+  condition: MarketIntelligenceDecisionThresholdCondition
+): MarketIntelligenceDecisionCondition {
+  return {
+    factor: threshold.affectedFactor,
+    label: threshold.gapLabel,
+    requiredEvidence: threshold.evidenceRequired,
+    currentStatus: threshold.currentStatus,
+    isDecisionCritical: true,
+    isThresholdSupported: condition.status === "defined",
+    description: condition.description,
+    isPlanningAssumption: condition.isPlanningAssumption,
+  };
+}
+
+// The single, canonical, structured model every render surface must
+// read for ENTER / MONITOR / AVOID threshold information (requirement
+// #2). `decision` is copied straight from canonicalState -- included so
+// a caller never needs a second lookup to confirm which decision these
+// conditions are explaining, and so a regression test can assert this
+// state can never disagree with the canonical decision it was built
+// from.
+export type MarketIntelligenceCanonicalThresholdState = {
+  decision: ExecutiveDecisionCode;
+  // One entry per material (decision-gating) gap's ENTER condition --
+  // requirement #3: ENTER is only ever "isThresholdSupported: true" when
+  // this report's own decision brief names a real, ENTER-linked figure;
+  // otherwise "AVOID"/"ENTER threshold requires validation." is the
+  // honest default, never a fabricated number and never a planning
+  // assumption borrowed from Strategic Recommendations (those signals
+  // are never read here at all -- see buildDecisionThresholdForGap's own
+  // comment).
+  enterConditions: MarketIntelligenceDecisionCondition[];
+  // Requirement #4: MONITOR's own conditions -- always
+  // "isThresholdSupported: true" via the structural status-quo
+  // statement when the report names no explicit figure, since "stays at
+  // MONITOR while X remains unresolved" never needs fabrication.
+  monitorConditions: MarketIntelligenceDecisionCondition[];
+  // Requirement #5: almost always "isThresholdSupported: false" in real
+  // reports (this report style essentially never states a downside
+  // figure) -- the model still supports a future report naming one
+  // (extractDecisionLinkedThresholdPhrase runs the identical check for
+  // "NO_GO" as it does for "GO") with ZERO renderer changes required.
+  avoidConditions: MarketIntelligenceDecisionCondition[];
+  // The decision-critical gaps themselves, restated as conditions --
+  // "which decision-critical condition(s) are preventing ENTER"
+  // (requirement #4). Identical in count/order to enterConditions (both
+  // are built from the SAME material-gap list) but framed around the
+  // CURRENT unresolved state rather than a hypothetical future one.
+  unresolvedConditions: MarketIntelligenceDecisionCondition[];
+  // Broader than unresolvedConditions: every gap this report has,
+  // material AND non-gating/supporting (e.g. growth-rate/CAGR) --
+  // "what evidence would still be worth gathering," not only what
+  // gates the canonical decision.
+  evidenceRequirements: MarketIntelligenceDecisionCondition[];
+  // "The controlling unresolved condition" (requirement #4's own
+  // phrase) -- set ONLY when exactly one decision-critical pillar is
+  // unresolved, since "the" controlling factor is a well-defined
+  // singular concept only in that case; null when zero (nothing is
+  // controlling) or multiple (no single factor is "the" controller) --
+  // never a guess at which of several unresolved pillars matters most.
+  controllingUnresolvedCondition: MarketIntelligenceDecisionCondition | null;
+};
+
+export function resolveMarketIntelligenceDecisionThresholdState(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  language: ResponseLanguage = "English"
+): MarketIntelligenceCanonicalThresholdState | null {
+  if (!canonicalState) return null;
+
+  const thresholds = resolveMarketIntelligenceDecisionThresholds(canonicalState, language);
+  const allGaps = resolveMarketIntelligenceEvidenceGaps(canonicalState, language);
+
+  const enterConditions = thresholds.map((threshold) => toDecisionCondition(threshold, threshold.enterCondition));
+  const monitorConditions = thresholds.map((threshold) => toDecisionCondition(threshold, threshold.monitorCondition));
+  const avoidConditions = thresholds.map((threshold) => toDecisionCondition(threshold, threshold.avoidCondition));
+
+  const unresolvedConditions = thresholds.map((threshold) => ({
+    factor: threshold.affectedFactor,
+    label: threshold.gapLabel,
+    requiredEvidence: threshold.evidenceRequired,
+    currentStatus: threshold.currentStatus,
+    isDecisionCritical: true,
+    isThresholdSupported: false,
+    description: threshold.currentStatus,
+    isPlanningAssumption: threshold.enterCondition.isPlanningAssumption,
+  }));
+
+  const evidenceRequirements = allGaps.map((gap) => ({
+    factor: gap.decisionFactor,
+    label: gap.label,
+    requiredEvidence: gap.evidenceRequired,
+    currentStatus: gap.currentStatus,
+    isDecisionCritical: gap.decisionFactor !== null,
+    isThresholdSupported: Boolean(gap.successThreshold),
+    description: gap.validationMethod,
+    isPlanningAssumption: gap.isPlanningAssumption,
+  }));
+
+  return {
+    decision: canonicalState.decision,
+    enterConditions,
+    monitorConditions,
+    avoidConditions,
+    unresolvedConditions,
+    evidenceRequirements,
+    controllingUnresolvedCondition: unresolvedConditions.length === 1 ? unresolvedConditions[0] : null,
+  };
 }

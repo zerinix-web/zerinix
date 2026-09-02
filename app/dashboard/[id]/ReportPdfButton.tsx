@@ -85,6 +85,7 @@ import {
 import {
   resolveMarketIntelligenceDecisionChangeState,
   buildMarketIntelligenceGapDrivenActions,
+  resolveMarketIntelligenceDecisionThresholdState,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
   repairReportLanguageSections,
@@ -6625,6 +6626,17 @@ export function buildStandardReportPdf({
             recommendationCanonicalState,
             pdfLocale === "tr" ? "Turkish" : "English"
           );
+          // TASK #37 -- requirement #4: MONITOR must explicitly identify
+          // which unresolved decision-critical condition(s) are
+          // preventing ENTER. Reads the SAME canonical threshold-state
+          // object the web card reads -- never independently re-derived.
+          const marketDecisionThresholdState = resolveMarketIntelligenceDecisionThresholdState(
+            recommendationCanonicalState,
+            pdfLocale === "tr" ? "Turkish" : "English"
+          );
+          const controllingFactorText = marketDecisionThresholdState?.controllingUnresolvedCondition
+            ? `${pdfLocale === "tr" ? "Kontrol Eden Faktör" : "Controlling Factor"}: ${marketDecisionThresholdState.controllingUnresolvedCondition.label}`
+            : "";
 
           if (marketGapDrivenActions.length > 0) {
             const gapsLabel = pdfLocale === "tr" ? "Kapatılması Gereken Kanıt Boşlukları" : "Evidence Gaps to Close";
@@ -6660,6 +6672,12 @@ export function buildStandardReportPdf({
               pdf.setTextColor("#ffffff");
               const chunkTitle = isFirstGapChunk ? gapsLabel : `${gapsLabel}${pdfLocale === "tr" ? " devamı" : " continued"}`;
               pdf.text(chunkTitle, bodyX, y + 12.5, { maxWidth: bodyWidth });
+
+              if (isFirstGapChunk && controllingFactorText) {
+                pdf.setFontSize(5.6);
+                pdf.setTextColor("#a1a1aa");
+                pdf.text(controllingFactorText, bodyX, y + 17, { maxWidth: bodyWidth });
+              }
 
               const rowsTopY = y + 19;
 
