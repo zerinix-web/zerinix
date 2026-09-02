@@ -208,7 +208,16 @@ test("REC-T10-3 (no regression): a card's height is never less than the original
     // conservatively-reclassified action gets when the model wrote none)
     // rather than the raw extracted `gate` alone -- Decision Gate space is
     // still reserved and drawn identically either way.
-    assert.match(source, /const gateReservedHeight = effectiveGate \? 9 : 0;/);
+    //
+    // TASK #43 -- the fixed "9" became a MINIMUM, not the whole formula:
+    // gateReservedHeight now also grows by wrapLineHeight per extra
+    // wrapped line the real gate sentence needs (see gateLines), since a
+    // full Decision Gate sentence used to be forced onto that single
+    // fixed-height line and hard-truncated with an ellipsis -- the exact
+    // "70% -> 7..." defect class this ticket fixed. The single-line case
+    // (gateLines.length === 1, the overwhelming majority of real
+    // reports) still reserves exactly 9, unchanged.
+    assert.match(source, /const gateReservedHeight = effectiveGate \? 9 \+ \(gateLines\.length - 1\) \* wrapLineHeight : 0;/);
   }
 });
 

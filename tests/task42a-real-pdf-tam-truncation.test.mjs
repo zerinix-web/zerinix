@@ -263,14 +263,40 @@ test("STRUCTURAL AUDIT: sentenceTerminatorPattern is textually identical across 
 // --- Recommendation gate/budget/owner/evidence-tie: confirmed already ---
 // --- immune (audited, not a false "already fine" claim)              ---
 
-test("AUDIT (requirement 8): extractRecommendationSignals' budget/owner/successCriterion/evidenceTie fields use a terminator requiring whitespace-or-end-of-string after a period ((?:;|\\.\\s|\\.$|$)), which a bare mid-number decimal point never satisfies -- confirmed structurally immune to this bug class, not patched because nothing here was broken", () => {
+test("AUDIT (requirement 8): extractRecommendationSignals' budget/owner/successCriterion/evidenceTie fields never treat a bare mid-number decimal point as their own end -- confirmed structurally immune to this bug class", () => {
   const reportPresentationSource = readFileSync(new URL("../app/lib/report-presentation.ts", import.meta.url), "utf8");
   const fnSource = reportPresentationSource.match(/export function extractRecommendationSignals\([\s\S]*?\n\}/)[0];
 
-  assert.match(fnSource, /explicitBudget[\s\S]*?\(\?:;\|\\\.\\s\|\\\.\$\|\$\)/);
-  assert.match(fnSource, /explicitOwner[\s\S]*?\(\?:;\|\\\.\\s\|\\\.\$\|\$\)/);
-  assert.match(fnSource, /explicitSuccessCriterion[\s\S]*?\(\?:;\|\\\.\\s\|\\\.\$\|\$\)/);
-  assert.match(fnSource, /evidenceTie[\s\S]*?\(\?:;\|\\\.\\s\|\\\.\$\|\$\)/);
+  // TASK #43B -- superseded the old whitespace-after-period terminator
+  // ((?:;|\.\s|\.$|$)) with recommendationFieldBoundaryPattern, a
+  // broader field-boundary rule (closing parenthesis, em/en dash, or
+  // the start of another field's own label, in addition to `;` and a
+  // real period) fixing a DIFFERENT reported defect (a field absorbing
+  // its neighbor). Decimal-point safety is preserved, just via this
+  // pattern's own embedded (?:(?<!\d)\.|\.(?!\d)) stop condition
+  // instead of the old \.\s|\.$ shape -- this audit now checks for
+  // that, not the superseded literal terminator text.
+  const explicitBudgetMatch = fnSource.match(/const explicitBudget = extractProtectedLabelValue\(([\s\S]*?)\);/);
+  const explicitOwnerMatch = fnSource.match(/const explicitOwner = extractProtectedLabelValue\(([\s\S]*?)\);/);
+  const explicitSuccessCriterionMatch = fnSource.match(/const explicitSuccessCriterion = extractProtectedLabelValue\(([\s\S]*?)\);/);
+  const evidenceTieMatch = fnSource.match(/const evidenceTie = extractProtectedLabelValue\(([\s\S]*?)\);/);
+  assert.ok(explicitBudgetMatch, "expected explicitBudget");
+  assert.ok(explicitOwnerMatch, "expected explicitOwner");
+  assert.ok(explicitSuccessCriterionMatch, "expected explicitSuccessCriterion");
+  assert.ok(evidenceTieMatch, "expected evidenceTie");
+
+  for (const [name, match] of [
+    ["explicitBudget", explicitBudgetMatch],
+    ["explicitOwner", explicitOwnerMatch],
+    ["explicitSuccessCriterion", explicitSuccessCriterionMatch],
+    ["evidenceTie", evidenceTieMatch],
+  ]) {
+    assert.match(match[1], /recommendationFieldBoundaryPattern/, `${name}: expected it to use the shared, decimal-safe recommendationFieldBoundaryPattern`);
+  }
+  assert.ok(
+    fnSource.includes("(?<!\\\\d)\\\\.|\\\\.(?!\\\\d)"),
+    "expected the decimal-safe period stop condition to still be present"
+  );
 });
 
 test("AUDIT (requirement 8): extractRecommendationSignals' gate field has no mandatory trailing literal terminator at all, so it cannot backtrack onto a decimal point the way a bare-`\\.`-terminated regex can -- confirmed structurally immune, not patched", () => {

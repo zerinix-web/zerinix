@@ -103,7 +103,17 @@ function extractFunctionSource(source, functionName) {
 const functionDependencies = {
   extractForceIntensity: /const forceAliases: Record<string, string\[\]> = \{[\s\S]*?\n\};/,
   extractForceImplication: /const forceAliases: Record<string, string\[\]> = \{[\s\S]*?\n\};/,
-  extractRecommendationSignals: /export const recommendationOwnerRolePattern =[\s\S]*?;/,
+  // TASK #43A -- extractRecommendationSignals now also protects each
+  // label-based field's own known abbreviations (protectSentenceAbbreviations/
+  // restoreSentenceAbbreviations, both module-private, defined much
+  // earlier in the file than recommendationOwnerRolePattern) before
+  // applying its `\.\s`-based terminator, so this isolated module needs
+  // both alongside the pre-existing dependency.
+  extractRecommendationSignals: [
+    /export const SENTENCE_ABBREVIATIONS = \[[\s\S]*?\n\];/,
+    /function protectSentenceAbbreviations\([\s\S]*?\n\}\n\nfunction restoreSentenceAbbreviations\([\s\S]*?\n\}/,
+    /export const recommendationOwnerRolePattern =[\s\S]*?;/,
+  ],
   // A later ticket ("RESTORE PREMIUM ANALYTICAL DEPTH") split
   // extractMarketIntelligenceCompetitorRows into a 3-tier fallback chain
   // (table -> flattened bullets -> Major Players' own bullets), each its
@@ -118,11 +128,18 @@ const functionDependencies = {
 
 async function compileFunction(source, functionName) {
   const raw = extractFunctionSource(source, functionName);
-  const dependencyPattern = functionDependencies[functionName];
-  const dependency = dependencyPattern ? source.match(dependencyPattern)?.[0] : null;
-  if (dependencyPattern) {
-    assert.ok(dependency, `dependency for ${functionName} not found`);
-  }
+  const dependencyPatterns = functionDependencies[functionName];
+  const patterns = Array.isArray(dependencyPatterns)
+    ? dependencyPatterns
+    : dependencyPatterns
+      ? [dependencyPatterns]
+      : [];
+  const dependencyPieces = patterns.map((pattern) => {
+    const match = source.match(pattern)?.[0];
+    assert.ok(match, `dependency for ${functionName} not found (pattern: ${pattern})`);
+    return match;
+  });
+  const dependency = dependencyPieces.length > 0 ? dependencyPieces.join("\n\n") : null;
   const dir = mkdtempSync(join(tmpdir(), "zerinix-decision-report-fn-"));
   const outPath = join(dir, `${functionName}.ts`);
   writeFileSync(outPath, `${dependency ? `${dependency}\n` : ""}export ${raw}\n`);

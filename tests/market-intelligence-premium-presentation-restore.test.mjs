@@ -78,7 +78,18 @@ async function compileFunction(source, functionName) {
   );
   const dependency =
     functionName === "extractRecommendationSignals"
-      ? reportPresentationSource.match(/export const recommendationOwnerRolePattern =[\s\S]*?;/)?.[0]
+      ? [
+          // TASK #43A -- extractRecommendationSignals now also protects
+          // each label-based field's own known abbreviations
+          // (protectSentenceAbbreviations/restoreSentenceAbbreviations,
+          // both module-private) before applying its `\.\s`-based
+          // terminator, so this isolated module needs them too.
+          reportPresentationSource.match(/export const SENTENCE_ABBREVIATIONS = \[[\s\S]*?\n\];/)?.[0],
+          reportPresentationSource.match(
+            /function protectSentenceAbbreviations\([\s\S]*?\n\}\n\nfunction restoreSentenceAbbreviations\([\s\S]*?\n\}/
+          )?.[0],
+          reportPresentationSource.match(/export const recommendationOwnerRolePattern =[\s\S]*?;/)?.[0],
+        ].join("\n\n")
       : functionName === "extractHeadlineMonetaryValue"
         ? [
             source.match(/const marketSizeExclusionContext =[\s\S]*?;/)?.[0],

@@ -376,7 +376,13 @@ test("E4. Strategic Recommendations' row-chunking algorithm, run against REAL js
 
   const pieces = [
     "import { jsPDF } from \"jspdf\";",
-    "import { localizePdfPresentationText, normalizePdfText } from \"/Users/iyslv/Desktop/zerinix/app/lib/pdf-normalization.mjs\";",
+    // TASK #43 -- computeRecommendationCardLayout now also builds and
+    // measures the wrapped "ACTION · TYPE -> THRESHOLD" classification
+    // tag (localizePdfPresentationLabel("ACTION", pdfLocale)) as part of
+    // its own height computation, so this stub import must provide it
+    // too -- the same real, already-imported module the production code
+    // reads it from.
+    "import { localizePdfPresentationText, localizePdfPresentationLabel, normalizePdfText } from \"/Users/iyslv/Desktop/zerinix/app/lib/pdf-normalization.mjs\";",
     "import { wrapPdfText as wrapPdfTextWithEngine } from \"/Users/iyslv/Desktop/zerinix/app/lib/pdf-engine/utils.ts\";",
     // TASK #31 -- computeRecommendationCardLayout now calls this real,
     // imported function (and closes over recommendationCanonicalState,
@@ -399,6 +405,14 @@ test("E4. Strategic Recommendations' row-chunking algorithm, run against REAL js
       assert.ok(startMatch, "recommendationOwnerRolePattern not found");
       return startMatch[0];
     })(),
+    // TASK #43A -- extractRecommendationSignals now protects each
+    // label-based field's own known abbreviations (protect/restore-
+    // SentenceAbbreviations, both module-private to report-presentation.ts)
+    // before applying its `\.\s`-based terminator, so this isolated
+    // harness must provide the same two real helpers.
+    `const SENTENCE_ABBREVIATIONS = ${JSON.stringify(SENTENCE_ABBREVIATIONS)};`,
+    extractFunctionSource(reportPresentationSource, "protectSentenceAbbreviations"),
+    extractFunctionSource(reportPresentationSource, "restoreSentenceAbbreviations"),
     extractFunctionSource(reportPresentationSource, "extractRecommendationSignals").replace(
       "function extractRecommendationSignals(line: string) {",
       "export function extractRecommendationSignals(line: string) {"

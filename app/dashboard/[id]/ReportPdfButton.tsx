@@ -4549,6 +4549,15 @@ export function buildStandardReportPdf({
           ? ` (${localizeRecommendationProvenance(classification.provenance, pdfLocale === "tr" ? "Turkish" : "English")})`
           : "";
         const effectiveGate = gate || classification.downgradeReason || "";
+        // TASK #43 -- everything measured below (classification tag,
+        // action text, per-field values, decision gate) shares one
+        // "reserve real height for real wrapped lines" line-height unit,
+        // so a card only grows when its own content genuinely needs
+        // more room -- never a fixed-height slot that a downstream draw
+        // call then has to cram text into via character-slicing.
+        const wrapLineHeight = 3;
+        const previousMeasureFontSize = pdf.getFontSize();
+
         pdf.setFontSize(6);
         // TASK #25C -- confirmed live (real persisted report): capping
         // this at 2 lines silently ellipsized real action text whenever
@@ -4561,6 +4570,22 @@ export function buildStandardReportPdf({
         // draw call in the strategic-recommendation pagination branch),
         // so the full, untruncated action always reaches the page.
         const actionLines = wrapPdfText(localizePdfPresentationText(item, pdfLocale), cardWidth - 13);
+
+        // TASK #43 -- confirmed live: the "ACTION · TYPE -> THRESHOLD"
+        // classification tag above the action text used to draw through
+        // drawRecommendationFieldValue, a single-line helper that hard-
+        // truncates with an ellipsis -- so a real decision-threshold name
+        // (e.g. "OBTAINABLE SHARE (SAM/SOM)") could be cut mid-word right
+        // where this card is naming WHICH threshold the action ties to.
+        // Wrapping it (capped at 2 lines -- this is a short structured
+        // tag, never open-ended prose) and growing the space reserved
+        // above the action text only when it genuinely needs a second
+        // line keeps the full threshold name legible.
+        pdf.setFontSize(5.2);
+        const classificationText = `${localizePdfPresentationLabel("ACTION", pdfLocale)} · ${classification.actionTypeLabel.toUpperCase()}${classification.relatedEvidenceGapId ? ` → ${classification.relatedDecisionThreshold?.gapLabel.toUpperCase()}` : ""}`;
+        const classificationLines = wrapPdfText(classificationText, cardWidth - 13).slice(0, 2);
+        const classificationExtraHeight = (classificationLines.length - 1) * wrapLineHeight;
+
         // TASK #29H -- Activity/Evidence Tie added alongside the
         // pre-existing 4 fields so a fully-populated recommendation (now
         // correctly grouped into ONE item, see extractRecommendationItems'
@@ -4576,16 +4601,74 @@ export function buildStandardReportPdf({
             ["Evidence Tie", evidenceTie],
           ] as const
         ).filter(([, value]) => value);
-        const fieldsTopY = 7.8 + actionLines.length * 3.3 + 2.5;
+        // TASK #43 -- confirmed live: every field value (Owner/Timeline/
+        // Budget/Success Metric/Activity/Evidence Tie) used to draw
+        // through drawRecommendationFieldValue at a fixed one-line row
+        // height -- for a short numeric value squeezed into a narrow
+        // half-card column, that helper's character-slice-then-ellipsis
+        // fallback is exactly the reported defect class ("$25,000" ->
+        // "$2...", "90 days" -> "9..."). Measuring each value's real
+        // wrapped line count here (same technique as
+        // getExecutiveDecisionCardLayout's recItems above) lets each row
+        // grow to fit instead of the text being cut; capped at 3 lines
+        // per value since these are short labeled facts, not prose.
+        const fieldColWidth = (cardWidth - 6) / 2;
+        pdf.setFontSize(5.2);
+        const wrappedFields = fields.map(([label, value]) => ({
+          label,
+          lines: wrapPdfText(localizePdfPresentationText(value, pdfLocale), fieldColWidth - 2).slice(0, 3),
+        }));
         // TASK #29H -- raised from 4 to 6 (3 rows of 2) to match the 2
         // new fields above -- a fully-populated recommendation must never
         // have Activity/Evidence Tie silently dropped once grouping
         // correctly keeps all of a recommendation's metadata on one card
         // (Task #25's "never silently truncate content" requirement).
-        const fieldsRows = fields.length > 0 ? Math.ceil(Math.min(fields.length, 6) / 2) : 0;
-        const contentBottom =
-          fieldsRows > 0 ? fieldsTopY + (fieldsRows - 1) * 5.6 + 5.5 : fieldsTopY + 3;
-        const gateReservedHeight = effectiveGate ? 9 : 0;
+        const boundedFields = wrappedFields.slice(0, 6);
+        const fieldRowLineCounts: number[] = [];
+        for (let i = 0; i < boundedFields.length; i += 2) {
+          const leftLines = boundedFields[i]?.lines.length ?? 1;
+          const rightLines = boundedFields[i + 1]?.lines.length ?? 1;
+          fieldRowLineCounts.push(Math.max(leftLines, rightLines, 1));
+        }
+        // Cumulative Y offset (relative to the field grid's own top) for
+        // each row, derived from the ACTUAL line count of every row
+        // above it -- replaces a flat `row * 5.6` assumption that had no
+        // way to make room for a row above it that had wrapped to more
+        // than one line.
+        const fieldRowYOffsets: number[] = [];
+        let fieldRowCursor = 0;
+        fieldRowLineCounts.forEach((lines) => {
+          fieldRowYOffsets.push(fieldRowCursor);
+          fieldRowCursor += 5.6 + (lines - 1) * wrapLineHeight;
+        });
+
+        // TASK #43 -- confirmed live: the Decision Gate sentence (a full,
+        // decision-relevant sentence -- e.g. a real conversion-rate or
+        // budget threshold the recommendation is gated on) used to draw
+        // through drawRecommendationFieldValue on a single fixed-height
+        // line, exactly where the ticket's own examples ("70% -> 7...")
+        // could occur. Wrapped and capped at 3 lines (a decision gate is
+        // one sentence, never a paragraph), growing the reserved height
+        // only when the real sentence needs more than one line.
+        pdf.setFontSize(5);
+        const gateLines = effectiveGate
+          ? wrapPdfText(localizePdfPresentationText(effectiveGate, pdfLocale), cardWidth - 6).slice(0, 3)
+          : [];
+
+        pdf.setFontSize(previousMeasureFontSize);
+
+        const fieldsTopY = 7.8 + classificationExtraHeight + actionLines.length * 3.3 + 2.5;
+        let contentBottom: number;
+        if (fieldRowLineCounts.length > 0) {
+          const interRowGaps = fieldRowLineCounts
+            .slice(0, -1)
+            .reduce((sum, lines) => sum + 5.6 + (lines - 1) * wrapLineHeight, 0);
+          const lastRowLines = fieldRowLineCounts[fieldRowLineCounts.length - 1];
+          contentBottom = fieldsTopY + interRowGaps + 5.5 + (lastRowLines - 1) * wrapLineHeight;
+        } else {
+          contentBottom = fieldsTopY + 3;
+        }
+        const gateReservedHeight = effectiveGate ? 9 + (gateLines.length - 1) * wrapLineHeight : 0;
         const height = Math.max(recommendationCardMinHeight, contentBottom + gateReservedHeight);
 
         return {
@@ -4594,10 +4677,13 @@ export function buildStandardReportPdf({
           budget,
           owner,
           gate: effectiveGate,
+          gateLines,
           activity,
           evidenceTie,
           actionLines,
-          fields,
+          classificationLines,
+          fields: boundedFields,
+          fieldRowYOffsets,
           fieldsTopY,
           height,
           classification,
@@ -4673,6 +4759,51 @@ export function buildStandardReportPdf({
           rowHeights: [firstRowHeight, secondRowHeight],
           totalHeight: firstRowHeight + gap + secondRowHeight,
         };
+      };
+
+      // TASK #43A -- confirmed live against the real Download PDF path:
+      // forceCardHeight/forceCardSpacing (drawSectionVisual's own
+      // isPorterSection branch) used to be fixed constants (14/16)
+      // tuned for exactly 2 wrapped lines, with the implication
+      // sentence itself hard-capped at `.slice(0, 2)` -- so a real force
+      // sentence needing a 3rd line was silently dropped with NO
+      // ellipsis, ending mid-thought ("...need for", "...go-to-market
+      // cost;"). getVisualHeight's own Porter branch also hardcoded a
+      // matching `Math.max(44, 5 * 16)` that could never notice this.
+      // getPorterLayout is the single, shared computation (matching
+      // this file's own getSwotLayout/getFinancialLayout convention)
+      // both call sites now read from, so pagination budgeting and
+      // drawing can never disagree: sizing the card (and the vertical
+      // spacing between all 5 cards, since they share one uniform spoke
+      // layout) off the REAL max wrapped-line count across all 5 forces
+      // means a longer sentence grows every card's shared row height
+      // instead of being cut. The original 14/16 constants fall out
+      // exactly when every force fits in its original 2 lines (the
+      // common case), so nothing visually shifts for an already-fitting
+      // report.
+      const porterForceNames = ["Rivalry", "Entrants", "Buyer", "Supplier", "Substitutes"];
+      const porterForceCardGap = 2;
+      const porterImplicationLineHeight = 3.2;
+      const getPorterLayout = (content: string, width: number) => {
+        const previousFontSize = pdf.getFontSize();
+        pdf.setFontSize(4.6);
+        const forces = porterForceNames.map((force) => {
+          const score = extractForceIntensity(content, force)?.width ?? 0;
+          const implication = extractForceImplication(content, force);
+          const lines = implication
+            ? wrapPdfText(localizePdfPresentationText(implication, pdfLocale), width * 0.38 - 4).slice(0, 4)
+            : [];
+
+          return { force, score, implication, lines };
+        });
+        pdf.setFontSize(previousFontSize);
+
+        const maxLines = Math.max(1, ...forces.map((entry) => entry.lines.length || 1));
+        const forceCardHeight = Math.max(14, 7.6 + maxLines * porterImplicationLineHeight);
+        const forceCardSpacing = forceCardHeight + porterForceCardGap;
+        const totalHeight = Math.max(44, forces.length * forceCardSpacing);
+
+        return { forces, forceCardHeight, forceCardSpacing, totalHeight };
       };
 
       const getFinancialLayout = (content: string, width: number) => {
@@ -5851,7 +5982,6 @@ export function buildStandardReportPdf({
         }
 
         if (isPorterSection) {
-          const forces = ["Rivalry", "Entrants", "Buyer", "Supplier", "Substitutes"];
           const centerX = bodyX + bodyWidth * 0.32;
           const centerY = visualY + 22;
           // Each force card now also carries its own real investor-
@@ -5862,8 +5992,16 @@ export function buildStandardReportPdf({
           // taller card (was a fixed 6mm/8mm-spaced row, now sized to fit
           // up to 2 wrapped lines) is what makes it safe for
           // pdfCompleteVisualFields to suppress that paragraph entirely.
-          const forceCardHeight = 14;
-          const forceCardSpacing = 16;
+          //
+          // TASK #43A -- forceCardHeight/forceCardSpacing/each force's
+          // own wrapped implicationLines now come from getPorterLayout
+          // (shared with getVisualHeight above, see its own comment),
+          // instead of the fixed 14/16 constants and a `.slice(0, 2)`
+          // that used to silently drop a 3rd wrapped line with no
+          // ellipsis -- the real reported "...need for"/"...go-to-market
+          // cost;" defect.
+          const porterLayout = getPorterLayout(content, bodyWidth);
+          const { forceCardHeight, forceCardSpacing } = porterLayout;
 
           pdf.setDrawColor("#115e59");
           pdf.circle(centerX, centerY, 20, "S");
@@ -5872,19 +6010,12 @@ export function buildStandardReportPdf({
           pdf.setFillColor("#5eead4");
           pdf.circle(centerX, centerY, 2.2, "F");
 
-          forces.forEach((force, index) => {
-            const angle = -Math.PI / 2 + (index * 2 * Math.PI) / forces.length;
+          porterLayout.forces.forEach(({ force, score, implication, lines }, index) => {
+            const angle = -Math.PI / 2 + (index * 2 * Math.PI) / porterLayout.forces.length;
             const dotX = centerX + Math.cos(angle) * 20;
             const dotY = centerY + Math.sin(angle) * 20;
             const cardX = bodyX + bodyWidth * 0.58;
             const cardY = visualY + index * forceCardSpacing;
-            // CRITICAL FIX -- do not reintroduce old fake-data behavior.
-            // This used to be a static [72, 54, 66, 48, 60] array,
-            // identical for every report -- see extractForceIntensity's
-            // own comment for why a real per-force reading is used
-            // instead.
-            const score = extractForceIntensity(content, force)?.width ?? 0;
-            const implication = extractForceImplication(content, force);
 
             pdf.setDrawColor("#5eead4");
             pdf.line(centerX, centerY, dotX, dotY);
@@ -5910,21 +6041,17 @@ export function buildStandardReportPdf({
               isMarketIntelligenceReport && !isForceEvidenceCited(implication) ? "#fbbf24" : "#5eead4"
             );
             pdf.roundedRect(cardX + 22, cardY + 2.2, (bodyWidth * 0.24 * score) / 100, 1.4, 0.7, 0.7, "F");
-            if (implication) {
+            if (lines.length > 0) {
               pdf.setFontSize(4.6);
               pdf.setTextColor("#a1a1aa");
-              const implicationLines = wrapPdfText(
-                localizePdfPresentationText(implication, pdfLocale),
-                bodyWidth * 0.38 - 4
-              ).slice(0, 2);
-              pdf.text(implicationLines, cardX + 2, cardY + 7.6, {
+              pdf.text(lines, cardX + 2, cardY + 7.6, {
                 lineHeightFactor: 1.2,
                 maxWidth: bodyWidth * 0.38 - 4,
               });
             }
           });
 
-          return Math.max(44, forces.length * forceCardSpacing);
+          return porterLayout.totalHeight;
         }
 
         if (
@@ -6182,9 +6309,7 @@ export function buildStandardReportPdf({
         }
 
         if (normalizedTitle.includes("porter")) {
-          // Must match drawSectionVisual's own isPorterSection branch
-          // exactly (Math.max(44, forces.length(5) * forceCardSpacing(16))).
-          return Math.max(44, 5 * 16);
+          return getPorterLayout(section.content, bodyWidth).totalHeight;
         }
 
         if (
@@ -6526,27 +6651,6 @@ export function buildStandardReportPdf({
               ? `${localizePdfPresentationLabel("Current Decision", pdfLocale)}: ${strategicRecommendationDecision.decisionLabel}`
               : "";
 
-          const drawRecommendationFieldValue = (
-            text: string,
-            x: number,
-            lineY: number,
-            maxWidth: number,
-            size: number,
-            minSize = 5.4
-          ) => {
-            let fontSize = size;
-            pdf.setFontSize(fontSize);
-            while (fontSize > minSize && pdf.getTextWidth(text) > maxWidth) {
-              fontSize -= 0.35;
-              pdf.setFontSize(fontSize);
-            }
-            const safeText =
-              pdf.getTextWidth(text) > maxWidth
-                ? `${text.slice(0, Math.max(4, Math.floor(text.length * (maxWidth / Math.max(pdf.getTextWidth(text), 1))) - 1))}…`
-                : text;
-            pdf.text(safeText, x, lineY);
-          };
-
           let rowCursor = 0;
           let isFirstChunk = true;
 
@@ -6621,7 +6725,7 @@ export function buildStandardReportPdf({
                     .slice(rowCursor, rowCursor + rowInChunk)
                     .reduce((sum, height) => sum + height + cardGap, 0);
                 const cardHeight = rowHeights[rowCursor + rowInChunk];
-                const { gate, actionLines, fields, classification } = card;
+                const { gate, gateLines, actionLines, classificationLines, fields, fieldRowYOffsets, fieldsTopY: relativeFieldsTopY } = card;
 
                 pdf.setFillColor("#18181b");
                 pdf.setDrawColor("#27272a");
@@ -6636,54 +6740,91 @@ export function buildStandardReportPdf({
 
                 pdf.setFontSize(5.2);
                 pdf.setTextColor("#71717a");
-                // TASK #31 -- explicit action-type classification appended
+                // TASK #43 -- explicit action-type classification appended
                 // next to the existing "ACTION" label (never a new
-                // element/row -- see this task's own "without cluttering
-                // the UI" requirement), truncated to the card's own
-                // available width exactly like every other field value
-                // already does via drawRecommendationFieldValue.
-                drawRecommendationFieldValue(
-                  `${localizePdfPresentationLabel("ACTION", pdfLocale)} · ${classification.actionTypeLabel.toUpperCase()}${classification.relatedEvidenceGapId ? ` → ${classification.relatedDecisionThreshold?.gapLabel.toUpperCase()}` : ""}`,
-                  x + 11,
-                  cardY + 4,
-                  cardWidth - 13,
-                  5.2,
-                  4
-                );
-                pdf.setFontSize(6);
-                pdf.setTextColor("#e4e4e7");
-                pdf.text(actionLines, x + 11, cardY + 7.8, {
+                // element/row -- see Task #31's own "without cluttering
+                // the UI" requirement). Wrapped (up to 2 lines) instead of
+                // hard-truncated with an ellipsis, using the SAME
+                // classificationLines computeRecommendationCardLayout
+                // already measured, so drawing and the card's own
+                // reserved height can never disagree.
+                pdf.text(classificationLines, x + 11, cardY + 4, {
                   lineHeightFactor: 1.15,
                   maxWidth: cardWidth - 13,
                 });
 
-                const fieldsTopY = cardY + 7.8 + actionLines.length * 3.3 + 2.5;
+                const classificationExtraHeight = (classificationLines.length - 1) * 3;
+
+                pdf.setFontSize(6);
+                pdf.setTextColor("#e4e4e7");
+                pdf.text(actionLines, x + 11, cardY + 7.8 + classificationExtraHeight, {
+                  lineHeightFactor: 1.15,
+                  maxWidth: cardWidth - 13,
+                });
+
+                // TASK #43 -- reuses the SAME relative fieldsTopY
+                // computeRecommendationCardLayout derived the card's own
+                // height from (rather than recomputing it a second,
+                // independent time here), so drawing and height budgeting
+                // can never drift apart.
+                const fieldsTopY = cardY + relativeFieldsTopY;
                 const fieldColWidth = (cardWidth - 6) / 2;
 
                 if (fields.length > 0) {
                   pdf.setDrawColor("#27272a");
                   pdf.line(x + 3, fieldsTopY - 1.6, x + cardWidth - 3, fieldsTopY - 1.6);
 
-                  fields.slice(0, 6).forEach(([label, value], fieldIndex) => {
+                  // TASK #43 -- confirmed live: each field value used to
+                  // draw through drawRecommendationFieldValue at a fixed
+                  // one-line row height, hard-truncating with an ellipsis
+                  // (and, for a short numeric value in this narrow half-
+                  // card column, cutting mid-number -- e.g. "$25,000" ->
+                  // "$2...", "90 days" -> "9..."). Draws the pre-wrapped
+                  // `lines` array computeRecommendationCardLayout already
+                  // measured, at the row's own real Y offset (derived
+                  // from every row above it's ACTUAL line count, not a
+                  // flat `row * 5.6` assumption), so a value that needs a
+                  // second line grows its own row instead of being cut.
+                  fields.forEach(({ label, lines }, fieldIndex) => {
                     const fx = x + 3 + (fieldIndex % 2) * fieldColWidth;
-                    const fy = fieldsTopY + Math.floor(fieldIndex / 2) * 5.6;
+                    const fy = fieldsTopY + fieldRowYOffsets[Math.floor(fieldIndex / 2)];
 
                     pdf.setFontSize(4.4);
                     pdf.setTextColor("#71717a");
                     pdf.text(localizePdfPresentationLabel(label, pdfLocale).toUpperCase(), fx, fy);
                     pdf.setFontSize(5.2);
                     pdf.setTextColor("#5eead4");
-                    drawRecommendationFieldValue(value, fx, fy + 2.8, fieldColWidth - 2, 5.2, 4);
+                    pdf.text(lines, fx, fy + 2.8, {
+                      lineHeightFactor: 1.15,
+                      maxWidth: fieldColWidth - 2,
+                    });
                   });
                 }
 
                 if (gate) {
+                  // TASK #43 -- confirmed live: the Decision Gate sentence
+                  // used to draw through drawRecommendationFieldValue on a
+                  // single fixed-height line -- exactly the ticket's own
+                  // "70% -> 7..." defect class, on a real decision-gating
+                  // sentence. Wrapped (up to 3 lines, computed once in
+                  // computeRecommendationCardLayout) and the reserved
+                  // height above it grows with the real line count, so
+                  // the label/text vertical offsets below always land at
+                  // the same spot the height math already reserved.
+                  const gateReservedHeight = 9 + (gateLines.length - 1) * 3;
                   pdf.setFontSize(4.4);
                   pdf.setTextColor("#71717a");
-                  pdf.text(localizePdfPresentationLabel("DECISION GATE", pdfLocale), x + 3, cardY + cardHeight - 5.4);
+                  pdf.text(
+                    localizePdfPresentationLabel("DECISION GATE", pdfLocale),
+                    x + 3,
+                    cardY + cardHeight - gateReservedHeight + 3.6
+                  );
                   pdf.setFontSize(5);
                   pdf.setTextColor("#fbbf24");
-                  drawRecommendationFieldValue(gate, x + 3, cardY + cardHeight - 2, cardWidth - 6, 5, 4);
+                  pdf.text(gateLines, x + 3, cardY + cardHeight - gateReservedHeight + 6.6, {
+                    lineHeightFactor: 1.15,
+                    maxWidth: cardWidth - 6,
+                  });
                 }
               });
 
@@ -6747,7 +6888,101 @@ export function buildStandardReportPdf({
             const enterIfLabel = pdfLocale === "tr" ? "GİR EĞER" : "ENTER IF";
             const monitorIfLabel = pdfLocale === "tr" ? "İZLE EĞER" : "MONITOR IF";
             const avoidIfLabel = pdfLocale === "tr" ? "KAÇIN EĞER" : "AVOID IF";
-            const gapRowHeight = 36;
+            // TASK #43 -- confirmed live: every field in this row (gap
+            // label, action, measurable result, decision consequence, and
+            // -- the real defect -- the full ENTER/MONITOR/AVOID
+            // threshold sentences) used to draw through
+            // drawRecommendationFieldValue on a single, fixed-height
+            // line inside a hardcoded 36mm row, hard-truncating with an
+            // ellipsis. The ENTER/MONITOR/AVOID condition sentences are
+            // real decision-gating prose (e.g. naming a specific
+            // percentage or dollar threshold) and are exactly the class
+            // of "Strategic Recommendations... end with '...'" defect
+            // this ticket reports. computeGapDrivenActionRowLayout
+            // measures every field's real wrapped line count once, and
+            // the row's own height (both for per-page chunk budgeting
+            // and for each field's actual Y position) is derived
+            // entirely from that -- growing only when real content
+            // needs more than one line, exactly mirroring
+            // computeRecommendationCardLayout's fix above.
+            const computeGapDrivenActionRowLayout = (gapAction: (typeof marketGapDrivenActions)[number]) => {
+              const isControllingGap = marketControllingDecisionThreshold?.gapId === gapAction.gapId;
+              const enterIfText = isControllingGap
+                ? marketControllingDecisionThreshold!.enterSummary
+                : gapAction.threshold.enterCondition.description;
+              const monitorIfText = isControllingGap
+                ? marketControllingDecisionThreshold!.monitorSummary
+                : gapAction.threshold.monitorCondition.description;
+              const avoidIfText = isControllingGap
+                ? marketControllingDecisionThreshold!.avoidSummary
+                : gapAction.threshold.avoidCondition.description;
+
+              const previousFontSize = pdf.getFontSize();
+              const lineHeight = 3.6;
+
+              pdf.setFontSize(7.2);
+              const gapLabelLines = wrapPdfText(localizePdfPresentationText(gapAction.gapLabel, pdfLocale), bodyWidth).slice(0, 2);
+              pdf.setFontSize(5.6);
+              const actionLines = wrapPdfText(localizePdfPresentationText(gapAction.action, pdfLocale), bodyWidth).slice(0, 2);
+              const measurableResultLines = wrapPdfText(
+                localizePdfPresentationText(gapAction.measurableResult, pdfLocale),
+                bodyWidth
+              ).slice(0, 2);
+              pdf.setFontSize(5.4);
+              const decisionConsequenceLines = wrapPdfText(
+                localizePdfPresentationText(gapAction.decisionConsequence, pdfLocale),
+                bodyWidth
+              ).slice(0, 2);
+              pdf.setFontSize(4.6);
+              const enterLines = wrapPdfText(`${enterIfLabel} — ${enterIfText}`, bodyWidth).slice(0, 3);
+              const monitorLines = wrapPdfText(`${monitorIfLabel} — ${monitorIfText}`, bodyWidth).slice(0, 3);
+              const avoidLines = wrapPdfText(`${avoidIfLabel} — ${avoidIfText}`, bodyWidth).slice(0, 3);
+              pdf.setFontSize(previousFontSize);
+
+              // Cumulative Y offsets (relative to the row's own top),
+              // reducing to the ORIGINAL fixed offsets (0, 4.6, 9.2,
+              // 13.8, 18.2, 22.4, 26.8, 31.2, total 36) whenever every
+              // field is exactly 1 line, so an already-correct, single-
+              // line row renders pixel-identical to before.
+              let cursor = 0;
+              const gapLabelY = cursor;
+              cursor += 4.6 + (gapLabelLines.length - 1) * lineHeight;
+              const actionY = cursor;
+              cursor += 4.6 + (actionLines.length - 1) * lineHeight;
+              const measurableResultY = cursor;
+              cursor += 4.6 + (measurableResultLines.length - 1) * lineHeight;
+              const decisionConsequenceY = cursor;
+              cursor += 4.4 + (decisionConsequenceLines.length - 1) * lineHeight;
+              const thresholdLabelY = cursor;
+              cursor += 4.2;
+              const enterY = cursor;
+              cursor += 4.4 + (enterLines.length - 1) * lineHeight;
+              const monitorY = cursor;
+              cursor += 4.4 + (monitorLines.length - 1) * lineHeight;
+              const avoidY = cursor;
+              cursor += 4.4 + (avoidLines.length - 1) * lineHeight;
+
+              return {
+                gapLabelLines,
+                actionLines,
+                measurableResultLines,
+                decisionConsequenceLines,
+                enterLines,
+                monitorLines,
+                avoidLines,
+                gapLabelY,
+                actionY,
+                measurableResultY,
+                decisionConsequenceY,
+                thresholdLabelY,
+                enterY,
+                monitorY,
+                avoidY,
+                rowHeight: Math.max(36, cursor + 0.4),
+              };
+            };
+
+            const gapRowLayouts = marketGapDrivenActions.map((gapAction) => computeGapDrivenActionRowLayout(gapAction));
 
             let gapCursor = 0;
             let isFirstGapChunk = true;
@@ -6757,7 +6992,7 @@ export function buildStandardReportPdf({
               let chunkRowsHeight = 0;
 
               for (let candidate = gapCursor; candidate < marketGapDrivenActions.length; candidate += 1) {
-                const candidateRowsHeight = chunkRowsHeight + gapRowHeight;
+                const candidateRowsHeight = chunkRowsHeight + gapRowLayouts[candidate].rowHeight;
                 const candidateCardHeight = cardHeaderHeight + candidateRowsHeight + cardBottomPadding;
                 if (rowsInChunk > 0 && candidateCardHeight > maxUsableCardHeight) {
                   break;
@@ -6787,41 +7022,45 @@ export function buildStandardReportPdf({
               marketGapDrivenActions
                 .slice(gapCursor, gapCursor + rowsInChunk)
                 .forEach((gapAction, indexInChunk) => {
-                  const rowY = rowsTopY + indexInChunk * gapRowHeight;
+                  const absoluteRowIndex = gapCursor + indexInChunk;
+                  const rowLayout = gapRowLayouts[absoluteRowIndex];
+                  const rowY =
+                    rowsTopY +
+                    gapRowLayouts
+                      .slice(gapCursor, absoluteRowIndex)
+                      .reduce((sum, layout) => sum + layout.rowHeight, 0);
                   if (indexInChunk > 0) {
                     pdf.setDrawColor("#27272a");
                     pdf.line(bodyX, rowY - 4, bodyX + bodyWidth, rowY - 4);
                   }
-                  // TASK #39 -- prefer the richer, multi-criterion
-                  // controlling threshold when it resolves for THIS gap;
-                  // otherwise fall back to Task #36/#37's unchanged flat
-                  // per-gap threshold exactly as before.
-                  const isControllingGap = marketControllingDecisionThreshold?.gapId === gapAction.gapId;
-                  const enterIfText = isControllingGap
-                    ? marketControllingDecisionThreshold!.enterSummary
-                    : gapAction.threshold.enterCondition.description;
-                  const monitorIfText = isControllingGap
-                    ? marketControllingDecisionThreshold!.monitorSummary
-                    : gapAction.threshold.monitorCondition.description;
-                  const avoidIfText = isControllingGap
-                    ? marketControllingDecisionThreshold!.avoidSummary
-                    : gapAction.threshold.avoidCondition.description;
 
                   pdf.setFontSize(7.2);
                   pdf.setTextColor("#e4e4e7");
-                  drawRecommendationFieldValue(gapAction.gapLabel, bodyX, rowY, bodyWidth, 7.2, 5.5);
+                  pdf.text(rowLayout.gapLabelLines, bodyX, rowY + rowLayout.gapLabelY, {
+                    lineHeightFactor: 1.15,
+                    maxWidth: bodyWidth,
+                  });
 
                   pdf.setFontSize(5.6);
                   pdf.setTextColor("#71717a");
-                  drawRecommendationFieldValue(gapAction.action, bodyX, rowY + 4.6, bodyWidth, 5.6, 4.4);
+                  pdf.text(rowLayout.actionLines, bodyX, rowY + rowLayout.actionY, {
+                    lineHeightFactor: 1.15,
+                    maxWidth: bodyWidth,
+                  });
 
                   pdf.setFontSize(5.6);
                   pdf.setTextColor("#a1a1aa");
-                  drawRecommendationFieldValue(gapAction.measurableResult, bodyX, rowY + 9.2, bodyWidth, 5.6, 4.4);
+                  pdf.text(rowLayout.measurableResultLines, bodyX, rowY + rowLayout.measurableResultY, {
+                    lineHeightFactor: 1.15,
+                    maxWidth: bodyWidth,
+                  });
 
                   pdf.setFontSize(5.4);
                   pdf.setTextColor("#fbbf24");
-                  drawRecommendationFieldValue(gapAction.decisionConsequence, bodyX, rowY + 13.8, bodyWidth, 5.4, 4.2);
+                  pdf.text(rowLayout.decisionConsequenceLines, bodyX, rowY + rowLayout.decisionConsequenceY, {
+                    lineHeightFactor: 1.15,
+                    maxWidth: bodyWidth,
+                  });
 
                   // TASK #36 -- the SAME structured per-gap decision
                   // threshold the web Strategic Recommendations card
@@ -6833,40 +7072,34 @@ export function buildStandardReportPdf({
                   // inventing a number for the PDF alone.
                   pdf.setFontSize(4.2);
                   pdf.setTextColor("#71717a");
-                  pdf.text(thresholdLabel, bodyX, rowY + 18.2);
+                  pdf.text(thresholdLabel, bodyX, rowY + rowLayout.thresholdLabelY);
 
+                  // TASK #43 -- these 3 sentences (the real ENTER/
+                  // MONITOR/AVOID threshold conditions, e.g. naming a
+                  // specific percentage or dollar figure) are the
+                  // concrete defect this ticket reports. Drawn from the
+                  // SAME wrapped lines computeGapDrivenActionRowLayout
+                  // already measured -- never re-truncated here.
                   pdf.setFontSize(4.6);
                   pdf.setTextColor("#5eead4");
-                  drawRecommendationFieldValue(
-                    `${enterIfLabel} — ${enterIfText}`,
-                    bodyX,
-                    rowY + 22.4,
-                    bodyWidth,
-                    4.6,
-                    3.8
-                  );
+                  pdf.text(rowLayout.enterLines, bodyX, rowY + rowLayout.enterY, {
+                    lineHeightFactor: 1.15,
+                    maxWidth: bodyWidth,
+                  });
 
                   pdf.setFontSize(4.6);
                   pdf.setTextColor("#a1a1aa");
-                  drawRecommendationFieldValue(
-                    `${monitorIfLabel} — ${monitorIfText}`,
-                    bodyX,
-                    rowY + 26.8,
-                    bodyWidth,
-                    4.6,
-                    3.8
-                  );
+                  pdf.text(rowLayout.monitorLines, bodyX, rowY + rowLayout.monitorY, {
+                    lineHeightFactor: 1.15,
+                    maxWidth: bodyWidth,
+                  });
 
                   pdf.setFontSize(4.6);
                   pdf.setTextColor("#fca5a5");
-                  drawRecommendationFieldValue(
-                    `${avoidIfLabel} — ${avoidIfText}`,
-                    bodyX,
-                    rowY + 31.2,
-                    bodyWidth,
-                    4.6,
-                    3.8
-                  );
+                  pdf.text(rowLayout.avoidLines, bodyX, rowY + rowLayout.avoidY, {
+                    lineHeightFactor: 1.15,
+                    maxWidth: bodyWidth,
+                  });
                 });
 
               y += chunkCardHeight + minSectionGap;

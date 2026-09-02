@@ -115,6 +115,13 @@ async function compileRecommendationHelpers(source) {
   const isEvidenceStatusDisclaimerLine = extractFunctionSource(reportPresentationSource, "isEvidenceStatusDisclaimerLine");
   const extractRecommendationItems = extractFunctionSource(reportPresentationSource, "extractRecommendationItems");
   const extractRecommendationSignals = extractFunctionSource(reportPresentationSource, "extractRecommendationSignals");
+  // TASK #43A -- extractRecommendationSignals now protects each
+  // label-based field's own known abbreviations (protect/restore-
+  // SentenceAbbreviations, both module-private to report-presentation.ts)
+  // before applying its `\.\s`-based terminator, so this isolated
+  // harness must provide the same two real helpers.
+  const protectSentenceAbbreviations = extractFunctionSource(reportPresentationSource, "protectSentenceAbbreviations");
+  const restoreSentenceAbbreviations = extractFunctionSource(reportPresentationSource, "restoreSentenceAbbreviations");
   return compileModule(
     [
       'const SENTENCE_ABBREVIATIONS = ["U.S.", "Inc.", "Corp.", "Ltd.", "e.g.", "i.e.", "vs.", "etc."];',
@@ -123,6 +130,8 @@ async function compileRecommendationHelpers(source) {
       isMetadataOnlyRecommendationLine,
       isEvidenceStatusDisclaimerLine,
       extractRecommendationItems,
+      protectSentenceAbbreviations,
+      restoreSentenceAbbreviations,
       extractRecommendationSignals,
     ],
     ["extractRecommendationItems", "extractRecommendationSignals"]

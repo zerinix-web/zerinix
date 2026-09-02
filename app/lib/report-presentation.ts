@@ -2025,20 +2025,102 @@ export function extractRecommendationSignals(line: string) {
   const timeframe = line.match(
     /\b\d+[\s-](?:day|days|week|weeks|month|months|gün|hafta|ay)\b|\bQ[1-4]\b|\b(?:this|next)\s+quarter\b/i
   )?.[0];
+  // TASK #43A -- confirmed live against the real Download PDF path:
+  // "Owner: Head of BD (U.S. mid-market); Budget cap: ..." was
+  // rendering as "Head of BD (U.S" -- the `\.\s` terminator below (a
+  // period followed by whitespace) matches EVERY period-space pair,
+  // including the one inside "U.S." itself, with no concept that
+  // "U.S." is a known abbreviation rather than this field's own end.
+  // protectSentenceAbbreviations is this file's own established fix
+  // for the identical problem in splitSentences (see its comment
+  // above) -- it swaps each known abbreviation's periods for a
+  // sentinel character before these regexes run, so "U.S. " can never
+  // satisfy `\.\s` here; restoreSentenceAbbreviations converts the
+  // sentinel back to a real "." in the extracted value only. Applied
+  // to every label-based field below (Budget/Success Metric/Owner/
+  // Activity/Evidence Tie) since all five share this exact terminator
+  // shape.
+  const abbreviationProtectedLine = protectSentenceAbbreviations(line);
+  const extractProtectedLabelValue = (regex: RegExp) => {
+    const match = abbreviationProtectedLine.match(regex)?.[1];
+    return match ? restoreSentenceAbbreviations(match).trim() : undefined;
+  };
+  // TASK #43B -- confirmed live against the real Download PDF path:
+  // "U.S. Mid-Market Pilot (Owner: Head of Partnerships) -- Budget
+  // ceiling USD 75,000 (Assumption)." resolved Owner to "Head of
+  // Partnerships) -- Budget ceiling USD 75,000 (Assumption)" instead of
+  // just "Head of Partnerships". Root cause: the OLD terminator (see
+  // Task #43A's own comment above) only ever recognized `;` or a real
+  // sentence-ending period as "this field's own end" -- it had no
+  // concept of a closing parenthesis (the common "(Owner: X) -- ..."
+  // shape), an em/en dash introducing the next clause, or simply
+  // running straight into the NEXT recognized label with no
+  // punctuation between them at all. With none of those present, the
+  // lazy capture kept growing until the very end of the sentence,
+  // absorbing every field written after it.
+  //
+  // recommendationFieldBoundaryPattern is a single, shared "stop here"
+  // rule reused by every one of these 5 label-based fields (Owner/
+  // Budget/Success Metric/Activity/Evidence Tie), so one field can
+  // never absorb a neighboring one no matter which of these it is:
+  //   - `;` and a genuine (non-decimal) period -- unchanged from
+  //     before, reusing the exact decimal-safe period check from Task
+  //     #42A's sentenceTerminatorPattern so a real figure like "$1.5M"
+  //     is never cut at its own decimal point.
+  //   - a closing parenthesis, and an em dash or en dash -- the two
+  //     real reported shapes.
+  //   - the START of any of these 5 fields' own label keyword -- so
+  //     even with NO punctuation at all between two fields, one can
+  //     never run into the next. This is what makes the fix
+  //     structural rather than a punctuation whitelist: any field
+  //     written back-to-back with no separator is still safely
+  //     bounded.
+  // A `(...)` pair that is fully closed WITHIN the value itself (e.g.
+  // "Head of BD (U.S. mid-market)", Task #43A's own real fixture) is
+  // matched as one atomic unit before the bare-`)` stop condition is
+  // ever consulted, so a legitimate parenthetical descriptor that is
+  // part of the value survives intact -- only a closing paren with no
+  // matching open WITHIN the value (i.e. one that closes a group
+  // wrapping the field from OUTSIDE) ends the match. Implemented as a
+  // repeated negative lookahead ("consume any character, or one
+  // balanced parenthetical, as long as a boundary does not start
+  // here") -- the same class of technique as Task #42/#42A's
+  // sentenceSafeSegmentPattern, generalized to multiple stop
+  // conditions instead of just one.
+  const recommendationFieldLabelAlternation =
+    "(?:Owner|Owned by|Budget(?:\\s+cap|\\s+ceiling)?|Spend(?:\\s+cap|\\s+ceiling)?|Success\\s+(?:criterion|metric)|Activity|Action|Scope|Evidence(?:\\s+(?:tie|to\\s+collect|link|basis))?|Supporting evidence)\\s*:";
+  const recommendationFieldBoundaryStop = `;|\\)|[—–]|(?:(?<!\\d)\\.|\\.(?!\\d))|\\b${recommendationFieldLabelAlternation}`;
+  const recommendationFieldBoundaryPattern = `(?:(?!${recommendationFieldBoundaryStop})(?:\\([^()]*\\)|[\\s\\S]))*`;
   // TASK #29H -- prefer an explicit "Budget cap:"/"Budget ceiling:"/
   // "Spend cap:" label's own value first (this pipeline's real
   // generation contract already names the field this way) -- falls back
   // to the old bare currency-amount scan unchanged for content that
   // doesn't use the label, so a report that just writes "$75,000"
   // inline still resolves exactly as before.
-  const explicitBudget = line.match(/\b(?:Budget(?:\s+cap|\s+ceiling)?|Spend(?:\s+cap|\s+ceiling)?)\s*:\s*([^;]+?)(?:;|\.\s|\.$|$)/i)?.[1]?.trim();
+  // TASK #43B -- the label's own colon is now optional, requiring
+  // instead (via lookahead, so it is never consumed into the value)
+  // that whatever follows actually looks like a monetary figure
+  // (a currency symbol, a common currency code, or a bare digit) --
+  // the real reported shape, "Budget ceiling USD 75,000", never uses a
+  // colon at all. This still refuses to match ordinary prose that
+  // merely contains the word "budget" (e.g. "the pilot's Budget is a
+  // concern"), since "is" satisfies neither the colon nor the
+  // lookahead.
+  const explicitBudget = extractProtectedLabelValue(
+    new RegExp(
+      `\\b(?:Budget(?:\\s+cap|\\s+ceiling)?|Spend(?:\\s+cap|\\s+ceiling)?)\\b\\s*:?\\s*(?=[€$₺]|USD|EUR|GBP|TRY|\\d)(${recommendationFieldBoundaryPattern})`,
+      "i"
+    )
+  );
   const budget = explicitBudget || line.match(/[€$₺]\s*\d+(?:[.,]\d+)*(?:\s*[kKmMbB])?/)?.[0];
   // TASK #29H -- prefer an explicit "Success criterion:"/"Success
   // metric:" label's own value first -- the old bare percentage/count
   // scan below only ever caught a narrow set of phrasings and missed
   // real success criteria stated in other terms (e.g. "at least one
   // comparable public price schedule secured").
-  const explicitSuccessCriterion = line.match(/\bSuccess\s+(?:criterion|metric)\s*:\s*([^;]+?)(?:;|\.\s|\.$|$)/i)?.[1]?.trim();
+  const explicitSuccessCriterion = extractProtectedLabelValue(
+    new RegExp(`\\bSuccess\\s+(?:criterion|metric)\\s*:\\s*(${recommendationFieldBoundaryPattern})`, "i")
+  );
   const metric =
     explicitSuccessCriterion ||
     line.match(/\d+(?:[.,]\d+)?\s*%/)?.[0] ||
@@ -2049,7 +2131,9 @@ export function extractRecommendationSignals(line: string) {
   // ...) and silently dropped a real owner name/role stated in any other
   // words (e.g. "Pilot Lead"). Falls back to the role-keyword scan
   // unchanged for content with no explicit label at all.
-  const explicitOwner = line.match(/\b(?:Owner|Owned by)\s*:\s*([^;]+?)(?:;|\.\s|\.$|$)/i)?.[1]?.trim();
+  const explicitOwner = extractProtectedLabelValue(
+    new RegExp(`\\b(?:Owner|Owned by)\\s*:\\s*(${recommendationFieldBoundaryPattern})`, "i")
+  );
   const owner =
     explicitOwner ||
     line.match(new RegExp(`\\b(?:owned by|led by|driven by|owner:)\\s+(?:the\\s+)?(${recommendationOwnerRolePattern})\\b`, "i"))?.[1] ||
@@ -2074,7 +2158,9 @@ export function extractRecommendationSignals(line: string) {
   // right recommendation. Explicit-label-only (no guess fallback) since,
   // unlike owner/budget, there is no reliable keyword-free way to infer
   // these two from free prose without risking fabrication.
-  const activity = line.match(/\b(?:Activity|Action|Scope)\s*:\s*([^;]+?)(?:;|\.\s|\.$|$)/i)?.[1]?.trim();
+  const activity = extractProtectedLabelValue(
+    new RegExp(`\\b(?:Activity|Action|Scope)\\s*:\\s*(${recommendationFieldBoundaryPattern})`, "i")
+  );
   // TASK #29I -- extended from "Evidence tie:"/"Evidence to collect:"/
   // "Evidence link:" to also recognize a BARE "Evidence:" label and
   // "Evidence basis:"/"Supporting evidence:" (the same semantic field
@@ -2084,7 +2170,12 @@ export function extractRecommendationSignals(line: string) {
   // satisfy either that suffix or the bare "Evidence:" form (there is
   // always a non-whitespace word between "Evidence" and the colon in
   // that shape), so this can never re-capture what #29E already excludes.
-  const evidenceTie = line.match(/\b(?:Evidence(?:\s+(?:tie|to\s+collect|link|basis))?|Supporting evidence)\s*:\s*([^;]+?)(?:;|\.\s|\.$|$)/i)?.[1]?.trim();
+  const evidenceTie = extractProtectedLabelValue(
+    new RegExp(
+      `\\b(?:Evidence(?:\\s+(?:tie|to\\s+collect|link|basis))?|Supporting evidence)\\s*:\\s*(${recommendationFieldBoundaryPattern})`,
+      "i"
+    )
+  );
 
   return {
     timeframe: timeframe?.trim() || "",
