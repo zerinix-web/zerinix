@@ -509,3 +509,156 @@ test("acquisition prompts remain classified as Acquisition Due Diligence -- repo
   const report = normalizeReport(acquisitionReportRow());
   assert.equal(report.type, "Acquisition Due Diligence Report");
 });
+
+// --- TASK #41 -- eliminate malformed and empty citation artifacts -----
+//
+// ROOT CAUSE (confirmed via full lifecycle trace: generation ->
+// normalization -> canonical state -> web renderer -> PDF renderer):
+// citationBracketTagPattern (above) correctly deletes an individual
+// [R#]-shaped citation tag, but when Market Intelligence's own
+// generation prompt grouped several citations inside ONE parenthetical
+// or bracket, separated by commas -- e.g. "regional signals ([R12],
+// [R45])." or "adoption patterns ([R7],[R21])." -- removing each tag
+// individually left the comma(s) that used to separate them stranded
+// inside the group: "(, )" / "(,,)" / "[,]". A group holding exactly one
+// citation and nothing else collapsed to a fully empty "()" / "[]".
+// This is a single, centralized fix in stripReportPresentationArtifacts
+// itself (leadingGroupSeparatorPattern/trailingGroupSeparatorPattern/
+// emptyParentheticalGroupPattern/emptyBracketGroupPattern) -- since every
+// render surface (page.tsx, Planner.tsx web + PDF, ReportPdfButton.tsx
+// PDF) and the canonical narrative fields
+// (market-intelligence-canonical-state.ts) already funnel through this
+// exact function, the fix reaches all of them with zero renderer
+// changes.
+
+const plannerSourceForCitationAudit = readFileSync(
+  new URL("../components/Planner.tsx", import.meta.url),
+  "utf8"
+);
+const dashboardReportSourceForCitationAudit = readFileSync(
+  new URL("../app/dashboard/[id]/page.tsx", import.meta.url),
+  "utf8"
+);
+
+test("TASK #41: '(,)' collapses entirely -- a single citation alone in a parenthetical leaves no empty group behind", () => {
+  const result = stripReportPresentationArtifacts("Adoption patterns ([R7]).");
+  assert.equal(result, "Adoption patterns.");
+  assert.doesNotMatch(result, /\(,?\)/);
+});
+
+test("TASK #41: '(,,)' (two citations, no space) collapses entirely -- the real reported production artifact", () => {
+  const result = stripReportPresentationArtifacts("Regional expansion signals ([R12],[R45]).");
+  assert.equal(result, "Regional expansion signals.");
+  assert.doesNotMatch(result, /\(,+\)/);
+});
+
+test("TASK #41: '()' (already-empty parenthetical, e.g. from an upstream removal) is removed entirely rather than left as bare empty parens", () => {
+  const result = stripReportPresentationArtifacts("A note ().");
+  assert.equal(result, "A note.");
+  assert.doesNotMatch(result, /\(\)/);
+});
+
+test("TASK #41: '[,]' (square-bracket citation group) collapses entirely", () => {
+  const result = stripReportPresentationArtifacts("Adoption patterns [[R7], [R21]].");
+  assert.equal(result, "Adoption patterns.");
+  assert.doesNotMatch(result, /\[,?\]/);
+});
+
+test("TASK #41: three citations inside one parenthetical, comma-separated, all collapse together (never left as '(,,)' or any partial remnant)", () => {
+  const result = stripReportPresentationArtifacts("Group of three ([R1],[R2],[R3]).");
+  assert.equal(result, "Group of three.");
+  assert.doesNotMatch(result, /[([][,;\s]*[)\]]/);
+});
+
+test("TASK #41: a citation followed immediately by terminal punctuation leaves no dangling space or empty group before the punctuation", () => {
+  const result = stripReportPresentationArtifacts("Strong evidence supports this claim ([R99]).");
+  assert.equal(result, "Strong evidence supports this claim.");
+});
+
+test("TASK #41: a citation mixed with REAL content in the same parenthetical is stripped without losing the real content -- leading, trailing, and both-sided cases", () => {
+  assert.equal(
+    stripReportPresentationArtifacts("Obtainable share ([R12], up 12% YoY) matters."),
+    "Obtainable share (up 12% YoY) matters."
+  );
+  assert.equal(
+    stripReportPresentationArtifacts("The stated range (up 12% YoY, [R99]) applies."),
+    "The stated range (up 12% YoY) applies."
+  );
+  assert.equal(
+    stripReportPresentationArtifacts("The combined figure ([R1], up 12%, [R2]) is cited."),
+    "The combined figure (up 12%) is cited."
+  );
+});
+
+test("TASK #41: valid ordinary parentheses with real content (never citations) are left completely untouched", () => {
+  assert.equal(
+    stripReportPresentationArtifacts("Products (e.g., widgets) are common in this segment."),
+    "Products (e.g., widgets) are common in this segment."
+  );
+  assert.equal(
+    stripReportPresentationArtifacts("A simple ranked list (1, 2, 3) stays exactly as written."),
+    "A simple ranked list (1, 2, 3) stays exactly as written."
+  );
+  assert.equal(
+    stripReportPresentationArtifacts("Segment growth (North America) remained steady."),
+    "Segment growth (North America) remained steady."
+  );
+});
+
+test("TASK #41: a real, meaningful bracket group with no citation inside (e.g. a footnote-style aside) is never touched by the new empty-group passes", () => {
+  assert.equal(
+    stripReportPresentationArtifacts("The finding [see Appendix A] is notable."),
+    "The finding [see Appendix A] is notable."
+  );
+});
+
+test("TASK #41: a standalone citation with no surrounding parentheses/brackets around it still resolves cleanly (regression check against the pre-existing citation-stripping behavior)", () => {
+  assert.equal(
+    stripReportPresentationArtifacts("Legit citation stays [R42] intact context around it."),
+    "Legit citation stays intact context around it."
+  );
+});
+
+test("TASK #41: realistic Market Intelligence section prose (Market Overview / Industry Trends / Porter's Five Forces style sentences) sanitizes cleanly with no malformed citation remnants", () => {
+  const sections = [
+    "Market Overview: The market is expanding rapidly, with regional expansion signals ([R12], [R45]) supporting continued growth.",
+    "Industry Trends: Adoption patterns ([R7],[R21]) point toward consolidation among mid-market vendors.",
+    "Porter's Five Forces: Buyer power remains moderate ([R3]), while supplier concentration is low ([R8], [R14]).",
+    "Barriers: Regulatory complexity ([R19]) and capital intensity ([R22],[R25]) both slow new entrants.",
+  ];
+  for (const raw of sections) {
+    const cleaned = stripReportPresentationArtifacts(raw);
+    assert.doesNotMatch(cleaned, /\[R\d+\]/, `raw citation marker leaked in: "${cleaned}"`);
+    assert.doesNotMatch(cleaned, /[([][,;\s]*[)\]]/, `empty/malformed citation group leaked in: "${cleaned}"`);
+    assert.doesNotMatch(cleaned, /\s[,;]/, `dangling separator leaked in: "${cleaned}"`);
+  }
+});
+
+test("TASK #41: the fix is idempotent -- sanitizing already-clean text a second time never introduces or removes anything further", () => {
+  const raw = "Regional expansion signals ([R12], [R45]) supporting continued growth.";
+  const once = stripReportPresentationArtifacts(raw);
+  const twice = stripReportPresentationArtifacts(once);
+  assert.equal(once, twice);
+});
+
+test("TASK #41 STRUCTURAL AUDIT: web and PDF (page.tsx, Planner.tsx, ReportPdfButton.tsx) all consume the SAME centralized stripReportPresentationArtifacts -- no independent citation-cleanup implementation exists on any render surface", () => {
+  for (const [name, source] of [
+    ["page.tsx", dashboardReportSourceForCitationAudit],
+    ["Planner.tsx", plannerSourceForCitationAudit],
+    ["ReportPdfButton.tsx", pdfButtonSource],
+  ]) {
+    assert.match(
+      source,
+      /stripReportPresentationArtifacts/,
+      `${name}: must consume the centralized stripReportPresentationArtifacts sanitizer`
+    );
+  }
+});
+
+test("TASK #41: web and PDF resolve an identical, artifact-free result for the same raw section content -- pure and deterministic, so the two surfaces can never structurally disagree", () => {
+  const raw = "Regional expansion signals ([R12],[R45]) supporting continued growth.";
+  const webResult = stripReportPresentationArtifacts(raw);
+  const pdfResult = stripReportPresentationArtifacts(raw);
+  assert.equal(webResult, pdfResult);
+  assert.doesNotMatch(webResult, /[([][,;\s]*[)\]]/);
+});

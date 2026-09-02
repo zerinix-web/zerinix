@@ -246,6 +246,39 @@ const promptWordBudgetLeakPattern = /\s*\(?\b(?:max|maximum)\.?\s+\d{1,4}\s+word
 // content, only closes the gap the removal passes above already opened.
 const spaceBeforeTerminalPunctuationPattern = /[ \t]+([.,;:!?)\]}])/g;
 
+// TASK #41 -- confirmed live: citationBracketTagPattern (and the other
+// removal passes above) correctly delete a [R#]-shaped tag itself, but
+// when the ORIGINAL text grouped several citations inside one
+// parenthetical/bracket separated by commas -- e.g. "regional signals
+// ([R12], [R45])." or "adoption patterns ([R7],[R21])." -- removing each
+// tag individually leaves the comma(s) that used to separate them
+// stranded inside the group: "(, )" / "(,,)" / "[,]". When a group held
+// exactly one citation and nothing else, this leaves a fully empty
+// "()" / "[]". Real report evidence: "signals (,,)." and "patterns
+// (,).".
+//
+// Two passes, in order, fix this deterministically without touching any
+// legitimate parenthetical: leadingGroupSeparatorPattern collapses any
+// run of comma/semicolon/whitespace immediately after an opening "(" or
+// "[" down to nothing; trailingGroupSeparatorPattern does the mirror
+// image immediately before a closing ")" or "]". Neither pattern's
+// character class contains a single letter or digit, so they can only
+// ever match citation-removal residue that is PURELY separator
+// characters touching a delimiter -- a real parenthetical always has an
+// actual word/number/symbol adjacent to its own delimiter (e.g. "(e.g.,
+// widgets)", "(1, 2, 3)") and is therefore structurally untouched. Once
+// a group's own separators are fully cleared this way, a group that
+// held ONLY citations collapses to the literal "()" / "[]" -- removed
+// entirely by the two emptyGroupPattern passes below, since an empty
+// parenthetical is never meaningful prose. Order matters: the
+// leading/trailing passes must run before the empty-group passes, since
+// "(,,)" only becomes the literal "()" once its internal separators are
+// cleared.
+const leadingGroupSeparatorPattern = /([([])[\s,;]+/g;
+const trailingGroupSeparatorPattern = /[\s,;]+([)\]])/g;
+const emptyParentheticalGroupPattern = /\(\)/g;
+const emptyBracketGroupPattern = /\[\]/g;
+
 function collapseWhitespace(value: string): string {
   return value
     .split("\n")
@@ -294,8 +327,10 @@ const emptyAfterSanitizationFallback =
 // fragment behind); then inline bracket tags (now including bare
 // [Verified]/[Derived]), the unbracketed "Verified from X" phrase,
 // standalone vocabulary, confidence scores, and bare URLs; then the
-// dangling-space-before-punctuation cleanup (TASK #34) closes the gap
-// those removals just opened, once all of them have already run; then
+// empty-citation-group cleanup (TASK #41) closes any "(,)"/"(,,)" /
+// "[,]"/empty "()"/"[]" gap those removals just opened; then the
+// dangling-space-before-punctuation cleanup (TASK #34) closes the
+// (space-only) gap that remains once the group itself is gone; then
 // any remaining raw snake_case identifier is naturalized as the last
 // polish pass; and finally, if a genuinely non-empty input sanitized
 // down to nothing, the schema-preservation fallback above takes its
@@ -317,6 +352,16 @@ export function stripReportPresentationArtifacts(content: string): string {
   sanitized = sanitized.replace(confidenceScorePattern, "");
   sanitized = sanitized.replace(bareUrlPattern, "");
   sanitized = sanitized.replace(promptWordBudgetLeakPattern, "");
+  // TASK #41 -- must run after every removal pass above (any of them can
+  // leave a parenthetical/bracket group holding nothing but separator
+  // punctuation) and before spaceBeforeTerminalPunctuationPattern, since
+  // an emptied group still needs to be removed before that pass cleans
+  // up whatever space now sits directly before the sentence's own
+  // terminal punctuation.
+  sanitized = sanitized.replace(leadingGroupSeparatorPattern, "$1");
+  sanitized = sanitized.replace(trailingGroupSeparatorPattern, "$1");
+  sanitized = sanitized.replace(emptyParentheticalGroupPattern, "");
+  sanitized = sanitized.replace(emptyBracketGroupPattern, "");
   sanitized = sanitized.replace(spaceBeforeTerminalPunctuationPattern, "$1");
   sanitized = naturalizeSnakeCaseIdentifiers(sanitized);
 
