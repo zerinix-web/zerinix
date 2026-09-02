@@ -202,25 +202,57 @@ test("the model supports a future report naming a real AVOID-linked figure with 
 
 // --- Renderer prose cannot override canonical thresholds ---
 
-test("STRUCTURAL AUDIT: the ENTER IF / MONITOR IF / AVOID IF values on every render surface trace ONLY to gapAction.threshold.*Condition.description -- never a prose-extracted variable", () => {
+// TASK #39 -- requirement #7 introduced an `enterIfText` (and
+// `monitorIfText`/`avoidIfText`) local variable on every render surface,
+// resolving to EITHER gapAction.threshold.enterCondition.description
+// (Task #36/#37's unchanged flat threshold) OR
+// marketControllingDecisionThreshold's own enterSummary (Task #39's
+// richer, multi-criterion model) -- never a third, independently
+// re-derived source. This test now verifies BOTH halves of that same
+// guarantee: the "ENTER IF" label is paired with `enterIfText` at its
+// USAGE site, and `enterIfText` itself is only ever ASSIGNED from one of
+// those two canonical sources, never from a prose-extraction helper.
+test("STRUCTURAL AUDIT: the ENTER IF / MONITOR IF / AVOID IF values on every render surface trace ONLY to gapAction.threshold.*Condition.description or marketControllingDecisionThreshold's own summaries -- never a prose-extracted variable", () => {
   for (const [name, source] of [
     ["page.tsx", dashboardReportSource],
     ["Planner.tsx", plannerSource],
     ["ReportPdfButton.tsx", pdfButtonSource],
   ]) {
-    // Two acceptable usage shapes exist in this codebase: JSX
-    // (`<span>ENTER IF</span> — {gapAction.threshold.enterCondition...}`)
-    // and PDF template-literal drawing
-    // (`` `${enterIfLabel} — ${gapAction.threshold.enterCondition...}` ``)
-    // -- at least one real USAGE site (not merely the label's own
-    // declaration) must pair the "ENTER IF" label with the structured
-    // condition object in every file.
-    const hasJsxUsage = /ENTER IF<\/span>\s*—\s*\{gapAction\.threshold\.enterCondition\.description\}/.test(source);
-    const hasTemplateUsage = /\$\{enterIfLabel\}[\s\S]{0,20}gapAction\.threshold\.enterCondition\.description/.test(source);
+    // Usage site: "ENTER IF" paired with either the pre-#39 direct
+    // reference, or the new enterIfText indirection variable.
+    const hasJsxUsage =
+      /ENTER IF<\/span>\s*—\s*\{gapAction\.threshold\.enterCondition\.description\}/.test(source) ||
+      /ENTER IF<\/span>\s*—\s*\{enterIfText\}/.test(source);
+    const hasTemplateUsage =
+      /\$\{enterIfLabel\}[\s\S]{0,20}gapAction\.threshold\.enterCondition\.description/.test(source) ||
+      /\$\{enterIfLabel\}[\s\S]{0,20}enterIfText/.test(source);
     assert.ok(
       hasJsxUsage || hasTemplateUsage,
-      `${name}: expected an ENTER IF usage site paired with gapAction.threshold.enterCondition.description`
+      `${name}: expected an ENTER IF usage site paired with gapAction.threshold.enterCondition.description or enterIfText`
     );
+
+    // Assignment site: if enterIfText exists, it must only ever be
+    // assigned from the two canonical sources -- never a prose-scan
+    // helper (extractMetricValueFromAliases/extractAliasedSectionSnippet).
+    const enterIfTextAssignmentMatch = source.match(/const enterIfText = [\s\S]{0,220}?;/);
+    if (enterIfTextAssignmentMatch) {
+      const assignment = enterIfTextAssignmentMatch[0];
+      assert.match(
+        assignment,
+        /marketControllingDecisionThreshold[!?]?\.enterSummary/,
+        `${name}: enterIfText must read marketControllingDecisionThreshold's own enterSummary`
+      );
+      assert.match(
+        assignment,
+        /gapAction\.threshold\.enterCondition\.description/,
+        `${name}: enterIfText must fall back to gapAction.threshold.enterCondition.description`
+      );
+      assert.doesNotMatch(
+        assignment,
+        /extractMetricValueFromAliases|extractAliasedSectionSnippet/,
+        `${name}: enterIfText must never fall back to prose extraction`
+      );
+    }
   }
 });
 

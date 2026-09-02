@@ -87,6 +87,7 @@ import {
   resolveMarketIntelligenceDecisionThresholdState,
   classifyStrategicRecommendationValidation,
   localizeRecommendationProvenance,
+  resolveMarketIntelligenceControllingDecisionThreshold,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
   repairReportLanguageSections,
@@ -6640,6 +6641,29 @@ export function buildStandardReportPdf({
           const controllingFactorText = marketDecisionThresholdState?.controllingUnresolvedCondition
             ? `${pdfLocale === "tr" ? "Kontrol Eden Faktör" : "Controlling Factor"}: ${marketDecisionThresholdState.controllingUnresolvedCondition.label}`
             : "";
+          // TASK #39 -- requirement #7: cross-reference Strategic
+          // Recommendations' own structured validation targets into the
+          // controlling gap's decision threshold, never by re-parsing
+          // this section's prose -- only by reading the SAME
+          // already-classified objects each card's own layout function
+          // independently computes anyway.
+          const marketRecommendationValidations = items.map((item) =>
+            classifyStrategicRecommendationValidation({
+              item,
+              signals: extractRecommendationSignals(item),
+              canonicalState: recommendationCanonicalState,
+              language: pdfLocale === "tr" ? "Turkish" : "English",
+            })
+          );
+          // TASK #39 -- the richer, multi-criterion ENTER/MONITOR/AVOID
+          // model for the single controlling evidence gap -- never a
+          // second, independently derived threshold; the SAME object the
+          // web card reads.
+          const marketControllingDecisionThreshold = resolveMarketIntelligenceControllingDecisionThreshold(
+            recommendationCanonicalState,
+            marketRecommendationValidations,
+            pdfLocale === "tr" ? "Turkish" : "English"
+          );
 
           if (marketGapDrivenActions.length > 0) {
             const gapsLabel = pdfLocale === "tr" ? "Kapatılması Gereken Kanıt Boşlukları" : "Evidence Gaps to Close";
@@ -6692,6 +6716,20 @@ export function buildStandardReportPdf({
                     pdf.setDrawColor("#27272a");
                     pdf.line(bodyX, rowY - 4, bodyX + bodyWidth, rowY - 4);
                   }
+                  // TASK #39 -- prefer the richer, multi-criterion
+                  // controlling threshold when it resolves for THIS gap;
+                  // otherwise fall back to Task #36/#37's unchanged flat
+                  // per-gap threshold exactly as before.
+                  const isControllingGap = marketControllingDecisionThreshold?.gapId === gapAction.gapId;
+                  const enterIfText = isControllingGap
+                    ? marketControllingDecisionThreshold!.enterSummary
+                    : gapAction.threshold.enterCondition.description;
+                  const monitorIfText = isControllingGap
+                    ? marketControllingDecisionThreshold!.monitorSummary
+                    : gapAction.threshold.monitorCondition.description;
+                  const avoidIfText = isControllingGap
+                    ? marketControllingDecisionThreshold!.avoidSummary
+                    : gapAction.threshold.avoidCondition.description;
 
                   pdf.setFontSize(7.2);
                   pdf.setTextColor("#e4e4e7");
@@ -6724,7 +6762,7 @@ export function buildStandardReportPdf({
                   pdf.setFontSize(4.6);
                   pdf.setTextColor("#5eead4");
                   drawRecommendationFieldValue(
-                    `${enterIfLabel} — ${gapAction.threshold.enterCondition.description}`,
+                    `${enterIfLabel} — ${enterIfText}`,
                     bodyX,
                     rowY + 22.4,
                     bodyWidth,
@@ -6735,7 +6773,7 @@ export function buildStandardReportPdf({
                   pdf.setFontSize(4.6);
                   pdf.setTextColor("#a1a1aa");
                   drawRecommendationFieldValue(
-                    `${monitorIfLabel} — ${gapAction.threshold.monitorCondition.description}`,
+                    `${monitorIfLabel} — ${monitorIfText}`,
                     bodyX,
                     rowY + 26.8,
                     bodyWidth,
@@ -6746,7 +6784,7 @@ export function buildStandardReportPdf({
                   pdf.setFontSize(4.6);
                   pdf.setTextColor("#fca5a5");
                   drawRecommendationFieldValue(
-                    `${avoidIfLabel} — ${gapAction.threshold.avoidCondition.description}`,
+                    `${avoidIfLabel} — ${avoidIfText}`,
                     bodyX,
                     rowY + 31.2,
                     bodyWidth,

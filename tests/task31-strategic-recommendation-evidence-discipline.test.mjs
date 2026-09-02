@@ -154,11 +154,18 @@ test("STRUCTURAL AUDIT: all 4 render sites import and call classifyStrategicReco
     const callSites = source.match(/classifyStrategicRecommendationValidation\(/g) || [];
     assert.ok(callSites.length >= 1, `${name}: expected at least one classifyStrategicRecommendationValidation( call site`);
   }
-  // Planner.tsx has 2 call sites (web PremiumSectionVisual + PDF
-  // computeRecommendationCardLayout) -- both must exist so web and PDF
-  // can never classify a card differently.
+  // Planner.tsx originally had 2 call sites (web PremiumSectionVisual +
+  // PDF computeRecommendationCardLayout, one per card). TASK #39 --
+  // requirement #7 -- added a SECOND pair of call sites (web + PDF) that
+  // pre-classify every recommendation item once up front specifically to
+  // cross-reference Strategic Recommendations' own structured validation
+  // targets into the controlling evidence gap's decision threshold
+  // (resolveMarketIntelligenceControllingDecisionThreshold) -- a
+  // deliberate, legitimate architectural addition, not drift: all 4 call
+  // sites must exist so web and PDF can never classify a card, or
+  // cross-reference a threshold, differently from each other.
   const plannerCallSites = plannerSource.match(/classifyStrategicRecommendationValidation\(/g) || [];
-  assert.equal(plannerCallSites.length, 2, "Planner.tsx must classify identically in both its web and PDF render paths");
+  assert.equal(plannerCallSites.length, 4, "Planner.tsx must classify identically in both its web and PDF render paths, for both per-card rendering and Task #39's threshold cross-reference");
 });
 
 test("STRUCTURAL AUDIT: the PDF layout function computes the effective gate (model gate or downgrade reason) BEFORE the height math that depends on it, in both PDF files", () => {

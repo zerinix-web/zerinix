@@ -1275,3 +1275,286 @@ export function classifyStrategicRecommendationValidation(input: {
     relatedDecisionThreshold,
   };
 }
+
+// TASK #39 -- Make Market Intelligence ENTER / MONITOR / AVOID decision
+// thresholds structurally measurable and authoritative.
+//
+// PROBLEM: Task #36/#37's per-gap threshold collapses each direction into
+// exactly ONE sentence, which reads as a bare "ENTER threshold requires
+// validation." placeholder whenever the decision brief names no number --
+// too vague for an executive decision system, and it never draws on
+// Strategic Recommendations' own structured validation targets (Task #38)
+// even when one exists for the SAME controlling gap.
+//
+// FIX: resolveMarketIntelligenceControllingDecisionThreshold builds a
+// richer, multi-CRITERION model for the single controlling evidence gap
+// (the real, common case this report style produces -- e.g. Obtainable
+// Share alone keeping a report at MONITOR). Each direction
+// (enter/monitor/avoid) is an ARRAY of named criteria, not one flat
+// sentence, and every criterion explicitly carries whichever of the 4
+// provenance categories applies (verifiedEvidence/benchmarkDerived/
+// validationTarget/planningAssumption) or null when the criterion is
+// purely qualitative/structural and makes no numeric claim at all.
+//
+// This intentionally does NOT invent separate line items for every
+// dimension this task's own ticket lists as an example (pilot
+// conversion, win rate, reachable-account capacity, pricing, unit
+// economics) -- Market Intelligence's own architecture never persists
+// structured data for any of those (they are Business Plan's financial-
+// model concepts, deliberately isolated from Market Intelligence
+// elsewhere in this codebase); fabricating a named line item for a
+// dimension this report never actually measures would be exactly the
+// "invent unsupported market numbers" this task forbids. Only 3
+// dimensions are ever populated, each backed by real, already-computed
+// structured data:
+//   - controllingEvidenceGap: the gap itself (always present, purely
+//     qualitative -- "this evidence must resolve," no number).
+//   - reportStatedThreshold: a real number this SPECIFIC report's own
+//     decision brief already states (Task #36/#37's existing, unchanged
+//     extraction) -- preferred when present, since it is the report's
+//     own considered figure.
+//   - recommendationValidationTarget: the linked Strategic
+//     Recommendation's own structured kpi/successCriterion (Task #38) --
+//     used only when no report-stated figure exists, and ONLY the
+//     already-classified object is read (never re-parsed prose).
+// The type itself supports more dimensions (see
+// MarketIntelligenceThresholdCriterionDimension) so a FUTURE evidence
+// source (e.g. if Market Intelligence ever persists structured pricing
+// or win-rate evidence) can populate them without any renderer change --
+// mirroring this codebase's established "design for future evidence,
+// never fabricate today" pattern (Task #37's own avoidCondition).
+
+export type MarketIntelligenceThresholdCriterionDimension =
+  | "controllingEvidenceGap"
+  | "reportStatedThreshold"
+  | "recommendationValidationTarget"
+  // Reserved for a future evidence source this report kind does not yet
+  // structurally persist -- never populated today (see this section's
+  // own top-of-file comment for why).
+  | "pilotConversion"
+  | "winRate"
+  | "reachableAccountCapacity"
+  | "pricingValidation"
+  | "unitEconomics";
+
+export type MarketIntelligenceThresholdCriterion = {
+  dimension: MarketIntelligenceThresholdCriterionDimension;
+  label: string;
+  description: string;
+  // null ONLY for a purely qualitative/structural criterion that makes
+  // no numeric claim at all (e.g. "this evidence gap must resolve") --
+  // every criterion that DOES carry a number or named target is always
+  // explicitly classified into one of the 4 real categories, never left
+  // ambiguous.
+  provenance: MarketIntelligenceRecommendationProvenance | null;
+  // The real, verbatim figure/target text this criterion is grounded in
+  // (e.g. "above 5%" or "20% pilot conversion rate") -- null when the
+  // criterion is qualitative only.
+  value: string | null;
+};
+
+const RECOMMENDATION_VALIDATION_TARGET_LABELS: Record<ResponseLanguage, string> = {
+  English: "Recommended Validation Target",
+  Turkish: "Önerilen Doğrulama Hedefi",
+  German: "Empfohlenes Validierungsziel",
+  French: "Cible de validation recommandée",
+  Spanish: "Objetivo de validación recomendado",
+};
+
+function buildControllingGapCriterion(
+  gap: MarketIntelligenceEvidenceGap,
+  description: string
+): MarketIntelligenceThresholdCriterion {
+  return {
+    dimension: "controllingEvidenceGap",
+    label: gap.label,
+    description,
+    provenance: null,
+    value: null,
+  };
+}
+
+function buildReportStatedCriterion(
+  gap: MarketIntelligenceEvidenceGap,
+  condition: MarketIntelligenceDecisionThresholdCondition,
+  rawPhrase: string
+): MarketIntelligenceThresholdCriterion {
+  return {
+    dimension: "reportStatedThreshold",
+    label: gap.label,
+    description: condition.description,
+    // A number the report's OWN decision brief states for itself is not
+    // independently citation-verified -- it is, at best, the report's
+    // own considered validation bar (never presented as externally
+    // "verifiedEvidence"), or explicitly a planning assumption when the
+    // underlying evidence state (e.g. SAM's default share ratio) is
+    // itself unevidenced.
+    provenance: condition.isPlanningAssumption ? "planningAssumption" : "validationTarget",
+    value: rawPhrase,
+  };
+}
+
+// TASK #39A -- defense-in-depth: returns null (never a criterion with a
+// dangling/empty target) whenever the validation's own successCriterion
+// is empty, even though the caller's own linkedValidation selection
+// already filters this out -- a builder that can silently render a blank
+// target is exactly the shape of bug this task fixes, so it must be
+// impossible to construct one here regardless of how it is called.
+function buildRecommendationEnterCriterion(
+  validation: MarketIntelligenceRecommendationValidation,
+  language: ResponseLanguage
+): MarketIntelligenceThresholdCriterion | null {
+  if (!validation.successCriterion.trim() || !validation.provenance) return null;
+  return {
+    dimension: "recommendationValidationTarget",
+    label: RECOMMENDATION_VALIDATION_TARGET_LABELS[language],
+    description: `${validation.successCriterion} (${localizeRecommendationProvenance(
+      validation.provenance,
+      language
+    )}).`,
+    provenance: validation.provenance,
+    value: validation.successCriterion,
+  };
+}
+
+const RECOMMENDATION_VALIDATION_NOT_MET_TEMPLATES: Record<ResponseLanguage, (target: string) => string> = {
+  English: (target) => `Validation fails to meet the recommended target: ${target}.`,
+  Turkish: (target) => `Doğrulama, önerilen hedefi karşılamaz: ${target}.`,
+  German: (target) => `Die Validierung erreicht das empfohlene Ziel nicht: ${target}.`,
+  French: (target) => `La validation n'atteint pas la cible recommandée : ${target}.`,
+  Spanish: (target) => `La validación no alcanza el objetivo recomendado: ${target}.`,
+};
+
+// TASK #39A -- same defense-in-depth as buildRecommendationEnterCriterion
+// above: null (never "...recommended target: .") whenever there is no
+// real, non-empty target to name.
+function buildRecommendationAvoidCriterion(
+  validation: MarketIntelligenceRecommendationValidation,
+  language: ResponseLanguage
+): MarketIntelligenceThresholdCriterion | null {
+  if (!validation.successCriterion.trim() || !validation.provenance) return null;
+  return {
+    dimension: "recommendationValidationTarget",
+    label: RECOMMENDATION_VALIDATION_TARGET_LABELS[language],
+    description: RECOMMENDATION_VALIDATION_NOT_MET_TEMPLATES[language](validation.successCriterion),
+    provenance: validation.provenance,
+    value: validation.successCriterion,
+  };
+}
+
+const AVOID_STRUCTURAL_TEMPLATES: Record<ResponseLanguage, (gapLabel: string) => string> = {
+  English: (gapLabel) => `Validation demonstrates ${gapLabel} cannot be resolved to a defensible, viable estimate.`,
+  Turkish: (gapLabel) => `Doğrulama, ${gapLabel} unsurunun savunulabilir, uygulanabilir bir tahmine çözümlenemediğini gösterir.`,
+  German: (gapLabel) => `Die Validierung zeigt, dass ${gapLabel} nicht zu einer belastbaren, tragfähigen Schätzung aufgelöst werden kann.`,
+  French: (gapLabel) => `La validation démontre que ${gapLabel} ne peut pas être résolu en une estimation défendable et viable.`,
+  Spanish: (gapLabel) => `La validación demuestra que ${gapLabel} no puede resolverse en una estimación defendible y viable.`,
+};
+
+// The single, canonical, structured model every render surface must read
+// for the controlling evidence gap's ENTER/MONITOR/AVOID conditions
+// (requirement #1's exact field names). Only ever resolves for the SAME
+// single-controlling-gap state Task #37/#38 already gate their own
+// linkage on -- null when 0 or 2+ material gaps exist, never guessing
+// which one is "the" controlling factor.
+export type MarketIntelligenceControllingDecisionThreshold = {
+  gapId: MarketIntelligenceEvidenceGapId;
+  controllingFactor: string;
+  affectedFactor: MarketIntelligenceDecisionFactor;
+  requiredEvidence: string;
+  currentThresholdState: string;
+  enterConditions: MarketIntelligenceThresholdCriterion[];
+  monitorConditions: MarketIntelligenceThresholdCriterion[];
+  avoidConditions: MarketIntelligenceThresholdCriterion[];
+  // Convenience pre-joined display strings (each criterion's own
+  // description, space-joined) -- computed ONCE here so every render
+  // surface shows the identical compact sentence instead of each
+  // independently re-joining the arrays and risking drift.
+  enterSummary: string;
+  monitorSummary: string;
+  avoidSummary: string;
+};
+
+// requirement #7: recommendation validation targets must be reused
+// structurally, never recovered by prose parsing -- this accepts ONLY
+// already-classified MarketIntelligenceRecommendationValidation objects
+// (Task #38's own output), never raw recommendation item strings.
+export function resolveMarketIntelligenceControllingDecisionThreshold(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[] = [],
+  language: ResponseLanguage = "English"
+): MarketIntelligenceControllingDecisionThreshold | null {
+  if (!canonicalState) return null;
+
+  const materialGaps = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).filter(
+    (gap) => gap.decisionFactor !== null
+  );
+  if (materialGaps.length !== 1) return null;
+  const gap = materialGaps[0];
+
+  const threshold = resolveMarketIntelligenceDecisionThresholds(canonicalState, language).find(
+    (candidate) => candidate.gapId === gap.id
+  );
+  if (!threshold) return null;
+
+  // TASK #39A -- confirmed live: numericBasis (and therefore provenance)
+  // is derived from budget/metric/timeframe TOGETHER
+  // (deriveStrategicRecommendationNumericBasis joins all three before
+  // testing for a numeric figure), so a card can carry a real provenance
+  // classification (e.g. because its budget or timeline is numeric)
+  // while its OWN successCriterion/metric field is empty. Building an
+  // AVOID/ENTER sentence around that empty string produced the reported
+  // "Validation fails to meet the recommended target: ." -- a dangling
+  // colon with nothing after it. A linked validation is only usable here
+  // when it actually carries a non-empty measurable target string;
+  // otherwise there is nothing structurally defensible to render, and
+  // the caller must omit the clause entirely rather than invent one.
+  const linkedValidation =
+    recommendationValidations.find(
+      (validation) =>
+        validation.relatedEvidenceGapId === gap.id &&
+        validation.provenance &&
+        validation.successCriterion.trim().length > 0
+    ) ?? null;
+
+  const whatWouldChange = canonicalState.whatWouldChangeThisDecision;
+  const enterPhrase = extractDecisionLinkedThresholdPhrase(whatWouldChange, "GO", language);
+  const avoidPhrase = extractDecisionLinkedThresholdPhrase(whatWouldChange, "NO_GO", language);
+
+  const enterConditions: MarketIntelligenceThresholdCriterion[] = [
+    buildControllingGapCriterion(gap, gap.evidenceRequired),
+  ];
+  if (threshold.enterCondition.status === "defined" && enterPhrase) {
+    enterConditions.push(buildReportStatedCriterion(gap, threshold.enterCondition, enterPhrase));
+  } else if (linkedValidation) {
+    const recommendationCriterion = buildRecommendationEnterCriterion(linkedValidation, language);
+    if (recommendationCriterion) enterConditions.push(recommendationCriterion);
+  }
+
+  const monitorConditions: MarketIntelligenceThresholdCriterion[] = [
+    buildControllingGapCriterion(gap, threshold.monitorCondition.description),
+  ];
+
+  const avoidConditions: MarketIntelligenceThresholdCriterion[] = [
+    buildControllingGapCriterion(gap, AVOID_STRUCTURAL_TEMPLATES[language](gap.label)),
+  ];
+  if (threshold.avoidCondition.status === "defined" && avoidPhrase) {
+    avoidConditions.push(buildReportStatedCriterion(gap, threshold.avoidCondition, avoidPhrase));
+  } else if (linkedValidation) {
+    const recommendationCriterion = buildRecommendationAvoidCriterion(linkedValidation, language);
+    if (recommendationCriterion) avoidConditions.push(recommendationCriterion);
+  }
+
+  return {
+    gapId: gap.id,
+    controllingFactor: gap.label,
+    affectedFactor: gap.decisionFactor as MarketIntelligenceDecisionFactor,
+    requiredEvidence: gap.evidenceRequired,
+    currentThresholdState: gap.currentStatus,
+    enterConditions,
+    monitorConditions,
+    avoidConditions,
+    enterSummary: enterConditions.map((criterion) => criterion.description).join(" "),
+    monitorSummary: monitorConditions.map((criterion) => criterion.description).join(" "),
+    avoidSummary: avoidConditions.map((criterion) => criterion.description).join(" "),
+  };
+}

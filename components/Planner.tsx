@@ -173,6 +173,7 @@ import {
   resolveMarketIntelligenceDecisionThresholdState,
   classifyStrategicRecommendationValidation,
   localizeRecommendationProvenance,
+  resolveMarketIntelligenceControllingDecisionThreshold,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
   localizeMarketConfidenceFactorLevel,
@@ -5445,6 +5446,32 @@ if (field === "swotAnalysis") {
           strategicRecommendationDecision?.language || "English"
         )
       : null;
+    // TASK #39 -- requirement #7: cross-reference Strategic
+    // Recommendations' own structured validation targets into the
+    // controlling gap's decision threshold, never by re-parsing this
+    // section's prose -- only by reading the SAME already-classified
+    // objects (classifyStrategicRecommendationValidation, Task #38) each
+    // card below independently computes anyway.
+    const marketRecommendationValidations = isMarketIntelligence
+      ? items.map((item) =>
+          classifyStrategicRecommendationValidation({
+            item,
+            signals: extractRecommendationSignals(item),
+            canonicalState: marketIntelligenceCanonicalState,
+            language: strategicRecommendationDecision?.language || "English",
+          })
+        )
+      : [];
+    // TASK #39 -- the richer, multi-criterion ENTER/MONITOR/AVOID model
+    // for the single controlling evidence gap -- never a second,
+    // independently derived threshold.
+    const marketControllingDecisionThreshold = isMarketIntelligence
+      ? resolveMarketIntelligenceControllingDecisionThreshold(
+          marketIntelligenceCanonicalState,
+          marketRecommendationValidations,
+          strategicRecommendationDecision?.language || "English"
+        )
+      : null;
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-white/[0.025] p-5">
@@ -5557,28 +5584,47 @@ if (field === "swotAnalysis") {
               ) : null}
             </div>
             <div className="mt-3 space-y-3">
-              {marketGapDrivenActions.map((gapAction) => (
-                <div key={gapAction.gapId} className="border-t border-white/10 pt-3 first:border-t-0 first:pt-0">
-                  <p className="text-sm font-semibold text-zinc-100">{gapAction.gapLabel}</p>
-                  <p className="mt-1 text-xs leading-5 text-zinc-300">{gapAction.action}</p>
-                  <p className="mt-1 text-xs leading-5 text-zinc-400">{gapAction.measurableResult}</p>
-                  <p className="mt-1 text-xs leading-5 text-amber-200">{gapAction.decisionConsequence}</p>
-                  <div className="mt-2 space-y-1 rounded-xl border border-white/10 bg-black/20 p-2.5">
-                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-                      Decision Threshold
-                    </p>
-                    <p className="text-[11px] leading-5 text-zinc-300">
-                      <span className="font-semibold text-zinc-100">ENTER IF</span> — {gapAction.threshold.enterCondition.description}
-                    </p>
-                    <p className="text-[11px] leading-5 text-zinc-300">
-                      <span className="font-semibold text-zinc-100">MONITOR IF</span> — {gapAction.threshold.monitorCondition.description}
-                    </p>
-                    <p className="text-[11px] leading-5 text-zinc-300">
-                      <span className="font-semibold text-zinc-100">AVOID IF</span> — {gapAction.threshold.avoidCondition.description}
-                    </p>
+              {marketGapDrivenActions.map((gapAction) => {
+                // TASK #39 -- prefer the richer, multi-criterion
+                // controlling threshold (which may fold in the report's
+                // own stated figure AND/OR a linked recommendation's
+                // structured validation target) when it resolves for
+                // THIS gap; otherwise fall back to Task #36/#37's
+                // unchanged flat per-gap threshold exactly as before.
+                const isControllingGap = marketControllingDecisionThreshold?.gapId === gapAction.gapId;
+                const enterIfText = isControllingGap
+                  ? marketControllingDecisionThreshold!.enterSummary
+                  : gapAction.threshold.enterCondition.description;
+                const monitorIfText = isControllingGap
+                  ? marketControllingDecisionThreshold!.monitorSummary
+                  : gapAction.threshold.monitorCondition.description;
+                const avoidIfText = isControllingGap
+                  ? marketControllingDecisionThreshold!.avoidSummary
+                  : gapAction.threshold.avoidCondition.description;
+
+                return (
+                  <div key={gapAction.gapId} className="border-t border-white/10 pt-3 first:border-t-0 first:pt-0">
+                    <p className="text-sm font-semibold text-zinc-100">{gapAction.gapLabel}</p>
+                    <p className="mt-1 text-xs leading-5 text-zinc-300">{gapAction.action}</p>
+                    <p className="mt-1 text-xs leading-5 text-zinc-400">{gapAction.measurableResult}</p>
+                    <p className="mt-1 text-xs leading-5 text-amber-200">{gapAction.decisionConsequence}</p>
+                    <div className="mt-2 space-y-1 rounded-xl border border-white/10 bg-black/20 p-2.5">
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                        Decision Threshold
+                      </p>
+                      <p className="text-[11px] leading-5 text-zinc-300">
+                        <span className="font-semibold text-zinc-100">ENTER IF</span> — {enterIfText}
+                      </p>
+                      <p className="text-[11px] leading-5 text-zinc-300">
+                        <span className="font-semibold text-zinc-100">MONITOR IF</span> — {monitorIfText}
+                      </p>
+                      <p className="text-[11px] leading-5 text-zinc-300">
+                        <span className="font-semibold text-zinc-100">AVOID IF</span> — {avoidIfText}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : null}
@@ -10259,6 +10305,29 @@ const ReportPanel = memo(function ReportPanel({
 	          const controllingFactorText = marketDecisionThresholdState?.controllingUnresolvedCondition
 	            ? `${pdfLocale === "tr" ? "Kontrol Eden Faktör" : "Controlling Factor"}: ${marketDecisionThresholdState.controllingUnresolvedCondition.label}`
 	            : "";
+	          // TASK #39 -- requirement #7: cross-reference Strategic
+	          // Recommendations' own structured validation targets into the
+	          // controlling gap's decision threshold, never by re-parsing this
+	          // section's prose -- only by reading the SAME already-classified
+	          // objects each card's own layout function independently computes
+	          // anyway.
+	          const marketRecommendationValidations = items.map((item) =>
+	            classifyStrategicRecommendationValidation({
+	              item,
+	              signals: extractRecommendationSignals(item),
+	              canonicalState: marketIntelligenceCanonicalState,
+	              language: pdfLocale === "tr" ? "Turkish" : "English",
+	            })
+	          );
+	          // TASK #39 -- the richer, multi-criterion ENTER/MONITOR/AVOID
+	          // model for the single controlling evidence gap -- never a
+	          // second, independently derived threshold; the SAME object the
+	          // web card reads.
+	          const marketControllingDecisionThreshold = resolveMarketIntelligenceControllingDecisionThreshold(
+	            marketIntelligenceCanonicalState,
+	            marketRecommendationValidations,
+	            pdfLocale === "tr" ? "Turkish" : "English"
+	          );
 
 	          if (marketGapDrivenActions.length > 0) {
 	            const gapsLabel = pdfLocale === "tr" ? "Kapatılması Gereken Kanıt Boşlukları" : "Evidence Gaps to Close";
@@ -10311,6 +10380,20 @@ const ReportPanel = memo(function ReportPanel({
 	                    pdf.setDrawColor("#27272a");
 	                    pdf.line(bodyX, rowY - 4, bodyX + bodyWidth, rowY - 4);
 	                  }
+	                  // TASK #39 -- prefer the richer, multi-criterion controlling
+	                  // threshold when it resolves for THIS gap; otherwise fall back
+	                  // to Task #36/#37's unchanged flat per-gap threshold exactly as
+	                  // before.
+	                  const isControllingGap = marketControllingDecisionThreshold?.gapId === gapAction.gapId;
+	                  const enterIfText = isControllingGap
+	                    ? marketControllingDecisionThreshold!.enterSummary
+	                    : gapAction.threshold.enterCondition.description;
+	                  const monitorIfText = isControllingGap
+	                    ? marketControllingDecisionThreshold!.monitorSummary
+	                    : gapAction.threshold.monitorCondition.description;
+	                  const avoidIfText = isControllingGap
+	                    ? marketControllingDecisionThreshold!.avoidSummary
+	                    : gapAction.threshold.avoidCondition.description;
 
 	                  pdf.setFontSize(7.2);
 	                  pdf.setTextColor("#e4e4e7");
@@ -10340,7 +10423,7 @@ const ReportPanel = memo(function ReportPanel({
 	                  pdf.setFontSize(4.6);
 	                  pdf.setTextColor("#5eead4");
 	                  drawRecommendationFieldValue(
-	                    `${enterIfLabel} — ${gapAction.threshold.enterCondition.description}`,
+	                    `${enterIfLabel} — ${enterIfText}`,
 	                    bodyX,
 	                    rowY + 22.4,
 	                    bodyWidth,
@@ -10351,7 +10434,7 @@ const ReportPanel = memo(function ReportPanel({
 	                  pdf.setFontSize(4.6);
 	                  pdf.setTextColor("#a1a1aa");
 	                  drawRecommendationFieldValue(
-	                    `${monitorIfLabel} — ${gapAction.threshold.monitorCondition.description}`,
+	                    `${monitorIfLabel} — ${monitorIfText}`,
 	                    bodyX,
 	                    rowY + 26.8,
 	                    bodyWidth,
@@ -10362,7 +10445,7 @@ const ReportPanel = memo(function ReportPanel({
 	                  pdf.setFontSize(4.6);
 	                  pdf.setTextColor("#fca5a5");
 	                  drawRecommendationFieldValue(
-	                    `${avoidIfLabel} — ${gapAction.threshold.avoidCondition.description}`,
+	                    `${avoidIfLabel} — ${avoidIfText}`,
 	                    bodyX,
 	                    rowY + 31.2,
 	                    bodyWidth,
