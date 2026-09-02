@@ -2087,9 +2087,21 @@ export function extractRecommendationSignals(line: string) {
   // here") -- the same class of technique as Task #42/#42A's
   // sentenceSafeSegmentPattern, generalized to multiple stop
   // conditions instead of just one.
+  //
+  // TASK #44 -- confirmed live: an em/en dash is ALSO the conventional
+  // separator inside a compact numeric RANGE written without spaces
+  // ("$50,000--$75,000", "USD 2.1--2.8M") -- the bare `[—–]` stop above
+  // would cut such a range in half, exactly the "numeric values
+  // containing... ranges" case this ticket requires protecting. A
+  // clause-separating dash (the real reported shape) always carries
+  // whitespace on both sides in normal prose ("Head of Revenue -- Budget
+  // cap: ..."); a range-separating dash never does. Gating the dash stop
+  // on adjacent whitespace lets a field only stop at a genuine clause
+  // break, never at a compact range's own internal separator.
   const recommendationFieldLabelAlternation =
     "(?:Owner|Owned by|Budget(?:\\s+cap|\\s+ceiling)?|Spend(?:\\s+cap|\\s+ceiling)?|Success\\s+(?:criterion|metric)|Activity|Action|Scope|Evidence(?:\\s+(?:tie|to\\s+collect|link|basis))?|Supporting evidence)\\s*:";
-  const recommendationFieldBoundaryStop = `;|\\)|[—–]|(?:(?<!\\d)\\.|\\.(?!\\d))|\\b${recommendationFieldLabelAlternation}`;
+  const recommendationFieldClauseDashStop = "(?:(?<=\\s)[—–]|[—–](?=\\s))";
+  const recommendationFieldBoundaryStop = `;|\\)|${recommendationFieldClauseDashStop}|(?:(?<!\\d)\\.|\\.(?!\\d))|\\b${recommendationFieldLabelAlternation}`;
   const recommendationFieldBoundaryPattern = `(?:(?!${recommendationFieldBoundaryStop})(?:\\([^()]*\\)|[\\s\\S]))*`;
   // TASK #29H -- prefer an explicit "Budget cap:"/"Budget ceiling:"/
   // "Spend cap:" label's own value first (this pipeline's real

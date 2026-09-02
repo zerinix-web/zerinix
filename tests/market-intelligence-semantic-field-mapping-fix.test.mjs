@@ -180,7 +180,13 @@ test("page.tsx and Planner.tsx: the Market Size/CAGR card no longer classifies e
 test("report-evidence.ts: inferEvidenceLevel's own default for unlabeled/ambiguous context is 'benchmarkDerived', never 'verified' -- the canonical classifier both Market Size and TAM/SAM/SOM now share", async () => {
   const source = readFileSync("app/lib/report-evidence.ts", "utf8");
   const raw = extractFunctionSource(source, "inferEvidenceLevel").replace(/: [^,)]+(?=[,)])/g, "").replace(/\): [^{]+\{/, ") {");
-  const mod = await compileModule([raw], ["inferEvidenceLevel"]);
+  // TASK #44 -- inferEvidenceLevel now also references negatedVerifiedPattern
+  // (a module-level const, checked before the bare "verified" match, so a
+  // sentence explicitly saying a figure has NOT been verified is never
+  // misclassified as verified) -- this isolated extraction needs it too.
+  const negatedVerifiedPatternMatch = source.match(/const negatedVerifiedPattern =\s*\n?\s*\/[\s\S]*?\/i;/);
+  assert.ok(negatedVerifiedPatternMatch, "negatedVerifiedPattern not found");
+  const mod = await compileModule([negatedVerifiedPatternMatch[0], raw], ["inferEvidenceLevel"]);
 
   const result = mod.inferEvidenceLevel({
     label: "Market Size",

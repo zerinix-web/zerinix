@@ -40,8 +40,24 @@ export function getEvidenceLabel(level: EvidenceLevel, locale: EvidenceLocale = 
   return evidenceLabels[locale][level];
 }
 
+// TASK #44 -- confirmed live: a genuinely honest gap-explanation
+// sentence like "the requested market's own addressable size has not
+// been independently verified" (market-intelligence-graph.ts's own
+// real generated text) contains the bare word "verified" -- the plain
+// `\bverified\b` check below matched it anyway and classified an
+// EXPLICITLY UNVERIFIED figure as "verified", exactly backwards from
+// its own stated meaning. Checked before both the "derived from" and
+// bare "verified" checks in each function below, so a negated claim
+// can never be promoted to either a more confident tier.
+const negatedVerifiedPattern =
+  /\b(?:not|never|cannot\s+be|can't\s+be|hasn't\s+been|has\s+not\s+been|isn't|is\s+not|no\s+longer)\b(?:\s+\S+){0,5}?\s+verified\b/i;
+
 export function normalizeEvidenceLevel(value: string): EvidenceLevel {
   const normalized = value.trim().toLowerCase();
+
+  if (negatedVerifiedPattern.test(normalized)) {
+    return "validationRequired";
+  }
 
   // Checked before "verified" below: "derived from the verified MRR
   // figure" legitimately contains the word "verified" as a modifier on
@@ -76,7 +92,11 @@ export function inferEvidenceLevel(input: {
 }) {
   const evidenceContext = `${input.label || ""}\n${input.value || ""}\n${input.context || ""}`;
 
-  if (!input.value || /\b(no data|not available|validation required|needs validation|validate|low confidence)\b/i.test(evidenceContext)) {
+  if (
+    !input.value ||
+    /\b(no data|not available|validation required|needs validation|validate|low confidence)\b/i.test(evidenceContext) ||
+    negatedVerifiedPattern.test(evidenceContext)
+  ) {
     return "validationRequired";
   }
 
