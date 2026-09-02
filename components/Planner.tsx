@@ -168,6 +168,11 @@ import {
   type MarketIntelligenceCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
+  resolveMarketIntelligenceDecisionChangeState,
+  selectTopMarketIntelligenceEvidenceGaps,
+  buildMarketIntelligenceGapDrivenActions,
+} from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
+import {
   localizeMarketConfidenceFactorLevel,
   type MarketConfidenceFactorLevel,
 } from "@/app/lib/report-engine/market-intelligence-presentation";
@@ -5415,6 +5420,19 @@ if (field === "swotAnalysis") {
           detectPdfPresentationLocale(executiveSummaryContent || section.content) === "tr" ? "Turkish" : "English"
         )
       : null;
+    // TASK #35 -- requirement #6: validation actions should directly
+    // correspond to material evidence gaps where possible (gap ->
+    // validation action -> measurable result -> decision consequence).
+    // Built ONLY from the SAME structured canonical gaps the Executive
+    // Summary/Snapshot already read -- never re-parsed from this
+    // section's own AI-generated recommendation cards, which remain
+    // completely untouched below.
+    const marketGapDrivenActions = isMarketIntelligence
+      ? buildMarketIntelligenceGapDrivenActions(
+          marketIntelligenceCanonicalState,
+          strategicRecommendationDecision?.language || "English"
+        )
+      : [];
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-white/[0.025] p-5">
@@ -5506,6 +5524,23 @@ if (field === "swotAnalysis") {
         ) : (
           <p className="mt-4 text-sm leading-6 text-zinc-400">{section.content}</p>
         )}
+        {marketGapDrivenActions.length > 0 ? (
+          <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/[0.04] p-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200/80">
+              Evidence Gaps to Close
+            </p>
+            <div className="mt-3 space-y-3">
+              {marketGapDrivenActions.map((gapAction) => (
+                <div key={gapAction.gapId} className="border-t border-white/10 pt-3 first:border-t-0 first:pt-0">
+                  <p className="text-sm font-semibold text-zinc-100">{gapAction.gapLabel}</p>
+                  <p className="mt-1 text-xs leading-5 text-zinc-300">{gapAction.action}</p>
+                  <p className="mt-1 text-xs leading-5 text-zinc-400">{gapAction.measurableResult}</p>
+                  <p className="mt-1 text-xs leading-5 text-amber-200">{gapAction.decisionConsequence}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -5801,6 +5836,28 @@ if (field === "swotAnalysis") {
       ? marketIntelligenceCanonicalState?.topRisks?.[0] ||
         takeFirstListItem(extractAliasedSectionSnippet(section.content, topRisksLabels, missingEvidenceLabels))
       : extractAliasedSectionSnippet(section.content, topRisksLabels, missingEvidenceLabels);
+    // TASK #35 -- structured, canonical-state-derived evidence gaps
+    // (market-intelligence-evidence-gaps.ts) rather than raw prose. When
+    // canonical state exists, "Key Gap"/"What Would Change This Decision"
+    // must derive from the SAME decisionCriticalEvidence pillars the
+    // canonical decision itself gates on -- never independently
+    // re-derived from this section's own prose. Falls back to the
+    // pre-existing prose extraction exactly as before for any report
+    // without canonical state (never upgrades what a legacy report
+    // already showed).
+    const marketDecisionChangeState = isMarketIntelligence
+      ? resolveMarketIntelligenceDecisionChangeState(marketIntelligenceCanonicalState, evidenceLocale)
+      : null;
+    const marketTopEvidenceGaps = marketDecisionChangeState
+      ? selectTopMarketIntelligenceEvidenceGaps(
+          [...marketDecisionChangeState.materialGaps, ...marketDecisionChangeState.supportingGaps],
+          2
+        )
+      : [];
+    const marketKeyGapDisplay =
+      marketDecisionChangeState && marketDecisionChangeState.materialGaps.length > 0
+        ? marketDecisionChangeState.materialGaps[0].label
+        : extractAliasedSectionSnippet(section.content, missingEvidenceLabels, whatWouldChangeLabels) || "—";
     const recommendationMetrics = [
       ["Confidence", extractConfidence(section.content) ? `${extractConfidence(section.content)}%` : "—"],
       ["Why", extractMetricValueFromAliases(section.content, whyLabels) || "—"],
@@ -5809,7 +5866,7 @@ if (field === "swotAnalysis") {
       // label, not a board-level card title. The underlying extraction
       // (missingEvidenceLabels) is unchanged -- only the displayed label
       // is renamed to what the reader should actually do with it.
-      ["Key Gap", extractAliasedSectionSnippet(section.content, missingEvidenceLabels, whatWouldChangeLabels) || "—"],
+      ["Key Gap", marketKeyGapDisplay],
     ];
 
     return (
@@ -5863,9 +5920,22 @@ if (field === "swotAnalysis") {
               {extractMetricValueFromAliases(section.content, immediateNextActionLabels) || "—"}
             </p>
             <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">What Would Change This Decision</p>
-            <p className="mt-2 text-sm leading-6 text-zinc-300">
-              {extractMetricValueFromAliases(section.content, whatWouldChangeLabels) || "—"}
-            </p>
+            {marketDecisionChangeState && marketTopEvidenceGaps.length > 0 ? (
+              <div className="mt-2 space-y-2">
+                <p className="text-sm leading-6 text-zinc-300">{marketDecisionChangeState.question}</p>
+                <ul className="space-y-1.5">
+                  {marketTopEvidenceGaps.map((gap) => (
+                    <li key={gap.id} className="text-sm leading-6 text-zinc-300">
+                      <span className="font-semibold text-zinc-100">{gap.label}:</span> {gap.evidenceRequired}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm leading-6 text-zinc-300">
+                {extractMetricValueFromAliases(section.content, whatWouldChangeLabels) || "—"}
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -8566,6 +8636,24 @@ const ReportPanel = memo(function ReportPanel({
         const missingEvidence = extractAliasedSectionSnippet(content, missingEvidenceLabels, whatWouldChangeLabels);
         const whatWouldChange = extractMetricValueFromAliases(content, whatWouldChangeLabels);
         const nextAction = extractMetricValueFromAliases(content, immediateNextActionLabels);
+        // TASK #35 -- structured, canonical-state-derived evidence gaps
+        // (market-intelligence-evidence-gaps.ts) rather than raw prose --
+        // mirrors the identical fix in ReportPdfButton.tsx.
+        // "Information Required Before Decision" must state WHAT is
+        // missing and WHY it matters, derived from the SAME
+        // decisionCriticalEvidence pillars the canonical decision itself
+        // gates on. Falls back to the pre-existing prose extraction
+        // exactly as before for any report without canonical state.
+        const marketDecisionChangeState = isMarketIntelligence
+          ? resolveMarketIntelligenceDecisionChangeState(marketIntelligenceCanonicalState, pdfLocale === "tr" ? "Turkish" : "English")
+          : null;
+        const marketTopEvidenceGap =
+          marketDecisionChangeState && marketDecisionChangeState.materialGaps.length > 0
+            ? marketDecisionChangeState.materialGaps[0]
+            : null;
+        const marketInformationRequired = marketTopEvidenceGap
+          ? `${marketTopEvidenceGap.label}: ${marketTopEvidenceGap.evidenceRequired}`
+          : null;
 
         // CRITICAL FIX -- root-cause repair (ticket: "Fix the canonical
         // decision consistency bug"): confirmed live -- the PREVIOUS fix
@@ -8643,7 +8731,8 @@ const ReportPanel = memo(function ReportPanel({
           // evidence-aware wording used there for the equivalent state.
           [
             isMarketIntelligence ? "Information Required Before Decision" : "Missing Evidence",
-            missingEvidence ||
+            marketInformationRequired ||
+              missingEvidence ||
               (isTurkishPdf
                 ? "Nihai karardan önce ek doğrulama gereklidir."
                 : "Additional validation required before a final decision."),
@@ -10099,6 +10188,86 @@ const ReportPanel = memo(function ReportPanel({
 	            y += chunkCardHeight + 5;
 	            rowCursor += rowsInChunk;
 	            isFirstChunk = false;
+	          }
+
+	          // TASK #35 -- requirement #6 (bounded gap -> validation action ->
+	          // measurable result -> decision consequence) + requirement #7
+	          // (web/PDF parity): draws the SAME structured gap-driven actions
+	          // the web Strategic Recommendations card already renders
+	          // (buildMarketIntelligenceGapDrivenActions, itself built only
+	          // from the SAME canonical decisionCriticalEvidence pillars every
+	          // other MI surface reads) -- never a second, independently
+	          // derived PDF-only list. Appended as trailing rows within this
+	          // same section rather than a new TOC entry, since it is part of
+	          // Strategic Recommendations, not a separate section.
+	          const marketGapDrivenActions = buildMarketIntelligenceGapDrivenActions(
+	            marketIntelligenceCanonicalState,
+	            pdfLocale === "tr" ? "Turkish" : "English"
+	          );
+
+	          if (marketGapDrivenActions.length > 0) {
+	            const gapsLabel = pdfLocale === "tr" ? "Kapatılması Gereken Kanıt Boşlukları" : "Evidence Gaps to Close";
+	            const gapRowHeight = 20;
+
+	            let gapCursor = 0;
+	            let isFirstGapChunk = true;
+
+	            while (gapCursor < marketGapDrivenActions.length) {
+	              let rowsInChunk = 0;
+	              let chunkRowsHeight = 0;
+
+	              for (let candidate = gapCursor; candidate < marketGapDrivenActions.length; candidate += 1) {
+	                const candidateRowsHeight = chunkRowsHeight + gapRowHeight;
+	                const candidateCardHeight = cardHeaderHeight + candidateRowsHeight + cardBottomPadding;
+	                if (rowsInChunk > 0 && candidateCardHeight > maxUsableCardHeight) {
+	                  break;
+	                }
+	                chunkRowsHeight = candidateRowsHeight;
+	                rowsInChunk += 1;
+	              }
+
+	              const chunkCardHeight = Math.max(31, cardHeaderHeight + chunkRowsHeight + cardBottomPadding);
+	              ensureSpace(chunkCardHeight);
+
+	              drawPdfSectionCardFrame(pdf, { margin, y, contentWidth, cardHeight: chunkCardHeight });
+
+	              pdf.setFontSize(14);
+	              pdf.setTextColor("#ffffff");
+	              const chunkTitle = isFirstGapChunk ? gapsLabel : `${gapsLabel}${pdfLocale === "tr" ? " devamı" : " continued"}`;
+	              pdf.text(chunkTitle, bodyX, y + 12.5, { maxWidth: bodyWidth });
+
+	              const rowsTopY = y + 19;
+
+	              marketGapDrivenActions
+	                .slice(gapCursor, gapCursor + rowsInChunk)
+	                .forEach((gapAction, indexInChunk) => {
+	                  const rowY = rowsTopY + indexInChunk * gapRowHeight;
+	                  if (indexInChunk > 0) {
+	                    pdf.setDrawColor("#27272a");
+	                    pdf.line(bodyX, rowY - 4, bodyX + bodyWidth, rowY - 4);
+	                  }
+
+	                  pdf.setFontSize(7.2);
+	                  pdf.setTextColor("#e4e4e7");
+	                  drawRecommendationFieldValue(gapAction.gapLabel, bodyX, rowY, bodyWidth, 7.2, 5.5);
+
+	                  pdf.setFontSize(5.6);
+	                  pdf.setTextColor("#71717a");
+	                  drawRecommendationFieldValue(gapAction.action, bodyX, rowY + 4.6, bodyWidth, 5.6, 4.4);
+
+	                  pdf.setFontSize(5.6);
+	                  pdf.setTextColor("#a1a1aa");
+	                  drawRecommendationFieldValue(gapAction.measurableResult, bodyX, rowY + 9.2, bodyWidth, 5.6, 4.4);
+
+	                  pdf.setFontSize(5.4);
+	                  pdf.setTextColor("#fbbf24");
+	                  drawRecommendationFieldValue(gapAction.decisionConsequence, bodyX, rowY + 13.8, bodyWidth, 5.4, 4.2);
+	                });
+
+	              y += chunkCardHeight + 5;
+	              gapCursor += rowsInChunk;
+	              isFirstGapChunk = false;
+	            }
 	          }
 
 	          return;

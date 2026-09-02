@@ -83,6 +83,10 @@ import {
   classifyStrategicRecommendationAction,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
+  resolveMarketIntelligenceDecisionChangeState,
+  buildMarketIntelligenceGapDrivenActions,
+} from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
+import {
   repairReportLanguageSections,
   resolveMarketPdfLanguage,
   resolveReportLanguage,
@@ -4712,6 +4716,24 @@ export function buildStandardReportPdf({
           : extractAliasedSectionSnippet(content, topRisksLabels, missingEvidenceLabels);
         const missingEvidence = extractAliasedSectionSnippet(content, missingEvidenceLabels, whatWouldChangeLabels);
         const whatWouldChange = extractMetricValueFromAliases(content, whatWouldChangeLabels);
+        // TASK #35 -- structured, canonical-state-derived evidence gaps
+        // (market-intelligence-evidence-gaps.ts) rather than raw prose.
+        // "Information Required Before Decision" must state WHAT is
+        // missing and WHY it matters, derived from the SAME
+        // decisionCriticalEvidence pillars the canonical decision itself
+        // gates on -- never independently re-derived from this section's
+        // own prose. Falls back to the pre-existing prose extraction
+        // exactly as before for any report without canonical state.
+        const marketDecisionChangeState = isMarketIntelligenceReport
+          ? resolveMarketIntelligenceDecisionChangeState(recommendationCanonicalState, pdfLocale === "tr" ? "Turkish" : "English")
+          : null;
+        const marketTopEvidenceGap =
+          marketDecisionChangeState && marketDecisionChangeState.materialGaps.length > 0
+            ? marketDecisionChangeState.materialGaps[0]
+            : null;
+        const marketInformationRequired = marketTopEvidenceGap
+          ? `${marketTopEvidenceGap.label}: ${marketTopEvidenceGap.evidenceRequired}`
+          : null;
         const nextAction = extractMetricValueFromAliases(content, immediateNextActionLabels);
 
         // CRITICAL FIX -- root-cause repair (ticket: "Fix the canonical
@@ -4804,7 +4826,8 @@ export function buildStandardReportPdf({
           // make.
           [
             isMarketIntelligenceReport ? "Information Required Before Decision" : "Missing Evidence",
-            missingEvidence ||
+            marketInformationRequired ||
+              missingEvidence ||
               (isTurkishPdf
                 ? "Nihai karardan önce ek doğrulama gereklidir."
                 : "Additional validation required before a final decision."),
@@ -6586,6 +6609,86 @@ export function buildStandardReportPdf({
             y += chunkCardHeight + minSectionGap;
             rowCursor += rowsInChunk;
             isFirstChunk = false;
+          }
+
+          // TASK #35 -- requirement #6 (bounded gap -> validation action ->
+          // measurable result -> decision consequence) + requirement #7
+          // (web/PDF parity): draws the SAME structured gap-driven actions
+          // the web Strategic Recommendations card already renders
+          // (buildMarketIntelligenceGapDrivenActions, itself built only
+          // from the SAME canonical decisionCriticalEvidence pillars every
+          // other MI surface reads) -- never a second, independently
+          // derived PDF-only list. Appended as trailing rows within this
+          // same section rather than a new TOC entry, since it is part of
+          // Strategic Recommendations, not a separate section.
+          const marketGapDrivenActions = buildMarketIntelligenceGapDrivenActions(
+            recommendationCanonicalState,
+            pdfLocale === "tr" ? "Turkish" : "English"
+          );
+
+          if (marketGapDrivenActions.length > 0) {
+            const gapsLabel = pdfLocale === "tr" ? "Kapatılması Gereken Kanıt Boşlukları" : "Evidence Gaps to Close";
+            const gapRowHeight = 20;
+
+            let gapCursor = 0;
+            let isFirstGapChunk = true;
+
+            while (gapCursor < marketGapDrivenActions.length) {
+              let rowsInChunk = 0;
+              let chunkRowsHeight = 0;
+
+              for (let candidate = gapCursor; candidate < marketGapDrivenActions.length; candidate += 1) {
+                const candidateRowsHeight = chunkRowsHeight + gapRowHeight;
+                const candidateCardHeight = cardHeaderHeight + candidateRowsHeight + cardBottomPadding;
+                if (rowsInChunk > 0 && candidateCardHeight > maxUsableCardHeight) {
+                  break;
+                }
+                chunkRowsHeight = candidateRowsHeight;
+                rowsInChunk += 1;
+              }
+
+              const chunkCardHeight = Math.max(31, cardHeaderHeight + chunkRowsHeight + cardBottomPadding);
+              ensureSpace(chunkCardHeight);
+
+              drawPdfSectionCardFrame(pdf, { margin, y, contentWidth, cardHeight: chunkCardHeight });
+
+              pdf.setFontSize(14);
+              pdf.setTextColor("#ffffff");
+              const chunkTitle = isFirstGapChunk ? gapsLabel : `${gapsLabel}${pdfLocale === "tr" ? " devamı" : " continued"}`;
+              pdf.text(chunkTitle, bodyX, y + 12.5, { maxWidth: bodyWidth });
+
+              const rowsTopY = y + 19;
+
+              marketGapDrivenActions
+                .slice(gapCursor, gapCursor + rowsInChunk)
+                .forEach((gapAction, indexInChunk) => {
+                  const rowY = rowsTopY + indexInChunk * gapRowHeight;
+                  if (indexInChunk > 0) {
+                    pdf.setDrawColor("#27272a");
+                    pdf.line(bodyX, rowY - 4, bodyX + bodyWidth, rowY - 4);
+                  }
+
+                  pdf.setFontSize(7.2);
+                  pdf.setTextColor("#e4e4e7");
+                  drawRecommendationFieldValue(gapAction.gapLabel, bodyX, rowY, bodyWidth, 7.2, 5.5);
+
+                  pdf.setFontSize(5.6);
+                  pdf.setTextColor("#71717a");
+                  drawRecommendationFieldValue(gapAction.action, bodyX, rowY + 4.6, bodyWidth, 5.6, 4.4);
+
+                  pdf.setFontSize(5.6);
+                  pdf.setTextColor("#a1a1aa");
+                  drawRecommendationFieldValue(gapAction.measurableResult, bodyX, rowY + 9.2, bodyWidth, 5.6, 4.4);
+
+                  pdf.setFontSize(5.4);
+                  pdf.setTextColor("#fbbf24");
+                  drawRecommendationFieldValue(gapAction.decisionConsequence, bodyX, rowY + 13.8, bodyWidth, 5.4, 4.2);
+                });
+
+              y += chunkCardHeight + minSectionGap;
+              gapCursor += rowsInChunk;
+              isFirstGapChunk = false;
+            }
           }
 
           return;

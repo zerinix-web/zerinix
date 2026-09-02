@@ -72,6 +72,11 @@ import {
   type MarketIntelligenceCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
+  resolveMarketIntelligenceDecisionChangeState,
+  selectTopMarketIntelligenceEvidenceGaps,
+  buildMarketIntelligenceGapDrivenActions,
+} from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
+import {
   localizeMarketConfidenceFactorLevel,
   type MarketConfidenceFactorLevel,
 } from "@/app/lib/report-engine/market-intelligence-presentation";
@@ -3290,6 +3295,20 @@ function ReportSectionVisual({
           detectPdfPresentationLocale(executiveSummaryContent || content) === "tr" ? "Turkish" : "English"
         )
       : null;
+    // TASK #35 -- requirement #6: validation actions should directly
+    // correspond to material evidence gaps where possible, following a
+    // bounded gap -> validation action -> measurable result -> decision
+    // consequence flow. Built ONLY from the SAME structured canonical
+    // gaps the Executive Summary/Snapshot already read (never re-parsed
+    // from this section's own AI-generated recommendation cards, which
+    // remain completely untouched below) -- so this never disagrees with
+    // what the Executive Summary already says is missing.
+    const marketGapDrivenActions = isMarketIntelligence
+      ? buildMarketIntelligenceGapDrivenActions(
+          marketIntelligenceCanonicalState,
+          strategicRecommendationDecision?.language || "English"
+        )
+      : [];
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-white/[0.025] p-5">
@@ -3388,6 +3407,23 @@ function ReportSectionVisual({
         ) : (
           <p className="mt-4 text-sm leading-6 text-zinc-400">{content}</p>
         )}
+        {marketGapDrivenActions.length > 0 ? (
+          <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/[0.04] p-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200/80">
+              Evidence Gaps to Close
+            </p>
+            <div className="mt-3 space-y-3">
+              {marketGapDrivenActions.map((gapAction) => (
+                <div key={gapAction.gapId} className="border-t border-white/10 pt-3 first:border-t-0 first:pt-0">
+                  <p className="text-sm font-semibold text-zinc-100">{gapAction.gapLabel}</p>
+                  <p className="mt-1 text-xs leading-5 text-zinc-300">{gapAction.action}</p>
+                  <p className="mt-1 text-xs leading-5 text-zinc-400">{gapAction.measurableResult}</p>
+                  <p className="mt-1 text-xs leading-5 text-amber-200">{gapAction.decisionConsequence}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -4581,6 +4617,27 @@ function ExecutiveSnapshotPanel({
         ];
       })()
     : snapshot.riskHeatmap;
+  // TASK #35 -- structured, canonical-state-derived evidence gaps
+  // (market-intelligence-evidence-gaps.ts) surfaced on the Executive
+  // Snapshot itself, not just the separate Executive Decision card
+  // (Planner.tsx/ReportPdfButton.tsx) -- every render surface must be
+  // able to show the SAME "what specifically prevents ENTER"-class
+  // answer, derived only from decisionCriticalEvidence, never re-parsed
+  // from this section's own prose. null/empty for any report without
+  // canonical state or with every decision-critical pillar resolved --
+  // never a fabricated gap.
+  const marketDecisionChangeState = isMarketIntelligence
+    ? resolveMarketIntelligenceDecisionChangeState(
+        marketIntelligenceCanonicalState,
+        isMarketIntelligenceTurkish ? "Turkish" : "English"
+      )
+    : null;
+  const marketTopEvidenceGaps = marketDecisionChangeState
+    ? selectTopMarketIntelligenceEvidenceGaps(
+        [...marketDecisionChangeState.materialGaps, ...marketDecisionChangeState.supportingGaps],
+        2
+      )
+    : [];
   const groups = [
     { label: labels.why, items: snapshot.why },
     { label: labels.mainRisks, items: snapshot.risks },
@@ -4666,6 +4723,23 @@ function ExecutiveSnapshotPanel({
           </div>
         ))}
       </div>
+      {marketDecisionChangeState && marketTopEvidenceGaps.length > 0 ? (
+        <div className="mt-3 rounded-2xl border border-white/10 bg-black/25 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-200/70">
+            {marketDecisionChangeState.question}
+          </p>
+          <ul className="mt-3 space-y-2 text-sm leading-6 text-zinc-300">
+            {marketTopEvidenceGaps.map((gap) => (
+              <li key={gap.id} className="flex gap-2">
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
+                <span>
+                  <span className="font-semibold text-zinc-100">{gap.label}:</span> {gap.evidenceRequired}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {reportQualityBreakdown.length > 0 ? (
         <div className="mt-3 rounded-2xl border border-white/10 bg-black/25 p-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-200/70">
