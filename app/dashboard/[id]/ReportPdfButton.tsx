@@ -89,6 +89,7 @@ import {
   localizeRecommendationProvenance,
   resolveMarketIntelligenceControllingDecisionThreshold,
   resolveMarketIntelligenceControllingClosurePlan,
+  resolveMarketIntelligenceMultiGapPriorityState,
   resolveMarketIntelligenceConfidenceState,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
@@ -6928,6 +6929,16 @@ export function buildStandardReportPdf({
             marketRecommendationValidations,
             pdfLocale === "tr" ? "Turkish" : "English"
           );
+          // TASK #48 -- requirement #2/#8: the SAME canonical multi-gap
+          // priority state (primary/secondary/co-controlling, each with
+          // its OWN structurally-linked closure plan) the web card
+          // reads -- byte-identical to marketControllingClosurePlan
+          // above for today's single-material-gap reports.
+          const marketMultiGapPriorityState = resolveMarketIntelligenceMultiGapPriorityState(
+            recommendationCanonicalState,
+            marketRecommendationValidations,
+            pdfLocale === "tr" ? "Turkish" : "English"
+          );
 
           if (marketGapDrivenActions.length > 0) {
             const gapsLabel = pdfLocale === "tr" ? "Kapatılması Gereken Kanıt Boşlukları" : "Evidence Gaps to Close";
@@ -6967,14 +6978,17 @@ export function buildStandardReportPdf({
               const avoidIfText = isControllingGap
                 ? marketControllingDecisionThreshold!.avoidSummary
                 : gapAction.threshold.avoidCondition.description;
-              // TASK #47 -- only the controlling gap ever has a closure
-              // plan (resolveMarketIntelligenceControllingClosurePlan's
-              // own single-controlling-gap gate) -- every other row's
-              // layout is completely unaffected, exactly as before.
+              // TASK #48 -- sourced from the SAME canonical multi-gap
+              // priority state the web card reads (primary AND, in a
+              // multi-gap report, any co-controlling/secondary gap that
+              // has its own structurally linked recommendation) --
+              // byte-identical to Task #47's single-controlling-gap
+              // behavior for today's real reports; every row's layout
+              // that does not resolve one is completely unaffected,
+              // exactly as before.
               const closurePlan =
-                isControllingGap && marketControllingClosurePlan?.gapId === gapAction.gapId
-                  ? marketControllingClosurePlan
-                  : null;
+                marketMultiGapPriorityState.prioritized.find((entry) => entry.gap.id === gapAction.gapId)
+                  ?.closurePlan ?? (isControllingGap ? marketControllingClosurePlan : null);
 
               const previousFontSize = pdf.getFontSize();
               const lineHeight = 3.6;

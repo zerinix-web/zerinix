@@ -269,19 +269,19 @@ test("TASK #47A: the inherited timeline carries the SAME provenance qualifier th
   assert.match(plan.timeline, /\(.*\)$/);
 });
 
-test("TASK #47A/#47B: selection never inspects the recommendation's own free-text item string -- only structured relatedEvidenceGapId/owner/timeline/successCriterion/provenance fields", () => {
+test("TASK #47A/#47B/#48A: selection never inspects the recommendation's own free-text item string -- only structured relatedEvidenceGapId/owner/timeline/successCriterion/provenance fields", () => {
   const selectorSource = evidenceGapsSource.match(
     /function selectAuthoritativeClosurePlanValidation\([\s\S]*?\n\}/
   )[0];
-  const scoringSource = evidenceGapsSource.match(/function scoreClosurePlanCandidate\([\s\S]*?\n\}/)[0];
-  for (const source of [selectorSource, scoringSource]) {
+  const metricHelperSource = evidenceGapsSource.match(/function hasStructuredSuccessMetric\([\s\S]*?\n\}/)[0];
+  for (const source of [selectorSource, metricHelperSource]) {
     assert.doesNotMatch(source, /\.item\b/, "must never read a validation's raw item text");
-    assert.doesNotMatch(source, /includes\(|match\(|test\(/, "must never do substring/regex prose matching");
+    assert.doesNotMatch(source, /includes\(|\.match\(|\.test\(/, "must never do substring/regex prose matching");
   }
-  assert.match(scoringSource, /\.owner\.trim\(\)/);
-  assert.match(scoringSource, /\.timeline\.trim\(\)/);
-  assert.match(scoringSource, /\.successCriterion\.trim\(\)/);
-  assert.match(scoringSource, /\.provenance\s*===\s*"validationTarget"/);
+  assert.match(selectorSource, /\.owner\.trim\(\)/);
+  assert.match(selectorSource, /\.timeline\.trim\(\)/);
+  assert.match(selectorSource, /\.provenance\s*===\s*"validationTarget"/);
+  assert.match(metricHelperSource, /\.successCriterion\.trim\(\)/);
 });
 
 // --- 5. Validation target / canonical methodology unchanged ---------------

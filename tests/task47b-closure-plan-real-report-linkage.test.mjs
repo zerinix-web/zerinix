@@ -277,9 +277,11 @@ test("TASK #47B: page.tsx, Planner.tsx (web + PDF), and ReportPdfButton.tsx all 
   assert.equal(plannerOccurrences, 2, "Planner.tsx must call the resolver from both its web JSX and its own PDF-drawing function");
 });
 
-test("TASK #47B (drift check): the fixed scoring function is a pure structured-field check with no prose/keyword matching", () => {
-  const scoringSource = evidenceGapsSource.match(/function scoreClosurePlanCandidate\([\s\S]*?\n\}/)[0];
-  assert.doesNotMatch(scoringSource, /\.item\b/);
-  assert.doesNotMatch(scoringSource, /includes\(|match\(|test\(/);
-  assert.match(scoringSource, /validation\.provenance === "validationTarget"/);
+test("TASK #47B/#48A (drift check): the candidate-selection logic is a pure structured-field check with no prose/keyword matching", () => {
+  const selectorSource = evidenceGapsSource.match(
+    /function selectAuthoritativeClosurePlanValidation\([\s\S]*?\n\}/
+  )[0];
+  assert.doesNotMatch(selectorSource, /\.item\b/);
+  assert.doesNotMatch(selectorSource, /includes\(|\.match\(|\.test\(/);
+  assert.match(selectorSource, /validation\.provenance === "validationTarget"/);
 });

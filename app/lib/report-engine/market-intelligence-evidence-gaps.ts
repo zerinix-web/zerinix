@@ -465,15 +465,33 @@ const GROWTH_RATE_DECISION_IMPACT: Record<ResponseLanguage, string> = {
 // Only ever extracts a threshold the report's OWN generation-time
 // decision brief already states verbatim (e.g. "A validated SOM above 5%
 // would upgrade this to ENTER.") -- never a value this module invents.
-// Scoped to obtainable-share/market-sizing language (percentage-of-share
-// or dollar-figure phrasing tied to "above/over/at least/exceeding")
-// since that is the only class of numeric bar this report style ever
-// names for itself.
+// Percentage-scoped: obtainable share (SAM/SOM) is inherently a
+// share-of-market concept, so this is the only figure SHAPE that gap's
+// own threshold is ever expressed in.
 const NAMED_SUCCESS_THRESHOLD_PATTERN =
   /\b(?:above|over|exceeding|beyond|at least)\s+[\d.,]+\s?%|\b[\d.,]+\s?%\s+(?:or\s+(?:higher|more|above))/i;
 
 function extractNamedSuccessThreshold(whatWouldChangeThisDecision: string): string | null {
   const match = whatWouldChangeThisDecision.match(NAMED_SUCCESS_THRESHOLD_PATTERN);
+  return match ? match[0].trim() : null;
+}
+
+// TASK #48 -- the market-sizing counterpart to
+// extractNamedSuccessThreshold, DELIBERATELY scoped to DOLLAR figures
+// only (market size is inherently a currency-amount concept, never a
+// percentage) -- a SEPARATE pattern rather than one shared "any numeric
+// bar" scan, specifically so a single whatWouldChangeThisDecision
+// sentence that names BOTH a market-size bar ("a verified TAM above $2
+// billion") AND an obtainable-share bar ("obtainable share above 10%")
+// can never have BOTH gaps accidentally resolve to the SAME (first-
+// matched) figure -- each gap only ever looks for the figure SHAPE its
+// own underlying metric is actually expressed in, never a keyword/gap-
+// name search over the surrounding words.
+const NAMED_DOLLAR_THRESHOLD_PATTERN =
+  /\b(?:above|over|exceeding|beyond|at least)\s+[$€₺]\s?[\d.,]+\s?(?:thousand|million|billion|trillion|[kKmMbB])?\b/i;
+
+function extractNamedMarketSizeThreshold(whatWouldChangeThisDecision: string): string | null {
+  const match = whatWouldChangeThisDecision.match(NAMED_DOLLAR_THRESHOLD_PATTERN);
   return match ? match[0].trim() : null;
 }
 
@@ -524,7 +542,12 @@ export function resolveMarketIntelligenceEvidenceGaps(
       currentStatus: MARKET_SIZING_UNRESOLVED_STATUS[language],
       evidenceRequired: copy.evidenceRequired,
       validationMethod: copy.validationMethod,
-      successThreshold: null,
+      // TASK #48 -- previously always null; now sourced verbatim from
+      // the report's own text via the dollar-scoped extractor above,
+      // exactly when it actually names a directional market-size bar --
+      // never invented, still null for the overwhelming majority of
+      // reports that name no explicit market-size bar for themselves.
+      successThreshold: extractNamedMarketSizeThreshold(whatWouldChangeThisDecision),
       decisionImpact: buildDecisionImpactSentence(decision, unresolvedCount, language),
     });
   }
@@ -1189,16 +1212,41 @@ function resolveRecommendationProvenance(
 // keeping a report at MONITOR, Task #37's own controllingUnresolvedCondition).
 // In that state there is no second candidate a validation/pilot action
 // could possibly be advancing instead, so the link is a structural fact,
-// not an inference. Whenever 0 or 2+ material gaps exist, this returns
-// null rather than guess which one (or none) a given card relates to --
-// identical discipline to controllingUnresolvedCondition itself. Only
-// "validation"/"pilot" actionTypes ever link: those are the only two
-// action types whose entire purpose is gathering NEW decision-critical
-// evidence (a "scale"/"conditional_execution"/"research" action's
-// relationship to a specific gap is not structurally guaranteed the same
-// way).
+// not an inference. Only "validation"/"pilot" actionTypes ever link:
+// those are the only two action types whose entire purpose is gathering
+// NEW decision-critical evidence (a "scale"/"conditional_execution"/
+// "research" action's relationship to a specific gap is not
+// structurally guaranteed the same way).
+//
+// TASK #48 -- Make Market Intelligence multi-gap evidence closure
+// structurally authoritative.
+//
+// PROBLEM: whenever 2+ material gaps existed, this always returned null
+// -- correct discipline (never guess which of several gaps a card
+// relates to) but too conservative for the real, common shape this
+// report's own generation prompt produces under any non-ENTER decision:
+// "First 90 Days" REQUIRES exactly three bounded, measurable actions,
+// so a real multi-gap MONITOR report can easily have one action that
+// structurally, unambiguously targets ONE specific gap and a second
+// action targeting a DIFFERENT one.
+//
+// FIX: when 2+ material gaps exist, this action is now linked to a
+// SPECIFIC gap ONLY when its own successCriterion names the SAME
+// percentage figure that gap's OWN report-stated successThreshold
+// already names (Task #35's extractNamedSuccessThreshold, reused
+// verbatim) -- a NUMERIC EQUALITY check between two already-extracted
+// figures, never a word/gap-name/keyword comparison, and the SAME
+// technique Task #47C already uses to disambiguate between several
+// recommendations for ONE gap, generalized here to disambiguate WHICH
+// gap a recommendation targets. Requires the match to be unique across
+// ALL material gaps -- 0 or 2+ gaps sharing that figure (or the action
+// naming no figure at all, or the gap naming no figure at all) still
+// returns null, never a guess. This is a pure widening: the single-gap
+// path above is completely untouched, so every existing single-gap
+// behavior (Tasks #38/#46/#47-#47C) is unaffected.
 function resolveLinkedEvidenceGap(
   actionType: StrategicRecommendationClassification["actionType"],
+  successCriterion: string,
   canonicalState: MarketIntelligenceCanonicalState | null,
   language: ResponseLanguage
 ): MarketIntelligenceEvidenceGap | null {
@@ -1208,7 +1256,48 @@ function resolveLinkedEvidenceGap(
   const materialGaps = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).filter(
     (gap) => gap.decisionFactor !== null
   );
-  return materialGaps.length === 1 ? materialGaps[0] : null;
+  if (materialGaps.length === 1) return materialGaps[0];
+  if (materialGaps.length === 0) return null;
+
+  const actionFigure = extractComparableThresholdFigure(successCriterion);
+  if (!actionFigure) return null;
+  const numericMatches = materialGaps.filter((gap) =>
+    comparableThresholdFiguresMatch(actionFigure, gap.successThreshold ? extractComparableThresholdFigure(gap.successThreshold) : null)
+  );
+  return numericMatches.length === 1 ? numericMatches[0] : null;
+}
+
+// TASK #48 -- a type-aware companion to Task #47C's own
+// extractPercentageFigure (kept completely unchanged, still
+// percentage-only, since it is scoped to the single-gap recommendation-
+// tiebreaker that only ever compares against obtainable-share's own
+// percentage bar). Now that a SECOND gap type (market-sizing) can also
+// carry a report-stated threshold, and that threshold may be a DOLLAR
+// figure rather than a percentage, a bare string-equality check on the
+// wrong two kinds of figure could accidentally treat "$50,000" and "50%"
+// as unrelated-but-similar-looking numbers, or two DIFFERENT dollar
+// amounts that merely share digits. This extracts a figure's KIND
+// (percentage vs dollar) alongside its normalized value, and
+// comparableThresholdFiguresMatch requires BOTH the kind and the value
+// to agree -- never a same-number-different-unit false positive.
+type MarketIntelligenceComparableThresholdFigure = { kind: "percentage" | "dollar"; value: string };
+
+const PERCENTAGE_FIGURE_PATTERN = /\d+(?:\.\d+)?\s?%/;
+const DOLLAR_FIGURE_PATTERN = /[$€₺]\s?\d[\d,.]*\s?(?:thousand|million|billion|trillion|[kKmMbB])?/i;
+
+function extractComparableThresholdFigure(text: string): MarketIntelligenceComparableThresholdFigure | null {
+  const percentageMatch = text.match(PERCENTAGE_FIGURE_PATTERN);
+  if (percentageMatch) return { kind: "percentage", value: percentageMatch[0].replace(/\s/g, "") };
+  const dollarMatch = text.match(DOLLAR_FIGURE_PATTERN);
+  if (dollarMatch) return { kind: "dollar", value: dollarMatch[0].replace(/\s/g, "").toUpperCase() };
+  return null;
+}
+
+function comparableThresholdFiguresMatch(
+  a: MarketIntelligenceComparableThresholdFigure | null,
+  b: MarketIntelligenceComparableThresholdFigure | null
+): boolean {
+  return Boolean(a && b && a.kind === b.kind && a.value === b.value);
 }
 
 // The single, structured record every render surface must read for a
@@ -1259,7 +1348,7 @@ export function classifyStrategicRecommendationValidation(input: {
   const { item, signals, canonicalState, language = "English" } = input;
   const classification = classifyStrategicRecommendationAction({ item, signals, canonicalState, language });
   const provenance = resolveRecommendationProvenance(classification, signals.evidenceTie, canonicalState);
-  const linkedGap = resolveLinkedEvidenceGap(classification.actionType, canonicalState, language);
+  const linkedGap = resolveLinkedEvidenceGap(classification.actionType, signals.metric, canonicalState, language);
   const relatedDecisionThreshold =
     linkedGap && canonicalState
       ? resolveMarketIntelligenceDecisionThresholds(canonicalState, language).find((t) => t.gapId === linkedGap.id) ?? null
@@ -1478,23 +1567,19 @@ export type MarketIntelligenceControllingDecisionThreshold = {
   avoidSummary: string;
 };
 
-// requirement #7: recommendation validation targets must be reused
-// structurally, never recovered by prose parsing -- this accepts ONLY
-// already-classified MarketIntelligenceRecommendationValidation objects
-// (Task #38's own output), never raw recommendation item strings.
-export function resolveMarketIntelligenceControllingDecisionThreshold(
-  canonicalState: MarketIntelligenceCanonicalState | null,
-  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[] = [],
-  language: ResponseLanguage = "English"
+// TASK #48 -- extracted from resolveMarketIntelligenceControllingDecisionThreshold
+// so the SAME enrichment logic (report-stated OR linked-recommendation
+// ENTER/AVOID criteria) can be built for ANY specific material gap, not
+// only when it happens to be the sole one -- needed for multi-gap
+// closure (see resolveMarketIntelligenceGapDecisionThreshold below).
+// Behavior is byte-for-byte identical to the pre-Task-#48 inline body;
+// this is a pure extraction, zero logic change.
+function buildControllingThresholdForGap(
+  gap: MarketIntelligenceEvidenceGap,
+  canonicalState: MarketIntelligenceCanonicalState,
+  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[],
+  language: ResponseLanguage
 ): MarketIntelligenceControllingDecisionThreshold | null {
-  if (!canonicalState) return null;
-
-  const materialGaps = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).filter(
-    (gap) => gap.decisionFactor !== null
-  );
-  if (materialGaps.length !== 1) return null;
-  const gap = materialGaps[0];
-
   const threshold = resolveMarketIntelligenceDecisionThresholds(canonicalState, language).find(
     (candidate) => candidate.gapId === gap.id
   );
@@ -1561,6 +1646,55 @@ export function resolveMarketIntelligenceControllingDecisionThreshold(
     monitorSummary: monitorConditions.map((criterion) => criterion.description).join(" "),
     avoidSummary: avoidConditions.map((criterion) => criterion.description).join(" "),
   };
+}
+
+// requirement #7: recommendation validation targets must be reused
+// structurally, never recovered by prose parsing -- this accepts ONLY
+// already-classified MarketIntelligenceRecommendationValidation objects
+// (Task #38's own output), never raw recommendation item strings. Only
+// ever resolves for the SAME single-controlling-gap state Task #37/#38
+// already gate their own linkage on -- null when 0 or 2+ material gaps
+// exist, never guessing which one is "the" controlling factor. This
+// public contract is UNCHANGED by Task #48 -- it is now a thin wrapper
+// over buildControllingThresholdForGap, so every pre-existing caller and
+// test continues to see byte-identical behavior.
+export function resolveMarketIntelligenceControllingDecisionThreshold(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[] = [],
+  language: ResponseLanguage = "English"
+): MarketIntelligenceControllingDecisionThreshold | null {
+  if (!canonicalState) return null;
+
+  const materialGaps = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).filter(
+    (gap) => gap.decisionFactor !== null
+  );
+  if (materialGaps.length !== 1) return null;
+
+  return buildControllingThresholdForGap(materialGaps[0], canonicalState, recommendationValidations, language);
+}
+
+// TASK #48 -- the SAME enrichment model as
+// resolveMarketIntelligenceControllingDecisionThreshold, generalized to
+// ANY SPECIFIC material gap by id, regardless of how many OTHER material
+// gaps are simultaneously unresolved. Used only for a gap that has
+// already been classified as a genuine multi-gap PRIMARY or CO-
+// CONTROLLING candidate (resolveMarketIntelligenceMultiGapPriorityState
+// below) -- never called speculatively for an arbitrary gap, so this
+// does not reintroduce the "guess which gap a card relates to" problem
+// Task #38 was built to avoid; it only builds the DISPLAY model for a
+// gap whose priority has already been resolved structurally.
+export function resolveMarketIntelligenceGapDecisionThreshold(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  gapId: MarketIntelligenceEvidenceGapId,
+  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[] = [],
+  language: ResponseLanguage = "English"
+): MarketIntelligenceControllingDecisionThreshold | null {
+  if (!canonicalState) return null;
+  const gap = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).find(
+    (candidate) => candidate.id === gapId && candidate.decisionFactor !== null
+  );
+  if (!gap) return null;
+  return buildControllingThresholdForGap(gap, canonicalState, recommendationValidations, language);
 }
 
 // TASK #47 -- Make Market Intelligence evidence-gap closure actions
@@ -1707,12 +1841,6 @@ const CLOSURE_PLAN_NO_TIMELINE: Record<ResponseLanguage, string> = {
 // linked candidate (the exact case Task #47 already handled) is still
 // used regardless of completeness -- there is nothing else it could be
 // confused with.
-function scoreClosurePlanCandidate(validation: MarketIntelligenceRecommendationValidation): number | null {
-  if (!validation.owner.trim() || !validation.timeline.trim()) return null;
-  const hasMeasurableTarget = Boolean(validation.successCriterion.trim()) || validation.provenance === "validationTarget";
-  return hasMeasurableTarget ? 1 : 0;
-}
-
 // TASK #47C -- confirmed live against the REAL regenerated report: Task
 // #47A/#47B's own tie-breaking (falling back to "not yet assigned"
 // whenever 2+ candidates share the highest completeness score) turned
@@ -1723,32 +1851,51 @@ function scoreClosurePlanCandidate(validation: MarketIntelligenceRecommendationV
 // "bounded and reversible (validation, research, or a small gated
 // pilot)" whenever the decision is anything short of a full ENTER -- so
 // a real MONITOR report routinely has 2-3 equally-complete validation/
-// pilot candidates (owner + timeline + a measurable target) simultaneously,
-// each addressing a DIFFERENT decision-critical pillar, not just the one
-// this ticket is asking about. Task #47B's scoring bar has no way to
-// distinguish "the action that targets Obtainable Share" from "an
-// equally complete action that targets Market Sizing or Competitive
-// Evidence instead" -- both score identically -- so it always abstained.
+// pilot candidates (owner + timeline + a measurable target) simultaneously.
 //
-// This module already computes ONE genuinely structural, non-prose
-// signal that ties a SPECIFIC number to THIS SPECIFIC gap:
-// gap.successThreshold (Task #35's extractNamedSuccessThreshold) --
-// lifted verbatim from this report's OWN whatWouldChangeThisDecision
-// text, naming the exact percentage that would move Obtainable Share to
-// ENTER (e.g. "at least 10%"). A recommendation whose OWN successCriterion
-// names the SAME percentage figure is not a prose/keyword match -- it is
-// a NUMERIC equality check between two already-extracted figures, using
-// no vocabulary, gap name, or synonym list at all. When the gap names a
-// real threshold figure and EXACTLY ONE tied candidate's successCriterion
-// carries that same figure, it is unambiguously the action targeting
-// THIS gap and becomes the tiebreaker winner. When the gap names no
-// figure, or 0/2+ tied candidates share it, there remains no safe way to
-// choose, and the honest fallback is unchanged.
-const PERCENTAGE_FIGURE_PATTERN = /\d+(?:\.\d+)?\s?%/;
-
-function extractPercentageFigure(text: string): string | null {
-  const match = text.match(PERCENTAGE_FIGURE_PATTERN);
-  return match ? match[0].replace(/\s/g, "") : null;
+// TASK #48A -- confirmed live against a SECOND real regenerated report:
+// even after Task #47C's fix, TWO candidates BOTH linked to the SAME
+// SOLE controlling gap ("Vertical pilot": owner + timeline + an explicit
+// "10%" success metric; "Procurement reference test": owner + timeline,
+// but NO distinct success metric at all -- its own provenance still
+// classifies as "validationTarget" purely because its BUDGET/TIMELINE
+// figures are numeric) tied under Task #47C's single binary bonus
+// ("has a measurable target" -- true for both, via two different
+// routes), so selection still abstained even though "Vertical pilot" is
+// structurally, unambiguously stronger: it carries an EXPLICIT success
+// metric that the other candidate simply does not have at all.
+//
+// FIX: replace the single binary bonus with a SEQUENCE of progressively
+// narrowing filters, applied in the SAME priority order this ticket's
+// own requirement #2 lists (each stage only narrows the candidate pool
+// when it actually distinguishes at least one candidate -- it never
+// discards every remaining candidate just because none clears a later,
+// stricter bar):
+//   (1) owner AND timeline present (requirements #5/#6 -- a hard
+//       prerequisite, unchanged from Task #47A/#47B).
+//   (2) has a distinct, structured success metric AND that metric is
+//       itself classified "validationTarget" (requirements #3/#4) --
+//       strictly stronger than merely having SOME numeric content
+//       elsewhere (a bare budget/timeline figure) earn the same
+//       classification, which is exactly what let "Procurement
+//       reference test" wrongly tie with "Vertical pilot" before.
+//   (3) among whatever remains tied, prefer whichever candidate's own
+//       success-metric figure NUMERICALLY matches this gap's own
+//       report-stated threshold (gap.successThreshold, Task #35/#48's
+//       existing type-aware percentage/dollar equality check, reused
+//       verbatim) -- the closest available structural proxy for
+//       requirement #8's "directly tests the controlling economic/
+//       market uncertainty," since obtainable share's own bar is
+//       always expressed as exactly that kind of figure. Still never a
+//       word/keyword/gap-name comparison.
+// When zero candidates clear stage (1), or 2+ remain tied after EVERY
+// stage narrows as far as it safely can, there is no safe, non-
+// arbitrary way to choose one, and this returns null -- the honest
+// fallback is unchanged (requirement: never guess). A lone linked
+// candidate is still used regardless of completeness, exactly as
+// before -- there is nothing else it could be confused with.
+function hasStructuredSuccessMetric(validation: MarketIntelligenceRecommendationValidation): boolean {
+  return Boolean(validation.successCriterion.trim());
 }
 
 function selectAuthoritativeClosurePlanValidation(
@@ -1758,25 +1905,38 @@ function selectAuthoritativeClosurePlanValidation(
   if (linkedValidations.length === 0) return null;
   if (linkedValidations.length === 1) return linkedValidations[0];
 
-  const scoredCandidates = linkedValidations
-    .map((validation) => ({ validation, score: scoreClosurePlanCandidate(validation) }))
-    .filter((entry): entry is { validation: MarketIntelligenceRecommendationValidation; score: number } => entry.score !== null);
-  if (scoredCandidates.length === 0) return null;
+  // Stage 1 (requirements #5/#6): owner and timeline are a hard
+  // prerequisite -- a candidate missing either is never eligible,
+  // regardless of how strong its other signals are.
+  const eligible = linkedValidations.filter((validation) => validation.owner.trim() && validation.timeline.trim());
+  if (eligible.length === 0) return null;
+  if (eligible.length === 1) return eligible[0];
 
-  const highestScore = Math.max(...scoredCandidates.map((entry) => entry.score));
-  const topCandidates = scoredCandidates.filter((entry) => entry.score === highestScore);
-  if (topCandidates.length === 1) return topCandidates[0].validation;
-
-  // TASK #47C -- numeric tiebreaker: never applied unless the gap itself
-  // names a real, report-stated percentage (never a fabricated bar), and
-  // only ever resolves when EXACTLY ONE tied candidate's own
-  // successCriterion carries that same figure.
-  const gapFigure = gapSuccessThreshold ? extractPercentageFigure(gapSuccessThreshold) : null;
-  if (!gapFigure) return null;
-  const numericMatches = topCandidates.filter(
-    (entry) => extractPercentageFigure(entry.validation.successCriterion) === gapFigure
+  // Stage 2 (requirements #3/#4): prefer a candidate with an EXPLICIT
+  // success metric that is ITSELF classified as a validation target --
+  // only narrows the pool when it actually distinguishes someone; a
+  // report where NO candidate has a distinct metric is unaffected.
+  const withValidationTargetMetric = eligible.filter(
+    (validation) => hasStructuredSuccessMetric(validation) && validation.provenance === "validationTarget"
   );
-  return numericMatches.length === 1 ? numericMatches[0].validation : null;
+  let pool = withValidationTargetMetric.length > 0 ? withValidationTargetMetric : eligible;
+  if (pool.length === 1) return pool[0];
+
+  // Stage 3 (requirement #8 proxy): among the still-tied pool, prefer
+  // whichever candidate's own success-metric figure numerically matches
+  // this gap's own report-stated threshold -- never applied unless the
+  // gap itself names a real, report-stated figure (never a fabricated
+  // bar), and only ever narrows the pool when it actually distinguishes
+  // at least one candidate.
+  const gapFigure = gapSuccessThreshold ? extractComparableThresholdFigure(gapSuccessThreshold) : null;
+  if (gapFigure) {
+    const numericMatches = pool.filter((validation) =>
+      comparableThresholdFiguresMatch(gapFigure, extractComparableThresholdFigure(validation.successCriterion))
+    );
+    if (numericMatches.length > 0) pool = numericMatches;
+  }
+
+  return pool.length === 1 ? pool[0] : null;
 }
 
 // requirement #1: owner/timeline/budget, sourced ONLY from the single
@@ -1818,38 +1978,17 @@ function resolveClosurePlanAssignment(
   };
 }
 
-// The single, canonical, structured closure plan every render surface
-// must read for a controlling evidence gap's WHO/WHEN/HOW-MUCH/WHAT-
-// COUNTS-AS-SUCCESS-OR-FAILURE fields (requirement #1). Resolves ONLY
-// for the SAME single-controlling-gap state
-// resolveMarketIntelligenceControllingDecisionThreshold already gates on
-// -- requirement #8's "multiple simultaneous material gaps do not cause
-// the system to arbitrarily invent a single closure plan" is satisfied
-// by construction here, not by a separate check, since this function
-// simply cannot produce a non-null result unless that shared gate
-// already resolved a single controlling gap.
-export function resolveMarketIntelligenceControllingClosurePlan(
-  canonicalState: MarketIntelligenceCanonicalState | null,
-  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[] = [],
-  language: ResponseLanguage = "English"
-): MarketIntelligenceEvidenceGapClosurePlan | null {
-  if (!canonicalState) return null;
-
-  const controllingThreshold = resolveMarketIntelligenceControllingDecisionThreshold(
-    canonicalState,
-    recommendationValidations,
-    language
-  );
-  if (!controllingThreshold) return null;
-
-  const gap = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).find(
-    (candidate) => candidate.id === controllingThreshold.gapId
-  );
-  // Structurally unreachable (controllingThreshold is itself derived from
-  // this same gap list), kept as a defensive guard rather than a
-  // non-null assertion.
-  if (!gap) return null;
-
+// TASK #48 -- extracted so the SAME closure-plan construction can run
+// for ANY specific gap once its own controlling-threshold model has
+// already been resolved (either the sole-controlling-gap path or the
+// generalized per-gap path below) -- a pure extraction of the pre-Task-
+// #48 body, zero logic change.
+function buildClosurePlanForGap(
+  gap: MarketIntelligenceEvidenceGap,
+  controllingThreshold: MarketIntelligenceControllingDecisionThreshold,
+  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[],
+  language: ResponseLanguage
+): MarketIntelligenceEvidenceGapClosurePlan {
   const linkedValidations = recommendationValidations.filter(
     (validation) => validation.relatedEvidenceGapId === gap.id
   );
@@ -1874,6 +2013,269 @@ export function resolveMarketIntelligenceControllingClosurePlan(
     failureCriterion: controllingThreshold.avoidSummary,
     decisionImpact: gap.decisionImpact,
     hasAssignedOwner: assignment.hasAssignedOwner,
+  };
+}
+
+// The single, canonical, structured closure plan every render surface
+// must read for a controlling evidence gap's WHO/WHEN/HOW-MUCH/WHAT-
+// COUNTS-AS-SUCCESS-OR-FAILURE fields (requirement #1). Resolves ONLY
+// for the SAME single-controlling-gap state
+// resolveMarketIntelligenceControllingDecisionThreshold already gates on
+// -- requirement #8's "multiple simultaneous material gaps do not cause
+// the system to arbitrarily invent a single closure plan" is satisfied
+// by construction here, not by a separate check, since this function
+// simply cannot produce a non-null result unless that shared gate
+// already resolved a single controlling gap. This public contract is
+// UNCHANGED by Task #48 -- it is now a thin wrapper over
+// buildClosurePlanForGap, so every pre-existing caller and test
+// continues to see byte-identical behavior.
+export function resolveMarketIntelligenceControllingClosurePlan(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[] = [],
+  language: ResponseLanguage = "English"
+): MarketIntelligenceEvidenceGapClosurePlan | null {
+  if (!canonicalState) return null;
+
+  const controllingThreshold = resolveMarketIntelligenceControllingDecisionThreshold(
+    canonicalState,
+    recommendationValidations,
+    language
+  );
+  if (!controllingThreshold) return null;
+
+  const gap = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).find(
+    (candidate) => candidate.id === controllingThreshold.gapId
+  );
+  // Structurally unreachable (controllingThreshold is itself derived from
+  // this same gap list), kept as a defensive guard rather than a
+  // non-null assertion.
+  if (!gap) return null;
+
+  return buildClosurePlanForGap(gap, controllingThreshold, recommendationValidations, language);
+}
+
+// TASK #48 -- the SAME closure-plan model, generalized to ANY SPECIFIC
+// material gap by id, regardless of how many OTHER material gaps are
+// simultaneously unresolved. Used only for a gap that has already been
+// classified as a genuine multi-gap PRIMARY or CO-CONTROLLING candidate
+// (resolveMarketIntelligenceMultiGapPriorityState below) -- never called
+// speculatively for an arbitrary gap. Requirement #1's owner/timeline/
+// budget/success/failure fields are built by the EXACT SAME
+// buildClosurePlanForGap/resolveClosurePlanAssignment/
+// selectAuthoritativeClosurePlanValidation pipeline the single-gap path
+// already uses -- a secondary or co-controlling gap can therefore never
+// borrow a field from a DIFFERENT gap's recommendation (requirement #5):
+// linkedValidations is always filtered to `relatedEvidenceGapId ===
+// gap.id`, and that identifier is itself never guessed (see
+// resolveLinkedEvidenceGap's own comment).
+export function resolveMarketIntelligenceGapClosurePlan(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  gapId: MarketIntelligenceEvidenceGapId,
+  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[] = [],
+  language: ResponseLanguage = "English"
+): MarketIntelligenceEvidenceGapClosurePlan | null {
+  if (!canonicalState) return null;
+  const gap = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).find(
+    (candidate) => candidate.id === gapId && candidate.decisionFactor !== null
+  );
+  if (!gap) return null;
+
+  const controllingThreshold = resolveMarketIntelligenceGapDecisionThreshold(
+    canonicalState,
+    gapId,
+    recommendationValidations,
+    language
+  );
+  if (!controllingThreshold) return null;
+
+  return buildClosurePlanForGap(gap, controllingThreshold, recommendationValidations, language);
+}
+
+// TASK #48 -- Make Market Intelligence multi-gap evidence closure
+// structurally authoritative.
+//
+// PROBLEM (the documented architectural note from Tasks #46/#47C):
+// whenever 2+ material (decision-gating) evidence gaps are
+// simultaneously unresolved, every "controlling factor" resolver above
+// (resolveMarketIntelligenceControllingDecisionThreshold,
+// resolveMarketIntelligenceControllingClosurePlan,
+// resolveMarketIntelligenceDecisionThresholdState's own
+// controllingUnresolvedCondition) abstains entirely -- correct
+// discipline (never guess which of several co-equal, AND-gated pillars
+// is "the" one), but leaves no defensible PRIORITIZED view at all, even
+// when the report's own structured data already distinguishes the gaps
+// (e.g. one has a report-stated numeric threshold and a structurally
+// linked recommendation, the other has neither).
+//
+// FIX: resolveMarketIntelligenceMultiGapPriorityState ranks material
+// gaps using ONLY two already-existing, already-structural signals, in a
+// fixed precedence (never a weighted/invented score):
+//   Tier 2 (strongest) -- the gap has a recommendation STRUCTURALLY
+//     linked to it (relatedEvidenceGapId, Task #38/#48's own numeric-
+//     match widening above) -- the report contains a concrete action
+//     designed to close exactly this gap.
+//   Tier 1 -- the gap has no linked recommendation, but the report's
+//     OWN decision brief names a real threshold for it
+//     (gap.successThreshold, Task #35).
+//   Tier 0 -- neither.
+// A gap reaching a HIGHER tier than every other material gap becomes
+// the PRIMARY gap; every other material gap becomes SECONDARY. When 2+
+// gaps tie at the HIGHEST tier reached by any gap, there is no
+// structural basis to prefer one over the other -- they are represented
+// as CO-CONTROLLING (primaryGap stays null; requirement #4: never guess
+// between equally supported gaps), and any OTHER, lower-tier material
+// gaps become secondary relative to that co-controlling set. With
+// exactly one material gap, that gap is ALWAYS primary regardless of
+// tier (requirement #5: preserve Task #47C's exact single-gap behavior)
+// -- there is nothing to compare it against. With zero material gaps,
+// every field is empty/null.
+//
+// This NEVER changes decisionCriticalEvidence, the canonical
+// ENTER/MONITOR/AVOID decision, confidence, or which gaps count as
+// material in the first place -- it only ranks gaps ALREADY found
+// material by resolveMarketIntelligenceEvidenceGaps, using fields those
+// same gaps and recommendationValidations already carry.
+export type MarketIntelligenceGapPriorityStatus = "primary" | "secondary" | "coControlling";
+
+export type MarketIntelligenceGapPriorityTier = "linkedRecommendation" | "reportStatedThreshold" | "unranked";
+
+export type MarketIntelligencePrioritizedGap = {
+  gap: MarketIntelligenceEvidenceGap;
+  status: MarketIntelligenceGapPriorityStatus;
+  tier: MarketIntelligenceGapPriorityTier;
+  // The SAME closure plan resolveMarketIntelligenceGapClosurePlan
+  // produces for this specific gap -- null only when this gap's own
+  // controlling-threshold model does not resolve (structurally
+  // unreachable for a gap already found material, kept as a defensive
+  // type rather than a non-null assertion).
+  closurePlan: MarketIntelligenceEvidenceGapClosurePlan | null;
+};
+
+export type MarketIntelligenceMultiGapPriorityState = {
+  materialGaps: MarketIntelligenceEvidenceGap[];
+  // Non-null whenever exactly one gap uniquely reaches the highest
+  // priority tier (including the trivial single-material-gap case).
+  // Null when zero material gaps exist, or 2+ tie at the top (see
+  // coControllingGaps).
+  primaryGap: MarketIntelligenceEvidenceGap | null;
+  primaryClosurePlan: MarketIntelligenceEvidenceGapClosurePlan | null;
+  // Every material gap that is NOT primary and NOT co-controlling.
+  secondaryGaps: MarketIntelligenceEvidenceGap[];
+  // Non-empty ONLY when 2+ gaps tie at the highest priority tier --
+  // requirement #4's explicit "represent them explicitly as co-
+  // controlling gaps" state. Always empty when primaryGap is non-null.
+  coControllingGaps: MarketIntelligenceEvidenceGap[];
+  // Per-gap breakdown (status/tier/own closure plan) for every material
+  // gap, in the SAME order resolveMarketIntelligenceEvidenceGaps
+  // returns them -- the single source every render surface should read
+  // rather than re-deriving status per gap itself.
+  prioritized: MarketIntelligencePrioritizedGap[];
+};
+
+function resolveGapPriorityTier(
+  gap: MarketIntelligenceEvidenceGap,
+  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[]
+): MarketIntelligenceGapPriorityTier {
+  const hasLinkedRecommendation = recommendationValidations.some(
+    (validation) => validation.relatedEvidenceGapId === gap.id
+  );
+  if (hasLinkedRecommendation) return "linkedRecommendation";
+  if (gap.successThreshold) return "reportStatedThreshold";
+  return "unranked";
+}
+
+const GAP_PRIORITY_TIER_RANK: Record<MarketIntelligenceGapPriorityTier, number> = {
+  linkedRecommendation: 2,
+  reportStatedThreshold: 1,
+  unranked: 0,
+};
+
+export function resolveMarketIntelligenceMultiGapPriorityState(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[] = [],
+  language: ResponseLanguage = "English"
+): MarketIntelligenceMultiGapPriorityState {
+  const materialGaps = canonicalState
+    ? resolveMarketIntelligenceEvidenceGaps(canonicalState, language).filter((gap) => gap.decisionFactor !== null)
+    : [];
+
+  const empty: MarketIntelligenceMultiGapPriorityState = {
+    materialGaps: [],
+    primaryGap: null,
+    primaryClosurePlan: null,
+    secondaryGaps: [],
+    coControllingGaps: [],
+    prioritized: [],
+  };
+  if (!canonicalState || materialGaps.length === 0) return empty;
+
+  const closurePlanFor = (gapId: MarketIntelligenceEvidenceGapId) =>
+    resolveMarketIntelligenceGapClosurePlan(canonicalState, gapId, recommendationValidations, language);
+
+  // Requirement #5: the trivial, already-shipped single-gap case is
+  // ALWAYS primary, regardless of tier -- byte-identical to Task #47C's
+  // own behavior (resolveMarketIntelligenceControllingClosurePlan is
+  // itself called here, guaranteeing identical output, not a re-
+  // implementation).
+  if (materialGaps.length === 1) {
+    const gap = materialGaps[0];
+    const closurePlan = resolveMarketIntelligenceControllingClosurePlan(canonicalState, recommendationValidations, language);
+    return {
+      materialGaps,
+      primaryGap: gap,
+      primaryClosurePlan: closurePlan,
+      secondaryGaps: [],
+      coControllingGaps: [],
+      prioritized: [
+        { gap, status: "primary", tier: resolveGapPriorityTier(gap, recommendationValidations), closurePlan },
+      ],
+    };
+  }
+
+  const tiered = materialGaps.map((gap) => ({ gap, tier: resolveGapPriorityTier(gap, recommendationValidations) }));
+  const highestRank = Math.max(...tiered.map((entry) => GAP_PRIORITY_TIER_RANK[entry.tier]));
+  const topTierEntries = tiered.filter((entry) => GAP_PRIORITY_TIER_RANK[entry.tier] === highestRank);
+
+  if (topTierEntries.length === 1) {
+    const primaryGap = topTierEntries[0].gap;
+    const secondaryGaps = materialGaps.filter((gap) => gap.id !== primaryGap.id);
+    const prioritized: MarketIntelligencePrioritizedGap[] = tiered.map(({ gap, tier }) => ({
+      gap,
+      status: gap.id === primaryGap.id ? "primary" : "secondary",
+      tier,
+      closurePlan: closurePlanFor(gap.id),
+    }));
+    return {
+      materialGaps,
+      primaryGap,
+      primaryClosurePlan: closurePlanFor(primaryGap.id),
+      secondaryGaps,
+      coControllingGaps: [],
+      prioritized,
+    };
+  }
+
+  // Requirement #4: 2+ gaps genuinely tie at the highest reached tier --
+  // never guess between them. They are all CO-CONTROLLING; any other
+  // material gap not in that top tier is secondary to the co-
+  // controlling set.
+  const coControllingIds = new Set(topTierEntries.map((entry) => entry.gap.id));
+  const coControllingGaps = materialGaps.filter((gap) => coControllingIds.has(gap.id));
+  const secondaryGaps = materialGaps.filter((gap) => !coControllingIds.has(gap.id));
+  const prioritized: MarketIntelligencePrioritizedGap[] = tiered.map(({ gap, tier }) => ({
+    gap,
+    status: coControllingIds.has(gap.id) ? "coControlling" : "secondary",
+    tier,
+    closurePlan: closurePlanFor(gap.id),
+  }));
+
+  return {
+    materialGaps,
+    primaryGap: null,
+    primaryClosurePlan: null,
+    secondaryGaps,
+    coControllingGaps,
+    prioritized,
   };
 }
 

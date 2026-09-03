@@ -356,26 +356,27 @@ test("STRUCTURAL AUDIT: no render site reads canonicalState.missingEvidence/what
 
 // --- 8. Remaining architectural note (requirement #7's own ask) ------------
 //
-// resolveLinkedEvidenceGap (market-intelligence-evidence-gaps.ts) and
-// resolveMarketIntelligenceDecisionThresholdState's own
-// controllingUnresolvedCondition BOTH deliberately resolve to null/no-link
-// whenever more than one material gap is simultaneously unresolved (the
-// "materialGaps.length === 1 ? ... : null" pattern), rather than guessing
-// which of several co-equal AND-gated pillars is "the" one to link a
-// recommendation to or name as controlling. This is safe and internally
-// consistent (both consumers abstain identically, so they can never
-// disagree) and correctly covers the real CLM report (exactly one
-// material gap today), but means a FUTURE report with 2+ simultaneous
-// decision-critical gaps would show NO controlling-factor caption and NO
-// gap-linked recommendation at all, rather than a best-effort partial
-// link. Fixing this would require threading a genuine priority signal
-// between 3 co-equal, AND-gated pillars with no existing weighting to
-// borrow (assessMarketEntryConfidence's 0.4/0.25/0.2/0.15 weights apply to
-// a DIFFERENT set of 4 confidence dimensions, not these 3 gate booleans) --
-// out of scope for this ticket's "smallest safe fix, avoid broad
-// refactoring" mandate. Documented here as a candidate for a future,
-// narrowly-scoped ticket if multi-gap reports become common.
-test("DOCUMENTED ARCHITECTURAL NOTE: the single-controlling-gap simplification is consistent across BOTH consumers that use it -- confirmed so a future fix has one behavior to change, not two independently-drifted ones", () => {
-  assert.match(evidenceGapsSource, /materialGaps\.length === 1 \? materialGaps\[0\] : null/);
+// UPDATE (Task #48): this note originally documented that
+// resolveLinkedEvidenceGap and resolveMarketIntelligenceDecisionThresholdState's
+// own controllingUnresolvedCondition both abstained entirely whenever 2+
+// material gaps were simultaneously unresolved, with no prioritized view
+// at all. Task #48 ("Make Market Intelligence multi-gap evidence closure
+// structurally authoritative") is exactly the "future, narrowly-scoped
+// ticket" this note anticipated: resolveLinkedEvidenceGap now ALSO links
+// a recommendation to a specific gap in the 2+-material-gap case, but
+// ONLY via a non-prose numeric match against that gap's own report-
+// stated successThreshold (never a guess), and a new
+// resolveMarketIntelligenceMultiGapPriorityState resolver ranks material
+// gaps into primary/secondary/co-controlling using only already-
+// structural signals (linked-recommendation presence, report-stated
+// threshold presence) -- still never fabricating a priority from prose
+// or section order, and still representing genuine ties as explicitly
+// co-controlling rather than guessing. resolveMarketIntelligenceDecisionThresholdState's
+// OWN controllingUnresolvedCondition is intentionally UNCHANGED (it
+// remains a simpler, single-condition concept for the pre-existing
+// Executive-Summary-facing threshold state) -- Task #48 added a
+// separate, additive resolver rather than redefining this one.
+test("DOCUMENTED ARCHITECTURAL NOTE (updated by Task #48): resolveMarketIntelligenceDecisionThresholdState's own controllingUnresolvedCondition remains a conservative single-condition concept, and Task #48's multi-gap priority resolver now exists as the structural fix for the 2+-material-gap case", () => {
   assert.match(evidenceGapsSource, /unresolvedConditions\.length === 1 \? unresolvedConditions\[0\] : null/);
+  assert.match(evidenceGapsSource, /export function resolveMarketIntelligenceMultiGapPriorityState\(/);
 });

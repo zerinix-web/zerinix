@@ -342,9 +342,9 @@ test("TASK #47C: web (page.tsx, Planner.tsx) and PDF (Planner.tsx, ReportPdfButt
   assert.equal(plannerOccurrences, 2, "Planner.tsx must call the resolver from both its web JSX and its own PDF-drawing function, both delegating to the SAME shared resolver");
 });
 
-test("TASK #47C (drift check): the numeric tiebreaker lives inside the single shared resolver module, is a pure numeric-equality check, and never inspects a validation's raw item text", () => {
+test("TASK #47C/#48A (drift check): the numeric tiebreaker lives inside the single shared resolver module, is a pure numeric-equality check, and never inspects a validation's raw item text", () => {
   const fnSource = evidenceGapsSource.match(/function selectAuthoritativeClosurePlanValidation\([\s\S]*?\n\}/)[0];
-  assert.match(fnSource, /extractPercentageFigure\(/);
+  assert.match(fnSource, /extractComparableThresholdFigure\(/);
   assert.match(fnSource, /gapSuccessThreshold/);
   assert.doesNotMatch(fnSource, /\.item\b/);
 });
