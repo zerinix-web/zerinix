@@ -136,7 +136,10 @@ test("DUP6 (no regression): pdfCompleteVisualFields (executiveSummary, tamSamSom
 test("CONF1: page.tsx's ExecutiveInsightBanner no longer renders a bare em-dash for a null confidence value", () => {
   const fnIndex = pageSource.indexOf("function ExecutiveInsightBanner(");
   assert.notEqual(fnIndex, -1);
-  const fnWindow = pageSource.slice(fnIndex, fnIndex + 1600);
+  // TASK #49 widened this function's own signature/comment block
+  // (isMarketIntelligence/marketIntelligenceCanonicalState props) --
+  // window widened accordingly to still reach the same target line.
+  const fnWindow = pageSource.slice(fnIndex, fnIndex + 3500);
 
   assert.match(
     fnWindow,
@@ -213,7 +216,10 @@ test("CONF7: Planner.tsx's marketConfidenceDisplay (used in both the metricCards
 test("CONF8: Planner.tsx's on-screen ExecutiveInsightBanner mirrors page.tsx's identical fix -- no bare em-dash for a null confidence value", () => {
   const fnIndex = plannerSource.indexOf('function ExecutiveInsightBanner(');
   assert.notEqual(fnIndex, -1);
-  const fnWindow = plannerSource.slice(fnIndex, fnIndex + 1600);
+  // TASK #49 widened this function's own signature/comment block
+  // (isMarketIntelligence/marketIntelligenceCanonicalState props) --
+  // window widened accordingly to still reach the same target line.
+  const fnWindow = plannerSource.slice(fnIndex, fnIndex + 3500);
 
   assert.match(
     fnWindow,

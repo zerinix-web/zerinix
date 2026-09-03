@@ -4679,9 +4679,28 @@ function ExecutiveSummaryVisual({
   );
 }
 
-function ExecutiveInsightBanner({ section }: { section: ReportSection }) {
+function ExecutiveInsightBanner({
+  section,
+  isMarketIntelligence = false,
+  marketIntelligenceCanonicalState = null,
+}: {
+  section: ReportSection;
+  isMarketIntelligence?: boolean;
+  marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
+}) {
   const insight = extractFirstInsight(section.content);
-  const confidence = extractConfidence(section.content);
+  // TASK #49 -- see page.tsx's identical ExecutiveInsightBanner for the
+  // full comment: this was the one Market-Intelligence-reachable
+  // confidence display never gated to use the canonical confidence
+  // value, relying only on cardFirstReportFields (below) incidentally
+  // excluding every real MI field today rather than a structural
+  // safeguard. Market Intelligence now always reads
+  // canonicalState.confidence directly -- never extractConfidence's
+  // unsafe bare-percentage prose scan -- falling back to the same
+  // "Validation Needed" placeholder when no canonical state exists.
+  const confidence = isMarketIntelligence
+    ? marketIntelligenceCanonicalState?.confidence ?? null
+    : extractConfidence(section.content);
 
   if (!insight) {
     return null;
@@ -7704,7 +7723,11 @@ const ReportSectionCard = memo(
               hasPremiumSectionVisual(section) &&
               section.field !== "financialDashboard" &&
               !cardFirstReportFields.has(section.field ?? "") ? (
-                <ExecutiveInsightBanner section={section} />
+                <ExecutiveInsightBanner
+                  section={section}
+                  isMarketIntelligence={isMarketIntelligence}
+                  marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
+                />
               ) : null}
               {/* ExecutiveSummaryVisual (above) is already the dedicated
                   Executive Summary card -- PremiumSectionVisual's own

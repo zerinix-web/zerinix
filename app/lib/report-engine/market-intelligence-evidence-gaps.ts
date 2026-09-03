@@ -1244,6 +1244,89 @@ function resolveRecommendationProvenance(
 // returns null, never a guess. This is a pure widening: the single-gap
 // path above is completely untouched, so every existing single-gap
 // behavior (Tasks #38/#46/#47-#47C) is unaffected.
+// TASK #50 -- Fix the semantic mismatch between an evidence gap and its
+// Closure Plan / Decision Threshold.
+//
+// PROBLEM (confirmed live on a real regenerated report): with exactly
+// ONE material gap (Obtainable Share (SAM/SOM)), the single-gap fast
+// path below linked EVERY validation/pilot-classified recommendation to
+// it unconditionally -- including a "Vertical Technical Pilot" whose own
+// success metric was "85% extraction accuracy" on compliance clauses, a
+// PRODUCT/TECHNICAL performance figure that measures nothing about how
+// much of the market this business can capture. That 85% then flowed,
+// completely unchallenged, into the ENTER threshold and Closure Plan
+// (Owner/Timeline/Budget) for a gap it has no evidentiary relationship
+// to at all. The single-gap fast path (and, symmetrically, the multi-gap
+// numeric-match path just below it) both only ever asked "is this
+// action a validation/pilot action, and is there only one place it
+// could possibly be about" -- neither ever asked "does this action's
+// OWN evidence actually measure what this specific gap needs."
+//
+// FIX: a candidate's OWN successCriterion is checked against a small,
+// curated, gap-scoped vocabulary of what KIND of KPI that gap's
+// underlying concept is ever measured by (GAP_REQUIRED_EVIDENCE_CATEGORY
+// below) -- e.g. Obtainable Share is inherently a capture-rate concept
+// (conversion/win-rate/paid-pilot/LOI/reachable-account/penetration),
+// never a product/technical performance concept (extraction accuracy/
+// latency/model accuracy/integration completion). This is intentionally
+// NOT a general prose-similarity search: it only ever inspects the
+// recommendation's own already-extracted, already-structured
+// successCriterion field (Task #31), against a small, explicit,
+// bidirectional vocabulary -- never the free-form action/activity text,
+// never a gap-name/keyword scan of the whole item. A candidate is
+// rejected ONLY when its metric AFFIRMATIVELY classifies into a
+// DIFFERENT known category than the gap requires (e.g. a technical-
+// performance metric proposed for a capture-rate gap); a candidate with
+// NO distinct metric at all, or a metric this vocabulary does not
+// recognize either way, remains exactly as eligible as before Task #50
+// (never a new reason to reject the "Procurement reference test"/
+// "Pilot Recruitment" shapes Tasks #47B/#48A already made resolvable) --
+// this is a strict narrowing (blocks a confirmed wrong answer), never a
+// broadening of what can link. Gap types with no defined requirement
+// (competitive-evidence today) are completely unaffected.
+type MarketIntelligenceEvidenceCategory = "captureRate" | "marketSize" | "technicalPerformance";
+
+// Deliberately narrow, curated patterns -- each names a closed set of
+// real-world KPI vocabulary this report style's own generation prompt
+// actually produces for that concept, never a broad word.
+const CAPTURE_RATE_EVIDENCE_PATTERN =
+  /\b(?:conversion(?:\s+rate)?|win[- ]rate|paid[- ]pilot|pilot\s+conversion|LOIs?|letters?\s+of\s+intent|reachable[- ]account|obtainable[- ]share|(?:market\s+)?penetration)\b/i;
+const MARKET_SIZE_EVIDENCE_PATTERN =
+  /\b(?:TAM|total\s+addressable\s+market|market\s+size|addressable\s+market|buyer\s+population)\b/i;
+const TECHNICAL_PERFORMANCE_EVIDENCE_PATTERN =
+  /\b(?:extraction\s+accuracy|latency|model\s+accuracy|integration\s+completion|uptime|throughput|processing\s+accuracy|precision|recall|F1[- ]score)\b/i;
+
+function resolveRecommendationEvidenceCategories(successCriterion: string): Set<MarketIntelligenceEvidenceCategory> {
+  const categories = new Set<MarketIntelligenceEvidenceCategory>();
+  if (!successCriterion.trim()) return categories;
+  if (CAPTURE_RATE_EVIDENCE_PATTERN.test(successCriterion)) categories.add("captureRate");
+  if (MARKET_SIZE_EVIDENCE_PATTERN.test(successCriterion)) categories.add("marketSize");
+  if (TECHNICAL_PERFORMANCE_EVIDENCE_PATTERN.test(successCriterion)) categories.add("technicalPerformance");
+  return categories;
+}
+
+// Only gaps with a defined requirement are semantically gated at all --
+// this is an explicit allow-list, never a default-deny, so a future or
+// unlisted gap type (competitive-evidence today) keeps its existing,
+// unchanged linkage behavior exactly as before.
+const GAP_REQUIRED_EVIDENCE_CATEGORY: Partial<Record<MarketIntelligenceEvidenceGapId, MarketIntelligenceEvidenceCategory>> = {
+  "obtainable-share": "captureRate",
+  "market-sizing": "marketSize",
+};
+
+function isRecommendationSemanticallyCompatibleWithGap(
+  gapId: MarketIntelligenceEvidenceGapId,
+  successCriterion: string
+): boolean {
+  const requiredCategory = GAP_REQUIRED_EVIDENCE_CATEGORY[gapId];
+  if (!requiredCategory) return true;
+  const categories = resolveRecommendationEvidenceCategories(successCriterion);
+  // No distinct/classifiable metric at all -- neutral, never a reason to
+  // reject a link Tasks #47B/#48A already made resolvable this way.
+  if (categories.size === 0) return true;
+  return categories.has(requiredCategory);
+}
+
 function resolveLinkedEvidenceGap(
   actionType: StrategicRecommendationClassification["actionType"],
   successCriterion: string,
@@ -1256,7 +1339,10 @@ function resolveLinkedEvidenceGap(
   const materialGaps = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).filter(
     (gap) => gap.decisionFactor !== null
   );
-  if (materialGaps.length === 1) return materialGaps[0];
+  if (materialGaps.length === 1) {
+    const gap = materialGaps[0];
+    return isRecommendationSemanticallyCompatibleWithGap(gap.id, successCriterion) ? gap : null;
+  }
   if (materialGaps.length === 0) return null;
 
   const actionFigure = extractComparableThresholdFigure(successCriterion);
@@ -1264,7 +1350,10 @@ function resolveLinkedEvidenceGap(
   const numericMatches = materialGaps.filter((gap) =>
     comparableThresholdFiguresMatch(actionFigure, gap.successThreshold ? extractComparableThresholdFigure(gap.successThreshold) : null)
   );
-  return numericMatches.length === 1 ? numericMatches[0] : null;
+  const semanticMatches = numericMatches.filter((gap) =>
+    isRecommendationSemanticallyCompatibleWithGap(gap.id, successCriterion)
+  );
+  return semanticMatches.length === 1 ? semanticMatches[0] : null;
 }
 
 // TASK #48 -- a type-aware companion to Task #47C's own

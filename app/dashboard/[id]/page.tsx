@@ -2447,11 +2447,36 @@ function ExecutiveSummaryVisual({
 
 function ExecutiveInsightBanner({
   content,
+  isMarketIntelligence = false,
+  marketIntelligenceCanonicalState = null,
 }: {
   content: string;
+  isMarketIntelligence?: boolean;
+  marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
 }) {
   const insight = extractFirstInsight(content);
-  const confidence = extractConfidence(content);
+  // TASK #49 -- Make Market Intelligence decision confidence structurally
+  // evidence-derived. AUDIT FINDING: this banner is the one remaining
+  // Market-Intelligence-reachable confidence display that was NEVER
+  // gated to use the canonical confidence value -- extractConfidence's
+  // own bare-percentage fallback (`/\b(\d{1,3})\s*%/`) can attach ANY
+  // unrelated number mentioned anywhere in this section's prose (a CAGR,
+  // a TAM growth rate, a pilot conversion target, ...) to a badge
+  // literally labeled "Confidence." This never manifests for a REAL
+  // report today only because cardFirstReportFields (below) happens to
+  // already exclude every field name Market Intelligence actually
+  // generates -- an incidental, not structural, protection that a future
+  // field-set edit could silently remove. Market Intelligence now always
+  // reads canonicalState.confidence directly (Task #40's own
+  // structurally-calculated score, the SAME value Investment Decision
+  // Snapshot/Executive Snapshot/PDF cover already read) -- never the
+  // prose scan -- falling back to the SAME "Validation Needed" honest
+  // placeholder this file already uses everywhere else for "no
+  // defensible numeric confidence exists" when no canonical state is
+  // present. Every other report kind is completely unaffected.
+  const confidence = isMarketIntelligence
+    ? marketIntelligenceCanonicalState?.confidence ?? null
+    : extractConfidence(content);
 
   if (!insight) {
     return null;
@@ -6665,7 +6690,11 @@ export default async function ReportDetailPage({
                               {hasReportSectionVisual(section.title) &&
                               !isFinancialDashboard &&
                               !cardFirstReportFields.has(section.field ?? "") ? (
-                                <ExecutiveInsightBanner content={section.content} />
+                                <ExecutiveInsightBanner
+                                  content={section.content}
+                                  isMarketIntelligence={report.type === "Market Analysis"}
+                                  marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
+                                />
                               ) : null}
                               <ReportSectionVisual
                                 title={section.title}
