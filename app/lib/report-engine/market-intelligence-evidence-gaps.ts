@@ -1558,6 +1558,15 @@ export type MarketIntelligenceThresholdCriterion = {
   // (e.g. "above 5%" or "20% pilot conversion rate") -- null when the
   // criterion is qualitative only.
   value: string | null;
+  // TASK #52 -- the per-component provenance breakdown `.description`
+  // is rendered from, when this criterion carries a compound claim.
+  // Undefined for a criterion with no numeric claim at all
+  // (provenance === null, e.g. buildControllingGapCriterion); a
+  // length-1 array for every existing single-figure criterion
+  // (byte-identical to Task #51's behavior); length 2+ only when a
+  // genuinely separate pricing/unit-economics figure was found inside
+  // the SAME successCriterion string.
+  components?: MarketIntelligenceThresholdComponent[];
 };
 
 const RECOMMENDATION_VALIDATION_TARGET_LABELS: Record<ResponseLanguage, string> = {
@@ -1567,6 +1576,118 @@ const RECOMMENDATION_VALIDATION_TARGET_LABELS: Record<ResponseLanguage, string> 
   French: "Cible de validation recommandée",
   Spanish: "Objetivo de validación recomendado",
 };
+
+// TASK #52 -- Make compound Market Intelligence decision thresholds
+// structurally provenance-safe.
+//
+// PROBLEM: a recommendation's own successCriterion is ONE string with
+// ONE card-level provenance (Task #38's classifyStrategicRecommendationValidation),
+// even when that string names TWO structurally different sub-claims --
+// e.g. "at least 4 paid contracts within 9 months at average ACV above
+// USD 25,000" bundles a raw COUNT the pilot itself directly produces
+// (paid contracts) with a PRICING/unit-economics figure (ACV) that is a
+// modeled assumption layered ON TOP of that count, not something the
+// pilot's own completion count measures. Task #51 correctly labels the
+// WHOLE string with ONE provenance qualifier -- but a genuinely mixed
+// claim then gets flattened to whichever single label the whole card
+// happens to carry, exactly the "10 paying customers + USD 25k ACV =
+// entirely Validation Target" flattening this task closes.
+//
+// FIX: MarketIntelligenceThresholdCriterion gains an ADDITIVE, optional
+// `components` breakdown (never removing or changing `.description`/
+// `.provenance`/`.value` -- every existing single-component consumer,
+// including Closure Plan's own aliasing of enterSummary/avoidSummary,
+// is completely unaffected). splitThresholdIntoComponents only ever
+// splits out a SEPARATE clause when the string ALSO names a distinct
+// pricing/unit-economics figure (ACV/deal size/contract value/price) --
+// a criterion with no such second figure returns a single, unsplit
+// component, byte-identical to Task #51's own output. Each component's
+// OWN provenance is derived from THIS SAME card's already-classified
+// provenance (never a new, independently-invented classification, and
+// never stronger than what the card itself already earned) -- a
+// pricing/unit-economics component is only ever narrowed FROM
+// "validationTarget" DOWN to "planningAssumption" (never the reverse,
+// and never touched at all when the card is "verifiedEvidence"/
+// "benchmarkDerived", since a real citation or benchmark backing the
+// WHOLE compound claim legitimately covers every clause of it). This
+// satisfies "never inherit provenance from one component to another":
+// the count component keeps exactly what the card already earned; the
+// pricing component is narrowed based on ITS OWN structural nature, not
+// borrowed from its sibling.
+const PRICING_COMPONENT_KEYWORD_PATTERN =
+  /\b(?:ACV|annual\s+contract\s+value|deal\s+size|contract\s+value|price(?:\s+point)?|revenue\s+per\s+(?:customer|deal|account))\b/i;
+
+// TASK #52 -- DOLLAR_FIGURE_PATTERN only recognizes a literal currency
+// SYMBOL ($/€/₺); this report style's own generation prompt (mirroring
+// report-presentation.ts's own budget-extraction convention) at least as
+// often names a figure by currency CODE instead ("USD 25,000", "EUR
+// 40k") -- confirmed live against this exact ticket's own real example
+// ("average ACV above USD 25,000"), which the symbol-only pattern never
+// matched. Scoped to this module's own pricing-clause detection only
+// (never widening the SHARED DOLLAR_FIGURE_PATTERN other, unrelated gap-
+// threshold numeric-matching already depends on).
+const CURRENCY_FIGURE_PATTERN = new RegExp(
+  `(?:${DOLLAR_FIGURE_PATTERN.source}|\\b(?:USD|EUR|GBP|TRY)\\s?\\d[\\d,.]*\\s?(?:thousand|million|billion|trillion|[kKmMbB])?\\b)`,
+  "i"
+);
+
+const PRICING_CLAUSE_PATTERN = new RegExp(
+  `\\b(?:at|with)\\s+(?:an?\\s+)?(?:average\\s+)?(?:ACV|annual\\s+contract\\s+value|deal\\s+size|contract\\s+value|price(?:\\s+point)?|revenue\\s+per\\s+(?:customer|deal|account))\\b[^.;,]*?${CURRENCY_FIGURE_PATTERN.source}[^.;,]*`,
+  "i"
+);
+
+// Only ever splits out a SEPARATE clause when a distinct pricing figure
+// is present -- a criterion naming just one claim (the overwhelming
+// majority) returns a single-element array, matching Task #51's
+// unsplit behavior exactly.
+function splitThresholdIntoComponents(successCriterion: string): string[] {
+  const match = successCriterion.match(PRICING_CLAUSE_PATTERN);
+  if (!match || match.index === undefined) return [successCriterion.trim()];
+
+  const pricingClause = match[0].trim();
+  const primaryClause = (successCriterion.slice(0, match.index) + successCriterion.slice(match.index + match[0].length))
+    .replace(/\s+(?:at|with)\s*$/i, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  return primaryClause ? [primaryClause, pricingClause] : [successCriterion.trim()];
+}
+
+function classifyThresholdComponentProvenance(
+  componentText: string,
+  cardProvenance: MarketIntelligenceRecommendationProvenance
+): MarketIntelligenceRecommendationProvenance {
+  if (cardProvenance !== "validationTarget") return cardProvenance;
+  const isPricingComponent =
+    CURRENCY_FIGURE_PATTERN.test(componentText) && PRICING_COMPONENT_KEYWORD_PATTERN.test(componentText);
+  return isPricingComponent ? "planningAssumption" : cardProvenance;
+}
+
+// The single, canonical per-component breakdown every criterion builder
+// below must use -- never a second, independently-derived split.
+export type MarketIntelligenceThresholdComponent = {
+  text: string;
+  provenance: MarketIntelligenceRecommendationProvenance;
+};
+
+function resolveThresholdComponents(
+  validation: MarketIntelligenceRecommendationValidation
+): MarketIntelligenceThresholdComponent[] {
+  if (!validation.successCriterion.trim() || !validation.provenance) return [];
+  return splitThresholdIntoComponents(validation.successCriterion).map((text) => ({
+    text,
+    provenance: classifyThresholdComponentProvenance(text, validation.provenance as MarketIntelligenceRecommendationProvenance),
+  }));
+}
+
+function buildQualifiedCompoundText(
+  components: readonly MarketIntelligenceThresholdComponent[],
+  language: ResponseLanguage
+): string {
+  return components
+    .map((component) => `${component.text} (${localizeRecommendationProvenance(component.provenance, language)})`)
+    .join(" ");
+}
 
 function buildControllingGapCriterion(
   gap: MarketIntelligenceEvidenceGap,
@@ -1607,29 +1728,34 @@ function buildReportStatedCriterion(
 // already filters this out -- a builder that can silently render a blank
 // target is exactly the shape of bug this task fixes, so it must be
 // impossible to construct one here regardless of how it is called.
+// TASK #52 -- description is now built from the per-component
+// breakdown (resolveThresholdComponents/buildQualifiedCompoundText),
+// never a single blanket qualifier over the whole compound string. For
+// a criterion with only ONE component (the overwhelming majority), this
+// produces byte-identical output to Task #51's own single-qualifier
+// text.
 function buildRecommendationEnterCriterion(
   validation: MarketIntelligenceRecommendationValidation,
   language: ResponseLanguage
 ): MarketIntelligenceThresholdCriterion | null {
-  if (!validation.successCriterion.trim() || !validation.provenance) return null;
+  const components = resolveThresholdComponents(validation);
+  if (components.length === 0) return null;
   return {
     dimension: "recommendationValidationTarget",
     label: RECOMMENDATION_VALIDATION_TARGET_LABELS[language],
-    description: `${validation.successCriterion} (${localizeRecommendationProvenance(
-      validation.provenance,
-      language
-    )}).`,
+    description: `${buildQualifiedCompoundText(components, language)}.`,
     provenance: validation.provenance,
     value: validation.successCriterion,
+    components,
   };
 }
 
-const RECOMMENDATION_VALIDATION_NOT_MET_TEMPLATES: Record<ResponseLanguage, (target: string, provenanceLabel: string) => string> = {
-  English: (target, provenanceLabel) => `Validation fails to meet the recommended target: ${target} (${provenanceLabel}).`,
-  Turkish: (target, provenanceLabel) => `Doğrulama, önerilen hedefi karşılamaz: ${target} (${provenanceLabel}).`,
-  German: (target, provenanceLabel) => `Die Validierung erreicht das empfohlene Ziel nicht: ${target} (${provenanceLabel}).`,
-  French: (target, provenanceLabel) => `La validation n'atteint pas la cible recommandée : ${target} (${provenanceLabel}).`,
-  Spanish: (target, provenanceLabel) => `La validación no alcanza el objetivo recomendado: ${target} (${provenanceLabel}).`,
+const RECOMMENDATION_VALIDATION_NOT_MET_TEMPLATES: Record<ResponseLanguage, (qualifiedTarget: string) => string> = {
+  English: (qualifiedTarget) => `Validation fails to meet the recommended target: ${qualifiedTarget}.`,
+  Turkish: (qualifiedTarget) => `Doğrulama, önerilen hedefi karşılamaz: ${qualifiedTarget}.`,
+  German: (qualifiedTarget) => `Die Validierung erreicht das empfohlene Ziel nicht: ${qualifiedTarget}.`,
+  French: (qualifiedTarget) => `La validation n'atteint pas la cible recommandée : ${qualifiedTarget}.`,
+  Spanish: (qualifiedTarget) => `La validación no alcanza el objetivo recomendado: ${qualifiedTarget}.`,
 };
 
 // TASK #39A -- same defense-in-depth as buildRecommendationEnterCriterion
@@ -1639,19 +1765,21 @@ const RECOMMENDATION_VALIDATION_NOT_MET_TEMPLATES: Record<ResponseLanguage, (tar
 // buildRecommendationEnterCriterion already shows, so an AVOID-side
 // recommendation-derived figure is never displayed as if it carried more
 // certainty than its ENTER-side counterpart.
+// TASK #52 -- description is now built from the SAME per-component
+// breakdown ENTER uses -- a compound claim's two clauses are never
+// flattened into one qualifier here either.
 function buildRecommendationAvoidCriterion(
   validation: MarketIntelligenceRecommendationValidation,
   language: ResponseLanguage
 ): MarketIntelligenceThresholdCriterion | null {
-  if (!validation.successCriterion.trim() || !validation.provenance) return null;
+  const components = resolveThresholdComponents(validation);
+  if (components.length === 0) return null;
   return {
     dimension: "recommendationValidationTarget",
     label: RECOMMENDATION_VALIDATION_TARGET_LABELS[language],
-    description: RECOMMENDATION_VALIDATION_NOT_MET_TEMPLATES[language](
-      validation.successCriterion,
-      localizeRecommendationProvenance(validation.provenance, language)
-    ),
+    description: RECOMMENDATION_VALIDATION_NOT_MET_TEMPLATES[language](buildQualifiedCompoundText(components, language)),
     provenance: validation.provenance,
+    components,
     value: validation.successCriterion,
   };
 }
