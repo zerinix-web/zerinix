@@ -216,7 +216,11 @@ test("a linked recommendation WITH a real, non-empty success metric still contri
   const threshold = resolveMarketIntelligenceControllingDecisionThreshold(state, [validation]);
   const criterion = threshold.avoidConditions.find((c) => c.dimension === "recommendationValidationTarget");
   assert.ok(criterion);
-  assert.match(criterion.description, /fails to meet the recommended target: 20% pilot conversion rate\./);
+  // TASK #51 -- this description now also embeds the SAME provenance
+  // qualifier buildRecommendationEnterCriterion already showed, so an
+  // AVOID-side recommendation-derived figure is never presented with
+  // less visible qualification than its ENTER-side counterpart.
+  assert.match(criterion.description, /fails to meet the recommended target: 20% pilot conversion rate \(.+\)\./);
   assert.equal(threshold.avoidConditions.length, 2);
   assert.match(threshold.avoidSummary, /20% pilot conversion rate/);
 });

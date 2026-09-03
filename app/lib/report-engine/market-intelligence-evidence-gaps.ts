@@ -747,17 +747,42 @@ function extractDecisionLinkedThresholdPhrase(
   return null;
 }
 
+// TASK #51 -- Make Market Intelligence decision thresholds evidence-
+// qualified, not merely recommendation-derived.
+//
+// AUDIT FINDING: buildRecommendationEnterCriterion (Task #38) already
+// appends its provenance label directly onto its own description text
+// (e.g. "...ACV >= USD 25k (Validation Target)."), but this report-
+// stated-threshold description -- and buildRecommendationAvoidCriterion's
+// own "Validation fails to meet..." sentence just below -- never did,
+// even though BOTH already carry the correct provenance on their own
+// structured MarketIntelligenceThresholdCriterion.provenance field
+// (isPlanningAssumption was already tracked; it just never reached the
+// VISIBLE text a reader actually sees in ENTER IF/AVOID IF/Closure Plan
+// Success/Failure Criterion). A reader could see a report-stated
+// planning-assumption figure with no visible qualifier at all, right
+// next to a recommendation-derived figure that DOES show one --
+// inconsistent, and exactly the "presented as if verified" risk this
+// task closes. isPlanningAssumption now selects the SAME two-value
+// provenance/label vocabulary (validationTarget/planningAssumption,
+// via localizeRecommendationProvenance) every recommendation-derived
+// criterion already uses -- never a new, separately-worded label.
 function buildQuantifiedThresholdDescription(
   gapLabel: string,
   directionalPhrase: string,
+  isPlanningAssumption: boolean,
   language: ResponseLanguage
 ): string {
+  const provenanceLabel = localizeRecommendationProvenance(
+    isPlanningAssumption ? "planningAssumption" : "validationTarget",
+    language
+  );
   const templates: Record<ResponseLanguage, string> = {
-    English: `${gapLabel} ${directionalPhrase} (stated in this report's own decision brief).`,
-    Turkish: `${gapLabel} ${directionalPhrase} (bu raporun kendi karar özetinde belirtilmiştir).`,
-    German: `${gapLabel} ${directionalPhrase} (in der eigenen Entscheidungszusammenfassung dieses Berichts angegeben).`,
-    French: `${gapLabel} ${directionalPhrase} (indiqué dans la note de décision de ce rapport).`,
-    Spanish: `${gapLabel} ${directionalPhrase} (indicado en el resumen de decisión de este informe).`,
+    English: `${gapLabel} ${directionalPhrase} (stated in this report's own decision brief; ${provenanceLabel}).`,
+    Turkish: `${gapLabel} ${directionalPhrase} (bu raporun kendi karar özetinde belirtilmiştir; ${provenanceLabel}).`,
+    German: `${gapLabel} ${directionalPhrase} (in der eigenen Entscheidungszusammenfassung dieses Berichts angegeben; ${provenanceLabel}).`,
+    French: `${gapLabel} ${directionalPhrase} (indiqué dans la note de décision de ce rapport ; ${provenanceLabel}).`,
+    Spanish: `${gapLabel} ${directionalPhrase} (indicado en el resumen de decisión de este informe; ${provenanceLabel}).`,
   };
   return templates[language];
 }
@@ -826,7 +851,7 @@ function buildDecisionThresholdForGap(
     enterCondition: enterPhrase
       ? {
           status: "defined",
-          description: buildQuantifiedThresholdDescription(gap.label, enterPhrase, language),
+          description: buildQuantifiedThresholdDescription(gap.label, enterPhrase, gap.isPlanningAssumption, language),
           isPlanningAssumption: gap.isPlanningAssumption,
         }
       : {
@@ -843,7 +868,7 @@ function buildDecisionThresholdForGap(
     monitorCondition: monitorPhrase
       ? {
           status: "defined",
-          description: buildQuantifiedThresholdDescription(gap.label, monitorPhrase, language),
+          description: buildQuantifiedThresholdDescription(gap.label, monitorPhrase, gap.isPlanningAssumption, language),
           isPlanningAssumption: gap.isPlanningAssumption,
         }
       : {
@@ -854,7 +879,7 @@ function buildDecisionThresholdForGap(
     avoidCondition: avoidPhrase
       ? {
           status: "defined",
-          description: buildQuantifiedThresholdDescription(gap.label, avoidPhrase, language),
+          description: buildQuantifiedThresholdDescription(gap.label, avoidPhrase, gap.isPlanningAssumption, language),
           isPlanningAssumption: gap.isPlanningAssumption,
         }
       : {
@@ -1599,17 +1624,21 @@ function buildRecommendationEnterCriterion(
   };
 }
 
-const RECOMMENDATION_VALIDATION_NOT_MET_TEMPLATES: Record<ResponseLanguage, (target: string) => string> = {
-  English: (target) => `Validation fails to meet the recommended target: ${target}.`,
-  Turkish: (target) => `Doğrulama, önerilen hedefi karşılamaz: ${target}.`,
-  German: (target) => `Die Validierung erreicht das empfohlene Ziel nicht: ${target}.`,
-  French: (target) => `La validation n'atteint pas la cible recommandée : ${target}.`,
-  Spanish: (target) => `La validación no alcanza el objetivo recomendado: ${target}.`,
+const RECOMMENDATION_VALIDATION_NOT_MET_TEMPLATES: Record<ResponseLanguage, (target: string, provenanceLabel: string) => string> = {
+  English: (target, provenanceLabel) => `Validation fails to meet the recommended target: ${target} (${provenanceLabel}).`,
+  Turkish: (target, provenanceLabel) => `Doğrulama, önerilen hedefi karşılamaz: ${target} (${provenanceLabel}).`,
+  German: (target, provenanceLabel) => `Die Validierung erreicht das empfohlene Ziel nicht: ${target} (${provenanceLabel}).`,
+  French: (target, provenanceLabel) => `La validation n'atteint pas la cible recommandée : ${target} (${provenanceLabel}).`,
+  Spanish: (target, provenanceLabel) => `La validación no alcanza el objetivo recomendado: ${target} (${provenanceLabel}).`,
 };
 
 // TASK #39A -- same defense-in-depth as buildRecommendationEnterCriterion
 // above: null (never "...recommended target: .") whenever there is no
 // real, non-empty target to name.
+// TASK #51 -- now also embeds the SAME provenance qualifier
+// buildRecommendationEnterCriterion already shows, so an AVOID-side
+// recommendation-derived figure is never displayed as if it carried more
+// certainty than its ENTER-side counterpart.
 function buildRecommendationAvoidCriterion(
   validation: MarketIntelligenceRecommendationValidation,
   language: ResponseLanguage
@@ -1618,7 +1647,10 @@ function buildRecommendationAvoidCriterion(
   return {
     dimension: "recommendationValidationTarget",
     label: RECOMMENDATION_VALIDATION_TARGET_LABELS[language],
-    description: RECOMMENDATION_VALIDATION_NOT_MET_TEMPLATES[language](validation.successCriterion),
+    description: RECOMMENDATION_VALIDATION_NOT_MET_TEMPLATES[language](
+      validation.successCriterion,
+      localizeRecommendationProvenance(validation.provenance, language)
+    ),
     provenance: validation.provenance,
     value: validation.successCriterion,
   };
