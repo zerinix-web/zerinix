@@ -155,7 +155,7 @@ test("STRATEGIC RECOMMENDATIONS remains MONITOR: unaffected by this fix, still r
   for (const source of [pageSource, plannerSource]) {
     assert.match(source, /const strategicRecommendationDecision = isMarketIntelligence/);
   }
-  assert.match(pdfButtonSource, /const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
+  assert.match(pdfButtonSource, /const strategicRecommendationDecision = resolveMarketIntelligenceGatedExecutiveDecision\(/);
   assert.equal(decision.decisionLabel, "MONITOR");
 });
 
@@ -168,13 +168,13 @@ test("PDF PRESENTATION remains aligned: ReportPdfButton.tsx and Planner.tsx's PD
   assert.doesNotMatch(pdfButtonSource, /function extractFirstInsight/);
   // TASK #23 -- this call site now prefers a persisted canonical-state
   // snapshot over re-parsing content, via
-  // resolveMarketIntelligenceExecutiveDecisionWithCanonicalState; it
+  // resolveMarketIntelligenceGatedExecutiveDecision; it
   // still falls back to the exact same resolveMarketIntelligenceExecutiveDecision
   // for every report without one, so this leak class remains structurally
   // impossible either way.
   assert.match(
     pdfButtonSource,
-    /const marketDecision = isMarketIntelligenceReport\s*\n\s*\? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*readMarketIntelligenceCanonicalState\(report\.metadata\),\s*\n\s*content,\s*\n\s*pdfLocale === "tr" \? "Turkish" : "English"\s*\n\s*\)/
+    /const marketDecision = isMarketIntelligenceReport\s*\n\s*\? resolveMarketIntelligenceGatedExecutiveDecision\(\s*\n\s*readMarketIntelligenceCanonicalState\(report\.metadata\),\s*\n\s*content,\s*\n\s*pdfLocale === "tr" \? "Turkish" : "English"\s*\n\s*\)/
   );
 
   // Planner.tsx DOES define extractFirstInsight, but only for its web JSX

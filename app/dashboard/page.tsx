@@ -23,8 +23,10 @@ import {
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
 import {
   readMarketIntelligenceCanonicalState,
-  resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
+import {
+  resolveMarketIntelligenceGatedExecutiveDecision,
+} from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import { detectPdfPresentationLocale } from "@/app/lib/pdf-normalization.mjs";
 import {
   getUserPlanTier,
@@ -213,7 +215,7 @@ function getDecisionSignal(report: DashboardReport | undefined) {
   if (report.type === "Market Analysis") {
     const canonicalState = readMarketIntelligenceCanonicalState(report.metadata);
     const locale = detectPdfPresentationLocale(content);
-    const marketDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+    const marketDecision = resolveMarketIntelligenceGatedExecutiveDecision(
       canonicalState,
       content,
       locale === "tr" ? "Turkish" : "English"

@@ -218,7 +218,7 @@ test("REGRESSION: 'Current Decision: MONITOR' / 'Decision: MONITOR' text is pres
 
 test("DRIFT CHECK: canonical decision resolution, confidence factors, Main Risk, CAGR fallback, and TAM/SAM/SOM cascade are untouched by this consolidation -- it only relocates presentation-layer text-extraction helpers", () => {
   for (const source of [pdfButtonSource, plannerSource]) {
-    assert.match(source, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
+    assert.match(source, /resolveMarketIntelligenceGatedExecutiveDecision\(/);
     assert.match(source, /resolveMarketSizingCascade\(/);
     assert.match(source, /constrainMarketSizingResolutionToCanonicalState\(/);
     assert.match(source, /A CAGR percentage was not stated in this report's own sources\. This value is marked Validation Required until it can be confirmed\./);

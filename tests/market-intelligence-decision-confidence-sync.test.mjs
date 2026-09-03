@@ -261,7 +261,7 @@ test("DRIFT GUARD: Market Intelligence's cover-page confidence and Executive Sum
 
 test("PROPERTY A/B (web decision/confidence === PDF decision/confidence): every Market-Intelligence-gated decision surface -- page.tsx's ExecutiveSummaryVisual and ExecutiveSnapshotPanel, Planner.tsx's equivalents, and both PDF exports' cover + Executive Summary card -- calls resolveMarketIntelligenceExecutiveDecision, the ONE canonical source, over the executiveSummary section's own content only", () => {
   // TASK #24 -- ALL 9 of these call sites now resolve through
-  // resolveMarketIntelligenceExecutiveDecisionWithCanonicalState (prefers
+  // resolveMarketIntelligenceGatedExecutiveDecision (prefers
   // a persisted canonical-state snapshot, falls back to the exact same
   // resolveMarketIntelligenceExecutiveDecision this test still exercises
   // directly for every report without one -- see
@@ -272,39 +272,39 @@ test("PROPERTY A/B (web decision/confidence === PDF decision/confidence): every 
   const callSites = [
     [
       pageSource,
-      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*section\.content,/,
+      /resolveMarketIntelligenceGatedExecutiveDecision\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*section\.content,/,
     ],
     [
       pageSource,
-      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*content,\s*\n\s*evidenceLocale/,
+      /resolveMarketIntelligenceGatedExecutiveDecision\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*content,\s*\n\s*evidenceLocale/,
     ],
     [
       pageSource,
-      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*executiveSummary \|\| executiveRecommendation,/,
+      /resolveMarketIntelligenceGatedExecutiveDecision\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*executiveSummary \|\| executiveRecommendation,/,
     ],
     [
       plannerSource,
-      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*section\.content,\s*\n\s*evidenceLocale/,
+      /resolveMarketIntelligenceGatedExecutiveDecision\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*section\.content,\s*\n\s*evidenceLocale/,
     ],
     [
       plannerSource,
-      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*section\.content,\s*\n\s*isMarketIntelligenceTurkish/,
+      /resolveMarketIntelligenceGatedExecutiveDecision\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*section\.content,\s*\n\s*isMarketIntelligenceTurkish/,
     ],
     [
       pdfButtonSource,
-      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*readMarketIntelligenceCanonicalState\(report\.metadata\),\s*\n\s*marketExecutiveSummaryContent,/,
+      /resolveMarketIntelligenceGatedExecutiveDecision\(\s*\n\s*readMarketIntelligenceCanonicalState\(report\.metadata\),\s*\n\s*marketExecutiveSummaryContent,/,
     ],
     [
       pdfButtonSource,
-      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*readMarketIntelligenceCanonicalState\(report\.metadata\),\s*\n\s*content,/,
+      /resolveMarketIntelligenceGatedExecutiveDecision\(\s*\n\s*readMarketIntelligenceCanonicalState\(report\.metadata\),\s*\n\s*content,/,
     ],
     [
       plannerSource,
-      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*marketExecutiveSummaryContent,/,
+      /resolveMarketIntelligenceGatedExecutiveDecision\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*marketExecutiveSummaryContent,/,
     ],
     [
       plannerSource,
-      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*content,\s*\n\s*pdfLocale === "tr" \? "Turkish" : "English"/,
+      /resolveMarketIntelligenceGatedExecutiveDecision\(\s*\n\s*marketIntelligenceCanonicalState,\s*\n\s*content,\s*\n\s*pdfLocale === "tr" \? "Turkish" : "English"/,
     ],
   ];
 

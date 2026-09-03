@@ -171,7 +171,7 @@ test("4b. STRUCTURAL AUDIT: page.tsx, ReportPdfButton.tsx, and Planner.tsx all c
     const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
     assert.match(
       source,
-      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState/,
+      /resolveMarketIntelligenceGatedExecutiveDecision/,
       `${file} must call the single shared canonical-state-aware resolver`
     );
   }

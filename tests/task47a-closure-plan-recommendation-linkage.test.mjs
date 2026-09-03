@@ -280,7 +280,7 @@ test("TASK #47A/#47B/#48A: selection never inspects the recommendation's own fre
   }
   assert.match(selectorSource, /\.owner\.trim\(\)/);
   assert.match(selectorSource, /\.timeline\.trim\(\)/);
-  assert.match(selectorSource, /\.provenance\s*===\s*"validationTarget"/);
+  assert.match(selectorSource, /\.evidenceTie\.trim\(\)/);
   assert.match(metricHelperSource, /\.successCriterion\.trim\(\)/);
 });
 

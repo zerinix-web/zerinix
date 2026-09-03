@@ -340,7 +340,7 @@ test("ReportPdfButton.tsx, Planner.tsx, page.tsx: extractRecommendationItems on 
 
 test("DRIFT CHECK: this ticket's changes touch only isRecommendationHeadingLine and the topRisk/marketExecutiveSummaryTopRisk computations -- decision/confidence derivation, TAM/SAM/SOM cascade, and CAGR/Market-Overview fixes from Task #29E all remain present and untouched", () => {
   for (const source of [pdfButtonSource, plannerSource]) {
-    assert.match(source, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
+    assert.match(source, /resolveMarketIntelligenceGatedExecutiveDecision\(/);
     assert.match(source, /resolveMarketSizingCascade\(/);
     assert.match(source, /constrainMarketSizingResolutionToCanonicalState\(/);
     assert.match(source, /A CAGR percentage was not stated in this report's own sources\. This value is marked Validation Required until it can be confirmed\./);

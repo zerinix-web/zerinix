@@ -135,7 +135,7 @@ test("STRUCTURAL AUDIT: dashboard home's getDecisionSignal resolves Market Analy
   const body = fnMatch[0];
 
   const marketBranchIndex = body.indexOf('report.type === "Market Analysis"');
-  const canonicalCallIndex = body.indexOf("resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(");
+  const canonicalCallIndex = body.indexOf("resolveMarketIntelligenceGatedExecutiveDecision(");
   const genericResolverIndex = body.indexOf("resolveCanonicalDecisionFromReportText(");
 
   assert.ok(marketBranchIndex >= 0, "no Market Analysis type guard found");
@@ -175,7 +175,7 @@ test("STRUCTURAL AUDIT: workspace detail's detectWorkspaceSignal guards Market A
   const body = fnMatch[0];
 
   const marketBranchIndex = body.indexOf('report.type === "Market Analysis"');
-  const canonicalCallIndex = body.indexOf("resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(");
+  const canonicalCallIndex = body.indexOf("resolveMarketIntelligenceGatedExecutiveDecision(");
   const investmentScoreLeakIndex = body.indexOf("report.investmentScore?.recommendation");
 
   assert.ok(marketBranchIndex >= 0, "no Market Analysis type guard found");

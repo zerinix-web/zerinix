@@ -132,7 +132,7 @@ test("STRUCTURAL AUDIT: no bare resolveMarketIntelligenceExecutiveDecision( call
     ["ReportPdfButton.tsx", pdfButtonSource],
   ]) {
     const bareMatches = source.match(bareCallPattern) || [];
-    const withCanonicalStateMatches = source.match(/resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/g) || [];
+    const withCanonicalStateMatches = source.match(/resolveMarketIntelligenceGatedExecutiveDecision\(/g) || [];
     assert.equal(bareMatches.length, 0, `${name}: expected zero bare resolveMarketIntelligenceExecutiveDecision( call sites`);
     assert.ok(withCanonicalStateMatches.length > 0, `${name}: expected at least one canonical-state-aware decision resolution`);
   }
@@ -381,19 +381,19 @@ test("SCENARIO 4: save -> reload -> UI -> PDF retains the exact same canonical d
 test("SCENARIO 5a: the Strategic Recommendations badge (all 3 files, web + PDF) resolves through the SAME canonical-state-aware function as the top-level decision -- structurally cannot disagree", () => {
   assert.match(
     pageSource,
-    /const strategicRecommendationDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/
+    /const strategicRecommendationDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceGatedExecutiveDecision\(/
   );
   assert.match(
     plannerSource,
-    /const strategicRecommendationDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/
+    /const strategicRecommendationDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceGatedExecutiveDecision\(/
   );
   assert.match(
     plannerSource,
-    /const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/
+    /const strategicRecommendationDecision = resolveMarketIntelligenceGatedExecutiveDecision\(/
   );
   assert.match(
     pdfButtonSource,
-    /const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/
+    /const strategicRecommendationDecision = resolveMarketIntelligenceGatedExecutiveDecision\(/
   );
 });
 
@@ -430,7 +430,7 @@ test("SCENARIO 5c: canonical state's main risk tile reads topRisks[0] directly, 
 test("SCENARIO 5d: page.tsx's Decision Confidence tile reads the SAME canonical-state-aware resolver's confidenceScore, never a second independent scan when available", () => {
   assert.match(
     pageSource,
-    /const marketDecisionConfidence = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/
+    /const marketDecisionConfidence = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceGatedExecutiveDecision\(/
   );
   assert.match(pageSource, /marketDecisionConfidence !== null\s*\n\s*\? `\$\{marketDecisionConfidence\}%`/);
 });

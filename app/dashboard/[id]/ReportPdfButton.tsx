@@ -78,7 +78,6 @@ import {
 } from "@/app/lib/report-engine/executive-decision-brief";
 import {
   readMarketIntelligenceCanonicalState,
-  resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
   constrainMarketSizingResolutionToCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
@@ -91,6 +90,7 @@ import {
   resolveMarketIntelligenceControllingClosurePlan,
   resolveMarketIntelligenceMultiGapPriorityState,
   resolveMarketIntelligenceConfidenceState,
+  resolveMarketIntelligenceGatedExecutiveDecision,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
   repairReportLanguageSections,
@@ -3650,7 +3650,7 @@ export function buildStandardReportPdf({
         // over re-parsing the banner text; falls back to the exact same
         // prose parse for every report without one.
         const marketDecision = isMarketIntelligenceReport
-          ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+          ? resolveMarketIntelligenceGatedExecutiveDecision(
               readMarketIntelligenceCanonicalState(report.metadata),
               marketExecutiveSummaryContent,
               pdfLocale === "tr" ? "Turkish" : "English"
@@ -4961,7 +4961,7 @@ export function buildStandardReportPdf({
         // over re-parsing the banner text; falls back to the exact same
         // prose parse for every report without one.
         const marketDecision = isMarketIntelligenceReport
-          ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+          ? resolveMarketIntelligenceGatedExecutiveDecision(
               readMarketIntelligenceCanonicalState(report.metadata),
               content,
               pdfLocale === "tr" ? "Turkish" : "English"
@@ -6681,7 +6681,7 @@ export function buildStandardReportPdf({
           const cardWidth = (bodyWidth - (columns - 1) * cardGap) / columns;
           const { cards, rowHeights } = computeRecommendationRowHeights(items, cardWidth);
 
-          const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+          const strategicRecommendationDecision = resolveMarketIntelligenceGatedExecutiveDecision(
             recommendationCanonicalState,
             pdfSections.find((entry) => entry.field === "executiveSummary")?.content || "",
             pdfLocale === "tr" ? "Turkish" : "English"
@@ -6950,6 +6950,7 @@ export function buildStandardReportPdf({
             const ownerLabel = pdfLocale === "tr" ? "Sorumlu" : "Owner";
             const timelineLabel = pdfLocale === "tr" ? "Zaman Çizelgesi" : "Timeline";
             const budgetLabel = pdfLocale === "tr" ? "Bütçe" : "Budget";
+            const evidenceTieLabel = pdfLocale === "tr" ? "Kanıt Bağı" : "Evidence Tie";
             // TASK #43 -- confirmed live: every field in this row (gap
             // label, action, measurable result, decision consequence, and
             // -- the real defect -- the full ENTER/MONITOR/AVOID
@@ -7015,7 +7016,7 @@ export function buildStandardReportPdf({
                 ? wrapPdfText(
                     `${ownerLabel}: ${closurePlan.owner}   ${timelineLabel}: ${closurePlan.timeline}${
                       closurePlan.budget ? `   ${budgetLabel}: ${closurePlan.budget}` : ""
-                    }`,
+                    }${closurePlan.evidenceTie ? `   ${evidenceTieLabel}: ${closurePlan.evidenceTie}` : ""}`,
                     bodyWidth
                   ).slice(0, 3)
                 : [];

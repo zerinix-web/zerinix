@@ -389,15 +389,15 @@ test("REGRESSION (exact real report shape): MarketIntelligenceCanonicalState.top
 //    SAM-SOM states / decision logic are untouched by this ticket.
 // =========================================================================
 
-test("DRIFT CHECK: this ticket's changes do not touch decision/confidence derivation -- resolveMarketIntelligenceExecutiveDecisionWithCanonicalState, the marketConfidenceFactors extraction, and the TAM/SAM/SOM cascade all remain present and untouched in ReportPdfButton.tsx", () => {
-  assert.match(pdfButtonSource, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
+test("DRIFT CHECK: this ticket's changes do not touch decision/confidence derivation -- resolveMarketIntelligenceGatedExecutiveDecision, the marketConfidenceFactors extraction, and the TAM/SAM/SOM cascade all remain present and untouched in ReportPdfButton.tsx", () => {
+  assert.match(pdfButtonSource, /resolveMarketIntelligenceGatedExecutiveDecision\(/);
   assert.match(pdfButtonSource, /const marketConfidenceFactors = isMarketIntelligenceReport/);
   assert.match(pdfButtonSource, /resolveMarketSizingCascade\(/);
   assert.match(pdfButtonSource, /constrainMarketSizingResolutionToCanonicalState\(/);
 });
 
 test("DRIFT CHECK: Planner.tsx's decision/confidence derivation and TAM/SAM/SOM cascade are untouched by this ticket's fixes", () => {
-  assert.match(plannerSource, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
+  assert.match(plannerSource, /resolveMarketIntelligenceGatedExecutiveDecision\(/);
   assert.match(plannerSource, /resolveMarketIntelligenceConfidenceFactors\(/);
 });
 

@@ -276,9 +276,9 @@ test("UI and PDF also agree on the extracted field VALUES for the same grouped c
 // 5. Canonical decision remains unchanged (MONITOR everywhere).
 // =========================================================================
 
-test("DRIFT CHECK: the Strategic Recommendations 'Current Decision' badge computation (resolveMarketIntelligenceExecutiveDecisionWithCanonicalState) and Task #29E/#29F/#29G's canonical Main Risk / CAGR / evidence-disclaimer fixes remain present and untouched", () => {
+test("DRIFT CHECK: the Strategic Recommendations 'Current Decision' badge computation (resolveMarketIntelligenceGatedExecutiveDecision) and Task #29E/#29F/#29G's canonical Main Risk / CAGR / evidence-disclaimer fixes remain present and untouched", () => {
   for (const source of [pdfButtonSource, plannerSource]) {
-    assert.match(source, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
+    assert.match(source, /resolveMarketIntelligenceGatedExecutiveDecision\(/);
     assert.match(source, /localizePdfPresentationLabel\("Current Decision", pdfLocale\)/);
     assert.match(source, /A CAGR percentage was not stated in this report's own sources\. This value is marked Validation Required until it can be confirmed\./);
   }

@@ -52,10 +52,15 @@ import {
 } from "@/app/lib/report-engine/market-intelligence-presentation";
 import {
   classifyStrategicRecommendationAction,
+  resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
   type MarketIntelligenceCanonicalState,
   type MarketIntelligenceCanonicalMarketSizing,
   type StrategicRecommendationClassification,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
+import {
+  mapExecutiveDecisionCodeToCanonicalDecision,
+  type MarketIntelligenceExecutiveDecision,
+} from "@/app/lib/report-engine/executive-decision-vocabulary";
 
 export type MarketIntelligenceDecisionFactor =
   | "marketSizingResolved"
@@ -2018,6 +2023,15 @@ export type MarketIntelligenceEvidenceGapClosurePlan = {
   // the sole case owner/timeline/budget are ever sourced from real card
   // data rather than the shared fallback sentence.
   hasAssignedOwner: boolean;
+  // TASK #53B -- requirement #3: the Closure Plan must inherit the
+  // selected action's own Evidence Tie/Activity where available, never
+  // fabricated. null (never a placeholder sentence) whenever no
+  // authoritative candidate was selected, or the selected candidate
+  // itself names no evidence tie/activity -- mirrors the existing
+  // `budget` convention of omitting an empty field rather than showing a
+  // blank or invented one.
+  evidenceTie: string | null;
+  activity: string | null;
 };
 
 const CLOSURE_PLAN_NO_OWNER: Record<ResponseLanguage, string> = {
@@ -2147,6 +2161,41 @@ function hasStructuredSuccessMetric(validation: MarketIntelligenceRecommendation
   return Boolean(validation.successCriterion.trim());
 }
 
+// Applies `predicate` to `pool` and narrows to the matching subset ONLY
+// when that subset is both non-empty and strictly smaller than the
+// current pool -- i.e. only when it actually distinguishes at least one
+// candidate. A predicate that matches everyone, or no one, never
+// eliminates a candidate that a later, more decisive stage might still
+// be able to single out (requirement: never discard a candidate down to
+// zero just because none clears one particular bar).
+function narrowByStructuralCompleteness<T>(pool: readonly T[], predicate: (item: T) => boolean): readonly T[] {
+  const matching = pool.filter(predicate);
+  return matching.length > 0 && matching.length < pool.length ? matching : pool;
+}
+
+// TASK #53B -- requirement #2's own explicit, ordered preference list,
+// applied as a SEQUENCE of progressively narrowing structural-
+// completeness filters (never prose/title/keyword matching): validation/
+// pilot action type, then owner, then timeline, then a measurable
+// success metric, then an evidence tie. Each stage only narrows the pool
+// when it actually distinguishes at least one candidate (see
+// narrowByStructuralCompleteness above), so a report where every
+// candidate ties on one dimension simply falls through to the next
+// rather than collapsing to zero.
+//
+// CONFIRMED LIVE (a second real report, after Task #48A): "Buyer Demand
+// Validation" (owner, timeline, an explicit "15%" success metric, and an
+// evidence tie naming SUSB target lists) tied with a second, less
+// complete procurement-validation action under the OLD rule -- both
+// classified `provenance: "validationTarget"` (Task 48A's own bug
+// class), and neither's own figure numerically matched this report's own
+// stated Obtainable Share threshold (Task #47C's tiebreaker), so
+// selection abstained even though "Buyer Demand Validation" is
+// obviously, structurally the more complete candidate. Requiring only
+// "has a distinct success metric" (never ALSO its provenance
+// classification, which describes evidence QUALITY, not completeness) as
+// its own stage, plus a NEW "has an evidence tie" stage, resolves this
+// without reintroducing any prose/numeric-threshold guessing.
 function selectAuthoritativeClosurePlanValidation(
   linkedValidations: readonly MarketIntelligenceRecommendationValidation[],
   gapSuccessThreshold: string | null
@@ -2154,29 +2203,48 @@ function selectAuthoritativeClosurePlanValidation(
   if (linkedValidations.length === 0) return null;
   if (linkedValidations.length === 1) return linkedValidations[0];
 
-  // Stage 1 (requirements #5/#6): owner and timeline are a hard
-  // prerequisite -- a candidate missing either is never eligible,
-  // regardless of how strong its other signals are.
-  const eligible = linkedValidations.filter((validation) => validation.owner.trim() && validation.timeline.trim());
-  if (eligible.length === 0) return null;
-  if (eligible.length === 1) return eligible[0];
-
-  // Stage 2 (requirements #3/#4): prefer a candidate with an EXPLICIT
-  // success metric that is ITSELF classified as a validation target --
-  // only narrows the pool when it actually distinguishes someone; a
-  // report where NO candidate has a distinct metric is unaffected.
-  const withValidationTargetMetric = eligible.filter(
-    (validation) => hasStructuredSuccessMetric(validation) && validation.provenance === "validationTarget"
+  // Stage 0 (requirement #2, "validation/pilot action over generic
+  // conditional execution"): defensive only -- resolveLinkedEvidenceGap
+  // (Task #38) already refuses to link any OTHER action type to a gap at
+  // all, so every real candidate reaching this function is already
+  // validation/pilot. Only matters for a caller supplying a broader
+  // candidate list directly.
+  let pool = narrowByStructuralCompleteness(
+    linkedValidations,
+    (validation) => validation.actionType === "validation" || validation.actionType === "pilot"
   );
-  let pool = withValidationTargetMetric.length > 0 ? withValidationTargetMetric : eligible;
   if (pool.length === 1) return pool[0];
 
-  // Stage 3 (requirement #8 proxy): among the still-tied pool, prefer
-  // whichever candidate's own success-metric figure numerically matches
-  // this gap's own report-stated threshold -- never applied unless the
-  // gap itself names a real, report-stated figure (never a fabricated
-  // bar), and only ever narrows the pool when it actually distinguishes
-  // at least one candidate.
+  // Stage 1 (requirements #5/#6, unchanged since Task #47A): owner and
+  // timeline are a hard prerequisite -- a candidate missing either is
+  // never eligible, regardless of how strong its other signals are (a
+  // Closure Plan naming a WHO with no WHEN, or vice versa, is not
+  // meaningfully more complete than no assignment at all).
+  const eligible = pool.filter((validation) => validation.owner.trim() && validation.timeline.trim());
+  if (eligible.length === 0) return null;
+  if (eligible.length === 1) return eligible[0];
+  pool = eligible;
+
+  // Stage 2 (requirement #2, "action with measurable success metric"):
+  // a candidate carrying its own explicit, structured success criterion
+  // is preferred over one that names none at all -- a pure completeness
+  // signal, deliberately never gated on that metric's OWN provenance
+  // classification (provenance is surfaced separately on the resolved
+  // plan, never used here to disqualify an otherwise-complete candidate).
+  pool = narrowByStructuralCompleteness(pool, hasStructuredSuccessMetric);
+  if (pool.length === 1) return pool[0];
+
+  // Stage 3 (requirement #2, "action with evidence tie"): prefer a
+  // candidate that names its own evidence tie.
+  pool = narrowByStructuralCompleteness(pool, (validation) => Boolean(validation.evidenceTie.trim()));
+  if (pool.length === 1) return pool[0];
+
+  // Stage 4 (Task #47C, requirement #8 proxy, preserved): among a still-
+  // tied pool, prefer whichever candidate's own success-metric figure
+  // numerically matches this gap's own report-stated threshold -- never
+  // applied unless the gap itself names a real, report-stated figure
+  // (never a fabricated bar), and only ever narrows when it actually
+  // distinguishes at least one candidate.
   const gapFigure = gapSuccessThreshold ? extractComparableThresholdFigure(gapSuccessThreshold) : null;
   if (gapFigure) {
     const numericMatches = pool.filter((validation) =>
@@ -2188,6 +2256,15 @@ function selectAuthoritativeClosurePlanValidation(
   return pool.length === 1 ? pool[0] : null;
 }
 
+type MarketIntelligenceClosurePlanAssignment = {
+  owner: string;
+  timeline: string;
+  budget: string | null;
+  hasAssignedOwner: boolean;
+  evidenceTie: string | null;
+  activity: string | null;
+};
+
 // requirement #1: owner/timeline/budget, sourced ONLY from the single
 // authoritative candidate selectAuthoritativeClosurePlanValidation
 // resolves -- see that function's own comment, and this section's
@@ -2197,7 +2274,7 @@ function resolveClosurePlanAssignment(
   linkedValidations: readonly MarketIntelligenceRecommendationValidation[],
   gapSuccessThreshold: string | null,
   language: ResponseLanguage
-): { owner: string; timeline: string; budget: string | null; hasAssignedOwner: boolean } {
+): MarketIntelligenceClosurePlanAssignment {
   const validation = selectAuthoritativeClosurePlanValidation(linkedValidations, gapSuccessThreshold);
   if (!validation) {
     return {
@@ -2205,12 +2282,16 @@ function resolveClosurePlanAssignment(
       timeline: CLOSURE_PLAN_NO_TIMELINE[language],
       budget: null,
       hasAssignedOwner: false,
+      evidenceTie: null,
+      activity: null,
     };
   }
 
   const owner = validation.owner.trim();
   const timeline = validation.timeline.trim();
   const budget = validation.budget.trim();
+  const evidenceTie = validation.evidenceTie.trim();
+  const activity = validation.activity.trim();
   // Task #38's own provenance suffix -- reused verbatim, never a second,
   // independently worded qualifier -- so "Planning Assumption"/
   // "Validation Target" reads identically here and on the recommendation
@@ -2224,6 +2305,10 @@ function resolveClosurePlanAssignment(
     timeline: timeline ? `${timeline}${provenanceSuffix}` : CLOSURE_PLAN_NO_TIMELINE[language],
     budget: budget ? `${budget}${provenanceSuffix}` : null,
     hasAssignedOwner: Boolean(owner),
+    // requirement #3/#4: never fabricated -- null (never a placeholder
+    // sentence) whenever the selected candidate itself names none.
+    evidenceTie: evidenceTie || null,
+    activity: activity || null,
   };
 }
 
@@ -2262,6 +2347,8 @@ function buildClosurePlanForGap(
     failureCriterion: controllingThreshold.avoidSummary,
     decisionImpact: gap.decisionImpact,
     hasAssignedOwner: assignment.hasAssignedOwner,
+    evidenceTie: assignment.evidenceTie,
+    activity: assignment.activity,
   };
 }
 
@@ -2749,5 +2836,229 @@ export function resolveMarketIntelligenceConfidenceState(
     constraints,
     rationale: buildConfidenceRationale(canonicalState.confidence, contributors.length, constraints, language),
     provenance: "structural",
+  };
+}
+
+// TASK #53 -- Make Market Intelligence ENTER eligibility structurally
+// evidence-gated.
+//
+// AUDIT FINDING (full trace of the canonical decision pipeline,
+// assessMarketEntryConfidence, market-intelligence-presentation.ts):
+// the canonical ENTER/MONITOR/AVOID decision is ALREADY, and remains,
+// a pure function of exactly two already-persisted inputs -- coverage
+// (4 confidence dimensions, computed at generation time from classified
+// research evidence) and decisionCriticalEvidence (the SAME 3
+// structural booleans this whole module already reads everywhere else).
+// It NEVER reads a recommendation's own text, a Closure Plan, a Decision
+// Threshold, or any "is this number met" evaluation -- there is no code
+// path by which a recommendation's own "10 paying customers (Validation
+// Target)" KPI, however it is worded or classified, could reach
+// assessMarketEntryConfidence at all. evidenceGapBlocksStrongDecision
+// (that function's own existing logic) ALREADY forces MONITOR --  never
+// AVOID -- whenever any of the 3 pillars is unresolved, regardless of
+// whether the raw blended score would otherwise read ENTER or AVOID:
+// requirement #8 ("weak evidence must not automatically produce AVOID")
+// was therefore ALREADY satisfied by the existing, unmodified
+// methodology, confirmed here by trace and locked in by regression test
+// rather than by any code change.
+//
+// THE ACTUAL GAP: nothing in this module ever separated a threshold's
+// own TARGET (what must eventually be true) from an OBSERVED RESULT
+// (what the available evidence demonstrates has actually happened) --
+// "ENTER IF" text has always been a CONDITION STATEMENT, never a
+// pass/fail evaluation. That is safe for DISPLAY (Tasks #35-#52 never
+// claim a target has been met), but there was no STRUCTURAL, TESTABLE
+// gate formalizing "a numeric ENTER requirement, however completely it
+// is described, can only be treated as SATISFIED when its OWN
+// provenance is genuinely verified -- never merely because a target
+// number is present, matched, or classified as a validation target."
+//
+// FIX: resolveMarketIntelligenceEnterEligibility is a NEW, PURELY
+// ADDITIVE, read-only function -- like every other resolver in this
+// module, it computes a value FROM already-canonical state and NEVER
+// writes back to it, and it is NOT a second decision engine: `eligible`
+// is derived from decisionCriticalEvidence -- the EXACT SAME structural
+// gate assessMarketEntryConfidence's own cap already uses -- so it can
+// never disagree with, or influence, the canonical `decision` field.
+// isEnterRequirementEvidenceQualified/isCompoundEnterRequirementEvidenceQualified
+// are the formal TARGET-vs-OBSERVED gate requirement #6 asks for: a
+// requirement's own numeric target string is NEVER itself evidence that
+// the target was achieved -- only a genuinely verified (or, for a
+// requirement class that explicitly and structurally allows it,
+// benchmark-derived) provenance value counts as "the observed result
+// satisfies this requirement." A compound threshold (Task #52) is
+// satisfied only when EVERY component independently qualifies -- the
+// weakest linked component governs, exactly requirement #3's "10
+// paying customers + USD 25k ACV" example.
+export type MarketIntelligenceEnterRequirementResult = {
+  gapId: MarketIntelligenceEvidenceGapId;
+  gapLabel: string;
+  // The controlling ENTER criterion driving this result, broken into
+  // its own per-component provenance (Task #52) -- empty when no
+  // report-stated or recommendation-derived criterion exists at all
+  // (evidence required, never fabricated).
+  components: MarketIntelligenceThresholdComponent[];
+  // Whether EVERY component's own provenance is strong enough to
+  // independently satisfy this ENTER requirement -- never true merely
+  // because a target number exists, matches, or is named a "Validation
+  // Target"; never true for an empty components list (requirement #5:
+  // "evidence required" is the honest default, not a guess).
+  evidenceQualified: boolean;
+};
+
+export type MarketIntelligenceEnterEligibilityState = {
+  decision: ExecutiveDecisionCode;
+  // True only when NO decision-critical pillar is unresolved -- the
+  // IDENTICAL structural condition assessMarketEntryConfidence's own
+  // evidenceGapBlocksStrongDecision gate already requires before this
+  // report's canonical decision can ever read ENTER (GO). This can
+  // never disagree with the canonical decision, because it is derived
+  // from the SAME decisionCriticalEvidence booleans, never a second,
+  // independently-computed gate.
+  eligible: boolean;
+  // Every currently-unresolved material gap -- non-empty whenever
+  // `eligible` is false for this reason. Empty when every pillar is
+  // already resolved (regardless of whether `decision` itself happens
+  // to read ENTER, MONITOR, or AVOID for OTHER reasons -- e.g. weak raw
+  // coverage can still keep a fully-resolved report at MONITOR or
+  // AVOID; this field only reports the EVIDENCE-GAP dimension of
+  // eligibility, never the confidence-strength dimension, which remains
+  // assessMarketEntryConfidence's own unchanged responsibility).
+  blockingGaps: MarketIntelligenceEvidenceGap[];
+  // Per-(currently unresolved) gap breakdown of what evidence would
+  // need to qualify for THAT gap's own ENTER condition to be considered
+  // satisfied -- requirement #5's "what evidence class is required,
+  // whether it is actually satisfied" made explicit and testable.
+  requirements: MarketIntelligenceEnterRequirementResult[];
+};
+
+// Strict by default: only a genuinely, independently verified citation
+// qualifies as evidence that an ENTER requirement's own target has
+// actually been achieved. allowBenchmarkDerived exists ONLY for a
+// future requirement class this report style does not currently define
+// one for; every real call site in this module leaves it false, so
+// nothing short of real verified evidence can satisfy an ENTER
+// requirement today -- "prefer abstention over guessing."
+function isEnterRequirementEvidenceQualified(
+  provenance: MarketIntelligenceRecommendationProvenance | null,
+  options: { allowBenchmarkDerived?: boolean } = {}
+): boolean {
+  if (provenance === "verifiedEvidence") return true;
+  if (provenance === "benchmarkDerived" && options.allowBenchmarkDerived) return true;
+  return false;
+}
+
+// Compound-aware (Task #52): a multi-component threshold is satisfied
+// for ENTER purposes ONLY when EVERY component independently qualifies
+// -- the weakest component governs, never the strongest, and an empty
+// component list (no numeric claim at all) is never "satisfied."
+function isCompoundEnterRequirementEvidenceQualified(
+  components: readonly MarketIntelligenceThresholdComponent[],
+  options: { allowBenchmarkDerived?: boolean } = {}
+): boolean {
+  if (components.length === 0) return false;
+  return components.every((component) => isEnterRequirementEvidenceQualified(component.provenance, options));
+}
+
+// The single, canonical, structured ENTER-eligibility model every
+// render surface must read if it ever needs to explain (never
+// recompute) why ENTER is or is not currently reachable. Pure and
+// read-only: never mutates canonicalState, never a second decision
+// engine, and structurally incapable of promoting a report to ENTER --
+// it can only ever CONFIRM or EXPLAIN what assessMarketEntryConfidence
+// already decided from decisionCriticalEvidence + coverage.
+export function resolveMarketIntelligenceEnterEligibility(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[] = [],
+  language: ResponseLanguage = "English"
+): MarketIntelligenceEnterEligibilityState | null {
+  if (!canonicalState) return null;
+
+  const blockingGaps = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).filter(
+    (gap) => gap.decisionFactor !== null
+  );
+
+  const requirements: MarketIntelligenceEnterRequirementResult[] = blockingGaps.map((gap) => {
+    const threshold = resolveMarketIntelligenceGapDecisionThreshold(canonicalState, gap.id, recommendationValidations, language);
+    const enterCriterion =
+      threshold?.enterConditions.find(
+        (criterion) => criterion.dimension === "recommendationValidationTarget" || criterion.dimension === "reportStatedThreshold"
+      ) ?? null;
+    const components =
+      enterCriterion?.components ??
+      (enterCriterion?.provenance && enterCriterion.value ? [{ text: enterCriterion.value, provenance: enterCriterion.provenance }] : []);
+    return {
+      gapId: gap.id,
+      gapLabel: gap.label,
+      components,
+      evidenceQualified: isCompoundEnterRequirementEvidenceQualified(components),
+    };
+  });
+
+  return {
+    decision: canonicalState.decision,
+    // requirement #2: ENTER requires NO unresolved decision-critical
+    // evidence gap -- the IDENTICAL condition assessMarketEntryConfidence
+    // already enforces, read here rather than recomputed, so this can
+    // never disagree with the canonical decision.
+    eligible: blockingGaps.length === 0,
+    blockingGaps,
+    requirements,
+  };
+}
+
+// TASK #53A -- the single canonical decision-RESOLUTION entrypoint every
+// Market Intelligence UI/PDF surface must call instead of
+// resolveMarketIntelligenceExecutiveDecisionWithCanonicalState directly.
+// It delegates to that existing resolver for everything (label,
+// decisionSource, confidenceScore, language) and then applies exactly
+// one additional check, reusing resolveMarketIntelligenceEnterEligibility
+// above verbatim -- never a second, independently-computed decision
+// engine, never a re-derivation of eligibility from anything other than
+// the same decisionCriticalEvidence booleans assessMarketEntryConfidence
+// already used at generation time.
+//
+// Gate: an ENTER (GO) verdict may reach a render surface only when
+// resolveMarketIntelligenceEnterEligibility reports no unresolved
+// decision-critical evidence gap for this canonical state; otherwise it
+// is downgraded to MONITOR (CONDITIONAL_GO) for display purposes only.
+// MONITOR and AVOID are never touched -- the eligibility check only ever
+// narrows GO, so it structurally cannot promote or otherwise change any
+// other decision (requirement #4). confidenceScore is passed through
+// unchanged: this task gates the decision LABEL a report is allowed to
+// show, not the confidence number generation already computed.
+//
+// For a correctly generated report this is a no-op: GO with an
+// unresolved decision-critical evidence gap cannot occur, because
+// assessMarketEntryConfidence's own evidenceGapBlocksStrongDecision
+// already forces MONITOR at generation time from the identical
+// condition. This gate is defense-in-depth for canonical state that
+// predates that invariant or was altered after generation -- not a
+// second source of truth.
+//
+// Reports with no canonicalState (legacy banner-parse fallback) are
+// passed through completely unchanged: resolveMarketIntelligenceEnterEligibility
+// requires a canonicalState to evaluate evidence gaps against, so there
+// is nothing to gate.
+export function resolveMarketIntelligenceGatedExecutiveDecision(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  executiveSummaryContent: string,
+  language: ResponseLanguage = "English"
+): MarketIntelligenceExecutiveDecision {
+  const resolved = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+    canonicalState,
+    executiveSummaryContent,
+    language
+  );
+
+  if (!canonicalState || canonicalState.decision !== "GO") return resolved;
+
+  const eligibility = resolveMarketIntelligenceEnterEligibility(canonicalState, [], language);
+  if (!eligibility || eligibility.eligible) return resolved;
+
+  return {
+    ...resolved,
+    decisionLabel: localizeExecutiveDecision("CONDITIONAL_GO", resolved.language, "market"),
+    canonicalDecision: mapExecutiveDecisionCodeToCanonicalDecision("CONDITIONAL_GO"),
   };
 }

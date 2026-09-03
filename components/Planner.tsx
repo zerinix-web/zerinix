@@ -161,7 +161,6 @@ import {
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
 import {
   readMarketIntelligenceCanonicalState,
-  resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
   resolveMarketIntelligenceConfidenceFactors,
   constrainMarketSizingResolutionToCanonicalState,
   resolveMarketIntelligenceDecisionEvidenceLevel,
@@ -179,6 +178,7 @@ import {
   resolveMarketIntelligenceControllingClosurePlan,
   resolveMarketIntelligenceMultiGapPriorityState,
   resolveMarketIntelligenceConfidenceState,
+  resolveMarketIntelligenceGatedExecutiveDecision,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
   localizeMarketConfidenceFactorLevel,
@@ -4509,7 +4509,7 @@ function ExecutiveSummaryVisual({
   // TASK #24 -- Investment Decision Snapshot (web) now prefers the
   // persisted canonical decision over re-parsing this section's content.
   const marketDecision = isMarketIntelligence
-    ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+    ? resolveMarketIntelligenceGatedExecutiveDecision(
         marketIntelligenceCanonicalState,
         section.content,
         evidenceLocale
@@ -5532,7 +5532,7 @@ if (field === "swotAnalysis") {
     // the SAME executiveSummary content, so this section can never
     // display a decision Executive Summary itself disagrees with.
     const strategicRecommendationDecision = isMarketIntelligence
-      ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+      ? resolveMarketIntelligenceGatedExecutiveDecision(
           marketIntelligenceCanonicalState,
           executiveSummaryContent,
           detectPdfPresentationLocale(executiveSummaryContent || section.content) === "tr" ? "Turkish" : "English"
@@ -5821,6 +5821,12 @@ if (field === "swotAnalysis") {
                           <span className="font-semibold text-zinc-100">Failure Criterion</span> —{" "}
                           {gapClosurePlan.failureCriterion}
                         </p>
+                        {gapClosurePlan.evidenceTie ? (
+                          <p className="text-[11px] leading-5 text-zinc-300">
+                            <span className="font-semibold text-zinc-100">Evidence Tie</span> —{" "}
+                            {gapClosurePlan.evidenceTie}
+                          </p>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -6926,7 +6932,7 @@ function ExecutiveSnapshotPanel({
   // re-parsing the banner text; falls back to the exact same prose parse
   // for every report without one.
   const marketDecision = isMarketIntelligence
-    ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+    ? resolveMarketIntelligenceGatedExecutiveDecision(
         marketIntelligenceCanonicalState,
         section.content,
         isMarketIntelligenceTurkish ? "Turkish" : "English"
@@ -8230,7 +8236,7 @@ const ReportPanel = memo(function ReportPanel({
         // text; falls back to the exact same prose parse for every report
         // without one. See resolveMarketIntelligenceExecutiveDecisionWithCanonicalState.
         const marketDecision = isMarketIntelligence
-          ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+          ? resolveMarketIntelligenceGatedExecutiveDecision(
               marketIntelligenceCanonicalState,
               marketExecutiveSummaryContent,
               pdfLocale === "tr" ? "Turkish" : "English"
@@ -9110,7 +9116,7 @@ const ReportPanel = memo(function ReportPanel({
         // marketIntelligenceCanonicalState the web snapshot and cover
         // page already use.
         const marketDecision = isMarketIntelligence
-          ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+          ? resolveMarketIntelligenceGatedExecutiveDecision(
               marketIntelligenceCanonicalState,
               content,
               pdfLocale === "tr" ? "Turkish" : "English"
@@ -10483,7 +10489,7 @@ const ReportPanel = memo(function ReportPanel({
 	          const cardWidth = (bodyWidth - (columns - 1) * cardGap) / columns;
 	          const { cards, rowHeights } = computeRecommendationRowHeights(items, cardWidth);
 
-	          const strategicRecommendationDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+	          const strategicRecommendationDecision = resolveMarketIntelligenceGatedExecutiveDecision(
 	            marketIntelligenceCanonicalState,
 	            pdfSections.find((entry) => entry.field === "executiveSummary")?.content || "",
 	            pdfLocale === "tr" ? "Turkish" : "English"
@@ -10739,6 +10745,7 @@ const ReportPanel = memo(function ReportPanel({
 	            const ownerLabel = pdfLocale === "tr" ? "Sorumlu" : "Owner";
 	            const timelineLabel = pdfLocale === "tr" ? "Zaman Çizelgesi" : "Timeline";
 	            const budgetLabel = pdfLocale === "tr" ? "Bütçe" : "Budget";
+	            const evidenceTieLabel = pdfLocale === "tr" ? "Kanıt Bağı" : "Evidence Tie";
 	            // TASK #43 -- see ReportPdfButton.tsx's identical layout
 	            // function for the full comment. Every field in this row
 	            // (gap label, action, measurable result, decision
@@ -10789,7 +10796,7 @@ const ReportPanel = memo(function ReportPanel({
 	                ? (pdf.splitTextToSize(
 	                    `${ownerLabel}: ${closurePlan.owner}   ${timelineLabel}: ${closurePlan.timeline}${
 	                      closurePlan.budget ? `   ${budgetLabel}: ${closurePlan.budget}` : ""
-	                    }`,
+	                    }${closurePlan.evidenceTie ? `   ${evidenceTieLabel}: ${closurePlan.evidenceTie}` : ""}`,
 	                    bodyWidth
 	                  ) as string[]).slice(0, 3)
 	                : [];

@@ -326,6 +326,6 @@ test("TASK #48A (drift check): the deterministic selection rule lives entirely i
   assert.doesNotMatch(fnSource, /"10%"/);
   assert.match(fnSource, /\.owner\.trim\(\)/);
   assert.match(fnSource, /\.timeline\.trim\(\)/);
-  assert.match(fnSource, /provenance\s*===\s*"validationTarget"/);
+  assert.match(fnSource, /\.evidenceTie\.trim\(\)/);
   assert.match(fnSource, /extractComparableThresholdFigure\(/);
 });

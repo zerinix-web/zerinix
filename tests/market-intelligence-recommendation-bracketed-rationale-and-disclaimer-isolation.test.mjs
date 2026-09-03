@@ -305,7 +305,7 @@ test("REGRESSION: the 'Executive verdict: MONITOR' line itself is preserved verb
 
 test("DRIFT CHECK: this ticket's changes are confined to the extractRecommendationItems merge loop and isEvidenceStatusDisclaimerLine -- Main Risk canonical-state-first resolution, confidence/decision derivation, TAM/SAM/SOM cascade, and the CAGR/Market-Overview fixes from prior tasks all remain present and untouched", () => {
   for (const source of [pdfButtonSource, plannerSource]) {
-    assert.match(source, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
+    assert.match(source, /resolveMarketIntelligenceGatedExecutiveDecision\(/);
     assert.match(source, /resolveMarketSizingCascade\(/);
     assert.match(source, /constrainMarketSizingResolutionToCanonicalState\(/);
     assert.match(source, /A CAGR percentage was not stated in this report's own sources\. This value is marked Validation Required until it can be confirmed\./);

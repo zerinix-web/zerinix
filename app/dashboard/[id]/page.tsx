@@ -63,7 +63,6 @@ import {
 import { localizedLabelVariants } from "@/app/lib/report-engine/executive-decision-brief";
 import {
   readMarketIntelligenceCanonicalState,
-  resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
   resolveMarketIntelligenceConfidenceFactors,
   constrainMarketSizingResolutionToCanonicalState,
   resolveMarketIntelligenceDecisionEvidenceLevel,
@@ -81,6 +80,7 @@ import {
   resolveMarketIntelligenceControllingClosurePlan,
   resolveMarketIntelligenceMultiGapPriorityState,
   resolveMarketIntelligenceConfidenceState,
+  resolveMarketIntelligenceGatedExecutiveDecision,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
   localizeMarketConfidenceFactorLevel,
@@ -1796,7 +1796,7 @@ function getDecisionSummaryItems(
   // comment. Falls back to the exact same prose parse below for every
   // report without one (100% of reports persisted before this task).
   const marketDecisionSignal = isMarketIntelligence
-    ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+    ? resolveMarketIntelligenceGatedExecutiveDecision(
         marketIntelligenceCanonicalState,
         executiveSummary || executiveRecommendation,
         dashboardLocale === "tr" ? "Turkish" : "English"
@@ -1887,7 +1887,7 @@ function getDecisionSummaryItems(
   // over the same content -- the two could otherwise report different
   // numbers for the same report.
   const marketDecisionConfidence = isMarketIntelligence
-    ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+    ? resolveMarketIntelligenceGatedExecutiveDecision(
         marketIntelligenceCanonicalState,
         executiveSummary || executiveRecommendation,
         dashboardLocale === "tr" ? "Turkish" : "English"
@@ -2252,7 +2252,7 @@ function ExecutiveSummaryVisual({
   // TASK #24 -- Investment Decision Snapshot now prefers the persisted
   // canonical decision over re-parsing this section's own content.
   const marketDecision = isMarketIntelligence
-    ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+    ? resolveMarketIntelligenceGatedExecutiveDecision(
         marketIntelligenceCanonicalState,
         content,
         evidenceLocale
@@ -3373,7 +3373,7 @@ function ReportSectionVisual({
     // executiveSummary content -- so Strategic Recommendations can never
     // display a decision Executive Summary itself disagrees with.
     const strategicRecommendationDecision = isMarketIntelligence
-      ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+      ? resolveMarketIntelligenceGatedExecutiveDecision(
           marketIntelligenceCanonicalState,
           executiveSummaryContent,
           detectPdfPresentationLocale(executiveSummaryContent || content) === "tr" ? "Turkish" : "English"
@@ -3677,6 +3677,12 @@ function ReportSectionVisual({
                           <span className="font-semibold text-zinc-100">Failure Criterion</span> —{" "}
                           {gapClosurePlan.failureCriterion}
                         </p>
+                        {gapClosurePlan.evidenceTie ? (
+                          <p className="text-[11px] leading-5 text-zinc-300">
+                            <span className="font-semibold text-zinc-100">Evidence Tie</span> —{" "}
+                            {gapClosurePlan.evidenceTie}
+                          </p>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -4743,7 +4749,7 @@ function ExecutiveSnapshotPanel({
   // decision source: prefers the persisted canonical decision, falling
   // back to the exact same prose parse for every degraded/legacy report.
   const marketDecision = isMarketIntelligence
-    ? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+    ? resolveMarketIntelligenceGatedExecutiveDecision(
         marketIntelligenceCanonicalState,
         section.content,
         isMarketIntelligenceTurkish ? "Turkish" : "English"

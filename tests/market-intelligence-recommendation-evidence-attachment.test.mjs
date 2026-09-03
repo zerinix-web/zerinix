@@ -306,7 +306,7 @@ test("REGRESSION: 'Current Decision: MONITOR' survives verbatim as its own card,
 
 test("DRIFT CHECK: canonical Main Risk, confidence factors, CAGR fallback, decision derivation, and TAM/SAM/SOM cascade all remain present and untouched by this ticket's changes", () => {
   for (const source of [pdfButtonSource, plannerSource]) {
-    assert.match(source, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
+    assert.match(source, /resolveMarketIntelligenceGatedExecutiveDecision\(/);
     assert.match(source, /resolveMarketSizingCascade\(/);
     assert.match(source, /constrainMarketSizingResolutionToCanonicalState\(/);
     assert.match(source, /A CAGR percentage was not stated in this report's own sources\. This value is marked Validation Required until it can be confirmed\./);

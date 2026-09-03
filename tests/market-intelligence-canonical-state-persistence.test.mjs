@@ -346,24 +346,24 @@ test("H1. page.tsx's primary decision signal resolves through the canonical-stat
   const source = readSourceFile("../app/dashboard/[id]/page.tsx");
   assert.match(
     source,
-    /const marketDecisionSignal = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/
+    /const marketDecisionSignal = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceGatedExecutiveDecision\(/
   );
   assert.match(
     source,
-    /import\s*\{[^}]*resolveMarketIntelligenceExecutiveDecisionWithCanonicalState[^}]*\}\s*from\s*"@\/app\/lib\/report-engine\/market-intelligence-canonical-state"/s
+    /import\s*\{[^}]*resolveMarketIntelligenceGatedExecutiveDecision[^}]*\}\s*from\s*"@\/app\/lib\/report-engine\/market-intelligence-evidence-gaps"/s
   );
 });
 
 test("H2. ReportPdfButton.tsx's cover-page decision AND per-section decision both resolve through the canonical-state-aware wrapper", () => {
   const source = readSourceFile("../app/dashboard/[id]/ReportPdfButton.tsx");
-  const wrapperCallCount = (source.match(/resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/g) || []).length;
+  const wrapperCallCount = (source.match(/resolveMarketIntelligenceGatedExecutiveDecision\(/g) || []).length;
   assert.ok(wrapperCallCount >= 2, `expected at least 2 call sites (cover page + section), found ${wrapperCallCount}`);
   assert.match(source, /readMarketIntelligenceCanonicalState\(report\.metadata\)/);
 });
 
 test("H3. Planner.tsx's web-rendered snapshot AND its PDF cover both resolve through the canonical-state-aware wrapper, fed by the SAME ReportPanel-level canonical state", () => {
   const source = readSourceFile("../components/Planner.tsx");
-  const wrapperCallCount = (source.match(/resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/g) || []).length;
+  const wrapperCallCount = (source.match(/resolveMarketIntelligenceGatedExecutiveDecision\(/g) || []).length;
   assert.ok(wrapperCallCount >= 2, `expected at least 2 call sites (web snapshot + PDF cover), found ${wrapperCallCount}`);
   // Both the ReportSectionCard/ExecutiveSnapshotPanel chain (web) and
   // downloadPdf/drawCoverPage (PDF) are fed by ReportPanel's single

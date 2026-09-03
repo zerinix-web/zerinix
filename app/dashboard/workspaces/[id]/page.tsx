@@ -26,8 +26,10 @@ import {
 } from "../../report-utils";
 import {
   readMarketIntelligenceCanonicalState,
-  resolveMarketIntelligenceExecutiveDecisionWithCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
+import {
+  resolveMarketIntelligenceGatedExecutiveDecision,
+} from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import { detectPdfPresentationLocale } from "@/app/lib/pdf-normalization.mjs";
 
 export const dynamic = "force-dynamic";
@@ -170,7 +172,7 @@ function detectWorkspaceSignal(report: DashboardReport) {
     const content = `${recommendation}\n${summary}`;
     const canonicalState = readMarketIntelligenceCanonicalState(report.metadata);
     const locale = detectPdfPresentationLocale(content);
-    const marketDecision = resolveMarketIntelligenceExecutiveDecisionWithCanonicalState(
+    const marketDecision = resolveMarketIntelligenceGatedExecutiveDecision(
       canonicalState,
       content,
       locale === "tr" ? "Turkish" : "English"

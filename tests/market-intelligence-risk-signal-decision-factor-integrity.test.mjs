@@ -219,7 +219,7 @@ test("no fabrication guard: a Top 3 Risks list item with no explicit severity wo
 
 test("drift check: this fix does not touch resolveMarketIntelligenceExecutiveDecision, the Strategic Recommendations decision badge (Task #17), or the Executive Summary decision-leakage reconciliation (Task #17B) -- confirms no second, independent decision system was created", () => {
   for (const source of [pageSource, plannerSource]) {
-    assert.match(source, /const marketDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
+    assert.match(source, /const marketDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceGatedExecutiveDecision\(/);
     assert.match(source, /const strategicRecommendationDecision = isMarketIntelligence/);
   }
 });

@@ -186,7 +186,7 @@ test("CANONICAL DECISION SCENARIO: MONITOR + validation-required SOM -- Strategi
   assert.equal(decision.decisionLabel, "MONITOR");
 
   // TASK #24 -- Strategic Recommendations' decision badge now resolves
-  // through resolveMarketIntelligenceExecutiveDecisionWithCanonicalState
+  // through resolveMarketIntelligenceGatedExecutiveDecision
   // (prefers a persisted canonical decision, falls back to this exact
   // same resolveMarketIntelligenceExecutiveDecision behavior for every
   // report without one) -- still against the same executiveSummary
@@ -199,7 +199,7 @@ test("CANONICAL DECISION SCENARIO: MONITOR + validation-required SOM -- Strategi
     // exact site -- same underlying data, read once instead of twice.
     assert.match(
       source,
-      /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(\s*\n?\s*(?:marketIntelligenceCanonicalState|readMarketIntelligenceCanonicalState\(report\.metadata\)|recommendationCanonicalState),\s*\n?\s*(?:executiveSummaryContent|pdfSections\.find\(\(entry\) => entry\.field === "executiveSummary"\)\?\.content \|\| "")/,
+      /resolveMarketIntelligenceGatedExecutiveDecision\(\s*\n?\s*(?:marketIntelligenceCanonicalState|readMarketIntelligenceCanonicalState\(report\.metadata\)|recommendationCanonicalState),\s*\n?\s*(?:executiveSummaryContent|pdfSections\.find\(\(entry\) => entry\.field === "executiveSummary"\)\?\.content \|\| "")/,
       "Strategic Recommendations must resolve its decision through the same canonical resolver, against the same executiveSummary content"
     );
   }
@@ -225,7 +225,7 @@ test("WEB PRESENTATION: page.tsx and Planner.tsx thread executiveSummaryContent 
     assert.match(source, /Current Decision:\s*\{strategicRecommendationDecision\.decisionLabel\}/);
     assert.match(
       source,
-      /const strategicRecommendationDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/,
+      /const strategicRecommendationDecision = isMarketIntelligence\s*\n\s*\? resolveMarketIntelligenceGatedExecutiveDecision\(/,
       "the badge must be gated behind isMarketIntelligence, never computed for other report kinds"
     );
   }

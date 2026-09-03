@@ -120,14 +120,14 @@ test("SCENARIO E (web and PDF share one canonical decision state): page.tsx, Rep
   const plannerSource = readSourceFile("components/Planner.tsx");
 
   // TASK #24 -- all 3 surfaces now resolve exclusively through
-  // resolveMarketIntelligenceExecutiveDecisionWithCanonicalState (the
+  // resolveMarketIntelligenceGatedExecutiveDecision (the
   // canonical-state module), which internally still calls this exact
   // same resolveMarketIntelligenceExecutiveDecision (from the shared
   // vocabulary module) for every report without a persisted canonical
   // state -- so the "one shared source, never independently reimplemented"
   // guarantee holds one level deeper than before, not less strictly.
   for (const source of [pageSource, pdfButtonSource, plannerSource]) {
-    assert.match(source, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState/);
+    assert.match(source, /resolveMarketIntelligenceGatedExecutiveDecision/);
     assert.match(source, /from "@\/app\/lib\/report-engine\/market-intelligence-canonical-state"/);
     assert.doesNotMatch(
       source,

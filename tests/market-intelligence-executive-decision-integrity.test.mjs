@@ -290,13 +290,13 @@ const pdfButtonSource = readFileSync(
 
 test("PARITY: page.tsx and ReportPdfButton.tsx both resolve the Market Intelligence decision through the SAME resolveMarketIntelligenceExecutiveDecision call against the SAME canonical executiveSummary text this fix's gate writes into -- neither surface independently reconstructs a stronger decision from prose (drift check: this shared architecture is untouched by this fix)", () => {
   // TASK #24 -- both surfaces now call
-  // resolveMarketIntelligenceExecutiveDecisionWithCanonicalState, which
+  // resolveMarketIntelligenceGatedExecutiveDecision, which
   // prefers a persisted canonical decision and falls back to this exact
   // same resolveMarketIntelligenceExecutiveDecision (still the shared
   // vocabulary function underneath, confirmed exported unmodified) for
   // every report without one -- the parity guarantee is unchanged.
-  assert.match(pageSource, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
-  assert.match(pdfButtonSource, /resolveMarketIntelligenceExecutiveDecisionWithCanonicalState\(/);
+  assert.match(pageSource, /resolveMarketIntelligenceGatedExecutiveDecision\(/);
+  assert.match(pdfButtonSource, /resolveMarketIntelligenceGatedExecutiveDecision\(/);
   const vocabularySource = readFileSync(
     new URL("../app/lib/report-engine/executive-decision-vocabulary.ts", import.meta.url),
     "utf8"

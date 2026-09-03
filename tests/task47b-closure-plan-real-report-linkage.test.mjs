@@ -283,5 +283,5 @@ test("TASK #47B/#48A (drift check): the candidate-selection logic is a pure stru
   )[0];
   assert.doesNotMatch(selectorSource, /\.item\b/);
   assert.doesNotMatch(selectorSource, /includes\(|\.match\(|\.test\(/);
-  assert.match(selectorSource, /validation\.provenance === "validationTarget"/);
+  assert.match(selectorSource, /validation\.evidenceTie\.trim\(\)/);
 });
