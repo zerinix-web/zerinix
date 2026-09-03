@@ -78,6 +78,7 @@ import {
   classifyStrategicRecommendationValidation,
   localizeRecommendationProvenance,
   resolveMarketIntelligenceControllingDecisionThreshold,
+  resolveMarketIntelligenceControllingClosurePlan,
   resolveMarketIntelligenceConfidenceState,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
@@ -3405,6 +3406,17 @@ function ReportSectionVisual({
           strategicRecommendationDecision?.language || "English"
         )
       : null;
+    // TASK #47 -- requirement #1/#2: one authoritative WHO/WHEN/HOW-MUCH
+    // closure plan for the controlling gap, built ONLY from the SAME
+    // controlling threshold and recommendation-validation objects above --
+    // never a second, independently derived plan.
+    const marketControllingClosurePlan = isMarketIntelligence
+      ? resolveMarketIntelligenceControllingClosurePlan(
+          marketIntelligenceCanonicalState,
+          marketRecommendationValidations,
+          strategicRecommendationDecision?.language || "English"
+        )
+      : null;
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-white/[0.025] p-5">
@@ -3562,6 +3574,47 @@ function ReportSectionVisual({
                         <span className="font-semibold text-zinc-100">AVOID IF</span> — {avoidIfText}
                       </p>
                     </div>
+                    {isControllingGap && marketControllingClosurePlan ? (
+                      <div className="mt-2 space-y-1.5 rounded-xl border border-white/10 bg-black/20 p-2.5">
+                        <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                          Closure Plan
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Owner</p>
+                            <p
+                              className={`mt-0.5 text-[11px] leading-5 ${
+                                marketControllingClosurePlan.hasAssignedOwner ? "text-teal-100" : "text-zinc-400"
+                              }`}
+                            >
+                              {marketControllingClosurePlan.owner}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Timeline</p>
+                            <p className="mt-0.5 text-[11px] leading-5 text-zinc-300">
+                              {marketControllingClosurePlan.timeline}
+                            </p>
+                          </div>
+                          {marketControllingClosurePlan.budget ? (
+                            <div>
+                              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Budget</p>
+                              <p className="mt-0.5 text-[11px] leading-5 text-zinc-300">
+                                {marketControllingClosurePlan.budget}
+                              </p>
+                            </div>
+                          ) : null}
+                        </div>
+                        <p className="text-[11px] leading-5 text-zinc-300">
+                          <span className="font-semibold text-zinc-100">Success Criterion</span> —{" "}
+                          {marketControllingClosurePlan.measurableSuccessCriterion}
+                        </p>
+                        <p className="text-[11px] leading-5 text-zinc-300">
+                          <span className="font-semibold text-zinc-100">Failure Criterion</span> —{" "}
+                          {marketControllingClosurePlan.failureCriterion}
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}

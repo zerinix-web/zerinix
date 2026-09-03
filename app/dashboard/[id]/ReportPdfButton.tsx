@@ -88,6 +88,7 @@ import {
   classifyStrategicRecommendationValidation,
   localizeRecommendationProvenance,
   resolveMarketIntelligenceControllingDecisionThreshold,
+  resolveMarketIntelligenceControllingClosurePlan,
   resolveMarketIntelligenceConfidenceState,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
@@ -6919,6 +6920,14 @@ export function buildStandardReportPdf({
             marketRecommendationValidations,
             pdfLocale === "tr" ? "Turkish" : "English"
           );
+          // TASK #47 -- requirement #1/#2/#6: the SAME authoritative
+          // WHO/WHEN/HOW-MUCH closure plan the web card reads -- never a
+          // second, independently derived PDF-only plan.
+          const marketControllingClosurePlan = resolveMarketIntelligenceControllingClosurePlan(
+            recommendationCanonicalState,
+            marketRecommendationValidations,
+            pdfLocale === "tr" ? "Turkish" : "English"
+          );
 
           if (marketGapDrivenActions.length > 0) {
             const gapsLabel = pdfLocale === "tr" ? "Kapatılması Gereken Kanıt Boşlukları" : "Evidence Gaps to Close";
@@ -6926,6 +6935,10 @@ export function buildStandardReportPdf({
             const enterIfLabel = pdfLocale === "tr" ? "GİR EĞER" : "ENTER IF";
             const monitorIfLabel = pdfLocale === "tr" ? "İZLE EĞER" : "MONITOR IF";
             const avoidIfLabel = pdfLocale === "tr" ? "KAÇIN EĞER" : "AVOID IF";
+            const closurePlanLabel = pdfLocale === "tr" ? "KAPANIŞ PLANI" : "CLOSURE PLAN";
+            const ownerLabel = pdfLocale === "tr" ? "Sorumlu" : "Owner";
+            const timelineLabel = pdfLocale === "tr" ? "Zaman Çizelgesi" : "Timeline";
+            const budgetLabel = pdfLocale === "tr" ? "Bütçe" : "Budget";
             // TASK #43 -- confirmed live: every field in this row (gap
             // label, action, measurable result, decision consequence, and
             // -- the real defect -- the full ENTER/MONITOR/AVOID
@@ -6954,6 +6967,14 @@ export function buildStandardReportPdf({
               const avoidIfText = isControllingGap
                 ? marketControllingDecisionThreshold!.avoidSummary
                 : gapAction.threshold.avoidCondition.description;
+              // TASK #47 -- only the controlling gap ever has a closure
+              // plan (resolveMarketIntelligenceControllingClosurePlan's
+              // own single-controlling-gap gate) -- every other row's
+              // layout is completely unaffected, exactly as before.
+              const closurePlan =
+                isControllingGap && marketControllingClosurePlan?.gapId === gapAction.gapId
+                  ? marketControllingClosurePlan
+                  : null;
 
               const previousFontSize = pdf.getFontSize();
               const lineHeight = 3.6;
@@ -6975,13 +6996,23 @@ export function buildStandardReportPdf({
               const enterLines = wrapPdfText(`${enterIfLabel} — ${enterIfText}`, bodyWidth).slice(0, 3);
               const monitorLines = wrapPdfText(`${monitorIfLabel} — ${monitorIfText}`, bodyWidth).slice(0, 3);
               const avoidLines = wrapPdfText(`${avoidIfLabel} — ${avoidIfText}`, bodyWidth).slice(0, 3);
+              pdf.setFontSize(4.4);
+              const closurePlanLines = closurePlan
+                ? wrapPdfText(
+                    `${ownerLabel}: ${closurePlan.owner}   ${timelineLabel}: ${closurePlan.timeline}${
+                      closurePlan.budget ? `   ${budgetLabel}: ${closurePlan.budget}` : ""
+                    }`,
+                    bodyWidth
+                  ).slice(0, 3)
+                : [];
               pdf.setFontSize(previousFontSize);
 
               // Cumulative Y offsets (relative to the row's own top),
               // reducing to the ORIGINAL fixed offsets (0, 4.6, 9.2,
               // 13.8, 18.2, 22.4, 26.8, 31.2, total 36) whenever every
-              // field is exactly 1 line, so an already-correct, single-
-              // line row renders pixel-identical to before.
+              // field is exactly 1 line and no closure plan exists, so an
+              // already-correct, single-line row renders pixel-identical
+              // to before.
               let cursor = 0;
               const gapLabelY = cursor;
               cursor += 4.6 + (gapLabelLines.length - 1) * lineHeight;
@@ -6999,6 +7030,12 @@ export function buildStandardReportPdf({
               cursor += 4.4 + (monitorLines.length - 1) * lineHeight;
               const avoidY = cursor;
               cursor += 4.4 + (avoidLines.length - 1) * lineHeight;
+              const closurePlanLabelY = cursor;
+              const closurePlanY = cursor;
+              if (closurePlanLines.length > 0) {
+                cursor += 4.2;
+                cursor += 4.4 + (closurePlanLines.length - 1) * lineHeight;
+              }
 
               return {
                 gapLabelLines,
@@ -7008,6 +7045,7 @@ export function buildStandardReportPdf({
                 enterLines,
                 monitorLines,
                 avoidLines,
+                closurePlanLines,
                 gapLabelY,
                 actionY,
                 measurableResultY,
@@ -7016,6 +7054,8 @@ export function buildStandardReportPdf({
                 enterY,
                 monitorY,
                 avoidY,
+                closurePlanLabelY,
+                closurePlanY: closurePlanY + 4.2,
                 rowHeight: Math.max(36, cursor + 0.4),
               };
             };
@@ -7138,6 +7178,25 @@ export function buildStandardReportPdf({
                     lineHeightFactor: 1.15,
                     maxWidth: bodyWidth,
                   });
+
+                  // TASK #47 -- the SAME authoritative closure plan the
+                  // web Strategic Recommendations card renders
+                  // (resolveMarketIntelligenceControllingClosurePlan) --
+                  // only drawn for the controlling gap's row, and only
+                  // ever grows the row (computeGapDrivenActionRowLayout)
+                  // when real owner/timeline/budget content exists.
+                  if (rowLayout.closurePlanLines.length > 0) {
+                    pdf.setFontSize(4.2);
+                    pdf.setTextColor("#71717a");
+                    pdf.text(closurePlanLabel, bodyX, rowY + rowLayout.closurePlanLabelY);
+
+                    pdf.setFontSize(4.4);
+                    pdf.setTextColor("#93c5fd");
+                    pdf.text(rowLayout.closurePlanLines, bodyX, rowY + rowLayout.closurePlanY, {
+                      lineHeightFactor: 1.15,
+                      maxWidth: bodyWidth,
+                    });
+                  }
                 });
 
               y += chunkCardHeight + minSectionGap;

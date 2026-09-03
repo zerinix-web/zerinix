@@ -176,6 +176,7 @@ import {
   classifyStrategicRecommendationValidation,
   localizeRecommendationProvenance,
   resolveMarketIntelligenceControllingDecisionThreshold,
+  resolveMarketIntelligenceControllingClosurePlan,
   resolveMarketIntelligenceConfidenceState,
 } from "@/app/lib/report-engine/market-intelligence-evidence-gaps";
 import {
@@ -5566,6 +5567,17 @@ if (field === "swotAnalysis") {
           strategicRecommendationDecision?.language || "English"
         )
       : null;
+    // TASK #47 -- requirement #1/#2: one authoritative WHO/WHEN/HOW-MUCH
+    // closure plan for the controlling gap, built ONLY from the SAME
+    // controlling threshold and recommendation-validation objects above --
+    // never a second, independently derived plan.
+    const marketControllingClosurePlan = isMarketIntelligence
+      ? resolveMarketIntelligenceControllingClosurePlan(
+          marketIntelligenceCanonicalState,
+          marketRecommendationValidations,
+          strategicRecommendationDecision?.language || "English"
+        )
+      : null;
 
     return (
       <div className="mb-5 rounded-[2rem] border border-white/10 bg-white/[0.025] p-5">
@@ -5716,6 +5728,47 @@ if (field === "swotAnalysis") {
                         <span className="font-semibold text-zinc-100">AVOID IF</span> — {avoidIfText}
                       </p>
                     </div>
+                    {isControllingGap && marketControllingClosurePlan ? (
+                      <div className="mt-2 space-y-1.5 rounded-xl border border-white/10 bg-black/20 p-2.5">
+                        <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                          Closure Plan
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Owner</p>
+                            <p
+                              className={`mt-0.5 text-[11px] leading-5 ${
+                                marketControllingClosurePlan.hasAssignedOwner ? "text-teal-100" : "text-zinc-400"
+                              }`}
+                            >
+                              {marketControllingClosurePlan.owner}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Timeline</p>
+                            <p className="mt-0.5 text-[11px] leading-5 text-zinc-300">
+                              {marketControllingClosurePlan.timeline}
+                            </p>
+                          </div>
+                          {marketControllingClosurePlan.budget ? (
+                            <div>
+                              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Budget</p>
+                              <p className="mt-0.5 text-[11px] leading-5 text-zinc-300">
+                                {marketControllingClosurePlan.budget}
+                              </p>
+                            </div>
+                          ) : null}
+                        </div>
+                        <p className="text-[11px] leading-5 text-zinc-300">
+                          <span className="font-semibold text-zinc-100">Success Criterion</span> —{" "}
+                          {marketControllingClosurePlan.measurableSuccessCriterion}
+                        </p>
+                        <p className="text-[11px] leading-5 text-zinc-300">
+                          <span className="font-semibold text-zinc-100">Failure Criterion</span> —{" "}
+                          {marketControllingClosurePlan.failureCriterion}
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
@@ -10599,6 +10652,14 @@ const ReportPanel = memo(function ReportPanel({
 	            marketRecommendationValidations,
 	            pdfLocale === "tr" ? "Turkish" : "English"
 	          );
+	          // TASK #47 -- requirement #1/#2/#6: the SAME authoritative
+	          // WHO/WHEN/HOW-MUCH closure plan the web card reads -- never a
+	          // second, independently derived PDF-only plan.
+	          const marketControllingClosurePlan = resolveMarketIntelligenceControllingClosurePlan(
+	            marketIntelligenceCanonicalState,
+	            marketRecommendationValidations,
+	            pdfLocale === "tr" ? "Turkish" : "English"
+	          );
 
 	          if (marketGapDrivenActions.length > 0) {
 	            const gapsLabel = pdfLocale === "tr" ? "Kapatılması Gereken Kanıt Boşlukları" : "Evidence Gaps to Close";
@@ -10606,6 +10667,10 @@ const ReportPanel = memo(function ReportPanel({
 	            const enterIfLabel = pdfLocale === "tr" ? "GİR EĞER" : "ENTER IF";
 	            const monitorIfLabel = pdfLocale === "tr" ? "İZLE EĞER" : "MONITOR IF";
 	            const avoidIfLabel = pdfLocale === "tr" ? "KAÇIN EĞER" : "AVOID IF";
+	            const closurePlanLabel = pdfLocale === "tr" ? "KAPANIŞ PLANI" : "CLOSURE PLAN";
+	            const ownerLabel = pdfLocale === "tr" ? "Sorumlu" : "Owner";
+	            const timelineLabel = pdfLocale === "tr" ? "Zaman Çizelgesi" : "Timeline";
+	            const budgetLabel = pdfLocale === "tr" ? "Bütçe" : "Budget";
 	            // TASK #43 -- see ReportPdfButton.tsx's identical layout
 	            // function for the full comment. Every field in this row
 	            // (gap label, action, measurable result, decision
@@ -10625,6 +10690,14 @@ const ReportPanel = memo(function ReportPanel({
 	              const avoidIfText = isControllingGap
 	                ? marketControllingDecisionThreshold!.avoidSummary
 	                : gapAction.threshold.avoidCondition.description;
+	              // TASK #47 -- only the controlling gap ever has a closure
+	              // plan (resolveMarketIntelligenceControllingClosurePlan's
+	              // own single-controlling-gap gate) -- every other row's
+	              // layout is completely unaffected, exactly as before.
+	              const closurePlan =
+	                isControllingGap && marketControllingClosurePlan?.gapId === gapAction.gapId
+	                  ? marketControllingClosurePlan
+	                  : null;
 
 	              const previousFontSize = pdf.getFontSize();
 	              const lineHeight = 3.6;
@@ -10640,6 +10713,15 @@ const ReportPanel = memo(function ReportPanel({
 	              const enterLines = (pdf.splitTextToSize(`${enterIfLabel} — ${enterIfText}`, bodyWidth) as string[]).slice(0, 3);
 	              const monitorLines = (pdf.splitTextToSize(`${monitorIfLabel} — ${monitorIfText}`, bodyWidth) as string[]).slice(0, 3);
 	              const avoidLines = (pdf.splitTextToSize(`${avoidIfLabel} — ${avoidIfText}`, bodyWidth) as string[]).slice(0, 3);
+	              pdf.setFontSize(4.4);
+	              const closurePlanLines = closurePlan
+	                ? (pdf.splitTextToSize(
+	                    `${ownerLabel}: ${closurePlan.owner}   ${timelineLabel}: ${closurePlan.timeline}${
+	                      closurePlan.budget ? `   ${budgetLabel}: ${closurePlan.budget}` : ""
+	                    }`,
+	                    bodyWidth
+	                  ) as string[]).slice(0, 3)
+	                : [];
 	              pdf.setFontSize(previousFontSize);
 
 	              let cursor = 0;
@@ -10659,6 +10741,12 @@ const ReportPanel = memo(function ReportPanel({
 	              cursor += 4.4 + (monitorLines.length - 1) * lineHeight;
 	              const avoidY = cursor;
 	              cursor += 4.4 + (avoidLines.length - 1) * lineHeight;
+	              const closurePlanLabelY = cursor;
+	              const closurePlanY = cursor;
+	              if (closurePlanLines.length > 0) {
+	                cursor += 4.2;
+	                cursor += 4.4 + (closurePlanLines.length - 1) * lineHeight;
+	              }
 
 	              return {
 	                gapLabelLines,
@@ -10668,6 +10756,7 @@ const ReportPanel = memo(function ReportPanel({
 	                enterLines,
 	                monitorLines,
 	                avoidLines,
+	                closurePlanLines,
 	                gapLabelY,
 	                actionY,
 	                measurableResultY,
@@ -10676,6 +10765,8 @@ const ReportPanel = memo(function ReportPanel({
 	                enterY,
 	                monitorY,
 	                avoidY,
+	                closurePlanLabelY,
+	                closurePlanY: closurePlanY + 4.2,
 	                rowHeight: Math.max(36, cursor + 0.4),
 	              };
 	            };
@@ -10794,6 +10885,25 @@ const ReportPanel = memo(function ReportPanel({
 	                    lineHeightFactor: 1.15,
 	                    maxWidth: bodyWidth,
 	                  });
+
+	                  // TASK #47 -- the SAME authoritative closure plan the
+	                  // web Strategic Recommendations card renders
+	                  // (resolveMarketIntelligenceControllingClosurePlan) --
+	                  // only drawn for the controlling gap's row, and only
+	                  // ever grows the row when real owner/timeline/budget
+	                  // content exists.
+	                  if (rowLayout.closurePlanLines.length > 0) {
+	                    pdf.setFontSize(4.2);
+	                    pdf.setTextColor("#71717a");
+	                    pdf.text(closurePlanLabel, bodyX, rowY + rowLayout.closurePlanLabelY);
+
+	                    pdf.setFontSize(4.4);
+	                    pdf.setTextColor("#93c5fd");
+	                    pdf.text(rowLayout.closurePlanLines, bodyX, rowY + rowLayout.closurePlanY, {
+	                      lineHeightFactor: 1.15,
+	                      maxWidth: bodyWidth,
+	                    });
+	                  }
 	                });
 
 	              y += chunkCardHeight + 5;

@@ -1563,6 +1563,320 @@ export function resolveMarketIntelligenceControllingDecisionThreshold(
   };
 }
 
+// TASK #47 -- Make Market Intelligence evidence-gap closure actions
+// structurally executable and measurable.
+//
+// PROBLEM: Tasks #35-#39 already make every decision-critical evidence
+// gap structurally explained (WHAT/WHY) and its ENTER/MONITOR/AVOID
+// thresholds structurally derived (WHAT RESULT would change the
+// decision), but never state WHO owns closing the gap, BY WHEN, or AT
+// WHAT COST. Each Strategic Recommendation card independently carries
+// its OWN owner/timeline/budget (extractRecommendationSignals) -- and
+// because resolveLinkedEvidenceGap links EVERY "validation"/"pilot"
+// action to the sole controlling gap whenever exactly one exists, two or
+// more such cards could each claim to be closing the SAME gap with a
+// different owner, deadline, or budget, with nothing today reconciling
+// or even flagging that.
+//
+// FIX: resolveMarketIntelligenceControllingClosurePlan builds ONE
+// closure plan for the SAME single controlling gap
+// resolveMarketIntelligenceControllingDecisionThreshold already gates on
+// (null whenever 0 or 2+ material gaps are unresolved -- never guessing
+// which one is "the" plan, identical discipline to
+// controllingUnresolvedCondition/resolveLinkedEvidenceGap above).
+// requiredEvidence/validationMethod/decisionImpact and the measurable
+// success/monitor/failure criteria are pure aliases of data Tasks
+// #35-#39 already compute (the gap's own evidenceRequired/
+// validationMethod/decisionImpact, and the controlling threshold's own
+// enterSummary/monitorSummary/avoidSummary) -- zero new interpretation
+// logic, so this can never disagree with the "Evidence Gaps to Close"/
+// decision-threshold surfaces that already render those exact strings.
+//
+// owner/timeline/budget are populated from the SINGLE authoritative
+// recommendation card selectAuthoritativeClosurePlanValidation resolves
+// (Task #47A) -- either the lone card linking to this gap
+// (relatedEvidenceGapId, Task #38), or, when several link to the same
+// gap, whichever ONE of them is unambiguously the most complete
+// (non-empty owner, timeline, AND success criterion), never a guess
+// between two equally (in)complete conflicting cards. When no such
+// unique candidate exists, those fields fall back to an honest, single,
+// localized "not yet assigned" sentence rather than fabricating or
+// arbitrarily picking a winner between conflicting cards. Because
+// owner/timeline are lifted verbatim
+// from that ONE card's own already-extracted signals
+// (extractRecommendationSignals, unchanged) and budget carries the SAME
+// provenance suffix (verifiedEvidence/benchmarkDerived/planningAssumption/
+// validationTarget, Task #38) the card itself already displays, any
+// render surface that also shows that same card's own Owner/Timeline/
+// Budget fields is guaranteed -- by construction, not a second
+// reconciliation step -- to show identical text, so recommendation cards
+// and this closure plan can never structurally disagree.
+export type MarketIntelligenceEvidenceGapClosurePlan = {
+  gapId: MarketIntelligenceEvidenceGapId;
+  gapLabel: string;
+  affectedFactor: MarketIntelligenceDecisionFactor;
+  requiredEvidence: string;
+  validationMethod: string;
+  // Never empty -- always a real owner/timeline string, or the SAME
+  // localized "not yet assigned" sentence every render surface would
+  // otherwise have to word independently.
+  owner: string;
+  timeline: string;
+  // null only when no budget figure applies at all (no linked card, an
+  // ambiguous 2+-card link, or the sole linked card names no budget) --
+  // mirrors the existing recommendation-card convention of omitting an
+  // empty Budget field entirely rather than showing a blank one.
+  budget: string | null;
+  measurableSuccessCriterion: string;
+  monitorStatus: string;
+  failureCriterion: string;
+  decisionImpact: string;
+  // True only when exactly one recommendation card links to this gap --
+  // the sole case owner/timeline/budget are ever sourced from real card
+  // data rather than the shared fallback sentence.
+  hasAssignedOwner: boolean;
+};
+
+const CLOSURE_PLAN_NO_OWNER: Record<ResponseLanguage, string> = {
+  English: "Not yet assigned to a specific recommendation action.",
+  Turkish: "Henüz belirli bir öneri eylemine atanmadı.",
+  German: "Noch keiner bestimmten Empfehlungsaktion zugewiesen.",
+  French: "Pas encore attribué à une action de recommandation spécifique.",
+  Spanish: "Aún no asignado a una acción de recomendación específica.",
+};
+
+const CLOSURE_PLAN_NO_TIMELINE: Record<ResponseLanguage, string> = {
+  English: "No timeline committed yet.",
+  Turkish: "Henüz bir zaman çizelgesi belirlenmedi.",
+  German: "Noch kein Zeitrahmen festgelegt.",
+  French: "Aucun calendrier encore fixé.",
+  Spanish: "Aún no se ha fijado un cronograma.",
+};
+
+// TASK #47A -- confirmed live against the real report: Task #47's own
+// "exactly one linked candidate, else unassigned" rule was too
+// conservative. resolveLinkedEvidenceGap (Task #38) links EVERY
+// "validation"/"pilot" actionType recommendation to the sole controlling
+// gap whenever exactly one exists -- so a real report with several such
+// cards (e.g. "Pilot Recruitment" AND "Buyer Readiness Survey," both
+// validating Obtainable Share) always has 2+ linked candidates, which
+// Task #47 treated identically to a genuine conflict, always falling
+// back to "Not yet assigned" even though one candidate is obviously the
+// authoritative one.
+//
+// TASK #47B -- confirmed live against the REAL regenerated report: Task
+// #47A's own bar (owner AND timeline AND a non-empty successCriterion
+// STRING) still always fell back to "Not yet assigned," even with a
+// clearly dominant "Pilot Recruitment" card (Owner: Head of Commercial/
+// Partnerships, Timeline: 6 months) sitting right next to a clearly
+// weaker "Buyer Readiness Survey" card (owner only). Root cause:
+// successCriterion is literally an alias of signals.metric -- a
+// SEPARATELY labeled "Success criterion:"/"Success metric:" field
+// (report-presentation.ts) -- and this report style's real generation
+// prompt frequently names its validation target INSIDE the timeframe
+// itself ("6 months") rather than as a distinct metric string, leaving
+// successCriterion genuinely empty on the one card that structurally
+// IS the report's own validation target. classifyStrategicRecommendationValidation
+// (Task #38) already classifies that exact case correctly --
+// deriveStrategicRecommendationNumericBasis (market-intelligence-
+// canonical-state.ts) joins budget/metric/timeframe BEFORE testing for
+// a numeric figure, so a validation/pilot action's bare timeframe number
+// alone already earns it `provenance: "validationTarget"` -- but Task
+// #47A's selection bar never consulted that field, only the separate
+// (and, in the real report, empty) successCriterion string, so the
+// obviously-dominant "Pilot Recruitment" candidate silently failed to
+// qualify and the whole selection fell back to "unassigned" every time.
+//
+// FIX: split "is this candidate real enough to consider at all" from "is
+// it measurably a validation target." A candidate is only ever
+// considered when it carries a non-empty owner AND timeline (the two
+// fields the Closure Plan actually inherits, per requirement #6) --
+// still never fabricated. Among candidates that clear that bar, one that
+// ALSO carries a measurable target -- EITHER a distinct successCriterion
+// string, OR the SAME provenance classification (Task #38's own
+// verifiedEvidence/benchmarkDerived/planningAssumption/validationTarget)
+// already attached to its owner/timeline/budget figures -- outranks one
+// that carries neither. When exactly one candidate reaches the highest
+// tier reached by any candidate, it is unambiguously the strongest
+// action and becomes the authoritative source (requirement #6: one
+// source action, never a synthetic merge of several). When zero
+// candidates clear even the owner+timeline bar, or 2+ tie at the highest
+// tier, there is no safe, non-arbitrary way to choose one, so this
+// returns null and the caller falls back to the same honest "not yet
+// assigned" sentence as before (requirement #7: never guess). A lone
+// linked candidate (the exact case Task #47 already handled) is still
+// used regardless of completeness -- there is nothing else it could be
+// confused with.
+function scoreClosurePlanCandidate(validation: MarketIntelligenceRecommendationValidation): number | null {
+  if (!validation.owner.trim() || !validation.timeline.trim()) return null;
+  const hasMeasurableTarget = Boolean(validation.successCriterion.trim()) || validation.provenance === "validationTarget";
+  return hasMeasurableTarget ? 1 : 0;
+}
+
+// TASK #47C -- confirmed live against the REAL regenerated report: Task
+// #47A/#47B's own tie-breaking (falling back to "not yet assigned"
+// whenever 2+ candidates share the highest completeness score) turned
+// out to be the COMMON case, not the rare one, for exactly the report
+// type the Closure Plan matters most for. This report's own generation
+// prompt (app/lib/report-engine/prompts/market.ts) REQUIRES "First 90
+// Days" to name "exactly three concrete actions with owners" that are
+// "bounded and reversible (validation, research, or a small gated
+// pilot)" whenever the decision is anything short of a full ENTER -- so
+// a real MONITOR report routinely has 2-3 equally-complete validation/
+// pilot candidates (owner + timeline + a measurable target) simultaneously,
+// each addressing a DIFFERENT decision-critical pillar, not just the one
+// this ticket is asking about. Task #47B's scoring bar has no way to
+// distinguish "the action that targets Obtainable Share" from "an
+// equally complete action that targets Market Sizing or Competitive
+// Evidence instead" -- both score identically -- so it always abstained.
+//
+// This module already computes ONE genuinely structural, non-prose
+// signal that ties a SPECIFIC number to THIS SPECIFIC gap:
+// gap.successThreshold (Task #35's extractNamedSuccessThreshold) --
+// lifted verbatim from this report's OWN whatWouldChangeThisDecision
+// text, naming the exact percentage that would move Obtainable Share to
+// ENTER (e.g. "at least 10%"). A recommendation whose OWN successCriterion
+// names the SAME percentage figure is not a prose/keyword match -- it is
+// a NUMERIC equality check between two already-extracted figures, using
+// no vocabulary, gap name, or synonym list at all. When the gap names a
+// real threshold figure and EXACTLY ONE tied candidate's successCriterion
+// carries that same figure, it is unambiguously the action targeting
+// THIS gap and becomes the tiebreaker winner. When the gap names no
+// figure, or 0/2+ tied candidates share it, there remains no safe way to
+// choose, and the honest fallback is unchanged.
+const PERCENTAGE_FIGURE_PATTERN = /\d+(?:\.\d+)?\s?%/;
+
+function extractPercentageFigure(text: string): string | null {
+  const match = text.match(PERCENTAGE_FIGURE_PATTERN);
+  return match ? match[0].replace(/\s/g, "") : null;
+}
+
+function selectAuthoritativeClosurePlanValidation(
+  linkedValidations: readonly MarketIntelligenceRecommendationValidation[],
+  gapSuccessThreshold: string | null
+): MarketIntelligenceRecommendationValidation | null {
+  if (linkedValidations.length === 0) return null;
+  if (linkedValidations.length === 1) return linkedValidations[0];
+
+  const scoredCandidates = linkedValidations
+    .map((validation) => ({ validation, score: scoreClosurePlanCandidate(validation) }))
+    .filter((entry): entry is { validation: MarketIntelligenceRecommendationValidation; score: number } => entry.score !== null);
+  if (scoredCandidates.length === 0) return null;
+
+  const highestScore = Math.max(...scoredCandidates.map((entry) => entry.score));
+  const topCandidates = scoredCandidates.filter((entry) => entry.score === highestScore);
+  if (topCandidates.length === 1) return topCandidates[0].validation;
+
+  // TASK #47C -- numeric tiebreaker: never applied unless the gap itself
+  // names a real, report-stated percentage (never a fabricated bar), and
+  // only ever resolves when EXACTLY ONE tied candidate's own
+  // successCriterion carries that same figure.
+  const gapFigure = gapSuccessThreshold ? extractPercentageFigure(gapSuccessThreshold) : null;
+  if (!gapFigure) return null;
+  const numericMatches = topCandidates.filter(
+    (entry) => extractPercentageFigure(entry.validation.successCriterion) === gapFigure
+  );
+  return numericMatches.length === 1 ? numericMatches[0].validation : null;
+}
+
+// requirement #1: owner/timeline/budget, sourced ONLY from the single
+// authoritative candidate selectAuthoritativeClosurePlanValidation
+// resolves -- see that function's own comment, and this section's
+// top-of-file comment, for why an unresolved/ambiguous selection must
+// never be arbitrated between.
+function resolveClosurePlanAssignment(
+  linkedValidations: readonly MarketIntelligenceRecommendationValidation[],
+  gapSuccessThreshold: string | null,
+  language: ResponseLanguage
+): { owner: string; timeline: string; budget: string | null; hasAssignedOwner: boolean } {
+  const validation = selectAuthoritativeClosurePlanValidation(linkedValidations, gapSuccessThreshold);
+  if (!validation) {
+    return {
+      owner: CLOSURE_PLAN_NO_OWNER[language],
+      timeline: CLOSURE_PLAN_NO_TIMELINE[language],
+      budget: null,
+      hasAssignedOwner: false,
+    };
+  }
+
+  const owner = validation.owner.trim();
+  const timeline = validation.timeline.trim();
+  const budget = validation.budget.trim();
+  // Task #38's own provenance suffix -- reused verbatim, never a second,
+  // independently worded qualifier -- so "Planning Assumption"/
+  // "Validation Target" reads identically here and on the recommendation
+  // card it was lifted from.
+  const provenanceSuffix = validation.provenance
+    ? ` (${localizeRecommendationProvenance(validation.provenance, language)})`
+    : "";
+
+  return {
+    owner: owner || CLOSURE_PLAN_NO_OWNER[language],
+    timeline: timeline ? `${timeline}${provenanceSuffix}` : CLOSURE_PLAN_NO_TIMELINE[language],
+    budget: budget ? `${budget}${provenanceSuffix}` : null,
+    hasAssignedOwner: Boolean(owner),
+  };
+}
+
+// The single, canonical, structured closure plan every render surface
+// must read for a controlling evidence gap's WHO/WHEN/HOW-MUCH/WHAT-
+// COUNTS-AS-SUCCESS-OR-FAILURE fields (requirement #1). Resolves ONLY
+// for the SAME single-controlling-gap state
+// resolveMarketIntelligenceControllingDecisionThreshold already gates on
+// -- requirement #8's "multiple simultaneous material gaps do not cause
+// the system to arbitrarily invent a single closure plan" is satisfied
+// by construction here, not by a separate check, since this function
+// simply cannot produce a non-null result unless that shared gate
+// already resolved a single controlling gap.
+export function resolveMarketIntelligenceControllingClosurePlan(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[] = [],
+  language: ResponseLanguage = "English"
+): MarketIntelligenceEvidenceGapClosurePlan | null {
+  if (!canonicalState) return null;
+
+  const controllingThreshold = resolveMarketIntelligenceControllingDecisionThreshold(
+    canonicalState,
+    recommendationValidations,
+    language
+  );
+  if (!controllingThreshold) return null;
+
+  const gap = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).find(
+    (candidate) => candidate.id === controllingThreshold.gapId
+  );
+  // Structurally unreachable (controllingThreshold is itself derived from
+  // this same gap list), kept as a defensive guard rather than a
+  // non-null assertion.
+  if (!gap) return null;
+
+  const linkedValidations = recommendationValidations.filter(
+    (validation) => validation.relatedEvidenceGapId === gap.id
+  );
+  const assignment = resolveClosurePlanAssignment(linkedValidations, gap.successThreshold, language);
+
+  return {
+    gapId: gap.id,
+    gapLabel: gap.label,
+    affectedFactor: gap.decisionFactor as MarketIntelligenceDecisionFactor,
+    requiredEvidence: gap.evidenceRequired,
+    validationMethod: gap.validationMethod,
+    owner: assignment.owner,
+    timeline: assignment.timeline,
+    budget: assignment.budget,
+    // requirement #3: ENTER -> measurable successful validation, MONITOR
+    // -> unresolved/inconclusive validation, AVOID -> failed validation --
+    // aliased verbatim from the SAME controlling-threshold summaries
+    // Evidence Gaps to Close already renders as "ENTER IF"/"MONITOR IF"/
+    // "AVOID IF", never independently re-derived.
+    measurableSuccessCriterion: controllingThreshold.enterSummary,
+    monitorStatus: controllingThreshold.monitorSummary,
+    failureCriterion: controllingThreshold.avoidSummary,
+    decisionImpact: gap.decisionImpact,
+    hasAssignedOwner: assignment.hasAssignedOwner,
+  };
+}
+
 // TASK #40 -- Make Market Intelligence confidence scoring structurally
 // authoritative and explainable.
 //
