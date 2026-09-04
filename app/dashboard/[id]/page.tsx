@@ -44,6 +44,8 @@ import {
   readFounderReadinessScoreValue,
   resolveCagrHeadlinePresentation,
   deriveMarketSizeMetricEvidenceLevel,
+  parseMarketSizingMagnitude,
+  extractMarketSizingLayerValue,
   stripLeadingTakeawaySentence,
 } from "@/app/lib/report-presentation";
 import type {
@@ -269,137 +271,46 @@ function takeFirstListItem(value: string) {
   return firstLine || value.trim();
 }
 
-// CRITICAL FIX -- confirmed live: TAM/SAM/SOM's own deterministic
-// "Planning Estimate" backend (market-intelligence-graph.ts's
-// buildPlanningEstimate) writes each layer as "TAM [Estimated]: $2.4M" --
-// a bracketed classification tag sitting between the label and its colon
-// that extractMetricValue's generic "label immediately followed by a
-// colon" regex cannot see past. That silently read every Planning
-// Estimate report as if TAM/SAM/SOM had never been stated at all: the
-// card showed "Validation Needed" for a layer while the report's own text
-// plainly stated a dollar figure two words later. Tries the existing
-// "LABEL: value" extraction first (unchanged for the "verified figure"
-// shape), then falls back to a pattern that tolerates an optional
-// bracketed tag ([Estimated]/[Verified]/etc.) between the label and the
-// colon -- never a new calculation, purely reading past a formatting
-// detail the original regex didn't anticipate.
-function extractMarketSizeCardValue(content: string, label: string) {
-  const direct = extractMetricValueFromAliases(content, [label]);
-
-  if (direct) {
-    return direct;
-  }
-
-  // CRITICAL FIX -- confirmed live (second gap, beyond the [Estimated]
-  // bracket tag above): the model's own natural prose also writes
-  // "TAM (Total Addressable Market): USD 1.45B" -- a parenthetical
-  // expansion of the label sitting between it and the colon, which
-  // neither extractMetricValueFromAliases above nor the bracket-only
-  // fallback below could see past, so the card fell back to "Validation
-  // Needed" a second, different way even though the report's own text
-  // plainly stated the figure. Strips "**" first (the model sometimes
-  // bolds the label itself, e.g. "**TAM** (...)"), then tolerates an
-  // optional "(...)" label expansion in addition to the existing
-  // "[...]" tag, in either order.
-  //
-  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence research-
-  // quality failure, UI/PDF canonical-data divergence): this exact
-  // strategy is now also duplicated, verbatim in behavior, as the shared
-  // extractMarketSizingLayerValue (report-presentation.ts) -- see that
-  // function's own PARITY test for the proof the two stay identical.
-  // Left as page.tsx's own copy (rather than delegated) to avoid
-  // touching this file's extensively drift-tested internals; only
-  // ReportPdfButton.tsx's independently-diverging extractor was the
-  // actual source of the reported inconsistency and now calls the
-  // shared function directly.
-  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = content
-    .replace(/\*\*/g, "")
-    .match(
-      new RegExp(`\\b${escapedLabel}\\b\\s*(?:\\([^)\\n]{0,80}\\)\\s*)?(?:\\[[^\\]\\n]{0,40}\\]\\s*)?[:\\-–—]\\s*([^\\n]*)`, "i")
-    );
-
-  return match?.[1]?.trim().replace(/\*\*/g, "") || "";
+// TASK #58 -- this function used to carry its own two-step extraction
+// (a boundary-aware "LABEL: value" grab via extractMetricValueFromAliases,
+// then a bracket/paren-tolerant fallback regex) that was, per its own
+// prior comment, "verbatim in behavior" to report-presentation.ts's
+// extractMarketSizingLayerValue -- a second, independently-maintained
+// copy of the exact same rule, kept only because ReportPdfButton.tsx's
+// independently-DIVERGING copy (already fixed) was the sole reported
+// symptom at the time. Two real gaps existed here that the canonical
+// function does not have: (1) neither of this function's own regexes
+// anchored the label with a `\b` word boundary, so (unlike the
+// canonical extractor) a company/product name that happens to END in
+// "TAM"/"SAM"/"SOM" could in principle be mistaken for the label; (2)
+// neither separator class included "≈"/"~", so a Planning Estimate
+// written as "TAM (...) ≈ €200-800 million" (a real, confirmed-live
+// report shape -- see the canonical function's own comment) silently
+// fell through to "Validation Needed" here even though ReportPdfButton.tsx
+// and the shared extractor both resolve it correctly. Now a pure
+// delegation to that one canonical, already-battle-tested
+// implementation -- extractMetricValueFromAliases (the general-purpose,
+// non-TAM-specific label extractor used report-wide for every OTHER
+// field) is untouched and still used everywhere else in this file.
+function extractMarketSizeCardValue(content: string, label: "TAM" | "SAM" | "SOM") {
+  return extractMarketSizingLayerValue(content, label);
 }
 
-// CRITICAL FIX -- do not reintroduce old fake-data behavior. TAM/SAM/SOM's
-// bar widths were static, hardcoded percentages (100%/62%/28%) --
-// identical for every report regardless of the actual figures -- rather
-// than reflecting the real relationship between the three values. This
-// parses the extracted value's number and unit (K/M/B/T or a spelled-out
-// word) into a comparable magnitude so bar widths can be computed from
-// what the report actually says.
-//
-// CRITICAL FIX -- confirmed live (root-cause pipeline repair): a range
-// ("$2.1-2.8 billion") used to take its FIRST bound with a unit token
-// required immediately adjacent to that first number -- since a shared
-// trailing unit sits next to the SECOND number in this phrasing, the
-// first number parsed with NO unit at all (e.g. magnitude 2.1 instead of
-// 2,100,000,000). That silently broke the TAM >= SAM >= SOM nesting check
-// against a correctly-parsed sibling layer, showing "Additional market
-// validation is required" even though the report's own text was a
-// complete, internally consistent, evidence-labeled estimate -- not a
-// data problem, a parsing bug. Now takes the LAST number+unit found
-// (matching the already-correct parseMarketSizeMagnitude used by the PDF
-// exports/Planner.tsx for the identical field), which correctly resolves
-// a shared trailing unit. Also matches the full unit word first so
-// "thousand"/"trillion" (both starting with "t") can no longer collide.
-// CRITICAL FIX (Task #21) -- confirmed live against a REAL report: a
-// value string like "USD 1.5 billion (U.S., 2024 baseline...) [R12]."
-// carries a trailing citation tag ("R12") that is itself a bare,
-// unit-less number -- the prior "always take the LAST match" rule
-// (Task #19's own fix, for genuine ranges like "$2.1-2.8 billion" where
-// the upper bound is the correct figure to use) picked up "12" instead
-// of "1.5 billion", silently corrupting the parsed magnitude used by
-// this section's own TAM/SAM/SOM nesting check (SAM <= TAM, SOM <= SAM)
-// -- exactly the kind of "mathematically reproducible" failure this
-// ticket's audit specifically targets. A citation ID or a bare year
-// (e.g. "2024") is unit-less; a real monetary figure in this field
-// always carries an explicit scale word (thousand/million/billion/
-// trillion/k/m/b/t). Preferring the LAST match that DOES carry a unit --
-// falling back to the last bare number only when no unit-suffixed match
-// exists at all -- keeps Task #19's own range-upper-bound behavior
-// completely intact while no longer mistaking a trailing citation tag or
-// year for the monetary value itself.
-//
-// SECOND, MORE SEVERE BUG found while verifying the fix above against
-// this exact report's real text: without a trailing word-boundary, the
-// single-letter unit shortcuts ([kKmMbBtT]) matched the FIRST LETTER of
-// any adjacent word, not just a standalone abbreviation -- "2024
-// baseline" read as "2024" + "b" (from "baseline") = 2024 BILLION.
-// Requiring \b immediately after each unit token means a single-letter
-// shortcut only matches when it is a complete token on its own (a real
-// "50k"/"$3 B" abbreviation), never the opening letter of a longer word
-// -- verified this does not regress "50k" (no space) or "$3 B market"
-// (space before an unrelated word), and correctly ignores an orphaned
-// unit word with no adjacent number at all (e.g. "...in a
-// trillion-dollar economy" contributes nothing, since the numeric
-// capture group is not optional).
+// TASK #57 -- this file's own local parseMonetaryMagnitude (parsed the
+// extracted TAM/SAM/SOM value's number and unit -- K/M/B/T or a spelled-
+// out word -- into a comparable magnitude so bar widths reflect the
+// report's real figures, not a static hardcoded percentage) was
+// functionally near-identical to report-presentation.ts's
+// parseMarketSizingMagnitude, but a second, independently-maintained
+// copy of the identical parsing rule all the same -- exactly the
+// structural risk that let Planner.tsx's own copy silently drift into a
+// genuine ~1000x-2000x magnitude bug (Task #56's audit). Now a pure
+// delegation to that shared canonical parser -- this wrapper carries
+// zero parsing logic of its own and can never again drift from it. Kept
+// as a thin, same-named wrapper (rather than renaming every call site)
+// purely so every existing caller below keeps reading identically.
 function parseMonetaryMagnitude(value: string) {
-  const matches = [
-    ...(value || "").matchAll(/([\d.,]+)\s*(thousand\b|million\b|billion\b|trillion\b|[kKmMbBtT]\b)?/g),
-  ].filter((candidate) => candidate[1] && Number.isFinite(parseFloat(candidate[1].replace(/,/g, ""))));
-  const unitMatches = matches.filter((candidate) => candidate[2]);
-  const last = unitMatches.length > 0 ? unitMatches.at(-1) : matches.at(-1);
-
-  if (!last) {
-    return null;
-  }
-
-  const num = parseFloat(last[1].replace(/,/g, ""));
-  const unit = (last[2] || "").toLowerCase();
-  const multiplier =
-    unit === "k" || unit === "thousand"
-      ? 1e3
-      : unit === "m" || unit === "million"
-        ? 1e6
-        : unit === "b" || unit === "billion"
-          ? 1e9
-          : unit === "t" || unit === "trillion"
-            ? 1e12
-            : 1;
-
-  return num * multiplier;
+  return parseMarketSizingMagnitude(value);
 }
 
 // tamSamSom's own prompt requires a "named scaling assumption" and
@@ -2571,7 +2482,7 @@ function ReportSectionVisual({
     // widths used to be static, hardcoded percentages (100%/62%/28%) --
     // identical for every report regardless of the real figures. Widths
     // are now computed from each bar's own extracted value (via
-    // parseMonetaryMagnitude), scaled relative to the largest of the
+    // parseMarketSizingMagnitude), scaled relative to the largest of the
     // three -- TAM is expected to be the largest by definition, so it
     // naturally lands near 100% while SAM/SOM reflect their real,
     // reported proportion of it. A bar with no extractable value shows

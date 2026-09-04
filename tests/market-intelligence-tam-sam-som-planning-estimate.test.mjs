@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { extractMarketSizingLayerValue } from "../app/lib/report-presentation.ts";
+import { extractMarketSizingLayerValue, shapeMarketSizeDisplayValue } from "../app/lib/report-presentation.ts";
 
 const routeSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
 const graphSource = readFileSync("app/lib/ai/market-intelligence-graph.ts", "utf8");
@@ -62,11 +62,13 @@ test("extractMarketSizeVisualValue recognizes a value embedded in prose, not jus
     "normalizePdfText",
     "escapeRegExp",
     "extractMarketSizingLayerValue",
+    "shapeMarketSizeDisplayValue",
     `${[jsSignature, ...rest].join("\n")}\nreturn extractMarketSizeVisualValue;`
   )(
     (value) => value,
     (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-    extractMarketSizingLayerValue
+    extractMarketSizingLayerValue,
+    shapeMarketSizeDisplayValue
   );
 
   // Reproduces a real, live-observed defect: a genuine, correctly nested
@@ -94,11 +96,13 @@ test("extractMarketSizeVisualValue still matches the original dedicated-line sha
     "normalizePdfText",
     "escapeRegExp",
     "extractMarketSizingLayerValue",
+    "shapeMarketSizeDisplayValue",
     `${[jsSignature, ...rest].join("\n")}\nreturn extractMarketSizeVisualValue;`
   )(
     (value) => value,
     (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-    extractMarketSizingLayerValue
+    extractMarketSizingLayerValue,
+    shapeMarketSizeDisplayValue
   );
 
   const content = "TAM: $2.1B\nSAM: $800M\nSOM: $120M";
@@ -117,11 +121,13 @@ test("extractMarketSizeVisualValue does not match a bare label mention with no v
     "normalizePdfText",
     "escapeRegExp",
     "extractMarketSizingLayerValue",
+    "shapeMarketSizeDisplayValue",
     `${[jsSignature, ...rest].join("\n")}\nreturn extractMarketSizeVisualValue;`
   )(
     (value) => value,
     (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-    extractMarketSizingLayerValue
+    extractMarketSizingLayerValue,
+    shapeMarketSizeDisplayValue
   );
 
   assert.equal(fn("TAM / SAM / SOM\nCould not be calculated.", "TAM"), "");

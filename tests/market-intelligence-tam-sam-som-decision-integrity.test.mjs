@@ -367,9 +367,19 @@ async function compileFunctionFromFile(source, functionName) {
   } while (braceDepth > 0);
   const raw = source.slice(start, i);
 
+  // TASK #57 -- page.tsx's parseMonetaryMagnitude and Planner.tsx's
+  // parseMarketSizeMagnitude are now both thin delegations to the
+  // shared, canonical parseMarketSizingMagnitude (report-presentation.ts)
+  // rather than independent copies -- imported by absolute path so an
+  // extracted, standalone-compiled function has the real dependency
+  // available. Harmless/unused for any OTHER extracted function.
+  const canonicalMagnitudeImport = `import { parseMarketSizingMagnitude } from ${JSON.stringify(
+    pathToFileURL(join(process.cwd(), "app/lib/report-presentation.ts")).href
+  )};\n`;
+
   const dir = mkdtempSync(join(tmpdir(), "zerinix-magnitude-parse-"));
   const outPath = join(dir, "extract.mts");
-  writeFileSync(outPath, `${raw}\nexport { ${functionName} };\n`);
+  writeFileSync(outPath, `${canonicalMagnitudeImport}${raw}\nexport { ${functionName} };\n`);
   const mod = await import(pathToFileURL(outPath).href);
   return mod[functionName];
 }

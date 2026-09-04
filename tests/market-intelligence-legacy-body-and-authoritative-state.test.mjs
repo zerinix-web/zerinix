@@ -167,29 +167,51 @@ for (const [label, source] of [
   ["page.tsx", pageSource],
   ["Planner.tsx", plannerSource],
 ]) {
-  test(`${label}: extractMarketSize${label === "page.tsx" ? "CardValue" : "Value"} tolerates an optional "(...)" label expansion in addition to the existing "[...]" tag`, () => {
-    const fnName = label === "page.tsx" ? "extractMarketSizeCardValue" : "extractMarketSizeValue";
+  // TASK #58 -- both extractMarketSizeCardValue (page.tsx) and
+  // extractMarketSizeValue (Planner.tsx) used to carry their own copy of
+  // this exact "(...)" -then- "[...]" tolerant regex -- the "(...)" /
+  // "[...]" group ordering this test used to check for directly in each
+  // file's own source. Both are now pure delegations (for their raw-
+  // capture step) to the shared, canonical extractMarketSizingLayerValue
+  // (report-presentation.ts), which itself carries the identical
+  // "(...)" -then- "[...]" tolerance (see its own "withTag" fallback) --
+  // so there is no longer a second copy of this regex in either file to
+  // check independently. Updated to prove the delegation itself.
+  const fnName = label === "page.tsx" ? "extractMarketSizeCardValue" : "extractMarketSizeValue";
+  test(`${label}: ${fnName} delegates its raw-value capture to the canonical extractMarketSizingLayerValue (which itself tolerates an optional "(...)" label expansion in addition to the existing "[...]" tag) -- no independent copy of this extraction rule is left in this file`, () => {
+    assert.match(source, new RegExp(`\\bextractMarketSizingLayerValue\\(`), `${fnName} must call the canonical extractor`);
     const fnMatch = source.match(new RegExp(`function ${fnName}\\([\\s\\S]*?\\n\\}`));
     assert.ok(fnMatch, `${fnName} not found`);
-    const fn = fnMatch[0];
-    // A bounded "(...)" group (0-80 chars, no newline) immediately followed
-    // by the existing "[...]" tag group, both optional, both before the
-    // separator -- proves the parenthetical tolerance sits alongside the
-    // bracket tolerance without hand-typing the doubly-escaped regex text.
-    assert.ok(fn.includes("0,80"), "expected a bounded optional parenthetical group");
-    assert.ok(fn.includes("0,40"), "expected the existing bounded optional bracket group");
-    const parenIndex = fn.indexOf("0,80");
-    const bracketIndex = fn.indexOf("0,40");
-    assert.ok(parenIndex >= 0 && bracketIndex > parenIndex, "expected the parenthetical group before the bracket group");
+    assert.ok(
+      !fnMatch[0].includes("0,80") && !fnMatch[0].includes("0,40"),
+      `${fnName} must carry zero independent parenthetical/bracket-tolerance regex logic of its own`
+    );
   });
 }
 
-test("ReportPdfButton.tsx: extractMarketSizeVisualValue's singleBound now also accepts a 3-letter currency CODE (USD/EUR/GBP/TRY/CAD/AUD/CHF/JPY) alongside the existing symbols, in both bounds of a range", () => {
+// TASK #59 -- this exact regex (singleBound/currencyToken, including its
+// 3-letter currency CODE support) was promoted from ReportPdfButton.tsx's
+// own extractMarketSizeVisualValue into report-presentation.ts's shared
+// shapeMarketSizeDisplayValue, so both ReportPdfButton.tsx and
+// Planner.tsx's extractMarketSizeValue can use the identical, already-
+// correct pattern instead of Planner.tsx's own divergent compactPdfMetricValue
+// copy. Updated to check the shared function's new home rather than
+// ReportPdfButton.tsx's own source, which no longer contains this regex
+// at all (a pure delegation now, see the H2/STRUCTURAL test in
+// task59-market-size-display-normalization-unification.test.mjs for the
+// delegation proof).
+// TASK #60 -- "TL" (the common Turkish Lira abbreviation, distinct from
+// the ISO "TRY" code) added to this same currencyToken alongside the
+// existing symbols/codes -- updated to match.
+test("report-presentation.ts: the canonical shapeMarketSizeDisplayValue's singleBound accepts a 3-letter currency CODE (USD/EUR/GBP/TRY/CAD/AUD/CHF/JPY) alongside the existing symbols, in both bounds of a range", () => {
+  const reportPresentationSource = readFileSync(new URL("../app/lib/report-presentation.ts", import.meta.url), "utf8");
   assert.match(
-    pdfButtonSource,
-    /const currencyToken = "\(\?:\[€\$₺\]\|\(\?:USD\|EUR\|GBP\|TRY\|CAD\|AUD\|CHF\|JPY\)\\\\b\)";/
+    reportPresentationSource,
+    /const currencyToken = "\(\?:\[€\$₺\]\|\(\?:USD\|EUR\|GBP\|TRY\|CAD\|AUD\|CHF\|JPY\|TL\)\\\\b\)";/
   );
-  const occurrences = pdfButtonSource.match(/currencyToken/g) || [];
+  const fnMatch = reportPresentationSource.match(/export function shapeMarketSizeDisplayValue\([\s\S]*?\n\}/);
+  assert.ok(fnMatch, "shapeMarketSizeDisplayValue not found");
+  const occurrences = fnMatch[0].match(/currencyToken/g) || [];
   // Declaration + use in singleBound + use in valuePattern's own second-
   // bound group (singleBound itself is referenced twice via ${singleBound}
   // interpolation, which doesn't re-print the literal token "currencyToken").

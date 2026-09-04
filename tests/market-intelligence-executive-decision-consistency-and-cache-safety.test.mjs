@@ -110,8 +110,15 @@ const plannerHeader = `import { normalizePdfText } from ${JSON.stringify(
 // canonical parseMarketSizingMagnitude (report-presentation.ts) rather
 // than an independent copy -- imported by absolute path so the compiled
 // bundle has the real dependency available, the same pattern plannerHeader
-// already uses above. Harmless (unused) for Planner.tsx's own compiled
-// bundle, which still has its own full, independent implementation.
+// already uses above.
+//
+// TASK #57 -- page.tsx's parseMonetaryMagnitude and Planner.tsx's
+// parseMarketSizeMagnitude are now ALSO thin delegations to this same
+// canonical parser (Task #56's audit found Planner.tsx's own prior
+// independent copy silently mis-parsed comma-grouped figures by up to
+// ~2000x) -- this header must be passed for any compiled bundle
+// extracting either of those two functions now, not just
+// ReportPdfButton.tsx's.
 const canonicalMagnitudeHeader = `import { parseMarketSizingMagnitude } from ${JSON.stringify(
   pathToFileURL(join(process.cwd(), "app/lib/report-presentation.ts")).href
 )};\n\n`;
@@ -287,10 +294,14 @@ for (const [label, source] of [
 }
 
 test("page.tsx: parseMonetaryMagnitude (the reference implementation these two files now mirror) agrees with the newly-fixed Planner.tsx/ReportPdfButton.tsx on the same spelled-out-unit input -- cross-surface agreement, not just an internal fix", async () => {
-  const { parseMonetaryMagnitude } = await compileFunctions(pageSource, ["parseMonetaryMagnitude"]);
-  const { parseMarketSizeMagnitude: plannerParse } = await compileFunctions(plannerSource, [
-    "parseMarketSizeMagnitude",
-  ]);
+  const { parseMonetaryMagnitude } = await compileFunctions(pageSource, ["parseMonetaryMagnitude"], {
+    header: canonicalMagnitudeHeader,
+  });
+  const { parseMarketSizeMagnitude: plannerParse } = await compileFunctions(
+    plannerSource,
+    ["parseMarketSizeMagnitude"],
+    { header: canonicalMagnitudeHeader }
+  );
   const { parseMarketSizeMagnitude: pdfParse } = await compileFunctions(pdfButtonSource, ["parseMarketSizeMagnitude"], {
     header: canonicalMagnitudeHeader,
   });

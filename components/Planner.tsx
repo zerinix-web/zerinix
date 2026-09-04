@@ -70,6 +70,9 @@ import {
   readFounderReadinessMetricValue,
   readFounderReadinessScoreValue,
   resolveMarketSizingCascade,
+  parseMarketSizingMagnitude,
+  extractMarketSizingLayerValue,
+  shapeMarketSizeDisplayValue,
   deriveMarketSizeMetricEvidenceLevel,
   protectSentenceAbbreviations,
   restoreSentenceAbbreviations,
@@ -1696,7 +1699,7 @@ function extractMeaningfulBullets(content: string, limit = 4) {
     .slice(0, limit);
 }
 
-function extractMarketLevelDescription(content: string, label: string) {
+function extractMarketLevelDescription(content: string, label: "TAM" | "SAM" | "SOM") {
   const value = extractMarketSizeValue(content, label);
   const snippet = extractSectionSnippet(content, label) || extractKeywordInsight(content, [label]);
   const description = snippet
@@ -2839,93 +2842,82 @@ function EvidenceBadge({
 // chart never disagree on what counts as a meaningful value.
 function isMarketSizeValueMeaningful(value: string) {
   if (!value.trim()) return false;
-  return /[$€₺%]|\d\s*[kKmMbBtT]\b|\b(?:milyon|milyar|bin|thousand|million|billion|trillion)\b/i.test(
+  // TASK #60 -- trilyon added alongside the existing Turkish aliases,
+  // matching parseMarketSizingMagnitude's own unit table. "TL" added
+  // alongside the existing "₺" symbol: normalizePdfText (this same
+  // caller's own pre-processing step, see extractMarketSizeValue)
+  // substitutes the Turkish Lira SYMBOL with the ASCII-safe "TL" prefix
+  // before this gate ever runs (the embedded PDF font has no glyph for
+  // it) -- without this, a ₺-only Turkish value with no other
+  // unit/currency word would fail this meaningful-check purely because
+  // its own currency indicator had already been rewritten to a word
+  // this regex didn't yet recognize.
+  return /[$€₺%]|\bTL\b|\d\s*[kKmMbBtT]\b|\b(?:milyon|milyar|bin|trilyon|thousand|million|billion|trillion)\b/i.test(
     value
   );
 }
 
-function extractMarketSizeValue(content: string, label: string) {
-  const escapedLabel = escapeRegExp(label);
-  // CRITICAL FIX -- confirmed live: market-intelligence-graph.ts's own
-  // deterministic "Planning Estimate" backend writes each layer as
-  // "TAM [Estimated]: $2.4M" -- a bracketed classification tag sitting
-  // between the label and its value that this regex previously could not
-  // see past (it required the value immediately after an optional
-  // colon), silently reading such reports as if TAM/SAM/SOM had never
-  // been stated -- the chart showed "Validation Needed" for a layer while
-  // the report's own text plainly stated a dollar figure two words later.
-  //
-  // CRITICAL FIX -- confirmed live (second gap): the model's own natural
-  // prose also writes "TAM (Total Addressable Market): USD 1.45B" -- a
-  // parenthetical expansion of the label, and a 3-letter currency CODE
-  // (USD/EUR/...) instead of a symbol -- neither of which the old narrow
-  // "value must start immediately after the colon with an optional
-  // symbol" pattern could match, so it fell through to the same
-  // "Validation Needed" state a second, different way. Now tolerates an
-  // optional "(...)" label expansion (in addition to the existing
-  // "[...]" tag), and captures the REST of the line rather than trying to
-  // enumerate every currency notation up front -- compactPdfMetricValue
-  // (unchanged) still does the actual numeric narrowing below, exactly as
-  // it already did for the extractMetricValue fallback path.
-  const direct = normalizePdfText(content)
-    .replace(/\*\*/g, "")
-    .match(
-      new RegExp(`\\b${escapedLabel}\\b\\s*(?:\\([^)\\n]{0,80}\\)\\s*)?(?:\\[[^\\]\\n]{0,40}\\]\\s*)?[:\\-–—]\\s*([^\\n]*)`, "i")
-    )?.[1];
-
-  const value = compactPdfMetricValue(direct || extractMetricValue(content, label));
+// TASK #58 -- this file's own "direct" raw-extraction regex (a single,
+// unbounded-lookahead "LABEL: rest of line" grab, with no `\b` word
+// boundary on the label and no tolerance for the "≈"/"~" approximation
+// separator a real Planning Estimate can use) was a second, independently-
+// maintained copy of the same rule report-presentation.ts's
+// extractMarketSizingLayerValue already implements more completely
+// (word-boundary-anchored label, a boundary-aware first pass that stops
+// at the next field/keyword rather than swallowing the rest of the
+// line, and "≈"/"~" separator support) -- exactly the class of risk
+// Task #57's audit flagged. Now delegates raw-value capture to that one
+// canonical function (pre-normalized via normalizePdfText first, the
+// same convention ReportPdfButton.tsx's own delegating
+// extractMarketSizeVisualValue already uses).
+//
+// TASK #59 -- confirmed live: the NEXT step here, compactPdfMetricValue,
+// is a general-purpose display-narrowing function shared by every OTHER
+// metric card in this file (ARR/CAC/budgets/etc, left completely
+// untouched) whose unit vocabulary is single-letter-only ([kKmMbB%]).
+// Its own "collapse a space before a trailing unit letter" cleanup pass
+// has no trailing word boundary, so it matches the bare letter 'm'/'b'
+// EMBEDDED inside a spelled-out "million"/"billion" and collapses the
+// space in front of it -- "18 million" silently became "18million",
+// which its numeric-shape regex then misread as "18" + shorthand unit
+// "m" (only an accident of coincidence that "18m" still denotes 18
+// million). "18 thousand" has no such accidental letter to absorb ('t'
+// is not a recognized shorthand) and simply lost its unit outright,
+// compacting to a bare, unscaled "18" -- a genuine, silent 1000x-
+// looking scale loss, confirmed live by this task's own investigation.
+// Now shapes through report-presentation.ts's shared
+// shapeMarketSizeDisplayValue instead -- the SAME already-correct,
+// spelled-out-unit-aware pattern ReportPdfButton.tsx's
+// extractMarketSizeVisualValue already used -- so a value phrased
+// either way narrows to a real, correctly-scaled display string. The
+// isMarketSizeValueMeaningful gate itself already recognized spelled-out
+// units (it was never the source of this bug) and is unchanged.
+function extractMarketSizeValue(content: string, label: "TAM" | "SAM" | "SOM") {
+  const direct = extractMarketSizingLayerValue(normalizePdfText(content), label);
+  const value = shapeMarketSizeDisplayValue(direct || extractMetricValue(content, label));
 
   return isMarketSizeValueMeaningful(value) ? value : "";
 }
 
-// TAM/SAM/SOM values are ranges by design ("$2.1-2.8B"), so the
-// magnitude used for chart scaling is the upper bound of the range --
-// the last number+unit found in the string, not the first.
-//
-// CRITICAL FIX -- confirmed live (cross-surface audit): this only matched
-// a single-letter unit ([kKmMbBtT]), so a spelled-out "thousand" matched
-// just its leading "t" and was read as TRILLION -- a billion-fold
-// misparse ("$200 thousand" -> 200,000,000,000,000 instead of 200,000).
-// page.tsx's parseMonetaryMagnitude already tries the full unit word
-// first for exactly this reason (thousand/trillion both start with "t");
-// mirrored here so the dashboard, Planner, and exported PDF can never
-// disagree on a TAM/SAM/SOM layer's resolved/nested state -- or the
-// "Data Confirmed" evidence badge derived from it -- purely because one
-// surface used a narrower unit parser than another.
-// CRITICAL FIX (Task #21) -- see page.tsx's own identical
-// parseMonetaryMagnitude for the full rationale: a trailing citation tag
-// ("[R12]") or bare year is itself an unmarked number that "always take
-// the LAST match" could mistake for the actual monetary figure.
-// Preferring the last match that carries an explicit scale unit --
-// falling back to the last bare number only when none exists -- keeps
-// the established range-upper-bound behavior intact while no longer
-// picking up a citation tag or year as the value itself. A trailing \b
-// on every unit token (including the single-letter shortcuts) further
-// prevents a bare number immediately followed by an unrelated word from
-// being misread through that word's own first letter (e.g. "2024
-// baseline" must never parse as "2024 billion").
+// TASK #57 -- this file previously carried its OWN independent
+// parseMarketSizeMagnitude implementation with a broken number-capture
+// group (\d+(?:[.,]\d+)? -- only ONE optional decimal/thousands group)
+// and a non-global comma-to-period replace, which silently mis-parsed
+// any comma-grouped figure with more than one comma ("$1,234,567" ->
+// 567, "40,000" -> 40) -- a ~1000x-2000x magnitude corruption Task #56's
+// audit confirmed reproducible, affecting both this file's own web
+// TAM/SAM/SOM cascade below and its own PDF concentric-circle drawing.
+// Now a pure delegation to report-presentation.ts's
+// parseMarketSizingMagnitude -- the same canonical parser
+// ReportPdfButton.tsx already delegates to and
+// app/api/market-analysis/route.ts uses at generation time -- so there
+// is exactly ONE implementation of this parsing rule left in the
+// codebase; this wrapper carries zero parsing logic of its own and can
+// never again drift from it. Kept as a thin, same-named wrapper (rather
+// than renaming every call site) purely so every existing caller below
+// keeps reading identically.
 function parseMarketSizeMagnitude(value: string): number | null {
-  const matches = [...value.matchAll(/(\d+(?:[.,]\d+)?)\s*(thousand\b|million\b|billion\b|trillion\b|[kKmMbBtT]\b)?/gi)];
-  const unitMatches = matches.filter((candidate) => candidate[2]);
-  const last = unitMatches.length > 0 ? unitMatches.at(-1) : matches.at(-1);
-  if (!last) return null;
-
-  const numeric = Number(last[1].replace(",", "."));
-  if (!Number.isFinite(numeric) || numeric <= 0) return null;
-
-  const unit = (last[2] || "").toLowerCase();
-  const multiplier =
-    unit === "t" || unit === "trillion"
-      ? 1e12
-      : unit === "b" || unit === "billion"
-        ? 1e9
-        : unit === "m" || unit === "million"
-          ? 1e6
-          : unit === "k" || unit === "thousand"
-            ? 1e3
-            : 1;
-
-  return numeric * multiplier;
+  return parseMarketSizingMagnitude(value);
 }
 
 const tamSamSomBarLabels = ["TAM", "SAM", "SOM"] as const;
@@ -4799,8 +4791,8 @@ function PremiumSectionVisual({
     // never remove the visual component (this ticket's own explicit
     // requirement) -- match the exported PDF's own already-correct
     // treatment (see downloadPdf's own tamSamSom branch, which already
-    // uses parseMarketSizeMagnitude for real proportional sizing) -- the
-    // on-screen visual had drifted out of sync with it, still using a
+    // uses parseMarketSizingMagnitude for real proportional sizing) --
+    // the on-screen visual had drifted out of sync with it, still using a
     // static [100, 68, 36] bar-width array regardless of the real
     // figures. Each of TAM/SAM/SOM is now independent: a layer with a
     // real extractable value gets a real proportional bar (scaled

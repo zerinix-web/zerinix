@@ -134,14 +134,29 @@ test("reference: 'thousand' and 'trillion' (both starting with 't') no longer co
   assert.equal(parseMonetaryMagnitudeReference("£2.8 thousand"), 2800);
 });
 
-test("page.tsx: parseMonetaryMagnitude uses the LAST number+unit found (matchAll), matching the already-correct parseMarketSizeMagnitude used by the PDF exports/Planner.tsx for the identical field -- no longer the old first-match, unit-must-be-immediately-adjacent regex", () => {
+test("page.tsx: parseMonetaryMagnitude is now a pure delegation to the shared, canonical parseMarketSizingMagnitude (report-presentation.ts) -- TASK #57: no independent copy of this parsing rule is left in page.tsx to drift out of sync", () => {
   const fnMatch = pageSource.match(/function parseMonetaryMagnitude\(value: string\) \{[\s\S]*?\n\}/);
   assert.ok(fnMatch, "parseMonetaryMagnitude not found");
   const fn = fnMatch[0];
 
+  assert.match(fn, /return parseMarketSizingMagnitude\(value\);/);
+  assert.ok(!fn.includes(".matchAll("), "page.tsx's own copy must carry zero parsing logic -- matchAll belongs only to the shared parser now");
+});
+
+test("report-presentation.ts: parseMarketSizingMagnitude (the single parser page.tsx/Planner.tsx/ReportPdfButton.tsx all now delegate to) uses the LAST number+unit found (matchAll), not the old first-match, unit-must-be-immediately-adjacent regex", () => {
+  const sharedSource = readFileSync(new URL("../app/lib/report-presentation.ts", import.meta.url), "utf8");
+  const fnMatch = sharedSource.match(/export function parseMarketSizingMagnitude\(value: string\): number \| null \{[\s\S]*?\n\}/);
+  assert.ok(fnMatch, "parseMarketSizingMagnitude not found");
+  const fn = fnMatch[0];
+
   assert.ok(fn.includes(".matchAll("), "expected matchAll (every match), not the old single .match()");
   assert.ok(fn.includes(".at(-1)"), "expected the LAST match to be selected, not the first");
-  assert.ok(fn.includes("Number.isFinite(parseFloat("), "expected a finite-number guard on candidate matches");
+  // TASK #60 -- the finite-number guard now wraps normalizeMarketSizeNumberToken
+  // (which additionally handles Turkish decimal-comma/period-grouping
+  // normalization before parsing) rather than a bare parseFloat call
+  // directly -- still a genuine finite-number guard, just one layer
+  // removed from the raw parseFloat.
+  assert.ok(fn.includes("Number.isFinite(normalizeMarketSizeNumberToken("), "expected a finite-number guard on candidate matches");
 });
 
 test("page.tsx and Planner.tsx: extractHeadlineMonetaryValue now recognizes £ and common spelled-out currency codes (USD/EUR/GBP/...), not just €/$/₺ -- a correctly-sourced GBP or code-labeled figure no longer renders 'Validation Needed' purely due to notation", () => {

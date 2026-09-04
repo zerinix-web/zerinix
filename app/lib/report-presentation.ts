@@ -1573,22 +1573,96 @@ export function extractMarketSizingLayerValue(
 // shared across both bounds; the full unit word is tried before the
 // single-letter abbreviation so "thousand"/"trillion" (both starting
 // with "t") can never collide.
-// CRITICAL FIX (Task #21) -- see page.tsx's own identical parseMonetaryMagnitude
-// for the full rationale: a trailing citation tag ("[R12]") or bare year
-// is itself an unmarked number that the prior "always take the LAST
-// match" rule could mistake for the actual monetary figure. Preferring
-// the last match that carries an explicit scale unit -- falling back to
-// the last bare number only when none exists -- keeps the established
-// range-upper-bound behavior (e.g. "$2.1-2.8 billion") intact while no
-// longer picking up a citation tag or year as the value itself. A
-// trailing \b on every unit token (including the single-letter
+// CRITICAL FIX (Task #21) -- confirmed live against a REAL report: a
+// value string like "USD 1.5 billion (U.S., 2024 baseline...) [R12]."
+// carries a trailing citation tag ("R12") that is itself a bare,
+// unit-less number -- the prior "always take the LAST match" rule
+// (for genuine ranges like "$2.1-2.8 billion" where the upper bound is
+// the correct figure to use) picked up "12" instead of "1.5 billion",
+// silently corrupting the parsed magnitude used by TAM/SAM/SOM's own
+// nesting check (SAM <= TAM, SOM <= SAM). A citation ID or a bare year
+// is unit-less; a real monetary figure in this field always carries an
+// explicit scale word (thousand/million/billion/trillion/k/m/b/t).
+// Preferring the last match that carries an explicit scale unit --
+// falling back to the last bare number only when none exists -- keeps
+// the established range-upper-bound behavior (e.g. "$2.1-2.8 billion")
+// intact while no longer picking up a citation tag or year as the value
+// itself. A trailing \b on every unit token (including the single-letter
 // shortcuts) additionally prevents a bare number immediately followed by
 // an unrelated word from being misread through that word's own first
 // letter (e.g. "2024 baseline" must never parse as "2024 billion").
+//
+// TASK #57 -- this is now the SINGLE parser for TAM/SAM/SOM magnitude
+// across every surface: ReportPdfButton.tsx delegates to it directly,
+// and page.tsx/Planner.tsx (which each carried their own independently-
+// maintained copy -- page.tsx's an exact behavioral match, Planner.tsx's
+// a genuinely broken one with a single-group number-capture regex and a
+// non-global comma replace that silently shrank comma-grouped figures
+// like "$1,234,567" down to "567") now import and call this function
+// directly. No render surface may reimplement this parsing rule again.
+//
+// TASK #60 -- confirmed live: a Turkish-language report's spelled-out
+// magnitude words ("bin"/"milyon"/"milyar"/"trilyon") were not in the
+// unit alternation at all, so "200 milyon" matched as a BARE number
+// with no recognized unit -- worse than failing to parse, it silently
+// returned 200 (not null), a genuine, un-flagged 1,000,000x scale loss
+// masquerading as a valid resolved figure. Turkish aliases are added to
+// the SAME unit alternation and multiplier table English words already
+// use -- never a second parser, never a language-specific code path.
+//
+// A second, related gap surfaced alongside it: Turkish numeric
+// convention swaps the roles of "," and "." from English (comma is the
+// DECIMAL separator, period is the THOUSANDS separator) -- "1,2 milyar"
+// means 1.2 billion, not 12 billion, and "1.250.000" means 1,250,000,
+// not 1.25. Two narrowly-scoped, unambiguous normalizations handle
+// this without a general locale heuristic that could misread an
+// ordinary English figure:
+//   (a) a number token shaped as 2-or-more period-separated groups of
+//       EXACTLY 3 digits ("1.250.000", "18.000.000") can never be a
+//       legitimate decimal number under ANY standard notation (a real
+//       decimal has at most one decimal point) -- structurally
+//       unambiguous, so its periods are always thousands separators,
+//       independent of language or unit.
+//   (b) a number token paired with a TURKISH unit word that contains
+//       EXACTLY ONE comma is read as a Turkish decimal separator (comma
+//       -> period) rather than stripped as an English thousands
+//       separator -- gated strictly on the Turkish unit word itself
+//       being the anchor that matched, so this can never reinterpret an
+//       English-unit or unit-less figure. Two-or-more commas alongside
+//       a Turkish unit is not a real Turkish numeral shape at all (that
+//       convention never repeats the decimal separator); the existing,
+//       comma-stripping behavior applies unchanged rather than guessing.
+// Any OTHER ambiguous shape (e.g. a single dot-plus-3-digits value with
+// no unit at all, which could legitimately be either "18.000" as an
+// English/Turkish-decimal 18.0 or a period-grouped 18,000) is
+// deliberately left exactly as the existing parser already treats it --
+// no new heuristic is introduced for a case this task was not asked to
+// resolve and cannot resolve safely without more context than the
+// figure itself provides.
+const marketSizeUnambiguousPeriodGroupingPattern = /^\d{1,3}(\.\d{3}){2,}$/;
+const turkishMarketSizeUnitWords = new Set(["bin", "milyon", "milyar", "trilyon"]);
+
+function normalizeMarketSizeNumberToken(rawDigits: string, unit: string): number {
+  if (marketSizeUnambiguousPeriodGroupingPattern.test(rawDigits)) {
+    return parseFloat(rawDigits.replace(/\./g, ""));
+  }
+
+  if (turkishMarketSizeUnitWords.has(unit.toLowerCase())) {
+    const commaCount = (rawDigits.match(/,/g) || []).length;
+    if (commaCount === 1) {
+      return parseFloat(rawDigits.replace(",", "."));
+    }
+  }
+
+  return parseFloat(rawDigits.replace(/,/g, ""));
+}
+
 export function parseMarketSizingMagnitude(value: string): number | null {
   const matches = [
-    ...(value || "").matchAll(/([\d.,]+)\s*(thousand\b|million\b|billion\b|trillion\b|[kKmMbBtT]\b)?/gi),
-  ].filter((candidate) => candidate[1] && Number.isFinite(parseFloat(candidate[1].replace(/,/g, ""))));
+    ...(value || "").matchAll(
+      /([\d.,]+)\s*(thousand\b|million\b|billion\b|trillion\b|bin\b|milyon\b|milyar\b|trilyon\b|[kKmMbBtT]\b)?/gi
+    ),
+  ].filter((candidate) => candidate[1] && Number.isFinite(normalizeMarketSizeNumberToken(candidate[1], candidate[2] || "")));
   const unitMatches = matches.filter((candidate) => candidate[2]);
   const last = unitMatches.length > 0 ? unitMatches.at(-1) : matches.at(-1);
 
@@ -1596,24 +1670,94 @@ export function parseMarketSizingMagnitude(value: string): number | null {
     return null;
   }
 
-  const num = parseFloat(last[1].replace(/,/g, ""));
+  const num = normalizeMarketSizeNumberToken(last[1], last[2] || "");
   if (!Number.isFinite(num) || num <= 0) {
     return null;
   }
 
   const unit = (last[2] || "").toLowerCase();
   const multiplier =
-    unit === "k" || unit === "thousand"
+    unit === "k" || unit === "thousand" || unit === "bin"
       ? 1e3
-      : unit === "m" || unit === "million"
+      : unit === "m" || unit === "million" || unit === "milyon"
         ? 1e6
-        : unit === "b" || unit === "billion"
+        : unit === "b" || unit === "billion" || unit === "milyar"
           ? 1e9
-          : unit === "t" || unit === "trillion"
+          : unit === "t" || unit === "trillion" || unit === "trilyon"
             ? 1e12
             : 1;
 
   return num * multiplier;
+}
+
+// TASK #59 -- the canonical TAM/SAM/SOM DISPLAY-shaping step: narrows an
+// already-extracted raw value string (extractMarketSizingLayerValue's
+// own output) down to a clean, compact value shape for rendering,
+// WITHOUT reinterpreting or re-deriving the underlying magnitude --
+// that remains parseMarketSizingMagnitude's job alone, called
+// separately by any caller that also needs the number.
+//
+// TRACE (Task #59's own audit): Planner.tsx's extractMarketSizeValue
+// routed this step through the file-wide, general-purpose
+// compactPdfMetricValue -- correct for the many OTHER metric types it
+// also serves (ARR/CAC/budgets/etc, left completely untouched), but its
+// unit vocabulary is single-letter-only ([kKmMbB%]), and its own
+// "collapse a space before a trailing unit letter" cleanup pass
+// (`replace(/\s+([kKmMbB%$])/g, "$1")`, with NO trailing word boundary)
+// would match the bare LETTER 'm'/'b' embedded inside a spelled-out
+// "million"/"billion" and collapse the space in front of it -- "18
+// million" became "18million", which the numeric-shape regex then
+// misread as "18" + shorthand-unit "m", losing "illion" entirely (only
+// an accident of coincidence that "18m" still denotes the same
+// magnitude). "18 thousand" has no such accidental letter to absorb
+// ('t' is not a recognized shorthand) and simply lost its unit outright,
+// compacting to a bare, unscaled "18" -- a genuine, silent 1000x-looking
+// scale loss confirmed live by this task's own investigation.
+//
+// FIX: this function reuses the SAME unit vocabulary
+// parseMarketSizingMagnitude already recognizes (single-letter K/M/B/T
+// shortcuts AND spelled-out thousand/million/billion/trillion words,
+// each requiring its own trailing word boundary so one can never
+// mis-absorb the other), promoted from ReportPdfButton.tsx's own
+// extractMarketSizeVisualValue (which already had this correct,
+// already-battle-tested pattern -- see that function's own comment
+// history for its range/currency-code/approximation-symbol fixes) into
+// this shared module so Planner.tsx no longer needs a second,
+// divergent shaping step for the exact same field. Never touches
+// compactPdfMetricValue itself, which keeps serving every non-market-
+// size metric card exactly as before.
+export function shapeMarketSizeDisplayValue(rawValue: string): string {
+  if (!rawValue) {
+    return "";
+  }
+
+  // The tamSamSom prompt explicitly instructs "use ranges" instead of
+  // inventing false precision, so a value like "$2.1-2.8B" is the
+  // expected shape, not an edge case -- capture an optional second
+  // bound instead of stopping at the first number and silently dropping
+  // the rest of the range. Also accepts a spelled-out unit ("200
+  // million"), not just the abbreviated K/M/B/T -- a real Planning
+  // Estimate paragraph routinely writes units out in full.
+  // TASK #60 -- trilyon added alongside the existing milyon/milyar/bin
+  // aliases, matching parseMarketSizingMagnitude's own unit table
+  // exactly, so a trillion-scale Turkish value can be displayed as well
+  // as parsed. TL added to the currency token alongside the existing ₺
+  // symbol and TRY code -- the common Turkish Lira abbreviation
+  // ("200 milyon TL"), distinct from the ISO code.
+  const unitWord = "(?:thousand|million|billion|trillion|milyon|milyar|bin|trilyon)";
+  const currencyToken = "(?:[€$₺]|(?:USD|EUR|GBP|TRY|CAD|AUD|CHF|JPY|TL)\\b)";
+  const singleBound = `(?:[<>~≈]?\\s*)?(?:${currencyToken}\\s*)?\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT%]\\b|\\s+${unitWord}\\b)?`;
+  const valuePattern = `(${singleBound}(?:\\s*[-–—]\\s*(?:${currencyToken}\\s*)?${singleBound})?)`;
+
+  // Searches WITHIN the already-scoped raw value text rather than
+  // requiring the shape to start at position 0 -- lets a value text like
+  // "near-term obtainable share is estimated at $3-5M" (real prose
+  // preceding the actual figure) still resolve to a clean "$3-5M"
+  // display string, instead of failing outright the way an anchored
+  // `^...` match would.
+  const shapedValue = rawValue.match(new RegExp(valuePattern, "i"))?.[0];
+
+  return shapedValue ? shapedValue.replace(/\s+/g, " ").trim() : "";
 }
 
 export type MarketSizingCascadeResolution = {

@@ -174,14 +174,28 @@ async function compileTamSamSomEvidenceModule(source, { external } = {}) {
     `export ${extractFunctionSource(source, "getTamSamSomSectionEvidence")}`,
   ].join("\n\n");
 
+  // TASK #57 -- page.tsx's parseMonetaryMagnitude and Planner.tsx's
+  // parseMarketSizeMagnitude are now both thin delegations to the
+  // shared, canonical parseMarketSizingMagnitude (report-presentation.ts)
+  // rather than independent copies -- imported by absolute path so the
+  // extracted, standalone-compiled bundle has the real dependency
+  // available.
+  // TASK #58 -- page.tsx's extractMarketSizeCardValue and Planner.tsx's
+  // extractMarketSizeValue are now both thin delegations (for their raw-
+  // capture step) to the shared, canonical extractMarketSizingLayerValue
+  // (report-presentation.ts) rather than independent copies -- imported
+  // for the same reason.
+  const canonicalMagnitudeImport = `import { parseMarketSizingMagnitude, extractMarketSizingLayerValue, shapeMarketSizeDisplayValue } from ${JSON.stringify(
+    pathToFileURL(join(process.cwd(), "app/lib/report-presentation.ts")).href
+  )};\n`;
   const header =
-    external === "planner"
+    (external === "planner"
       ? `import { normalizePdfText } from ${JSON.stringify(
           pathToFileURL(join(process.cwd(), "app/lib/pdf-normalization.mjs")).href
         )};\nimport { formatMetricCardValue } from ${JSON.stringify(
           pathToFileURL(join(process.cwd(), "components/planner/report-utils.ts")).href
-        )};\n\n`
-      : "";
+        )};\n`
+      : "") + canonicalMagnitudeImport + "\n";
 
   const dir = mkdtempSync(join(tmpdir(), "zerinix-tam-badge-fn-"));
   const outPath = join(dir, "tamSamSomEvidence.ts");

@@ -27,6 +27,7 @@ import {
   buildExecutiveSnapshot,
   compactExecutiveDecisionMemoSections,
   extractMarketSizingLayerValue,
+  shapeMarketSizeDisplayValue,
   extractRecommendationItems,
   extractRecommendationSignals,
   getReportQualityBreakdown,
@@ -1249,43 +1250,21 @@ function compactPdfMetricValue(value: string) {
 // string -- keeps the PDF's display formatting unchanged while
 // guaranteeing the two surfaces can no longer disagree about which
 // layers are actually stated in the report's own text.
+//
+// TASK #59 -- the shape/compacting pattern itself (range support,
+// spelled-out unit words, currency codes, approximation symbols) is now
+// promoted to report-presentation.ts's shared shapeMarketSizeDisplayValue
+// -- this was already the correct, most complete implementation of this
+// rule in the codebase (Planner.tsx's own copy, which routed through the
+// general-purpose compactPdfMetricValue instead, silently mis-shaped
+// spelled-out units -- see that shared function's own comment for the
+// exact bug), so promoting it here rather than rewriting it is a pure
+// move, not a behavior change for this call site.
 function extractMarketSizeVisualValue(content: string, label: "TAM" | "SAM" | "SOM") {
   const normalized = normalizePdfText(content);
   const rawValue = extractMarketSizingLayerValue(normalized, label);
 
-  if (!rawValue) {
-    return "";
-  }
-
-  // The tamSamSom prompt explicitly instructs "use ranges" instead of
-  // inventing false precision, so a value like "$2.1-2.8B" is the expected
-  // shape, not an edge case -- capture an optional second bound instead of
-  // stopping at the first number and silently dropping the rest of the
-  // range. Also accepts a spelled-out unit ("200 million"), not just the
-  // abbreviated K/M/B/T -- confirmed live, a real Planning Estimate paragraph
-  // routinely writes units out in full.
-  const unitWord = "(?:thousand|million|billion|trillion|milyon|milyar|bin)";
-  // CRITICAL FIX -- confirmed live (third gap on top of the two documented
-  // below): the model's own natural prose also writes a 3-letter currency
-  // CODE ("USD 1.45B") instead of a symbol -- singleBound's currency group
-  // only ever recognized [€$₺], so a value using a code alone had nothing
-  // for the regex to anchor on between the separator and the digits,
-  // falling through to "Validation Needed" a third, different way even
-  // though the figure was stated plainly. Tolerates the common codes
-  // alongside the existing symbols, in either bound of a range.
-  const currencyToken = "(?:[€$₺]|(?:USD|EUR|GBP|TRY|CAD|AUD|CHF|JPY)\\b)";
-  const singleBound = `(?:[<>~≈]?\\s*)?(?:${currencyToken}\\s*)?\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT%]\\b|\\s+${unitWord}\\b)?`;
-  const valuePattern = `(${singleBound}(?:\\s*[-–—]\\s*(?:${currencyToken}\\s*)?${singleBound})?)`;
-
-  // Searches WITHIN the already-scoped raw value text rather than
-  // requiring the shape to start at position 0 -- this is what lets a
-  // value text like "near-term obtainable share is estimated at $3-5M"
-  // (real prose preceding the actual figure) still resolve to a clean
-  // "$3-5M" legend string, instead of failing outright the way an
-  // anchored `^...` match would.
-  const shapedValue = rawValue.match(new RegExp(valuePattern, "i"))?.[0];
-
-  return shapedValue ? shapedValue.replace(/\s+/g, " ").trim() : "";
+  return shapeMarketSizeDisplayValue(rawValue);
 }
 
 // compactPdfMetricValue's fallback pattern deliberately allows a bare
@@ -1300,15 +1279,32 @@ function extractMarketSizeVisualValue(content: string, label: "TAM" | "SAM" | "S
 // other, non-market-size callers.
 function isMarketSizeValueMeaningful(value: string) {
   if (!value.trim()) return false;
-  return /[$€₺%]|\d\s*[kKmMbBtT]\b|\b(?:milyon|milyar|bin|thousand|million|billion|trillion)\b/i.test(
+  // TASK #60 -- trilyon added alongside the existing Turkish aliases,
+  // matching parseMarketSizingMagnitude's own unit table. "TL" added
+  // alongside the existing "₺" symbol: normalizePdfText (this same
+  // caller's own pre-processing step, see extractMarketSizeVisualValue)
+  // substitutes the Turkish Lira SYMBOL with the ASCII-safe "TL" prefix
+  // before this gate ever runs (the embedded PDF font has no glyph for
+  // it) -- without this, a ₺-only Turkish value with no other
+  // unit/currency word would fail this meaningful-check purely because
+  // its own currency indicator had already been rewritten to a word
+  // this regex didn't yet recognize.
+  return /[$€₺%]|\bTL\b|\d\s*[kKmMbBtT]\b|\b(?:milyon|milyar|bin|trilyon|thousand|million|billion|trillion)\b/i.test(
     value
   );
 }
 
+// TASK #59 -- the fallback branch (reached only when the canonical
+// extractMarketSizingLayerValue itself found nothing at all under this
+// label) now also shapes through shapeMarketSizeDisplayValue rather than
+// the general-purpose compactPdfMetricValue, for the same reason as
+// extractMarketSizeVisualValue above -- this is still conceptually a
+// market-size value, so it deserves the same spelled-out-unit-aware
+// shaping, not the narrower single-letter-only one.
 function extractMarketSizeValue(content: string, label: "TAM" | "SAM" | "SOM") {
   const value =
     extractMarketSizeVisualValue(content, label) ||
-    compactPdfMetricValue(extractMetricValue(content, label));
+    shapeMarketSizeDisplayValue(extractMetricValue(content, label));
 
   return isMarketSizeValueMeaningful(value) ? value : "";
 }

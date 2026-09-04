@@ -108,9 +108,20 @@ async function compileFunction(source, functionName) {
     return match;
   });
   const dependency = dependencyPieces.length > 0 ? dependencyPieces.join("\n\n") : null;
+  // TASK #57 -- page.tsx's parseMonetaryMagnitude and Planner.tsx's
+  // parseMarketSizeMagnitude are now thin delegations to the shared,
+  // canonical parseMarketSizingMagnitude (report-presentation.ts) rather
+  // than independent copies -- imported by absolute path so the compiled
+  // standalone bundle has the real dependency available.
+  const canonicalMagnitudeImport =
+    functionName === "parseMonetaryMagnitude" || functionName === "parseMarketSizeMagnitude"
+      ? `import { parseMarketSizingMagnitude } from ${JSON.stringify(
+          pathToFileURL(join(process.cwd(), "app/lib/report-presentation.ts")).href
+        )};\n`
+      : "";
   const dir = mkdtempSync(join(tmpdir(), "zerinix-investor-grade-fn-"));
   const outPath = join(dir, `${functionName}.ts`);
-  writeFileSync(outPath, `${dependency ? `${dependency}\n` : ""}export ${raw}\n`);
+  writeFileSync(outPath, `${canonicalMagnitudeImport}${dependency ? `${dependency}\n` : ""}export ${raw}\n`);
   const mod = await import(pathToFileURL(outPath).href);
   return mod[functionName];
 }

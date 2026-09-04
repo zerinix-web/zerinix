@@ -143,17 +143,23 @@ test("TAM4: a SAM that numerically exceeds TAM is still rejected as unresolved t
   assert.equal(cascade.samResolved, false, "SAM exceeding its own TAM is a data inconsistency, not merely missing data");
 });
 
-test("PARITY: page.tsx's own (untouched) tag-tolerant extraction fallback uses the exact same regex source fragment as the canonical extractMarketSizingLayerValue's second step -- proving the two can never silently diverge even though page.tsx keeps its own copy (the same accepted pattern already used for the cascade decision function)", () => {
-  const sharedFragment =
-    '(?:\\\\([^)\\\\n]{0,80}\\\\)\\\\s*)?(?:\\\\[[^\\\\]\\\\n]{0,40}\\\\]\\\\s*)?';
-  assert.ok(
-    pageSource.includes(sharedFragment),
-    "page.tsx's own bracket/paren-tolerant fallback regex fragment must be present"
+// TASK #58 -- page.tsx's own tag-tolerant extraction fallback (a second,
+// independently-maintained copy of extractMarketSizingLayerValue's logic)
+// is now removed entirely: extractMarketSizeCardValue delegates directly
+// to the canonical function, so there is no longer a second regex
+// fragment to keep in lockstep by hand. Updated from a source-fragment
+// comparison to a delegation proof, mirroring the ReportPdfButton.tsx
+// PARITY test immediately below.
+test("PARITY: page.tsx's extractMarketSizeCardValue delegates directly to the canonical extractMarketSizingLayerValue -- no independent copy of this extraction rule is left to silently diverge", () => {
+  assert.match(
+    pageSource,
+    /import\s*\{[^}]*extractMarketSizingLayerValue[^}]*\}\s*from\s*"@\/app\/lib\/report-presentation"/s,
+    "page.tsx must import the canonical extractor"
   );
-  const reportPresentationSource = readFileSync(`${repoRoot}app/lib/report-presentation.ts`, "utf8");
-  assert.ok(
-    reportPresentationSource.includes(sharedFragment),
-    "the canonical extractMarketSizingLayerValue must use the identical bracket/paren-tolerant fragment"
+  assert.match(
+    pageSource,
+    /function extractMarketSizeCardValue\(content: string, label: "TAM" \| "SAM" \| "SOM"\) \{\s*return extractMarketSizingLayerValue\(content, label\);\s*\}/,
+    "page.tsx's extractMarketSizeCardValue must be a pure delegation to the canonical extractor, not maintain its own copy"
   );
 });
 
