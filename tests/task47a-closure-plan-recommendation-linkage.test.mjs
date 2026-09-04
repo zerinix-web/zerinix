@@ -229,17 +229,33 @@ test("TASK #47A: when TWO linked recommendations are EQUALLY complete (a genuine
   assert.equal(plan.budget, null);
 });
 
-test("TASK #47A: when every linked recommendation is equally incomplete (no candidate has owner+timeline+success criterion together), the closure plan keeps the honest fallback rather than picking the 'least incomplete' one", () => {
+test("TASK #47A/#54C: a candidate with a real owner (even with no timeline) is preferred over a candidate with NO owner at all -- owner alone is the one genuine hard prerequisite; a real WHO with an honestly unresolved WHEN is still more useful than nothing", () => {
   const survey = buildValidation(BUYER_READINESS_SURVEY_ITEM);
   const anotherPartial = buildValidation(
     "Run structured competitor discovery interviews to validate obtainable share over 3 months."
   );
   assert.equal(anotherPartial.relatedEvidenceGapId, "obtainable-share");
   assert.equal(anotherPartial.owner, "");
+  assert.equal(survey.owner, "Head of Insights");
+  assert.equal(survey.timeline, "");
 
   const plan = resolveMarketIntelligenceControllingClosurePlan(CLM_STATE, [survey, anotherPartial], "English");
   assert.ok(plan);
+  assert.equal(plan.hasAssignedOwner, true);
+  assert.equal(plan.owner, "Head of Insights");
+  assert.match(plan.timeline, /no timeline committed/i, "the missing timeline is never fabricated -- it stays the honest fallback text even though owner resolves");
+});
+
+test("TASK #54C: when NEITHER candidate has an owner at all, the closure plan still keeps the honest fallback -- owner remains the one genuine hard prerequisite", () => {
+  const noOwnerA = buildValidation("Run structured competitor discovery interviews to validate obtainable share over 3 months.");
+  const noOwnerB = buildValidation("Run a customer discovery survey to validate obtainable share over 6 weeks.");
+  assert.equal(noOwnerA.owner, "");
+  assert.equal(noOwnerB.owner, "");
+
+  const plan = resolveMarketIntelligenceControllingClosurePlan(CLM_STATE, [noOwnerA, noOwnerB], "English");
+  assert.ok(plan);
   assert.equal(plan.hasAssignedOwner, false);
+  assert.match(plan.owner, /not yet assigned/i);
 });
 
 test("TASK #47A: zero linked recommendations still fall back to the same honest sentence as before", () => {

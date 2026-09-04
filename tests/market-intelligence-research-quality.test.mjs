@@ -198,7 +198,12 @@ test("chat and Market Intelligence report can consume one lossless final researc
   assert.ok(graph.vendorIntelligence.evidenceProviders.some((item) => item.name === "Grand View Research"));
   assert.ok(graph.planningEstimate, "source-backed planning estimate expected");
   assert.match(graph.planningEstimate.tam, /\$8\.4B/);
-  assert.match(graph.planningEstimate.formula, /\[R11\]/);
+  // TASK #54B: the formula sentence never embeds a bracketed [R#]
+  // citation -- report-utils.ts's universal presentation sanitizer
+  // unconditionally strips that shape for every report type, so
+  // traceability lives in the structured evidenceIds array instead.
+  assert.doesNotMatch(graph.planningEstimate.formula, /\[R\d+\]/);
+  assert.ok(graph.planningEstimate.evidenceIds.includes("R11"));
   // Evidence-first market-sizing engine: SAM's assumption is tagged
   // [Assumption] only when no real serviceable-share evidence was found
   // (true for this fixture -- it has a market forecast and competitors,

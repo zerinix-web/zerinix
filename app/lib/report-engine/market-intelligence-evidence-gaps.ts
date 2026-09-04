@@ -1376,14 +1376,55 @@ function resolveLinkedEvidenceGap(
   if (materialGaps.length === 0) return null;
 
   const actionFigure = extractComparableThresholdFigure(successCriterion);
-  if (!actionFigure) return null;
-  const numericMatches = materialGaps.filter((gap) =>
-    comparableThresholdFiguresMatch(actionFigure, gap.successThreshold ? extractComparableThresholdFigure(gap.successThreshold) : null)
-  );
-  const semanticMatches = numericMatches.filter((gap) =>
-    isRecommendationSemanticallyCompatibleWithGap(gap.id, successCriterion)
-  );
-  return semanticMatches.length === 1 ? semanticMatches[0] : null;
+  if (actionFigure) {
+    const numericMatches = materialGaps.filter((gap) =>
+      comparableThresholdFiguresMatch(actionFigure, gap.successThreshold ? extractComparableThresholdFigure(gap.successThreshold) : null)
+    );
+    const semanticMatches = numericMatches.filter((gap) =>
+      isRecommendationSemanticallyCompatibleWithGap(gap.id, successCriterion)
+    );
+    if (semanticMatches.length === 1) return semanticMatches[0];
+  }
+
+  // TASK #54C (2nd fix) -- CRITICAL FIX, confirmed live against a THIRD
+  // real report: the multi-gap numeric-match path above requires the
+  // candidate's OWN figure to numerically equal a material gap's OWN
+  // report-stated threshold -- but when the report's whatWouldChangeThisDecision
+  // text names NO explicit threshold for ANY material gap (gap.successThreshold
+  // is null for every one of them, the common real-report shape this
+  // task's own fixtures confirm), numeric matching is structurally
+  // IMPOSSIBLE for every candidate, no matter how obviously relevant its
+  // own text is -- resolveLinkedEvidenceGap returned null for every
+  // recommendation whenever 2+ decision-critical gaps were simultaneously
+  // unresolved, even a "Paid Pilot Commitment Test" naming a clear,
+  // unambiguous capture-rate criterion ("20% willing to commit to a paid
+  // pilot..."). This is a LINKAGE failure, upstream of and structurally
+  // distinct from Task #54C's own earlier fix (which only ever helps
+  // once a candidate is ALREADY linked) -- no amount of relaxing the
+  // Closure Plan's owner/timeline selection stages can recover a
+  // candidate whose relatedEvidenceGapId never resolved in the first
+  // place.
+  //
+  // FIX: when numeric matching does not already produce a unique
+  // answer, fall back to the SAME semantic-category vocabulary the
+  // single-material-gap path above already trusts (Task #50) --
+  // requiring the candidate's OWN classified evidence category to
+  // EXCLUSIVELY identify exactly one material gap's own required
+  // category. Never a keyword/title scan (successCriterion only, same
+  // as every other semantic check in this file); never guesses: a
+  // candidate with no classifiable category (categories.size === 0,
+  // e.g. "Proof-of-Value Integration Pilot" and "SOM & Channel
+  // Validation" above, which name no distinct metric at all) still
+  // correctly returns null here, exactly as before -- this fallback
+  // only ever RESOLVES a genuine ambiguity when the candidate's own
+  // evidence category structurally belongs to one, and only one,
+  // unresolved gap; it never weakens or bypasses the requirement that a
+  // link be structurally justified.
+  const categoryMatches = materialGaps.filter((gap) => {
+    const requiredCategory = GAP_REQUIRED_EVIDENCE_CATEGORY[gap.id];
+    return Boolean(requiredCategory) && resolveRecommendationEvidenceCategories(successCriterion).has(requiredCategory!);
+  });
+  return categoryMatches.length === 1 ? categoryMatches[0] : null;
 }
 
 // TASK #48 -- a type-aware companion to Task #47C's own
@@ -2215,15 +2256,34 @@ function selectAuthoritativeClosurePlanValidation(
   );
   if (pool.length === 1) return pool[0];
 
-  // Stage 1 (requirements #5/#6, unchanged since Task #47A): owner and
-  // timeline are a hard prerequisite -- a candidate missing either is
-  // never eligible, regardless of how strong its other signals are (a
-  // Closure Plan naming a WHO with no WHEN, or vice versa, is not
-  // meaningfully more complete than no assignment at all).
-  const eligible = pool.filter((validation) => validation.owner.trim() && validation.timeline.trim());
+  // Stage 1 (TASK #54C -- requirement #5/#6's hard owner+timeline PAIR
+  // requirement is relaxed to OWNER ALONE): confirmed live against a
+  // THIRD real report -- a genuine "First 90 Days"-style set of 3
+  // linked, validation/pilot actions (Buyer validation program, Pricing
+  // & willingness-to-pay test, Integration gating proof), each with a
+  // real owner and budget, but NONE naming a separate timeline at all.
+  // The OLD "owner AND timeline both required" gate filtered every one
+  // of them out (eligible.length === 0), falling back to "Not yet
+  // assigned"/"No timeline committed yet" even though 3 real owners
+  // were available. A Closure Plan naming a real WHO with no WHEN is
+  // still far more useful than the shared unassigned fallback -- the
+  // WHO is never fabricated, and the missing WHEN still renders as its
+  // own honest "no timeline committed" text (resolveClosurePlanAssignment
+  // below, unchanged), so nothing is invented either way. Owner alone
+  // remains the one genuine hard prerequisite: a Closure Plan with no
+  // owner at all has nothing meaningful to assign.
+  const eligible = pool.filter((validation) => validation.owner.trim());
   if (eligible.length === 0) return null;
   if (eligible.length === 1) return eligible[0];
   pool = eligible;
+
+  // Stage 1b (TASK #54C, requirement #3, "timeline when available"):
+  // now a preference, not a hard requirement -- only narrows the pool
+  // when it actually distinguishes someone, exactly like every other
+  // completeness stage below. A report where every remaining candidate
+  // shares the same timeline (present or absent) is unaffected.
+  pool = narrowByStructuralCompleteness(pool, (validation) => Boolean(validation.timeline.trim()));
+  if (pool.length === 1) return pool[0];
 
   // Stage 2 (requirement #2, "action with measurable success metric"):
   // a candidate carrying its own explicit, structured success criterion
@@ -3061,4 +3121,272 @@ export function resolveMarketIntelligenceGatedExecutiveDecision(
     decisionLabel: localizeExecutiveDecision("CONDITIONAL_GO", resolved.language, "market"),
     canonicalDecision: mapExecutiveDecisionCodeToCanonicalDecision("CONDITIONAL_GO"),
   };
+}
+
+// TASK #54 -- Make Market Intelligence decision-gate evaluation
+// structurally auditable.
+//
+// ROOT ARCHITECTURAL ISSUE (confirmed via audit): a gate's SATISFIED
+// state has always lived only as a bare boolean
+// (canonicalState.decisionCriticalEvidence.<pillar>Resolved), with no
+// structured record of WHY it reads that way -- no evidence
+// requirement, no evidence class, no controlling/non-controlling
+// status, in one place, for BOTH the resolved and unresolved case.
+// resolveMarketIntelligenceEvidenceGaps only ever emits an object for
+// an UNRESOLVED gate (see its own filter conditions above); a resolved
+// gate has never had any structured representation at all -- a reader
+// could only infer "why" from re-reading raw marketSizing/competitors
+// fields directly, with no single canonical audit trail. This is the
+// gap this task closes: NOT a new decision engine, a new gating rule,
+// or a new evidence-classification taxonomy -- a pure, additive
+// STRUCTURAL VIEW over exactly the fields resolveDecisionCriticalEvidenceState
+// (app/api/market-analysis/route.ts) and resolveMarketIntelligenceEnterEligibility
+// (Task #53) already compute and already gate the canonical decision on.
+//
+// FAIL-CLOSED GUARANTEE (requirements #3/#5): `satisfied` below is
+// ALWAYS read directly and only from
+// canonicalState.decisionCriticalEvidence[decisionFactor] -- the SAME
+// boolean assessMarketEntryConfidence's own evidenceGapBlocksStrongDecision
+// gate and resolveMarketIntelligenceEnterEligibility's own `eligible`
+// flag already require. It is NEVER derived from a linked
+// recommendation's provenance, a closure-plan target, a Validation
+// Target, a planning assumption, a budget/timeline figure, or any
+// prose -- those can only ever populate `evidenceClass`/`why`, which
+// are pure explanatory metadata this function can never feed back into
+// `satisfied`. A gate whose underlying pillar is unresolved is
+// therefore structurally incapable of reading `satisfied: true` no
+// matter what any recommendation claims, and this function cannot
+// promote, demote, or otherwise recompute the canonical ENTER/MONITOR/
+// AVOID decision itself -- it only explains the SAME 3 pillars that
+// decision already depends on.
+export type MarketIntelligenceGateEvidenceClass =
+  // A resolved gate backed by the SAME structural signal
+  // resolveDecisionCriticalEvidenceState itself gates on (a supported,
+  // evidence-backed market-sizing estimate; a named competitor/adjacent
+  // player independently confirmed by 2+ sources; an evidence-derived
+  // SAM with a calculated SOM) -- never inferred from recommendation
+  // text.
+  | "verifiedEvidence"
+  // A resolved gate backed only by a disclosed default assumption or a
+  // directional (weaker) estimate -- structurally resolved (the pillar
+  // reads true) but not independently verified.
+  | "structuralAssumption"
+  // An UNRESOLVED gate that nonetheless has a linked recommendation
+  // offering some class of future evidence toward closing it -- reuses
+  // the EXISTING MarketIntelligenceRecommendationProvenance vocabulary
+  // verbatim (Task #38), never a parallel taxonomy. This describes what
+  // the PROPOSED closure action's own evidence looks like; it is
+  // orthogonal to, and can never influence, `satisfied` above.
+  | MarketIntelligenceRecommendationProvenance
+  // An unresolved gate with no linked recommendation offering any
+  // evidence at all.
+  | null;
+
+export type MarketIntelligenceDecisionGateEvaluation = {
+  gateId: MarketIntelligenceEvidenceGapId;
+  decisionFactor: MarketIntelligenceDecisionFactor;
+  label: string;
+  evidenceRequirement: string;
+  currentStatus: string;
+  evidenceClass: MarketIntelligenceGateEvidenceClass;
+  // Read ONLY from canonicalState.decisionCriticalEvidence -- see this
+  // section's own top-of-file fail-closed comment.
+  satisfied: boolean;
+  why: string;
+  // Whether this gate is the one (or one of several, in a multi-gap
+  // report) currently gating the decision -- sourced from the SAME
+  // Task #47C/#48 controlling/priority resolution every closure-plan
+  // consumer already reads, never re-derived. Always false for an
+  // already-satisfied gate: a resolved pillar blocks nothing.
+  controlling: boolean;
+};
+
+// The 3 gap ids that actually gate the canonical decision -- "growth-rate"
+// has decisionFactor: null (see resolveMarketIntelligenceEvidenceGaps'
+// own top-of-file comment) and is deliberately excluded from this and
+// every other decision-gate-specific structure below.
+type MarketIntelligenceDecisionCriticalGapId = Exclude<MarketIntelligenceEvidenceGapId, "growth-rate">;
+
+const GATE_SATISFIED_STATUS: Record<
+  MarketIntelligenceDecisionCriticalGapId,
+  Record<"verifiedEvidence" | "structuralAssumption", Record<ResponseLanguage, string>>
+> = {
+  "market-sizing": {
+    verifiedEvidence: {
+      English: "A supported, evidence-backed total market size estimate is established.",
+      Turkish: "Kanıta dayalı, desteklenmiş bir toplam pazar büyüklüğü tahmini oluşturulmuştur.",
+      German: "Eine unterstützte, evidenzbasierte Gesamtmarktgrößenschätzung ist etabliert.",
+      French: "Une estimation de la taille totale du marché, étayée par des preuves, est établie.",
+      Spanish: "Se ha establecido una estimación del tamaño total del mercado respaldada por evidencia.",
+    },
+    structuralAssumption: {
+      English: "A directional total market size estimate exists, but it is not independently evidence-backed.",
+      Turkish: "Yönelimsel bir toplam pazar büyüklüğü tahmini mevcuttur, ancak bağımsız olarak kanıta dayalı değildir.",
+      German: "Es existiert eine richtungsweisende Gesamtmarktgrößenschätzung, die jedoch nicht unabhängig evidenzbasiert ist.",
+      French: "Une estimation directionnelle de la taille totale du marché existe, mais elle n'est pas étayée par des preuves indépendantes.",
+      Spanish: "Existe una estimación direccional del tamaño total del mercado, pero no está respaldada por evidencia independiente.",
+    },
+  },
+  "competitive-evidence": {
+    verifiedEvidence: {
+      English: "At least one named competitor or adjacent player is independently verified.",
+      Turkish: "En az bir adı belirtilen rakip veya yakın oyuncu bağımsız olarak doğrulanmıştır.",
+      German: "Mindestens ein benannter Wettbewerber oder angrenzender Akteur ist unabhängig verifiziert.",
+      French: "Au moins un concurrent nommé ou acteur adjacent est vérifié de manière indépendante.",
+      Spanish: "Al menos un competidor nombrado o actor adyacente está verificado de forma independiente.",
+    },
+    structuralAssumption: {
+      English: "Named competitors or adjacent players exist, but none is independently verified.",
+      Turkish: "Adı belirtilen rakipler veya yakın oyuncular mevcuttur, ancak hiçbiri bağımsız olarak doğrulanmamıştır.",
+      German: "Es gibt benannte Wettbewerber oder angrenzende Akteure, aber keiner ist unabhängig verifiziert.",
+      French: "Des concurrents nommés ou des acteurs adjacents existent, mais aucun n'est vérifié de manière indépendante.",
+      Spanish: "Existen competidores nombrados o actores adyacentes, pero ninguno está verificado de forma independiente.",
+    },
+  },
+  "obtainable-share": {
+    verifiedEvidence: {
+      English: "Obtainable share is calculated from an evidence-derived serviceable-share ratio.",
+      Turkish: "Ulaşılabilir pay, kanıta dayalı bir hizmet verilebilir pay oranından hesaplanmıştır.",
+      German: "Der erzielbare Anteil wird aus einem evidenzbasierten bedienbaren Anteilsverhältnis berechnet.",
+      French: "La part accessible est calculée à partir d'un ratio de part desservable dérivé de preuves.",
+      Spanish: "La cuota alcanzable se calcula a partir de una relación de cuota servible derivada de evidencia.",
+    },
+    structuralAssumption: {
+      English: "Obtainable share reads as resolved only because no serviceable-share model applies to this report; it is not independently evidenced.",
+      Turkish: "Ulaşılabilir pay, yalnızca bu rapora bir hizmet verilebilir pay modeli uygulanmadığı için çözülmüş görünmektedir; bağımsız olarak kanıtlanmamıştır.",
+      German: "Der erzielbare Anteil gilt nur deshalb als gelöst, weil für diesen Bericht kein Modell für den bedienbaren Anteil gilt; er ist nicht unabhängig belegt.",
+      French: "La part accessible n'apparaît résolue que parce qu'aucun modèle de part desservable ne s'applique à ce rapport ; elle n'est pas étayée de manière indépendante.",
+      Spanish: "La cuota alcanzable aparece como resuelta solo porque no se aplica ningún modelo de cuota servible a este informe; no está evidenciada de forma independiente.",
+    },
+  },
+};
+
+const GATE_DEFINITIONS: readonly {
+  id: MarketIntelligenceDecisionCriticalGapId;
+  decisionFactor: MarketIntelligenceDecisionFactor;
+  copy: Record<ResponseLanguage, LocalizedGapCopy>;
+}[] = [
+  { id: "market-sizing", decisionFactor: "marketSizingResolved", copy: MARKET_SIZING_GAP_COPY },
+  { id: "competitive-evidence", decisionFactor: "competitiveEvidenceResolved", copy: COMPETITIVE_EVIDENCE_GAP_COPY },
+  { id: "obtainable-share", decisionFactor: "obtainableShareResolved", copy: OBTAINABLE_SHARE_GAP_COPY },
+];
+
+// Requirement #6 note: this NEVER independently derives AVOID -- it has
+// no return value or branch representing AVOID at all. AVOID remains
+// exactly what it already was (assessMarketEntryConfidence's own
+// unchanged blend, requirement #6/"Do not redesign the ENTER/MONITOR/
+// AVOID methodology") -- this function only ever explains whether the
+// SAME 3 pillars that feed that decision are satisfied, never whether
+// they justify rejection.
+function resolveSatisfiedGateEvidenceClass(
+  gateId: MarketIntelligenceDecisionCriticalGapId,
+  canonicalState: MarketIntelligenceCanonicalState
+): "verifiedEvidence" | "structuralAssumption" {
+  if (gateId === "market-sizing") {
+    return canonicalState.marketSizing?.tier === "supportedEstimate" ? "verifiedEvidence" : "structuralAssumption";
+  }
+  if (gateId === "competitive-evidence") {
+    return canonicalState.competitors.some((competitor) => competitor.confidenceClassification === "Verified")
+      ? "verifiedEvidence"
+      : "structuralAssumption";
+  }
+  // obtainable-share: mirrors resolveDecisionCriticalEvidenceState's own
+  // literal check (route.ts) -- samMethod is the exact field that check
+  // reads, persisted verbatim onto canonical state for precisely this
+  // kind of downstream audit.
+  return canonicalState.marketSizing?.samMethod === "evidenceDerived" ? "verifiedEvidence" : "structuralAssumption";
+}
+
+// Reuses resolveMarketIntelligenceEnterEligibility's own already-
+// computed per-gap requirement (Task #53) rather than re-deriving
+// anything: `components` is the SAME compound-threshold breakdown the
+// ENTER-eligibility resolver already builds from linked recommendations,
+// and `evidenceQualified` is the SAME "every component independently
+// qualifies" check. This only ever reads that result to pick a single
+// representative evidenceClass value for display -- it never feeds
+// back into `satisfied`.
+function resolveUnresolvedGateEvidenceClass(
+  requirement: MarketIntelligenceEnterRequirementResult | undefined
+): MarketIntelligenceRecommendationProvenance | null {
+  if (!requirement || requirement.components.length === 0) return null;
+  if (requirement.evidenceQualified) return requirement.components[0].provenance;
+  const weakest = requirement.components.find(
+    (component) => !isEnterRequirementEvidenceQualified(component.provenance)
+  );
+  return (weakest ?? requirement.components[0]).provenance;
+}
+
+// The single, canonical, structured evaluation every render surface
+// must read to explain (never recompute) why the current decision
+// reads MONITOR/ENTER/AVOID -- one entry per decision-critical gate
+// (market-sizing, competitive-evidence, obtainable-share; growth-rate
+// is excluded, since it has no decisionFactor and gates nothing).
+// Requirement #4: for the real, currently-verified report (Obtainable
+// Share the sole unresolved pillar), this resolves to exactly one
+// entry with gateId "obtainable-share", satisfied: false, controlling:
+// true -- matching decision MONITOR without this function ever touching
+// or re-deriving that decision itself.
+export function resolveMarketIntelligenceDecisionGateEvaluations(
+  canonicalState: MarketIntelligenceCanonicalState | null,
+  recommendationValidations: readonly MarketIntelligenceRecommendationValidation[] = [],
+  language: ResponseLanguage = "English"
+): MarketIntelligenceDecisionGateEvaluation[] {
+  if (!canonicalState) return [];
+
+  const eligibility = resolveMarketIntelligenceEnterEligibility(canonicalState, recommendationValidations, language);
+  const requirementByGapId = new Map((eligibility?.requirements ?? []).map((requirement) => [requirement.gapId, requirement]));
+
+  const priorityState = resolveMarketIntelligenceMultiGapPriorityState(canonicalState, recommendationValidations, language);
+  const controllingGapIds = new Set(
+    priorityState.prioritized.filter((entry) => entry.status !== "secondary").map((entry) => entry.gap.id)
+  );
+
+  const unresolvedGapsById = new Map(
+    resolveMarketIntelligenceEvidenceGaps(canonicalState, language)
+      .filter((gap) => gap.decisionFactor !== null)
+      .map((gap) => [gap.id, gap])
+  );
+
+  return GATE_DEFINITIONS.map(({ id, decisionFactor, copy }) => {
+    // Fail-closed (requirements #3/#5): read directly, and only, from
+    // the same structural boolean the canonical decision itself already
+    // depends on -- never from a recommendation, closure plan, or
+    // prose.
+    const satisfied = canonicalState.decisionCriticalEvidence[decisionFactor];
+
+    if (!satisfied) {
+      const gap = unresolvedGapsById.get(id);
+      // Structurally unreachable (an unsatisfied decisionFactor always
+      // has a corresponding gap emitted above), kept as a defensive
+      // fallback rather than a non-null assertion.
+      const label = gap?.label ?? copy[language].label;
+      const evidenceRequirement = gap?.evidenceRequired ?? copy[language].evidenceRequired;
+      const currentStatus = gap?.currentStatus ?? "";
+      const why = gap?.whyItMatters ?? copy[language].whyItMatters;
+      return {
+        gateId: id,
+        decisionFactor,
+        label,
+        evidenceRequirement,
+        currentStatus,
+        evidenceClass: resolveUnresolvedGateEvidenceClass(requirementByGapId.get(id)),
+        satisfied: false,
+        why,
+        controlling: controllingGapIds.has(id),
+      };
+    }
+
+    const evidenceClass = resolveSatisfiedGateEvidenceClass(id, canonicalState);
+    return {
+      gateId: id,
+      decisionFactor,
+      label: copy[language].label,
+      evidenceRequirement: copy[language].evidenceRequired,
+      currentStatus: GATE_SATISFIED_STATUS[id][evidenceClass][language],
+      evidenceClass,
+      satisfied: true,
+      why: GATE_SATISFIED_STATUS[id][evidenceClass][language],
+      controlling: false,
+    };
+  });
 }

@@ -107,8 +107,11 @@ test("2. bottom-up TAM (addressable buyers x annualized price) is computed and t
   assert.ok(graph.planningEstimate);
   assert.equal(graph.planningEstimate.method, "bottomUp");
   assert.match(graph.planningEstimate.tam, /\$80(?:\.0)?M/);
-  assert.match(graph.planningEstimate.formula, /\[R1\]/);
-  assert.match(graph.planningEstimate.formula, /\[R2\]/);
+  // TASK #54B: the formula sentence never embeds a bracketed [R#]
+  // citation -- report-utils.ts's universal presentation sanitizer
+  // unconditionally strips that shape for every report type, so
+  // traceability lives in the structured evidenceIds array instead.
+  assert.doesNotMatch(graph.planningEstimate.formula, /\[R\d+\]/);
   assert.deepEqual(new Set(graph.planningEstimate.evidenceIds), new Set(["R1", "R2"]));
 });
 
@@ -438,7 +441,7 @@ test("11. a pending SOM never carries a fabricated numeric figure, in the graph 
 
 // --- 12. Calculation traceability -------------------------------------------
 
-test("12. every figure remains traceable: formula cites real evidence ids, evidenceIds resolve to real sources, geography/year/marketDefinition are populated", () => {
+test("12. every figure remains traceable: evidenceIds resolve to real sources (TASK #54B: the formula sentence itself no longer embeds a bracketed [R#] citation, since report-utils.ts's own universal presentation sanitizer unconditionally strips that shape for every report type -- traceability instead lives in the structured evidenceIds array, which every render surface can already resolve against Sources), geography/year/marketDefinition are populated", () => {
   const graph = buildMarketIntelligenceGraph(
     {
       evidence: [
@@ -462,8 +465,8 @@ test("12. every figure remains traceable: formula cites real evidence ids, evide
   const estimate = graph.planningEstimate;
   assert.ok(estimate);
   assert.match(estimate.tam, /\$384(?:\.0)?M/);
-  assert.match(estimate.formula, /\[R1\]/);
-  assert.match(estimate.formula, /\[R2\]/);
+  assert.doesNotMatch(estimate.formula, /\[R\d+\]/, "TASK #54B: a bracketed [R#] citation can never survive report-utils.ts's universal presentation sanitizer -- it must never be constructed here at all");
+  assert.deepEqual(new Set(estimate.evidenceIds), new Set(["R1", "R2"]));
   const sourceIds = new Set(graph.sources.map((item) => item.evidenceId));
   for (const id of estimate.evidenceIds) {
     assert.ok(sourceIds.has(id), `evidence id ${id} must resolve to a real source`);

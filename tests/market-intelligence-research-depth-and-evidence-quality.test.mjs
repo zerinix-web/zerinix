@@ -188,7 +188,13 @@ test("RECONCILE-DEPTH-1: two independent top-down market-size candidates that di
   assert.ok(graph.planningEstimate, "a top-down estimate should be produced from either candidate");
   assert.equal(graph.planningEstimate.method, "topDown");
   assert.equal(graph.planningEstimate.conflicting, true, "a >2.5x divergence between two top-down candidates must be flagged");
-  assert.match(graph.planningEstimate.conflictNote, /R2/, "the runner-up candidate's evidence id must be named in the disclosure");
+  // TASK #54B: the disclosure no longer names the runner-up candidate's
+  // bracketed [R#] id directly -- that shape can never survive report-
+  // utils.ts's universal presentation sanitizer for any report type.
+  // Traceability instead lives in evidenceIds (the anchor's own id;
+  // the runner-up is disclosed by figure and reasoning, not by its raw
+  // internal reference number).
+  assert.doesNotMatch(graph.planningEstimate.conflictNote, /\[R\d+\]/);
   assert.match(graph.planningEstimate.conflictNote, /diverges/i);
   assert.equal(graph.planningEstimate.tier, "directional", "an unresolved disagreement must not present as a fully supported estimate");
 });

@@ -321,20 +321,28 @@ test("TASK #53B (regression guard): when two candidates are equally complete on 
   assert.notEqual(plan.owner, equallyComplete.owner);
 });
 
-test("TASK #53B (drift check): the deterministic selection cascade applies actionType, then owner+timeline, then success metric, then evidence tie, then the numeric-threshold tiebreaker, in that exact order, confirmed via source", () => {
+test("TASK #53B/#54C (drift check): the deterministic selection cascade applies actionType, then owner (hard prerequisite), then timeline (preference), then success metric, then evidence tie, then the numeric-threshold tiebreaker, in that exact order, confirmed via source", () => {
   const fnSource = evidenceGapsSource.match(/function selectAuthoritativeClosurePlanValidation\([\s\S]*?\n\}/)[0];
   const actionTypeIdx = fnSource.indexOf('validation.actionType === "validation"');
-  const ownerTimelineIdx = fnSource.indexOf("validation.owner.trim() && validation.timeline.trim()");
+  const ownerIdx = fnSource.indexOf("pool.filter((validation) => validation.owner.trim())");
+  const timelineIdx = fnSource.indexOf('narrowByStructuralCompleteness(pool, (validation) => Boolean(validation.timeline.trim()))');
   const metricIdx = fnSource.indexOf("narrowByStructuralCompleteness(pool, hasStructuredSuccessMetric)");
   const evidenceTieIdx = fnSource.indexOf("validation.evidenceTie.trim()");
   const numericIdx = fnSource.indexOf("comparableThresholdFiguresMatch(gapFigure");
-  for (const idx of [actionTypeIdx, ownerTimelineIdx, metricIdx, evidenceTieIdx, numericIdx]) {
+  for (const idx of [actionTypeIdx, ownerIdx, timelineIdx, metricIdx, evidenceTieIdx, numericIdx]) {
     assert.notEqual(idx, -1);
   }
-  assert.ok(actionTypeIdx < ownerTimelineIdx);
-  assert.ok(ownerTimelineIdx < metricIdx);
+  assert.ok(actionTypeIdx < ownerIdx);
+  assert.ok(ownerIdx < timelineIdx);
+  assert.ok(timelineIdx < metricIdx);
   assert.ok(metricIdx < evidenceTieIdx);
   assert.ok(evidenceTieIdx < numericIdx);
+});
+
+test("TASK #54C (drift check): owner alone is the hard prerequisite -- confirmed via source, the selector no longer requires `validation.timeline.trim()` as part of the SAME eligibility filter as owner", () => {
+  const fnSource = evidenceGapsSource.match(/function selectAuthoritativeClosurePlanValidation\([\s\S]*?\n\}/)[0];
+  assert.doesNotMatch(fnSource, /validation\.owner\.trim\(\)\s*&&\s*validation\.timeline\.trim\(\)/);
+  assert.match(fnSource, /pool\.filter\(\(validation\) => validation\.owner\.trim\(\)\)/);
 });
 
 test("TASK #53B (drift check): the success-metric stage no longer requires provenance === 'validationTarget' -- confirmed via source, since that requirement is exactly what caused this real-report failure", () => {
