@@ -340,7 +340,9 @@ test("TASK #54C: resolveMarketIntelligenceControllingClosurePlan never mutates c
 });
 
 test("TASK #54C (drift check): selectAuthoritativeClosurePlanValidation's ONLY hard-filtering (length-reducing-to-zero-possible) stage is the owner check -- confirmed via source, timeline/metric/evidenceTie stages all use the narrow-only-if-distinguishing helper", () => {
-  const fnSource = evidenceGapsSource.match(/function selectAuthoritativeClosurePlanValidation\([\s\S]*?\n\}/)[0];
+  const fnSource = evidenceGapsSource.match(
+    /function selectAuthoritativeClosurePlanValidation\([\s\S]*?\n\}\n\ntype MarketIntelligenceClosurePlanAssignment/
+  )[0];
   assert.match(fnSource, /if \(eligible\.length === 0\) return null;/);
   const timelineStage = fnSource.match(/narrowByStructuralCompleteness\(pool, \(validation\) => Boolean\(validation\.timeline\.trim\(\)\)\);/);
   assert.ok(timelineStage, "the timeline stage must use the same narrow-only-if-distinguishing helper as every other completeness preference");
@@ -466,16 +468,24 @@ test("TASK #54C-2: an unclassifiable candidate (no distinct success metric) can 
 });
 
 test("TASK #54C-2 (drift check): the semantic-category fallback never fires when the numeric-match path already found a unique answer -- the existing, more precise mechanism from Task #47C/#48 is tried first and preserved unchanged", () => {
-  const fnSource = evidenceGapsSource.match(/function resolveLinkedEvidenceGap\([\s\S]*?\n\}/)[0];
+  const fnSource = evidenceGapsSource.match(
+    /function resolveLinkedEvidenceGap\([\s\S]*?\n\}\n\n\/\/ TASK #48/
+  )[0];
   const numericIdx = fnSource.indexOf("extractComparableThresholdFigure(successCriterion)");
-  const categoryIdx = fnSource.indexOf("GAP_REQUIRED_EVIDENCE_CATEGORY[gap.id]");
+  // Anchored to the fallback stage's own distinctive code (not the bare
+  // "GAP_REQUIRED_EVIDENCE_CATEGORY[gap.id]" substring, which TASK #55B's
+  // own diagnostic logging now also references earlier, for an unrelated
+  // debug snapshot -- this anchor is unique to the real fallback logic).
+  const categoryIdx = fnSource.indexOf("classifiedCategories.has(requiredCategory!)");
   assert.notEqual(numericIdx, -1);
   assert.notEqual(categoryIdx, -1);
   assert.ok(numericIdx < categoryIdx, "numeric matching must be attempted before the semantic-category fallback");
 });
 
 test("TASK #54C-2 (drift check): the semantic-category fallback never reads a validation's raw item text -- only the already-extracted, structured successCriterion field, exactly like every other semantic check in this file", () => {
-  const fnSource = evidenceGapsSource.match(/function resolveLinkedEvidenceGap\([\s\S]*?\n\}/)[0];
+  const fnSource = evidenceGapsSource.match(
+    /function resolveLinkedEvidenceGap\([\s\S]*?\n\}\n\n\/\/ TASK #48/
+  )[0];
   assert.doesNotMatch(fnSource, /\.item\b/);
 });
 

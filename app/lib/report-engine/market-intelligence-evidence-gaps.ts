@@ -1320,7 +1320,7 @@ type MarketIntelligenceEvidenceCategory = "captureRate" | "marketSize" | "techni
 // real-world KPI vocabulary this report style's own generation prompt
 // actually produces for that concept, never a broad word.
 const CAPTURE_RATE_EVIDENCE_PATTERN =
-  /\b(?:conversion(?:\s+rate)?|win[- ]rate|paid[- ]pilot|pilot\s+conversion|LOIs?|letters?\s+of\s+intent|reachable[- ]account|obtainable[- ]share|(?:market\s+)?penetration)\b/i;
+  /\b(?:conversion(?:\s+rate)?|win[- ]rate|paid[- ]pilot|pilot\s+conversion|LOIs?|letters?\s+of\s+intent|reachable[- ]account|obtainable[- ]share|(?:market\s+)?penetration|willingness[- ]to[- ]pay|pricing\s+signals?|price\s+bands?)\b/i;
 const MARKET_SIZE_EVIDENCE_PATTERN =
   /\b(?:TAM|total\s+addressable\s+market|market\s+size|addressable\s+market|buyer\s+population)\b/i;
 const TECHNICAL_PERFORMANCE_EVIDENCE_PATTERN =
@@ -1361,19 +1361,27 @@ function resolveLinkedEvidenceGap(
   actionType: StrategicRecommendationClassification["actionType"],
   successCriterion: string,
   canonicalState: MarketIntelligenceCanonicalState | null,
-  language: ResponseLanguage
+  language: ResponseLanguage,
+  evidenceTie: string = ""
 ): MarketIntelligenceEvidenceGap | null {
-  if (!canonicalState) return null;
-  if (actionType !== "validation" && actionType !== "pilot") return null;
+  if (!canonicalState) {
+    return null;
+  }
+  if (actionType !== "validation" && actionType !== "pilot") {
+    return null;
+  }
 
   const materialGaps = resolveMarketIntelligenceEvidenceGaps(canonicalState, language).filter(
     (gap) => gap.decisionFactor !== null
   );
   if (materialGaps.length === 1) {
     const gap = materialGaps[0];
-    return isRecommendationSemanticallyCompatibleWithGap(gap.id, successCriterion) ? gap : null;
+    const compatible = isRecommendationSemanticallyCompatibleWithGap(gap.id, successCriterion);
+    return compatible ? gap : null;
   }
-  if (materialGaps.length === 0) return null;
+  if (materialGaps.length === 0) {
+    return null;
+  }
 
   const actionFigure = extractComparableThresholdFigure(successCriterion);
   if (actionFigure) {
@@ -1410,19 +1418,43 @@ function resolveLinkedEvidenceGap(
   // single-material-gap path above already trusts (Task #50) --
   // requiring the candidate's OWN classified evidence category to
   // EXCLUSIVELY identify exactly one material gap's own required
-  // category. Never a keyword/title scan (successCriterion only, same
-  // as every other semantic check in this file); never guesses: a
-  // candidate with no classifiable category (categories.size === 0,
-  // e.g. "Proof-of-Value Integration Pilot" and "SOM & Channel
-  // Validation" above, which name no distinct metric at all) still
-  // correctly returns null here, exactly as before -- this fallback
-  // only ever RESOLVES a genuine ambiguity when the candidate's own
-  // evidence category structurally belongs to one, and only one,
-  // unresolved gap; it never weakens or bypasses the requirement that a
-  // link be structurally justified.
+  // category. Never a keyword/title scan; never guesses: a candidate
+  // with no classifiable category (categories.size === 0, e.g. "Proof-
+  // of-Value Integration Pilot" and "SOM & Channel Validation" above,
+  // which name no distinct metric at all) still correctly returns null
+  // here, exactly as before -- this fallback only ever RESOLVES a
+  // genuine ambiguity when the candidate's own evidence category
+  // structurally belongs to one, and only one, unresolved gap; it never
+  // weakens or bypasses the requirement that a link be structurally
+  // justified.
+  //
+  // TASK #55A -- CRITICAL FIX, confirmed live against a FOURTH real
+  // report: a genuine, well-formed "Pilot Action" (owner, timeline,
+  // budget, and a real, explicitly-labeled Evidence tie: "mid-market
+  // price bands / ContractSafe / BindLegal pricing signals") still
+  // returned null here, because Task #54C's own fallback only ever
+  // classified `successCriterion` -- and this real action names NO
+  // separate, distinct success metric at all (a common, legitimate
+  // shape: not every "First 90 Days" action states a bare percentage,
+  // some state their target entirely through their own Evidence Tie).
+  // The evidenceTie field is exactly as structured, explicit, and
+  // labeled as successCriterion (both extracted by the SAME "Label:
+  // value" parsing, report-presentation.ts's extractRecommendationSignals)
+  // -- classifying its text through the SAME curated vocabulary is not
+  // a new prose-similarity engine, it is reading a second existing
+  // structured field the report already populates the identical way.
+  // Combining both fields (rather than only ever falling back to
+  // evidenceTie alone) preserves every existing successCriterion-only
+  // classification unchanged, and still correctly returns null for a
+  // candidate whose evidenceTie ALSO names nothing classifiable (e.g.
+  // "SOM Validation Research" above, which has neither) -- this can
+  // never link two candidates to the same gap that don't both carry
+  // real, classifiable structured evidence.
+  const classifiableText = [successCriterion, evidenceTie].filter(Boolean).join(" ");
+  const classifiedCategories = resolveRecommendationEvidenceCategories(classifiableText);
   const categoryMatches = materialGaps.filter((gap) => {
     const requiredCategory = GAP_REQUIRED_EVIDENCE_CATEGORY[gap.id];
-    return Boolean(requiredCategory) && resolveRecommendationEvidenceCategories(successCriterion).has(requiredCategory!);
+    return Boolean(requiredCategory) && classifiedCategories.has(requiredCategory!);
   });
   return categoryMatches.length === 1 ? categoryMatches[0] : null;
 }
@@ -1508,13 +1540,13 @@ export function classifyStrategicRecommendationValidation(input: {
   const { item, signals, canonicalState, language = "English" } = input;
   const classification = classifyStrategicRecommendationAction({ item, signals, canonicalState, language });
   const provenance = resolveRecommendationProvenance(classification, signals.evidenceTie, canonicalState);
-  const linkedGap = resolveLinkedEvidenceGap(classification.actionType, signals.metric, canonicalState, language);
+  const linkedGap = resolveLinkedEvidenceGap(classification.actionType, signals.metric, canonicalState, language, signals.evidenceTie);
   const relatedDecisionThreshold =
     linkedGap && canonicalState
       ? resolveMarketIntelligenceDecisionThresholds(canonicalState, language).find((t) => t.gapId === linkedGap.id) ?? null
       : null;
 
-  return {
+  const result: MarketIntelligenceRecommendationValidation = {
     ...classification,
     owner: signals.owner,
     activity: signals.activity,
@@ -1527,6 +1559,8 @@ export function classifyStrategicRecommendationValidation(input: {
     relatedEvidenceGapId: linkedGap?.id ?? null,
     relatedDecisionThreshold,
   };
+
+  return result;
 }
 
 // TASK #39 -- Make Market Intelligence ENTER / MONITOR / AVOID decision
@@ -3182,6 +3216,40 @@ export type MarketIntelligenceGateEvidenceClass =
   // evidence at all.
   | null;
 
+// TASK #55 -- requirement #3: a decision-critical gate must be able to
+// distinguish unresolved/insufficient from resolved-positive from
+// resolved-negative, without a parallel decision engine or any prose
+// parsing. This codebase's own methodology (assessMarketEntryConfidence,
+// market-intelligence-presentation.ts) already draws this exact
+// distinction, just not on a single boolean: `decisionCriticalEvidence`
+// only ever answers "is this pillar STRUCTURALLY SUFFICIENT to decide
+// from" (never "is the underlying finding favorable") -- whether a
+// resolved pillar's real finding was favorable or unfavorable is
+// entirely the coverage/confidence blend's job, which is what actually
+// separates a resolved-and-favorable outcome (ENTER) from a resolved-
+// and-unfavorable one (AVOID). `resolutionOutcome` below is a PURE,
+// read-only derivation of exactly that existing relationship -- never a
+// second computation of it:
+//   - "unresolved": satisfied is false (the pillar itself is still
+//     insufficient -- unresolved/insufficient evidence).
+//   - "positiveResolution": satisfied is true AND the canonical decision
+//     is GO -- this pillar is resolved and the overall, already-
+//     computed methodology found the result favorable enough to enter.
+//   - "negativeResolution": satisfied is true AND the canonical decision
+//     is NO_GO -- resolved, and the overall methodology found the
+//     result unfavorable enough to avoid.
+//   - "resolvedPendingOtherGates": satisfied is true but the canonical
+//     decision is still CONDITIONAL_GO -- this pillar's own requirement
+//     is met, but a DIFFERENT decision-critical pillar is still
+//     unresolved, so the overall decision (and therefore whether THIS
+//     pillar's own finding reads as favorable or unfavorable) cannot yet
+//     be determined. Never guessed as positive or negative.
+export type MarketIntelligenceGateResolutionOutcome =
+  | "unresolved"
+  | "positiveResolution"
+  | "negativeResolution"
+  | "resolvedPendingOtherGates";
+
 export type MarketIntelligenceDecisionGateEvaluation = {
   gateId: MarketIntelligenceEvidenceGapId;
   decisionFactor: MarketIntelligenceDecisionFactor;
@@ -3192,6 +3260,7 @@ export type MarketIntelligenceDecisionGateEvaluation = {
   // Read ONLY from canonicalState.decisionCriticalEvidence -- see this
   // section's own top-of-file fail-closed comment.
   satisfied: boolean;
+  resolutionOutcome: MarketIntelligenceGateResolutionOutcome;
   why: string;
   // Whether this gate is the one (or one of several, in a multi-gap
   // report) currently gating the decision -- sourced from the SAME
@@ -3200,6 +3269,16 @@ export type MarketIntelligenceDecisionGateEvaluation = {
   // already-satisfied gate: a resolved pillar blocks nothing.
   controlling: boolean;
 };
+
+function resolveGateResolutionOutcome(
+  satisfied: boolean,
+  decision: ExecutiveDecisionCode
+): MarketIntelligenceGateResolutionOutcome {
+  if (!satisfied) return "unresolved";
+  if (decision === "GO") return "positiveResolution";
+  if (decision === "NO_GO") return "negativeResolution";
+  return "resolvedPendingOtherGates";
+}
 
 // The 3 gap ids that actually gate the canonical decision -- "growth-rate"
 // has decisionFactor: null (see resolveMarketIntelligenceEvidenceGaps'
@@ -3371,6 +3450,7 @@ export function resolveMarketIntelligenceDecisionGateEvaluations(
         currentStatus,
         evidenceClass: resolveUnresolvedGateEvidenceClass(requirementByGapId.get(id)),
         satisfied: false,
+        resolutionOutcome: resolveGateResolutionOutcome(false, canonicalState.decision),
         why,
         controlling: controllingGapIds.has(id),
       };
@@ -3385,6 +3465,7 @@ export function resolveMarketIntelligenceDecisionGateEvaluations(
       currentStatus: GATE_SATISFIED_STATUS[id][evidenceClass][language],
       evidenceClass,
       satisfied: true,
+      resolutionOutcome: resolveGateResolutionOutcome(true, canonicalState.decision),
       why: GATE_SATISFIED_STATUS[id][evidenceClass][language],
       controlling: false,
     };
