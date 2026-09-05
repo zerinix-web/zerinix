@@ -2852,7 +2852,16 @@ function isMarketSizeValueMeaningful(value: string) {
   // unit/currency word would fail this meaningful-check purely because
   // its own currency indicator had already been rewritten to a word
   // this regex didn't yet recognize.
-  return /[$€₺%]|\bTL\b|\d\s*[kKmMbBtT]\b|\b(?:milyon|milyar|bin|trilyon|thousand|million|billion|trillion)\b/i.test(
+  // TASK #62 -- confirmed live (web/PDF parity audit): this gate never
+  // recognized the 3-letter currency CODES (USD/EUR/GBP/TRY/CAD/AUD/
+  // CHF/JPY) shapeMarketSizeDisplayValue's own currencyToken already
+  // accepts -- only bare symbols and "TL". A bare, unit-less figure
+  // whose ONLY indicator was a currency code ("18,000,000 USD") shaped
+  // correctly (after this task's trailing-currency fix) but still
+  // failed here, while page.tsx (which has no meaningful-gate at all)
+  // already resolved the identical text -- the same class of surfaced
+  // parity gap. Reuses the exact same code list, not a new vocabulary.
+  return /[$€₺%]|\b(?:TL|USD|EUR|GBP|TRY|CAD|AUD|CHF|JPY)\b|\d\s*[kKmMbBtT]\b|\b(?:milyon|milyar|bin|trilyon|thousand|million|billion|trillion)\b/i.test(
     value
   );
 }

@@ -1746,7 +1746,21 @@ export function shapeMarketSizeDisplayValue(rawValue: string): string {
   // ("200 milyon TL"), distinct from the ISO code.
   const unitWord = "(?:thousand|million|billion|trillion|milyon|milyar|bin|trilyon)";
   const currencyToken = "(?:[€$₺]|(?:USD|EUR|GBP|TRY|CAD|AUD|CHF|JPY|TL)\\b)";
-  const singleBound = `(?:[<>~≈]?\\s*)?(?:${currencyToken}\\s*)?\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT%]\\b|\\s+${unitWord}\\b)?`;
+  // TASK #62 -- confirmed live (web/PDF parity audit): a currency
+  // indicator TRAILING the number ("18.000.000 TL", the conventional
+  // Turkish placement) was silently dropped here, since this pattern
+  // previously only ever captured a currency prefix BEFORE the digits.
+  // For a bare, unit-less figure (no K/M/B/thousand/million word), that
+  // dropped currency was the ONLY thing isMarketSizeValueMeaningful
+  // (Planner.tsx/ReportPdfButton.tsx) had to recognize as a real market-
+  // size indicator -- losing it caused a genuine, reproduced divergence:
+  // page.tsx (which has no shaping/meaningful-gate step at all) resolved
+  // "TAM: 18.000.000 ₺" to a real $18,000,000 magnitude, while
+  // Planner.tsx's live view and the exported PDF showed "Validation
+  // Needed" for the IDENTICAL underlying report text. An optional
+  // trailing currency group (mirroring the existing leading one)
+  // preserves it through shaping, so all three surfaces now agree.
+  const singleBound = `(?:[<>~≈]?\\s*)?(?:${currencyToken}\\s*)?\\d+(?:[.,]\\d+)*(?:\\s*[kKmMbBtT%]\\b|\\s+${unitWord}\\b)?(?:\\s*${currencyToken})?`;
   const valuePattern = `(${singleBound}(?:\\s*[-–—]\\s*(?:${currencyToken}\\s*)?${singleBound})?)`;
 
   // Searches WITHIN the already-scoped raw value text rather than

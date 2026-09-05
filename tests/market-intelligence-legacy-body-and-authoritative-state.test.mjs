@@ -212,10 +212,13 @@ test("report-presentation.ts: the canonical shapeMarketSizeDisplayValue's single
   const fnMatch = reportPresentationSource.match(/export function shapeMarketSizeDisplayValue\([\s\S]*?\n\}/);
   assert.ok(fnMatch, "shapeMarketSizeDisplayValue not found");
   const occurrences = fnMatch[0].match(/currencyToken/g) || [];
-  // Declaration + use in singleBound + use in valuePattern's own second-
-  // bound group (singleBound itself is referenced twice via ${singleBound}
+  // Declaration + a LEADING use in singleBound + a TRAILING use in
+  // singleBound (TASK #62 -- a currency indicator trailing the digits,
+  // e.g. "18.000.000 TL", is now preserved through shaping too, not
+  // just a leading one) + use in valuePattern's own second-bound group
+  // (singleBound itself is referenced twice via ${singleBound}
   // interpolation, which doesn't re-print the literal token "currencyToken").
-  assert.equal(occurrences.length, 3, `expected currencyToken declared once and reused twice, got ${occurrences.length} occurrences`);
+  assert.equal(occurrences.length, 4, `expected currencyToken declared once and reused three times, got ${occurrences.length} occurrences`);
 });
 
 test("reference: ReportPdfButton.tsx's fixed pattern preserves the FULL range ('USD 7.3M–21.8M'), not just the first bound -- the most complete of the three files' fixes, since its valuePattern already had range support before this ticket", () => {
