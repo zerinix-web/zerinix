@@ -17,7 +17,12 @@ import {
   type MarketIntelligenceGraph,
 } from "@/app/lib/ai/market-intelligence-graph";
 import { estimateAiInputTokens } from "@/app/lib/ai/token-optimization";
-import { resolveCachedOrExecuteResearch } from "@/app/lib/ai/research-cache-core";
+import {
+  resolveCachedOrExecuteResearch,
+  runExclusivelyByKey,
+} from "@/app/lib/ai/research-cache-core";
+
+export { runExclusivelyByKey };
 import { logOperationalInfo } from "@/app/lib/security/logging";
 
 const RESEARCH_CACHE_VERSION = "research-result-v1";

@@ -47,8 +47,16 @@ import {
   getCachedResearchFromReportData,
   logSkippedResearchForReportCache,
   resolveDomainResearchWithCache,
+  runExclusivelyByKey,
   type ResearchCacheIdentity,
 } from "@/app/lib/ai/research-cache";
+import {
+  acquireMarketIntelligenceExecutionClaim,
+  releaseMarketIntelligenceExecutionClaim,
+  sleep as sleepBeforeExecutionClaimRetry,
+  MARKET_INTELLIGENCE_FULL_REPORT_CLAIM_POLL_ATTEMPTS,
+  MARKET_INTELLIGENCE_FULL_REPORT_CLAIM_POLL_DELAY_MS,
+} from "@/app/lib/ai/market-intelligence-execution-claim";
 import { checkAiProductionRateLimit } from "@/app/lib/ai/rate-limit";
 import { createAiJobDescriptor } from "@/app/lib/ai/queue";
 import { createCanonicalFinancialAssumptions } from "@/app/lib/ai/financial-assumptions";
@@ -2281,6 +2289,38 @@ Write only this section's content. Do not write a JSON object, field name, headi
             : "",
         ].filter(Boolean).join(":"),
       });
+      // TASK #67 -- atomic duplicate-execution guard for the Market
+      // Intelligence full-report provider call. Two SEPARATE report_jobs
+      // rows (each minted with its own always-unique reportRequestId --
+      // see components/Planner.tsx's createMessageId() per submit) can
+      // exist for what is semantically the SAME market intelligence
+      // request (identical prompt/assets/language/model/report variant),
+      // and each independently reaches this function. fullReportCacheKey
+      // above is already the canonical, deterministic identity for "this
+      // exact request" -- no reportRequestId, no timestamp -- so it is
+      // reused here, unmodified, as the guard key. runExclusivelyByKey
+      // (research-cache-core.ts) mirrors the exact proven, already-live
+      // synchronous check-and-set pattern that module's own
+      // resolveCachedOrExecuteResearch already uses to fix the identical
+      // class of bug one layer down, for the research sub-call only --
+      // this closes it for the expensive full-report synthesis call
+      // itself. A concurrent duplicate simply waits for the current
+      // owner to finish, then re-runs this exact same, unmodified cache-
+      // check-then-maybe-generate logic below from the top: a successful
+      // owner will have populated the cache by then (a genuine hit,
+      // served by the unchanged code immediately below), and a failed
+      // owner leaves the cache untouched, so the waiter legitimately
+      // becomes the new owner and generates its own fresh report --
+      // never doubly failing a request merely because another one
+      // already failed, and never leaving the key permanently locked.
+      const fullReportGuardKey = `${user.id}:${fullReportCacheKey}`;
+      // TASK #67A -- bounded wait budget for the distributed execution
+      // claim below, shared across every recursive retry of
+      // runFullReportGenerationOnce (never reset per-attempt), so the
+      // TOTAL wait across all retries stays capped even though each
+      // retry re-enters the function from the top.
+      let executionClaimWaitAttempts = 0;
+      const runFullReportGenerationOnce = async (): Promise<Response> => {
       const cachedFullReport = await getCachedAiResponse(
         supabase,
         user.id,
@@ -2555,6 +2595,72 @@ Write only this section's content. Do not write a JSON object, field name, headi
         });
       }
 
+      // TASK #67A -- distributed, cross-instance-safe execution-
+      // ownership claim (app/lib/ai/market-intelligence-execution-
+      // claim.ts + the accompanying migration). runExclusivelyByKey
+      // above only protects against a duplicate arriving in THIS SAME
+      // process, and only up until this function returns -- for a
+      // streamed report that happens before the ReadableStream's own
+      // background work (the real provider call and persistence,
+      // further below) actually finishes, and it has no visibility
+      // across separate serverless instances at all. This claim is
+      // acquired here, before any research or provider call, keyed by
+      // the SAME canonical fullReportCacheKey identity, and released
+      // only once that background work genuinely completes (see the
+      // stream's own finally block below, and the two early-return
+      // paths immediately below) -- authoritative across every
+      // instance, not just this process.
+      const executionClaimWorkerId = crypto.randomUUID();
+      const executionClaimResult = await acquireMarketIntelligenceExecutionClaim({
+        supabase,
+        userId: user.id,
+        fingerprint: fullReportCacheKey,
+        workerId: executionClaimWorkerId,
+      });
+
+      if (executionClaimResult === "held_by_another_owner") {
+        if (executionClaimWaitAttempts >= MARKET_INTELLIGENCE_FULL_REPORT_CLAIM_POLL_ATTEMPTS) {
+          logOperationalInfo("[api:market-analysis] execution claim wait exhausted", {
+            reportRequestId: reportRequestId || null,
+            fingerprint: fullReportCacheKey,
+            waitAttempts: executionClaimWaitAttempts,
+          });
+          return NextResponse.json(
+            {
+              error:
+                "Market intelligence generation is already in progress for this request. Please try again shortly.",
+            },
+            { status: 429 }
+          );
+        }
+        executionClaimWaitAttempts += 1;
+        await sleepBeforeExecutionClaimRetry(MARKET_INTELLIGENCE_FULL_REPORT_CLAIM_POLL_DELAY_MS);
+        // Re-enter from the top: re-runs the cache check above first --
+        // if the current owner finished and persisted a real result in
+        // the meantime, this serves it exactly like any other cache
+        // hit; otherwise this re-attempts the claim.
+        return runFullReportGenerationOnce();
+      }
+
+      let executionClaimReleased = false;
+      const releaseExecutionClaimOnce = async () => {
+        if (executionClaimReleased) return;
+        executionClaimReleased = true;
+        const { error: releaseError } = await releaseMarketIntelligenceExecutionClaim({
+          supabase,
+          userId: user.id,
+          fingerprint: fullReportCacheKey,
+          workerId: executionClaimWorkerId,
+        });
+        if (releaseError) {
+          logServerError(
+            "api:market-analysis:execution-claim-release",
+            new Error(releaseError)
+          );
+        }
+      };
+
+      try {
       const marketResearchClient = createOpenAiClient();
       const { research: domainResearch } =
         await resolveDomainResearchWithCache({
@@ -2670,6 +2776,7 @@ Write only this section's content. Do not write a JSON object, field name, headi
           responseLanguage === "Turkish"
             ? `Araştırma tamamlandı, ancak karar raporu için doğrulanabilir temel kanıt bulunamadı. Gerekli bilgi veya belge: ${clarificationUnresolvedLabel || "karar bağlamı"}.`
             : `Research completed, but no verifiable core evidence was found for a decision report. Required information or document: ${clarificationUnresolvedLabel || "decision context"}.`;
+        await releaseExecutionClaimOnce();
         return NextResponse.json(
           { error: clarificationErrorText },
           { status: 422 }
@@ -2691,6 +2798,7 @@ Write only this section's content. Do not write a JSON object, field name, headi
       });
 
       if (existingAiCallCount >= MAX_AI_CALLS_PER_MARKET_REPORT) {
+        await releaseExecutionClaimOnce();
         return NextResponse.json(
           {
             error:
@@ -3095,6 +3203,7 @@ Do not include markdown code fences, braces inside string values, or commentary 
             );
           } finally {
             controller.close();
+            await releaseExecutionClaimOnce();
           }
         },
       });
@@ -3106,6 +3215,13 @@ Do not include markdown code fences, braces inside string values, or commentary 
           "Cache-Control": "no-cache, no-transform",
         },
       });
+      } catch (error) {
+        await releaseExecutionClaimOnce();
+        throw error;
+      }
+      };
+
+      return runExclusivelyByKey(fullReportGuardKey, runFullReportGenerationOnce);
     }
 
     const cacheKey = createAiCacheKey({

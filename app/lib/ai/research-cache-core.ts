@@ -51,3 +51,59 @@ export async function resolveCachedOrExecuteResearch<T>(input: {
     inFlight.delete(input.dedupeKey);
   }
 }
+
+const exclusiveExecutions = new Map<string, Promise<void>>();
+
+// TASK #67 -- generic atomic "only one caller may run for this key at a
+// time" guard, complementary to resolveCachedOrExecuteResearch above.
+// That function coalesces concurrent callers onto ONE shared, already-
+// resolved VALUE -- it requires every caller to want the exact same
+// result shape. This one instead lets each caller run its OWN full
+// `run` callback (which may itself start with a cache check, exactly
+// like resolveDomainResearchWithCache's caller does one level up), but
+// guarantees no two callers holding the same key ever execute `run`
+// concurrently: a caller that finds the key already held simply waits
+// for the current holder to finish (success or failure -- deliberately
+// ignored here, via `.catch(() => {})`, since a failure just means "no
+// new state to build on," not an error for THIS caller) and then tries
+// again from scratch, calling `run` a second time. `run` itself is
+// expected to re-check whatever cache/state the previous holder may
+// have populated before doing any expensive work of its own, so a
+// waiter whose predecessor succeeded typically returns immediately on
+// this second attempt without ever becoming a holder itself.
+//
+// The check-then-set below is synchronous (no `await` between the `get`
+// and the `set`), exactly like resolveCachedOrExecuteResearch's own
+// documented fix -- no two concurrent calls can ever both observe "the
+// key is free" for the same key. The guard can never lock a key
+// indefinitely: `release()` and the same-instance-guarded `delete()` in
+// `finally` both run synchronously, with no `await` between them and
+// the holder's own `run()` settling (success OR failure/throw), so the
+// key is freed the instant the holder's attempt is done, regardless of
+// outcome -- a failed/timed-out/aborted attempt still frees the key for
+// a legitimate retry.
+export async function runExclusivelyByKey<T>(
+  key: string,
+  run: () => Promise<T>
+): Promise<T> {
+  const existing = exclusiveExecutions.get(key);
+  if (existing) {
+    await existing.catch(() => {});
+    return runExclusivelyByKey(key, run);
+  }
+
+  let release: () => void = () => {};
+  const ownership = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  exclusiveExecutions.set(key, ownership);
+
+  try {
+    return await run();
+  } finally {
+    release();
+    if (exclusiveExecutions.get(key) === ownership) {
+      exclusiveExecutions.delete(key);
+    }
+  }
+}
