@@ -4,6 +4,11 @@ import {
 } from "../ai/executive-decision-system.ts";
 import { executiveBriefSchema } from "../ai/executive-brief-generator.ts";
 import { strategicDecisionMemoSchema, type StrategicDecisionMemo } from "../ai/strategic-decision-memo.ts";
+import {
+  executiveDecisionLabels,
+  localizeExecutiveDecision,
+  type ExecutiveDecisionCode,
+} from "./executive-decision-brief.ts";
 
 // Formats ZERINIX Executive Decision System v1's output into additive
 // prompt context for the existing "Strategic Report" (business plan)
@@ -266,6 +271,35 @@ ${evidenceSummaryLines.map((line) => `- ${line}`).join("\n")}`;
 // strategic-decision-memo.ts), not something newly introduced here.
 export type StrategicDecisionMemoReportSection = string;
 
+// TASK #65 FIX -- confirmed live via code-path tracing: this section
+// REPLACES executiveSummary post-hoc (see the 3 override sites in
+// plan-executor.ts), but until this fix it never emitted the shared,
+// deterministic "Decision: TOKEN (Confidence: NN%)" banner every OTHER
+// report kind's executiveSummary carries. resolveCanonicalDecisionFromReportText
+// / extractExecutiveDecisionFromText (executive-decision-vocabulary.ts,
+// executive-decision-brief.ts) are the ONLY functions the dashboard/PDF
+// use to read a report's canonical decision back out of its persisted
+// executiveSummary text -- with no recognizable banner present, they
+// silently fell through to the oldest fallback tier, the legacy,
+// independently-computed investmentScore.recommendation, discarding the
+// Executive Decision System's own real decision (executiveDecisionSignal)
+// entirely. This maps that signal onto the shared GO/CONDITIONAL_GO/
+// NO_GO vocabulary solely so this section can carry the SAME banner
+// shape the existing extraction pipeline already parses -- it does not
+// duplicate or reimplement any decision logic, only translates an
+// already-computed value into the one format the rest of the system
+// already knows how to read. "proceed_with_caution" (and any
+// unrecognized future signal value) conservatively maps to
+// CONDITIONAL_GO, matching this same module's own established default
+// (see extractGenericDecisionSignal in executive-decision-brief.ts).
+function mapExecutiveDecisionSignalToCode(
+  signal: StrategicDecisionMemo["executiveDecisionSignal"]
+): ExecutiveDecisionCode {
+  if (signal === "proceed") return "GO";
+  if (signal === "do_not_proceed_insufficient_evidence") return "NO_GO";
+  return "CONDITIONAL_GO";
+}
+
 function formatMemoList(items: readonly string[], emptyText: string): string {
   return items.length === 0 ? emptyText : items.map((item) => `- ${item}`).join("\n");
 }
@@ -288,8 +322,14 @@ export function formatStrategicDecisionMemoReportSection(
   }
 
   const memo = parsed.data;
+  const decisionCode = mapExecutiveDecisionSignalToCode(memo.executiveDecisionSignal);
+  const decisionBanner = `${executiveDecisionLabels.English.decision}: ${localizeExecutiveDecision(
+    decisionCode,
+    "English"
+  )} (${executiveDecisionLabels.English.confidence}: ${memo.confidence.aggregateConfidence}%)`;
 
   return `Executive Decision Memo
+${decisionBanner}
 Generated directly from the ZERINIX Executive Decision System. Every fact, risk, opportunity, and recommended action below is deterministically computed from verified evidence -- never freely written.
 
 Executive decision signal: "${memo.executiveDecisionSignal ?? "unknown"}". Aggregate confidence: ${memo.confidence.aggregateConfidence}/100.
