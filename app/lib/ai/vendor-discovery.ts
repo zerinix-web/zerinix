@@ -403,6 +403,23 @@ function normalizedMentionCandidate(value: string, taxonomyWords: ReadonlySet<st
 // so this generalizes to any market, not just the one that surfaced it.
 const mentionPatterns = [
   /\b([A-Z][A-Za-z0-9&.+'-]{1,28}(?:\s+[A-Z][A-Za-z0-9&.+'-]{1,28}){0,2})\s+(?:offers|provides|delivers|specializes in|is an AI-powered|is a leading|is a cloud-based)/g,
+  // TASK #68 -- CRITICAL FIX, confirmed live (Market Intelligence
+  // RegTech/GRC research-quality failure): the pattern above only
+  // recognizes three hardcoded adjective phrases after "is a/an" (AI-
+  // powered / leading / cloud-based) -- a common, real vendor-
+  // description construction ("X is a governance, risk, and compliance
+  // platform.", "Y is a compliance management software.") uses none of
+  // them, so a well-evidenced, real vendor mention in an uncatalogued
+  // market was never even extracted as a candidate before any
+  // classification/validation step ran. This generalizes the SAME "is
+  // a/an ... <role-noun>" construction to any descriptive words
+  // followed by one of a closed, curated set of vendor/product role-
+  // nouns -- industry-agnostic (the role-noun set describes what a
+  // company sells, not any named company or vertical), never a broad
+  // prose scan: the descriptive-words span stays bounded (at most 6
+  // lowercase/comma/ampersand-joined words) and must still end in one
+  // of these specific nouns.
+  /\b([A-Z][A-Za-z0-9&.+'-]{1,28}(?:\s+[A-Z][A-Za-z0-9&.+'-]{1,28}){0,2})\s+is\s+an?\s+(?:[a-z][a-z,&-]{1,20}\s+){0,6}(?:platform|software|solution|tool|provider|service)\b/g,
   /\b[Aa]lternatives?\s+[Tt]o\s+([A-Z][A-Za-z0-9&.+'-]{1,28}(?:\s+[A-Z][A-Za-z0-9&.+'-]{1,28}){0,2})/g,
   /\b([A-Z][A-Za-z0-9&.+'-]{1,28}(?:\s+[A-Z][A-Za-z0-9&.+'-]{1,28}){0,2})\s+(?:pricing|Pricing|reviews?|Reviews?|vs\.?|Vs\.?)\b/g,
   // These four use a character class WITHOUT a period (unlike the

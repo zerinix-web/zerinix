@@ -933,10 +933,28 @@ function buildPlanningEstimate(
   // --- Step 2: buyer-count research -- every candidate addressable-
   // buyer/establishment count, geography-consistent, ranked by
   // authority.
+  //
+  // TASK #68 -- CRITICAL FIX, confirmed live (Market Intelligence
+  // enterprise/regulated-buyer market sizing failure): this vocabulary
+  // was entirely SMB/establishment-shaped ("business population",
+  // "small business", "establishment") -- a regulated, enterprise-buyer
+  // market (e.g. RegTech/GRC, sold to banks/financial institutions/
+  // public companies) almost never describes its buyer population that
+  // way, so genuine buyer-count evidence for that kind of market was
+  // never even admitted into the candidate pool, forcing the pipeline
+  // into an avoidable "Validation Required" outcome even when usable
+  // evidence existed. Adding the enterprise/regulated-buyer equivalents
+  // (regulated entities/institutions, financial institutions, banks,
+  // enterprises, public companies) is industry-agnostic (it names WHO
+  // the buyers are, not any specific vertical) and does not weaken any
+  // existing safety gate: isPlausibleBusinessPopulationClaim's own
+  // magnitude-floor and classification-code guards, and the geography-
+  // conflict check, still apply unchanged to every candidate this
+  // widened filter admits.
   const buyerPopulationCandidates = rankEvidenceCandidates(
     sourceBacked.filter(
       (item) =>
-        /business.population|buyer.population|addressable.customer|number.of.business|establishment|small.business/i.test(
+        /business.population|buyer.population|addressable.customer|number.of.business|establishment|small.business|regulated\s+(?:entit(?:y|ies)|institutions?|companies)|financial\s+institutions?|number.of.(?:enterprises|companies|organizations|institutions)|public\s+companies/i.test(
           evidenceText(item)
         ) &&
         isPlausibleBusinessPopulationClaim(item) &&
@@ -949,13 +967,38 @@ function buildPlanningEstimate(
   // enforced on the proxy tier since a proxy is, by definition, allowed
   // to come from a comparable product/market -- the disclosure makes
   // that explicit instead of hiding it.
+  //
+  // TASK #68 -- CRITICAL FIX, confirmed live: enterprise B2B pricing
+  // evidence is overwhelmingly phrased as "annual contract value"/"ACV",
+  // never "subscription"/"per month" -- this vocabulary was recognized
+  // ONLY by the proxy-tier search below (findProxyPricingCandidate), so
+  // genuine pricing evidence for THIS exact category was demoted to the
+  // lower-confidence "proxy for a comparable product" tier (and its
+  // confidence penalty) purely because of vocabulary, not because the
+  // evidence was actually about a different product. Recognized
+  // directly here ONLY when the evidence text does not itself signal a
+  // comparable/adjacent reference product (comparableProductHedgePattern
+  // below) -- preserving the existing, deliberate proxy-tier test
+  // fixture ("A comparable construction-technology platform discloses
+  // an average customer contract value...") exactly as before, while
+  // fixing the general case where the SAME vocabulary genuinely
+  // describes the researched category itself. Bare "contract value"/
+  // "licensing fee" (without the ACV-specific phrasing) are deliberately
+  // left to the proxy tier alone -- narrower here reduces the risk of
+  // this direct tier ever misreading a genuinely adjacent-product signal.
+  // Does not weaken any existing check -- extractNumber must still find
+  // a real figure, and this evidence is drawn from the SAME sourceBacked
+  // pool (isVerified, confidence >= 48) every other direct candidate
+  // above already requires.
+  const comparableProductHedgePattern = /\bcomparable\b|\bsimilar\b|\banalogous\b|\badjacent\b/i;
   const directPricingCandidates = rankEvidenceCandidates(
-    sourceBacked.filter(
-      (item) =>
-        /pricing|subscription|per.month|per.year|annual.price|monthly.price/i.test(
-          evidenceText(item)
-        ) && extractNumber(`${item.claim} ${item.value}`)
-    )
+    sourceBacked.filter((item) => {
+      const text = evidenceText(item);
+      const isDirectVocabulary = /pricing|subscription|per.month|per.year|annual.price|monthly.price/i.test(text);
+      const isUnhedgedEnterpriseVocabulary =
+        /annual\s+contract\s+value|\bacv\b/i.test(text) && !comparableProductHedgePattern.test(text);
+      return (isDirectVocabulary || isUnhedgedEnterpriseVocabulary) && extractNumber(`${item.claim} ${item.value}`);
+    })
   );
   const buyerPopulation = buyerPopulationCandidates[0] || null;
   let annualPricing = directPricingCandidates[0] || null;

@@ -1326,6 +1326,73 @@ const MARKET_SIZE_EVIDENCE_PATTERN =
 const TECHNICAL_PERFORMANCE_EVIDENCE_PATTERN =
   /\b(?:extraction\s+accuracy|latency|model\s+accuracy|integration\s+completion|uptime|throughput|processing\s+accuracy|precision|recall|F1[- ]score)\b/i;
 
+// TASK #68 -- deliberately SEPARATE from MarketIntelligenceEvidenceCategory/
+// GAP_REQUIRED_EVIDENCE_CATEGORY above: adding "competitive-evidence" to
+// that shared map would satisfy the multi-gap fallback below, but it
+// would ALSO change isRecommendationSemanticallyCompatibleWithGap's
+// single-material-gap behavior, breaking Task #50's own explicit,
+// tested guarantee that a sole competitive-evidence gap accepts ANY
+// validation/pilot metric (it deliberately has "no defined
+// requirement" there). This narrow, curated pattern -- named/verified
+// competitors, competitive landscape, adjacent players, competitor
+// discovery, matching this report style's own real vocabulary (see
+// COMPETITIVE_EVIDENCE_GAP_COPY above and this codebase's competitor-
+// presentation tests) -- is used ONLY by the multi-gap fallback in
+// resolveLinkedEvidenceGap below, never touching the shared category
+// map or the single-gap gate.
+const COMPETITIVE_EVIDENCE_LINK_PATTERN =
+  /\b(?:named\s+competitors?|verified\s+competitors?|competitors?\s+(?:identified|verified|confirmed|validated|discovered)|competitive\s+landscape|adjacent\s+players?|competitor\s+discovery)\b/i;
+
+// TASK #68B -- CRITICAL FIX, confirmed live against a real report: a
+// "Quantitative Demand Survey" recommendation (Owner: Market
+// Intelligence, Budget $25,000, Evidence tie: "validate TAM") correctly
+// links to the sole material market-sizing gap above -- it genuinely IS
+// the action meant to resolve market sizing, so relatedEvidenceGapId and
+// the Closure Plan's owner/budget/activity are all correct. The bug is
+// ONE LAYER DOWN, in buildControllingThresholdForGap: that recommendation's
+// OWN successCriterion field is the bare string "40%" -- extracted from
+// its "KPI: response rate >= 40%" clause because the card's real
+// "Success: ..." sentence uses no "criterion:"/"metric:" label
+// extractRecommendationSignals recognizes, so the label-based extractor
+// falls back to the FIRST bare percentage in the whole card, which is the
+// survey's own response-rate KPI, not its willingness-to-pay finding. A
+// bare "40%" carries no MARKET_SIZE_EVIDENCE_PATTERN keyword either way,
+// so Task #50's own gate (isRecommendationSemanticallyCompatibleWithGap)
+// stays neutral and does not reject the link -- correctly, since the
+// RECOMMENDATION itself is not being rejected here. But
+// buildControllingThresholdForGap then took that same bare "40%" and
+// rendered it, unchallenged, as the market-sizing ENTER/AVOID decision
+// threshold -- semantic provenance leakage from "this action's own
+// execution-quality KPI" into "evidence that market size is resolved".
+//
+// FIX: a narrow, additive semantic gate used ONLY when threshold-
+// building considers linking a validation to the market-sizing gap's
+// OWN ENTER/AVOID criteria (never touching relatedEvidenceGapId,
+// isRecommendationSemanticallyCompatibleWithGap, or the Closure Plan
+// resolvers, which read a completely separate set of fields). A
+// candidate's successCriterion must affirmatively name real market-
+// sizing-evidence vocabulary (total addressable market, buyer
+// population, pricing/ACV signals, ...) AND must not be a bare
+// validation-process/activity metric (response rate, sample size,
+// interview/pilot count, completion rate, ...) -- deliberately the
+// OPPOSITE polarity from Task #50's own neutral-on-no-match gate, since
+// here an unclassifiable or process-only figure must NOT default to
+// "compatible": requirement #8 requires the qualitative threshold
+// (already unconditionally the first enterConditions/avoidConditions
+// entry) to survive untouched whenever no semantically compatible
+// number exists, rather than ever rendering a KPI this gap cannot
+// actually be measured by.
+const MARKET_SIZE_RESOLUTION_METRIC_PATTERN =
+  /\b(?:TAM|total\s+addressable\s+market|verified\s+market\s+size|market\s+size|addressable\s+market|serviceable\s+addressable\s+market|serviceable\s+obtainable\s+market|\bSAM\b|\bSOM\b|buyer\s+population|addressable\s+(?:customer|business)|business\s+population|willingness[- ]to[- ]pay|price\s+point|pricing\s+signals?|price\s+bands?|annual\s+contract\s+value|\bacv\b|licensing\s+fee)\b/i;
+const VALIDATION_PROCESS_ACTIVITY_METRIC_PATTERN =
+  /\b(?:response\s+rate|sample\s+size|outreach\s+count|interview\s+count|pilot\s+count|completion\s+rate|survey\s+completion|participation\s+rate)\b/i;
+
+function isMarketSizeCompatibleThresholdMetric(successCriterion: string): boolean {
+  if (!successCriterion.trim()) return false;
+  if (VALIDATION_PROCESS_ACTIVITY_METRIC_PATTERN.test(successCriterion)) return false;
+  return MARKET_SIZE_RESOLUTION_METRIC_PATTERN.test(successCriterion);
+}
+
 function resolveRecommendationEvidenceCategories(successCriterion: string): Set<MarketIntelligenceEvidenceCategory> {
   const categories = new Set<MarketIntelligenceEvidenceCategory>();
   if (!successCriterion.trim()) return categories;
@@ -1456,7 +1523,33 @@ function resolveLinkedEvidenceGap(
     const requiredCategory = GAP_REQUIRED_EVIDENCE_CATEGORY[gap.id];
     return Boolean(requiredCategory) && classifiedCategories.has(requiredCategory!);
   });
-  return categoryMatches.length === 1 ? categoryMatches[0] : null;
+
+  // TASK #68 -- CRITICAL FIX, confirmed against a real report where
+  // competitive-evidence was unresolved SIMULTANEOUSLY with another
+  // material gap (market-sizing): categoryMatches above can only ever
+  // select obtainable-share/market-sizing (the only two gaps in
+  // GAP_REQUIRED_EVIDENCE_CATEGORY -- competitive-evidence is
+  // deliberately absent from that shared map, see Task #50's own
+  // guarantee at COMPETITIVE_EVIDENCE_LINK_PATTERN's definition above).
+  // A recommendation genuinely aimed at resolving competitive-evidence
+  // (real owner/timeline/budget, successCriterion or evidenceTie naming
+  // named competitors / competitive landscape / competitor discovery)
+  // could therefore never link to it once 2+ material gaps existed --
+  // the multi-gap path had no way to select competitive-evidence at
+  // all, no matter how clearly relevant the candidate. This adds a
+  // separate, additive candidate set for that ONE gap type, using its
+  // own dedicated pattern -- never touching GAP_REQUIRED_EVIDENCE_CATEGORY
+  // or the single-gap gate above, so Task #50's guarantee is completely
+  // unaffected. Combined with categoryMatches (always disjoint, since
+  // competitive-evidence can never appear in categoryMatches) so a
+  // candidate whose text ambiguously names BOTH a category-gated metric
+  // and competitive-evidence vocabulary still correctly resolves to
+  // null rather than guessing.
+  const competitiveEvidenceMatches = COMPETITIVE_EVIDENCE_LINK_PATTERN.test(classifiableText)
+    ? materialGaps.filter((gap) => gap.id === "competitive-evidence")
+    : [];
+  const combinedMatches = [...categoryMatches, ...competitiveEvidenceMatches];
+  return combinedMatches.length === 1 ? combinedMatches[0] : null;
 }
 
 // TASK #48 -- a type-aware companion to Task #47C's own
@@ -1926,12 +2019,20 @@ function buildControllingThresholdForGap(
   // when it actually carries a non-empty measurable target string;
   // otherwise there is nothing structurally defensible to render, and
   // the caller must omit the clause entirely rather than invent one.
+  //
+  // TASK #68B -- for market-sizing specifically, that measurable target
+  // string must ALSO be a semantically compatible market-sizing-evidence
+  // metric (see isMarketSizeCompatibleThresholdMetric above), never a
+  // bare validation-process/activity KPI (e.g. a demand survey's own
+  // response-rate figure) leaking in as if it were evidence the gap is
+  // resolved. Every other gap type's behavior is completely unchanged.
   const linkedValidation =
     recommendationValidations.find(
       (validation) =>
         validation.relatedEvidenceGapId === gap.id &&
         validation.provenance &&
-        validation.successCriterion.trim().length > 0
+        validation.successCriterion.trim().length > 0 &&
+        (gap.id !== "market-sizing" || isMarketSizeCompatibleThresholdMetric(validation.successCriterion))
     ) ?? null;
 
   const whatWouldChange = canonicalState.whatWouldChangeThisDecision;

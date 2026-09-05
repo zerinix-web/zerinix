@@ -555,6 +555,57 @@ export function buildVendorIntelligenceGraph(
                   "Discovered via a commercial-product-shaped mention (e.g. an \"offers\"/\"provides\"/\"is a cloud-based\" pattern) with no specific non-vendor institutional signal found.",
               };
             }
+            // TASK #68A -- CRITICAL FIX, confirmed live against a real
+            // report: OpenAI's native web_search tool commonly returns a
+            // bare URL citation with the domain itself as the ENTIRE
+            // "claim"/"value"/"sourceTitle" text (e.g. claim="niceactimize.com"),
+            // which extractVendorCandidateMentions correctly recognizes via
+            // Path C (domain-fallback) -- but with no descriptive text at
+            // all, classifyOrganizationEntity always falls to the generic
+            // "unknown" default here, and the OUTER discard below
+            // (matchedByDomainFallbackOnly && entityType !== "commercial_vendor")
+            // then dropped the candidate entirely, BEFORE validateVendorCandidate
+            // or assessMarketRelevance ever ran -- even though the report's
+            // own narrative sections (Threats, Industry Trends, Executive
+            // Summary) cited this exact vendor by name from 4 distinct
+            // official niceactimize.com sub-pages (overview, PEP-screening,
+            // a marketplace listing, a product brochure), each independently
+            // tagged sourceType "official company source" by the research
+            // pipeline's own, already-computed source classifier -- a real
+            // identity signal, not a guess from citation volume alone. This
+            // upgrades ONLY the ambiguous "unknown" default, and ONLY when
+            // 2+ INDEPENDENT domains among this candidate's own qualifying
+            // evidence are already labeled "official company source" --
+            // narrower than the heuristic-mention upgrade above (which
+            // needs just one non-vendor signal absent), since a domain-
+            // fallback name has no descriptive text to corroborate it with
+            // at all. A single bare citation, a non-official sourceType, or
+            // an institution/academic domain (already excluded upstream by
+            // isNonCompetitorSourceDomain/classifyOrganizationEntity's own
+            // specific non-vendor types, which this branch never overrides)
+            // still cannot pass this bar. This does not touch
+            // validateVendorCandidate's own stricter, unmodified
+            // corroboration paths below -- a candidate upgraded here still
+            // requires official, non-thin evidence to become a fully
+            // validated `vendors` entry; thin-only evidence like this can
+            // still only ever reach the honestly-labeled adjacentPlayers
+            // tier further below.
+            if (candidate.matchedByDomainFallbackOnly && classification.entityType === "unknown") {
+              const officialSourceDomainCount = new Set(
+                qualifyingItems
+                  .filter((item) => item.sourceType === "official company source")
+                  .map((item) => hostnameOf(item.url))
+                  .filter(Boolean)
+              ).size;
+              if (officialSourceDomainCount >= 2) {
+                return {
+                  entityType: "commercial_vendor" as const,
+                  confidence: classification.confidence,
+                  reason:
+                    "Discovered via 2+ independent citations from the same company's own domain, each labeled an official company source, though with no descriptive snippet text.",
+                };
+              }
+            }
             return classification;
           })();
 
