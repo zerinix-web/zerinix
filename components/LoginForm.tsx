@@ -8,6 +8,7 @@ import {
   persistSupabaseSession,
   restoreSupabaseSession,
 } from "@/app/lib/supabase/client";
+import { classifyPasswordSignInError } from "@/app/lib/supabase/auth-error-classification";
 import OAuthButtons from "@/components/OAuthButtons";
 
 export default function LoginForm({
@@ -46,7 +47,31 @@ export default function LoginForm({
       });
 
       if (signInError) {
-        setError(labels.authError);
+        // TASK #69A-19A -- ROOT CAUSE FIX (classifier extracted to
+        // classifyPasswordSignInError under #69A-21 so this and both
+        // server-action login paths in app/auth/actions.ts share one
+        // truthful distinction instead of each re-implementing it):
+        // this is the real, live login form (LoginForm.tsx calls
+        // supabase.auth.signInWithPassword directly; app/auth/actions.ts's
+        // own server actions are a separate, unwired code path). Every
+        // signInWithPassword failure used to collapse into the SAME
+        // "check your email and password" message regardless of cause
+        // -- confirmed live, a genuine Supabase connectivity outage (the
+        // auth service itself unreachable) was indistinguishable here
+        // from real invalid credentials. That misleads someone with a
+        // CORRECT password into doubting it, and makes a real
+        // infrastructure incident look like a login bug. Every other
+        // error (genuinely wrong credentials, or any other auth
+        // failure) still shows the exact same generic message as
+        // before -- this deliberately never distinguishes "wrong
+        // email" from "wrong password" from "some other auth error",
+        // since that would let an attacker enumerate which part of a
+        // guess was wrong.
+        setError(
+          classifyPasswordSignInError(signInError) === "connectivity"
+            ? labels.connectionError
+            : labels.authError
+        );
         return;
       }
 

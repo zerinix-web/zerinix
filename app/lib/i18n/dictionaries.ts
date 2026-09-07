@@ -28,6 +28,12 @@ export const dictionaries = {
       signingIn: "Signing in...",
       signInButton: "Sign In",
       authError: "Check your email and password, then try again.",
+      // TASK #69A-19A -- a genuine connectivity/timeout failure reaching
+      // the auth service (isAuthRetryableFetchError, LoginForm.tsx) is
+      // now reported here instead of authError, so a real outage never
+      // reads as "your password is wrong."
+      connectionError:
+        "We couldn't reach the login service. Please check your connection and try again in a moment.",
       missingCredentials: "Enter your email and password.",
       sessionError: "Your session could not be saved. Please sign in again.",
       oauthError: "Social sign-in could not be started. Please try again.",
@@ -270,6 +276,8 @@ export const dictionaries = {
       signingIn: "Giriş yapılıyor...",
       signInButton: "Giriş Yap",
       authError: "E-posta ve şifrenizi kontrol edip tekrar deneyin.",
+      connectionError:
+        "Giriş servisine ulaşılamadı. Bağlantınızı kontrol edip birazdan tekrar deneyin.",
       missingCredentials: "E-posta ve şifrenizi girin.",
       sessionError: "Oturumunuz kaydedilemedi. Lütfen tekrar giriş yapın.",
       oauthError: "Sosyal giriş başlatılamadı. Lütfen tekrar deneyin.",
@@ -501,6 +509,8 @@ export const dictionaries = {
       signingIn: "Anmeldung läuft...",
       signInButton: "Anmelden",
       authError: "Prüfen Sie E-Mail und Passwort und versuchen Sie es erneut.",
+      connectionError:
+        "Der Anmeldedienst war nicht erreichbar. Bitte prüfen Sie Ihre Verbindung und versuchen Sie es gleich erneut.",
       missingCredentials: "Geben Sie Ihre E-Mail-Adresse und Ihr Passwort ein.",
       sessionError:
         "Ihre Sitzung konnte nicht gespeichert werden. Melden Sie sich erneut an.",
