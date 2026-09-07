@@ -9,6 +9,8 @@ import {
   getUserPlanTier,
   recordAiUsage,
 } from "@/app/lib/ai/governance";
+import { isFounderAccount } from "@/app/lib/beta-access";
+import { isVerifiedAdminOrOwnerAccount } from "@/app/lib/strategic-report-access";
 
 function readBodyString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim().slice(0, 256) : "";
@@ -69,6 +71,27 @@ export async function POST(request: NextRequest) {
   }
 
   const planTier = await getUserPlanTier(supabase, user.id);
+  // TASK #69A-16B -- ROOT CAUSE: this endpoint was the ONLY AI-usage
+  // quota check with no admin/owner (or founder) exemption at all --
+  // checkAiProductionRateLimit (app/lib/ai/rate-limit.ts) already exempts
+  // founder accounts from the report/chat/market quotas it gates
+  // ("founder account quota bypass"), but PDF export calls
+  // checkAIUsagePermission directly and never consulted that or any
+  // other exemption, so even the canonical admin/owner account was
+  // treated as an ordinary quota-limited user. Resolved entirely
+  // server-side from the already-authenticated `user` (Supabase's own
+  // auth.getUser() result, never client-supplied): isFounderAccount
+  // reuses the EXACT mechanism already granted quota-bypass authority
+  // elsewhere; isVerifiedAdminOrOwnerAccount reuses the EXACT canonical
+  // admin/owner resolution (verified JWT claim, then the service-role
+  // admin_roles table lookup) authorizeStrategicReportAccess already
+  // uses to gate Strategic Report access -- no new admin system, no
+  // hardcoded email, nothing client-controllable. Normal users are
+  // completely unaffected: this only ever WIDENS the allowed set, never
+  // narrows it, and checkAIUsagePermission/recordAiUsage below are
+  // otherwise byte-unchanged.
+  const isUsageLimitExemptAccount =
+    isFounderAccount(user) || (await isVerifiedAdminOrOwnerAccount(user));
   const permission = await checkAIUsagePermission({
     supabase,
     userId: user.id,
@@ -77,7 +100,7 @@ export async function POST(request: NextRequest) {
   });
   const promptHash = createAiPromptHash(`pdf_export:${reportId || reportTitle || user.id}`);
 
-  if (!permission.allowed) {
+  if (!permission.allowed && !isUsageLimitExemptAccount) {
     await recordAiUsage(supabase, {
       userId: user.id,
       endpoint: "/api/usage/pdf-export",
@@ -130,6 +153,11 @@ export async function POST(request: NextRequest) {
       usage_kind: "pdf_export",
       remainingUsage: permission.remainingUsage,
       report_title_present: Boolean(reportTitle),
+      // TASK #69A-16B -- purely additive audit annotation: true only when
+      // this specific export succeeded via the admin/owner/founder
+      // exemption despite an exhausted quota (!permission.allowed), never
+      // when a normal user succeeded within their real remaining quota.
+      quota_exempt: !permission.allowed && isUsageLimitExemptAccount,
     },
   });
 
