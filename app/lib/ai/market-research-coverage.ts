@@ -243,6 +243,35 @@ function coversField(item: DomainResearchEvidence, pattern: RegExp) {
   return pattern.test(`${item.field} ${item.claim} ${item.sourceType}`);
 }
 
+// TASK #69A-3 -- CRITICAL BUG FIX (confirmed live: a real Business Idea
+// Validation report's Competitor Landscape named two real, cited
+// competitors -- Float [R56][R59], Cash Flow Frog [R57] -- both backed by
+// genuinely "Verified from external source" evidence with real URLs and
+// publishers, yet the Executive Summary said "Distinct competitor
+// organizations represented: 0"). ROOT CAUSE: coversField above only
+// inspects `field`/`claim`/`sourceType`, and Business Idea Validation's
+// own research pipeline tags virtually all of its evidence with one of
+// four coarse field values (executive_assessment/priority_actions/
+// material_facts/analysis) -- none of which contain "compet", and the raw
+// `claim` text describes what a vendor's product DOES ("Float targets
+// finance teams... integrates with Xero/QuickBooks...") without
+// necessarily using the word "competitor" either. The SAME evidence items'
+// own, already-populated `impactReason` field -- the research pipeline's
+// own structured statement of why this evidence matters -- explicitly said
+// "Shows established competitor..." (R56) and "Indicates available
+// low-price competition..." (R57), a genuine, structured, AI-scored
+// signal this narrow competitor-only check simply never looked at.
+// Deliberately scoped to ONLY the competitor-evidence check below (not a
+// change to the shared coversField helper, which 5 other, unrelated
+// coverage dimensions -- market size, demand, product/pricing, industry
+// structure, company filings -- also depend on) so this fix cannot
+// possibly change any of those other dimensions' behavior.
+function coversCompetitorEvidence(item: DomainResearchEvidence) {
+  return /compet|major.players|product.evidence|company.evidence/i.test(
+    `${item.field} ${item.claim} ${item.sourceType} ${item.impactReason}`
+  );
+}
+
 export function evaluateMarketResearchCoverage(
   evidence: readonly DomainResearchEvidence[],
   prompt = ""
@@ -251,9 +280,7 @@ export function evaluateMarketResearchCoverage(
   const domains = new Set(verified.map((item) => normalizedDomain(item.url)).filter(Boolean));
   const classes = new Set(verified.map(classifyMarketEvidenceSource));
   classes.delete("other");
-  const competitorSources = verified.filter((item) =>
-    coversField(item, /compet|major.players|product.evidence|company.evidence/i)
-  );
+  const competitorSources = verified.filter((item) => coversCompetitorEvidence(item));
   const competitorOrganizations = new Set(
     competitorSources
       .map((item) => item.publisher.trim().toLowerCase() || normalizedDomain(item.url))

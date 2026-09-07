@@ -194,6 +194,37 @@ const keyAssumptionsCopy: Record<ResponseLanguage, { heading: string }> = {
   Spanish: { heading: "Supuestos financieros" },
 };
 
+// TASK #69A-4 -- CRITICAL BUG FIX (confirmed live: the real Business Idea
+// Validation quality gate -- domain-research.ts's validateDomainResearchQuality,
+// which every planFields section must satisfy -- requires every numeric-
+// bearing line to carry an explicit evidence-classification word/tag.
+// This list's own consolidated bullets (Lifetime, Monthly gross profit per
+// customer, Annualized operating expense, Target runway, Year-3 revenue,
+// ...) had NO classification of any kind -- unlike a few OTHER bullets in
+// the SAME list that happen to restate a tracked FinancialMetricModel's
+// own displayValue verbatim and get a "Planning assumption --" prefix
+// later, from labelModelDerivedFinancialClaims' separate, narrower value-
+// matching pass. This section is explicitly titled "Financial Assumptions"
+// -- every line in it, by the section's own name and purpose, states an
+// assumption feeding the financial model, whether or not it happens to
+// match a tracked metric's exact displayValue string. Appending the same
+// canonical "Assumption" classification word (already this codebase's own
+// established vocabulary, see financial-evidence-labeling.ts's own
+// FinancialEvidenceType/evidenceTypeLabelTranslations above) to every
+// bullet, uniformly, fixes every current and future untracked-intermediate-
+// value gap here at once -- never claims Verified, never invents a new
+// classification, and is harmless alongside labelModelDerivedFinancialClaims'
+// own later "Planning assumption --" prefix on lines it separately
+// recognizes (that prefix is prepended; this suffix is appended -- the two
+// never collide or duplicate each other's placement).
+const financialAssumptionsListSuffix: Record<ResponseLanguage, string> = {
+  English: "(Assumption)",
+  Turkish: "(Varsayım)",
+  German: "(Annahme)",
+  French: "(Hypothèse)",
+  Spanish: "(Supuesto)",
+};
+
 // Renders the consolidated, deduplicated assumption list in the
 // task's requested format (a plain bullet list under a "Financial
 // Assumptions" heading, one line per distinct assumption).
@@ -205,8 +236,10 @@ export function formatKeyFinancialAssumptionsList(
     return "";
   }
 
+  const suffix = financialAssumptionsListSuffix[language];
+
   return [
     keyAssumptionsCopy[language].heading,
-    ...assumptions.map((assumption) => `• ${assumption.label}`),
+    ...assumptions.map((assumption) => `• ${assumption.label} ${suffix}`),
   ].join("\n");
 }

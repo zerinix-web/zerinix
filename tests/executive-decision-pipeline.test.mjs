@@ -561,9 +561,13 @@ test("page_one_readable_in_30_seconds still fails when the OPENING itself (not l
 test("plan-executor.ts wires the single Executive Decision layer, evidence summary, filler stripping, and quality gate for Business Plan", () => {
   assert.match(planExecutorSource, /import\s*\{\s*\n?\s*formatExecutiveDecisionBrief/);
   assert.match(planExecutorSource, /buildPlanExecutiveDecisionBrief\(/);
+  // TASK #69A-7: Business Plan's Executive Decision banner now uses the
+  // "business_plan" vocabulary (ENTER/MONITOR/AVOID), not the "standard"
+  // default (GO/CONDITIONAL GO/NO-GO) -- the structured ExecutiveDecisionCode
+  // this brief is built from is unchanged; only the displayed token differs.
   assert.match(
     planExecutorSource,
-    /const planExecutiveDecisionBrief = buildPlanExecutiveDecisionBrief\(context, language\);\s*\n\s*normalized\.executiveSummary = formatExecutiveDecisionBrief\(planExecutiveDecisionBrief, language\);/
+    /const planExecutiveDecisionBrief = buildPlanExecutiveDecisionBrief\(context, language\);\s*\n\s*normalized\.executiveSummary = formatExecutiveDecisionBrief\(\s*\n\s*planExecutiveDecisionBrief,\s*\n\s*language,\s*\n\s*"business_plan"\s*\n\s*\);/
   );
   // Single decision layer: no scorecard, confidence rollup, or source
   // overview may be appended to executiveSummary after the brief.

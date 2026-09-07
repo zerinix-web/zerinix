@@ -168,6 +168,11 @@ async function compileTamSamSomEvidenceModule(source, { external } = {}) {
       ? extractFunctionSource(source, "parseMarketSizeMagnitude")
       : extractFunctionSource(source, "parseMonetaryMagnitude"),
     extractFunctionSource(source, "extractMarketSizeAssumption"),
+    // TASK #69A-3 -- isMarketSizeEstimated now checks a new, canonical
+    // "evidence=<type>" label (Business Idea Validation's own tamSamSom
+    // line format) first, via these two new dependencies.
+    extractFunctionSource(source, "extractMarketSizeEvidenceLabel"),
+    extractConstSource(source, "verifiedMarketSizeEvidenceLabelPattern"),
     extractFunctionSource(source, "isMarketSizeEstimated"),
     extractFunctionSource(source, "resolveTamSamSomCascade"),
     constrainMarketSizingResolutionToCanonicalStateSource,

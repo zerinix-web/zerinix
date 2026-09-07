@@ -245,9 +245,19 @@ test("DRIFT GUARD: Market Intelligence's cover-page confidence and Executive Sum
     pdfButtonSource,
     /const marketConfidenceScore = marketDecision \? marketDecision\.confidenceScore : null;/
   );
+  // TASK #69A-1 -- the else-branch reached ONLY for non-Market-Intelligence
+  // reports now checks report.investmentScore.confidence BEFORE
+  // extractConfidence's prose scan (structured-canonical-data-first
+  // authority fix) -- the property THIS test actually guards, that
+  // marketDecision (Market Intelligence's own gate) is what protects
+  // confidence for that report kind, never extractConfidence, is
+  // completely unaffected: marketDecision's own ternary branch is
+  // byte-for-byte unchanged, and the non-MI fallback chain still ends at
+  // the identical extractConfidence(content) ?? ... scan, just now
+  // subordinate to the structured check.
   assert.match(
     pdfButtonSource,
-    /const confidence = marketDecision\s*\n\s*\? marketDecision\.confidenceScore\s*\n\s*: extractConfidence\(content\) \?\?/
+    /const confidence = marketDecision\s*\n\s*\? marketDecision\.confidenceScore\s*\n\s*: typeof report\.investmentScore\?\.confidence === "number"\s*\n\s*\? report\.investmentScore\.confidence\s*\n\s*: extractConfidence\(content\) \?\?/
   );
   assert.match(
     plannerSource,
@@ -255,7 +265,7 @@ test("DRIFT GUARD: Market Intelligence's cover-page confidence and Executive Sum
   );
   assert.match(
     plannerSource,
-    /const confidence = marketDecision\s*\n\s*\? marketDecision\.confidenceScore\s*\n\s*: extractConfidence\(content\) \?\?/
+    /const confidence = marketDecision\s*\n\s*\? marketDecision\.confidenceScore\s*\n\s*: typeof investmentScore\?\.confidence === "number"\s*\n\s*\? investmentScore\.confidence\s*\n\s*: extractConfidence\(content\) \?\?/
   );
 });
 

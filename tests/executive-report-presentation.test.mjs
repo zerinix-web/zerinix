@@ -96,9 +96,14 @@ test("Business Plan and Market Intelligence build their single Executive Decisio
   assert.match(planSource, /function buildPlanExecutiveDecisionBrief/);
   assert.match(planSource, /score\.strengths/);
   assert.match(planSource, /score\.topRisks/);
+  // TASK #69A-7: Business Plan's Executive Decision banner now uses the
+  // "business_plan" vocabulary (ENTER/MONITOR/AVOID) instead of the
+  // "standard" default (GO/CONDITIONAL GO/NO-GO) -- the structured
+  // ExecutiveDecisionCode ("GO"/"CONDITIONAL_GO"/"NO_GO") this brief is
+  // built from is unchanged; only the displayed/localized token differs.
   assert.match(
     planSource,
-    /const planExecutiveDecisionBrief = buildPlanExecutiveDecisionBrief\(context, language\);\s*\n\s*normalized\.executiveSummary = formatExecutiveDecisionBrief\(planExecutiveDecisionBrief, language\);/
+    /const planExecutiveDecisionBrief = buildPlanExecutiveDecisionBrief\(context, language\);\s*\n\s*normalized\.executiveSummary = formatExecutiveDecisionBrief\(\s*\n\s*planExecutiveDecisionBrief,\s*\n\s*language,\s*\n\s*"business_plan"\s*\n\s*\);/
   );
 
   // Market Intelligence: isolated in its own module, built only from the

@@ -8,7 +8,7 @@
 // formatting -- only the contradicting number/keyword changes), and the
 // consistency score/correction log are for internal use only.
 import type { ResponseLanguage } from "./report-language.ts";
-import { decisionTokensForLanguage } from "./report-engine/executive-decision-brief.ts";
+import { decisionTokensForLanguage, type ExecutiveDecisionVocabulary } from "./report-engine/executive-decision-brief.ts";
 
 export type ConsistencyCorrectionType =
   | "recommendation_mismatch"
@@ -47,6 +47,26 @@ function escapeRegExp(value: string) {
 // substitution (a real mangling bug caught while testing this module).
 const VALUE_TOKEN = `(?:[<>~≈]?\\s*)?[$€£₺]?\\s*\\d[\\d.,]*\\s*(?:months?|days?|ay\\b|%|k|K|m|M|b|B)?`;
 
+// TASK #69A-3 -- CRITICAL BUG FIX (confirmed live: a real report's
+// financialAssumptions section read "Monthly Burn: $195k/month/month").
+// ROOT CAUSE: several canonical metrics (monthlyBurn, arpa) already embed
+// a rate suffix in their own displayValue ("$195k/month",
+// financial-model.ts) -- but VALUE_TOKEN above never recognized that
+// suffix as part of the value being matched, so a mention like
+// "Monthly Burn: $195k/month" only ever captured "$195k" as `value`,
+// leaving the report's own, already-correct "/month" sitting immediately
+// AFTER the match, untouched. Comparing that captured "$195k" against the
+// canonical "$195k/month" then read as a genuine mismatch (the two
+// normalize to different strings), triggering a "correction" that
+// substituted the FULL canonical value ("$195k/month") back in --
+// directly in front of the original, still-uncaptured "/month" it was
+// never able to consume, producing the doubled suffix. This is a
+// structural gap in what counts as part of "the value" being compared/
+// replaced, not a bug specific to any one metric's number -- any current
+// or future canonical metric whose displayValue carries a "/month"-style
+// rate suffix was equally exposed.
+const RATE_SUFFIX_TOKEN = `(?:\\/(?:month|mo|year|yr)\\b)?`;
+
 function normalizeValueForComparison(value: string) {
   return value.replace(/\s+/g, "").toLowerCase();
 }
@@ -77,7 +97,7 @@ function correctMetricMentions(
   // NOT an open-ended word-class match, so this can never skip past
   // unrelated words to grab an unconnected number later in the sentence.
   const mentionPattern = new RegExp(
-    `\\b(${labelPattern})\\b(\\s*(?:is|was|of|at|[:=\\-–—])?\\s*(?:only|about|approximately|around|roughly|nearly|almost|just|still|currently|neredeyse|yaklaşık|sadece|yalnızca)?\\s*)(${VALUE_TOKEN})`,
+    `\\b(${labelPattern})\\b(\\s*(?:is|was|of|at|[:=\\-–—])?\\s*(?:only|about|approximately|around|roughly|nearly|almost|just|still|currently|neredeyse|yaklaşık|sadece|yalnızca)?\\s*)(${VALUE_TOKEN}${RATE_SUFFIX_TOKEN})`,
     "gi"
   );
 
@@ -175,9 +195,10 @@ function correctExecutiveDecisionMentions(
   authoritativeToken: string,
   language: ResponseLanguage,
   protectedFields: ReadonlySet<string>,
-  corrections: ConsistencyCorrection[]
+  corrections: ConsistencyCorrection[],
+  vocabulary: ExecutiveDecisionVocabulary = "standard"
 ) {
-  const tokens = decisionTokensForLanguage(language)
+  const tokens = decisionTokensForLanguage(language, vocabulary)
     .slice()
     // Longest token first: "CONDITIONAL GO"/"NO-GO" must match whole,
     // never let the bare "GO" alternative match just the tail of one of
@@ -640,6 +661,15 @@ export type ConsistencyValidationInput = {
   // Independent of, and additive to, authoritativeDecision above (which
   // only ever matches the older PASS/HOLD/VALIDATE/REJECT vocabulary).
   authoritativeExecutiveDecisionToken?: string;
+  // Which decision vocabulary authoritativeExecutiveDecisionToken was
+  // localized in (see executive-decision-brief.ts's own
+  // ExecutiveDecisionVocabulary) -- must match whatever the caller used
+  // to build that token, so this pass corrects mismatches against the
+  // SAME vocabulary's other tokens, never a different vocabulary's.
+  // Defaults to "standard" (unchanged for every existing caller,
+  // including Market Intelligence, which does not pass
+  // authoritativeExecutiveDecisionToken at all).
+  executiveDecisionVocabulary?: ExecutiveDecisionVocabulary;
   decisionProtectedFields?: readonly string[];
   metricTargets?: readonly MetricConsistencyTarget[];
   metricProtectedFields?: readonly string[];
@@ -692,7 +722,8 @@ export function runConsistencyValidationPass(
       input.authoritativeExecutiveDecisionToken,
       input.language,
       decisionProtected,
-      corrections
+      corrections,
+      input.executiveDecisionVocabulary
     );
   }
 

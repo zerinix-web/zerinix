@@ -135,10 +135,10 @@ const pageSource = readFileSync("app/dashboard/[id]/page.tsx", "utf8");
 const plannerSource = readFileSync("components/Planner.tsx", "utf8");
 const pdfSource = readFileSync("app/dashboard/[id]/ReportPdfButton.tsx", "utf8");
 
-test("canonical decision consistency is preserved: plan-executor.ts still passes authoritativeExecutiveDecisionToken into the consistency pass", () => {
+test("canonical decision consistency is preserved: plan-executor.ts still passes authoritativeExecutiveDecisionToken into the consistency pass (Task #69A-7: now in the 'business_plan' vocabulary)", () => {
   assert.match(
     planExecutorSource,
-    /authoritativeExecutiveDecisionToken:\s*localizeExecutiveDecision\(planExecutiveDecisionBrief\.decision,\s*language\)/
+    /authoritativeExecutiveDecisionToken:\s*localizeExecutiveDecision\(\s*\n\s*planExecutiveDecisionBrief\.decision,\s*\n\s*language,\s*\n\s*"business_plan"\s*\n\s*\)/
   );
 });
 

@@ -80,11 +80,35 @@ const marketDecisionTranslations: Record<ResponseLanguage, Record<ExecutiveDecis
   Spanish: { GO: "ENTRAR", CONDITIONAL_GO: "MONITOREAR", NO_GO: "EVITAR" },
 };
 
-export type ExecutiveDecisionVocabulary = "standard" | "market";
+// TASK #69A-7 -- CRITICAL BUG FIX (confirmed live: a real Business Idea
+// Validation report was requested with an explicit "give me a clear
+// ENTER, MONITOR, or AVOID decision" prompt, but the generated report's
+// own Executive Decision banner said "CONDITIONAL GO" -- Business Plan
+// has never had its own decision vocabulary opt-in; every BIV call site
+// used decisionTranslationsFor's "standard" default (literal GO/
+// CONDITIONAL GO/NO-GO), the same table domain-analysis/acquisition/
+// real-estate use. "business_plan" reuses marketDecisionTranslations
+// verbatim (never a new, third, independently-hand-typed translation
+// table that could drift from Market Intelligence's own ENTER/MONITOR/
+// AVOID wording over time) -- the STRUCTURAL backing enum stays the
+// existing, unrenamed ExecutiveDecisionCode ("GO"/"CONDITIONAL_GO"/
+// "NO_GO"; only the DISPLAYED/localized token changes, exactly the same
+// pattern Market Intelligence's own "market" opt-in already established.
+// Market Intelligence's own "market" call sites are completely untouched
+// by this addition.
+export type ExecutiveDecisionVocabulary = "standard" | "market" | "business_plan";
 
 function decisionTranslationsFor(vocabulary: ExecutiveDecisionVocabulary) {
-  return vocabulary === "market" ? marketDecisionTranslations : decisionTranslations;
+  return vocabulary === "market" || vocabulary === "business_plan"
+    ? marketDecisionTranslations
+    : decisionTranslations;
 }
+
+// Every vocabulary's own translation table, for callers that don't know
+// (and must not have to guess) which vocabulary generated a given piece
+// of report text -- see extractExecutiveDecisionFromText's own default
+// behavior below.
+const allDecisionVocabularies: readonly ExecutiveDecisionVocabulary[] = ["standard", "market", "business_plan"];
 
 export function localizeExecutiveDecision(
   decision: ExecutiveDecisionCode,
@@ -339,16 +363,32 @@ export function extractGenericDecisionSignal(text: string) {
 // never reach a user.
 export function extractExecutiveDecisionFromText(
   text: string,
-  vocabulary: ExecutiveDecisionVocabulary = "standard"
+  vocabulary?: ExecutiveDecisionVocabulary
 ): { code: ExecutiveDecisionCode; token: string; language: ResponseLanguage } | null {
   if (!text) return null;
 
-  const table = decisionTranslationsFor(vocabulary);
+  // TASK #69A-7 -- this shared, report-type-agnostic extractor is used by
+  // callers (buildExecutiveSnapshot, ReportPdfButton.tsx's cover badge,
+  // executive-decision-vocabulary.ts's canonical-decision resolver) that
+  // do not know, and must not have to guess, which of Business Plan's
+  // "standard" (GO/CONDITIONAL GO/NO-GO) or "business_plan" (ENTER/
+  // MONITOR/AVOID) vocabularies produced the text they're parsing --
+  // trying every vocabulary except Market Intelligence's own explicit
+  // "market" opt-in (which every MI call site already requests by name,
+  // and must keep matching only its own tokens, never a business_plan/
+  // standard token that happens to coincide) covers both without any
+  // caller needing to be told which one applies. A caller that already
+  // knows its own vocabulary (Market Intelligence) still passes it
+  // explicitly and gets the exact same single-table behavior as before.
+  const vocabulariesToTry = vocabulary ? [vocabulary] : allDecisionVocabularies.filter((v) => v !== "market");
   const codes: ExecutiveDecisionCode[] = ["GO", "CONDITIONAL_GO", "NO_GO"];
   const candidates: Array<{ code: ExecutiveDecisionCode; token: string; language: ResponseLanguage }> = [];
-  for (const language of Object.keys(table) as ResponseLanguage[]) {
-    for (const code of codes) {
-      candidates.push({ code, token: table[language][code], language });
+  for (const candidateVocabulary of vocabulariesToTry) {
+    const table = decisionTranslationsFor(candidateVocabulary);
+    for (const language of Object.keys(table) as ResponseLanguage[]) {
+      for (const code of codes) {
+        candidates.push({ code, token: table[language][code], language });
+      }
     }
   }
   // Longest tokens first: "CONDITIONAL GO"/"KOŞULLU EVET" must match

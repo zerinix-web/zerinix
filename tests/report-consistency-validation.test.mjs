@@ -304,8 +304,19 @@ const marketSource = readFileSync("app/api/market-analysis/route.ts", "utf8");
 test("plan-executor.ts runs the consistency validation pass as the last step before returning the finalized report", () => {
   assert.match(planSource, /runConsistencyValidationPass/);
   const lastPassIndex = planSource.indexOf("runConsistencyValidationPass(");
-  const returnDedupedIndex = planSource.indexOf("return deduped;", lastPassIndex);
-  assert.ok(lastPassIndex > 0 && returnDedupedIndex > lastPassIndex);
+  // TASK #69A-4 -- the final return now also runs
+  // annotateUnclassifiedCanonicalMetricMentions on `deduped` (a purely
+  // additive quality-gate provenance annotation over the already-
+  // consistency-validated report, never re-introducing a metric mismatch
+  // runConsistencyValidationPass just fixed), so the literal final
+  // statement is no longer "return deduped;" -- the invariant this test
+  // guards (consistency validation runs LAST, right before the function
+  // returns) still holds.
+  const returnAnnotatedIndex = planSource.indexOf(
+    "return annotateUnclassifiedCanonicalMetricMentions(deduped, context);",
+    lastPassIndex
+  );
+  assert.ok(lastPassIndex > 0 && returnAnnotatedIndex > lastPassIndex);
 });
 
 test("market-analysis route.ts runs the consistency validation pass as the last step before returning the finalized report", () => {

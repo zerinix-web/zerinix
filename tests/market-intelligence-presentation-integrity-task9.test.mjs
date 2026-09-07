@@ -139,7 +139,10 @@ test("CONF1: page.tsx's ExecutiveInsightBanner no longer renders a bare em-dash 
   // TASK #49 widened this function's own signature/comment block
   // (isMarketIntelligence/marketIntelligenceCanonicalState props) --
   // window widened accordingly to still reach the same target line.
-  const fnWindow = pageSource.slice(fnIndex, fnIndex + 3500);
+  // TASK #69A-1 widened it again -- a new investmentScore prop plus its
+  // own structured-canonical-data-first comment block pushed the target
+  // line further from the function start.
+  const fnWindow = pageSource.slice(fnIndex, fnIndex + 4500);
 
   assert.match(
     fnWindow,

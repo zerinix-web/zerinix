@@ -181,9 +181,13 @@ test("inferReportDomainFromFieldNames falls back to 'business' (never fabricates
 });
 
 test("Planner.tsx imports and uses inferReportDomainFromFieldNames to self-correct the report identity from the worker's own persisted sections, rather than trusting only its own pre-fetch guess (drift check)", () => {
+  // TASK #69A-2 widened this import to a multi-line destructure alongside
+  // the new isFieldSetShapedForMarketIntelligence sibling export -- same
+  // module, same inferReportDomainFromFieldNames binding, just no longer a
+  // single-line import statement.
   assert.match(
     plannerSource,
-    /import \{ inferReportDomainFromFieldNames \} from "@\/app\/lib\/report-engine\/domain-inference";/
+    /import \{\s*\n\s*inferReportDomainFromFieldNames,\s*\n\s*isFieldSetShapedForMarketIntelligence,\s*\n\s*\} from "@\/app\/lib\/report-engine\/domain-inference";/
   );
   assert.match(plannerSource, /const correctedDomain = inferReportDomainFromFieldNames\(persistedFieldNames\);/);
 });

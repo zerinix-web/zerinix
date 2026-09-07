@@ -216,8 +216,16 @@ test("all three layers correctly nested and present: resolveMarketSizingCascade 
 async function compileIsMarketSizeEstimated(source) {
   const dir = mkdtempSync(join(tmpdir(), "zerinix-tam-estimated-"));
   const outPath = join(dir, "extract.mts");
+  // TASK #69A-3 widened isMarketSizeEstimated to check a new,
+  // canonical "evidence=<type>" label first (Business Idea Validation's
+  // own deterministic tamSamSom line format) via two new dependencies --
+  // extractFunctionSource only matches `function NAME(...)` shapes, so
+  // verifiedMarketSizeEvidenceLabelPattern (a `const` regex) is inlined
+  // directly here rather than extracted.
   const harness = [
     extractFunctionSource(source, "extractMarketSizeAssumption"),
+    extractFunctionSource(source, "extractMarketSizeEvidenceLabel"),
+    'const verifiedMarketSizeEvidenceLabelPattern = /^(?:verified|doğrulanmış|verifiziert|vérifié|verificado)$/i;',
     extractFunctionSource(source, "isMarketSizeEstimated"),
   ].join("\n\n");
   writeFileSync(outPath, `${harness}\nexport { isMarketSizeEstimated };\n`);

@@ -148,6 +148,45 @@ const marketIntelligenceIntentSignals =
 const businessPlanExecutionIntentSignals =
   /\bcreate\s+(?:a\s+|the\s+|my\s+|our\s+)?business\s+plan\b|\bbuild(?:ing)?\s+(?:a\s+|the\s+|my\s+|our\s+)?company\s+strategy\b|\boperating\s+plan\b|\bfinancial\s+forecast(?:s|ing)?\b|\b(?:gtm|go[\s-]to[\s-]market)\s+execution\s+roadmap\b|\bstartup\s+execution\b|\bbusiness\s+plan\s+report\b|\bbusiness\s+idea\s+validation\s+report\b/i;
 
+// TASK #69A-2 -- CRITICAL BUG FIX (confirmed live: a genuine, comprehensive
+// Business Idea Validation prompt -- "Analyze whether this is a strong
+// business idea, including customer pain points, target segments, market
+// opportunity, TAM/SAM/SOM, competitors, pricing, business model, unit
+// economics, go-to-market strategy, key risks, validation plan, and
+// financial assumptions." -- was silently rerouted to Market Intelligence,
+// because it happens to mention "market opportunity" as ONE of many
+// requested topics. marketIntelligenceIntentSignals' own "market
+// opportunity" alternative cannot simply be removed: several existing,
+// deliberately-tested prompts ("Assess the market opportunity for this
+// product.", "We need to assess market opportunity for a new B2B payments
+// product.") correctly rely on it as their SOLE Market Intelligence signal
+// and must keep matching.
+//
+// ROOT CAUSE, precisely: "market opportunity" alone is genuinely ambiguous
+// -- it is BOTH an unambiguous Market Intelligence phrase (when it is the
+// prompt's whole ask) AND, separately, the literal name of one of Business
+// Idea Validation's own always-produced report sections (prompts/plan.ts's
+// `marketOpportunity` field, "Market Opportunity = market attractiveness
+// without TAM/SAM/SOM calculations"), so a comprehensive prompt that simply
+// lists what a full business-idea report should cover is expected,
+// ordinary phrasing, not a signal the user wants Market Intelligence
+// instead. The existing businessPlanExecutionIntentSignals countersignal
+// only recognizes narrow EXECUTION phrases ("create a business plan",
+// "financial forecast", ...) and does not recognize this equally
+// unambiguous pattern: the prompt explicitly frames itself as asking
+// whether the described concept IS a business idea worth pursuing --
+// literally this product's own "Business Idea Validation" framing, just as
+// self-naming as "Create a Market Intelligence Report"/"Business Plan
+// Report" already is elsewhere in this file. This is additive only: it
+// does not touch marketIntelligenceIntentSignals or
+// businessPlanExecutionIntentSignals, so every existing verified case in
+// either direction is unaffected -- it only adds one more unambiguous way
+// for a prompt to signal genuine Business Idea Validation intent, exactly
+// the "prompt that genuinely mixes both intents is left exactly as
+// selected" philosophy this file already documents above.
+const businessIdeaValidationFramingSignals =
+  /\b(?:whether|is)\s+this\s+is\s+a\b[^.?!\n]{0,24}\bbusiness\s+idea\b|\bvalidate\s+(?:this|my|our)\s+business\s+idea\b|\bbusiness\s+idea\s+valid(?:ation|ity)\b/i;
+
 // CRITICAL FIX -- Market Intelligence prompts routed to Legal Assessment.
 // A superset of marketIntelligenceIntentSignals above, used only by
 // classifyReportDomain's own legal-priority guard below (never by
@@ -409,6 +448,11 @@ export function applyPromptIntentModeOverride({
   }
 
   if (businessPlanExecutionIntentSignals.test(prompt)) {
+    return { selectedMode: normalizedMode, overridden: false };
+  }
+
+  // TASK #69A-2 -- see businessIdeaValidationFramingSignals' own comment.
+  if (businessIdeaValidationFramingSignals.test(prompt)) {
     return { selectedMode: normalizedMode, overridden: false };
   }
 

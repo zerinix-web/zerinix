@@ -161,11 +161,16 @@ test("when no Executive Decision line is present at all (malformed content), the
 const planExecutorSource = readFileSync(join(repoRoot, "app/lib/report-jobs/plan-executor.ts"), "utf8");
 const pdfSource = readFileSync(join(repoRoot, "app/dashboard/[id]/ReportPdfButton.tsx"), "utf8");
 
-test("plan-executor.ts passes the same canonical Executive Decision token (from planExecutiveDecisionBrief) into the consistency pass that Executive Summary was itself rendered from", () => {
+test("plan-executor.ts passes the same canonical Executive Decision token (from planExecutiveDecisionBrief, in the 'business_plan' vocabulary -- Task #69A-7) into the consistency pass that Executive Summary was itself rendered from", () => {
   assert.match(
     planExecutorSource,
-    /authoritativeExecutiveDecisionToken:\s*localizeExecutiveDecision\(planExecutiveDecisionBrief\.decision,\s*language\)/
+    /authoritativeExecutiveDecisionToken:\s*localizeExecutiveDecision\(\s*\n\s*planExecutiveDecisionBrief\.decision,\s*\n\s*language,\s*\n\s*"business_plan"\s*\n\s*\)/
   );
+  // The consistency pass must be told which vocabulary that token came
+  // from, so it corrects mismatches against the SAME vocabulary's other
+  // tokens (ENTER/MONITOR/AVOID), never the "standard" GO/CONDITIONAL GO/
+  // NO-GO set.
+  assert.match(planExecutorSource, /executiveDecisionVocabulary:\s*"business_plan"/);
 });
 
 test("ReportPdfButton.tsx's cover page derives its GO/PASS/WAIT color banding from the same canonical Executive Decision extraction as the rest of the PDF, not solely the raw investmentScore.recommendation", () => {
