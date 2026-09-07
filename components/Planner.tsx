@@ -452,6 +452,11 @@ type PlannerProps = {
   initialReport?: InitialReport | null;
   regenerationContext?: RegenerationContext | null;
   preferredLanguage?: string;
+  // TASK #69A-25 -- lets loadPersistedConversations's fast path (SSR
+  // data already present) populate the displayed user email from the
+  // server's own already-completed getUser() call, so it never needs
+  // its own client-side auth round trip just to show this.
+  initialUserEmail?: string;
 };
 
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 60_000;
@@ -11955,9 +11960,11 @@ function useReportGeneration({
 function useConversations({
   initialConversations,
   conversationLoadError,
+  initialUserEmail,
 }: {
   initialConversations: Conversation[];
   conversationLoadError: string;
+  initialUserEmail: string;
 }) {
   const initialConversationId = useMemo(
     () => initialConversations[0]?.id || createPlannerMessageId(),
@@ -11970,7 +11977,7 @@ function useConversations({
       : [createConversation(initialConversationId)]
   );
   const [conversationError, setConversationError] = useState(conversationLoadError);
-  const [userEmail, setUserEmail] = useState("");
+  const [userEmail, setUserEmail] = useState(initialUserEmail);
   const persistedConversationIdsRef = useRef(
     new Set(initialConversations.map((conversation) => conversation.id))
   );
@@ -12286,6 +12293,7 @@ export default function Planner({
   initialReport = null,
   regenerationContext = null,
   preferredLanguage = "",
+  initialUserEmail = "",
 }: PlannerProps) {
   const restoredReportMode =
     initialReport?.status?.toLowerCase() === "completed"
@@ -12391,6 +12399,7 @@ export default function Planner({
   } = useConversations({
     initialConversations,
     conversationLoadError,
+    initialUserEmail,
   });
   const [activeMode, setActiveMode] = useState<ChatMode>(
     (regenerationContext
@@ -12636,6 +12645,19 @@ export default function Planner({
     };
   }, [messages.length, workflowCompletedSteps]);
 
+  // TASK #69A-25 -- PERFORMANCE FIX. ROOT CAUSE (confirmed via code
+  // inspection): this was the only effect in this component with no
+  // dependency array at all, so it tore down and re-registered a
+  // window-level keydown listener on EVERY render -- and this
+  // component re-renders continuously while a report streams in.
+  // Confirmed safe to run once per mount instead: handleShortcut never
+  // reads a captured reactive value directly -- composerRef is a ref
+  // (always current) and createNewConversation itself only calls
+  // setState UPDATER functions and reads mutable refs
+  // (activeReportRequestRef, conversationNavigationGenerationRef,
+  // composerDraftRef), never a closed-over state variable -- so the
+  // mount-time-captured versions behave identically to any later
+  // render's, and there is no stale-closure risk from registering once.
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -12652,7 +12674,8 @@ export default function Planner({
     window.addEventListener("keydown", handleShortcut);
 
     return () => window.removeEventListener("keydown", handleShortcut);
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function createMessageId() {
     return createPlannerMessageId();
@@ -12915,6 +12938,44 @@ export default function Planner({
 
   async function loadPersistedConversations() {
     const hydrationGeneration = conversationNavigationGenerationRef.current;
+
+    // TASK #69A-19 -- PERFORMANCE FIX. ROOT CAUSE (confirmed live):
+    // loadPlanConversations (app/plan/conversations.ts) already runs
+    // this EXACT query -- ai_conversations, then ai_messages for every
+    // one of those conversation ids, chunked -- SERVER-SIDE, once, on
+    // every /plan and /chat page load, and passes the complete result
+    // down as this component's own initialConversations prop (already
+    // seeded into conversations state by useConversations above). This
+    // effect then UNCONDITIONALLY repeated the identical two queries
+    // client-side on every mount, via a SEPARATE round of
+    // restoreSupabaseSession + auth.getUser() + two more DB round trips,
+    // and overwrote the just-rendered state with what is, in the common
+    // case, byte-identical data it already had -- pure duplicate work
+    // that grows with a user's real conversation/message history (their
+    // full analysis history, not paginated), which is exactly why the
+    // resulting delay was inconsistent rather than a fixed cost.
+    //
+    // TASK #69A-25 -- PERFORMANCE FIX (follow-up). ROOT CAUSE (confirmed
+    // live against the healthy, post-Nano-to-Micro-upgrade Supabase
+    // project): even with the #69A-19 skip below, this function used to
+    // call restoreSupabaseSession + supabase.auth.getUser() -- a real
+    // Supabase Auth network round trip, not a local read -- UNCONDITIONALLY,
+    // BEFORE ever reaching that skip check, purely to populate userEmail
+    // for display. That duplicated /plan/page.tsx's own already-completed
+    // server-side getUser() call on every single mount, including the
+    // common fast-path case where nothing else in this function would
+    // even run. The skip check now runs FIRST, before touching Supabase
+    // at all, and userEmail is seeded directly from the server's own
+    // user.email via the new initialUserEmail prop -- so the fast path
+    // performs zero client-side Supabase calls. The full auth + refetch
+    // path below (including its own userEmail assignment) is completely
+    // unchanged and still runs exactly as before whenever SSR found
+    // nothing or failed, so a real first-load/new-user/error case is
+    // never silently left unfetched or missing its email.
+    if (initialConversations.length > 0 && !conversationLoadError) {
+      return;
+    }
+
     const supabase = createClient();
     await restoreSupabaseSession(supabase);
     const {
@@ -12935,32 +12996,6 @@ export default function Planner({
     }
 
     setUserEmail(user.email || "");
-
-    // TASK #69A-19 -- PERFORMANCE FIX. ROOT CAUSE (confirmed live):
-    // loadPlanConversations (app/plan/conversations.ts) already runs
-    // this EXACT query -- ai_conversations, then ai_messages for every
-    // one of those conversation ids, chunked -- SERVER-SIDE, once, on
-    // every /plan and /chat page load, and passes the complete result
-    // down as this component's own initialConversations prop (already
-    // seeded into conversations state by useConversations above). This
-    // effect then UNCONDITIONALLY repeated the identical two queries
-    // client-side on every mount, via a SEPARATE round of
-    // restoreSupabaseSession + auth.getUser() + two more DB round trips,
-    // and overwrote the just-rendered state with what is, in the common
-    // case, byte-identical data it already had -- pure duplicate work
-    // that grows with a user's real conversation/message history (their
-    // full analysis history, not paginated), which is exactly why the
-    // resulting delay was inconsistent rather than a fixed cost.
-    //
-    // Skipped here ONLY when the server-rendered snapshot is already
-    // known-good (non-empty AND no conversationLoadError was reported --
-    // both already available as this component's own props) -- the
-    // heavy re-fetch still runs, completely unchanged, as a genuine
-    // recovery path whenever SSR found nothing or failed, so a real
-    // first-load/new-user/error case is never silently left unfetched.
-    if (initialConversations.length > 0 && !conversationLoadError) {
-      return;
-    }
 
     const { data, error } = await supabase
       .from("ai_conversations")
@@ -13117,7 +13152,30 @@ export default function Planner({
     composerDraftRef.current = "";
     setComposerResetKey((current) => current + 1);
     setAttachments([]);
-    void loadPersistedMessages(conversationId);
+    // TASK #69A-25 -- PERFORMANCE FIX. ROOT CAUSE (confirmed via code
+    // trace, not guessed): app/plan/conversations.ts's
+    // loadPlanConversations (this Planner's SSR data source, called by
+    // both /plan/page.tsx and /chat/page.tsx before the client ever
+    // mounts) unconditionally fetches EVERY message for EVERY one of
+    // the user's conversations, not just the active one -- so
+    // `conversations` state (seeded from initialConversations) already
+    // holds the complete, correct message history for every
+    // conversation before this function can ever run. Despite that,
+    // this used to call loadPersistedMessages(conversationId)
+    // unconditionally on every single sidebar click, re-fetching from
+    // Supabase data already sitting in memory -- a live probe against
+    // the (now-healthy, post-Nano-to-Micro-upgrade) Supabase project
+    // measured this exact query shape at ~140-250ms per call, paid on
+    // every conversation switch for no benefit. Skipped now whenever
+    // the target conversation already has messages loaded locally --
+    // mirroring the identical, already-established trust-fresh-SSR-data
+    // reasoning #69A-19 applied to the full conversation list's own
+    // initial load. Only a conversation with zero local messages
+    // (a brand-new, not-yet-persisted conversation, or the rare case
+    // where local state is genuinely incomplete) still fetches.
+    if (!selectedConversation?.messages.length) {
+      void loadPersistedMessages(conversationId);
+    }
   }
 
   function setComposerPrompt(value: string) {

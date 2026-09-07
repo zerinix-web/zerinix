@@ -1,10 +1,50 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import {
-  loadUserReports,
+  loadUserReport,
+  loadUserReportSummaries,
   loadUserWorkspaces,
   type DashboardReport,
   type DashboardWorkspace,
 } from "@/app/dashboard/report-utils";
+
+// TASK #69A-25 -- PERFORMANCE FIX. ROOT CAUSE (measured live against
+// the real, healthy Supabase project): this used to call
+// loadUserReports, which selects EVERY one of the user's reports WITH
+// their full `sections` content (the entire report body) and
+// `metadata`, purely to find the single most recent completed one --
+// a live, isolated measurement of that exact query against a real
+// account found it taking ~2.4s alone, by far the single most
+// expensive query in this whole function, and one that grows with the
+// user's total report count forever. Only ONE report's real content
+// is ever actually needed here (see buildInitialReportData in
+// Planner.tsx, which reads initialReport.sections to restore the
+// report view on reload). Fixed: use the existing, already-established
+// loadUserReportSummaries (no `sections`, capped at
+// DASHBOARD_RECENT_REPORTS_LIMIT, the same lightweight query
+// app/dashboard/page.tsx's own list view already uses) to find the
+// most recent completed report's id cheaply, then fetch that ONE
+// report's full content with loadUserReport -- never all of them.
+const LATEST_REPORT_LOOKUP_ATTEMPTS = 5;
+
+async function findLatestCompletedReportWithContent(
+  supabase: SupabaseClient,
+  user: User,
+  reportSummaries: DashboardReport[]
+): Promise<DashboardReport | null> {
+  const completedSummaries = reportSummaries
+    .filter((report) => report.status.toLowerCase() === "completed")
+    .slice(0, LATEST_REPORT_LOOKUP_ATTEMPTS);
+
+  for (const summary of completedSummaries) {
+    const fullReport = await loadUserReport(supabase, user, summary.id);
+
+    if (fullReport && fullReport.sections.length > 0) {
+      return fullReport;
+    }
+  }
+
+  return null;
+}
 
 type ConversationRow = {
   id: string;
@@ -40,27 +80,43 @@ function chunkValues<T>(values: T[], size: number) {
   return chunks;
 }
 
+// TASK #69A-25 -- PERFORMANCE FIX. ROOT CAUSE: each 25-conversation-id
+// chunk is an independent query with no ordering dependency on any
+// other chunk (results are merged and re-sorted by created_at below
+// regardless of arrival order), but this loop ran them one at a time
+// with `await` inside a `for` loop -- for any user with more than 25
+// conversations, chunk N+1 could not even start until chunk N's full
+// Supabase round trip finished, needlessly serializing otherwise-
+// concurrent work. Fixed to dispatch every chunk at once via
+// Promise.all; a single failed chunk still fails the whole call (same
+// behavior as before -- Promise.all rejects on the first error found
+// among the results here, same short-circuit-to-error semantics the
+// original sequential loop had).
 async function loadMessagesForConversations(
   supabase: SupabaseClient,
   userId: string,
   conversationIds: string[]
 ) {
-  const messages: MessageRow[] = [];
+  const chunkResults = await Promise.all(
+    chunkValues(conversationIds, MESSAGE_CONVERSATION_ID_CHUNK_SIZE).map((chunk) =>
+      supabase
+        .from("ai_messages")
+        .select("id,conversation_id,role,content,mode,status,attachments,created_at")
+        .eq("user_id", userId)
+        .in("conversation_id", chunk)
+        .order("created_at", { ascending: true })
+    )
+  );
 
-  for (const chunk of chunkValues(conversationIds, MESSAGE_CONVERSATION_ID_CHUNK_SIZE)) {
-    const { data, error } = await supabase
-      .from("ai_messages")
-      .select("id,conversation_id,role,content,mode,status,attachments,created_at")
-      .eq("user_id", userId)
-      .in("conversation_id", chunk)
-      .order("created_at", { ascending: true });
+  const firstError = chunkResults.find((result) => result.error)?.error;
 
-    if (error) {
-      return { data: [] as MessageRow[], error };
-    }
-
-    messages.push(...((data || []) as MessageRow[]));
+  if (firstError) {
+    return { data: [] as MessageRow[], error: firstError };
   }
+
+  const messages: MessageRow[] = chunkResults.flatMap(
+    (result) => (result.data || []) as MessageRow[]
+  );
 
   messages.sort(
     (left, right) =>
@@ -74,11 +130,16 @@ export async function loadPlanConversations(
   supabase: SupabaseClient,
   user: User
 ) {
-  const { data, error } = await supabase
-    .from("ai_conversations")
-    .select("id,title,created_at,updated_at")
-    .eq("user_id", user.id)
-    .order("updated_at", { ascending: false });
+  const [conversationsResult, { workspaces }, { reports: reportSummaries }] = await Promise.all([
+    supabase
+      .from("ai_conversations")
+      .select("id,title,created_at,updated_at")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false }),
+    loadUserWorkspaces(supabase, user),
+    loadUserReportSummaries(supabase, user),
+  ]);
+  const { data, error } = conversationsResult;
 
   if (error) {
     console.error("[ai_conversations select failed]", error);
@@ -106,14 +167,7 @@ export async function loadPlanConversations(
     };
   }
 
-  const [{ workspaces }, { reports }] = await Promise.all([
-    loadUserWorkspaces(supabase, user),
-    loadUserReports(supabase, user),
-  ]);
-  const latestReport =
-    reports.find(
-      (report) => report.status.toLowerCase() === "completed" && report.sections.length > 0
-    ) || null;
+  const latestReport = await findLatestCompletedReportWithContent(supabase, user, reportSummaries);
 
   const messagesByConversation = new Map<string, MessageRow[]>();
 

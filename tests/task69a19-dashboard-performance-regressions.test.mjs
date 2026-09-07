@@ -132,14 +132,26 @@ test("fix 2 proof: loadPersistedConversations skips the ai_conversations/ai_mess
   assert.ok(fnStart >= 0 && skipIndex > fnStart && skipIndex < queryIndex, "the skip check must run before the heavy queries");
 });
 
-test("fix 2 proof: the skip still resolves userEmail first -- auth resolution (restoreSupabaseSession + auth.getUser()) is never bypassed, only the two heavy DB queries are", () => {
+// NOTE (superseded by TASK #69A-25): this test originally required
+// setUserEmail(user.email || "") -- and therefore a real client-side
+// restoreSupabaseSession + auth.getUser() Supabase Auth round trip --
+// to run BEFORE the skip check, on every single /plan mount. #69A-25
+// found that round trip was itself a real, measurable duplicate (it
+// duplicates /plan/page.tsx's own already-completed server-side
+// getUser() call) and fixed it: the skip check now runs FIRST, before
+// touching Supabase at all, and userEmail is seeded directly from the
+// server's own user.email via the new initialUserEmail prop instead.
+// See tests/task69a25-planner-critical-path-performance-fixes.test.mjs
+// for the full fix proof.
+test("fix 2 proof (updated by #69A-25): the skip check now runs FIRST, before any Supabase auth call -- userEmail is seeded from the initialUserEmail prop in the fast path instead", () => {
   const fnStart = plannerSource.indexOf("async function loadPersistedConversations() {");
   const skipIndex = plannerSource.indexOf(
     "if (initialConversations.length > 0 && !conversationLoadError) {",
     fnStart
   );
-  const setUserEmailIndex = plannerSource.indexOf('setUserEmail(user.email || "");', fnStart);
-  assert.ok(setUserEmailIndex > fnStart && setUserEmailIndex < skipIndex, "userEmail must still be set before the skip check runs");
+  const getUserIndex = plannerSource.indexOf("await supabase.auth.getUser();", fnStart);
+  assert.ok(skipIndex > fnStart && skipIndex < getUserIndex, "the skip check must run before any client-side auth.getUser() call");
+  assert.match(plannerSource, /const \[userEmail, setUserEmail\] = useState\(initialUserEmail\);/);
 });
 
 test("fix 2 proof: the full fetch path (ai_conversations select, ai_messages fetch, setConversations, setActiveConversationId) remains completely intact for the fallback case -- this fix only adds an early return, it does not remove or alter any existing logic", () => {

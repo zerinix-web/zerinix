@@ -87,6 +87,7 @@ export default async function PlanPage({ searchParams }: PlanPageProps) {
       initialWorkspaceId={regenerationContext?.workspaceId || params.workspaceId}
       regenerationContext={regenerationContext}
       preferredLanguage={preferredLanguage}
+      initialUserEmail={user.email || ""}
     />
   );
 }
