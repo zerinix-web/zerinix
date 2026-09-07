@@ -87,7 +87,47 @@ export function BenchmarkIntelligencePanel({
           rationale: "Rationale",
           noGaps: "No material validation gaps detected.",
         };
-  const gaps = benchmarkFit?.validationGaps?.length ? benchmarkFit.validationGaps : [labels.noGaps];
+  // TASK #69A-18A -- "Largest Gaps" used to read benchmarkScore.deviations
+  // (a Benchmark Fit concept), which is why it rendered empty on a real
+  // report that genuinely had material validation gaps. Fixed to read a
+  // canonical gaps list instead.
+  //
+  // TASK #69A-18B -- ROOT CAUSE FIX (follow-up). That canonical list was
+  // benchmarkFit.validationGaps -- but confirmed live, it populated
+  // "Largest Gaps" with SCORE/DIMENSION dumps ("Financial Health:
+  // financial evidence 26%...", "Team / Founder: Market attractiveness
+  // 48%, Business model quality 54%, ..."), not validation gaps.
+  // validationGaps mixes THREE sources, and one of them --
+  // deriveAuthoritativeCategoryValidationGaps's category-derived entries
+  // -- reads category.explanation, which
+  // refreshInvestmentNarrativeFromResearchCoverage (investment-score.ts)
+  // overwrites post-research with a semicolon-joined dump of raw
+  // percentage/reasoning lines for 5 of the 8 categories. Even before
+  // that corruption, "categoryLabel: categoryExplanation" was never a
+  // genuine "unresolved validation gap" -- it is category-scorecard
+  // commentary, a different concept entirely from "what evidence is
+  // missing". Fixed: "Largest Gaps" (both branches below) now reads
+  // benchmarkFit.materialValidationGaps -- the ONE canonical, structured
+  // collection built solely from validationIntelligenceV2's own
+  // per-assumption evidence-gap model (customer demand / CAC / pricing
+  // / retention / operations), never a score, dimension, or category
+  // explanation of any kind.
+  // TASK #69A-18C -- ROOT CAUSE FIX. Confirmed live: web and PDF both
+  // correctly read this SAME canonical benchmarkFit.materialValidationGaps
+  // array (the #69A-18B fix), but this file used to slice it to its
+  // first 3 entries (below) while pdf-normalization.mjs sliced to 4 --
+  // two independently-chosen, out-of-sync truncation limits on the
+  // SAME source data. Since materialValidationGaps can never exceed 5
+  // entries (validationIntelligenceV2 always produces exactly 5 fixed,
+  // priority-ordered assumptions -- customer demand / CAC / pricing /
+  // retention / operations), there is no need for either renderer to
+  // truncate it at all: rendering the array as-is, unsliced, makes
+  // both renderers structurally incapable of diverging on count ever
+  // again, rather than relying on two hand-picked numbers staying in
+  // sync by coincidence.
+  const gaps = benchmarkFit?.materialValidationGaps?.length
+    ? benchmarkFit.materialValidationGaps
+    : [labels.noGaps];
   const summaryItems = [
     ...(benchmarkScore
       ? [
@@ -141,20 +181,12 @@ export function BenchmarkIntelligencePanel({
               {locale === "tr" ? "En Büyük Boşluklar" : "Largest gaps"}
             </p>
             <ul className="mt-3 space-y-2 text-sm leading-5 text-zinc-300">
-              {benchmarkScore.deviations
-                .filter((deviation) => deviation.status !== "Within Benchmark")
-                .slice(0, 3)
-                .map((deviation) => (
-                  <li key={`${deviation.metric}-${deviation.status}`} className="flex gap-2">
-                    <span className="mt-2 h-1.5 w-1.5 rounded-full bg-teal-300" />
-                    <span>
-                      {localizeBenchmarkFitValue(
-                        `${deviation.metric}: ${deviation.userValue} vs ${deviation.benchmarkRange} (${deviation.status})`,
-                        locale
-                      )}
-                    </span>
-                  </li>
-                ))}
+              {gaps.map((gap) => (
+                <li key={gap} className="flex gap-2">
+                  <span className="mt-2 h-1.5 w-1.5 rounded-full bg-teal-300" />
+                  <span>{localizeBenchmarkFitValue(gap, locale)}</span>
+                </li>
+              ))}
             </ul>
           </div>
           <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
@@ -179,7 +211,7 @@ export function BenchmarkIntelligencePanel({
               {labels.validationGaps}
             </p>
             <ul className="mt-3 space-y-2 text-sm leading-6 text-zinc-300">
-              {gaps.slice(0, 3).map((gap) => (
+              {gaps.map((gap) => (
                 <li key={gap} className="flex gap-2">
                   <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
                   <span>{localizeBenchmarkFitValue(gap, locale)}</span>

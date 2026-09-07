@@ -78,6 +78,18 @@ export type BenchmarkFit = {
   fit: BenchmarkFitLevel;
   matchedSignals: string[];
   validationGaps: string[];
+  // TASK #69A-18B -- separate from validationGaps above, which mixes in
+  // category-scorecard commentary (financial health / scalability /
+  // team-founder explanations -- report-SCORE prose, not evidence gaps)
+  // and coarse prompt-level benchmark-fit heuristics. materialValidationGaps
+  // is the ONE canonical, structured collection of genuinely unresolved
+  // validation/evidence gaps (financial-assumptions.ts's
+  // deriveValidationIntelligenceGaps, derived from validationIntelligenceV2's
+  // own per-assumption evidence model) -- optional so historical reports
+  // computed before this field existed degrade honestly instead of
+  // fabricating gap data. See financial-assumptions.ts for where this is
+  // populated.
+  materialValidationGaps?: string[];
   rationale: string;
 };
 

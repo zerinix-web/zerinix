@@ -180,6 +180,31 @@ export function refreshResearchAwareFinancialContext(
     ...refreshInvestmentNarrativeFromResearchCoverage(context.investmentScore, context),
   };
 
+  // TASK #69A-18A -- INVESTIGATED (not assumed): #69A-18 left a
+  // documented question here -- does refreshResearchAwareFinancialContext
+  // leave validationIntelligenceV2 as a stale pre-research snapshot?
+  // Traced end-to-end: this function's only caller chains through
+  // applyMarketResearchCoverageToContext (market-research-coverage.ts),
+  // which updates ONLY investmentScore/reportIntelligence and spreads
+  // everything else on `context` -- including financialModel's own
+  // metrics, financialConsistency, sourceIntelligence, and
+  // decisionConfidence -- completely unchanged. Those four are the ONLY
+  // real inputs createValidationIntelligence(V2)/
+  // createValidationIntelligenceModel ever read (confirmed by reading
+  // both functions' own signatures in validation-intelligence.ts).
+  // Since none of them are ever altered by real research evidence in
+  // this pipeline, re-deriving validationIntelligenceV2 here would
+  // recompute from the EXACT SAME inputs and produce a byte-identical
+  // result -- proven by a dedicated regression test, not assumed. So
+  // context.validationIntelligenceV2 is read directly below (never
+  // fabricated, never a second computation path), which is provably
+  // NOT stale relative to any input that can currently change it. This
+  // was NOT the cause of the empty Largest Gaps defect -- see the
+  // actual root-cause fix in BenchmarkIntelligencePanel.tsx and
+  // pdf-normalization.mjs (a renderer field-mapping bug, not a
+  // lifecycle/staleness bug).
+  const refreshedValidationIntelligenceGaps = deriveValidationIntelligenceGaps(context.validationIntelligenceV2);
+
   return {
     ...context,
     investmentScore: refreshedInvestmentScore,
@@ -196,8 +221,29 @@ export function refreshResearchAwareFinancialContext(
       validationGaps: [
         ...context.promptLevelValidationGaps,
         ...deriveAuthoritativeCategoryValidationGaps(refreshedInvestmentScore.categories),
-        ...deriveValidationIntelligenceGaps(context.validationIntelligenceV2),
+        ...refreshedValidationIntelligenceGaps,
       ],
+      // TASK #69A-18B -- ROOT CAUSE FIX. Confirmed live: post-refresh,
+      // deriveAuthoritativeCategoryValidationGaps(refreshedInvestmentScore.categories)
+      // reads category.explanation for 5 of the 8 categories AFTER
+      // refreshInvestmentNarrativeFromResearchCoverage (investment-score.ts)
+      // has already overwritten that field with
+      // decisionCategory.reasoning.join("; ") -- a semicolon-joined dump
+      // of raw percentage/reasoning lines (e.g. "Market attractiveness:
+      // 48%; Business model quality: 54%; ..." for Team/Founder), never
+      // intended to be read as prose. validationGaps above inherited
+      // that corruption (and, even pre-refresh, category-derived gaps
+      // were never genuinely "unresolved validation gaps" to begin with
+      // -- they are category-scorecard commentary, a fundamentally
+      // different concept from "what evidence is missing"). Benchmark
+      // Intelligence's "Largest Gaps" (web + PDF) now reads ONLY this
+      // field -- validationIntelligenceV2's own structured, per-
+      // assumption evidence-gap model (customer demand / CAC / pricing
+      // / retention / operations), which is never score-shaped and maps
+      // directly onto genuine validation concepts (willingness-to-pay,
+      // paid-pilot/paying-customer evidence, acquisition/conversion,
+      // retention/repeat behavior, primary customer validation).
+      materialValidationGaps: refreshedValidationIntelligenceGaps,
     },
   };
 }
@@ -290,6 +336,11 @@ export function createCanonicalFinancialAssumptions(input: {
       ...authoritativeCategoryValidationGaps,
       ...validationIntelligenceGaps,
     ],
+    // TASK #69A-18B -- Benchmark Intelligence's "Largest Gaps" (web +
+    // PDF) reads ONLY this field now, never the mixed validationGaps
+    // list above -- see this field's own doc comment on BenchmarkFit
+    // (financial-model.ts) for why the two must stay separate.
+    materialValidationGaps: validationIntelligenceGaps,
   };
 
   const contextWithoutReportIntelligence = {

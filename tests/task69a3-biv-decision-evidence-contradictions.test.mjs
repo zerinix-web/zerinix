@@ -272,7 +272,16 @@ test("ISSUE 4 (structural, same object): the enrichment modifies the SAME benchm
     "utf8"
   );
   assert.match(financialAssumptionsSource, /const benchmarkFit: BenchmarkFit = \{\s*\n\s*\.\.\.financialModel\.benchmarkFit,/);
-  for (const source of [pageSource, benchmarkPanelSource, pdfNormalizationSource]) {
+  // TASK #69A-18A -- page.tsx used to carry its own byte-for-byte
+  // duplicate of BenchmarkIntelligencePanel (a second copy of exactly
+  // this benchmarkFit.validationGaps read); it now imports the one
+  // shared, canonical component instead, so the read itself only ever
+  // exists in benchmarkPanelSource/pdfNormalizationSource.
+  assert.match(
+    pageSource,
+    /import \{ BenchmarkIntelligencePanel \} from "@\/components\/planner\/BenchmarkIntelligencePanel";/
+  );
+  for (const source of [benchmarkPanelSource, pdfNormalizationSource]) {
     assert.match(source, /benchmarkFit(?:\?\.)?\.validationGaps/);
   }
 });
@@ -368,11 +377,22 @@ test("requirement 7: TAM/SAM/SOM evidence classification is byte-identical logic
   assert.ok(pdfButtonSource.includes(marker));
 });
 
-test("requirement 7: Benchmark Intelligence's validationGaps rendering (web, Planner.tsx, PDF) all read the identical benchmarkFit.validationGaps field, never a renderer-computed copy", () => {
-  for (const source of [pageSource, benchmarkPanelSource]) {
-    assert.match(source, /benchmarkFit\?\.validationGaps\?\.length \? benchmarkFit\.validationGaps : \[labels\.noGaps\]/);
-  }
-  assert.match(pdfNormalizationSource, /benchmarkFit\?\.validationGaps\) && benchmarkFit\.validationGaps\.length/);
+test("requirement 7: Benchmark Intelligence's Largest Gaps rendering (web, Planner.tsx, PDF) all read the identical benchmarkFit.materialValidationGaps field, never a renderer-computed copy", () => {
+  // TASK #69A-18A -- page.tsx now imports BenchmarkIntelligencePanel
+  // from components/planner/ instead of carrying its own duplicate
+  // implementation (see the ISSUE 4 structural test above), so the
+  // actual gaps-resolution literal only lives in benchmarkPanelSource
+  // now; pageSource is checked for the import itself.
+  assert.match(
+    pageSource,
+    /import \{ BenchmarkIntelligencePanel \} from "@\/components\/planner\/BenchmarkIntelligencePanel";/
+  );
+  // TASK #69A-18B -- both renderers now read materialValidationGaps
+  // (the clean, structured, score-free canonical collection), never
+  // the mixed validationGaps field (which still carries category-
+  // scorecard commentary for other, unrelated consumers/tests).
+  assert.match(benchmarkPanelSource, /benchmarkFit\?\.materialValidationGaps\?\.length\s*\n\s*\? benchmarkFit\.materialValidationGaps\s*\n\s*: \[labels\.noGaps\];/);
+  assert.match(pdfNormalizationSource, /benchmarkFit\?\.materialValidationGaps\) && benchmarkFit\.materialValidationGaps\.length/);
 });
 
 test("requirement 7 (invariant H): Market Intelligence's own decision/evidence resolvers (resolveMarketIntelligenceGatedExecutiveDecision, resolveMarketIntelligenceConfidenceState) are untouched by any Task #69A-3 change", () => {

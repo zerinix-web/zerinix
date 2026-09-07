@@ -1298,20 +1298,56 @@ export function createPdfBenchmarkIntelligenceSection(benchmarkFit, locale = "en
           noGaps: "No material validation gaps detected.",
         };
   const hasBenchmarkScore = benchmarkScore && typeof benchmarkScore === "object";
-  const gaps = Array.isArray(benchmarkFit?.validationGaps) && benchmarkFit.validationGaps.length
-    ? benchmarkFit.validationGaps
+  // TASK #69A-18A -- this PDF section's "Largest gaps:" line used to be
+  // built from benchmarkScore.deviations (a Benchmark Fit concept),
+  // which is why it rendered empty/fell back to the false "no gaps"
+  // string on a real report that genuinely had material validation
+  // gaps. Fixed to read a canonical gaps list instead.
+  //
+  // TASK #69A-18B -- ROOT CAUSE FIX (follow-up). That canonical list was
+  // benchmarkFit.validationGaps -- but confirmed live, it populated
+  // "Largest Gaps" with SCORE/DIMENSION dumps ("Financial Health:
+  // financial evidence 26%...", "Team / Founder: Market attractiveness
+  // 48%, Business model quality 54%, ..."), not validation gaps.
+  // validationGaps mixes THREE sources, and one of them --
+  // deriveAuthoritativeCategoryValidationGaps's category-derived entries
+  // (financial-assumptions.ts) -- reads category.explanation, which
+  // refreshInvestmentNarrativeFromResearchCoverage (investment-score.ts)
+  // overwrites post-research with a semicolon-joined dump of raw
+  // percentage/reasoning lines for 5 of the 8 categories. Even before
+  // that corruption, "categoryLabel: categoryExplanation" was never a
+  // genuine "unresolved validation gap" -- it is category-scorecard
+  // commentary, a different concept entirely from "what evidence is
+  // missing". Fixed: both branches below now read
+  // benchmarkFit.materialValidationGaps -- the ONE canonical, structured
+  // collection built solely from validationIntelligenceV2's own
+  // per-assumption evidence-gap model (customer demand / CAC / pricing
+  // / retention / operations), never a score, dimension, or category
+  // explanation of any kind. Web and PDF read the identical field.
+  //
+  // TASK #69A-18C -- ROOT CAUSE FIX. Confirmed live: web and this PDF
+  // section both correctly read the SAME materialValidationGaps array,
+  // but this file sliced it to its first 4 entries while
+  // BenchmarkIntelligencePanel.tsx (web) sliced to 3 -- two
+  // independently-chosen, out-of-sync truncation limits on identical
+  // source data, which is why a real report's 4th canonical gap
+  // ("Competitor Insights: evidence missing -- Test the smallest
+  // delivery workflow before scaling...") appeared in the PDF but not
+  // on the web. That entry is genuinely canonical and materially
+  // unresolved (validationIntelligenceV2's 5th, "operations",
+  // assumption -- deterministically evidence-status-driven, never
+  // fabricated), so the fix is to show it everywhere, not hide it
+  // here. Since materialValidationGaps can never exceed 5 entries
+  // (validationIntelligenceV2 always produces exactly 5 fixed,
+  // priority-ordered assumptions), neither renderer needs to truncate
+  // it at all -- rendering the array as-is makes both structurally
+  // incapable of diverging on count again.
+  const gaps = Array.isArray(benchmarkFit?.materialValidationGaps) && benchmarkFit.materialValidationGaps.length
+    ? benchmarkFit.materialValidationGaps
     : [labels.noGaps];
   const dimensions = hasBenchmarkScore && benchmarkScore.dimensions && typeof benchmarkScore.dimensions === "object"
     ? benchmarkScore.dimensions
     : null;
-  const deviations = Array.isArray(benchmarkScore?.deviations)
-    ? benchmarkScore.deviations
-    : [];
-  const benchmarkGaps = deviations
-    .filter((deviation) => deviation && deviation.status && deviation.status !== "Within Benchmark")
-    .map((deviation) =>
-      `${deviation.metric}: ${deviation.userValue} vs ${deviation.benchmarkRange} (${deviation.status})`
-    );
   const scoreContent = hasBenchmarkScore
     ? [
         `${labels.overallFit}: ${benchmarkScore.overallFit}/100`,
@@ -1323,7 +1359,7 @@ export function createPdfBenchmarkIntelligenceSection(benchmarkFit, locale = "en
         `${labels.confidence}: ${localizeBenchmarkFitValue(benchmarkScore.confidence || "—", locale)}`,
         "",
         `${labels.largestGaps}:`,
-        ...(benchmarkGaps.length ? benchmarkGaps.slice(0, 4).map((gap) => `- ${localizeBenchmarkFitValue(gap, locale)}`) : [`- ${labels.noGaps}`]),
+        ...gaps.map((gap) => `- ${localizeBenchmarkFitValue(gap, locale)}`),
         "",
         `${labels.insights}:`,
         ...(Array.isArray(benchmarkScore.insights) && benchmarkScore.insights.length
@@ -1343,7 +1379,7 @@ export function createPdfBenchmarkIntelligenceSection(benchmarkFit, locale = "en
     `${labels.confidence}: ${localizeBenchmarkFitValue(benchmarkFit?.confidence || "—", locale)}`,
     "",
     `${labels.validationGaps}:`,
-    ...gaps.slice(0, 4).map((gap) => `- ${localizeBenchmarkFitValue(gap, locale)}`),
+    ...gaps.map((gap) => `- ${localizeBenchmarkFitValue(gap, locale)}`),
     "",
     `${labels.rationale}: ${localizeBenchmarkFitValue(benchmarkFit?.rationale || benchmarkFit?.benchmarkBasis || "—", locale)}`,
   ];

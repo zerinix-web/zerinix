@@ -43,6 +43,13 @@ export type ReportBenchmarkFit = {
   fit?: string;
   matchedSignals?: string[];
   validationGaps?: string[];
+  // TASK #69A-18B -- see BenchmarkFit's own doc comment in
+  // financial-model.ts. The one canonical, structured collection of
+  // genuinely unresolved validation/evidence gaps -- Benchmark
+  // Intelligence's "Largest Gaps" (web + PDF) must read ONLY this,
+  // never validationGaps above (which mixes in category-scorecard
+  // prose) and never any Benchmark Fit or Founder Readiness score.
+  materialValidationGaps?: string[];
   rationale?: string;
 };
 

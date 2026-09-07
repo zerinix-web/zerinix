@@ -60,6 +60,12 @@ const financialAssumptionsSource = readFileSync(join(repoRoot, "app/lib/ai/finan
 const pageSource = readFileSync(join(repoRoot, "app/dashboard/[id]/page.tsx"), "utf8");
 const pdfNormalizationSource = readFileSync(join(repoRoot, "app/lib/pdf-normalization.mjs"), "utf8");
 const plannerSource = readFileSync(join(repoRoot, "components/Planner.tsx"), "utf8");
+// TASK #69A-18A -- page.tsx no longer carries its own duplicate
+// BenchmarkIntelligencePanel; it imports the shared, canonical one.
+const benchmarkPanelSource = readFileSync(
+  join(repoRoot, "components/planner/BenchmarkIntelligencePanel.tsx"),
+  "utf8"
+);
 
 // --- Extraction harness: deriveValidationIntelligenceGaps, extracted ----
 // --- verbatim (never re-implemented) so requirement A/B/C/F/G can be ----
@@ -268,29 +274,60 @@ test("requirement C: when EVERY validationIntelligenceV2 assumption is genuinely
   assert.deepEqual(gaps, []);
 });
 
-test("requirement C: page.tsx's own 'No material validation gaps detected.' fallback is reached only when benchmarkFit.validationGaps.length is genuinely 0 -- unchanged, never bypassed by this fix", () => {
+test("requirement C: the web renderer's 'No material validation gaps detected.' fallback is reached only when benchmarkFit.materialValidationGaps.length is genuinely 0 -- unchanged, never bypassed by this fix", () => {
+  // TASK #69A-18A -- page.tsx now imports BenchmarkIntelligencePanel
+  // from components/planner/ instead of duplicating it locally; the
+  // gaps-resolution literal itself now lives only in benchmarkPanelSource.
   assert.match(
     pageSource,
-    /const gaps = benchmarkFit\?\.validationGaps\?\.length \? benchmarkFit\.validationGaps : \[labels\.noGaps\];/
+    /import \{ BenchmarkIntelligencePanel \} from "@\/components\/planner\/BenchmarkIntelligencePanel";/
+  );
+  // TASK #69A-18B -- reads materialValidationGaps now, not the mixed
+  // validationGaps field (see task69a18b's own dedicated test file for
+  // the full root-cause explanation).
+  assert.match(
+    benchmarkPanelSource,
+    /const gaps = benchmarkFit\?\.materialValidationGaps\?\.length\s*\n\s*\? benchmarkFit\.materialValidationGaps\s*\n\s*: \[labels\.noGaps\];/
   );
 });
 
 // --- Requirement D: web and PDF renderers share the same canonical gaps -
 
-test("requirement D: page.tsx (web) and pdf-normalization.mjs (PDF) both read benchmarkFit.validationGaps DIRECTLY from the same persisted object -- neither independently recomputes or re-derives gaps", () => {
+test("requirement D: the web renderer (BenchmarkIntelligencePanel) and pdf-normalization.mjs (PDF) both read benchmarkFit.materialValidationGaps DIRECTLY from the same persisted object -- neither independently recomputes or re-derives gaps", () => {
   assert.match(
-    pageSource,
-    /const gaps = benchmarkFit\?\.validationGaps\?\.length \? benchmarkFit\.validationGaps : \[labels\.noGaps\];/
+    benchmarkPanelSource,
+    /const gaps = benchmarkFit\?\.materialValidationGaps\?\.length\s*\n\s*\? benchmarkFit\.materialValidationGaps\s*\n\s*: \[labels\.noGaps\];/
   );
   assert.match(
     pdfNormalizationSource,
-    /const gaps = Array\.isArray\(benchmarkFit\?\.validationGaps\) && benchmarkFit\.validationGaps\.length\s*\n\s*\? benchmarkFit\.validationGaps\s*\n\s*: \[labels\.noGaps\];/
+    /const gaps = Array\.isArray\(benchmarkFit\?\.materialValidationGaps\) && benchmarkFit\.materialValidationGaps\.length\s*\n\s*\? benchmarkFit\.materialValidationGaps\s*\n\s*: \[labels\.noGaps\];/
+  );
+  // TASK #69A-18A -- ALSO confirms the web renderer's "Largest gaps"
+  // display (the benchmarkScore-present branch) now maps over this
+  // SAME `gaps` array, never benchmarkScore.deviations -- the exact
+  // renderer-field-mismatch bug that made Largest Gaps render empty.
+  // TASK #69A-18C -- web no longer truncates to 3 (that was the exact
+  // cause of a web/PDF parity break); it now renders the full canonical
+  // array unsliced.
+  assert.match(benchmarkPanelSource, /\{gaps\.map\(\(gap\) =>/);
+  assert.doesNotMatch(
+    benchmarkPanelSource,
+    /benchmarkScore\.deviations\s*\n\s*\.filter/
   );
   // Neither file defines its own independent gap-derivation formula
   // (a second call to deriveAuthoritativeCategoryValidationGaps/
   // deriveValidationIntelligenceGaps, or a hand-rolled equivalent).
-  assert.doesNotMatch(pageSource, /deriveValidationIntelligenceGaps|deriveAuthoritativeCategoryValidationGaps/);
-  assert.doesNotMatch(pdfNormalizationSource, /deriveValidationIntelligenceGaps|deriveAuthoritativeCategoryValidationGaps/);
+  // Strip line comments first -- #69A-18B's own explanatory comments
+  // deliberately name these functions in prose, which would otherwise
+  // false-positive this check.
+  const stripComments = (source) =>
+    source
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/, ""))
+      .join("\n");
+  assert.doesNotMatch(stripComments(pageSource), /deriveValidationIntelligenceGaps|deriveAuthoritativeCategoryValidationGaps/);
+  assert.doesNotMatch(stripComments(benchmarkPanelSource), /deriveValidationIntelligenceGaps|deriveAuthoritativeCategoryValidationGaps/);
+  assert.doesNotMatch(stripComments(pdfNormalizationSource), /deriveValidationIntelligenceGaps|deriveAuthoritativeCategoryValidationGaps/);
 });
 
 test("requirement D, REAL REPRO: the SAME real-prompt context's benchmarkFit.validationGaps is what BOTH renderers would consume verbatim -- proven non-empty and containing the real material gaps", () => {
