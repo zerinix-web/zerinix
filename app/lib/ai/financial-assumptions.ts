@@ -2,6 +2,7 @@ import {
   createFinancialModel,
   formatFinancialModelValue,
   validateFinancialConsistency,
+  type BenchmarkFit,
   type FinancialConsistencyCheck,
   type FinancialMetricModel,
   type FinancialModel,
@@ -42,7 +43,10 @@ import {
 import {
   createInvestmentScore,
   formatInvestmentScore,
+  refreshInvestmentNarrativeFromResearchCoverage,
   type InvestmentScore,
+  type InvestmentScoreCategory,
+  type InvestmentScoreCategoryKey,
 } from "@/app/lib/ai/investment-score";
 import { localizePdfPresentationLabel } from "@/app/lib/pdf-normalization.mjs";
 import {
@@ -61,10 +65,141 @@ export type AiFinancialModelContext = FinancialModel & {
   sourceIntelligence: SourceIntelligenceModel;
   validationIntelligence: ValidationIntelligenceModel;
   validationIntelligenceV2: ValidationIntelligence;
+  // TASK #69A-5 -- the ORIGINAL 3 prompt-text-only heuristic validation
+  // gaps createBenchmarkFit (financial-model.ts) computes, preserved here
+  // verbatim and separately from the authoritative, evidence-derived ones
+  // appended below. Kept on the context (never re-derived from scratch)
+  // so refreshResearchAwareFinancialContext can rebuild benchmarkFit.
+  // validationGaps later, after real research evidence updates
+  // investmentScore.categories, WITHOUT losing or duplicating these.
+  promptLevelValidationGaps: readonly string[];
 };
 
 function localizeReportLabel(value: string, language: ResponseLanguage) {
   return localizePdfPresentationLabel(value, language === "Turkish" ? "tr" : "en");
+}
+
+// Shared by createCanonicalFinancialAssumptions (initial, pre-research
+// snapshot) and refreshResearchAwareFinancialContext (post-research,
+// authoritative snapshot) below -- ONE definition of "material validation
+// gap" (a category scoring below half of its own maximum), so the two
+// call sites can never drift into disagreeing on the threshold or the
+// gap wording.
+function deriveAuthoritativeCategoryValidationGaps(
+  categories: Record<InvestmentScoreCategoryKey, InvestmentScoreCategory>
+): string[] {
+  return Object.values(categories)
+    .filter((category) => category.maximumScore > 0 && category.score / category.maximumScore < 0.5)
+    .sort((a, b) => a.score / a.maximumScore - b.score / b.maximumScore)
+    .map((category) => `${category.label}: ${category.explanation}`);
+}
+
+// TASK #69A-18 -- ROOT CAUSE FIX. Confirmed live: Benchmark Intelligence
+// said "No material validation gaps detected." while the SAME report's
+// Founder Readiness dimensions explicitly showed Validation Confidence
+// 60/100, Evidence Confidence 34/100, and Founder Evidence 34/100 (all
+// #69A-17's own canonical dimensionScores), and the Executive Summary
+// itself recommended validating pricing, buyer urgency, and repeatable
+// acquisition before committing full funding. ROOT CAUSE:
+// deriveAuthoritativeCategoryValidationGaps above only inspects the 8
+// COARSE, BLENDED investment-score categories (e.g. "Team / Founder" as
+// one averaged number) -- teamFounder's own normalizedScore blends 6
+// different sub-signals together (ideaQuality double-weighted,
+// validationLevel, founderEvidence, executionComplexity, a floored
+// metricConfidence), so the blended ratio can easily land AT OR ABOVE the
+// 0.5 "material gap" bar even while two or three of its OWN constituent
+// sub-scores individually sit well below it -- exactly what happened
+// here. It never had any visibility into validationIntelligenceV2
+// (validation-intelligence.ts's createValidationIntelligence), this
+// codebase's OWN pre-existing, genuinely structured, per-assumption
+// evidence-gap model (customer demand / CAC / pricing / retention /
+// operations, each carrying its own riskLevel + evidenceStatus +
+// required experiment + successMetric) -- a richer, already-canonical
+// representation of exactly the same "is there real validation
+// evidence" question Benchmark Intelligence is answering, computed
+// completely independently and never consulted by it.
+//
+// FIX: reuse that EXISTING canonical structure (never a second,
+// competing one -- per this ticket's own explicit instruction) as an
+// ADDITIONAL, additive source of material gaps, appended alongside (not
+// replacing) the pre-existing prompt-level and category-level gaps. A
+// validationIntelligenceV2 assumption counts as a material, unresolved
+// gap whenever its own evidenceStatus is anything other than "Validated"
+// -- reusing evidenceStatusFromScore's own existing >=72 bar
+// (validation-intelligence.ts), never a new threshold invented for this
+// fix. This directly closes the reported gap: Founder Readiness's
+// Validation Confidence/Evidence Confidence/Founder Evidence dimensions
+// and validationIntelligenceV2's customer-demand/pricing/retention
+// assumptions are measuring the same underlying evidence-sufficiency
+// reality from two different angles, and now both surface it.
+function deriveValidationIntelligenceGaps(
+  validationIntelligence: ValidationIntelligence
+): string[] {
+  return [...validationIntelligence.assumptions]
+    .filter((assumption) => assumption.evidenceStatus !== "Validated")
+    .sort((a, b) => a.priority - b.priority)
+    .map(
+      (assumption) =>
+        `${assumption.assumption}: evidence ${assumption.evidenceStatus.toLowerCase()} -- ${assumption.experiment} to establish ${assumption.successMetric}.`
+    );
+}
+
+// TASK #69A-5 -- CRITICAL BUG FIX (confirmed live: the real report's
+// Executive Summary correctly stated limited Financial Health evidence
+// and no verified market-size endpoint, while Benchmark Intelligence said
+// "No material validation gaps detected." on the exact same report).
+// ROOT CAUSE: applyMarketResearchCoverageToContext (market-research-
+// coverage.ts) and refreshInvestmentNarrativeFromResearchCoverage
+// (investment-score.ts) already rescore investmentScore.decisionEngine
+// and investmentScore.categories with the REAL research-evidence
+// coverage once domain research resolves -- but benchmarkFit.
+// validationGaps was computed exactly once, earlier, inside
+// createCanonicalFinancialAssumptions, from the categories' PRE-research
+// (prompt-text-only) scores, and nothing ever recomputed it afterward.
+// Benchmark Intelligence and the Executive Summary/Founder Score are
+// structurally two independent report surfaces both meant to read the
+// SAME authoritative evidence-sufficiency state; only one of them was
+// ever updated when that state changed.
+//
+// FIX: both real call sites that refresh investmentScore.categories via
+// refreshInvestmentNarrativeFromResearchCoverage (plan-executor.ts's
+// live-generation and cached-reuse paths) now call this ONE helper
+// instead, which performs that same categories/strengths/weaknesses/
+// topRisks refresh AND recomputes benchmarkFit.validationGaps from the
+// freshly-updated categories in the same step -- so the two report
+// surfaces can never again observe a different evidence-sufficiency
+// snapshot. The 3 original prompt-level heuristic gaps (preserved
+// verbatim on context.promptLevelValidationGaps) are always kept; only
+// the category-derived portion is replaced with the fresh one, never
+// appended on top of the stale one.
+export function refreshResearchAwareFinancialContext(
+  context: AiFinancialModelContext
+): AiFinancialModelContext {
+  const refreshedInvestmentScore: InvestmentScore = {
+    ...context.investmentScore,
+    ...refreshInvestmentNarrativeFromResearchCoverage(context.investmentScore, context),
+  };
+
+  return {
+    ...context,
+    investmentScore: refreshedInvestmentScore,
+    benchmarkFit: {
+      ...context.benchmarkFit,
+      // TASK #69A-18 -- validationIntelligenceV2's own material gaps
+      // (customer demand/CAC/pricing/retention/operations) are appended
+      // here too, exactly like the category-derived gaps immediately
+      // below -- context.validationIntelligenceV2 itself is not
+      // recomputed by this function (it depends on financialConsistency/
+      // sourceIntelligence, neither of which this refresh touches), so
+      // this reads the SAME snapshot already on context, never fabricating
+      // a new one.
+      validationGaps: [
+        ...context.promptLevelValidationGaps,
+        ...deriveAuthoritativeCategoryValidationGaps(refreshedInvestmentScore.categories),
+        ...deriveValidationIntelligenceGaps(context.validationIntelligenceV2),
+      ],
+    },
+  };
 }
 
 export function createCanonicalFinancialAssumptions(input: {
@@ -79,33 +214,94 @@ export function createCanonicalFinancialAssumptions(input: {
   const financialConsistency = validateFinancialConsistency(financialModel);
   const benchmarkScore = createBenchmarkIntelligenceScore(financialModel);
 
-  const contextWithoutReportIntelligence = {
-    ...financialModel,
+  // TASK #69A-3 -- CRITICAL BUG FIX (confirmed live: Benchmark Intelligence
+  // said "No material validation gaps detected." on the SAME real report
+  // whose own Executive Summary/Founder Score explicitly listed
+  // "Competitive Advantage evidence limited (1/12)" and "Financial Health
+  // evidence limited (4/15)"). ROOT CAUSE: createBenchmarkFit
+  // (financial-model.ts) computes benchmarkFit.validationGaps from only 3
+  // narrow, EARLY, prompt-text-only heuristics (no direct customer/
+  // revenue/retention/acquisition evidence in the raw prompt; low
+  // industry-benchmark confidence; an overly broad business-model signal)
+  // -- it has no knowledge whatsoever of investmentScore's own, much
+  // richer, evidence-derived per-category scoring, which is computed
+  // separately, immediately after this same financialModel. Benchmark
+  // Intelligence and the Executive Summary/Founder Score were structurally
+  // two independent sources of "is there a validation gap" truth that
+  // could -- and here did -- directly contradict each other.
+  //
+  // FIX: enrich the SAME benchmarkFit object (never a second, competing
+  // one) with investmentScore's own already-computed, already-ordered
+  // category scores -- the identical evidence-quality signal the
+  // Executive Summary's own "evidence is limited" language and Founder
+  // Score's weaknesses list already read from. A category counts as a
+  // material gap using the same "below half of its own maximum" bar this
+  // codebase already applies elsewhere for evidence-sufficiency decisions
+  // -- never a fabricated new threshold, and never touching the 3
+  // pre-existing prompt-level gap heuristics, which still run and still
+  // contribute their own findings unchanged.
+  //
+  // TASK #69A-5 -- this initial computation runs BEFORE real research
+  // evidence exists (applyMarketResearchCoverageToContext, which rescores
+  // investmentScore.decisionEngine/categories with actual coverage, has
+  // not run yet at this point) -- see refreshResearchAwareFinancialContext
+  // below, which recomputes this SAME gap list from the post-research
+  // categories once they're available, so Benchmark Intelligence never
+  // stays frozen at a pre-evidence snapshot while the Executive Summary/
+  // Founder Score move on to the real, research-aware one.
+  const authoritativeCategoryValidationGaps = deriveAuthoritativeCategoryValidationGaps(
+    investmentScore.categories
+  );
+  const promptLevelValidationGaps = financialModel.benchmarkFit.validationGaps;
+  // TASK #69A-18 -- decisionConfidence/sourceIntelligence are computed
+  // here, BEFORE benchmarkFit, specifically so validationIntelligenceV2
+  // (which needs both) can also be computed before benchmarkFit is
+  // finalized below -- its own material gaps are appended into the SAME
+  // benchmarkFit.validationGaps array the pre-existing prompt-level and
+  // category-level gaps already populate, never a second, competing gap
+  // list. No value computed here changes: this is a reordering of
+  // existing, unmodified computations, not a new formula.
+  const decisionConfidence = createDecisionConfidenceModel({
+    financialModel,
     investmentScore,
     financialConsistency,
-    benchmarkScore,
-    decisionConfidence: createDecisionConfidenceModel({
-      financialModel,
-      investmentScore,
-      financialConsistency,
-    }),
-    sourceIntelligence: createSourceIntelligenceModel({
-      financialModel,
-      financialConsistency,
-    }),
-  };
+  });
+  const sourceIntelligence = createSourceIntelligenceModel({
+    financialModel,
+    financialConsistency,
+  });
   const validationIntelligence = createValidationIntelligenceModel({
     financialModel,
     financialConsistency,
-    sourceIntelligence: contextWithoutReportIntelligence.sourceIntelligence,
-    decisionConfidence: contextWithoutReportIntelligence.decisionConfidence,
+    sourceIntelligence,
+    decisionConfidence,
   });
   const validationIntelligenceV2 = createValidationIntelligence({
     financialModel,
     financialConsistency,
-    sourceIntelligence: contextWithoutReportIntelligence.sourceIntelligence,
-    decisionConfidence: contextWithoutReportIntelligence.decisionConfidence,
+    sourceIntelligence,
+    decisionConfidence,
   });
+  const validationIntelligenceGaps = deriveValidationIntelligenceGaps(validationIntelligenceV2);
+  const benchmarkFit: BenchmarkFit = {
+    ...financialModel.benchmarkFit,
+    validationGaps: [
+      ...promptLevelValidationGaps,
+      ...authoritativeCategoryValidationGaps,
+      ...validationIntelligenceGaps,
+    ],
+  };
+
+  const contextWithoutReportIntelligence = {
+    ...financialModel,
+    benchmarkFit,
+    promptLevelValidationGaps,
+    investmentScore,
+    financialConsistency,
+    benchmarkScore,
+    decisionConfidence,
+    sourceIntelligence,
+  };
 
   return {
     ...contextWithoutReportIntelligence,

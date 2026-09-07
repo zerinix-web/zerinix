@@ -20,7 +20,18 @@ import type { LucideIcon } from "lucide-react";
 import { createClient } from "@/app/lib/supabase/server";
 import DashboardSidebar from "../DashboardSidebar";
 import { getAuthenticatedUser, loadUserReport } from "../report-utils";
-import ReportPdfButton from "./ReportPdfButton";
+// TASK #69A-19 -- PERFORMANCE FIX: ReportPdfButton.tsx statically
+// imports jsPDF (a 664KB minified chunk, plus its own pako dependency)
+// and several other PDF-only computation modules at its own top level
+// -- confirmed live, this chunk was eagerly included as a plain
+// <script> tag in EVERY /dashboard/[id] page load, even for the ~99% of
+// visits that never click "Download PDF". ReportPdfButtonLazy (a tiny,
+// dependency-free Client Component) wraps it in next/dynamic(...,
+// { ssr: false }) so the entire chunk is fetched only when actually
+// needed -- Next's App Router refuses `ssr: false` directly inside a
+// Server Component like this file, hence the small wrapper boundary
+// instead of calling next/dynamic here directly.
+import ReportPdfButton from "./ReportPdfButtonLazy";
 import {
   CopySectionButton,
   MobileReportSection,
@@ -35,6 +46,7 @@ import {
   extractRecommendationSignals,
   extractSectionMainExplanation,
   getReportQualityBreakdown,
+  FOUNDER_READINESS_DIMENSION_METRICS,
   getReportPresentationLabels,
   getSectionTakeaway,
   isExecutivePresentationSection,
@@ -59,6 +71,7 @@ import type {
 import { readExecutiveDecisionIntelligenceSummary } from "@/app/lib/report-engine/executive-decision-intelligence-presentation";
 import {
   getCanonicalDecisionLabel,
+  mapInvestmentScoreRecommendationToCanonicalDecision,
   reconcileMarketIntelligenceDecisionText,
   resolveCanonicalDecisionFromReportText,
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
@@ -71,6 +84,10 @@ import {
   resolveMarketIntelligenceCagrEvidenceLevel,
   type MarketIntelligenceCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
+import {
+  readBusinessCompetitorLandscapeState,
+  type BusinessCompetitorLandscapeState,
+} from "@/app/lib/report-engine/business-competitor-landscape-state";
 import {
   resolveMarketIntelligenceDecisionChangeState,
   selectTopMarketIntelligenceEvidenceGaps,
@@ -99,6 +116,7 @@ import {
   detectPdfPresentationLocale,
   localizePdfPresentationLabel,
   localizePdfPresentationText,
+  normalizePdfText,
 } from "@/app/lib/pdf-normalization.mjs";
 import { getExecutiveRecommendationDisplayMetrics } from "@/app/lib/report-executive-recommendation.mjs";
 import { createInsightSignature, describesSameInsight } from "@/app/lib/report-content-quality.mjs";
@@ -199,20 +217,10 @@ const mobilityFinancialDashboardMetrics = [
   { label: "Break-even", aliases: ["Break-even Month", "Break even Month", "Breakeven"] },
 ];
 
-const founderScoreMetrics = [
-  { label: "Founder Readiness Score", aliases: ["Founder Readiness Score", "Kurucu Hazırlık Skoru", "Overall Score", "Genel Skor"] },
-  { label: "Idea Quality", aliases: ["Idea Quality", "Fikir Kalitesi"] },
-  { label: "Market Attractiveness", aliases: ["Market Attractiveness", "Pazar Çekiciliği"] },
-  { label: "Business Model Quality", aliases: ["Business Model Quality", "İş Modeli Kalitesi"] },
-  { label: "Validation Confidence", aliases: ["Validation Confidence", "Doğrulama Güveni"] },
-  { label: "Execution Complexity", aliases: ["Execution Complexity", "executionComplexity", "Execution Difficulty", "executionDifficulty", "Execution", "Uygulama Karmaşıklığı", "Yürütme Karmaşıklığı", "Uygulama Zorluğu"] },
-  { label: "Evidence Confidence", aliases: ["Evidence Confidence", "Kanıt Güveni"] },
-  { label: "Founder Evidence", aliases: ["Founder Evidence", "Kurucu Kanıtı"] },
-];
-
-const founderScoreDimensionMetrics = founderScoreMetrics.filter(
-  (metric) => metric.label !== "Founder Readiness Score"
-);
+// TASK #69A-5 -- comes directly from report-presentation.ts's single
+// canonical FOUNDER_READINESS_DIMENSION_METRICS, never a hand-copied
+// duplicate -- see that file's own doc comment for why.
+const founderScoreDimensionMetrics = FOUNDER_READINESS_DIMENSION_METRICS;
 
 const founderRoadmapSteps = [
   "Tomorrow",
@@ -359,12 +367,51 @@ function extractMarketSizeAssumption(content: string, label: string) {
   return match ? match[0].trim().replace(/^[-*•]\s+/, "") : "";
 }
 
+// TASK #69A-3 -- CRITICAL BUG FIX (confirmed live: a real Business Idea
+// Validation report's TAM/SAM/SOM section reads "TAM: $21.8B |
+// evidence=Benchmark / Assumption | confidence=High" -- Business Idea
+// Validation's own canonical, deterministically-generated line format
+// (plan-executor.ts's marketSizeLine, built from the SAME
+// classifyFinancialMetricEvidenceType/localizeFinancialEvidenceType this
+// codebase's financial evidence labeling already uses everywhere else) --
+// yet the card rendered a "Verified" badge. Root cause: this function only
+// ever recognized Market Intelligence's OWN "[Estimated]"/"Planning
+// Estimate" free-prose convention; it has no concept of Business Idea
+// Validation's own "evidence=<type>" label at all, and each TAM/SAM/SOM
+// layer is its own single line with no trailing sentence
+// (extractMarketSizeAssumption already returns "" for this exact shape,
+// per TASK #42A's own comment above), so the bracket-tag scan never had
+// anything to find and silently defaulted to "not estimated" -- i.e.
+// "Verified" -- for every genuinely benchmark/assumption-derived figure.
+// FIX: when this canonical "evidence=<type>" label is present on the
+// layer's own line, it is authoritative (only a literal "Verified" tier,
+// in any of this report's 5 languages, counts as not-estimated) -- this
+// never touches Market Intelligence's own free-prose content, which never
+// emits this label at all, so its existing "[Estimated]"/"Planning
+// Estimate" detection is completely unchanged and used exactly as before
+// whenever the new label is absent.
+function extractMarketSizeEvidenceLabel(content: string, label: string) {
+  const match = content.match(
+    new RegExp(`\\b${label}\\s*:[^\\n]*?\\b(?:evidence|kanıt)\\s*=\\s*([^|\\n]+)`, "i")
+  );
+
+  return match ? match[1].trim() : null;
+}
+
+const verifiedMarketSizeEvidenceLabelPattern =
+  /^(?:verified|doğrulanmış|verifiziert|vérifié|verificado)$/i;
+
 // tamSamSom's own prompt allows a transparent, benchmark-derived estimate
 // when no verified local figure exists, explicitly requiring every such
 // figure be labeled "[Estimated]" and "never presented as verified". This
 // reads that real marker back out of the layer's own sentence, rather than
 // assuming estimated status.
 function isMarketSizeEstimated(content: string, label: string) {
+  const evidenceLabel = extractMarketSizeEvidenceLabel(content, label);
+  if (evidenceLabel !== null) {
+    return !verifiedMarketSizeEvidenceLabelPattern.test(evidenceLabel);
+  }
+
   const sentence = extractMarketSizeAssumption(content, label);
 
   return /\[Estimated\]/i.test(sentence) || /\bPlanning Estimate\b/i.test(sentence);
@@ -925,6 +972,15 @@ function isImplausibleCompetitorNameOnScreen(name: string) {
   if (trimmed.length > 60) return true;
   if (trimmed.includes("...") || trimmed.includes("…")) return true;
   if (/[[\]{}`|]|https?:\/\/|www\.|\.(?:com|org|net|edu|gov|io)\b/i.test(trimmed)) return true;
+  // TASK #69A-15C -- defense-in-depth, mirrors components/Planner.tsx.
+  // Compared via .toLowerCase() on both sides, never a /i regex literal
+  // -- "İ" (Turkish dotted capital I) lowercases to "i̇" (i + combining
+  // dot above), not plain ASCII "i", so a regex written with plain "i"
+  // characters would silently never match "AI Yönetici İçgörüsü".
+  const lowerTrimmed = trimmed.toLowerCase();
+  if (lowerTrimmed === "ai executive insight" || lowerTrimmed === "AI Yönetici İçgörüsü".toLowerCase()) {
+    return true;
+  }
   if (
     /^(?:conduct|analyz[e]?|generate|write|provide|summarize|summarise|explain|list|identify|assess|evaluate|create|perform|produce|research|describe|compare|review|investigate|determine|prepare|draft|compile|outline)\b/i.test(
       trimmed
@@ -1652,7 +1708,8 @@ function extractDecisionDriverList(content: string, labels: string[]) {
 function getDecisionSummaryItems(
   sections: Array<{ field?: string; title: string; content: string }>,
   isMarketIntelligence = false,
-  marketIntelligenceCanonicalState: MarketIntelligenceCanonicalState | null = null
+  marketIntelligenceCanonicalState: MarketIntelligenceCanonicalState | null = null,
+  investmentScore?: ReportInvestmentScore
 ) {
   const fullContent = sections.map((section) => `${section.title}\n${section.content}`).join("\n\n");
   const executiveSummary = getSectionContentByFieldOrTitle(sections, [
@@ -1713,6 +1770,30 @@ function getDecisionSummaryItems(
         dashboardLocale === "tr" ? "Turkish" : "English"
       ).decisionLabel
     : null;
+  // TASK #69A -- structured-canonical-data-first authority fix. This
+  // tile previously resolved decision/confidence for every non-Market-
+  // Intelligence report (Business Idea Validation included) purely by
+  // re-parsing prose (resolveCanonicalDecisionFromReportText's own
+  // banner/acquisition/real-estate text scan, then the unsafe bare
+  // detectRecommendation keyword fallback) -- never once consulting the
+  // structured investmentScore.recommendation/confidence fields this
+  // exact report already carries, even though the sibling Executive
+  // Snapshot panel (buildExecutiveSnapshot) on the SAME page prefers
+  // investmentScore first. Because both paths coexist unconditionally on
+  // the same page, a report whose prose disagreed with its own
+  // structured score could show two different decision/confidence values
+  // side by side. investmentScore is the single canonical Business Idea
+  // Validation decision model (app/lib/ai/investment-score.ts) -- reading
+  // it first here, and only ever falling back to prose parsing when it is
+  // genuinely absent, makes this tile agree with every other structured-
+  // first surface by construction rather than by coincidence.
+  const structuredInvestmentRecommendation =
+    !isMarketIntelligence &&
+    (investmentScore?.recommendation === "GO" ||
+      investmentScore?.recommendation === "WAIT" ||
+      investmentScore?.recommendation === "PASS")
+      ? investmentScore.recommendation
+      : null;
   const resolvedDecision = isMarketIntelligence
     ? null
     : resolveCanonicalDecisionFromReportText(
@@ -1720,15 +1801,20 @@ function getDecisionSummaryItems(
       );
   const decisionSignal =
     marketDecisionSignal ??
-    (resolvedDecision
+    (structuredInvestmentRecommendation
       ? getCanonicalDecisionLabel(
-          resolvedDecision.decision,
-          dashboardLocale === "tr" ? "Turkish" : resolvedDecision.language
+          mapInvestmentScoreRecommendationToCanonicalDecision(structuredInvestmentRecommendation),
+          dashboardLocale === "tr" ? "Turkish" : "English"
         )
-      : detectRecommendation(`${executiveRecommendation}\n${executiveSummary}\n${fullContent}`) ||
-        extractMetricValue(executiveRecommendation, "Decision") ||
-        extractMetricValue(executiveRecommendation, "Recommendation") ||
-        "—");
+      : resolvedDecision
+        ? getCanonicalDecisionLabel(
+            resolvedDecision.decision,
+            dashboardLocale === "tr" ? "Turkish" : resolvedDecision.language
+          )
+        : detectRecommendation(`${executiveRecommendation}\n${executiveSummary}\n${fullContent}`) ||
+          extractMetricValue(executiveRecommendation, "Decision") ||
+          extractMetricValue(executiveRecommendation, "Recommendation") ||
+          "—");
   // CRITICAL FIX -- confirmed live: for Market Intelligence, "Next
   // Action"/"Main Risk" previously fell back to a bare keyword scan
   // across fullContent (the ENTIRE report) whenever no literal "Next
@@ -1804,10 +1890,20 @@ function getDecisionSummaryItems(
         dashboardLocale === "tr" ? "Turkish" : "English"
       ).confidenceScore
     : null;
+  // TASK #69A -- same structured-first authority rule as decisionSignal
+  // above, applied to confidence: investmentScore.confidence (the same
+  // number the Executive Snapshot panel already prefers) is read before
+  // any prose-percentage scan, never after.
+  const structuredInvestmentConfidence =
+    !isMarketIntelligence && typeof investmentScore?.confidence === "number"
+      ? investmentScore.confidence
+      : null;
   const decisionConfidence =
     marketDecisionConfidence !== null
       ? `${marketDecisionConfidence}%`
-      : extractDecisionConfidenceValue(executiveRecommendation || fullContent);
+      : structuredInvestmentConfidence !== null
+        ? `${structuredInvestmentConfidence}%`
+        : extractDecisionConfidenceValue(executiveRecommendation || fullContent);
   const positiveDrivers = extractDecisionDriverList(executiveRecommendation || fullContent, [
     "Positive signals",
     "Pozitif sinyaller",
@@ -2094,12 +2190,44 @@ function KpiValueContent({ value }: { value: string }) {
       .map((segment) => (segment.label ? `${segment.label}: ${segment.text}` : segment.text))
       .join(" · ");
 
+    // TASK #69A-12 -- was line-clamp-1 (mirrors Planner.tsx's identical
+    // fix): a real Target/Owner description truncated to a near-
+    // meaningless one-line fragment.
     return (
       <div className="mt-2 min-h-[3.5rem]">
         <p className="text-[9px] font-semibold uppercase tracking-wide text-zinc-500">{first.label}</p>
         <p className="line-clamp-1 text-sm font-semibold leading-tight text-white">{first.text || "—"}</p>
         {supporting ? (
-          <p className="mt-0.5 line-clamp-1 text-[10px] leading-snug text-zinc-400">{supporting}</p>
+          <p className="mt-0.5 line-clamp-3 text-[10px] leading-snug text-zinc-400">{supporting}</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  // TASK #69A-11 -- CRITICAL LAYOUT FIX (mirrors the identical fix in
+  // components/Planner.tsx's own copy of this function): the first
+  // "|"-segment isn't a real "Label: value" pair, but further segments
+  // follow it (Target/Status/etc.). Previously this fell through to the
+  // plain branch below, which rendered the ENTIRE raw, still-pipe-
+  // delimited `value` string in one line-clamp-2 paragraph -- the exact
+  // crowding/truncation defect reported live. Give the primary reading
+  // and its Target/Status detail their own separated primary/supporting
+  // rows, exactly like the structured branch above. No data is
+  // fabricated or dropped -- every segment is still shown.
+  if (rest.length > 0) {
+    const primaryText = first?.label ? `${first.label}: ${first.text}` : first?.text || "";
+    const supporting = rest
+      .map((segment) => (segment.label ? `${segment.label}: ${segment.text}` : segment.text))
+      .join(" · ");
+
+    // TASK #69A-12 -- same relaxation as the structured branch above.
+    return (
+      <div className="mt-2 min-h-[3.5rem]">
+        <p className="line-clamp-2 text-balance text-lg font-semibold leading-tight text-white">
+          {primaryText || "Target"}
+        </p>
+        {supporting ? (
+          <p className="mt-1 line-clamp-3 text-[10px] leading-snug text-zinc-400">{supporting}</p>
         ) : null}
       </div>
     );
@@ -2360,10 +2488,12 @@ function ExecutiveInsightBanner({
   content,
   isMarketIntelligence = false,
   marketIntelligenceCanonicalState = null,
+  investmentScore,
 }: {
   content: string;
   isMarketIntelligence?: boolean;
   marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
+  investmentScore?: ReportInvestmentScore;
 }) {
   const insight = extractFirstInsight(content);
   // TASK #49 -- Make Market Intelligence decision confidence structurally
@@ -2385,9 +2515,18 @@ function ExecutiveInsightBanner({
   // placeholder this file already uses everywhere else for "no
   // defensible numeric confidence exists" when no canonical state is
   // present. Every other report kind is completely unaffected.
+  // TASK #69A-1 -- structured-canonical-data-first authority fix: this
+  // banner's confidence for a Business Idea Validation report previously
+  // came only from extractConfidence's bare-percentage prose scan, never
+  // once consulting investmentScore.confidence -- the same canonical
+  // number the Executive Snapshot panel/Decision Summary grid on this
+  // exact page already prefer. Checked first now; falls back to the
+  // identical prose scan only when investmentScore is genuinely absent.
   const confidence = isMarketIntelligence
     ? marketIntelligenceCanonicalState?.confidence ?? null
-    : extractConfidence(content);
+    : typeof investmentScore?.confidence === "number"
+      ? investmentScore.confidence
+      : extractConfidence(content);
 
   if (!insight) {
     return null;
@@ -2439,6 +2578,239 @@ function GaugeCircle({ label, score }: { label: string; score: number }) {
   );
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const competitorFieldLabels = [
+  "Company",
+  "Positioning",
+  "Strengths",
+  "Weaknesses",
+  "Competitive Threat",
+  "Threat",
+  "Pricing",
+  "Target Customer",
+  "Funding",
+  "Employee Size",
+  "How ZERINIX can outperform",
+  // TASK #69A-14 -- mirrors the identical fix in components/Planner.tsx:
+  // the REAL confirmed category labels competitorLandscape's own
+  // generation prompt (app/lib/report-engine/prompts/plan.ts) actually
+  // induces in its free-form, topic-organized prose -- needed as clause
+  // BOUNDARIES for parseInlineField, below.
+  "Direct competitors",
+  "Substitutes",
+  "Strengths of incumbents",
+  "How to outperform",
+  "Incumbent response",
+  "Switching barriers",
+  "Gap for entrant",
+  "Gap for a new entrant",
+  "Executive implication",
+  // TASK #69A-15C -- mirrors the identical fix in components/Planner.tsx:
+  // normalizeFullPlanReport (plan-executor.ts) deterministically appends
+  // a trailing "AI Executive Insight:\n..." block to EVERY
+  // competitorLandscape field -- presentation metadata, never a
+  // competitor. When both structured tiers come back empty, the
+  // last-resort per-line guess below mistook this heading's own prefix
+  // for a company name. Listed here so isKnownCategoryLabel rejects it
+  // via the same exact-match mechanism #69A-14 already established.
+  "AI Executive Insight",
+  "AI Yönetici İçgörüsü",
+];
+
+function parseInlineField(line: string, label: string) {
+  const labels = competitorFieldLabels
+    .filter((item) => item !== label)
+    .map(escapeRegExp)
+    .join("|");
+  const match = line.match(
+    new RegExp(`${escapeRegExp(label)}\\s*[:\\-–—]\\s*([\\s\\S]*?)(?=\\s+(?:${labels})\\s*[:\\-–—]|$)`, "i")
+  );
+
+  return match?.[1]?.trim() || "";
+}
+
+function cleanExecutiveText(value: string, maxLength = 180) {
+  const cleaned = normalizePdfText(value)
+    .replace(/^[-*•]\s+/, "")
+    .replace(/^\d+[.)]\s+/, "")
+    .replace(/\*\*/g, "")
+    .replace(/\s*\|\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
+
+  const truncated = cleaned.slice(0, maxLength).replace(/\s+\S*$/, "");
+
+  return `${truncated || cleaned.slice(0, maxLength)}…`;
+}
+
+// TASK #69A-13 -- replaces a hardcoded, fully fictional "Competitive
+// Positioning Map" (4 fixed fake data points -- "Incumbents",
+// "Specialists", "ZERINIX Thesis", "Low-end" -- at fixed coordinates,
+// using none of this report's own content) with a real extraction of
+// this report's own Competitor Landscape section, mirroring
+// components/Planner.tsx's own extractCompetitorRows -- with one
+// deliberate fix already applied here rather than copied verbatim: the
+// bullet-fallback branch no longer reuses the SAME raw bullet line (or
+// extractKeywordInsight's degenerate single-line "match", which simply
+// returns that same line back) as the fallback for Positioning,
+// Strengths, Weaknesses, AND Threat all at once -- which is exactly what
+// produced near-duplicate text across all four columns whenever a
+// bullet didn't use every expected inline label. Each field that has no
+// explicit label of its own now honestly renders "—" instead of
+// silently borrowing another field's raw source text.
+function extractCompetitorRows(content: string) {
+  const normalized = normalizePdfText(content).replace(/\*\*/g, "");
+  const tableRows = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("|") && line.endsWith("|") && !/^\|\s*-/.test(line));
+
+  if (tableRows.length > 1) {
+    const headers = tableRows[0]
+      .split("|")
+      .map((cell) => cell.trim().toLowerCase())
+      .filter(Boolean);
+
+    return tableRows
+      .slice(1)
+      .map((row) => row.split("|").map((cell) => cell.trim()).filter(Boolean))
+      .map((cells) => {
+        const read = (keys: string[]) => {
+          const index = headers.findIndex((header) => keys.some((key) => header.includes(key)));
+          return index >= 0 ? cells[index] || "" : "";
+        };
+
+        return {
+          company: read(["company", "competitor", "rakip"]),
+          positioning: read(["position", "konum"]),
+          strengths: read(["strength", "güç"]),
+          weaknesses: read(["weakness", "zayıf"]),
+          threat: read(["threat", "risk"]),
+        };
+      })
+      .filter((row) => row.company || row.positioning || row.strengths || row.weaknesses || row.threat)
+      .slice(0, 5);
+  }
+
+  // TASK #69A-14 -- CRITICAL SEMANTIC FIX (mirrors the identical fix in
+  // components/Planner.tsx's own copy of this function -- see that
+  // function's own comment for the full root-cause explanation). The
+  // real competitorLandscape generation prompt asks for pure analytical
+  // prose organized by TOPIC ("Direct competitors: Float (...). Cash
+  // Flow Frog (...). Substitutes: ... Pricing: ... Strengths of
+  // incumbents: ... Weaknesses: ..."), never a per-competitor bullet.
+  // Look for the "Direct competitors"/"Substitutes" clauses across the
+  // FULL content first, and extract each real "Name (details)" entity
+  // within just those clauses -- never treating the clause's own label
+  // as an entity, never fabricating Strengths/Weaknesses/Threat the
+  // source doesn't attribute per-entity.
+  const directCompetitorsClause = parseInlineField(normalized, "Direct competitors");
+  const substitutesClause = parseInlineField(normalized, "Substitutes");
+  const namedEntityPattern = /([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z&][A-Za-z0-9&.'-]*){0,4})\s*\(([^()]{3,220})\)/g;
+
+  const extractNamedEntities = (clauseText: string, type: "Direct competitor" | "Substitute") => {
+    if (!clauseText) return [];
+
+    const found: Array<{ name: string; positioning: string; type: string }> = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = namedEntityPattern.exec(clauseText)) !== null) {
+      const name = match[1].trim();
+
+      if (isImplausibleCompetitorNameOnScreen(name)) {
+        continue;
+      }
+
+      found.push({ name, positioning: match[2].trim(), type });
+    }
+
+    return found;
+  };
+
+  const seenEntityNames = new Set<string>();
+  const namedEntities = [
+    ...extractNamedEntities(directCompetitorsClause, "Direct competitor"),
+    ...extractNamedEntities(substitutesClause, "Substitute"),
+  ].filter((entity) => {
+    const key = entity.name.toLowerCase();
+
+    if (seenEntityNames.has(key)) {
+      return false;
+    }
+
+    seenEntityNames.add(key);
+    return true;
+  });
+
+  if (namedEntities.length > 0) {
+    return namedEntities.slice(0, 5).map((entity) => ({
+      company: cleanExecutiveText(
+        entity.type === "Substitute" ? `${entity.name} (Substitute)` : entity.name,
+        60
+      ),
+      positioning: cleanExecutiveText(entity.positioning, 120),
+      strengths: "—",
+      weaknesses: "—",
+      threat: "—",
+    }));
+  }
+
+  const lines = normalized
+    .split("\n")
+    .map((line) => line.trim().replace(/^[-*•]\s+/, ""))
+    .filter((line) => line.length > 14);
+  const rows: Array<{
+    company: string;
+    positioning: string;
+    strengths: string;
+    weaknesses: string;
+    threat: string;
+  }> = [];
+
+  lines.forEach((line) => {
+    // TASK #69A-14 -- last-resort tier, hardened the same way (mirrors
+    // Planner.tsx): a candidate company name that is implausible, or is
+    // literally one of this function's own known category labels, is
+    // rejected rather than accepted.
+    const rawCompanyGuess = line.match(/^([A-Z0-9][A-Za-z0-9 .&()/-]{1,42})\s*[:—–-]\s+/)?.[1]?.trim() || "";
+    const isKnownCategoryLabel = competitorFieldLabels.some(
+      (label) => label.toLowerCase() === rawCompanyGuess.toLowerCase()
+    );
+    const companyGuess =
+      rawCompanyGuess && !isKnownCategoryLabel && !isImplausibleCompetitorNameOnScreen(rawCompanyGuess)
+        ? rawCompanyGuess
+        : "";
+    const company =
+      parseInlineField(line, "Company") ||
+      parseInlineField(line, "Competitor") ||
+      companyGuess ||
+      "";
+    const positioning = parseInlineField(line, "Positioning") || parseInlineField(line, "Target Customer");
+    const strengths = parseInlineField(line, "Strengths");
+    const weaknesses = parseInlineField(line, "Weaknesses");
+    const threat = parseInlineField(line, "Competitive Threat") || parseInlineField(line, "Threat");
+
+    if (company || positioning || strengths || weaknesses || threat) {
+      rows.push({
+        company: cleanExecutiveText(company || "Market participant", 52),
+        positioning: cleanExecutiveText(positioning || "—", 120),
+        strengths: cleanExecutiveText(strengths || "—", 110),
+        weaknesses: cleanExecutiveText(weaknesses || "—", 110),
+        threat: cleanExecutiveText(threat || "—", 90),
+      });
+    }
+  });
+
+  return rows.slice(0, 5);
+}
+
 function ReportSectionVisual({
   title,
   content,
@@ -2447,6 +2819,7 @@ function ReportSectionVisual({
   majorPlayersContent = "",
   executiveSummaryContent = "",
   marketIntelligenceCanonicalState = null,
+  businessCompetitorLandscapeState = null,
 }: {
   title: string;
   content: string;
@@ -2468,6 +2841,14 @@ function ReportSectionVisual({
   // stale/contradictory verdict line.
   executiveSummaryContent?: string;
   marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
+  // TASK #69A-15 -- the versioned, structured Competitor Landscape
+  // snapshot captured once at generation time (see
+  // business-competitor-landscape-state.ts). null on every report
+  // persisted before this field existed, or whose model output didn't
+  // follow the new labeled line format -- both fall back to this
+  // function's own existing extractCompetitorRows prose-parsing tiers,
+  // completely unchanged.
+  businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
 }) {
   const normalizedTitle = title.toLowerCase();
   const evidenceLocale = getResponseLanguage(detectPdfPresentationLocale(content));
@@ -3072,11 +3453,23 @@ function ReportSectionVisual({
             </p>
           </div>
         ) : null}
-        <div className="grid gap-px bg-white/10 md:grid-cols-5">
+        {/* TASK #69A-12 -- CRITICAL FOLLOW-UP FIX (mirrors the identical
+            fix in components/Planner.tsx's own copy of this section):
+            auto-fit columns fit only 4 per row at typical desktop
+            widths, stranding the 5th metric alone on an otherwise-empty
+            second row -- and within each column, the label/badge still
+            shared one flex row with a shrink-0 badge that refused to
+            give up width, squeezing the label down to a few characters
+            before line-clamp's ellipsis fired ("EST...", "PLA...").
+            Fixed exactly like the KPI cards already were: the label now
+            gets its own full-width row, badge stacked below in its own
+            row. Explicit breakpoints replace auto-fit so 5 columns
+            predictably split 1 / 2+2+1 / 3+2. */}
+        <div className="grid grid-cols-1 gap-px bg-white/10 sm:grid-cols-2 lg:grid-cols-3">
           {flowMetrics.map(({ metric, value, evidence }) => (
-            <div key={metric} className="bg-zinc-950/80 p-4">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            <div key={metric} className="min-w-0 overflow-hidden bg-zinc-950/80 p-4">
+              <div className="flex min-h-[3.25rem] flex-col gap-1.5">
+                <p className="line-clamp-2 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
                   {getFinancialMetricDisplayLabel(metric, evidence)}
                 </p>
                 <EvidenceBadge level={evidence} locale={evidenceLocale} financial />
@@ -3607,28 +4000,83 @@ function ReportSectionVisual({
   }
 
   if (normalizedTitle.includes("competitor")) {
+    // TASK #69A-13 -- CRITICAL FIX: replaces a hardcoded, entirely
+    // fictional positioning-scatter visualization (4 fixed fake data
+    // points at fixed coordinates, using none of this report's own
+    // content -- the labels never varied regardless of which real
+    // competitors the report actually named) with the exact same real
+    // "Competitive Intelligence Table" grid
+    // components/Planner.tsx already renders for this section, built
+    // from this report's own extractCompetitorRows extraction -- see
+    // that function's own comment for the semantic-duplication fix
+    // already baked into it. Same min-w-0/break-words/overflow-x-auto
+    // hardening as Planner.tsx's copy, so no column can bleed past this
+    // card's own boundary either.
+    //
+    // TASK #69A-15 -- structured generation is now authoritative: a
+    // versioned businessCompetitorLandscapeState (mirrors
+    // Planner.tsx's own identical fix) drives this card directly when
+    // present, since each field was captured independently at
+    // generation time and never derived from Positioning or from each
+    // other. Only a report with no such state falls back to
+    // extractCompetitorRows, completely unchanged.
+    const competitors = businessCompetitorLandscapeState
+      ? businessCompetitorLandscapeState.competitors.map((entity) => ({
+          company: entity.type === "Substitute" ? `${entity.company} (Substitute)` : entity.company,
+          positioning: entity.positioning,
+          strengths: entity.strengths,
+          weaknesses: entity.weaknesses,
+          threat: entity.threat,
+        }))
+      : extractCompetitorRows(content);
+
     return (
-      <div className="mb-5 rounded-[2rem] border border-white/10 bg-white/[0.025] p-5">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
-          Competitive Positioning Map
-        </p>
-        <div className="relative mt-5 h-64 rounded-3xl border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.035),rgba(94,234,212,0.07))]">
-          <div className="absolute left-1/2 top-0 h-full w-px bg-white/10" />
-          <div className="absolute left-0 top-1/2 h-px w-full bg-white/10" />
-          {[
-            ["Incumbents", "24%", "32%"],
-            ["Specialists", "70%", "30%"],
-            ["ZERINIX Thesis", "58%", "62%"],
-            ["Low-end", "28%", "75%"],
-          ].map(([label, left, top], index) => (
-            <div key={label} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left, top }}>
-              <div className={`h-4 w-4 rounded-full ${index === 2 ? "bg-teal-200" : "bg-white/35"}`} />
-              <p className="mt-2 max-w-24 rounded-full border border-white/10 bg-black/65 px-2 py-1 text-center text-[11px] font-semibold leading-4 text-zinc-200 sm:max-w-none sm:whitespace-nowrap sm:text-xs">
-                {label}
-              </p>
-            </div>
-          ))}
+      <div className="mb-5 min-w-0 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.025]">
+        <div className="border-b border-white/10 p-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
+            Competitive Intelligence Table
+          </p>
+          <p className="mt-2 text-sm text-zinc-400">
+            Positioning, strengths, weaknesses and threat level from the generated analysis.
+          </p>
         </div>
+        {competitors.length > 0 ? (
+          <div className="min-w-0 overflow-x-auto">
+            <div className="min-w-[760px]">
+              <div className="grid grid-cols-[1fr_1.35fr_1.15fr_1.15fr_0.9fr] gap-px bg-white/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                {["Company", "Positioning", "Strengths", "Weaknesses", "Threat"].map((label) => (
+                  <div key={label} className="min-w-0 bg-zinc-950/80 px-4 py-3">
+                    {label}
+                  </div>
+                ))}
+              </div>
+              <div className="grid gap-px bg-white/10">
+                {competitors.map((row, index) => (
+                  <div
+                    key={`${row.company}-${index}`}
+                    className="grid grid-cols-[1fr_1.35fr_1.15fr_1.15fr_0.9fr] bg-black/35 text-sm leading-6 text-zinc-300"
+                  >
+                    <div className="min-w-0 break-words px-4 py-4 font-semibold text-white">{row.company}</div>
+                    <div className="min-w-0 break-words px-4 py-4">{row.positioning || "—"}</div>
+                    <div className="min-w-0 break-words px-4 py-4">{row.strengths}</div>
+                    <div className="min-w-0 break-words px-4 py-4">{row.weaknesses}</div>
+                    <div className="min-w-0 px-4 py-4">
+                      <span className="inline-block max-w-full whitespace-normal break-words rounded-2xl border border-teal-200/20 bg-teal-200/10 px-2.5 py-1 text-xs font-semibold text-teal-100">
+                        {row.threat}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex min-h-36 items-center justify-center p-6 text-center">
+            <p className="max-w-md text-sm leading-6 text-zinc-400">
+              No competitor data could be validated for this market yet.
+            </p>
+          </div>
+        )}
       </div>
     );
   }
@@ -4418,6 +4866,15 @@ const cardFirstReportFields = new Set([
   "marketSize",
   "cagr",
   "competitiveLandscape",
+  // TASK #69A-13 -- mirrors the identical fix in components/Planner.tsx:
+  // Business Idea Validation/Business Plan/Acquisition's competitor
+  // field now has a real "Competitive Intelligence Table" grid card here
+  // too (replacing the hardcoded fictional positioning-scatter
+  // visualization that used to stand in for it), so the same raw-table
+  // "Details" duplicate every other card-first field already suppresses
+  // can now be suppressed for this one too.
+  "competitorAnalysis",
+  "competitorLandscape",
 ]);
 
 function getReportArticleClass(title: string) {
@@ -5747,15 +6204,26 @@ function ReportText({
                   mobile ? "min-w-[36rem]" : "min-w-[42rem]"
                 }`}
               >
+                {/* TASK #69A-12 -- CRITICAL LAYOUT FIX: only the mobile
+                    branch had min-w-[8.5rem]/whitespace-normal/
+                    [overflow-wrap:anywhere] -- the desktop branch had
+                    NO per-column width floor at all (bare px-4 py-3),
+                    so table-layout:auto could shrink any column
+                    (typically the last one) down to near its longest
+                    unbroken word, wrapping every other word in that
+                    cell onto its own line ("word-by-word vertical
+                    wrapping"), instead of the wrapper's own
+                    overflow-x-auto taking over. Desktop now gets the
+                    exact same per-column floor mobile already had --
+                    only the padding scale still differs between the
+                    two. */}
                 <thead className="bg-white/[0.07] text-xs uppercase tracking-[0.18em] text-zinc-400">
                   <tr>
                     {headerRow?.map((cell, cellIndex) => (
                       <th
                         key={`header-${blockIndex}-${cellIndex}-${cell}`}
-                        className={`font-semibold text-zinc-300 ${
-                          mobile
-                            ? "min-w-[8.5rem] whitespace-normal px-3.5 py-3 [overflow-wrap:anywhere]"
-                            : "px-4 py-3"
+                        className={`min-w-[8.5rem] whitespace-normal font-semibold text-zinc-300 [overflow-wrap:anywhere] ${
+                          mobile ? "px-3.5 py-3" : "px-4 py-3"
                         }`}
                       >
                         {cell}
@@ -5769,10 +6237,8 @@ function ReportText({
                       {row.map((cell, cellIndex) => (
                         <td
                           key={`${cell}-${cellIndex}`}
-                          className={`align-top leading-7 ${
-                            mobile
-                              ? "whitespace-normal px-3.5 py-3 [overflow-wrap:anywhere]"
-                              : "px-4 py-3"
+                          className={`min-w-[8.5rem] whitespace-normal align-top leading-7 [overflow-wrap:anywhere] ${
+                            mobile ? "px-3.5 py-3" : "px-4 py-3"
                           }`}
                         >
                           {renderInlineMarkdown(cell)}
@@ -5899,6 +6365,10 @@ export default async function ReportDetailPage({
   // of truth per render, not N copies that could theoretically read
   // report.metadata at different points if this were ever refactored.
   const marketIntelligenceCanonicalState = readMarketIntelligenceCanonicalState(report.metadata);
+  // TASK #69A-15 -- mirrors the identical pattern immediately above:
+  // computed once and threaded to the Competitor Landscape card, one
+  // source of truth per render, never re-derived per section.
+  const businessCompetitorLandscapeState = readBusinessCompetitorLandscapeState(report.metadata);
   // TASK #34 FOLLOW-UP -- Sources is deliberately never rendered on any
   // surface, for every report kind including Market Intelligence
   // (presentation-only decision; see this task's own report). The
@@ -5922,7 +6392,8 @@ export default async function ReportDetailPage({
   const decisionSummaryItems = getDecisionSummaryItems(
     visibleSections,
     isMarketIntelligenceReport,
-    marketIntelligenceCanonicalState
+    marketIntelligenceCanonicalState,
+    report.investmentScore
   );
   const decisionSignalItem =
     decisionSummaryItems.find((item) => item.label === "Decision Signal") ||
@@ -6151,6 +6622,7 @@ export default async function ReportDetailPage({
                                   visibleSections.find((entry) => entry.field === "executiveSummary")?.content
                                 }
                                 marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
+                                businessCompetitorLandscapeState={businessCompetitorLandscapeState}
                               />
                             ) : null}
                           </div>
@@ -6611,6 +7083,7 @@ export default async function ReportDetailPage({
                                   content={section.content}
                                   isMarketIntelligence={report.type === "Market Analysis"}
                                   marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
+                                  investmentScore={report.investmentScore}
                                 />
                               ) : null}
                               <ReportSectionVisual
@@ -6625,6 +7098,7 @@ export default async function ReportDetailPage({
                                   visibleSections.find((entry) => entry.field === "executiveSummary")?.content
                                 }
                                 marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
+                                businessCompetitorLandscapeState={businessCompetitorLandscapeState}
                               />
                               {/* Card-first sections (see cardFirstReportFields) already
                                   surface their COMPLETE content via a dedicated visual

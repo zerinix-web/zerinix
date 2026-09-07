@@ -175,7 +175,10 @@ test("the TAM/SAM/SOM visualization badge is wired to isMarketIntelligence in bo
   // tests/task32-evidence-classification-authoritative.test.mjs for that
   // fix's own dedicated coverage). The market={isMarketIntelligence} prop
   // this test protects is unaffected.
-  assert.match(dashboardReportSource, /function ReportSectionVisual\(\{[\s\S]{0,300}isMarketIntelligence\??\s*:\s*boolean/);
+  // Window widened from 300 to 400 (TASK #69A-15 added a new
+  // businessCompetitorLandscapeState destructured param ahead of this
+  // point in the same parameter list).
+  assert.match(dashboardReportSource, /function ReportSectionVisual\(\{[\s\S]{0,400}isMarketIntelligence\??\s*:\s*boolean/);
   assert.match(
     dashboardReportSource,
     /<EvidenceBadge level=\{layerEvidenceLevel\} locale=\{evidenceLocale\} market=\{isMarketIntelligence\}/

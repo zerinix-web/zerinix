@@ -996,6 +996,28 @@ function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
 }
 
+// TASK #69A-5 -- CRITICAL BUG FIX (confirmed live: Financial Assumptions
+// rendered "Idea scope multiplier: 0.7425000000000002" -- a real report,
+// not a formatting choice). ROOT CAUSE: ideaScopeMultiplier chain-
+// multiplies several literal factors (1.35 x 0.55 x 1.2, etc.); IEEE 754
+// binary floating point cannot represent most of these decimal literals
+// exactly, so the product accumulates trailing-digit noise (1 x 1.35 x
+// 0.55 = 0.7425 in decimal, but 0.7425000000000002 in double-precision
+// binary) even though the VALUE is mathematically the clean 4-decimal
+// figure. This is a PRESENTATION-only formatter -- it is applied only at
+// the point a multiplier/ratio is interpolated into a human-readable
+// assumptions string, and never touches the multiplier variable itself,
+// so every calculation that consumes the raw, full-precision number
+// (TAM/CAC/etc.) is completely unaffected. Rounds to 4 decimal places
+// (enough headroom above every currently known multiplier literal in
+// this file, none of which carries more than 2 significant decimals) and
+// lets String() drop any trailing zeros, matching formatPercent's own
+// established "compute in full precision, format only for display"
+// convention right above.
+function formatMultiplier(value: number) {
+  return String(Math.round(value * 10_000) / 10_000);
+}
+
 function approximatelyEqual(left: number, right: number, tolerance = 0.03) {
   return Math.abs(left - right) <= Math.max(1, Math.abs(right)) * tolerance;
 }
@@ -1227,7 +1249,7 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
     `Geography: ${inputs.geography}`,
     `Pricing model: ${inputs.pricingModel}`,
     `Validation evidence: ${hasValidationEvidence(input.prompt) ? "present in prompt" : "not yet supplied; planning assumptions require validation"}`,
-    `Customer ramp multiplier: ${rampMultiplier}`,
+    `Customer ramp multiplier: ${formatMultiplier(rampMultiplier)}`,
   ];
   const benchmarkFit = createBenchmarkFit({
     prompt: input.prompt,
@@ -1262,7 +1284,7 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
         unit: "usd",
         confidence: confidence("TAM"),
         formula: "industry TAM x geography multiplier x idea scope multiplier",
-        assumptions: [...sharedAssumptions, `Geography multiplier: ${geoMultiplier}`, `Idea scope multiplier: ${scopeMultiplier}`],
+        assumptions: [...sharedAssumptions, `Geography multiplier: ${formatMultiplier(geoMultiplier)}`, `Idea scope multiplier: ${formatMultiplier(scopeMultiplier)}`],
         benchmarkComparison: "Derived from benchmark market scope rather than compared to operating range.",
       }),
       sam: metric({
@@ -1309,7 +1331,7 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
 	        unit: "usd",
 	        confidence: confidence(cacLabel),
 	        formula: "benchmark CAC x complexity multiplier",
-	        assumptions: [...sharedAssumptions, `Complexity multiplier: ${scopeMultiplier > 1 ? 1.18 : 1}`, `Acquisition uncertainty multiplier: ${cacMultiplier}`],
+	        assumptions: [...sharedAssumptions, `Complexity multiplier: ${formatMultiplier(scopeMultiplier > 1 ? 1.18 : 1)}`, `Acquisition uncertainty multiplier: ${formatMultiplier(cacMultiplier)}`],
         benchmarkComparison: compareToBenchmark(cac, benchmark.ranges.cac),
       }),
       ltv: metric({

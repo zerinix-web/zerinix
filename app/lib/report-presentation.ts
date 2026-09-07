@@ -578,31 +578,155 @@ function readFounderReasoningScore(investmentScore: ReportInvestmentScore | unde
   return null;
 }
 
+// TASK #69A-17 -- the ONE canonical, zero-regex read of a Founder
+// Readiness dimension's score: investment-score.ts's own
+// FounderReadinessDimensionScoreEntry[] (decisionEngine.founderScore.
+// dimensionScores), resolved by KEY identity, never by array position
+// or prose parsing. Returns null (never a guess) when the array itself
+// is absent -- a report persisted before this field existed, or before
+// investment-score.ts computed it -- so every caller's existing
+// prose/reasoning-based fallback stays the honest degradation path for
+// those historical reports.
+function readFounderReadinessDimensionScore(
+  investmentScore: ReportInvestmentScore | undefined,
+  key: Exclude<FounderReadinessDimensionKey, "founderReadinessScore">
+) {
+  const dimensionScores = investmentScore?.decisionEngine?.founderScore?.dimensionScores;
+
+  if (!Array.isArray(dimensionScores)) {
+    return null;
+  }
+
+  const entry = dimensionScores.find((candidate) => candidate?.key === key);
+
+  return typeof entry?.score === "number" && Number.isFinite(entry.score)
+    ? Math.max(0, Math.min(100, Math.round(entry.score)))
+    : null;
+}
+
 export function readFounderReadinessMetrics(investmentScore?: ReportInvestmentScore) {
-  const marketAttractiveness = readFounderReasoningScore(investmentScore, "Market attractiveness");
+  // Structured dimensionScores wins whenever present (a report generated
+  // after TASK #69A-17); the pre-existing per-line reasoning regex
+  // (readFounderReasoningScore) remains the fallback ONLY for reports
+  // that predate that field -- never removed, since it is still the
+  // sole source of truth for every historical report already persisted.
+  const readDimension = (
+    key: Exclude<FounderReadinessDimensionKey, "founderReadinessScore">,
+    reasoningLabel: string
+  ) => {
+    const structuredScore = readFounderReadinessDimensionScore(investmentScore, key);
+
+    return structuredScore !== null ? structuredScore : readFounderReasoningScore(investmentScore, reasoningLabel);
+  };
 
   return {
     founderReadinessScore: readFounderReadinessScoreValue(investmentScore),
-    ideaQuality: marketAttractiveness,
-    marketAttractiveness,
-    businessModelQuality: readFounderReasoningScore(investmentScore, "Business model quality"),
-    validationConfidence: readFounderReasoningScore(investmentScore, "Validation confidence"),
-    executionComplexity: readFounderReasoningScore(investmentScore, "Execution complexity"),
-    evidenceConfidence: readFounderReasoningScore(investmentScore, "Evidence confidence"),
-    founderEvidence: readFounderReasoningScore(investmentScore, "Founder evidence"),
+    ideaQuality: readDimension("ideaQuality", "Market attractiveness"),
+    marketAttractiveness: readDimension("marketAttractiveness", "Market attractiveness"),
+    businessModelQuality: readDimension("businessModelQuality", "Business model quality"),
+    validationConfidence: readDimension("validationConfidence", "Validation confidence"),
+    executionComplexity: readDimension("executionComplexity", "Execution complexity"),
+    evidenceConfidence: readDimension("evidenceConfidence", "Evidence confidence"),
+    founderEvidence: readDimension("founderEvidence", "Founder evidence"),
   };
 }
 
-const FOUNDER_READINESS_TEXT_ALIASES: Record<string, string[]> = {
-  "Founder Readiness Score": ["Founder Readiness Score", "Kurucu Hazırlık Skoru", "Overall Score", "Genel Skor"],
-  "Idea Quality": ["Idea Quality", "Fikir Kalitesi"],
-  "Market Attractiveness": ["Market Attractiveness", "Pazar Çekiciliği"],
-  "Business Model Quality": ["Business Model Quality", "İş Modeli Kalitesi"],
-  "Validation Confidence": ["Validation Confidence", "Doğrulama Güveni"],
-  "Execution Complexity": ["Execution Complexity", "Yürütme Karmaşıklığı", "Uygulama Karmaşıklığı", "Execution Difficulty"],
-  "Evidence Confidence": ["Evidence Confidence", "Kanıt Güveni"],
-  "Founder Evidence": ["Founder Evidence", "Kurucu Kanıtı"],
+// TASK #69A-5 -- CRITICAL BUG FIX (confirmed live: the Founder Readiness
+// dimension score CARDS and the explanatory text below them disagreed --
+// e.g. cards showed Market Attractiveness 54 while the text below said
+// Market Attractiveness 48). ROOT CAUSE: every consumer of Founder
+// Readiness dimensions (page.tsx, Planner.tsx, ReportPdfButton.tsx,
+// plan-executor.ts's buildCanonicalFounderScore) independently hand-
+// maintained its OWN copy of "the 7 dimension labels, in order" as a
+// separate array literal -- five+ parallel lists with no single source
+// of truth tying them together. ReportPdfButton.tsx's own copy went
+// further and read a dimension's score by POSITIONAL INDEX into a
+// separately-ordered values array (dimensionScoreValues[i]) rather than
+// by resolving that exact dimension's own identity -- so any future
+// edit to just one of the parallel label lists (reorder, insert, rename)
+// silently desyncs every other list and can render one dimension's score
+// under a completely different dimension's label, with no error and no
+// warning.
+//
+// FIX: this is now the ONE canonical, ordered list of Founder Readiness
+// dimension identities. Every renderer (dashboard cards, Planner.tsx,
+// the PDF) imports and iterates THIS list, and every score lookup goes
+// through readFounderReadinessMetricValue below (or
+// getFounderReadinessDimensionScore, its identity-keyed wrapper) --
+// never a hand-copied label array, and never a raw array index into a
+// separately-built values array. "Idea Quality" has no independent
+// underlying dimension of its own in the scoring engine (investment-
+// score.ts's teamFounder.reasoning never contains that phrase) -- it is,
+// by design, a presentation-layer synonym for Market Attractiveness's
+// own canonical score (see buildCanonicalFounderScore, plan-executor.ts).
+export type FounderReadinessDimensionKey =
+  | "founderReadinessScore"
+  | "ideaQuality"
+  | "marketAttractiveness"
+  | "businessModelQuality"
+  | "validationConfidence"
+  | "executionComplexity"
+  | "evidenceConfidence"
+  | "founderEvidence";
+
+export type FounderReadinessDimension = {
+  key: FounderReadinessDimensionKey;
+  label: string;
+  aliases: readonly string[];
 };
+
+export const FOUNDER_READINESS_DIMENSIONS: readonly FounderReadinessDimension[] = [
+  {
+    key: "founderReadinessScore",
+    label: "Founder Readiness Score",
+    aliases: ["Founder Readiness Score", "Kurucu Hazırlık Skoru", "Overall Score", "Genel Skor"],
+  },
+  { key: "ideaQuality", label: "Idea Quality", aliases: ["Idea Quality", "Fikir Kalitesi"] },
+  {
+    key: "marketAttractiveness",
+    label: "Market Attractiveness",
+    aliases: ["Market Attractiveness", "Pazar Çekiciliği"],
+  },
+  {
+    key: "businessModelQuality",
+    label: "Business Model Quality",
+    aliases: ["Business Model Quality", "İş Modeli Kalitesi"],
+  },
+  {
+    key: "validationConfidence",
+    label: "Validation Confidence",
+    aliases: ["Validation Confidence", "Doğrulama Güveni"],
+  },
+  {
+    key: "executionComplexity",
+    label: "Execution Complexity",
+    aliases: [
+      "Execution Complexity",
+      "executionComplexity",
+      "Execution Difficulty",
+      "executionDifficulty",
+      "Execution",
+      "Uygulama Karmaşıklığı",
+      "Yürütme Karmaşıklığı",
+      "Uygulama Zorluğu",
+    ],
+  },
+  {
+    key: "evidenceConfidence",
+    label: "Evidence Confidence",
+    aliases: ["Evidence Confidence", "Kanıt Güveni"],
+  },
+  { key: "founderEvidence", label: "Founder Evidence", aliases: ["Founder Evidence", "Kurucu Kanıtı"] },
+] as const;
+
+// Every dimension except the overall score -- the set every dimension-
+// CARD grid (never the headline score card) iterates over.
+export const FOUNDER_READINESS_DIMENSION_METRICS: readonly FounderReadinessDimension[] =
+  FOUNDER_READINESS_DIMENSIONS.filter((dimension) => dimension.key !== "founderReadinessScore");
+
+const FOUNDER_READINESS_TEXT_ALIASES: Record<string, readonly string[]> = Object.fromEntries(
+  FOUNDER_READINESS_DIMENSIONS.map((dimension) => [dimension.label, dimension.aliases])
+);
 
 function readFounderReadinessTextMetric(content: string | undefined, label: string) {
   if (!content) {
@@ -665,25 +789,86 @@ export function readFounderReadinessMetricValue(
   // must win whenever it has a parseable value; investmentScore is now
   // only a defensive fallback for the rare case where no report text is
   // available at all (e.g. a still-loading preview).
+  //
+  // TASK #69A-6 -- CRITICAL BUG FIX (confirmed live: the Founder
+  // Readiness section's own headline CARD read "51/100" straight off
+  // this text-first path, while the Key Takeaway/Executive Decision
+  // Center/PDF body -- which call readFounderReadinessScoreValue or
+  // buildExecutiveSnapshot's founderScoreValue, both investmentScore-
+  // FIRST -- showed "40/100" for the exact same report). The overall
+  // "Founder Readiness Score" is different in kind from the 7 individual
+  // dimensions above: investmentScore.decisionEngine.founderScore.score
+  // IS the single canonical definition of that number everywhere else in
+  // this codebase (it is never itself an alias/synonym the way "Idea
+  // Quality" legitimately is), so it must win here too, whenever it is
+  // available -- text is now only the defensive fallback for this one
+  // label, matching every other consumer's own priority order, instead
+  // of being a second, independently-computed source that can drift
+  // from it. buildCanonicalFounderScore (plan-executor.ts) now also
+  // writes this same canonical value into the text itself, so in
+  // practice the two never even need to disagree -- this ordering is
+  // the belt to that fix's suspenders.
+  if (label === "Founder Readiness Score") {
+    const canonicalScore = readFounderReadinessScoreValue(investmentScore);
+
+    return canonicalScore !== null ? canonicalScore : readFounderReadinessTextMetric(content, label);
+  }
+
+  // TASK #69A-17 -- the canonical, zero-regex structured score now wins
+  // FIRST, ahead of text parsing, for every one of the 7 individual
+  // dimensions: it is generated from the exact same source
+  // buildCanonicalFounderScore (plan-executor.ts) now uses to WRITE the
+  // report's own text, so the two are the same number by construction --
+  // there is no longer a "more consistent" source to prefer between them
+  // the way #69A-5's text-first ordering had to choose. Checking it first
+  // also means a dimension's card can never regress to a stale/drifted
+  // text-derived value if the underlying report text is ever reformatted
+  // in a way readFounderReadinessTextMetric's regex fails to match. Only
+  // when it is absent (a report persisted before this field existed) does
+  // priority fall back to the pre-existing, unmodified text-first-then-
+  // reasoning-fallback chain below -- the exact same historical-report
+  // degradation path #69A-5/#69A-6 already established.
+  const dimension = FOUNDER_READINESS_DIMENSIONS.find((entry) => entry.label === label);
+  const structuredScore =
+    dimension && dimension.key !== "founderReadinessScore"
+      ? readFounderReadinessDimensionScore(investmentScore, dimension.key)
+      : null;
+
+  if (structuredScore !== null) {
+    return structuredScore;
+  }
+
   const textValue = readFounderReadinessTextMetric(content, label);
 
   if (textValue !== null) {
     return textValue;
   }
 
+  // Resolved by dimension IDENTITY (FOUNDER_READINESS_DIMENSIONS' own key),
+  // never a hand-typed label->value map -- readFounderReadinessMetrics'
+  // return object is keyed by the exact same FounderReadinessDimensionKey
+  // values, so a dimension can never be paired with the wrong fallback
+  // score here.
   const metrics = readFounderReadinessMetrics(investmentScore);
-  const values: Record<string, number | null> = {
-    "Founder Readiness Score": metrics.founderReadinessScore,
-    "Idea Quality": metrics.ideaQuality,
-    "Market Attractiveness": metrics.marketAttractiveness,
-    "Business Model Quality": metrics.businessModelQuality,
-    "Validation Confidence": metrics.validationConfidence,
-    "Execution Complexity": metrics.executionComplexity,
-    "Evidence Confidence": metrics.evidenceConfidence,
-    "Founder Evidence": metrics.founderEvidence,
-  };
 
-  return values[label] ?? null;
+  return dimension ? metrics[dimension.key] : null;
+}
+
+// The ONE sanctioned identity-keyed entry point for a Founder Readiness
+// dimension's score -- every renderer should call this (never resolve a
+// dimension's label from a hand-copied array and never index into a
+// separately-built values array by position). Resolves the dimension's
+// own canonical label from FOUNDER_READINESS_DIMENSIONS, then reuses
+// readFounderReadinessMetricValue's own text-first/investmentScore-
+// fallback logic unchanged.
+export function getFounderReadinessDimensionScore(
+  key: FounderReadinessDimensionKey,
+  investmentScore?: ReportInvestmentScore,
+  content?: string
+) {
+  const dimension = FOUNDER_READINESS_DIMENSIONS.find((entry) => entry.key === key);
+
+  return dimension ? readFounderReadinessMetricValue(dimension.label, investmentScore, content) : null;
 }
 
 export function normalizeFounderReadinessScoreText(
@@ -817,17 +1002,135 @@ function inferRiskLevel(content: string, keywords: string[]): "Low" | "Medium" |
   return "Medium";
 }
 
-function buildRiskHeatmap(content: string, isTurkish: boolean) {
-  return [
-    { label: isTurkish ? "Müşteri doğrulaması" : "Customer validation", keywords: ["customer validation", "müşteri doğrulama", "demand validation", "purchase intent"] },
-    { label: isTurkish ? "Müşteri edinim maliyeti" : "CAC", keywords: ["cac", "customer acquisition", "edinim maliyeti"] },
-    { label: isTurkish ? "Sermaye verimliliği" : "Capital efficiency", keywords: ["capital efficiency", "sermaye verimliliği", "funding", "yatırım ihtiyacı"] },
-    { label: isTurkish ? "Rekabet" : "Competition", keywords: ["competition", "competitor", "rekabet", "rakip"] },
-    { label: isTurkish ? "Uygulama" : "Execution", keywords: ["execution", "yürütme", "operational", "operasyon"] },
-  ].map((item) => ({
-    label: item.label,
-    level: inferRiskLevel(content, item.keywords),
-  }));
+// TASK #69A-7 -- CRITICAL BUG FIX (confirmed live: the same report
+// classified CAC and Competition differently between the web Risk
+// Heatmap and the PDF). ROOT CAUSE: buildRiskHeatmap below classified
+// every dimension purely from inferRiskLevel's own keyword-presence scan
+// over whatever raw text happened to be passed in -- and different
+// callers pass DIFFERENT scopes of text for the exact same report (page.
+// tsx/Planner.tsx's inline snapshot passes only the executiveSummary
+// section's own content; the PDF/cover-page snapshot passes the entire
+// joined report). The same keyword ("cac", "competition") is far more or
+// less likely to appear -- and the generic high/critical/weak qualifier
+// regex far more or less likely to co-occur with it -- depending on how
+// much text is scanned, so the SAME underlying business could, and did,
+// score differently in each caller despite having exactly one real
+// canonical answer. Mirrors 90%/48% thresholds from classifyMarketConfidence
+// (market-research-coverage.ts) -- an already-established confidence
+// scale, not a new arbitrary cutoff -- inverted for risk polarity (a
+// strong/high-scoring category is low risk).
+function classifyStructuralRiskLevel(scorePercent: number): "Low" | "Medium" | "High" {
+  if (scorePercent >= 72) return "Low";
+  if (scorePercent >= 48) return "Medium";
+  return "High";
+}
+
+// Reads one investment-score category's score as a 0-100 percentage,
+// defensively (categories is a passed-through JSON blob whose exact
+// shape this client-side type only partially trusts). Returns null when
+// the category is missing or malformed -- callers fall back to the
+// evidence-policy-conservative keyword scan only in that case, never
+// inventing a canonical-looking number.
+function readCategoryScorePercent(
+  investmentScore: ReportInvestmentScore | undefined,
+  categoryKey: string
+): number | null {
+  const category = investmentScore?.categories?.[categoryKey];
+  if (
+    !category ||
+    typeof category.score !== "number" ||
+    typeof category.maximumScore !== "number" ||
+    category.maximumScore <= 0
+  ) {
+    return null;
+  }
+
+  return Math.round((category.score / category.maximumScore) * 100);
+}
+
+// One structured canonical risk dimension: the SAME investment-score.ts
+// category (or, for Customer Validation, the same canonical Founder
+// Readiness dimension already established in Task #69A-5/#69A-6) every
+// other authoritative surface in this report already reads. "CAC" and
+// "Capital efficiency" deliberately read two DIFFERENT categories
+// (businessModel's own CAC-payback/LTV-CAC factor vs. capitalEfficiency's
+// own investment-efficiency factor) rather than collapsing to one score,
+// preserving the heatmap's original 5 distinct risk angles.
+const RISK_HEATMAP_DIMENSIONS: ReadonlyArray<{
+  labelEn: string;
+  labelTr: string;
+  categoryKey: string | null;
+  founderReadinessKey?: FounderReadinessDimensionKey;
+  keywords: string[];
+}> = [
+  {
+    labelEn: "Customer validation",
+    labelTr: "Müşteri doğrulaması",
+    categoryKey: null,
+    founderReadinessKey: "validationConfidence",
+    keywords: ["customer validation", "müşteri doğrulama", "demand validation", "purchase intent"],
+  },
+  {
+    labelEn: "CAC",
+    labelTr: "Müşteri edinim maliyeti",
+    categoryKey: "businessModel",
+    keywords: ["cac", "customer acquisition", "edinim maliyeti"],
+  },
+  {
+    labelEn: "Capital efficiency",
+    labelTr: "Sermaye verimliliği",
+    categoryKey: "capitalEfficiency",
+    keywords: ["capital efficiency", "sermaye verimliliği", "funding", "yatırım ihtiyacı"],
+  },
+  {
+    labelEn: "Competition",
+    labelTr: "Rekabet",
+    categoryKey: "competitiveAdvantage",
+    keywords: ["competition", "competitor", "rekabet", "rakip"],
+  },
+  {
+    labelEn: "Execution",
+    labelTr: "Uygulama",
+    categoryKey: "executionRisk",
+    keywords: ["execution", "yürütme", "operational", "operasyon"],
+  },
+];
+
+function buildRiskHeatmap(
+  content: string,
+  isTurkish: boolean,
+  investmentScore?: ReportInvestmentScore
+) {
+  // Customer validation deliberately reads ONLY investmentScore.
+  // decisionEngine.founderScore.reasoning (via readFounderReadinessMetrics),
+  // never getFounderReadinessDimensionScore's own text-first path -- that
+  // path is correct for the Founder Readiness SECTION (Task #69A-5),
+  // where "Idea Quality"-style dimensions have no independent canonical
+  // source other than the rendered text itself, but it would silently
+  // reintroduce the exact same content-scope-dependent bug this fix
+  // exists to remove here: the "Validation Confidence: NN%" line only
+  // ever appears inside the founderScore FIELD's own text, so a caller
+  // that scans just the executiveSummary section (page.tsx/Planner.tsx's
+  // inline snapshot) would never find it, while a caller scanning the
+  // full joined report (the PDF/cover-page snapshot) would -- two
+  // different results for the same report, same class of bug as before.
+  const founderReadinessMetrics = readFounderReadinessMetrics(investmentScore);
+
+  return RISK_HEATMAP_DIMENSIONS.map((dimension) => {
+    const canonicalScorePercent = dimension.founderReadinessKey
+      ? founderReadinessMetrics[dimension.founderReadinessKey]
+      : dimension.categoryKey
+        ? readCategoryScorePercent(investmentScore, dimension.categoryKey)
+        : null;
+
+    return {
+      label: isTurkish ? dimension.labelTr : dimension.labelEn,
+      level:
+        canonicalScorePercent !== null
+          ? classifyStructuralRiskLevel(canonicalScorePercent)
+          : inferRiskLevel(content, dimension.keywords),
+    };
+  });
 }
 
 function buildConfidenceRadar(
@@ -1077,8 +1380,19 @@ export function buildExecutiveSnapshot(
       isTurkish
     ),
     nextAction: investmentScore?.nextCriticalAction || conditionsBeforeClosing || actionBullets[0],
-    riskLevel: inferRiskLevel(normalized, ["risk", "validation", "cac", "funding", "execution", "rekabet", "sermaye"]),
-    riskHeatmap: buildRiskHeatmap(normalized, isTurkish),
+    // TASK #69A-7 -- same content-scope-dependent bug class as
+    // riskHeatmap below: the single overall Risk Level badge must not
+    // independently recompute from a keyword scan whose result can shift
+    // depending on how much of the report a given caller happens to
+    // pass in. investmentScore.confidence is the one canonical
+    // confidence number every other surface (Executive Decision banner,
+    // cover page, PDF) already reads -- higher confidence is lower risk
+    // -- so it is the authority here too, whenever it is available.
+    riskLevel:
+      typeof investmentScore?.confidence === "number"
+        ? classifyStructuralRiskLevel(investmentScore.confidence)
+        : inferRiskLevel(normalized, ["risk", "validation", "cac", "funding", "execution", "rekabet", "sermaye"]),
+    riskHeatmap: buildRiskHeatmap(normalized, isTurkish, investmentScore),
     confidenceRadar: buildConfidenceRadar(normalized, investmentScore, isTurkish),
     why: collectBullets(
       normalized,

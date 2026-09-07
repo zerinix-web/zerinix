@@ -82,6 +82,14 @@ type MobileConversationExperienceProps = {
   onCreateConversation: () => void;
   onSelectConversation: (conversationId: string) => void;
   renderMessageContent: (message: MobileConversationMessage) => ReactNode;
+  // TASK #69A-10 -- optional so every other caller/test keeps rendering
+  // every message exactly as before. When provided and it returns false
+  // for a given message, that message's entire row (avatar + content) is
+  // skipped -- not just its content -- because a completed report-
+  // generation message's ReportPanel (rendered separately, below this
+  // list) already shows the same title, making the whole chat row a
+  // redundant completion shell rather than merely oversized content.
+  shouldRenderMessage?: (message: MobileConversationMessage) => boolean;
 };
 
 export const MobileConversationExperience = memo(function MobileConversationExperience({
@@ -111,6 +119,7 @@ export const MobileConversationExperience = memo(function MobileConversationExpe
   onCreateConversation,
   onSelectConversation,
   renderMessageContent,
+  shouldRenderMessage,
 }: MobileConversationExperienceProps) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
@@ -227,6 +236,10 @@ export const MobileConversationExperience = memo(function MobileConversationExpe
           ) : (
             <div className="space-y-6">
               {messages.map((message) => {
+                if (shouldRenderMessage && !shouldRenderMessage(message)) {
+                  return null;
+                }
+
                 const isUser = message.role === "user";
 
                 return (

@@ -33,10 +33,29 @@ export const planPrompts = {
       "Analyze only market opportunity without calculating TAM/SAM/SOM. Cover category, demand drivers, reachable initial niche, expansion path, venture-scale potential, and validation gates before significant investment. Include a compact Market Opportunity Score with Demand Score, Competition Score, Timing Score, Execution Difficulty, Revenue Potential, overall Opportunity Score 0-100, and a one-line calculation explanation. End with a concise executive implication explaining the founder action or validation priority. Do not add a heading. Do not repeat ICP details, competitor mapping, product description, pricing, go-to-market tactics, or market-sizing numbers owned by TAM/SAM/SOM. Max 190 words.",
     maxTokens: 800,
   },
+  // TASK #69A-15 -- CRITICAL ARCHITECTURAL FIX: the previous version of
+  // this prompt asked for pure free-form prose organized by topic
+  // ("Direct competitors: ... Substitutes: ... Pricing: ... Strengths
+  // of incumbents: ... Weaknesses: ..."), which earlier parser-only
+  // fixes already proved can never reliably yield PER-COMPETITOR
+  // Strengths/Weaknesses/Threat, since the model never labeled those
+  // sub-fields per named entity in the first place -- only Positioning (each
+  // competitor's own parenthetical description) was ever recoverable.
+  // Now explicitly requests one self-labeled line per competitor, in a
+  // fixed field order, so app/lib/report-engine/business-competitor-
+  // landscape-state.ts can deterministically parse a REAL, independent
+  // value for every field -- never guessed, never borrowed from another
+  // field, never fabricated when genuinely unsupported ("Not
+  // available" is explicitly permitted and maps to this codebase's
+  // canonical "—" missing-value marker). The trailing free-prose
+  // paragraph (pricing context, incumbent response, switching barriers,
+  // gap for a new entrant, executive implication) is preserved
+  // unstructured, exactly as before, since none of that content is
+  // itself a per-competitor attribute.
   competitorLandscape: {
     prompt:
-      "Map only competitors and substitutes. For each important competitor or substitute include available pricing, target customer, funding, employee size, strengths, weaknesses, positioning, and how the analyzed company can outperform. Omit unknown fields rather than inventing them. Include incumbent response, switching barriers, and the gap for a new entrant. End with a concise executive implication explaining the competitive decision impact. Do not add a heading. Do not repeat market sizing, SWOT, risks, GTM, or product description. Max 220 words.",
-    maxTokens: 850,
+      'Map only competitors and substitutes. For up to 4 of the most important, write ONE line per competitor in EXACTLY this format, with all six fields present and separated by " | ": COMPETITOR: <name> | TYPE: <Direct competitor or Substitute> | POSITIONING: <one sentence> | STRENGTHS: <one sentence, or "Not available" only if genuinely unsupported by evidence> | WEAKNESSES: <one sentence, or "Not available"> | THREAT: <Low, Medium, or High>. Never combine multiple competitors on one line, never omit a field, and never invent a value you are not confident about -- write "Not available" instead. After the competitor lines, add one short paragraph covering pricing context, incumbent response, switching barriers, the gap for a new entrant, and a concise executive implication explaining the competitive decision impact -- do not repeat those details in the per-competitor lines. Do not add a heading. Do not repeat market sizing, SWOT, risks, GTM, or product description. Max 260 words.',
+    maxTokens: 950,
   },
   businessModel: {
     prompt:

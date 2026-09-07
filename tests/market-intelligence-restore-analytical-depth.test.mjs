@@ -226,13 +226,19 @@ test("both PDF paths thread majorPlayers' content into extractMarketIntelligence
 
 test("REGRESSION GUARD (failure mode 1): the legacy raw report body (getReportMarkdown's full section-by-section dump, rendered verbatim in the live chat view) still does not return -- a completed Market Intelligence report message still renders only its title line", () => {
   assert.match(chatMessagesSource, /export function getReportCompletionHeadline\(content: string\)/);
+  // TASK #69A-9: the MI-only inline condition was generalized into the
+  // shared shouldShowReportCompletionHeadline (which still covers
+  // message.mode === "market" unconditionally, exactly as before, and
+  // now ALSO covers a completed Business Idea Validation message) --
+  // Market Intelligence's own behavior is provably unchanged: it is
+  // still the FIRST, unconditional branch of the shared check.
   assert.match(
     chatMessagesSource,
-    /const isCompletedMarketReportMessage =\s*\n\s*!isUser && message\.mode === "market" && message\.status === "complete";/
+    /return message\.mode === "market" \|\| isCompletedBusinessPlanReportMessage\(message, precedingUserContent\);/
   );
   assert.match(
     chatMessagesSource,
-    /const displayContent = isCompletedMarketReportMessage\s*\n\s*\? getReportCompletionHeadline\(message\.content\)\s*\n\s*: message\.content;/
+    /const displayContent = shouldShowReportCompletionHeadline\(message, precedingUserContent\)\s*\n\s*\? getReportCompletionHeadline\(message\.content\)\s*\n\s*: message\.content;/
   );
   assert.match(chatMessagesSource, /content=\{displayContent\}/);
 });

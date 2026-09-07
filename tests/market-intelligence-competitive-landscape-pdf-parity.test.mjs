@@ -154,7 +154,12 @@ test("ReportPdfButton.tsx: the competitor-table drawing branch forks on isMarket
   );
   const miForkIndex = block.indexOf("if (isMarketIntelligenceReport) {");
   const miExtractorIndex = block.indexOf("extractMarketIntelligenceCompetitorRows(\n              content,");
-  const genericExtractorIndex = block.indexOf("extractCompetitorRows(content)");
+  // TASK #69A-15 superseded the exact literal "extractCompetitorRows(content)"
+  // call here: it is now resolveCompetitorRowsForPdf(report, content),
+  // which prefers a versioned businessCompetitorLandscapeState first and
+  // falls back to extractCompetitorRows unchanged (defined once, shared
+  // by both this drawing pass and the height-measurement pass above).
+  const genericExtractorIndex = block.indexOf("resolveCompetitorRowsForPdf(report, content)");
 
   assert.ok(miForkIndex >= 0, "expected an isMarketIntelligenceReport fork");
   assert.ok(miExtractorIndex > miForkIndex, "MI extractor must be used inside the MI fork");
@@ -211,7 +216,13 @@ test("ReportPdfButton.tsx: getVisualHeight's competitor-table branch computes he
   // same return) still uses the original 8, since it draws no caption
   // or columns at all.
   assert.match(heightBlock, /return \(rows\.length === 0 \? 8 : 12\) \+ Math\.max\(1, rows\.length\) \* 15 \+ 4 \+ 8 \+ 50;/);
-  assert.match(heightBlock, /const rows = extractCompetitorRows\(section\.content\);\s*\n\s*if \(rows\.length === 0\) \{\s*\n\s*return 8 \+ 15 \+ 4;\s*\n\s*\}/);
+  // TASK #69A-15 superseded the exact literal
+  // "const rows = extractCompetitorRows(section.content);" line: it is
+  // now resolveCompetitorRowsForPdf(report, section.content), which
+  // prefers a versioned businessCompetitorLandscapeState first and
+  // falls back to extractCompetitorRows unchanged -- see that
+  // function's own definition and tests/task69a15's own coverage.
+  assert.match(heightBlock, /const rows = resolveCompetitorRowsForPdf\(report, section\.content\);\s*\n\s*if \(rows\.length === 0\) \{\s*\n\s*return 8 \+ 15 \+ 4;\s*\n\s*\}/);
   assert.match(
     heightBlock,
     /if \(rows\.length < minCompetitorTableRows\) \{\s*\n\s*return getNamesOnlyCompetitorLayout\(\s*\n\s*rows\.map\(\(row\) => row\.company \|\| "Company"\),\s*\n\s*bodyWidth,\s*\n\s*sparseCompetitorTableIntro\s*\n\s*\)\.totalHeight;\s*\n\s*\}/
@@ -236,7 +247,12 @@ test("Planner.tsx's downloadPdf: the competitor-table drawing branch (drawPdfVis
   );
   const miForkIndex = block.indexOf("if (isMarketIntelligence) {");
   const miExtractorIndex = block.indexOf("extractMarketIntelligenceCompetitorRows(\n              section.content,");
-  const genericExtractorIndex = block.indexOf("extractCompetitorRows(section.content)");
+  // TASK #69A-15 superseded the exact literal "extractCompetitorRows(section.content)"
+  // call here: it is now resolveCompetitorRowsForDownloadPdf(
+  // businessCompetitorLandscapeState, section.content), which prefers a
+  // versioned businessCompetitorLandscapeState first and falls back to
+  // extractCompetitorRows unchanged.
+  const genericExtractorIndex = block.indexOf("resolveCompetitorRowsForDownloadPdf(");
 
   assert.ok(miForkIndex >= 0, "expected an isMarketIntelligence fork");
   assert.ok(miExtractorIndex > miForkIndex, "MI extractor must be used inside the MI fork");
@@ -284,7 +300,17 @@ test("Planner.tsx's downloadPdf: getPdfVisualHeight's competitiveLandscape branc
   // this same return) still uses the original competitorHeaderHeight,
   // since it draws no caption or columns at all.
   assert.match(heightBlock, /return \(rows\.length === 0 \? competitorHeaderHeight : miCompetitorHeaderHeight\) \+ Math\.max\(1, rows\.length\) \* competitorRowHeight \+ 4 \+ 8 \+ 50;/);
-  assert.match(heightBlock, /const rows = extractCompetitorRows\(section\.content\);\s*\n\s*if \(rows\.length === 0\) \{\s*\n\s*return competitorHeaderHeight \+ competitorRowHeight \+ 4;\s*\n\s*\}/);
+  // TASK #69A-15 superseded the exact literal
+  // "const rows = extractCompetitorRows(section.content);" line: it is
+  // now resolveCompetitorRowsForDownloadPdf(businessCompetitorLandscapeState,
+  // section.content), which prefers a versioned
+  // businessCompetitorLandscapeState first (ReportPanel's own prop,
+  // already in scope) and falls back to extractCompetitorRows
+  // unchanged.
+  assert.match(
+    heightBlock,
+    /const rows = resolveCompetitorRowsForDownloadPdf\(\s*\n\s*businessCompetitorLandscapeState,\s*\n\s*section\.content\s*\n\s*\);\s*\n\s*if \(rows\.length === 0\) \{\s*\n\s*return competitorHeaderHeight \+ competitorRowHeight \+ 4;\s*\n\s*\}/
+  );
   assert.match(
     heightBlock,
     /if \(rows\.length < minCompetitorTableRows\) \{\s*\n\s*return getNamesOnlyCompetitorLayout\(\s*\n\s*rows\.map\(\(row\) => row\.company \|\| "Company"\),\s*\n\s*bodyWidth,\s*\n\s*sparseCompetitorTableIntro\s*\n\s*\)\.totalHeight;\s*\n\s*\}/

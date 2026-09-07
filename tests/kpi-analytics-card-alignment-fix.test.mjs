@@ -166,7 +166,14 @@ for (const [name, block] of [
     assert.ok(fnMatch, `${name} KpiValueContent not found`);
     assert.match(fnMatch[0], /text-\[9px\] font-semibold uppercase tracking-wide text-zinc-500/, `${name} label tier styling missing`);
     assert.match(fnMatch[0], /line-clamp-1 text-sm font-semibold leading-tight text-white/, `${name} value tier styling missing`);
-    assert.match(fnMatch[0], /line-clamp-1 text-\[10px\] leading-snug text-zinc-400/, `${name} supporting-text tier styling missing`);
+    // TASK #69A-12 -- was line-clamp-1: a real Target/Owner description
+    // truncated to a near-meaningless one-line fragment ("Target: 4 net
+    // new..."). Relaxed to line-clamp-3 so 2-3 lines of real context
+    // remain readable, per that ticket's explicit requirement. The value
+    // tier above (line-clamp-1) is untouched -- this ticket's own
+    // complaint was about supporting text, not the primary value, which
+    // was already confirmed readable.
+    assert.match(fnMatch[0], /line-clamp-3 text-\[10px\] leading-snug text-zinc-400/, `${name} supporting-text tier styling missing`);
     assert.doesNotMatch(fnMatch[0], /break-words/, `${name} KpiValueContent still allows mid-word breaking`);
   });
 

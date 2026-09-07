@@ -143,9 +143,17 @@ test("every full-report family checks report cache before research execution", (
 });
 
 test("cached reports retain their exact output and research citation provenance", () => {
+  // TASK #69A-15A superseded the exact literal
+  // "responseData: createReportCacheData(businessResearch)" call: it now
+  // also passes businessCompetitorLandscapeState as a third, additive
+  // argument, so a cache HIT doesn't silently lose the schema-enforced
+  // structured competitor data. This still proves the exact same
+  // invariant this test is named for (cached reports retain their exact
+  // output and research citation provenance) -- businessResearch is
+  // still the first argument, unchanged.
   assert.match(
     planExecutor,
-    /responseText: cacheResponseText,\s*responseData: createReportCacheData\(businessResearch\)/
+    /responseText: cacheResponseText,\s*\/\/ TASK #69A-15A[\s\S]{0,900}responseData: createReportCacheData\(\s*\n\s*businessResearch,\s*\n\s*undefined,\s*\n\s*businessCompetitorLandscapeState\s*\n\s*\),/
   );
   assert.match(
     planExecutor,

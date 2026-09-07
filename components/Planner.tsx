@@ -67,6 +67,7 @@ import {
   isExecutivePresentationSection,
   normalizeFounderReadinessScoreText,
   normalizeReportPresentationText,
+  FOUNDER_READINESS_DIMENSION_METRICS,
   readFounderReadinessMetricValue,
   readFounderReadinessScoreValue,
   resolveMarketSizingCascade,
@@ -130,19 +131,20 @@ import {
   repairPdfLineFragments,
 } from "@/app/lib/pdf-normalization.mjs";
 import { createInsightSignature, describesSameInsight } from "@/app/lib/report-content-quality.mjs";
-import {
-  applyPdfFont,
-  createPdfDocument,
-  drawPdfFooter,
-  drawPdfLogoMark,
-  getPdfPageMetrics,
-  paintPdfPageBackground,
-  type PdfLocale,
-} from "@/app/lib/pdf-engine/core";
-import { drawPdfSectionCardFrame } from "@/app/lib/pdf-engine/section-renderer";
-import {
-  splitPdfReadableLines as splitPdfReadableLinesWithEngine,
-} from "@/app/lib/pdf-engine/utils";
+// TASK #69A-19 -- PERFORMANCE FIX: createPdfDocument/applyPdfFont/
+// drawPdfFooter/drawPdfLogoMark/getPdfPageMetrics/paintPdfPageBackground/
+// drawPdfSectionCardFrame/splitPdfReadableLinesWithEngine used to be
+// static, eager, top-level imports -- confirmed live: this pulls the
+// entire jsPDF library (a 664KB minified chunk, plus its own pako
+// compression dependency) into EVERY page load that renders this
+// component, even though every one of these functions is used ONLY
+// inside downloadPdf (below), reachable only when a user actually
+// clicks "Download PDF". Only the TYPE (erased at build time, zero
+// runtime cost) is still imported eagerly here; the real, JS-emitting
+// functions are now loaded via a single dynamic import() inside
+// downloadPdf itself, so jsPDF is fetched/parsed/executed only on
+// first real PDF export attempt, never during normal page render.
+import type { PdfLocale } from "@/app/lib/pdf-engine/core";
 import {
   getEvidenceBadgeClass,
   getEvidenceLabel,
@@ -159,6 +161,7 @@ import {
 } from "@/app/lib/report-engine/executive-decision-brief";
 import {
   getCanonicalDecisionLabel,
+  mapInvestmentScoreRecommendationToCanonicalDecision,
   reconcileMarketIntelligenceDecisionText,
   resolveCanonicalDecisionFromReportText,
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
@@ -170,6 +173,10 @@ import {
   resolveMarketIntelligenceCagrEvidenceLevel,
   type MarketIntelligenceCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
+import {
+  readBusinessCompetitorLandscapeState,
+  type BusinessCompetitorLandscapeState,
+} from "@/app/lib/report-engine/business-competitor-landscape-state";
 import {
   resolveMarketIntelligenceDecisionChangeState,
   selectTopMarketIntelligenceEvidenceGaps,
@@ -200,7 +207,11 @@ import {
   parseCitations,
 } from "@/components/planner/Citations";
 import { MarkdownRenderer } from "@/components/planner/MarkdownRenderer";
-import { ChatMessages, getReportCompletionHeadline } from "@/components/planner/ChatMessages";
+import {
+  ChatMessages,
+  getReportCompletionHeadline,
+  shouldShowReportCompletionHeadline,
+} from "@/components/planner/ChatMessages";
 import { BenchmarkIntelligencePanel } from "@/components/planner/BenchmarkIntelligencePanel";
 import {
   classifyReportDomain,
@@ -230,7 +241,10 @@ import {
 } from "@/app/lib/report-engine/prompts/acquisition-analysis";
 import { planFieldLabels } from "@/app/lib/report-engine/prompts/plan";
 import { marketFieldLabels } from "@/app/lib/report-engine/prompts/market";
-import { inferReportDomainFromFieldNames } from "@/app/lib/report-engine/domain-inference";
+import {
+  inferReportDomainFromFieldNames,
+  isFieldSetShapedForMarketIntelligence,
+} from "@/app/lib/report-engine/domain-inference";
 import {
   isUniversalCustomerFacingSection,
   sanitizeMarketIntelligencePresentationText,
@@ -1387,30 +1401,12 @@ const mobilityFinancialDashboardMetrics = [
   { label: "Break-even", aliases: ["Break-even Month", "Başabaş Ayı", "Başabaş", "Break even Month", "Breakeven"] },
 ];
 
-const founderScoreMetrics = [
-  { label: "Founder Readiness Score", aliases: ["Founder Readiness Score", "Kurucu Hazırlık Skoru", "Overall Score", "Genel Skor"] },
-  { label: "Idea Quality", aliases: ["Idea Quality", "Fikir Kalitesi"] },
-  { label: "Market Attractiveness", aliases: ["Market Attractiveness", "Pazar Çekiciliği"] },
-  { label: "Business Model Quality", aliases: ["Business Model Quality", "İş Modeli Kalitesi"] },
-  { label: "Validation Confidence", aliases: ["Validation Confidence", "Doğrulama Güveni"] },
-  { label: "Execution Complexity", aliases: ["Execution Complexity", "executionComplexity", "Execution Difficulty", "executionDifficulty", "Execution", "Uygulama Karmaşıklığı", "Yürütme Karmaşıklığı", "Uygulama Zorluğu"] },
-  { label: "Evidence Confidence", aliases: ["Evidence Confidence", "Kanıt Güveni"] },
-  { label: "Founder Evidence", aliases: ["Founder Evidence", "Kurucu Kanıtı"] },
-];
-
-const founderScoreDimensionMetrics = founderScoreMetrics.filter(
-  (metric) => metric.label !== "Founder Readiness Score"
-);
-
-const founderScorePdfDimensionMetrics = [
-  { label: "Idea Quality", aliases: ["Idea Quality", "Fikir Kalitesi"] },
-  { label: "Market Attractiveness", aliases: ["Market Attractiveness", "Pazar Çekiciliği"] },
-  { label: "Business Model Quality", aliases: ["Business Model Quality", "İş Modeli Kalitesi"] },
-  { label: "Validation Confidence", aliases: ["Validation Confidence", "Doğrulama Güveni"] },
-  { label: "Execution Complexity", aliases: ["Execution Complexity", "executionComplexity", "Execution Difficulty", "executionDifficulty", "Execution", "Uygulama Karmaşıklığı", "Yürütme Karmaşıklığı", "Uygulama Zorluğu"] },
-  { label: "Evidence Confidence", aliases: ["Evidence Confidence", "Kanıt Güveni"] },
-  { label: "Founder Evidence", aliases: ["Founder Evidence", "Kurucu Kanıtı"] },
-];
+// TASK #69A-5 -- comes directly from report-presentation.ts's single
+// canonical FOUNDER_READINESS_DIMENSION_METRICS, never a hand-copied
+// duplicate -- see that file's own doc comment for why (this file used
+// to maintain 3 separate copies of the same 7 dimension labels, one of
+// which fed a positional-index lookup).
+const founderScoreDimensionMetrics = FOUNDER_READINESS_DIMENSION_METRICS;
 
 // Same fix as ReportPdfButton.tsx's identical kpiDashboardMetrics (the
 // PDF export's own separate copy of this list): CAC deliberately
@@ -1481,6 +1477,50 @@ const competitorFieldLabels = [
   "Funding",
   "Employee Size",
   "How ZERINIX can outperform",
+  // TASK #69A-14 -- the REAL confirmed category labels
+  // competitorLandscape's own generation prompt
+  // (app/lib/report-engine/prompts/plan.ts) actually induces in its
+  // free-form, topic-organized prose ("Map only competitors and
+  // substitutes. For each important competitor or substitute include
+  // available pricing, target customer, funding, employee size,
+  // strengths, weaknesses, positioning... Include incumbent response,
+  // switching barriers, and the gap for a new entrant. End with a
+  // concise executive implication...") -- confirmed verbatim against a
+  // real cached report's own field text. Needed as clause BOUNDARIES for
+  // parseInlineField, below, so "Direct competitors: ..." can be
+  // correctly isolated up to the next real label instead of running to
+  // the end of the string or swallowing an adjacent clause.
+  "Direct competitors",
+  "Substitutes",
+  "Strengths of incumbents",
+  "How to outperform",
+  "Incumbent response",
+  "Switching barriers",
+  "Gap for entrant",
+  "Gap for a new entrant",
+  "Executive implication",
+  // TASK #69A-15C -- ROOT CAUSE, confirmed against a real fresh
+  // regeneration's persisted content: normalizeFullPlanReport
+  // (plan-executor.ts) deterministically appends a trailing
+  // "AI Executive Insight:\n..." block to EVERY competitorLandscape
+  // field (via appendIntelligenceBlock), built entirely from
+  // investmentScore/financial-metric data -- it is presentation
+  // metadata, never a competitor. When the model's own
+  // competitorLandscapeStructured JSON array and the Tier 1 labeled-line
+  // parse both come back empty (e.g. this field fell back to a generic,
+  // no-named-entity skeleton sentence), extractCompetitorRows's
+  // last-resort per-line guess had no real competitor entity to find and
+  // instead matched this appended heading's own "AI Executive Insight: "
+  // prefix as if it were a company name -- the shared name-plausibility
+  // gate never rejected it (no verb, no URL, <=6 words), so a single fabricated
+  // "AI Executive Insight" row rendered with every other cell "—". Listing
+  // it here (exact, case-insensitive match against isKnownCategoryLabel)
+  // rejects it via the SAME established mechanism #69A-14 built for this
+  // identical class of bug (a known non-competitor label mistaken for an
+  // entity name) -- and its Turkish equivalent, since appendIntelligenceBlock
+  // localizes the title via reportLabel.
+  "AI Executive Insight",
+  "AI Yönetici İçgörüsü",
 ];
 
 function extractMetricValue(content: string, label: string) {
@@ -1765,12 +1805,38 @@ function extractMarketSizeAssumption(content: string, label: string) {
   return match ? match[0].trim().replace(/^[-*•]\s+/, "") : "";
 }
 
+// TASK #69A-3 -- see page.tsx's identical isMarketSizeEstimated fix for the
+// full root-cause comment: Business Idea Validation's own canonical
+// "TAM: $X | evidence=<type> | confidence=<level>" line format (no
+// trailing sentence, so extractMarketSizeAssumption already returns "" for
+// it) was never recognized by this function's bracket-tag-only detection,
+// silently defaulting every benchmark/assumption-derived figure to
+// "Verified". When the canonical "evidence=<type>" label is present, it is
+// now authoritative; Market Intelligence's own free-prose
+// "[Estimated]"/"Planning Estimate" convention (which never emits this
+// label) is completely unaffected.
+function extractMarketSizeEvidenceLabel(content: string, label: string) {
+  const match = content.match(
+    new RegExp(`\\b${label}\\s*:[^\\n]*?\\b(?:evidence|kanıt)\\s*=\\s*([^|\\n]+)`, "i")
+  );
+
+  return match ? match[1].trim() : null;
+}
+
+const verifiedMarketSizeEvidenceLabelPattern =
+  /^(?:verified|doğrulanmış|verifiziert|vérifié|verificado)$/i;
+
 // tamSamSom's own prompt allows a transparent, benchmark-derived estimate
 // when no verified local figure exists, explicitly requiring every such
 // figure be labeled "[Estimated]" and "never presented as verified". This
 // reads that real marker back out of the layer's own sentence, rather than
 // assuming estimated status.
 function isMarketSizeEstimated(content: string, label: string) {
+  const evidenceLabel = extractMarketSizeEvidenceLabel(content, label);
+  if (evidenceLabel !== null) {
+    return !verifiedMarketSizeEvidenceLabelPattern.test(evidenceLabel);
+  }
+
   const sentence = extractMarketSizeAssumption(content, label);
 
   return /\[Estimated\]/i.test(sentence) || /\bPlanning Estimate\b/i.test(sentence);
@@ -1848,6 +1914,97 @@ function extractCompetitorRows(content: string) {
       .slice(0, 5);
   }
 
+  // TASK #69A-14 -- CRITICAL SEMANTIC FIX. ROOT CAUSE: the real
+  // competitorLandscape generation prompt (app/lib/report-engine/
+  // prompts/plan.ts) asks for pure analytical prose organized by TOPIC
+  // -- "Direct competitors: Float (targets finance teams...; QuickBooks/
+  // Xero/FreeAgent integrations...). Cash Flow Frog (...). Substitutes:
+  // bookkeeping firms, Excel templates... Pricing: ... Strengths of
+  // incumbents: ... Weaknesses: ..." -- confirmed verbatim against a
+  // real cached report's own field text (see
+  // tests/task69a4-biv-quality-gate-provenance-fix.test.mjs's own real
+  // fixture). It never promises one bullet per competitor, and never
+  // uses "Company:"/"Positioning:" labels at all. #69A-13 correctly
+  // stopped Positioning/Strengths/Weaknesses/Threat from all echoing the
+  // same raw line, but left the COMPANY guess below (the plain regex a
+  // few lines down) completely unguarded -- so whenever an entire
+  // category clause landed on one "\n"-separated line (as it does for
+  // this real prompt's output), the CATEGORY LABEL ITSELF ("Direct
+  // competitors", "Substitutes", "Pricing", "Strengths of incumbents",
+  // "Weaknesses") was captured as the "company name", while the REAL
+  // competitor names buried mid-sentence (Float, Cash Flow Frog) were
+  // never seen -- exactly the newly reported defect (category headings
+  // as company rows, every other cell "—").
+  //
+  // FIX: before falling through to the old per-line guessing below, look
+  // for the "Direct competitors"/"Substitutes" clauses across the FULL
+  // content (never per-line, since the model's prose is not guaranteed
+  // to break at any particular newline) via the SAME parseInlineField/
+  // competitorFieldLabels boundary mechanism already used elsewhere in
+  // this function -- reusing the existing authority rather than adding a
+  // second one. Within just those specific clauses, find each real,
+  // evidence-preserving "Name (details)" entity via a repeatable
+  // pattern -- never treating the clause's own label as an entity
+  // (isImplausibleCompetitorNameOnScreen, already used for Market
+  // Intelligence's identical class of defect, gates every candidate
+  // name here too). Positioning holds the entity's own parenthetical
+  // description verbatim; Strengths/Weaknesses/Threat honestly stay "—"
+  // rather than being fabricated or borrowed from the shared,
+  // un-attributable category-level clauses (Pricing/Strengths of
+  // incumbents/Weaknesses describe the WHOLE incumbent set, not any one
+  // named entity, so attributing them to a specific company would be a
+  // fabrication this fix must not introduce).
+  const directCompetitorsClause = parseInlineField(normalized, "Direct competitors");
+  const substitutesClause = parseInlineField(normalized, "Substitutes");
+  const namedEntityPattern = /([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z&][A-Za-z0-9&.'-]*){0,4})\s*\(([^()]{3,220})\)/g;
+
+  const extractNamedEntities = (clauseText: string, type: "Direct competitor" | "Substitute") => {
+    if (!clauseText) return [];
+
+    const found: Array<{ name: string; positioning: string; type: string }> = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = namedEntityPattern.exec(clauseText)) !== null) {
+      const name = match[1].trim();
+
+      if (isImplausibleCompetitorNameOnScreen(name)) {
+        continue;
+      }
+
+      found.push({ name, positioning: match[2].trim(), type });
+    }
+
+    return found;
+  };
+
+  const seenEntityNames = new Set<string>();
+  const namedEntities = [
+    ...extractNamedEntities(directCompetitorsClause, "Direct competitor"),
+    ...extractNamedEntities(substitutesClause, "Substitute"),
+  ].filter((entity) => {
+    const key = entity.name.toLowerCase();
+
+    if (seenEntityNames.has(key)) {
+      return false;
+    }
+
+    seenEntityNames.add(key);
+    return true;
+  });
+
+  if (namedEntities.length > 0) {
+    return namedEntities.slice(0, 5).map((entity) => ({
+      company: cleanExecutiveText(
+        entity.type === "Substitute" ? `${entity.name} (Substitute)` : entity.name,
+        60
+      ),
+      positioning: cleanExecutiveText(entity.positioning, 120),
+      strengths: "—",
+      weaknesses: "—",
+      threat: "—",
+    }));
+  }
+
   const lines = normalized
     .split("\n")
     .map((line) => line.trim().replace(/^[-*•]\s+/, ""))
@@ -1861,28 +2018,94 @@ function extractCompetitorRows(content: string) {
   }> = [];
 
   lines.forEach((line) => {
+    // TASK #69A-14 -- last-resort tier, hardened the same way: a bare
+    // regex guess from the start of a line is exactly the mechanism that
+    // mis-captured "Direct competitors"/"Substitutes"/etc. as a company
+    // name above. Even though the new tier above should catch this
+    // prompt's real, confirmed shape first, this guard stays in place as
+    // defense-in-depth for any other unexpected shape that reaches this
+    // fallback -- a candidate name that is implausible, or that is
+    // literally one of this function's own known category labels, is
+    // rejected rather than accepted.
+    const rawCompanyGuess = line.match(/^([A-Z0-9][A-Za-z0-9 .&()/-]{1,42})\s*[:—–-]\s+/)?.[1]?.trim() || "";
+    const isKnownCategoryLabel = competitorFieldLabels.some(
+      (label) => label.toLowerCase() === rawCompanyGuess.toLowerCase()
+    );
+    const companyGuess =
+      rawCompanyGuess && !isKnownCategoryLabel && !isImplausibleCompetitorNameOnScreen(rawCompanyGuess)
+        ? rawCompanyGuess
+        : "";
     const company =
       parseInlineField(line, "Company") ||
       parseInlineField(line, "Competitor") ||
-      line.match(/^([A-Z0-9][A-Za-z0-9 .&()/-]{1,42})\s*[:—–-]\s+/)?.[1]?.trim() ||
+      companyGuess ||
       "";
     const positioning = parseInlineField(line, "Positioning") || parseInlineField(line, "Target Customer");
     const strengths = parseInlineField(line, "Strengths");
     const weaknesses = parseInlineField(line, "Weaknesses");
     const threat = parseInlineField(line, "Competitive Threat") || parseInlineField(line, "Threat");
 
+    // TASK #69A-13 -- CRITICAL SEMANTIC FIX (confirmed live: Positioning,
+    // Strengths, Weaknesses, and Threat all showed near-identical text
+    // for the same competitor). Root cause: whenever a bullet lacked its
+    // OWN explicit inline label, this fell back to the raw whole bullet
+    // `line` for Positioning, and to extractKeywordInsight(line, [...])
+    // for Strengths/Weaknesses/Threat -- but extractKeywordInsight,
+    // given a SINGLE line as its "content" argument (rather than a full
+    // multi-line section, its normal use elsewhere), always degenerates
+    // to returning that same single line back verbatim (its keyword
+    // search and its final `lines[0]` fallback both resolve to the one
+    // and only line it was given). So every field with no label of its
+    // own ended up echoing the identical raw bullet text, just truncated
+    // to a slightly different length (120/110/110/90 chars) per field --
+    // reading as near-duplicate columns. Each field that genuinely has
+    // no explicit label in this bullet now honestly renders "—" instead
+    // of silently borrowing the whole bullet (or another field's) text.
     if (company || positioning || strengths || weaknesses || threat) {
       rows.push({
         company: cleanExecutiveText(company || "Market participant", 52),
-        positioning: cleanExecutiveText(positioning || line, 120),
-        strengths: cleanExecutiveText(strengths || extractKeywordInsight(line, ["strength", "advantage"]) || "—", 110),
-        weaknesses: cleanExecutiveText(weaknesses || extractKeywordInsight(line, ["weakness", "gap"]) || "—", 110),
-        threat: cleanExecutiveText(threat || extractKeywordInsight(line, ["threat", "risk"]) || "—", 90),
+        positioning: cleanExecutiveText(positioning || "—", 120),
+        strengths: cleanExecutiveText(strengths || "—", 110),
+        weaknesses: cleanExecutiveText(weaknesses || "—", 110),
+        threat: cleanExecutiveText(threat || "—", 90),
       });
     }
   });
 
   return rows.slice(0, 5);
+}
+
+// TASK #69A-15 -- structured generation is now authoritative for
+// Planner.tsx's OWN client-side PDF export (downloadPdf, defined inside
+// ReportPanel's own body) too, mirroring the identical fix in the
+// on-screen "Competitive Intelligence Table" card above, page.tsx, and
+// ReportPdfButton.tsx's own buildStandardReportPdf: a versioned
+// businessCompetitorLandscapeState (see business-competitor-landscape-
+// state.ts) drives this table directly when present, since each field
+// was captured independently at generation time and never derived from
+// Positioning or from each other. Only a report with no such state
+// falls back to extractCompetitorRows, completely unchanged. Takes the
+// already-resolved state directly (ReportPanel's own
+// businessCompetitorLandscapeState prop, already in scope via closure
+// -- downloadPdf has no access to the raw currentReportMetadata/
+// initialReport component state, which live one component up) -- used
+// at BOTH the height-measurement pass and the drawing pass below, so
+// pagination and drawn content can never disagree on which rows exist.
+function resolveCompetitorRowsForDownloadPdf(
+  state: BusinessCompetitorLandscapeState | null | undefined,
+  content: string
+) {
+  if (state) {
+    return state.competitors.map((entity) => ({
+      company: entity.type === "Substitute" ? `${entity.company} (Substitute)` : entity.company,
+      positioning: entity.positioning,
+      strengths: entity.strengths,
+      weaknesses: entity.weaknesses,
+      threat: entity.threat,
+    }));
+  }
+
+  return extractCompetitorRows(content);
 }
 
 // CRITICAL FIX -- restore Market Intelligence's structured visual
@@ -2037,6 +2260,24 @@ function isImplausibleCompetitorNameOnScreen(name: string) {
   if (trimmed.length > 60) return true;
   if (trimmed.includes("...") || trimmed.includes("…")) return true;
   if (/[[\]{}`|]|https?:\/\/|www\.|\.(?:com|org|net|edu|gov|io)\b/i.test(trimmed)) return true;
+  // TASK #69A-15C -- defense-in-depth (the primary fix is
+  // competitorFieldLabels' exact-match "AI Executive Insight"/"AI
+  // Yönetici İçgörüsü" entries above, which already reject it in the
+  // one path this bug was actually proven to occur in). This is the
+  // same deterministically-appended presentation heading
+  // (appendIntelligenceBlock, plan-executor.ts) -- never a real
+  // competitor -- rejected here too so ANY future extraction path that
+  // calls this shared gate directly (without also consulting
+  // competitorFieldLabels) can't be fooled by it either. Compared via
+  // .toLowerCase() on BOTH sides (never a case-insensitive /i regex):
+  // "İ" (Turkish dotted capital I) lowercases to "i̇" (i + combining dot
+  // above), not plain "i", so a /.../i regex literal written with plain
+  // ASCII "i" characters would silently never match "AI Yönetici
+  // İçgörüsü" at all.
+  const lowerTrimmed = trimmed.toLowerCase();
+  if (lowerTrimmed === "ai executive insight" || lowerTrimmed === "AI Yönetici İçgörüsü".toLowerCase()) {
+    return true;
+  }
   if (
     /^(?:conduct|analyz[e]?|generate|write|provide|summarize|summarise|explain|list|identify|assess|evaluate|create|perform|produce|research|describe|compare|review|investigate|determine|prepare|draft|compile|outline)\b/i.test(
       trimmed
@@ -3705,25 +3946,21 @@ function normalizePdfKpiMetrics(content: string) {
   });
 }
 
+// TASK #69A-5 -- CRITICAL BUG FIX: used to build a positionally-ordered
+// `dimensionScoreValues` array and then look up each metric's score by
+// `dimensionScoreValues[founderScorePdfDimensionMetrics.findIndex(...)]`
+// -- an index into one array derived from a SEPARATE array's position,
+// which silently desyncs the moment either array's order/contents ever
+// change independently (see report-presentation.ts's own doc comment on
+// FOUNDER_READINESS_DIMENSIONS for the full incident). Resolving every
+// dimension directly by its own label/identity, with no intermediate
+// positional array at all, makes that class of bug structurally
+// impossible here.
 function normalizePdfFounderScoreMetrics(content: string, investmentScore?: ReportInvestmentScore) {
-  const textScoreValues = [
-    readFounderReadinessMetricValue("Founder Readiness Score", investmentScore, content),
-    readFounderReadinessMetricValue("Idea Quality", investmentScore, content),
-    readFounderReadinessMetricValue("Market Attractiveness", investmentScore, content),
-    readFounderReadinessMetricValue("Business Model Quality", investmentScore, content),
-    readFounderReadinessMetricValue("Validation Confidence", investmentScore, content),
-    readFounderReadinessMetricValue("Execution Complexity", investmentScore, content),
-    readFounderReadinessMetricValue("Evidence Confidence", investmentScore, content),
-    readFounderReadinessMetricValue("Founder Evidence", investmentScore, content),
-  ];
-  const dimensionScoreValues = textScoreValues.slice(1);
-
-  return founderScorePdfDimensionMetrics.map((metric) => ({
+  return FOUNDER_READINESS_DIMENSION_METRICS.map((metric) => ({
     label: metric.label,
     aliases: metric.aliases,
-    score:
-      dimensionScoreValues[founderScorePdfDimensionMetrics.findIndex((item) => item.label === metric.label)] ??
-      readFounderReadinessMetricValue(metric.label, investmentScore, content),
+    score: readFounderReadinessMetricValue(metric.label, investmentScore, content),
   }));
 }
 
@@ -4441,12 +4678,52 @@ function KpiValueContent({ value }: { value: string }) {
       .map((segment) => (segment.label ? `${segment.label}: ${segment.text}` : segment.text))
       .join(" · ");
 
+    // TASK #69A-12 -- the supporting line below was line-clamp-1: a real
+    // Target/Owner description ("prove the first paid activation within
+    // 30 days...") truncated to a near-meaningless fragment after just
+    // one line ("Target: 4 net new..."). The primary value above is
+    // unaffected and stays fully visible; only this supporting line now
+    // gets the 2-3 lines of room the ticket calls for.
     return (
       <div className="mt-2 min-h-[3.5rem]">
         <p className="text-[9px] font-semibold uppercase tracking-wide text-zinc-500">{first.label}</p>
         <p className="line-clamp-1 text-sm font-semibold leading-tight text-white">{first.text || "—"}</p>
         {supporting ? (
-          <p className="mt-0.5 line-clamp-1 text-[10px] leading-snug text-zinc-400">{supporting}</p>
+          <p className="mt-0.5 line-clamp-3 text-[10px] leading-snug text-zinc-400">{supporting}</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  // TASK #69A-11 -- CRITICAL LAYOUT FIX: the first "|"-segment isn't a
+  // real "Label: value" pair (a bare reading like "Not yet measured", or
+  // a value that merely contains a colon, e.g. "12:30" -- looksLikeKpiValueLabel
+  // already rejects that as a label above), but one or more further
+  // segments follow it (Target/Status/etc.). Previously this fell through
+  // to the plain branch below, which rendered the ENTIRE raw, still-pipe-
+  // delimited `value` string (reading, Target, and Status all
+  // concatenated) inside one line-clamp-2 paragraph -- the exact crowding/
+  // truncation defect reported live ("Not yet measured" colliding with
+  // Owner/Target text). Give the primary reading and its Target/Status
+  // detail the SAME separated primary/supporting layout the structured
+  // branch above already uses, instead of one unclipped blob. No data is
+  // fabricated or dropped -- every segment is still shown, just laid out
+  // in its own row.
+  if (rest.length > 0) {
+    const primaryText = first?.label ? `${first.label}: ${first.text}` : first?.text || "";
+    const supporting = rest
+      .map((segment) => (segment.label ? `${segment.label}: ${segment.text}` : segment.text))
+      .join(" · ");
+
+    // TASK #69A-12 -- same relaxation as the structured branch above: 2
+    // lines cut real Target/Status detail short.
+    return (
+      <div className="mt-2 min-h-[3.5rem]">
+        <p className="line-clamp-2 text-balance text-lg font-semibold leading-tight text-white">
+          {primaryText || "Target"}
+        </p>
+        {supporting ? (
+          <p className="mt-1 line-clamp-3 text-[10px] leading-snug text-zinc-400">{supporting}</p>
         ) : null}
       </div>
     );
@@ -4516,14 +4793,37 @@ function ExecutiveSummaryVisual({
         evidenceLocale
       )
     : null;
+  // TASK #69A-1 -- structured-canonical-data-first authority fix (same
+  // rule as page.tsx's getDecisionSummaryItems). resolveCanonicalDecisionFromReportText
+  // only ever consults investmentScoreRecommendation as its OWN last
+  // fallback tier, AFTER trying to parse this section's own banner/
+  // acquisition/real-estate text -- so a report whose free-form prose
+  // disagreed with its own structured investmentScore.recommendation
+  // could still show the prose-derived label here. investmentScore is
+  // the single canonical Business Idea Validation decision model
+  // (app/lib/ai/investment-score.ts) -- checking it FIRST, before any
+  // prose parse, makes this card agree with page.tsx's dashboard-view
+  // Decision Summary grid by construction rather than by coincidence.
+  const structuredInvestmentRecommendation =
+    !isMarketIntelligence &&
+    (investmentScore?.recommendation === "GO" ||
+      investmentScore?.recommendation === "WAIT" ||
+      investmentScore?.recommendation === "PASS")
+      ? investmentScore.recommendation
+      : null;
   const resolvedDecision = isMarketIntelligence
     ? null
     : resolveCanonicalDecisionFromReportText(section.content, investmentScore?.recommendation);
   const recommendation = marketDecision
     ? marketDecision.decisionLabel
-    : resolvedDecision
-      ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
-      : detectRecommendation(section.content) || "—";
+    : structuredInvestmentRecommendation
+      ? getCanonicalDecisionLabel(
+          mapInvestmentScoreRecommendationToCanonicalDecision(structuredInvestmentRecommendation),
+          evidenceLocale
+        )
+      : resolvedDecision
+        ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
+        : detectRecommendation(section.content) || "—";
   // TASK #30 -- confirmed live (canonical-decision-pipeline audit):
   // getDecisionClasses only recognizes the generic GO/CONDITIONAL_GO/
   // NO_GO-family words and the canonical PROCEED/PROCEED_WITH_CONDITIONS/
@@ -4684,10 +4984,12 @@ function ExecutiveInsightBanner({
   section,
   isMarketIntelligence = false,
   marketIntelligenceCanonicalState = null,
+  investmentScore,
 }: {
   section: ReportSection;
   isMarketIntelligence?: boolean;
   marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
+  investmentScore?: ReportInvestmentScore;
 }) {
   const insight = extractFirstInsight(section.content);
   // TASK #49 -- see page.tsx's identical ExecutiveInsightBanner for the
@@ -4699,9 +5001,16 @@ function ExecutiveInsightBanner({
   // canonicalState.confidence directly -- never extractConfidence's
   // unsafe bare-percentage prose scan -- falling back to the same
   // "Validation Needed" placeholder when no canonical state exists.
+  // TASK #69A-1 -- structured-canonical-data-first authority fix: same
+  // rule as page.tsx's identical ExecutiveInsightBanner. investmentScore.confidence
+  // (the same canonical number the Investment Decision Snapshot above
+  // already prefers) is read before extractConfidence's bare-percentage
+  // prose scan, never after.
   const confidence = isMarketIntelligence
     ? marketIntelligenceCanonicalState?.confidence ?? null
-    : extractConfidence(section.content);
+    : typeof investmentScore?.confidence === "number"
+      ? investmentScore.confidence
+      : extractConfidence(section.content);
 
   if (!insight) {
     return null;
@@ -4757,6 +5066,7 @@ function PremiumSectionVisual({
   majorPlayersContent = "",
   executiveSummaryContent = "",
   marketIntelligenceCanonicalState = null,
+  businessCompetitorLandscapeState = null,
 }: {
   section: ReportSection;
   investmentScore?: ReportInvestmentScore;
@@ -4777,6 +5087,14 @@ function PremiumSectionVisual({
   // stale/contradictory verdict line.
   executiveSummaryContent?: string;
   marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
+  // TASK #69A-15 -- the versioned, structured Competitor Landscape
+  // snapshot captured once at generation time (see
+  // business-competitor-landscape-state.ts). null on every report
+  // persisted before this field existed, or whose model output didn't
+  // follow the new labeled line format -- both fall back to this
+  // function's own existing extractCompetitorRows prose-parsing tiers,
+  // completely unchanged.
+  businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
 }) {
   const field = section.field;
 
@@ -5331,14 +5649,31 @@ if (field === "swotAnalysis") {
             </p>
           </div>
         ) : null}
-        <div className="grid gap-px bg-white/10 md:grid-cols-5">
+        {/* TASK #69A-12 -- CRITICAL FOLLOW-UP FIX: #69A-11's auto-fit
+            columns (minmax(11rem,1fr)) fit only 4 columns at typical
+            desktop widths, stranding the 5th metric alone on a mostly-
+            empty second row -- and within each ~11rem column, the
+            label/badge still shared ONE flex row (`items-start
+            justify-between`) with a shrink-0 badge that refuses to give
+            up width, so a long badge ("Benchmark / Assumption") squeezed
+            the label's own share of that row down to just a few
+            characters before line-clamp's ellipsis fired ("EST...",
+            "PLA...", "SCE..."). Fixed exactly like the KPI cards already
+            were (kpi-analytics-card-alignment-fix.test.mjs): the label
+            now gets its OWN full-width row, with the badge stacked below
+            it in a dedicated row of its own -- never competing for
+            horizontal space again, regardless of column width. The grid
+            now uses explicit breakpoints instead of auto-fit, so 5
+            columns predictably split 1 / 2+2+1 / 3+2 (never one isolated
+            card on an otherwise-empty row). */}
+        <div className="grid grid-cols-1 gap-px bg-white/10 sm:grid-cols-2 lg:grid-cols-3">
           {flowMetrics.map(({ metric, value, confidenceBadge }) => (
-            <div key={metric} className="bg-zinc-950/80 p-4">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            <div key={metric} className="min-w-0 overflow-hidden bg-zinc-950/80 p-4">
+              <div className="flex min-h-[3.25rem] flex-col gap-1.5">
+                <p className="line-clamp-2 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
                   {getFinancialMetricDisplayLabel(metric, confidenceBadge)}
                 </p>
-                <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
+                <span className={`w-fit shrink-0 rounded-full px-2 py-1 text-[9px] font-semibold ${getFinancialMetricConfidenceBadgeClass(confidenceBadge)}`}>
                   {getFinancialEvidenceBadgeLabel(confidenceBadge, evidenceLocale)}
                 </span>
               </div>
@@ -5841,10 +6176,46 @@ if (field === "swotAnalysis") {
   }
 
   if (field === "competitorAnalysis" || field === "competitorLandscape") {
-    const competitors = extractCompetitorRows(section.content);
+    // TASK #69A-15 -- structured generation is now authoritative: when a
+    // versioned businessCompetitorLandscapeState exists (every report
+    // generated after this fix, whose model output followed the new
+    // labeled-line format), it drives this card directly -- each
+    // field was captured independently by plan-executor.ts's own
+    // parseStructuredCompetitorLines, so Strengths/Weaknesses/Threat
+    // are REAL per-competitor values when the model supplied them,
+    // never derived from Positioning or from each other. Only a report
+    // with no such state (persisted before this fix existed, or whose
+    // model output didn't follow the format) falls back to this
+    // function's existing extractCompetitorRows prose-parsing tiers,
+    // completely unchanged from #69A-13/#69A-14.
+    const competitors = businessCompetitorLandscapeState
+      ? businessCompetitorLandscapeState.competitors.map((entity) => ({
+          company: entity.type === "Substitute" ? `${entity.company} (Substitute)` : entity.company,
+          positioning: entity.positioning,
+          strengths: entity.strengths,
+          weaknesses: entity.weaknesses,
+          threat: entity.threat,
+        }))
+      : extractCompetitorRows(section.content);
 
+    // TASK #69A-13 -- CRITICAL LAYOUT FIX: this card's THREAT column
+    // wrapped its value in a rounded-full "pill" <span> with no min-w-0
+    // on its containing cell and no explicit wrap control on the span
+    // itself -- a pill/badge shape implicitly assumes short, single-line
+    // content, but a competitor's threat text (before the semantic fix
+    // above) could run to 90 characters, and CSS grid's default
+    // minmax(auto,Nfr) track sizing lets an oversized child's intrinsic
+    // content width force its own column (and the whole grid) wider than
+    // intended, bleeding past the card's own boundary instead of
+    // triggering the wrapper's overflow-x-auto scroll. min-w-0 on every
+    // cell (so a track can always shrink to its FAIR share rather than
+    // its content's natural width) plus break-words/whitespace-normal on
+    // the threat chip (rounded-2xl instead of rounded-full, since a pill
+    // shape reads oddly once wrapped onto 2 lines) makes the existing
+    // overflow-x-auto + min-w-[760px] scroll mechanism actually able to
+    // do its job at any viewport, for any length of real content.
     return (
-      <div className="mb-5 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.025]">
+      <div className="mb-5 min-w-0 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.025]">
         <div className="border-b border-white/10 p-5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-teal-200/75">
             Competitive Intelligence Table
@@ -5854,11 +6225,11 @@ if (field === "swotAnalysis") {
           </p>
         </div>
         {competitors.length > 0 ? (
-          <div className="overflow-x-auto">
+          <div className="min-w-0 overflow-x-auto">
             <div className="min-w-[760px]">
               <div className="grid grid-cols-[1fr_1.35fr_1.15fr_1.15fr_0.9fr] gap-px bg-white/10 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
                 {["Company", "Positioning", "Strengths", "Weaknesses", "Threat"].map((label) => (
-                  <div key={label} className="bg-zinc-950/80 px-4 py-3">
+                  <div key={label} className="min-w-0 bg-zinc-950/80 px-4 py-3">
                     {label}
                   </div>
                 ))}
@@ -5869,12 +6240,12 @@ if (field === "swotAnalysis") {
                     key={`${row.company}-${index}`}
                     className="grid grid-cols-[1fr_1.35fr_1.15fr_1.15fr_0.9fr] bg-black/35 text-sm leading-6 text-zinc-300"
                   >
-                    <div className="px-4 py-4 font-semibold text-white">{row.company}</div>
-                    <div className="px-4 py-4">{row.positioning || "—"}</div>
-                    <div className="px-4 py-4">{row.strengths}</div>
-                    <div className="px-4 py-4">{row.weaknesses}</div>
-                    <div className="px-4 py-4">
-                      <span className="rounded-full border border-teal-200/20 bg-teal-200/10 px-2.5 py-1 text-xs font-semibold text-teal-100">
+                    <div className="min-w-0 break-words px-4 py-4 font-semibold text-white">{row.company}</div>
+                    <div className="min-w-0 break-words px-4 py-4">{row.positioning || "—"}</div>
+                    <div className="min-w-0 break-words px-4 py-4">{row.strengths}</div>
+                    <div className="min-w-0 break-words px-4 py-4">{row.weaknesses}</div>
+                    <div className="min-w-0 px-4 py-4">
+                      <span className="inline-block max-w-full whitespace-normal break-words rounded-2xl border border-teal-200/20 bg-teal-200/10 px-2.5 py-1 text-xs font-semibold text-teal-100">
                         {row.threat}
                       </span>
                     </div>
@@ -6721,6 +7092,26 @@ const cardFirstReportFields = new Set([
   "marketSize",
   "cagr",
   "competitiveLandscape",
+  // TASK #69A-12 -- CRITICAL LAYOUT FIX: Business Idea Validation/
+  // Business Plan/Acquisition's own competitor field ("competitorAnalysis"/
+  // "competitorLandscape" -- distinct from Market Intelligence's
+  // "competitiveLandscape", already above) was the one field with a real
+  // extraction-fed premium visual card (PremiumSectionVisual's own
+  // "Competitive Intelligence Table" grid, already hardened with
+  // overflow-x-auto + an explicit min-width + fr-sized columns) that was
+  // MISSING from this set -- so the exact same competitor data still
+  // rendered a SECOND time below it, as AnalysisNotes' raw, unprotected
+  // markdown <table> fallback (MarkdownRenderer's MarkdownTable), which
+  // has no per-column minimum width and inherits an ambient
+  // [overflow-wrap:anywhere] that lets table-layout:auto crush its final
+  // column into a vertical, word-by-word strip instead of triggering its
+  // own overflow-x-auto scrollbar. Adding these two field names here
+  // suppresses that redundant, broken raw-table duplicate the exact same
+  // way every other card-first field's raw "Details" duplicate is
+  // already suppressed -- the grid card's own extraction already
+  // captures every competitor row in full, never a teaser.
+  "competitorAnalysis",
+  "competitorLandscape",
 ]);
 
 function getReportArticleClass(section: ReportSection) {
@@ -7646,6 +8037,7 @@ const ReportSectionCard = memo(
     isMarketIntelligence,
     reportQuality,
     marketIntelligenceCanonicalState = null,
+    businessCompetitorLandscapeState = null,
     waitingMessage,
     majorPlayersContent,
     executiveSummaryContent,
@@ -7657,6 +8049,7 @@ const ReportSectionCard = memo(
     isMarketIntelligence: boolean;
     reportQuality?: ReportQualityScore;
     marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
+    businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
     waitingMessage: string;
     majorPlayersContent?: string;
     executiveSummaryContent?: string;
@@ -7734,6 +8127,7 @@ const ReportSectionCard = memo(
                   section={section}
                   isMarketIntelligence={isMarketIntelligence}
                   marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
+                  investmentScore={investmentScore}
                 />
               ) : null}
               {/* ExecutiveSummaryVisual (above) is already the dedicated
@@ -7750,6 +8144,7 @@ const ReportSectionCard = memo(
                   majorPlayersContent={majorPlayersContent}
                   executiveSummaryContent={executiveSummaryContent}
                   marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
+                  businessCompetitorLandscapeState={businessCompetitorLandscapeState}
                 />
               ) : null}
               {/* Card-first sections (see cardFirstReportFields) already
@@ -7808,6 +8203,7 @@ const ReportPanel = memo(function ReportPanel({
   benchmarkScore,
   reportQuality,
   marketIntelligenceCanonicalState = null,
+  businessCompetitorLandscapeState = null,
   isMarketIntelligence = false,
   onContinueAsChat,
   onBackToWorkspace,
@@ -7839,6 +8235,13 @@ const ReportPanel = memo(function ReportPanel({
   // a metadata chunk has arrived -- both fall back to the existing
   // prose-parsing path unchanged.
   marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
+  // TASK #69A-15 -- resolved by the caller via
+  // readBusinessCompetitorLandscapeState the same way
+  // marketIntelligenceCanonicalState already is. null for every report
+  // generated before this task, or whose model output didn't follow
+  // the new labeled competitor-line format -- both fall back to the
+  // existing extractCompetitorRows prose-parsing path unchanged.
+  businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
   isMarketIntelligence?: boolean;
   onContinueAsChat: () => void;
   onBackToWorkspace: () => void;
@@ -8011,6 +8414,24 @@ const ReportPanel = memo(function ReportPanel({
         setPdfError(errorPayload?.error || "PDF export is unavailable right now.");
         return;
       }
+
+      // TASK #69A-19 -- jsPDF (and its own pako dependency) is fetched,
+      // parsed, and executed here, on the user's actual click, never
+      // during the component's normal mount/render -- see the module-
+      // scope import comment above for the measured cost this removes
+      // from every ordinary page load.
+      const {
+        applyPdfFont,
+        createPdfDocument,
+        drawPdfFooter,
+        drawPdfLogoMark,
+        getPdfPageMetrics,
+        paintPdfPageBackground,
+      } = await import("@/app/lib/pdf-engine/core");
+      const { drawPdfSectionCardFrame } = await import("@/app/lib/pdf-engine/section-renderer");
+      const { splitPdfReadableLines: splitPdfReadableLinesWithEngine } = await import(
+        "@/app/lib/pdf-engine/utils"
+      );
 
       const pdf = createPdfDocument();
       const { pageWidth, pageHeight, margin, contentWidth } = getPdfPageMetrics(pdf);
@@ -9127,12 +9548,24 @@ const ReportPanel = memo(function ReportPanel({
         const decisionLabel = marketDecision
           ? marketDecision.decisionLabel
           : decisionMatch?.token.toUpperCase() || "—";
+        // TASK #69A-1 -- structured-canonical-data-first authority fix:
+        // investmentScore.confidence (the same canonical number every
+        // other Business Idea Validation surface -- Investment Decision
+        // Snapshot, Executive Snapshot, page.tsx's Decision Summary grid
+        // -- already prefers) is now checked BEFORE extractConfidence's
+        // bare-percentage prose scans, never after. This is this file's
+        // own live PDF export path (downloadPdf) for /plan -- previously
+        // the section-scoped prose scan ran first, so a report whose
+        // free-form executive summary prose disagreed with its own
+        // structured confidence could still export a different number
+        // than every other surface showed.
         const confidence = marketDecision
           ? marketDecision.confidenceScore
-          : extractConfidence(content) ??
-            investmentScore?.confidence ??
-            extractConfidence(fullReportContent) ??
-            extractScore(fullReportContent, "Investment Score");
+          : typeof investmentScore?.confidence === "number"
+            ? investmentScore.confidence
+            : extractConfidence(content) ??
+              extractConfidence(fullReportContent) ??
+              extractScore(fullReportContent, "Investment Score");
 
         const isTurkishPdf = pdfLocale === "tr";
         // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
@@ -9383,7 +9816,10 @@ const ReportPanel = memo(function ReportPanel({
             // above the column headers.
             return (rows.length === 0 ? competitorHeaderHeight : miCompetitorHeaderHeight) + Math.max(1, rows.length) * competitorRowHeight + 4 + 8 + 50;
           }
-          const rows = extractCompetitorRows(section.content);
+          const rows = resolveCompetitorRowsForDownloadPdf(
+            businessCompetitorLandscapeState,
+            section.content
+          );
           if (rows.length === 0) {
             return competitorHeaderHeight + competitorRowHeight + 4;
           }
@@ -9702,7 +10138,10 @@ const ReportPanel = memo(function ReportPanel({
             );
           }
 
-          const rows = extractCompetitorRows(section.content);
+          const rows = resolveCompetitorRowsForDownloadPdf(
+            businessCompetitorLandscapeState,
+            section.content
+          );
 
           if (rows.length === 0) {
             // P0 PRODUCTION FIX -- confirmed live (Market Intelligence PDF
@@ -11250,6 +11689,7 @@ const ReportPanel = memo(function ReportPanel({
             isMarketIntelligence={isMarketIntelligence}
             reportQuality={reportQuality}
             marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
+            businessCompetitorLandscapeState={businessCompetitorLandscapeState}
             waitingMessage={waitingMessage}
             majorPlayersContent={sections.find((entry) => entry.field === "majorPlayers")?.content}
             executiveSummaryContent={sections.find((entry) => entry.field === "executiveSummary")?.content}
@@ -12495,6 +12935,32 @@ export default function Planner({
     }
 
     setUserEmail(user.email || "");
+
+    // TASK #69A-19 -- PERFORMANCE FIX. ROOT CAUSE (confirmed live):
+    // loadPlanConversations (app/plan/conversations.ts) already runs
+    // this EXACT query -- ai_conversations, then ai_messages for every
+    // one of those conversation ids, chunked -- SERVER-SIDE, once, on
+    // every /plan and /chat page load, and passes the complete result
+    // down as this component's own initialConversations prop (already
+    // seeded into conversations state by useConversations above). This
+    // effect then UNCONDITIONALLY repeated the identical two queries
+    // client-side on every mount, via a SEPARATE round of
+    // restoreSupabaseSession + auth.getUser() + two more DB round trips,
+    // and overwrote the just-rendered state with what is, in the common
+    // case, byte-identical data it already had -- pure duplicate work
+    // that grows with a user's real conversation/message history (their
+    // full analysis history, not paginated), which is exactly why the
+    // resulting delay was inconsistent rather than a fixed cost.
+    //
+    // Skipped here ONLY when the server-rendered snapshot is already
+    // known-good (non-empty AND no conversationLoadError was reported --
+    // both already available as this component's own props) -- the
+    // heavy re-fetch still runs, completely unchanged, as a genuine
+    // recovery path whenever SSR found nothing or failed, so a real
+    // first-load/new-user/error case is never silently left unfetched.
+    if (initialConversations.length > 0 && !conversationLoadError) {
+      return;
+    }
 
     const { data, error } = await supabase
       .from("ai_conversations")
@@ -13864,6 +14330,32 @@ export default function Planner({
         );
 
         if (!clientGuessMatchesPersistedReport && persistedFieldNames.length > 0) {
+          // TASK #69A-2 -- confirmed live: applyPromptIntentModeOverride
+          // (app/lib/report-engine/domain.ts) can silently reroute a
+          // genuinely comprehensive Business Idea Validation prompt to
+          // Market Intelligence server-side, before the job is ever
+          // created -- invisible to this component's own requestedMode
+          // guard above (fixed at request time, from what THIS client
+          // sent). When that happens, persistedFieldNames belongs to a
+          // real, complete Market Intelligence report, not an incomplete
+          // Business Idea Validation one -- inferReportDomainFromFieldNames
+          // below has no concept of "market" (by design, see its own
+          // comment) and would otherwise misattribute this field set to
+          // some non-market domain, still find no matching fields, and
+          // fall through to the same generic, misleading "Report job
+          // completed without a complete report payload" failure a
+          // genuinely incomplete report would also produce -- even though
+          // a real, complete report exists. Checked first so this specific,
+          // now-understood mismatch fails with an accurate, actionable
+          // explanation instead.
+          if (isFieldSetShapedForMarketIntelligence(persistedFieldNames)) {
+            throw new Error(
+              reportLanguage === "Turkish"
+                ? "Bu istek Pazar İstihbaratı olarak işlendi, İş Fikri Doğrulama olarak değil. Lütfen isteğinizi netleştirip tekrar deneyin veya doğrudan Pazar İstihbaratı seçeneğini kullanın."
+                : "This request was generated as a Market Intelligence report instead of a Business Idea Validation report. Please rephrase your request or select Market Intelligence directly, then try again."
+            );
+          }
+
           const correctedDomain = inferReportDomainFromFieldNames(persistedFieldNames);
 
           if (correctedDomain !== reportDomain) {
@@ -14260,6 +14752,9 @@ export default function Planner({
             marketIntelligenceCanonicalState={readMarketIntelligenceCanonicalState(
               currentReportMetadata || initialReport?.metadata
             )}
+            businessCompetitorLandscapeState={readBusinessCompetitorLandscapeState(
+              currentReportMetadata || initialReport?.metadata
+            )}
             isMarketIntelligence={activeReportMode === "market"}
             onContinueAsChat={continueRestrictedReportAsChat}
             onBackToWorkspace={backToWorkspaceFromReportRestriction}
@@ -14421,16 +14916,46 @@ export default function Planner({
           onGenerateReport={generateMobileStrategicReport}
           onCreateConversation={() => void createNewConversation()}
           onSelectConversation={selectConversation}
-          renderMessageContent={(message: MobileConversationMessage) => (
-            <MarkdownRenderer
-              content={
-                message.role === "assistant" && message.mode === "market" && message.status === "complete"
-                  ? getReportCompletionHeadline(message.content)
-                  : message.content
-              }
-              streaming={message.status === "streaming"}
-            />
-          )}
+          renderMessageContent={(message: MobileConversationMessage) => {
+            // TASK #69A-9 -- reuses the SAME shouldShowReportCompletionHeadline
+            // decision ChatMessages.tsx's own desktop bubble now uses (never a
+            // second, independently-maintained condition), so mobile and
+            // desktop can never disagree on which completed report-generation
+            // messages show only their title line. messages is the same full
+            // array desktop's <ChatMessages> already renders from, so the
+            // preceding-user-message lookup here is exactly the same one.
+            const messageIndex = messages.findIndex((candidate) => candidate.id === message.id);
+            const precedingMessage = messageIndex > 0 ? messages[messageIndex - 1] : undefined;
+            const precedingUserContent =
+              precedingMessage?.role === "user" ? precedingMessage.content : undefined;
+
+            return (
+              <MarkdownRenderer
+                content={
+                  shouldShowReportCompletionHeadline(message, precedingUserContent)
+                    ? getReportCompletionHeadline(message.content)
+                    : message.content
+                }
+                streaming={message.status === "streaming"}
+              />
+            );
+          }}
+          shouldRenderMessage={(message: MobileConversationMessage) => {
+            // TASK #69A-10 -- mirrors the identical suppression desktop's
+            // <ChatMessages> now applies at its own list-render level (the
+            // same shouldShowReportCompletionHeadline rule, never a second,
+            // divergent condition): a completed report-generation message's
+            // entire row (not just its content) is skipped here, since
+            // ReportPanel/mobileReportContent already renders the same
+            // title as "ZERINIX EXECUTIVE REPORT" immediately below this
+            // list.
+            const messageIndex = messages.findIndex((candidate) => candidate.id === message.id);
+            const precedingMessage = messageIndex > 0 ? messages[messageIndex - 1] : undefined;
+            const precedingUserContent =
+              precedingMessage?.role === "user" ? precedingMessage.content : undefined;
+
+            return !shouldShowReportCompletionHeadline(message, precedingUserContent);
+          }}
         />
 
         <div
@@ -14512,6 +15037,9 @@ export default function Planner({
                   benchmarkScore={currentReportMetadata?.benchmarkScore || initialReport?.metadata?.benchmarkScore}
                   reportQuality={currentReportMetadata?.reportQuality || initialReport?.metadata?.reportQuality}
                   marketIntelligenceCanonicalState={readMarketIntelligenceCanonicalState(
+                    currentReportMetadata || initialReport?.metadata
+                  )}
+                  businessCompetitorLandscapeState={readBusinessCompetitorLandscapeState(
                     currentReportMetadata || initialReport?.metadata
                   )}
                   isMarketIntelligence={activeReportMode === "market"}

@@ -232,8 +232,27 @@ for (const [label, source, fnName] of [
     // explaining that re-attached-":" pattern -- see
     // extractMarketIntelligenceCompetitorNamesOnly's own comment + 1 use
     // site in the TASK #15 em-dash-labeled-list tier (also re-attaching
-    // ":" the same way, for the same reason).
-    assert.equal(occurrences.length, 8, `expected ${fnName} declared once and used across all 6 extraction tiers, got ${occurrences.length} occurrences`);
+    // ":" the same way, for the same reason) = 8 for the ORIGINAL Market
+    // Intelligence-only tiers.
+    //
+    // TASK #69A-14 -- Business Idea Validation's own extractCompetitorRows
+    // (a completely separate, non-Market-Intelligence extraction) now
+    // reuses this SAME shared plausibility gate (per that ticket's own
+    // "prefer extending/reusing the existing authoritative structure"
+    // instruction) rather than adding a second, parallel check -- 2 more
+    // real call sites (the new "Direct competitors"/"Substitutes"
+    // named-entity tier, plus the hardened last-resort company-guess
+    // tier) in BOTH page.tsx and Planner.tsx, plus 1 additional comment
+    // mention of the literal function name in Planner.tsx's own version
+    // of that fix specifically (this same regex counts comment text
+    // too) -- 10 for page.tsx, 11 for Planner.tsx. ReportPdfButton.tsx's
+    // OWN, differently-named isImplausibleCompetitorNamePdf (checked in
+    // this same loop) is untouched by that fix, since #69A-14 gave the
+    // PDF export path its own separate, newly-added
+    // isImplausibleCompetitorNameOnScreen instead -- see that ticket's
+    // own test file for the PDF-specific coverage.
+    const expectedOccurrences = { "page.tsx": 10, "Planner.tsx": 11, "ReportPdfButton.tsx": 8 }[label];
+    assert.equal(occurrences.length, expectedOccurrences, `expected ${fnName} declared once and used across all known extraction tiers in ${label}, got ${occurrences.length} occurrences`);
   });
 }
 

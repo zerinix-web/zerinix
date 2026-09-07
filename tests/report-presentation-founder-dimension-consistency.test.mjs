@@ -56,8 +56,24 @@ const { readFounderReadinessMetricValue } = await importReportPresentation();
 // single source of truth used everywhere else) now always wins over the
 // investmentScore-derived recomputation; investmentScore is only a
 // defensive fallback when no report text is available at all.
+//
+// TASK #69A-6 -- this priority is now DELIBERATELY reversed for the
+// overall "Founder Readiness Score" label specifically (confirmed live:
+// the section header showed "51/100" -- straight off this same text-
+// first path -- while the Key Takeaway/Executive Decision Center/PDF,
+// which all read investmentScore.decisionEngine.founderScore.score
+// directly, showed "40/100" for the exact same report). Unlike the 6
+// individual dimensions below (which have no single independent
+// canonical numeric source other than the text itself, by design --
+// e.g. "Idea Quality" is a presentation-layer synonym for Market
+// Attractiveness), the overall score DOES have one real canonical
+// definition everywhere else in this codebase --
+// investmentScore.decisionEngine.founderScore.score -- so it must win
+// here too, matching every other consumer's own priority order. Text
+// remains the fallback for this label only when investmentScore itself
+// has no parseable score at all.
 
-test("readFounderReadinessMetricValue prefers the report's own rendered text over investmentScore when both are available", () => {
+test("readFounderReadinessMetricValue prefers the report's own rendered text over investmentScore when both are available (per-dimension only -- the overall score now prefers the canonical investmentScore value, see task69a6-founder-score-and-benchmark-authority.test.mjs)", () => {
   // A deliberately adversarial investmentScore: if the text-based value
   // did not win, the "wrong" numbers below would leak through instead.
   const investmentScore = {
@@ -87,7 +103,6 @@ test("readFounderReadinessMetricValue prefers the report's own rendered text ove
   ].join("\n");
 
   for (const [label, expected] of [
-    ["Founder Readiness Score", 39],
     ["Execution Complexity", 30],
     ["Evidence Confidence", 31],
     ["Business Model Quality", 32],
@@ -99,6 +114,12 @@ test("readFounderReadinessMetricValue prefers the report's own rendered text ove
       `expected the rendered narrative's own ${label} (${expected}) to win over investmentScore's (got ${value})`
     );
   }
+
+  // Task #69A-6: the overall score is the one label where investmentScore
+  // (the canonical value) now wins over the text, even when the text has
+  // its own parseable number -- 25 (canonical), never 39 (the narrative's
+  // stale/independently-recomputed figure).
+  assert.equal(readFounderReadinessMetricValue("Founder Readiness Score", investmentScore, narrativeText), 25);
 });
 
 test("readFounderReadinessMetricValue falls back to investmentScore only when no report text is available", () => {

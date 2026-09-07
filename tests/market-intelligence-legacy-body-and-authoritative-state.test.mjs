@@ -110,13 +110,19 @@ test("ChatMessages.tsx: getReportCompletionHeadline is exported with the exact r
 });
 
 test("ChatMessages.tsx: ChatMessageBubble renders the headline-only content ONLY for a completed, assistant-authored, Market Intelligence report message -- an ordinary chat reply, a still-streaming message, and the user's own messages are all untouched", () => {
+  // TASK #69A-9: this MI-only inline condition was generalized into the
+  // shared shouldShowReportCompletionHeadline (still unconditionally
+  // true for message.mode === "market", exactly as before, plus a NEW,
+  // separately-scoped check for completed Business Idea Validation
+  // messages -- see the dedicated tests below and the new
+  // task69a9-biv-duplicate-report-prose-suppression.test.mjs suite).
   assert.match(
     chatMessagesSource,
-    /const isCompletedMarketReportMessage =\s*\n\s*!isUser && message\.mode === "market" && message\.status === "complete";/
+    /return message\.mode === "market" \|\| isCompletedBusinessPlanReportMessage\(message, precedingUserContent\);/
   );
   assert.match(
     chatMessagesSource,
-    /const displayContent = isCompletedMarketReportMessage\s*\n\s*\? getReportCompletionHeadline\(message\.content\)\s*\n\s*: message\.content;/
+    /const displayContent = shouldShowReportCompletionHeadline\(message, precedingUserContent\)\s*\n\s*\? getReportCompletionHeadline\(message\.content\)\s*\n\s*: message\.content;/
   );
   assert.match(chatMessagesSource, /content=\{displayContent\}/);
 });
@@ -126,16 +132,18 @@ test("ChatMessages.tsx: Copy, Edit, and the edit draft still operate on the FULL
   assert.match(chatMessagesSource, /const \[draft, setDraft\] = useState\(message\.content\);/);
 });
 
-test("Business Plan/Acquisition/Real Estate report-generation messages (mode === \"plan\") are explicitly excluded -- this fix is scoped to Market Intelligence only, per the ticket's own 'for Market Intelligence reports only' requirement", () => {
-  assert.doesNotMatch(chatMessagesSource, /message\.mode === "market" \|\| message\.mode === "plan"/);
+test("TASK #69A-9 superseded this test's original premise: Business Idea Validation (mode === \"plan\", domain 'business') is now ALSO covered by design, via a separate, narrower, domain-classified check -- Acquisition/Real Estate/legal-family 'plan'-mode messages remain explicitly excluded", () => {
+  assert.match(chatMessagesSource, /export function isCompletedBusinessPlanReportMessage/);
+  assert.match(chatMessagesSource, /message\.mode !== "plan"/);
+  assert.match(chatMessagesSource, /classifyReportDomain\(precedingUserContent\) === "business"/);
 });
 
 test("components/Planner.tsx: the mobile conversation view's renderMessageContent applies the identical headline-only rule, imported from the single shared source rather than a second, divergent copy", () => {
-  assert.match(plannerSource, /import \{ ChatMessages, getReportCompletionHeadline \} from "@\/components\/planner\/ChatMessages";/);
   assert.match(
     plannerSource,
-    /message\.role === "assistant" && message\.mode === "market" && message\.status === "complete"\s*\n\s*\? getReportCompletionHeadline\(message\.content\)\s*\n\s*: message\.content/
+    /import\s*\{\s*\n?\s*ChatMessages,\s*\n?\s*getReportCompletionHeadline,\s*\n?\s*shouldShowReportCompletionHeadline,?\s*\n?\s*\}\s*from\s*"@\/components\/planner\/ChatMessages";/
   );
+  assert.match(plannerSource, /shouldShowReportCompletionHeadline\(message, precedingUserContent\)/);
 });
 
 test("MobileConversationExperience.tsx: MobileConversationMessage's type now declares the mode field the real ChatMessage objects already carry at runtime, rather than Planner.tsx needing an unsafe cast to read it", () => {

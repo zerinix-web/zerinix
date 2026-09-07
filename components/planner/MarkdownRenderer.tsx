@@ -160,13 +160,37 @@ function MarkdownTable({ lines }: { lines: string[] }) {
     return null;
   }
 
+  // TASK #69A-12 -- CRITICAL LAYOUT FIX: this table's ancestor
+  // (MarkdownRenderer's own root div, below) applies an ambient
+  // [overflow-wrap:anywhere] to every descendant so long plain-prose
+  // words never overflow the chat/report column -- but that same rule
+  // inherits straight into these <th>/<td> cells too, where it lets the
+  // browser's table-layout:auto column-sizing algorithm satisfy a
+  // shrinking column by breaking its content mid-word/mid-character
+  // instead of respecting the table's own overflow-x-auto scroll
+  // wrapper. A wide, dense table (e.g. a 5+ column competitor
+  // comparison) then crushes its final column into a vertical,
+  // word-by-word strip rather than growing past its container and
+  // scrolling. [overflow-wrap:normal] restores ordinary word-wrap
+  // behavior inside cells specifically (whitespace/hyphen breaks only),
+  // and min-w-[7rem] gives every column a real usable floor -- together
+  // these make overflow-x-auto (already present on the wrapper below)
+  // the thing that actually activates once the table's genuine content
+  // needs more room, exactly per this ticket's "prefer horizontal
+  // scroll... over crushed text" requirement. This table renderer is
+  // shared by every report type/field's raw "Details" prose -- not
+  // Business Idea Validation-specific -- so this fix benefits any of
+  // them without any report-specific branching.
   return (
     <div className="my-4 overflow-x-auto rounded-2xl border border-white/10">
-      <table className="w-full min-w-[520px] border-collapse text-left text-sm">
+      <table className="w-full min-w-[640px] border-collapse text-left text-sm">
         <thead className="bg-white/[0.04] text-zinc-200">
           <tr>
             {header.map((cell, cellIndex) => (
-              <th key={`header-${cellIndex}-${cell}`} className="border-b border-white/10 px-4 py-3 font-semibold">
+              <th
+                key={`header-${cellIndex}-${cell}`}
+                className="min-w-[7rem] border-b border-white/10 px-4 py-3 font-semibold [overflow-wrap:normal]"
+              >
                 <InlineMarkdown text={cell} />
               </th>
             ))}
@@ -176,7 +200,10 @@ function MarkdownTable({ lines }: { lines: string[] }) {
           {bodyRows.map((row, rowIndex) => (
             <tr key={`row-${rowIndex}-${row.join("-")}`}>
               {row.map((cell, cellIndex) => (
-                <td key={`${cell}-${cellIndex}`} className="px-4 py-3 align-top">
+                <td
+                  key={`${cell}-${cellIndex}`}
+                  className="min-w-[7rem] px-4 py-3 align-top [overflow-wrap:normal]"
+                >
                   <InlineMarkdown text={cell} />
                 </td>
               ))}

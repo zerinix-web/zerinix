@@ -16,6 +16,10 @@ import {
   MARKET_INTELLIGENCE_GRAPH_VERSION,
   type MarketIntelligenceGraph,
 } from "@/app/lib/ai/market-intelligence-graph";
+import {
+  readBusinessCompetitorLandscapeState,
+  type BusinessCompetitorLandscapeState,
+} from "@/app/lib/report-engine/business-competitor-landscape-state";
 import { estimateAiInputTokens } from "@/app/lib/ai/token-optimization";
 import {
   resolveCachedOrExecuteResearch,
@@ -353,14 +357,36 @@ export function getCachedMarketIntelligenceGraphFromReportData(value: unknown) {
     : null;
 }
 
+// TASK #69A-15A -- mirrors getCachedMarketIntelligenceGraphFromReportData's
+// own established pattern exactly: a Business Idea Validation cache-hit
+// replays the ORIGINAL AI response text (JSON.stringify(parsedReport),
+// which only ever carries the 23 string PlanReportFields), never the raw
+// schema-enforced JSON blob that also included
+// competitorLandscapeStructured -- so without this, a cache hit would
+// silently lose the structured competitor data #69A-15A's schema
+// enforcement produced when the cache entry was first written. Reuses
+// readBusinessCompetitorLandscapeState's own version-gating (wrapping
+// the raw value in the same shape it already expects) rather than
+// duplicating that check.
+export function getCachedBusinessCompetitorLandscapeStateFromReportData(
+  value: unknown
+): BusinessCompetitorLandscapeState | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const state = (value as { businessCompetitorLandscapeState?: unknown })
+    .businessCompetitorLandscapeState;
+  return readBusinessCompetitorLandscapeState({ businessCompetitorLandscapeState: state });
+}
+
 export function createReportCacheData(
   research: DomainResearchBundle,
-  marketIntelligenceGraph?: MarketIntelligenceGraph
+  marketIntelligenceGraph?: MarketIntelligenceGraph,
+  businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null
 ) {
   return {
     version: REPORT_CACHE_VERSION,
     research,
     ...(marketIntelligenceGraph ? { marketIntelligenceGraph } : {}),
+    ...(businessCompetitorLandscapeState ? { businessCompetitorLandscapeState } : {}),
   };
 }
 

@@ -34,6 +34,8 @@ import {
   runDomainAwareResearch,
   validateDomainResearchQuality,
   validateDomainResearchQualitySafely,
+  NUMERIC_CLAIM_LABEL_PATTERN,
+  NUMERIC_CLAIM_PROVENANCE_PATTERN,
   type DomainResearchBundle,
   type DomainResearchEvidence,
 } from "@/app/lib/ai/domain-research";
@@ -47,6 +49,7 @@ import {
   createReportCacheData,
   getConversationResearchSnapshot,
   getCachedResearchFromReportData,
+  getCachedBusinessCompetitorLandscapeStateFromReportData,
   logSkippedResearchForReportCache,
   resolveDomainResearchWithCache,
   type ResearchCacheIdentity,
@@ -58,10 +61,10 @@ import {
   createCanonicalFinancialAssumptions,
   formatCanonicalFinancialAssumptions,
   formatFinancialConsistencyReport,
+  refreshResearchAwareFinancialContext,
   type AiFinancialModelContext,
 } from "@/app/lib/ai/financial-assumptions";
 import { applyMarketResearchCoverageToContext } from "@/app/lib/ai/market-research-coverage";
-import { refreshInvestmentNarrativeFromResearchCoverage } from "@/app/lib/ai/investment-score";
 import {
   compactReportFieldPrompt,
   createAiCostOptimizationMetrics,
@@ -120,7 +123,9 @@ import {
   formatKeyFinancialAssumptionsList,
   hasVerifiedUserProvidedData,
   localizeFinancialEvidenceType,
+  type FinancialEvidenceType,
 } from "@/app/lib/financial-evidence-labeling";
+import type { FinancialMetricModel } from "@/app/lib/ai/financial-model";
 import {
   runConsistencyValidationPass,
   type MetricConsistencyTarget,
@@ -224,6 +229,12 @@ import {
 import { createEmergencyRealEstateReport } from "@/app/lib/report-engine/real-estate-fallback";
 import { prepareRealEstateReportForPresentation } from "@/app/lib/report-engine/real-estate-presentation";
 import {
+  buildBusinessCompetitorLandscapeState,
+  buildBusinessCompetitorLandscapeStateFromStructuredResponse,
+  BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA,
+  type BusinessCompetitorLandscapeState,
+} from "@/app/lib/report-engine/business-competitor-landscape-state";
+import {
   assessLegalResearchCoverage,
   prepareLegalDecisionReport,
 } from "@/app/lib/report-engine/legal-report-quality";
@@ -251,12 +262,43 @@ type PlanReportMetadataChunk = {
     benchmarkScore: AiFinancialModelContext["benchmarkScore"];
     reportQuality: AiFinancialModelContext["reportIntelligence"];
     validationIntelligence: AiFinancialModelContext["validationIntelligenceV2"];
+    // TASK #69A-15 -- optional: only present once competitorLandscape's
+    // own generated content has actually been parsed (i.e. never on the
+    // EARLY metadata chunk enqueued before the report call even starts).
+    // worker.ts's reportMetadata handling REPLACES its accumulated
+    // `metadata` wholesale on every such event (never merges), so this
+    // field is included alongside every OTHER field here too, every
+    // time it is set -- never sent as a partial patch that could drop
+    // the earlier chunk's own fields.
+    businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
   };
 };
 
 const FULL_REPORT_FIELD = "fullReport";
 const MAX_AI_CALLS_PER_PLAN_REPORT = 1;
 const DECISION_INTELLIGENCE_PIPELINE = "decision_intelligence_v1";
+// Bump this whenever the business-plan generation CONTRACT changes in a way
+// that a cached fullReport response from before the change cannot satisfy --
+// e.g. requesting a new schema-enforced field, or changing what the prompt
+// asks the model to produce. createPreResearchReportCacheKey's cache key
+// only otherwise varies with the business idea text and financial
+// assumptions fingerprint, so a stale pre-contract-change cache entry would
+// silently keep being served (bypassing the new generation path entirely)
+// forever -- e.g. TASK #69A-15B, where a cache entry written before the
+// competitorLandscapeStructured schema existed kept being replayed for
+// every "fresh" report request for the same idea, permanently starving
+// buildBusinessCompetitorLandscapeStateFromStructuredResponse of any real
+// model response to read. TASK #69A-16 bumped this again (v1 -> v2): the
+// SCHEMA itself was unchanged, but the actual prompt TEXT sent to the
+// model now explicitly instructs it to map the research evidence
+// registry into competitorLandscapeStructured (previously that mapping
+// obligation existed only inside the JSON schema's own `description`
+// strings, which the model was evidently not reliably treating as a
+// mapping instruction) -- a cache entry written before this exists could
+// have a schema-valid but empty/near-empty competitorLandscapeStructured
+// array even when real competitor evidence existed, and must not be
+// served as if it reflects the new, stronger contract.
+const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "competitor-structured-v2";
 const FULL_REPORT_MAX_OUTPUT_TOKENS = 8_000;
 const FULL_REPORT_OPENAI_TIMEOUT_MS = 24_000;
 const REAL_ESTATE_REPORT_TIMEOUT_MS = 60_000;
@@ -502,7 +544,8 @@ function serializePlanReportChunks(report: Record<PlanReportField, string>) {
 }
 
 function serializePlanReportMetadataChunk(
-  context: AiFinancialModelContext
+  context: AiFinancialModelContext,
+  businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null
 ) {
   const chunk: PlanReportMetadataChunk = {
     reportMetadata: {
@@ -511,6 +554,7 @@ function serializePlanReportMetadataChunk(
       benchmarkScore: context.benchmarkScore,
       reportQuality: context.reportIntelligence,
       validationIntelligence: context.validationIntelligenceV2,
+      ...(businessCompetitorLandscapeState ? { businessCompetitorLandscapeState } : {}),
     },
   };
 
@@ -2410,7 +2454,11 @@ function createPlanFieldFallback(
       case "kpis":
         return buildCanonicalKpiGovernance(context, language);
       case "executiveSummary":
-        return formatExecutiveDecisionBrief(buildPlanExecutiveDecisionBrief(context, language), language);
+        return formatExecutiveDecisionBrief(
+          buildPlanExecutiveDecisionBrief(context, language),
+          language,
+          "business_plan"
+        );
       default:
         break;
     }
@@ -3231,11 +3279,35 @@ function buildCanonicalFounderScore(
     typeof parsed.founderScore === "string"
       ? sanitizeVisibleReportContent(parsed.founderScore)
       : "";
+  // TASK #69A-17 -- ROOT CAUSE FIX: this used to independently re-derive
+  // every dimension's NUMBER via its own un-anchored regex search over
+  // founderReasoning (the SAME reasoning array report-presentation.ts's
+  // readFounderReasoningScore also parses, but with a DIFFERENT,
+  // per-line anchored regex) -- two separate extraction implementations
+  // over the same prose, with no structural guarantee of ever agreeing,
+  // which is exactly how the Founder Readiness CARDS and this field's
+  // own explanatory TEXT below them were confirmed to disagree on the
+  // exact same dimension. investment-score.ts now computes this SAME
+  // set of numbers once, deterministically, with zero regex
+  // (decisionEngine.founderScore.dimensionScores) -- reading it here
+  // means the text this function builds and every renderer's card score
+  // are the same number by construction, not by coincidence. Falls back
+  // to the legacy regex extraction ONLY if that structured array is
+  // somehow absent (a defensive path, not the normal case -- investment-
+  // score.ts always populates it), never fabricating a value.
   const extractReasoningScore = (label: string) => {
     const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const match = new RegExp(`${escapedLabel}:\\s*(\\d+)%`, "i").exec(founderReasoning);
 
     return match?.[1] || "Validation Required";
+  };
+  const founderDimensionScores = Array.isArray(founder.dimensionScores) ? founder.dimensionScores : [];
+  const resolveDimensionScoreText = (key: string, reasoningLabel: string) => {
+    const structuredEntry = founderDimensionScores.find((entry) => entry?.key === key);
+
+    return structuredEntry && Number.isFinite(structuredEntry.score)
+      ? String(Math.max(0, Math.min(100, Math.round(structuredEntry.score))))
+      : extractReasoningScore(reasoningLabel);
   };
   const dimensionExplanation = (englishLabel: string, turkishLabel: string, fallback: string) =>
     (modelFounderScoreText &&
@@ -3244,27 +3316,31 @@ function buildCanonicalFounderScore(
         language === "Turkish" ? turkishLabel : englishLabel
       )) ||
     fallback;
-  const scoreValue = (value: string) => {
-    const parsed = Number(value);
-
-    return Number.isFinite(parsed) ? parsed : 55;
-  };
-  const marketAttractiveness = extractReasoningScore("Market attractiveness");
-  const businessModelQuality = extractReasoningScore("Business model quality");
-  const validationConfidence = extractReasoningScore("Validation confidence");
-  const executionComplexity = extractReasoningScore("Execution complexity");
-  const evidenceConfidence = extractReasoningScore("Evidence confidence");
-  const founderEvidence = extractReasoningScore("Founder evidence");
-  const ideaQuality = scoreValue(marketAttractiveness);
-  const overallScore = Math.round(
-    (ideaQuality * 2 +
-      scoreValue(marketAttractiveness) +
-      scoreValue(businessModelQuality) +
-      scoreValue(executionComplexity) +
-      scoreValue(validationConfidence) +
-      scoreValue(evidenceConfidence)) /
-      7
-  );
+  const marketAttractiveness = resolveDimensionScoreText("marketAttractiveness", "Market attractiveness");
+  const businessModelQuality = resolveDimensionScoreText("businessModelQuality", "Business model quality");
+  const validationConfidence = resolveDimensionScoreText("validationConfidence", "Validation confidence");
+  const executionComplexity = resolveDimensionScoreText("executionComplexity", "Execution complexity");
+  const evidenceConfidence = resolveDimensionScoreText("evidenceConfidence", "Evidence confidence");
+  const founderEvidence = resolveDimensionScoreText("founderEvidence", "Founder evidence");
+  const ideaQuality = resolveDimensionScoreText("ideaQuality", "Market attractiveness");
+  // TASK #69A-6 -- CRITICAL BUG FIX (confirmed live: the founderScore
+  // field's own headline read "Founder Readiness Score: 51/100" while
+  // the canonical investment-score.ts engine's own founder.score --
+  // already sitting right above in scope, and already what every other
+  // consumer (readFounderReadinessScoreValue, buildExecutiveSnapshot's
+  // founderScoreValue, the Executive Decision Center, and the PDF body
+  // paragraph via normalizeFounderReadinessScoreText) reads -- was 40 on
+  // the exact same report). ROOT CAUSE: this line used to independently
+  // RE-DERIVE an overall score from a hand-picked weighted average of
+  // the 6 individual dimension values (ideaQuality double-weighted) --
+  // a completely different formula than founder.score's own (research-
+  // coverage-aware, category-weighted) computation, so the two could
+  // only agree by coincidence. founder.score is already the ONE
+  // canonical overall Founder Readiness score every other surface in
+  // this report resolves to -- reusing it here, instead of recomputing
+  // a second one, is the fix: the field's own headline can no longer
+  // state a different number than the rest of the report ever again.
+  const overallScore = Math.max(0, Math.min(100, Math.round(founder.score)));
 
   const ideaQualityExplanation = dimensionExplanation(
     "Idea Quality",
@@ -3859,6 +3935,267 @@ function buildPlanFinancialConsistencyTargets(
   ];
 }
 
+// TASK #69A-4 -- CRITICAL BUG FIX (confirmed live: a real Business Idea
+// Validation generation failed domain-research.ts's quality gate --
+// "Report quality gate failed: unsupported numeric claim lacks evidence
+// and source or method provenance." -- on the `solution` field's own
+// "Must-win conditions: ... 3) customers accept $500-$2,000+/month ARPA
+// for value delivered." and the identically-shaped `targetCustomer`
+// sentence "...premium SMB FP&A can command $500-$2,000/mo -- model ARPA
+// $1k/mo assumes early enterprise SMB customers."). ROOT CAUSE: these are
+// legitimate planning targets that genuinely name a real, already-
+// canonically-classified metric (ARPA) -- but runConsistencyValidationPass's
+// own correctMetricMentions only ever CORRECTS a mismatched restatement
+// of a metric's own displayValue; it never adds a MISSING classification
+// tag, and never fires when the model's own free-form prose names the
+// metric alongside a genuinely different (but legitimately related, e.g.
+// a plausible range bracketing the same canonical figure) number, in
+// either label-then-value or value-then-label word order.
+//
+// FIX: for each canonical metric this report already computes and
+// classifies (the SAME classifyFinancialMetricEvidenceType/
+// localizeFinancialEvidenceType every deterministic metric line already
+// uses), scan every field's content, sentence by sentence, for that
+// metric's own name mentioned alongside a numeric/currency token in the
+// SAME sentence. A field that already satisfies the quality gate's own
+// label+provenance requirement ANYWHERE in its content (checked via the
+// EXACT SAME patterns the gate itself enforces, re-exported from
+// domain-research.ts for this one purpose) is left untouched. Otherwise,
+// the metric's own, already-computed, honest evidence classification is
+// appended once, at the end of that field -- never a fabricated
+// "Verified", never a value change, and never firing for a genuinely
+// unrelated, unclassified number that names no recognized canonical
+// metric at all (which correctly continues to fail the gate).
+//
+// Separately: Competitor Landscape's own [R#]-cited sentences (Float
+// [R56][R59], Cash Flow Frog [R57], real "Verified from external source"
+// evidence per the registry those IDs resolve against) satisfy the
+// gate's provenance requirement but never its SEPARATE label requirement
+// -- this report's own citation convention never prefixes a bracket-tag
+// or bare classification word before an inline [R#] reference in flowing
+// narrative prose (unlike, say, TAM/SAM/SOM's dedicated "evidence=<type>"
+// line format). A field containing at least one [R\d+] citation but no
+// classification word anywhere is annotated with the same, deliberately
+// least-committal "AI Analysis" class (this codebase's own existing
+// vocabulary for "interpretive conclusions" -- never claims a specific
+// evidence tier the underlying citations may not uniformly support,
+// unlike guessing "Verified" for every cited item regardless of its own
+// real label).
+// domain-research.ts's NUMERIC_CLAIM_LABEL_PATTERN recognizes only the 4
+// literal, English, bare classification words (Verified/Estimated/
+// Assumption/AI Analysis) or a bracket tag -- a pre-existing limitation
+// of the gate itself (unrelated to this fix; it does not recognize any
+// language's localized translation of these words). classifyFinancialMetricEvidenceType's
+// own "Derived" tier (a value mathematically derived from verified/user-
+// provided inputs, itself not independently externally verified) has no
+// direct word match in the gate's vocabulary -- it maps to "Estimated"
+// here, the closest honest equivalent per this report's own established
+// prompt-level vocabulary ("benchmark-derived values are Estimated",
+// prompts/plan.ts), never "Verified".
+//
+// The gate requires BOTH a label word AND a separate provenance marker
+// (NUMERIC_CLAIM_LABEL_PATTERN and NUMERIC_CLAIM_PROVENANCE_PATTERN are
+// checked independently -- domain-research.ts's unsupportedNumeric check
+// fails a claim if EITHER is missing). "Assumption" happens to be a bare
+// word recognized by both patterns, but "Verified" and "Estimated" are
+// LABEL-only words with no matching PROVENANCE word/bracket of their own
+// -- returning them alone would satisfy the label half while silently
+// still failing the gate on the provenance half whenever the surrounding
+// line carries no other citation/URL/formula/benchmark-source token. This
+// returns a complete annotation that is honest about *why* each tier was
+// reached and always satisfies both halves: Verified is grounded in the
+// same "[User]" provenance bracket the gate itself already recognizes
+// (accurate, since classifyFinancialMetricEvidenceType only reaches
+// Verified via explicit user-provided-data text or hasUserEvidence);
+// Derived is grounded in the bare word "formula" (accurate, since this
+// tier is reached only when the metric's own derivation text says it is
+// mathematically derived from another verified value).
+function toGateRecognizedEvidenceAnnotation(evidenceType: FinancialEvidenceType): string {
+  if (evidenceType === "Verified") return "(Verified) [User]";
+  if (evidenceType === "Derived") return "(Estimated -- formula-derived)";
+  return "(Assumption)";
+}
+
+// Plan fields whose own prompt (prompts/plan.ts) declares them as this
+// report's authored strategic recommendations / governance logic / self-
+// evaluation -- never a claim about external market reality: "Recommend
+// only pricing logic" (pricingStrategy), "Write only customer acquisition
+// strategy" (goToMarketPlan), "Write only the enterprise/founder-led sales
+// process" (salesStrategy), "Create only the AI Action Plan" (roadmap306090),
+// "Create only the founder execution plan" (founderRoadmap), "Define only
+// the KPI governance logic" (kpis), and "Write only executive readiness
+// evaluation ... 0-100 scores" (founderScore, the model's own self-scoring,
+// not a market fact). A numeric parameter in one of these fields (e.g. a
+// recommended account-revenue target, pilot length, or governance
+// threshold) is this report's own planning judgment call, not an
+// externally-verifiable fact -- structurally the same class already
+// established for the ARPA-in-narrative sentences above, just without a
+// tracked FinancialMetricModel to classify it against. Deliberately
+// narrow: every OTHER field (marketOpportunity, competitorLandscape,
+// tamSamSom, businessModel, swotAnalysis, portersFiveForces, risks,
+// scenarioAnalysis, kpiDashboard, sourcesAssumptions, etc.) is exempt, so
+// a genuinely unsupported numeric claim asserted as market/competitor/
+// research fact there still fails the gate exactly as required.
+const strategyRecommendationPlanFields: ReadonlySet<PlanReportField> = new Set([
+  "pricingStrategy",
+  "goToMarketPlan",
+  "salesStrategy",
+  "roadmap306090",
+  "founderRoadmap",
+  "kpis",
+  "founderScore",
+]);
+
+function annotateUnclassifiedCanonicalMetricMentions(
+  report: Record<PlanReportField, string>,
+  context: AiFinancialModelContext
+): Record<PlanReportField, string> {
+  const hasUserEvidence = hasVerifiedUserProvidedData(
+    context.financialConsistency.sources.userProvidedData
+  );
+  const { metrics } = context;
+  const metricTargets: Array<{ label: string; metric: FinancialMetricModel }> = [
+    { label: "TAM", metric: metrics.tam },
+    { label: "SAM", metric: metrics.sam },
+    { label: "SOM", metric: metrics.som },
+    { label: metrics.arpa.label, metric: metrics.arpa },
+    { label: "ARR", metric: metrics.arr },
+    { label: "MRR", metric: metrics.mrr },
+    { label: "CAC Payback", metric: metrics.cacPayback },
+    // "Payback" alone: buildCanonicalFinancialAssumptions' own "AI
+    // Planning Scenarios:" block (this file, ~3821) renders this metric
+    // under the bare label "- Payback:", never "CAC Payback" -- both
+    // phrasings must resolve to the same canonical metric.
+    { label: "Payback", metric: metrics.cacPayback },
+    { label: "CAC", metric: metrics.cac },
+    { label: "LTV", metric: metrics.ltv },
+    { label: "Gross Margin", metric: metrics.grossMargin },
+    { label: "Monthly Burn", metric: metrics.monthlyBurn },
+    { label: "Runway", metric: metrics.runway },
+    { label: "EBITDA", metric: metrics.ebitda },
+    { label: "Break-even Month", metric: metrics.breakEvenMonth },
+    // "Break-even" alone: the same "AI Planning Scenarios:" block renders
+    // this metric under "- Break-even:", never "Break-even Month".
+    { label: "Break-even", metric: metrics.breakEvenMonth },
+    { label: "Investment Needed", metric: metrics.investmentNeeded },
+  ];
+  // Mirrors the exact numeric-token union inside domain-research.ts's own
+  // exported NUMERIC_CLAIM_LINE_PATTERN (currency symbol + digits, or a
+  // digit followed by %/currency-code/area-unit/months/years) -- used both
+  // to decide whether a line carries a numeric claim at all, and (without
+  // the line-anchoring) to spot a metric mention within one sentence of it.
+  const numericTokenPattern =
+    /[$€£₺¥]\s*\d[\d.,]*|\b\d[\d.,]*\s*(?:%|USD|EUR|GBP|TRY|TL|m²|sqm|months?|years?)/i;
+  const citationPattern = /\[R\d+\]/;
+  const headingLinePattern = /^\s*#/;
+
+  // Classifies and annotates ONE real newline-bounded line, not a whole
+  // field. Required because domain-research.ts's own NUMERIC_CLAIM_LINE_PATTERN
+  // treats each real "\n"-separated segment of the joined report text as an
+  // INDEPENDENT claim (e.g. normalizeFullPlanReport's appendIntelligenceBlock
+  // appends a separate "AI Executive Insight:" paragraph onto
+  // competitorLandscape, joined by a real newline) -- annotating only the
+  // end of a multi-line field left an earlier, separately-"lined" segment
+  // (e.g. competitorLandscape's own "Direct competitors: ..." citation
+  // paragraph) unclassified and still failing independently, even though
+  // a later line in the SAME field had already been annotated.
+  function annotateLine(line: string, isStrategyField: boolean): string {
+    if (headingLinePattern.test(line) || !numericTokenPattern.test(line)) {
+      return line;
+    }
+
+    const alreadySatisfiesGate =
+      NUMERIC_CLAIM_LABEL_PATTERN.test(line) && NUMERIC_CLAIM_PROVENANCE_PATTERN.test(line);
+    if (alreadySatisfiesGate) return line;
+
+    const sentences = line.split(/(?<=[.!?;])\s+/);
+    let matchedMetric: FinancialMetricModel | null = null;
+    for (const sentence of sentences) {
+      for (const { label, metric } of metricTargets) {
+        if (!label) continue;
+        const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        if (
+          new RegExp(`\\b${escapedLabel}\\b`, "i").test(sentence) &&
+          numericTokenPattern.test(sentence)
+        ) {
+          matchedMetric = metric;
+          break;
+        }
+      }
+      if (matchedMetric) break;
+    }
+
+    if (matchedMetric) {
+      const evidenceType = classifyFinancialMetricEvidenceType(matchedMetric, hasUserEvidence);
+      return `${line.replace(/\s+$/, "")} ${toGateRecognizedEvidenceAnnotation(evidenceType)}`;
+    }
+
+    if (citationPattern.test(line)) {
+      return `${line.replace(/\s+$/, "")} (AI Analysis)`;
+    }
+
+    // Only for fields whose own prompt declares them as this report's
+    // authored strategy/recommendation/governance/self-evaluation content
+    // (see strategyRecommendationPlanFields above) -- a bare numeric
+    // parameter here (e.g. a recommended account-revenue target or pilot
+    // length) is this report's own planning judgment call, never an
+    // externally-verifiable fact, so it is honestly labeled an assumption.
+    // Every other field is left unannotated here, so a genuinely
+    // unsupported numeric claim asserted as market/competitor/research
+    // fact there still fails the gate.
+    if (isStrategyField) {
+      return `${line.replace(/\s+$/, "")} (Assumption)`;
+    }
+
+    return line;
+  }
+
+  // sourcesAssumptions renders each citation as a multi-line block (Title
+  // / Publisher / Year / Reference: [R#] / URL), separated from the next
+  // citation by a blank line -- see prompts/plan.ts's own field prompt
+  // ("List citation metadata..."). A Title line restating that source's
+  // own numeric detail (e.g. "Title: ... Cash Flow Frog Pro ~ $33/month
+  // ...") carries real provenance -- the SAME block's own "Reference:
+  // [R#]" line a few lines down -- but the gate checks each real "\n"-
+  // line independently, so that provenance never reaches the Title line
+  // itself. This propagates the block's own, already-legitimate
+  // reference tag onto its Title line only (never a fabricated or
+  // borrowed-from-elsewhere reference), after which the normal citation-
+  // only branch in annotateLine below adds the missing label word exactly
+  // as it does for any other citation-bearing, unlabeled line.
+  function propagateSourceRegistryReferenceOntoTitleLine(content: string): string {
+    return content
+      .split(/\n\n+/)
+      .map((block) => {
+        const referenceMatch = block.match(citationPattern);
+        if (!referenceMatch) return block;
+        return block
+          .split("\n")
+          .map((line) =>
+            /^Title:/.test(line) && !citationPattern.test(line) ? `${line} ${referenceMatch[0]}` : line
+          )
+          .join("\n");
+      })
+      .join("\n\n");
+  }
+
+  const annotated = { ...report };
+  for (const field of planFields) {
+    const content = annotated[field];
+    if (!content) continue;
+
+    const isStrategyField = strategyRecommendationPlanFields.has(field);
+    const preprocessed =
+      field === "sourcesAssumptions" ? propagateSourceRegistryReferenceOntoTitleLine(content) : content;
+    annotated[field] = preprocessed
+      .split("\n")
+      .map((line) => annotateLine(line, isStrategyField))
+      .join("\n");
+  }
+
+  return annotated;
+}
+
 // Maps Business Plan's own numeric decision engine onto the shared,
 // report-type-agnostic Executive Recommendation vocabulary. This is a pure
 // presentation mapping -- investmentScore.recommendation stays the
@@ -4152,7 +4489,11 @@ function normalizeFullPlanReport(
   // of those used to stack on top of this same field, restating the
   // decision three more times before any supporting section even started.
   const planExecutiveDecisionBrief = buildPlanExecutiveDecisionBrief(context, language);
-  normalized.executiveSummary = formatExecutiveDecisionBrief(planExecutiveDecisionBrief, language);
+  normalized.executiveSummary = formatExecutiveDecisionBrief(
+    planExecutiveDecisionBrief,
+    language,
+    "business_plan"
+  );
   normalized.swotAnalysis =
     language === "English"
       ? buildCanonicalSwot(context, parsed)
@@ -4369,10 +4710,22 @@ function normalizeFullPlanReport(
     // DecisionBrief, above). Every other section must agree with this,
     // not with the raw investmentScore.recommendation engine value (a
     // different vocabulary -- see report-presentation.ts).
-    authoritativeExecutiveDecisionToken: localizeExecutiveDecision(planExecutiveDecisionBrief.decision, language),
+    authoritativeExecutiveDecisionToken: localizeExecutiveDecision(
+      planExecutiveDecisionBrief.decision,
+      language,
+      "business_plan"
+    ),
+    executiveDecisionVocabulary: "business_plan",
     decisionProtectedFields: ["executiveSummary"],
     metricTargets: buildPlanFinancialConsistencyTargets(context),
-    metricProtectedFields: ["financialDashboard", "unitEconomics", "tamSamSom"],
+    // TASK #69A-3 -- financialAssumptions' own Monthly Burn/CAC/LTV/
+    // Payback/Runway/EBITDA/Break-even/Investment-Needed lines
+    // (buildKeyFinancialAssumptions above) are built directly from
+    // context.metrics.*.displayValue, exactly like financialDashboard/
+    // unitEconomics/tamSamSom already are -- the same "canonically built
+    // from this value already" reasoning this list's own comment states
+    // applies here too, so it belongs in the same protected set.
+    metricProtectedFields: ["financialDashboard", "unitEconomics", "tamSamSom", "financialAssumptions"],
     riskOpportunity: {
       risksField: "risks",
       opportunitiesHostField: "swotAnalysis",
@@ -4415,7 +4768,17 @@ function normalizeFullPlanReport(
     sourceFields: ["sourcesAssumptions"],
   });
 
-  return deduped;
+  // TASK #69A-4 -- runs last, after every other content-shaping pass
+  // above (so it sees the report's own final, canonical text) and right
+  // before this same content is handed to domain-research.ts's
+  // validateDomainResearchQuality/Safely (called by every caller of
+  // parseFullPlanReport, which itself calls normalizeFullPlanReport).
+  // Purely additive: it only ever appends an honest, already-computed
+  // evidence classification to a field that names a real canonical
+  // metric or cites real [R#] evidence without one; it never changes a
+  // decision, a number, or a section's own meaning, and never touches a
+  // field that already satisfies the gate.
+  return annotateUnclassifiedCanonicalMetricMentions(deduped, context);
 }
 
 function parseFullPlanReport(
@@ -8762,7 +9125,7 @@ Write only the content for this section. Do not write a JSON object, field name,
         endpoint: "/api/plan",
         identity: researchIdentity,
         model,
-        reportVariant: `${FULL_REPORT_FIELD}:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}`,
+        reportVariant: `${FULL_REPORT_FIELD}:${canonicalFinancialAssumptions.version}:${canonicalFinancialAssumptions.fingerprint}:${BUSINESS_PLAN_GENERATION_CONTRACT_VERSION}`,
         contextFingerprint: [
           userMemoryContext,
           conversationResearch
@@ -8785,6 +9148,17 @@ Write only the content for this section. Do not write a JSON object, field name,
         const cachedBusinessResearch = getCachedResearchFromReportData(
           cachedFullReport.responseData
         );
+        // TASK #69A-15A -- mirrors cachedBusinessResearch immediately
+        // above: reads back whatever schema-enforced structured
+        // competitor state was persisted alongside this cache entry (see
+        // createReportCacheData's own new third argument at the
+        // cache-WRITE call site) -- null for any cache entry written
+        // before this task, or one whose original generation never
+        // populated it.
+        const cachedBusinessCompetitorLandscapeState =
+          getCachedBusinessCompetitorLandscapeStateFromReportData(
+            cachedFullReport.responseData
+          );
         const cachedMarketResearchCoverageResult = cachedBusinessResearch
           ? applyMarketResearchCoverageToContext(
               canonicalFinancialAssumptions,
@@ -8793,16 +9167,7 @@ Write only the content for this section. Do not write a JSON object, field name,
             )
           : null;
         const cachedUnifiedFinancialContext = cachedMarketResearchCoverageResult
-          ? {
-              ...cachedMarketResearchCoverageResult.context,
-              investmentScore: {
-                ...cachedMarketResearchCoverageResult.context.investmentScore,
-                ...refreshInvestmentNarrativeFromResearchCoverage(
-                  cachedMarketResearchCoverageResult.context.investmentScore,
-                  cachedMarketResearchCoverageResult.context
-                ),
-              },
-            }
+          ? refreshResearchAwareFinancialContext(cachedMarketResearchCoverageResult.context)
           : canonicalFinancialAssumptions;
         const parsedCachedReport = parseFullPlanReport(
           cachedFullReport.responseText,
@@ -8903,8 +9268,15 @@ Write only the content for this section. Do not write a JSON object, field name,
         }
 
         return new Response(encoder.encode(
-          serializePlanReportMetadataChunk(cachedUnifiedFinancialContext) +
-            serializePlanReportChunks(parsedCachedReport)
+          serializePlanReportMetadataChunk(
+            cachedUnifiedFinancialContext,
+            // TASK #69A-15A -- prefer the schema-enforced state cached
+            // alongside this exact response (Tier 0) over #69A-15's own
+            // labeled-line text parse (Tier 1), mirroring the
+            // live-generation path's identical tier preference.
+            cachedBusinessCompetitorLandscapeState ||
+              buildBusinessCompetitorLandscapeState(parsedCachedReport.competitorLandscape)
+          ) + serializePlanReportChunks(parsedCachedReport)
         ), {
           headers: {
             "Content-Type": "application/x-ndjson; charset=utf-8",
@@ -8954,17 +9326,13 @@ Write only the content for this section. Do not write a JSON object, field name,
       // real evidence that applyMarketResearchCoverageToContext already
       // used to rescore decisionEngine and confidence above, so the
       // narrative and the confidence number are no longer computed from
-      // two different (one evidence-aware, one not) inputs.
-      const researchAwareFinancialContext = {
-        ...unifiedFinancialContext,
-        investmentScore: {
-          ...unifiedFinancialContext.investmentScore,
-          ...refreshInvestmentNarrativeFromResearchCoverage(
-            unifiedFinancialContext.investmentScore,
-            unifiedFinancialContext
-          ),
-        },
-      };
+      // two different (one evidence-aware, one not) inputs. Task #69A-5:
+      // also recomputes benchmarkFit.validationGaps from these same
+      // refreshed categories in the same step -- see
+      // refreshResearchAwareFinancialContext's own doc comment.
+      const researchAwareFinancialContext = refreshResearchAwareFinancialContext(
+        unifiedFinancialContext
+      );
       const unifiedFinancialAssumptionsContext =
         formatCanonicalFinancialAssumptions(researchAwareFinancialContext);
       const adaptiveWriterPlan = createAdaptiveReportWriterPlan({
@@ -9019,6 +9387,26 @@ Write only the content for this section. Do not write a JSON object, field name,
         );
       }
 
+      // TASK #69A-16 -- ROOT CAUSE: the research layer already retrieves
+      // named-competitor evidence (domain-research.ts's dedicated
+      // "competitors" field) and it already reaches this exact prompt via
+      // businessResearchContext, interpolated below -- but nothing in the
+      // actual prompt TEXT ever told the model to map that evidence into
+      // competitorLandscapeStructured. The only place that obligation
+      // existed was inside BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA's own
+      // `description` strings (schema/response_format metadata, a
+      // materially weaker signal than an explicit instruction in the main
+      // prompt body), so the model was free to return an empty array even
+      // with real competitor evidence available -- confirmed as the exact
+      // gap a prior ticket's real production trace exposed. FIX: a new mapping-
+      // requirement paragraph (verboseFullReportInput, below) explicitly
+      // instructs the model to use the evidence registry, populate each
+      // attribute independently and only when evidence-supported, include
+      // identity-only/partial competitors, and return an empty array
+      // rather than fabricate one -- positioned before "Report quality
+      // rules:" so it survives the verbose->compact substitution
+      // unconditionally. Business-plan-only; the other three
+      // createFullReportJsonSchema call sites are untouched.
       const verboseFieldContracts = planFields.map((fieldName) => `- ${fieldName}: ${planFieldLabels[responseLanguage][fieldName]} — ${planPrompts[fieldName].prompt}`).join("\n");
       const compactFieldContracts = planFields.map((fieldName) => `- ${fieldName}: ${planFieldLabels[responseLanguage][fieldName]} — ${compactReportFieldPrompt(planPrompts[fieldName].prompt)}`).join("\n");
       const verboseFullReportInput = `Latest user request language: ${responseLanguage}
@@ -9044,6 +9432,9 @@ ${userMemoryInstruction ? `\n${userMemoryInstruction}\n` : ""}
 Generate the complete Business Plan report as one structured JSON object.
 Return exactly these JSON keys and no others:
 ${compactFieldContracts}
+
+Competitor Landscape structured mapping requirement (competitorLandscapeStructured):
+Identify every distinct, real, named competitor or substitute company supported by the research evidence registry above (evidence fields such as Competitors, Vendor Discovery, or Product Evidence). For each one, set company to its real name, and independently set positioning, strengths, weaknesses, and threat ONLY when the evidence registry -- or a clearly evidence-grounded analytical inference -- supports that specific attribute; use null for any attribute the evidence does not support. Never invent a company, and never invent strengths, weaknesses, or threat merely to fill every field. Include a competitor even when only its identity and positioning are supported -- do not omit it for lacking strengths/weaknesses/threat evidence. If the evidence registry names zero real competitors, return an empty array for competitorLandscapeStructured rather than fabricating one.
 
 Report quality rules:
 ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${directive}`).join("\n")}
@@ -9173,9 +9564,28 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
                     },
                     text: {
                       verbosity: "low",
+                      // TASK #69A-15A -- CRITICAL ARCHITECTURAL FIX:
+                      // competitorLandscape (one of planFields, an
+                      // ordinary free-prose string) stays completely
+                      // unchanged in the schema -- "competitorLandscapeStructured"
+                      // is a NEW, ADDITIONAL top-level key, requested
+                      // alongside it in this SAME call, scoped to ONLY
+                      // this "zerinix_business_plan_report" schema via
+                      // createFullReportJsonSchema's own
+                      // fieldSchemaOverrides parameter (real estate/
+                      // domain-analysis/acquisition's own separate
+                      // createFullReportJsonSchema calls, below/above in
+                      // this file, are completely untouched). OpenAI's
+                      // strict json_schema mode VALIDATES the response
+                      // against BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA
+                      // before ever returning it -- real, load-bearing
+                      // enforcement, not the advisory prompt convention
+                      // #69A-15 tried first and a real regeneration
+                      // proved insufficient.
                       format: createFullReportJsonSchema(
                         "zerinix_business_plan_report",
-                        planFields
+                        [...planFields, "competitorLandscapeStructured"],
+                        { competitorLandscapeStructured: BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA }
                       ),
                     },
                   }, { signal: reportAbort.signal })
@@ -9221,11 +9631,34 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
               responseLanguage,
               promptText
             );
-            validateDomainResearchQualitySafely({
+            // TASK #69A-4 -- CRITICAL BUG FIX (confirmed live: this call's
+            // own return value was previously discarded entirely, so a
+            // report that failed the quality gate on this, the PRIMARY
+            // live-generation path, was silently cached and streamed to
+            // the user anyway -- the gate only ever actually blocked
+            // anything later, confusingly, when a SUBSEQUENT request hit
+            // the now-cached bad report through the cached-reuse path's
+            // own raw, throwing validateDomainResearchQuality call
+            // (~line 9097 above). validateDomainResearchQualitySafely
+            // exists to add structured diagnostic logging (phase,
+            // expectedDomain, message, stack -- domain-research.ts's own
+            // console.error) around the SAME check the raw function
+            // performs, not to make a real failure silently non-fatal;
+            // throwing its own already-logged validationError here
+            // restores real enforcement on this path -- identical
+            // rejection behavior to the cached-reuse path and to every
+            // other validateDomainResearchQuality call already present
+            // in this same function -- without touching the gate's own
+            // logic, thresholds, or vocabulary in domain-research.ts at
+            // all.
+            const qualityGateResult = validateDomainResearchQualitySafely({
               report: parsedReport,
               bundle: businessResearch,
               expectedDomain: "business",
             });
+            if (qualityGateResult.fallbackUsed && "validationError" in qualityGateResult) {
+              throw new Error(qualityGateResult.validationError || "Report quality gate failed.");
+            }
             // The Sources page must resolve the SAME [R#] citations the
             // model already cited inline elsewhere in the report (Market
             // Opportunity, Problem, etc.) -- not whatever the model
@@ -9243,6 +9676,31 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
               responseLanguage,
               researchAwareFinancialContext.normalizedBusinessIdea
             );
+            // TASK #69A-15A -- Tier 0 (authoritative): read
+            // competitorLandscapeStructured directly from the model's
+            // own schema-validated JSON response -- competitorLandscapeStructured
+            // is a schema-only key, never one of planFields, so
+            // parseFullPlanReport's own per-field loop (which only ever
+            // reads planFields) never touches it; re-parsing responseText
+            // here is cheap and safe (parseFullPlanReport already proved
+            // it's valid JSON moments ago). Falls back to Tier 1
+            // (#69A-15's own deterministic parse of competitorLandscape's
+            // labeled-line text, kept as a safety net for any path that
+            // doesn't go through this schema-enforced call, e.g. an
+            // already-cached pre-#69A-15A response) only if Tier 0 yields
+            // nothing -- never fabricated either way.
+            let structuredCompetitorLandscapeResponse: unknown;
+            try {
+              structuredCompetitorLandscapeResponse = (
+                JSON.parse(responseText) as Record<string, unknown>
+              ).competitorLandscapeStructured;
+            } catch {
+              structuredCompetitorLandscapeResponse = undefined;
+            }
+            const businessCompetitorLandscapeState =
+              buildBusinessCompetitorLandscapeStateFromStructuredResponse(
+                structuredCompetitorLandscapeResponse
+              ) || buildBusinessCompetitorLandscapeState(parsedReport.competitorLandscape);
             const reportMetadataContext = createReportMetadataContext({
               prompt: promptText,
               report: parsedReport,
@@ -9263,6 +9721,26 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             }
 
             fullReportStage = "stream_response";
+            // TASK #69A-15 -- a SECOND reportMetadata chunk, sent only
+            // once real structured competitor data was actually parsed
+            // above. worker.ts's own event handling REPLACES its
+            // accumulated metadata object wholesale on every
+            // reportMetadata event rather than merging one in, so this
+            // chunk re-sends every field the EARLY chunk (enqueued
+            // before the report call even started, from
+            // researchAwareFinancialContext -- unchanged by generation)
+            // already sent, plus this new field -- never a partial
+            // patch that could silently drop investmentScore/
+            // benchmarkFit/benchmarkScore/reportQuality/
+            // validationIntelligence from the final persisted metadata.
+            if (businessCompetitorLandscapeState) {
+              enqueue(
+                serializePlanReportMetadataChunk(
+                  researchAwareFinancialContext,
+                  businessCompetitorLandscapeState
+                )
+              );
+            }
             enqueue(serializePlanReportChunks(parsedReport));
 
             // Awaited (not fire-and-forget): the usage-write below marks
@@ -9287,7 +9765,22 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
                     language: responseLanguage,
                     model,
                     responseText: cacheResponseText,
-                    responseData: createReportCacheData(businessResearch),
+                    // TASK #69A-15A -- cacheResponseText above is
+                    // JSON.stringify(parsedReport), which only ever
+                    // carries the 23 string PlanReportFields -- without
+                    // also persisting businessCompetitorLandscapeState
+                    // here (the third, additive, optional argument, same
+                    // pattern as marketIntelligenceGraph immediately
+                    // before it), a future cache HIT for this exact
+                    // prompt would silently lose the schema-enforced
+                    // structured competitor data this generation just
+                    // produced, falling back to the weaker prose-parsing
+                    // tiers for every subsequent cache-served request.
+                    responseData: createReportCacheData(
+                      businessResearch,
+                      undefined,
+                      businessCompetitorLandscapeState
+                    ),
                     tokenUsage,
                     estimatedCostUsd,
                     expiresInDays: 7,

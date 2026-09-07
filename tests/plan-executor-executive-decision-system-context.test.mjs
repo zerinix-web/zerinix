@@ -107,11 +107,20 @@ test("does not modify the report section schema, PDF generation, UI, billing, au
     planExecutorSource,
     /createFullReportJsonSchema\(\s*"[^"]+",\s*\[[^\]]*executiveDecisionSystem/i
   );
-  // planFields (the JSON schema's required key list) is untouched --
-  // it is still read from planFields, never extended with a new key.
+  // TASK #69A-15A superseded this assertion's original premise
+  // (planFields passed bare, with no extension) with a DIFFERENT,
+  // deliberate, unrelated task: the business-plan schema now also
+  // requests a new "competitorLandscapeStructured" key (via
+  // `[...planFields, "competitorLandscapeStructured"]`, a fresh array
+  // -- planFields ITSELF, the shared constant every other report-field
+  // exhaustive check relies on, is never mutated). Confirmed here
+  // instead: the original planFields array is spread verbatim (every
+  // existing field this test's own concern was about is still present,
+  // untouched, in its original order) as the first part of that new
+  // array, not replaced or reordered.
   assert.match(
     planExecutorSource,
-    /format: createFullReportJsonSchema\(\s*"zerinix_business_plan_report",\s*planFields\s*\)/
+    /format: createFullReportJsonSchema\(\s*\n\s*"zerinix_business_plan_report",\s*\n\s*\[\.\.\.planFields, "competitorLandscapeStructured"\],/
   );
 });
 

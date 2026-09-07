@@ -95,7 +95,16 @@ test("Planner.tsx's downloadPdf: Competitive Landscape still has a real table (+
   assert.match(visualFieldsMatch[1], /"competitiveLandscape",/);
 
   assert.match(plannerSource, /if \(section\.field === "competitiveLandscape"\) \{/);
-  assert.match(plannerSource, /const rows = extractCompetitorRows\(section\.content\);/);
+  // TASK #69A-15 superseded the exact literal
+  // "const rows = extractCompetitorRows(section.content);" line: it is
+  // now resolveCompetitorRowsForDownloadPdf(businessCompetitorLandscapeState,
+  // section.content), which prefers a versioned
+  // businessCompetitorLandscapeState first and falls back to
+  // extractCompetitorRows unchanged.
+  assert.match(
+    plannerSource,
+    /const rows = resolveCompetitorRowsForDownloadPdf\(\s*\n\s*businessCompetitorLandscapeState,\s*\n\s*section\.content\s*\n\s*\);/
+  );
   // A later ticket ("RESTORE PREMIUM ANALYTICAL DEPTH") added Major
   // Players' own content as a third fallback tier -- the call now passes
   // it as a second argument rather than calling with section.content alone.

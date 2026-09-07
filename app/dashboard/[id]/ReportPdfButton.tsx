@@ -34,6 +34,7 @@ import {
   getSectionTakeaway,
   normalizeFounderReadinessScoreText,
   parseMarketSizingMagnitude,
+  FOUNDER_READINESS_DIMENSION_METRICS,
   readFounderReadinessMetricValue,
   readFounderReadinessScoreValue,
   resolveMarketSizingCascade,
@@ -81,6 +82,7 @@ import {
   readMarketIntelligenceCanonicalState,
   constrainMarketSizingResolutionToCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
+import { readBusinessCompetitorLandscapeState } from "@/app/lib/report-engine/business-competitor-landscape-state";
 import {
   resolveMarketIntelligenceDecisionChangeState,
   buildMarketIntelligenceGapDrivenActions,
@@ -950,17 +952,41 @@ const competitorFieldLabels = [
   "Competitive Threat",
   "Threat",
   "Target Customer",
+  // TASK #69A-14 -- mirrors the identical fix in components/Planner.tsx
+  // and app/dashboard/[id]/page.tsx: the REAL confirmed category labels
+  // competitorLandscape's own generation prompt
+  // (app/lib/report-engine/prompts/plan.ts) actually induces in its
+  // free-form, topic-organized prose -- needed as clause BOUNDARIES for
+  // parseInlineCompetitorField, below.
+  "Direct competitors",
+  "Substitutes",
+  "Pricing",
+  "Funding",
+  "Employee Size",
+  "Strengths of incumbents",
+  "How to outperform",
+  "Incumbent response",
+  "Switching barriers",
+  "Gap for entrant",
+  "Gap for a new entrant",
+  "Executive implication",
+  // TASK #69A-15C -- mirrors the identical fix in components/Planner.tsx
+  // and app/dashboard/[id]/page.tsx: normalizeFullPlanReport
+  // (plan-executor.ts) deterministically appends a trailing
+  // "AI Executive Insight:\n..." block to EVERY competitorLandscape
+  // field -- presentation metadata, never a competitor. When both
+  // structured tiers come back empty, the last-resort per-line guess
+  // below mistook this heading's own prefix for a company name. Listed
+  // here so isKnownCategoryLabel rejects it via the same exact-match
+  // mechanism #69A-14 already established.
+  "AI Executive Insight",
+  "AI Yönetici İçgörüsü",
 ];
 
-const founderScorePdfDimensionMetrics = [
-  { label: "Idea Quality", aliases: ["Idea Quality", "Fikir Kalitesi"] },
-  { label: "Market Attractiveness", aliases: ["Market Attractiveness", "Pazar Çekiciliği"] },
-  { label: "Business Model Quality", aliases: ["Business Model Quality", "İş Modeli Kalitesi"] },
-  { label: "Validation Confidence", aliases: ["Validation Confidence", "Doğrulama Güveni"] },
-  { label: "Execution Complexity", aliases: ["Execution Complexity", "executionComplexity", "Execution Difficulty", "executionDifficulty", "Execution", "Uygulama Karmaşıklığı", "Yürütme Karmaşıklığı", "Uygulama Zorluğu"] },
-  { label: "Evidence Confidence", aliases: ["Evidence Confidence", "Kanıt Güveni"] },
-  { label: "Founder Evidence", aliases: ["Founder Evidence", "Kurucu Kanıtı"] },
-];
+// TASK #69A-5 -- comes directly from report-presentation.ts's single
+// canonical FOUNDER_READINESS_DIMENSION_METRICS, never a hand-copied
+// duplicate -- see that file's own doc comment for why.
+const founderScorePdfDimensionMetrics = FOUNDER_READINESS_DIMENSION_METRICS;
 
 // CAC deliberately removed: the kpiDashboard prompt (plan.ts) explicitly
 // instructs the model "Do not include CAC, LTV, Gross Margin, Payback,
@@ -1381,6 +1407,25 @@ function extractMarketSizeAssumption(content: string, label: string) {
   return match ? match[0].trim().replace(/^[-*•]\s+/, "") : "";
 }
 
+// TASK #69A-3 -- see page.tsx's identical isMarketSizeEstimated fix for
+// the full root-cause comment: Business Idea Validation's own canonical
+// "TAM: $X | evidence=<type> | confidence=<level>" line format was never
+// recognized by this function's bracket-tag-only detection, silently
+// defaulting every benchmark/assumption-derived figure to "Verified" in
+// the exported PDF. When the canonical "evidence=<type>" label is present,
+// it is now authoritative; Market Intelligence's own free-prose
+// "[Estimated]"/"Planning Estimate" convention is completely unaffected.
+function extractMarketSizeEvidenceLabel(content: string, label: string) {
+  const match = content.match(
+    new RegExp(`\\b${label}\\s*:[^\\n]*?\\b(?:evidence|kanıt)\\s*=\\s*([^|\\n]+)`, "i")
+  );
+
+  return match ? match[1].trim() : null;
+}
+
+const verifiedMarketSizeEvidenceLabelPattern =
+  /^(?:verified|doğrulanmış|verifiziert|vérifié|verificado)$/i;
+
 // tamSamSom's own prompt allows a transparent, benchmark-derived estimate
 // when no verified local figure exists, explicitly requiring every such
 // figure be labeled "[Estimated]" and "never presented as verified". This
@@ -1388,6 +1433,11 @@ function extractMarketSizeAssumption(content: string, label: string) {
 // page.tsx/Planner.tsx's own isMarketSizeEstimated), rather than assuming
 // estimated status.
 function isMarketSizeEstimated(content: string, label: string) {
+  const evidenceLabel = extractMarketSizeEvidenceLabel(content, label);
+  if (evidenceLabel !== null) {
+    return !verifiedMarketSizeEvidenceLabelPattern.test(evidenceLabel);
+  }
+
   const sentence = extractMarketSizeAssumption(content, label);
 
   return /\[Estimated\]/i.test(sentence) || /\bPlanning Estimate\b/i.test(sentence);
@@ -2561,6 +2611,48 @@ function inferMarketIntelligenceMarketMapPosition(row: { category: string; posit
   return x !== null && y !== null ? { x, y } : null;
 }
 
+// TASK #69A-14 -- mirrors components/Planner.tsx's own
+// isImplausibleCompetitorNameOnScreen (itself mirrored from
+// app/lib/ai/vendor-discovery.ts's isImplausibleCompetitorName):
+// rejects a candidate "company name" that is too long, contains
+// markdown/URL artifacts, leads with an instruction verb, or is
+// actually an evidence/citation-label prefix -- never a real company
+// name. Used below as a name-plausibility gate for extractCompetitorRows'
+// own entity extraction, the same class of defect Market Intelligence's
+// competitor extraction already guards against.
+function isImplausibleCompetitorNameOnScreen(name: string) {
+  const trimmed = (name || "").trim();
+
+  if (!trimmed) return true;
+  if (trimmed.length > 60) return true;
+  if (trimmed.includes("...") || trimmed.includes("…")) return true;
+  if (/[[\]{}`|]|https?:\/\/|www\.|\.(?:com|org|net|edu|gov|io)\b/i.test(trimmed)) return true;
+  // TASK #69A-15C -- defense-in-depth, mirrors components/Planner.tsx.
+  // Compared via .toLowerCase() on both sides, never a /i regex literal
+  // -- "İ" (Turkish dotted capital I) lowercases to "i̇" (i + combining
+  // dot above), not plain ASCII "i", so a regex written with plain "i"
+  // characters would silently never match "AI Yönetici İçgörüsü".
+  const lowerTrimmed = trimmed.toLowerCase();
+  if (lowerTrimmed === "ai executive insight" || lowerTrimmed === "AI Yönetici İçgörüsü".toLowerCase()) {
+    return true;
+  }
+  if (
+    /^(?:conduct|analyz[e]?|generate|write|provide|summarize|summarise|explain|list|identify|assess|evaluate|create|perform|produce|research|describe|compare|review|investigate|determine|prepare|draft|compile|outline)\b/i.test(
+      trimmed
+    )
+  )
+    return true;
+  if (
+    /^(?:pricing evidence|market relevance|confidence|validation(?:\s+status)?|evidence|source|citation|methodology|assumption|coverage|note|reference)\s*:/i.test(
+      trimmed
+    )
+  )
+    return true;
+  if (trimmed.split(/\s+/).length > 6) return true;
+
+  return false;
+}
+
 function extractCompetitorRows(content: string) {
   const normalized = normalizePdfText(content).replace(/\*\*/g, "");
   const rows: Array<{
@@ -2606,6 +2698,79 @@ function extractCompetitorRows(content: string) {
     return rows.filter((row) => row.company || row.positioning || row.strengths || row.weaknesses || row.threat).slice(0, 4);
   }
 
+  // TASK #69A-14 -- CRITICAL SEMANTIC FIX (mirrors the identical fix in
+  // components/Planner.tsx and app/dashboard/[id]/page.tsx -- see those
+  // files' own comments for the full root-cause explanation). The real
+  // competitorLandscape generation prompt asks for pure analytical
+  // prose organized by TOPIC ("Direct competitors: Float (...). Cash
+  // Flow Frog (...). Substitutes: ... Pricing: ... Strengths of
+  // incumbents: ... Weaknesses: ..."), confirmed verbatim against a real
+  // cached report's own field text -- never a per-competitor bullet.
+  // The pre-existing competitorSummaryLinePattern guard below already
+  // recognized that the prompt's OWN "closing commentary" labels
+  // ("Executive implication"/"Incumbent response"/etc.) could collide
+  // with the company-name guess, but never recognized that the SAME
+  // failure mode applies to the prompt's own EARLIER category labels
+  // ("Direct competitors"/"Substitutes"/"Pricing"/"Strengths of
+  // incumbents"/"Weaknesses") -- exactly the defect reported live (those
+  // labels rendering as PDF competitor rows). This tier extracts the
+  // "Direct competitors"/"Substitutes" clauses from the FULL content
+  // (never per-line) via the SAME parseInlineCompetitorField/
+  // competitorFieldLabels boundary mechanism already used elsewhere in
+  // this function, then finds each real "Name (details)" entity within
+  // just those clauses -- never fabricating Strengths/Weaknesses/Threat
+  // the source doesn't attribute per-entity.
+  const directCompetitorsClause = parseInlineCompetitorField(normalized, "Direct competitors");
+  const substitutesClause = parseInlineCompetitorField(normalized, "Substitutes");
+  const namedEntityPattern = /([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z&][A-Za-z0-9&.'-]*){0,4})\s*\(([^()]{3,220})\)/g;
+
+  const extractNamedEntities = (clauseText: string, type: "Direct competitor" | "Substitute") => {
+    if (!clauseText) return [];
+
+    const found: Array<{ name: string; positioning: string; type: string }> = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = namedEntityPattern.exec(clauseText)) !== null) {
+      const name = match[1].trim();
+
+      if (isImplausibleCompetitorNameOnScreen(name)) {
+        continue;
+      }
+
+      found.push({ name, positioning: match[2].trim(), type });
+    }
+
+    return found;
+  };
+
+  const seenEntityNames = new Set<string>();
+  const namedEntities = [
+    ...extractNamedEntities(directCompetitorsClause, "Direct competitor"),
+    ...extractNamedEntities(substitutesClause, "Substitute"),
+  ].filter((entity) => {
+    const key = entity.name.toLowerCase();
+
+    if (seenEntityNames.has(key)) {
+      return false;
+    }
+
+    seenEntityNames.add(key);
+    return true;
+  });
+
+  if (namedEntities.length > 0) {
+    return namedEntities.slice(0, 4).map((entity) => ({
+      company: cleanPdfExecutiveText(
+        entity.type === "Substitute" ? `${entity.name} (Substitute)` : entity.name,
+        44
+      ),
+      positioning: cleanPdfExecutiveText(entity.positioning, 88),
+      strengths: "Validation required",
+      weaknesses: "Validation required",
+      threat: "Validation required",
+    }));
+  }
+
   // competitorLandscape's own prompt explicitly instructs a trailing
   // "Include incumbent response, switching barriers, and the gap for a new
   // entrant. End with a concise executive implication..." sentence -- the
@@ -2625,20 +2790,39 @@ function extractCompetitorRows(content: string) {
     .map((line) => line.trim().replace(/^[-*•]\s+/, ""))
     .filter((line) => line.length > 14 && !competitorSummaryLinePattern.test(line))
     .forEach((line) => {
+      // TASK #69A-14 -- last-resort tier, hardened the same way as the
+      // other two files: a candidate company name that is implausible,
+      // or that is literally one of this function's own known category
+      // labels, is rejected rather than accepted.
+      const rawCompanyGuess = line.match(/^([A-Z0-9][A-Za-z0-9 .&()/-]{1,42})\s*[:—–-]\s+/)?.[1]?.trim() || "";
+      const isKnownCategoryLabel = competitorFieldLabels.some(
+        (label) => label.toLowerCase() === rawCompanyGuess.toLowerCase()
+      );
+      const companyGuess =
+        rawCompanyGuess && !isKnownCategoryLabel && !isImplausibleCompetitorNameOnScreen(rawCompanyGuess)
+          ? rawCompanyGuess
+          : "";
       const company =
         parseInlineCompetitorField(line, "Company") ||
         parseInlineCompetitorField(line, "Competitor") ||
-        line.match(/^([A-Z0-9][A-Za-z0-9 .&()/-]{1,42})\s*[:—–-]\s+/)?.[1]?.trim() ||
+        companyGuess ||
         "";
       const positioning = parseInlineCompetitorField(line, "Positioning") || parseInlineCompetitorField(line, "Target Customer");
       const strengths = parseInlineCompetitorField(line, "Strengths");
       const weaknesses = parseInlineCompetitorField(line, "Weaknesses");
       const threat = parseInlineCompetitorField(line, "Competitive Threat") || parseInlineCompetitorField(line, "Threat");
 
+      // TASK #69A-14 -- was `positioning || line`: the exact same
+      // cross-field duplication mechanism #69A-13 fixed in
+      // Planner.tsx/page.tsx (a bullet with no explicit "Positioning:"
+      // label fell back to the WHOLE raw line, duplicating whatever
+      // Strengths/Weaknesses/Threat below it also derived from that
+      // same line). Falls back to this table's own existing "Validation
+      // required" convention instead, matching its siblings.
       if (company || positioning || strengths || weaknesses || threat) {
         rows.push({
           company: cleanPdfExecutiveText(company || "Market participant", 44),
-          positioning: cleanPdfExecutiveText(positioning || line, 88),
+          positioning: cleanPdfExecutiveText(positioning || "Validation required", 88),
           strengths: cleanPdfExecutiveText(strengths || "Validation required", 76),
           weaknesses: cleanPdfExecutiveText(weaknesses || "Validation required", 76),
           threat: cleanPdfExecutiveText(threat || "Validation required", 64),
@@ -2647,6 +2831,32 @@ function extractCompetitorRows(content: string) {
     });
 
   return rows.slice(0, 4);
+}
+
+// TASK #69A-15 -- structured generation is now authoritative for the
+// PDF export path too, mirroring the identical fix in
+// components/Planner.tsx and app/dashboard/[id]/page.tsx: a versioned
+// businessCompetitorLandscapeState (see business-competitor-landscape-
+// state.ts) drives this table directly when present, since each field
+// was captured independently at generation time and never derived from
+// Positioning or from each other. Only a report with no such state
+// falls back to extractCompetitorRows, completely unchanged. Used at
+// BOTH the height-measurement pass and the drawing pass below, so
+// pagination and drawn content can never disagree on which rows exist.
+function resolveCompetitorRowsForPdf(report: DashboardReport, content: string) {
+  const structuredState = readBusinessCompetitorLandscapeState(report.metadata);
+
+  if (structuredState) {
+    return structuredState.competitors.map((entity) => ({
+      company: entity.type === "Substitute" ? `${entity.company} (Substitute)` : entity.company,
+      positioning: entity.positioning,
+      strengths: entity.strengths,
+      weaknesses: entity.weaknesses,
+      threat: entity.threat,
+    }));
+  }
+
+  return extractCompetitorRows(content);
 }
 
 function extractRoadmapAction(content: string, step: string) {
@@ -2867,25 +3077,21 @@ function normalizePdfKpiMetrics(content: string) {
   });
 }
 
+// TASK #69A-5 -- CRITICAL BUG FIX: used to build a positionally-ordered
+// `dimensionScoreValues` array and then look up each metric's score by
+// `dimensionScoreValues[founderScorePdfDimensionMetrics.findIndex(...)]`
+// -- an index into one array derived from a SEPARATE array's position,
+// which silently desyncs the moment either array's order/contents ever
+// change independently (see report-presentation.ts's own doc comment on
+// FOUNDER_READINESS_DIMENSIONS for the full incident). Resolving every
+// dimension directly by its own label/identity, with no intermediate
+// positional array at all, makes that class of bug structurally
+// impossible here.
 function normalizePdfFounderScoreMetrics(content: string, investmentScore?: DashboardReport["investmentScore"]) {
-  const textScoreValues = [
-    readFounderReadinessMetricValue("Founder Readiness Score", investmentScore, content),
-    readFounderReadinessMetricValue("Idea Quality", investmentScore, content),
-    readFounderReadinessMetricValue("Market Attractiveness", investmentScore, content),
-    readFounderReadinessMetricValue("Business Model Quality", investmentScore, content),
-    readFounderReadinessMetricValue("Validation Confidence", investmentScore, content),
-    readFounderReadinessMetricValue("Execution Complexity", investmentScore, content),
-    readFounderReadinessMetricValue("Evidence Confidence", investmentScore, content),
-    readFounderReadinessMetricValue("Founder Evidence", investmentScore, content),
-  ];
-  const dimensionScoreValues = textScoreValues.slice(1);
-
   return founderScorePdfDimensionMetrics.map((metric) => ({
     label: metric.label,
     aliases: metric.aliases,
-    score:
-      dimensionScoreValues[founderScorePdfDimensionMetrics.findIndex((item) => item.label === metric.label)] ??
-      readFounderReadinessMetricValue(metric.label, investmentScore, content),
+    score: readFounderReadinessMetricValue(metric.label, investmentScore, content),
   }));
 }
 
@@ -4978,12 +5184,20 @@ export function buildStandardReportPdf({
           : decisionMatch?.token.toUpperCase() ||
             formatDecisionLabel(report.investmentScore?.recommendation || detectRecommendation(content) || "") ||
             "—";
+        // TASK #69A-1 -- structured-canonical-data-first authority fix:
+        // report.investmentScore.confidence (the same canonical number
+        // every other Business Idea Validation surface -- Investment
+        // Decision Snapshot, Executive Snapshot, the Decision Summary
+        // grid, Planner.tsx's own live PDF export -- already prefers) is
+        // now checked BEFORE extractConfidence's bare-percentage prose
+        // scans, never after.
         const confidence = marketDecision
           ? marketDecision.confidenceScore
-          : extractConfidence(content) ??
-            report.investmentScore?.confidence ??
-            extractConfidence(fullReportContent) ??
-            extractScore(fullReportContent, "Investment Score");
+          : typeof report.investmentScore?.confidence === "number"
+            ? report.investmentScore.confidence
+            : extractConfidence(content) ??
+              extractConfidence(fullReportContent) ??
+              extractScore(fullReportContent, "Investment Score");
 
         const isTurkishPdf = pdfLocale === "tr";
         // P0 PRODUCTION FIX -- confirmed live (Market Intelligence
@@ -5804,7 +6018,7 @@ export function buildStandardReportPdf({
             return miHeaderHeight + Math.max(1, miRows.length) * rowHeight + 4 + marketMapGap + marketMapHeight;
           }
 
-          const rows = extractCompetitorRows(content);
+          const rows = resolveCompetitorRowsForPdf(report, content);
 
           if (rows.length === 0) {
             // P0 FIX #8 -- same self-referential copy-paste fix as the
@@ -6412,7 +6626,7 @@ export function buildStandardReportPdf({
             // would silently under-report the full table's real height.
             return (rows.length === 0 ? 8 : 12) + Math.max(1, rows.length) * 15 + 4 + 8 + 50;
           }
-          const rows = extractCompetitorRows(section.content);
+          const rows = resolveCompetitorRowsForPdf(report, section.content);
           if (rows.length === 0) {
             return 8 + 15 + 4;
           }

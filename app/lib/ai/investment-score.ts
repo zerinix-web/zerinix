@@ -13,6 +13,23 @@ export type InvestmentScoreCategoryKey =
   | "capitalEfficiency"
   | "executionRisk";
 
+// TASK #69A-17 -- the ONE canonical, deterministic, per-dimension
+// Founder Readiness score entry. `key`/`label` identify the dimension by
+// IDENTITY (matching report-presentation.ts's own FounderReadinessDimensionKey/
+// FOUNDER_READINESS_DIMENSIONS), never a positional array index, so a
+// consumer can resolve a dimension's score without ever re-deriving it
+// from prose. Optional and additive on InvestmentScoreCategory (only
+// decisionEngine.founderScore ever actually populates it) -- a report
+// persisted before this field existed simply has it undefined, which
+// every reader below treats as "fall back to the pre-existing,
+// unmodified prose/reasoning-derived extraction," never as a reason to
+// fabricate a score.
+export type FounderReadinessDimensionScoreEntry = {
+  key: string;
+  label: string;
+  score: number;
+};
+
 export type InvestmentScoreCategory = {
   key: InvestmentScoreCategoryKey;
   label: string;
@@ -20,6 +37,7 @@ export type InvestmentScoreCategory = {
   maximumScore: number;
   explanation: string;
   reasoning: string[];
+  dimensionScores?: FounderReadinessDimensionScoreEntry[];
 };
 
 export type InvestmentScore = {
@@ -509,6 +527,42 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
     ],
   });
 
+  // TASK #69A-17 -- ROOT CAUSE FIX. Confirmed live: the Founder Readiness
+  // dimension CARDS and the explanatory TEXT below them showed different
+  // numbers for the same dimension. Both ultimately trace back to this
+  // SAME teamFounder.reasoning string array above, but through TWO
+  // independently-written regex extractors -- plan-executor.ts's
+  // buildCanonicalFounderScore (an un-anchored search over the array
+  // joined with " | ") and report-presentation.ts's
+  // readFounderReasoningScore (a per-line, start-anchored search) --
+  // that have no structural guarantee of ever agreeing, since they are
+  // two separate implementations parsing the same prose independently.
+  // This array is the SAME six values as the `reasoning` strings above,
+  // computed from the SAME source variables, but as genuinely structured
+  // {key, label, score} entries requiring zero regex to read. Every
+  // downstream consumer (buildCanonicalFounderScore's own text
+  // generation, AND every renderer's card/explanation lookup via
+  // report-presentation.ts) now reads THIS array first, so the
+  // generated text and the structured score can never diverge again --
+  // they are the same number, read once. "Idea Quality" is intentionally
+  // NOT its own key here: it has no independent underlying dimension in
+  // this engine (by design -- see report-presentation.ts's own comment
+  // on FOUNDER_READINESS_DIMENSIONS) and is instead the exact same value
+  // as Market Attractiveness, unchanged from the pre-existing behavior.
+  const founderReadinessDimensionScores: FounderReadinessDimensionScoreEntry[] = [
+    { key: "ideaQuality", label: "Idea Quality", score: roundScore(ideaQualityScore * 100) },
+    { key: "marketAttractiveness", label: "Market Attractiveness", score: roundScore(ideaQualityScore * 100) },
+    {
+      key: "businessModelQuality",
+      label: "Business Model Quality",
+      score: roundScore((businessModel.score / businessModel.maximumScore) * 100),
+    },
+    { key: "validationConfidence", label: "Validation Confidence", score: roundScore(validationLevelScore * 100) },
+    { key: "executionComplexity", label: "Execution Complexity", score: roundScore(executionComplexityScore * 100) },
+    { key: "evidenceConfidence", label: "Evidence Confidence", score: roundScore(founderEvidenceScore * 100) },
+    { key: "founderEvidence", label: "Founder Evidence", score: roundScore(founderEvidenceScore * 100) },
+  ];
+
   const capitalEfficiency = makeCategory({
     key: "capitalEfficiency",
     label: "Capital Efficiency",
@@ -624,6 +678,7 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
       label: "Founder Score",
       score: roundScore((teamFounder.score / teamFounder.maximumScore) * 100),
       maximumScore: 100,
+      dimensionScores: founderReadinessDimensionScores,
     },
     executionScore: {
       ...executionRisk,

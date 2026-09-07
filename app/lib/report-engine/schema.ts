@@ -33,7 +33,23 @@ export type ReportStreamEvent<
   fatal?: boolean;
 };
 
-export function createFullReportJsonSchema(name: string, fields: readonly string[]) {
+// TASK #69A-15A -- CRITICAL ARCHITECTURAL FIX: every field this function
+// has ever produced a schema for was hardcoded to `{ type: "string" }`,
+// with no way for any ONE report type to require a genuinely structured
+// (non-string) field without changing this shared function's behavior
+// for every OTHER report type that also calls it (real estate, generic
+// domain analysis, acquisition). `fieldSchemaOverrides` is purely
+// additive and backward-compatible: every existing call site that omits
+// it (still every call site except Business Idea Validation's own,
+// after this task) produces the exact same schema as before, byte for
+// byte. Only the ONE call passing an override for a given field name
+// gets a different property schema for that field -- every other field,
+// and every other report type's schema entirely, is untouched.
+export function createFullReportJsonSchema(
+  name: string,
+  fields: readonly string[],
+  fieldSchemaOverrides?: Readonly<Record<string, Record<string, unknown>>>
+) {
   return {
     type: "json_schema" as const,
     name,
@@ -44,7 +60,7 @@ export function createFullReportJsonSchema(name: string, fields: readonly string
       properties: Object.fromEntries(
         fields.map((field) => [
           field,
-          {
+          fieldSchemaOverrides?.[field] ?? {
             type: "string",
           },
         ])
