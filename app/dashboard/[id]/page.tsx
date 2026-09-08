@@ -97,8 +97,15 @@ import {
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
   readBusinessCompetitorLandscapeState,
+  formatCompetitorWeaknessForDisplay,
   type BusinessCompetitorLandscapeState,
 } from "@/app/lib/report-engine/business-competitor-landscape-state";
+import {
+  readPortersFiveForcesState,
+  porterLevelToIntensityBar,
+  PORTER_FORCE_ORDER,
+  type PortersFiveForcesState,
+} from "@/app/lib/report-engine/porters-five-forces-state";
 import {
   resolveMarketIntelligenceDecisionChangeState,
   selectTopMarketIntelligenceEvidenceGaps,
@@ -2830,6 +2837,7 @@ function ReportSectionVisual({
   executiveSummaryContent = "",
   marketIntelligenceCanonicalState = null,
   businessCompetitorLandscapeState = null,
+  portersFiveForcesState = null,
 }: {
   title: string;
   content: string;
@@ -2859,6 +2867,13 @@ function ReportSectionVisual({
   // function's own existing extractCompetitorRows prose-parsing tiers,
   // completely unchanged.
   businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
+  // TASK #69A-28 -- the versioned, structured Porter's Five Forces
+  // snapshot captured once at generation time (see
+  // porters-five-forces-state.ts). null on every report persisted
+  // before this field existed -- falls back to this function's own
+  // existing extractForceIntensity/extractForceImplication prose-parsing
+  // tiers, completely unchanged.
+  portersFiveForcesState?: PortersFiveForcesState | null;
 }) {
   const normalizedTitle = title.toLowerCase();
   const evidenceLocale = getResponseLanguage(detectPdfPresentationLocale(content));
@@ -4035,7 +4050,7 @@ function ReportSectionVisual({
           company: entity.type === "Substitute" ? `${entity.company} (Substitute)` : entity.company,
           positioning: entity.positioning,
           strengths: entity.strengths,
-          weaknesses: entity.weaknesses,
+          weaknesses: formatCompetitorWeaknessForDisplay(entity),
           threat: entity.threat,
         }))
       : extractCompetitorRows(content);
@@ -4425,6 +4440,13 @@ function ReportSectionVisual({
 
   if (normalizedTitle.includes("porter")) {
     const forces = ["Rivalry", "Entrants", "Buyer Power", "Supplier Power", "Substitutes"];
+    // TASK #69A-28 -- forces (the short display names above) and
+    // PORTER_FORCE_ORDER (the canonical force keys) are the SAME 5
+    // forces in the SAME order by construction, never independently
+    // reordered -- this pairs each display name with its own canonical
+    // key by position, once, so every card below reads the correct
+    // force's own structured record, never a different force's.
+    const forceKeys = PORTER_FORCE_ORDER;
 
     return (
       <div className="mb-5 grid gap-4 lg:grid-cols-[0.85fr_1.15fr]">
@@ -4454,9 +4476,30 @@ function ReportSectionVisual({
           })}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          {forces.map((force) => {
-            const intensity = extractForceIntensity(content, force);
-            const implication = extractForceImplication(content, force);
+          {forces.map((force, index) => {
+            // TASK #69A-28 -- STRUCTURAL AUTHORITY FIX: the canonical
+            // record (when this report was generated after this task)
+            // is now checked FIRST for every one of the 5 forces --
+            // including Supplier Power, the confirmed-live defect this
+            // task fixes -- never independently re-derived from prose
+            // when structured data already exists. Only a report
+            // persisted before portersFiveForcesState existed falls
+            // through to the original extractForceIntensity/
+            // extractForceImplication prose scan, completely unchanged.
+            const canonicalForce = portersFiveForcesState?.forces[forceKeys[index]] ?? null;
+            const intensity = canonicalForce
+              ? porterLevelToIntensityBar(canonicalForce.level)
+              : extractForceIntensity(content, force);
+            // canonicalForce's analysis+implication are both guaranteed
+            // non-empty (porters-five-forces-state.ts never persists a
+            // blank value -- an honest "Insufficient evidence..."
+            // sentence is substituted at generation time instead), so a
+            // genuinely unavailable force still shows real, explicit
+            // text here rather than silently rendering nothing.
+            const implication = canonicalForce
+              ? `${canonicalForce.analysis} ${canonicalForce.implication}`
+              : extractForceImplication(content, force);
+            const isInsufficientEvidence = canonicalForce?.level === "Insufficient evidence";
 
             return (
               <div key={force} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
@@ -4478,7 +4521,7 @@ function ReportSectionVisual({
                   </>
                 ) : (
                   <p className="mt-4 text-xs font-semibold uppercase tracking-[0.12em] text-amber-200">
-                    Not specified
+                    {isInsufficientEvidence ? "Insufficient evidence" : "Not specified"}
                   </p>
                 )}
                 {/* CRITICAL FIX -- confirmed live: line-clamp-3 could cut
@@ -6192,6 +6235,10 @@ export default async function ReportDetailPage({
   // computed once and threaded to the Competitor Landscape card, one
   // source of truth per render, never re-derived per section.
   const businessCompetitorLandscapeState = readBusinessCompetitorLandscapeState(report.metadata);
+  // TASK #69A-28 -- mirrors the identical pattern immediately above:
+  // computed once and threaded to the Porter's Five Forces card, one
+  // source of truth per render, never re-derived per section.
+  const portersFiveForcesState = readPortersFiveForcesState(report.metadata);
   // TASK #34 FOLLOW-UP -- Sources is deliberately never rendered on any
   // surface, for every report kind including Market Intelligence
   // (presentation-only decision; see this task's own report). The
@@ -6446,6 +6493,7 @@ export default async function ReportDetailPage({
                                 }
                                 marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
                                 businessCompetitorLandscapeState={businessCompetitorLandscapeState}
+                                portersFiveForcesState={portersFiveForcesState}
                               />
                             ) : null}
                           </div>
@@ -6922,6 +6970,7 @@ export default async function ReportDetailPage({
                                 }
                                 marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
                                 businessCompetitorLandscapeState={businessCompetitorLandscapeState}
+                                portersFiveForcesState={portersFiveForcesState}
                               />
                               {/* Card-first sections (see cardFirstReportFields) already
                                   surface their COMPLETE content via a dedicated visual

@@ -151,9 +151,13 @@ test("cached reports retain their exact output and research citation provenance"
   // invariant this test is named for (cached reports retain their exact
   // output and research citation provenance) -- businessResearch is
   // still the first argument, unchanged.
+  // Argument-list-tolerant: TASK #69A-28 legitimately appended a 4th,
+  // unrelated additive argument (portersFiveForcesState); this test's
+  // own concern is only that businessResearch/businessCompetitorLandscapeState
+  // are still passed as before.
   assert.match(
     planExecutor,
-    /responseText: cacheResponseText,\s*\/\/ TASK #69A-15A[\s\S]{0,900}responseData: createReportCacheData\(\s*\n\s*businessResearch,\s*\n\s*undefined,\s*\n\s*businessCompetitorLandscapeState\s*\n\s*\),/
+    /responseText: cacheResponseText,\s*\/\/ TASK #69A-15A[\s\S]{0,1400}responseData: createReportCacheData\(\s*\n\s*businessResearch,\s*\n\s*undefined,\s*\n\s*businessCompetitorLandscapeState(?:,\s*\n\s*portersFiveForcesState)?\s*\n\s*\),/
   );
   assert.match(
     planExecutor,

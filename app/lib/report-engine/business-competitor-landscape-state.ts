@@ -62,7 +62,87 @@
 // downloadPdf, page.tsx, ReportPdfButton.tsx) keeps working completely
 // unchanged, since they all read the SAME metadata key regardless of
 // which tier actually populated it.
+// TASK #69A-29 -- Make competitor weaknesses evidence-aware, structurally
+// authoritative, and eliminate "Not available" where defensible analysis
+// exists.
+//
+// ROOT CAUSE (traced before writing any code): the structured Tier 0
+// path (buildBusinessCompetitorLandscapeStateFromStructuredResponse,
+// below) was already firing correctly for the reported case -- company/
+// type/positioning came through fine for Float/Cash Flow Frog/Futrli.
+// The defect is specifically that `weaknesses` came back null far more
+// often than `strengths` for the SAME competitors with the SAME
+// evidence available. Two contributing causes, both confirmed by
+// reading the actual prompt/schema/research code, not assumed:
+//   1. domain-research.ts's "competitors" research objective ("Verify
+//      current competitors, positioning, pricing, and substitute
+//      offerings") never asked for differentiation/limitation signals
+//      at all -- research was never directed to gather the KIND of
+//      evidence a defensible weakness needs.
+//   2. The schema's own `weaknesses` field description only ever said
+//      "use null instead of inventing a value" -- technically already
+//      permitting "a clearly evidence-grounded analytical inference"
+//      (the mapping-requirement prompt's own pre-existing phrase), but
+//      with no concrete permission or pattern for what a defensible
+//      NEGATIVE inference about a real, named company actually looks
+//      like. Confirmed asymmetric behavior: the model reliably wrote
+//      strengths (a positive claim about a named competitor) but
+//      defaulted weaknesses to null far more often -- a known LLM
+//      caution bias against negative claims about a specific real
+//      business, not a wiring bug (the field name, mapping, and
+//      persistence path are all correct and unchanged).
+//
+// FIX: weaknesses may now be a directly-evidenced fact OR a clearly
+// labeled, evidence-grounded INFERENCE (narrower target segment,
+// integration limitation, pricing friction, workflow complexity,
+// weaker scenario depth, limited prescriptive guidance, enterprise/SMB
+// mismatch, channel limitation, switching/implementation burden --
+// never a generic template weakness and never speculative criticism
+// unsupported by any evidence). The new `weaknessBasis` field makes
+// that provenance distinction structural (never prose-embedded, never
+// inferred by a renderer): "verified" when directly documented,
+// "directional" when reasonably inferred from this competitor's own
+// positioning/pricing/differentiation evidence, "unavailable" when
+// weaknesses is null. Optional (BUSINESS_COMPETITOR_LANDSCAPE_STATE_VERSION
+// stays 1, deliberately NOT bumped) so every already-persisted report's
+// existing company/type/positioning/strengths/threat data keeps working
+// completely unchanged -- historical records simply have no
+// weaknessBasis, and every renderer treats that as "no provenance
+// qualifier to show", never a fabricated one.
+//
+// TASK #69A-29A -- a fresh real regeneration after #69A-29 confirmed
+// this structural fix alone was insufficient: Float/Cash Flow Frog/
+// Futrli (real, named direct competitors) still came back with
+// weaknesses unavailable, while a generic "Spreadsheets/Quicken"
+// substitute entry got one. ROOT CAUSE, traced to the ACTUAL research-
+// execution code (not assumed): the generation-time schema/prompt
+// permission this file already added was correct, but the model had
+// nothing comparative to work with for real named competitors --
+// domain-research.ts's own `RESEARCH_DOMAIN_TASKS` config (whose
+// "competitors" objective #69A-29 widened) is DEAD configuration, never
+// read by the real research-execution path at all; the REAL,
+// load-bearing "competitors" research requirement text lives in
+// app/lib/decision-intelligence/profiles.ts's `sharedBusinessResearch`
+// (consumed by buildDecisionResearchPlan into every task's own query),
+// and domain-research.ts's own buildTaskStageQueries further enriches
+// that query from a separate `fieldSynonyms` map -- NEITHER ever
+// mentioned limitations/feature-gaps/review-platform cons, and
+// businessResearchSourceStages' own "authoritative_public" stage
+// guidance named G2/Capterra/TrustRadius/Trustpilot as sources to
+// search but never said to capture their own Cons/limitations
+// sections specifically. Generic substitutes like "spreadsheets" need
+// no fresh research at all -- the model's own general knowledge
+// already supplies an obvious, well-known limitation (manual entry, no
+// automation), which is exactly why that entry already worked while
+// real named SaaS competitors, requiring real comparative evidence,
+// did not. Fixed at the query-text layer (profiles.ts, domain-
+// research.ts) -- see those files' own #69A-29A comments -- so real
+// comparative/limitation evidence can actually reach the generation
+// step this file's own #69A-29 fix already knows how to use.
 export type BivCompetitorType = "Direct competitor" | "Substitute" | "Unknown";
+
+export const WEAKNESS_BASIS_VALUES = ["verified", "directional", "unavailable"] as const;
+export type WeaknessBasis = (typeof WEAKNESS_BASIS_VALUES)[number];
 
 export type BivCompetitorRecord = {
   company: string;
@@ -70,8 +150,30 @@ export type BivCompetitorRecord = {
   positioning: string;
   strengths: string;
   weaknesses: string;
+  // TASK #69A-29 -- optional: absent on any record built before this
+  // field existed (a historical report, or a record built by a path
+  // this task didn't touch). Present on every record Tier 0 or Tier 1
+  // build from here on.
+  weaknessBasis?: WeaknessBasis;
   threat: string;
 };
+
+// TASK #69A-29 -- the ONE canonical mapping from a competitor's
+// weakness + its provenance onto display text, used by every renderer
+// (web table x2, PDF x2) instead of reading `weaknesses` raw -- so the
+// "(directional)" qualifier can never appear in one renderer and not
+// another for the same persisted report. Never called for a "—"
+// (unavailable) weakness, and never appends anything when basis is
+// "verified" or absent (undefined -- a historical record, or a
+// genuinely verified one) so the common case's visible text is
+// byte-identical to before this task.
+export function formatCompetitorWeaknessForDisplay(record: Pick<BivCompetitorRecord, "weaknesses" | "weaknessBasis">) {
+  if (record.weaknesses === "—" || record.weaknessBasis !== "directional") {
+    return record.weaknesses;
+  }
+
+  return `${record.weaknesses} (directional)`;
+}
 
 export const BUSINESS_COMPETITOR_LANDSCAPE_STATE_VERSION = 1;
 
@@ -133,12 +235,20 @@ export function parseStructuredCompetitorLines(content: string): BivCompetitorRe
       continue;
     }
 
+    const normalizedWeaknesses = normalizeStructuredCompetitorFieldValue(weaknesses);
+
     records.push({
       company: company.trim(),
       type: normalizeStructuredCompetitorType(type),
       positioning: normalizeStructuredCompetitorFieldValue(positioning),
       strengths: normalizeStructuredCompetitorFieldValue(strengths),
-      weaknesses: normalizeStructuredCompetitorFieldValue(weaknesses),
+      weaknesses: normalizedWeaknesses,
+      // TASK #69A-29 -- the labeled-line prose format (Tier 1) carries
+      // no provenance signal of its own, so a real, non-"—" value here
+      // can never be confirmed as "verified" -- "directional" is the
+      // honest, conservative default for anything Tier 1 recovers from
+      // free text.
+      weaknessBasis: normalizedWeaknesses === "—" ? "unavailable" : "directional",
       threat: normalizeStructuredCompetitorFieldValue(threat),
     });
   }
@@ -208,7 +318,13 @@ export const BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA = {
       weaknesses: {
         type: ["string", "null"],
         description:
-          "This competitor's own specific weakness, distinct from positioning. Null if not supported by evidence -- never copy positioning here.",
+          "This competitor's own specific, defensible weakness or limitation, distinct from positioning -- never copy positioning here. May be a DIRECTLY documented weakness (a review, comparison, or stated limitation) OR a clearly reasonable, company-specific INFERENCE grounded in this competitor's own positioning/pricing/differentiation/review evidence already gathered (e.g. narrower target segment, integration limitation, pricing friction, workflow complexity, weaker scenario depth, limited prescriptive guidance, enterprise/SMB mismatch, channel limitation, or switching/implementation burden). A directional inference requires a clear evidence-backed comparison (e.g. this competitor explicitly lacks a feature multiple comparable alternatives support, or its own review/comparison evidence names a specific, material limitation) -- NEVER generic sentiment (\"seems expensive\", \"looks outdated\", \"probably weak\") or assumptions based only on company size/age. Do not default to null merely because no explicit negative statement exists -- an evidence-grounded inference is expected when the evidence supports one. Null only when neither a documented weakness nor a defensible, comparison-backed inference exists for this specific competitor.",
+      },
+      weaknessBasis: {
+        type: "string",
+        enum: [...WEAKNESS_BASIS_VALUES],
+        description:
+          "Provenance of the weaknesses field above. \"verified\" ONLY when the evidence registry directly documents this weakness by name. \"directional\" when it is a reasonable inference from this competitor's own positioning/pricing/differentiation evidence rather than a directly stated fact. \"unavailable\" if and only if weaknesses is null.",
       },
       threat: {
         type: ["string", "null"],
@@ -216,7 +332,7 @@ export const BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA = {
           "Low, Medium, or High, or a short phrase describing this competitor's own competitive threat level. Null if not supported by evidence -- never copy positioning here.",
       },
     },
-    required: ["company", "type", "positioning", "strengths", "weaknesses", "threat"],
+    required: ["company", "type", "positioning", "strengths", "weaknesses", "weaknessBasis", "threat"],
   },
 } as const;
 
@@ -241,6 +357,22 @@ export function buildBusinessCompetitorLandscapeStateFromStructuredResponse(
   const readNullableField = (value: unknown) =>
     typeof value === "string" && value.trim() ? normalizeStructuredCompetitorFieldValue(value) : "—";
 
+  // TASK #69A-29 -- never trust the model's own weaknessBasis blindly:
+  // "verified" is only honored when weaknesses is actually non-"—" AND
+  // the model explicitly said "verified"; any other combination
+  // (missing, malformed, or a "verified" claim with no actual
+  // weakness text) safely resolves to "directional"/"unavailable" by
+  // the SAME rule the schema itself requires (basis must match
+  // whether weaknesses is null), so a schema-non-compliant response
+  // can never silently claim stronger provenance than it earned.
+  const resolveWeaknessBasis = (weaknesses: string, rawBasis: unknown): WeaknessBasis => {
+    if (weaknesses === "—") {
+      return "unavailable";
+    }
+
+    return rawBasis === "verified" ? "verified" : "directional";
+  };
+
   for (const entry of raw) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       continue;
@@ -261,12 +393,15 @@ export function buildBusinessCompetitorLandscapeStateFromStructuredResponse(
 
     seenCompanyNames.add(key);
 
+    const weaknesses = readNullableField(record.weaknesses);
+
     competitors.push({
       company,
       type: normalizeStructuredCompetitorType(typeof record.type === "string" ? record.type : ""),
       positioning: readNullableField(record.positioning),
       strengths: readNullableField(record.strengths),
-      weaknesses: readNullableField(record.weaknesses),
+      weaknesses,
+      weaknessBasis: resolveWeaknessBasis(weaknesses, record.weaknessBasis),
       threat: readNullableField(record.threat),
     });
   }

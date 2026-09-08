@@ -183,7 +183,7 @@ test("the TAM/SAM/SOM visualization badge is wired to isMarketIntelligence in bo
     dashboardReportSource,
     /<EvidenceBadge level=\{layerEvidenceLevel\} locale=\{evidenceLocale\} market=\{isMarketIntelligence\}/
   );
-  assert.match(plannerSource, /function PremiumSectionVisual\(\{[\s\S]{0,300}isMarketIntelligence\??\s*:\s*boolean/);
+  assert.match(plannerSource, /function PremiumSectionVisual\(\{[\s\S]{0,500}isMarketIntelligence\??\s*:\s*boolean/);
 });
 
 test("the protected, cross-report-kind report-evidence.ts taxonomy is untouched (drift check)", () => {

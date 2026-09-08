@@ -92,11 +92,16 @@ function createAiCacheKeyMirror(parts) {
 // --- Root cause confirmation (final-report items 1/2/3) ------------------
 
 test("root cause confirmation: domain-research.ts has a dedicated 'competitors' research field aimed at named competitor identification", () => {
+  // TASK #69A-29 -- widened this objective's own text (additively) to
+  // also ask for differentiation/limitation signals, so a defensible
+  // weakness inference has real evidence to point to. Still the same
+  // dedicated field, still only ever asking for real, verifiable
+  // evidence -- never a directive to invent one.
   const domainResearchSource = readFileSync(join(repoRoot, "app/lib/ai/domain-research.ts"), "utf8");
   assert.match(domainResearchSource, /field: "competitors",/);
   assert.match(
     domainResearchSource,
-    /objective: "Verify current competitors, positioning, pricing, and substitute offerings\."/
+    /objective:\s*\n?\s*"Verify current competitors, positioning, pricing, substitute offerings, and any differentiation, target-segment, or limitation signals that could support a strengths\/weaknesses comparison\."/
   );
 });
 
@@ -159,13 +164,20 @@ test("fix proof: the schema's own top-level description was strengthened with ma
   }
 });
 
-test("fix proof: the schema's structural contract (type/required/nullability) is completely unchanged -- only the description text was strengthened, never the shape OpenAI's strict mode validates against", () => {
+test("[UPDATED BY #69A-29] fix proof: #69A-16's OWN fix only strengthened description text, never the shape OpenAI's strict mode validates against -- #69A-29 later legitimately added a new required property (weaknessBasis) for its own, separately-ticketed reason", () => {
+  // TASK #69A-29 -- added weaknessBasis (a real structural change, not
+  // a #69A-16 regression): a required, non-nullable provenance enum
+  // for the weaknesses field, so "verified" vs "directional" vs
+  // "unavailable" is a structural fact, never inferred by a renderer.
+  // The array/object/additionalProperties shape and strengths' own
+  // nullability -- the parts #69A-16 itself never touched -- remain
+  // exactly as they were.
   assert.equal(BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA.type, "array");
   assert.equal(BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA.items.type, "object");
   assert.equal(BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA.items.additionalProperties, false);
   assert.deepEqual(
     [...BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA.items.required].sort(),
-    ["company", "positioning", "strengths", "threat", "type", "weaknesses"]
+    ["company", "positioning", "strengths", "threat", "type", "weaknessBasis", "weaknesses"]
   );
   assert.deepEqual(BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA.items.properties.strengths.type, ["string", "null"]);
 });
@@ -191,12 +203,21 @@ test("scope proof: this fix's new prompt paragraph and description text appear O
 
 // --- Cache: version bump proof (final-report item 5) ---------------------
 
-test("cache proof: BUSINESS_PLAN_GENERATION_CONTRACT_VERSION was bumped to a v2 (or later) value, distinct from #69A-15B's original v1, because the prompt TEXT (not just the schema) changed", () => {
-  const match = /const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "competitor-structured-v(\d+)";/.exec(
-    planExecutorSource
-  );
+test("[UPDATED BY #69A-28] cache proof: BUSINESS_PLAN_GENERATION_CONTRACT_VERSION was bumped to a value distinct from #69A-15B's original v1 ('competitor-structured-v1') and #69A-16's own v2 ('competitor-structured-v2'), because the generation contract changed again", () => {
+  // TASK #69A-28 -- this constant's own NAMING convention is not fixed
+  // forever (it is a free-form cache-busting tag, not a strict
+  // "competitor-structured-vN" counter) -- #69A-28 renamed it to
+  // "porter-structured-v3" when it added the schema-enforced Porter's
+  // Five Forces key, on top of (not replacing) #69A-16's own
+  // competitor-mapping contract change. This test now proves the
+  // weaker, still-meaningful invariant every future ticket that bumps
+  // this constant can keep satisfying: the value differs from both
+  // prior historical values, so a stale cache entry from either era
+  // still misses.
+  const match = /const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "([^"]+)";/.exec(planExecutorSource);
   assert.ok(match, "expected the versioned contract constant to still exist");
-  assert.ok(Number(match[1]) >= 2, `expected the version number to be bumped past 1 for this ticket's prompt change, got v${match[1]}`);
+  assert.notEqual(match[1], "competitor-structured-v1", "#69A-15B's original value must not still be in use");
+  assert.notEqual(match[1], "competitor-structured-v2", "#69A-16's value must not still be in use unchanged");
 });
 
 test("cache proof: the SAME reportVariant call site (business-plan, fullReportCacheKey) is the one carrying the bumped version -- untouched real_estate/domain_decision_analysis call sites still don't reference it", () => {
@@ -208,10 +229,8 @@ test("cache proof: the SAME reportVariant call site (business-plan, fullReportCa
   assert.equal(contractVersionUsageCount, 2, "expected exactly one declaration + one usage, unchanged in count/location from #69A-15B");
 });
 
-test("cache proof: a cache key computed under the OLD v1 contract tag differs from one computed under the CURRENT contract tag for the identical business idea/model/financial-assumptions -- so a pre-#69A-16 cache entry is guaranteed to miss and force a genuine, contract-compliant model call", () => {
-  const currentVersionMatch = /const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "(competitor-structured-v\d+)";/.exec(
-    planExecutorSource
-  );
+test("[UPDATED BY #69A-28] cache proof: a cache key computed under the OLD v1 contract tag differs from one computed under the CURRENT contract tag for the identical business idea/model/financial-assumptions -- so a pre-#69A-16 cache entry is guaranteed to miss and force a genuine, contract-compliant model call", () => {
+  const currentVersionMatch = /const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "([^"]+)";/.exec(planExecutorSource);
   assert.ok(currentVersionMatch);
   const currentVersion = currentVersionMatch[1];
   assert.notEqual(currentVersion, "competitor-structured-v1", "this ticket must have bumped past v1");

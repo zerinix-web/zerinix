@@ -392,14 +392,22 @@ test("requirement I: plan-executor.ts's own #69A-15C changes are confined to nor
   const markerCount = (planExecutorSource.match(/#69A-15C/g) || []).length;
   assert.equal(markerCount, 0, "this fix requires no change inside plan-executor.ts itself -- the corruption is a renderer-side (Tier 2) defect, not a generation-side one");
   // #69A-15A/15B's own load-bearing mechanisms remain byte-present.
+  // Field-list-tolerant: TASK #69A-28 legitimately appended a second,
+  // unrelated schema-enforced key ("portersFiveForcesStructured") to
+  // this SAME array; this test's own concern is only that
+  // competitorLandscapeStructured itself is still requested, not that
+  // it is the array's only member.
   assert.match(
     planExecutorSource,
-    /format: createFullReportJsonSchema\(\s*\n\s*"zerinix_business_plan_report",\s*\n\s*\[\.\.\.planFields, "competitorLandscapeStructured"\],/
+    /format: createFullReportJsonSchema\(\s*\n\s*"zerinix_business_plan_report",\s*\n\s*\[\.\.\.planFields, "competitorLandscapeStructured"(?:, "portersFiveForcesStructured")?\],/
   );
   // Version-tolerant: TASK #69A-16 legitimately bumped this v1 -> v2 for
-  // an unrelated (prompt-strengthening) contract change; this test's own
-  // concern is only that the mechanism still exists, not its exact value.
-  assert.match(planExecutorSource, /const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "competitor-structured-v\d+";/);
+  // an unrelated (prompt-strengthening) contract change, and TASK
+  // #69A-28 renamed/bumped it again (v2 -> "porter-structured-v3") for
+  // its own, also-unrelated, schema-enforcement change; this test's own
+  // concern is only that the mechanism still exists, not its exact
+  // value or naming convention.
+  assert.match(planExecutorSource, /const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "[^"]+";/);
 });
 
 // --- Tier 0 / Tier 1 untouched (business-competitor-landscape-state.ts) --

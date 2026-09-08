@@ -503,7 +503,15 @@ const domainDefinitions: Record<
       },
       {
         field: "competitors",
-        objective: "Verify current competitors, positioning, pricing, and substitute offerings.",
+        // TASK #69A-29 -- additive widening only: this objective never
+        // asked for differentiation/limitation-relevant evidence at
+        // all, so a defensible, evidence-grounded competitor weakness
+        // had nothing to point to even when the model was later
+        // instructed it could infer one. Still asks only for real,
+        // verifiable evidence -- never a directive to invent a
+        // weakness.
+        objective:
+          "Verify current competitors, positioning, pricing, substitute offerings, and any differentiation, target-segment, or limitation signals that could support a strengths/weaknesses comparison.",
         preferredSources: ["official company website", "company filing", "regulator"],
       },
     ],
@@ -1189,8 +1197,16 @@ const businessResearchSourceStages: Array<{
   {
     id: "authoritative_public",
     sourcePriority: "competitor and product evidence",
+    // TASK #69A-29A -- this guidance already named review platforms
+    // (G2/Capterra/TrustRadius/Trustpilot) as sources to search, but
+    // never said WHAT to extract from them -- confirmed live: a
+    // competitor's own review-platform page routinely returns
+    // positioning/pricing/feature facts without ever surfacing that
+    // same page's own "Cons"/limitations section, since nothing asked
+    // for it specifically. Same sources, same number of searches --
+    // this only widens what to look for once a page is already found.
     guidance:
-      "Search named competitor company sites, product review platforms (e.g. G2, Capterra, TrustRadius, Trustpilot), app/marketplace listings, and funding or press coverage for real, named companies actively operating in this exact category or a closely adjacent one.",
+      "Search named competitor company sites, product review platforms (e.g. G2, Capterra, TrustRadius, Trustpilot), app/marketplace listings, and funding or press coverage for real, named companies actively operating in this exact category or a closely adjacent one. When a review-platform or comparison page is found, capture its own documented limitations, feature gaps, or \"cons\"/drawbacks section too -- not only its positioning, features, or pricing.",
   },
   {
     id: "commercial_market",
@@ -1406,7 +1422,20 @@ export function buildTaskStageQueries({
     amenities_projects: "nearby transport public project school hospital industrial zone yakın ulaşım kamu projesi okul hastane sanayi bölgesi",
     regional_development: "regional investment projects development infrastructure bölgesel yatırım proje gelişim",
     geospatial_context: "map coordinates satellite cadastral geography harita koordinat uydu kadastro",
-    competitors: "multiple independent competitors vendors major players positioning market share",
+    // TASK #69A-29A -- ROOT CAUSE FIX: this synonym string is what
+    // actually widens EVERY "competitors"-field task's real search
+    // query text (see buildTaskStageQueries's own return statement
+    // below) -- it never mentioned limitations, feature gaps, pricing
+    // constraints, or review-platform cons/drawbacks at all, so a named
+    // competitor's own strengths/positioning surfaced readily while a
+    // defensible weakness had nothing comparative to point to, even
+    // though businessResearchSourceStages' own "authoritative_public"
+    // stage already instructs searching G2/Capterra/TrustRadius/
+    // Trustpilot -- those pages were being searched, but never for
+    // their own Cons/limitations sections specifically. Same query
+    // budget, same number of search calls -- only the search TERMS are
+    // richer.
+    competitors: "multiple independent competitors vendors major players positioning market share pricing feature comparison limitations gaps cons drawbacks reviews alternatives",
     // REQUIRED RESEARCH HIERARCHY (evidence-first market-sizing engine):
     // biases the SAME query budget toward the source types
     // market-intelligence-graph.ts's buildPlanningEstimate actually ranks

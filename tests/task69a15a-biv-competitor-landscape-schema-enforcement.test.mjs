@@ -146,24 +146,35 @@ test("requirement A: createFullReportJsonSchema, with fieldSchemaOverrides, prod
   assert.equal(schema.strict, true);
 });
 
-test("requirement A: every per-competitor field except company/type is nullable (\"string\" | \"null\"), enforcing structure without forcing fabricated content", () => {
+test("requirement A: every per-competitor field except company/type/weaknessBasis is nullable (\"string\" | \"null\"), enforcing structure without forcing fabricated content", () => {
+  // TASK #69A-29 added a 7th property, weaknessBasis -- a required,
+  // non-nullable enum (it always has a value: "verified"/"directional"/
+  // "unavailable", never null itself; whether a real weakness exists is
+  // expressed by weaknesses being null, not by this field being absent).
   const props = BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA.items.properties;
   assert.deepEqual(props.positioning.type, ["string", "null"]);
   assert.deepEqual(props.strengths.type, ["string", "null"]);
   assert.deepEqual(props.weaknesses.type, ["string", "null"]);
   assert.deepEqual(props.threat.type, ["string", "null"]);
   assert.equal(props.company.type, "string");
+  assert.equal(props.weaknessBasis.type, "string");
+  assert.deepEqual([...props.weaknessBasis.enum].sort(), ["directional", "unavailable", "verified"]);
   // OpenAI's strict json_schema mode requires EVERY property to be
   // listed in `required` (nullability, not omission, is how optionality
-  // is expressed) -- confirm all six are present.
+  // is expressed) -- confirm all seven are present.
   assert.deepEqual(
     [...BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA.items.required].sort(),
-    ["company", "positioning", "strengths", "threat", "type", "weaknesses"]
+    ["company", "positioning", "strengths", "threat", "type", "weaknessBasis", "weaknesses"]
   );
 });
 
 test("requirement A: plan-executor.ts's business-plan generation call requests competitorLandscapeStructured, scoped to ONLY that one call -- planFields itself is never mutated", () => {
-  const callMatch = /format: createFullReportJsonSchema\(\s*\n\s*"zerinix_business_plan_report",\s*\n\s*\[\.\.\.planFields, "competitorLandscapeStructured"\],\s*\n\s*\{ competitorLandscapeStructured: BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA \}\s*\n\s*\),/.exec(
+  // Field-list-tolerant: TASK #69A-28 legitimately appended a second,
+  // unrelated schema-enforced key ("portersFiveForcesStructured") and
+  // its own override entry to this SAME call; this test's own concern
+  // is only that competitorLandscapeStructured itself is still
+  // requested with its own schema override intact.
+  const callMatch = /format: createFullReportJsonSchema\(\s*\n\s*"zerinix_business_plan_report",\s*\n\s*\[\.\.\.planFields, "competitorLandscapeStructured"(?:, "portersFiveForcesStructured")?\],\s*\n\s*\{[\s\S]{0,300}?competitorLandscapeStructured: BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA[\s\S]{0,300}?\}\s*\n\s*\),/.exec(
     planExecutorSource
   );
   assert.ok(callMatch, "business-plan generation call not found with the expected schema-override shape");
@@ -274,7 +285,12 @@ test("requirement D: the builder's own source contains no code path that reads .
   assert.ok(fnMatch);
   assert.match(fnMatch[0], /positioning: readNullableField\(record\.positioning\)/);
   assert.match(fnMatch[0], /strengths: readNullableField\(record\.strengths\)/);
-  assert.match(fnMatch[0], /weaknesses: readNullableField\(record\.weaknesses\)/);
+  // TASK #69A-29 -- weaknesses is now read into a local const first
+  // (so weaknessBasis can be derived from the SAME resolved value,
+  // never re-reading record.weaknesses a second time), then referenced
+  // by shorthand in the pushed object -- still read from its own
+  // independently-named raw property, never from .positioning.
+  assert.match(fnMatch[0], /const weaknesses = readNullableField\(record\.weaknesses\);/);
   assert.match(fnMatch[0], /threat: readNullableField\(record\.threat\)/);
 });
 
@@ -318,10 +334,15 @@ test("requirement F: a cache entry written before this task (no businessCompetit
 });
 
 test("requirement F: research-cache.ts's REAL createReportCacheData/getCachedBusinessCompetitorLandscapeStateFromReportData match the mirror's logic exactly (source-shape verification, since \"server-only\" blocks a direct import in this test runner)", () => {
+  // Signature-tolerant: TASK #69A-28 legitimately appended a 4th,
+  // unrelated optional parameter (portersFiveForcesState) to
+  // createReportCacheData; this test's own concern is only that
+  // businessCompetitorLandscapeState's own 3rd-argument handling is
+  // still present and correct.
   const researchCacheSource = readFileSync(join(repoRoot, "app/lib/ai/research-cache.ts"), "utf8");
   assert.match(
     researchCacheSource,
-    /export function createReportCacheData\(\s*\n\s*research: DomainResearchBundle,\s*\n\s*marketIntelligenceGraph\?: MarketIntelligenceGraph,\s*\n\s*businessCompetitorLandscapeState\?: BusinessCompetitorLandscapeState \| null\s*\n\)\s*\{\s*\n\s*return \{\s*\n\s*version: REPORT_CACHE_VERSION,\s*\n\s*research,\s*\n\s*\.\.\.\(marketIntelligenceGraph \? \{ marketIntelligenceGraph \} : \{\}\),\s*\n\s*\.\.\.\(businessCompetitorLandscapeState \? \{ businessCompetitorLandscapeState \} : \{\}\),\s*\n\s*\};\s*\n\}/
+    /export function createReportCacheData\(\s*\n\s*research: DomainResearchBundle,\s*\n\s*marketIntelligenceGraph\?: MarketIntelligenceGraph,\s*\n\s*businessCompetitorLandscapeState\?: BusinessCompetitorLandscapeState \| null,?\s*\n(?:\s*portersFiveForcesState\?: PortersFiveForcesState \| null\s*\n)?\)\s*\{\s*\n\s*return \{\s*\n\s*version: REPORT_CACHE_VERSION,\s*\n\s*research,\s*\n\s*\.\.\.\(marketIntelligenceGraph \? \{ marketIntelligenceGraph \} : \{\}\),\s*\n\s*\.\.\.\(businessCompetitorLandscapeState \? \{ businessCompetitorLandscapeState \} : \{\}\),/
   );
   assert.match(
     researchCacheSource,
@@ -334,9 +355,11 @@ test("requirement F: research-cache.ts's REAL createReportCacheData/getCachedBus
 });
 
 test("requirement F: plan-executor.ts persists businessCompetitorLandscapeState alongside the AI response cache write, and reads it back at the cache-hit path, preferring it over the Tier 1 prose parse", () => {
+  // Argument-list-tolerant: TASK #69A-28 legitimately appended a 4th
+  // argument (portersFiveForcesState) to this same call.
   assert.match(
     planExecutorSource,
-    /responseData: createReportCacheData\(\s*\n\s*businessResearch,\s*\n\s*undefined,\s*\n\s*businessCompetitorLandscapeState\s*\n\s*\),/
+    /responseData: createReportCacheData\(\s*\n\s*businessResearch,\s*\n\s*undefined,\s*\n\s*businessCompetitorLandscapeState(?:,\s*\n\s*portersFiveForcesState)?\s*\n\s*\),/
   );
   assert.match(
     planExecutorSource,

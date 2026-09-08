@@ -50,6 +50,7 @@ import {
   getConversationResearchSnapshot,
   getCachedResearchFromReportData,
   getCachedBusinessCompetitorLandscapeStateFromReportData,
+  getCachedPortersFiveForcesStateFromReportData,
   logSkippedResearchForReportCache,
   resolveDomainResearchWithCache,
   type ResearchCacheIdentity,
@@ -235,6 +236,11 @@ import {
   type BusinessCompetitorLandscapeState,
 } from "@/app/lib/report-engine/business-competitor-landscape-state";
 import {
+  buildPortersFiveForcesStateFromStructuredResponse,
+  PORTERS_FIVE_FORCES_JSON_SCHEMA,
+  type PortersFiveForcesState,
+} from "@/app/lib/report-engine/porters-five-forces-state";
+import {
   assessLegalResearchCoverage,
   prepareLegalDecisionReport,
 } from "@/app/lib/report-engine/legal-report-quality";
@@ -271,6 +277,13 @@ type PlanReportMetadataChunk = {
     // time it is set -- never sent as a partial patch that could drop
     // the earlier chunk's own fields.
     businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
+    // TASK #69A-28 -- same additive-optional contract as
+    // businessCompetitorLandscapeState immediately above: only present
+    // once portersFiveForcesStructured has actually been parsed and
+    // validated (all 5 canonical forces present), sent alongside every
+    // other field in the SAME chunk so worker.ts's wholesale metadata
+    // replacement never drops it.
+    portersFiveForcesState?: PortersFiveForcesState | null;
   };
 };
 
@@ -297,8 +310,28 @@ const DECISION_INTELLIGENCE_PIPELINE = "decision_intelligence_v1";
 // mapping instruction) -- a cache entry written before this exists could
 // have a schema-valid but empty/near-empty competitorLandscapeStructured
 // array even when real competitor evidence existed, and must not be
-// served as if it reflects the new, stronger contract.
-const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "competitor-structured-v2";
+// served as if it reflects the new, stronger contract. TASK #69A-28
+// bumped this again (v2 -> v3): a NEW schema-enforced
+// "portersFiveForcesStructured" key was added to this SAME generation
+// call (see PORTERS_FIVE_FORCES_JSON_SCHEMA) -- a cache entry written
+// before this exists has no such key at all, and must not be served as
+// if it already carries the structured Porter's Five Forces state this
+// task's completeness invariant depends on. TASK #69A-29 bumped this
+// again (v3 -> v4): competitorLandscapeStructured's own per-competitor
+// schema gained a new required "weaknessBasis" field and the
+// weaknesses field's own description/inference guidance changed -- a
+// cache entry written before this exists has no weaknessBasis key at
+// all and was generated under the old, more conservative weaknesses
+// guidance, and must not be served as if it already reflects this
+// task's evidence-aware inference requirement. TASK #69A-29A bumped
+// this again (v4 -> v5): the weaknesses/weaknessBasis mapping-
+// requirement paragraph gained explicit comparative-inference rules
+// (what counts as a defensible directional inference vs. prohibited
+// generic sentiment) and a source-preference order -- a cache entry
+// written before this exists was generated under the looser, less
+// specific guidance and must not be served as if it already reflects
+// this task's stricter negative-claim safety rules.
+const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "weakness-comparison-rules-v5";
 const FULL_REPORT_MAX_OUTPUT_TOKENS = 8_000;
 const FULL_REPORT_OPENAI_TIMEOUT_MS = 24_000;
 const REAL_ESTATE_REPORT_TIMEOUT_MS = 60_000;
@@ -545,7 +578,8 @@ function serializePlanReportChunks(report: Record<PlanReportField, string>) {
 
 function serializePlanReportMetadataChunk(
   context: AiFinancialModelContext,
-  businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null
+  businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null,
+  portersFiveForcesState?: PortersFiveForcesState | null
 ) {
   const chunk: PlanReportMetadataChunk = {
     reportMetadata: {
@@ -555,6 +589,7 @@ function serializePlanReportMetadataChunk(
       reportQuality: context.reportIntelligence,
       validationIntelligence: context.validationIntelligenceV2,
       ...(businessCompetitorLandscapeState ? { businessCompetitorLandscapeState } : {}),
+      ...(portersFiveForcesState ? { portersFiveForcesState } : {}),
     },
   };
 
@@ -9159,6 +9194,12 @@ Write only the content for this section. Do not write a JSON object, field name,
           getCachedBusinessCompetitorLandscapeStateFromReportData(
             cachedFullReport.responseData
           );
+        // TASK #69A-28 -- mirrors cachedBusinessCompetitorLandscapeState
+        // immediately above, for the structured Porter's Five Forces
+        // state persisted alongside this cache entry.
+        const cachedPortersFiveForcesState = getCachedPortersFiveForcesStateFromReportData(
+          cachedFullReport.responseData
+        );
         const cachedMarketResearchCoverageResult = cachedBusinessResearch
           ? applyMarketResearchCoverageToContext(
               canonicalFinancialAssumptions,
@@ -9275,7 +9316,12 @@ Write only the content for this section. Do not write a JSON object, field name,
             // labeled-line text parse (Tier 1), mirroring the
             // live-generation path's identical tier preference.
             cachedBusinessCompetitorLandscapeState ||
-              buildBusinessCompetitorLandscapeState(parsedCachedReport.competitorLandscape)
+              buildBusinessCompetitorLandscapeState(parsedCachedReport.competitorLandscape),
+            // TASK #69A-28 -- no Tier 1 fallback exists for Porter (see
+            // its own comment at the live-generation call site): null
+            // here correctly falls through to each renderer's own
+            // pre-existing prose-parsing tiers, unchanged.
+            cachedPortersFiveForcesState
           ) + serializePlanReportChunks(parsedCachedReport)
         ), {
           headers: {
@@ -9436,6 +9482,11 @@ ${compactFieldContracts}
 Competitor Landscape structured mapping requirement (competitorLandscapeStructured):
 Identify every distinct, real, named competitor or substitute company supported by the research evidence registry above (evidence fields such as Competitors, Vendor Discovery, or Product Evidence). For each one, set company to its real name, and independently set positioning, strengths, weaknesses, and threat ONLY when the evidence registry -- or a clearly evidence-grounded analytical inference -- supports that specific attribute; use null for any attribute the evidence does not support. Never invent a company, and never invent strengths, weaknesses, or threat merely to fill every field. Include a competitor even when only its identity and positioning are supported -- do not omit it for lacking strengths/weaknesses/threat evidence. If the evidence registry names zero real competitors, return an empty array for competitorLandscapeStructured rather than fabricating one.
 
+Competitor weaknesses honesty and inference requirement (weaknesses/weaknessBasis): do not default weaknesses to null merely because the evidence registry contains no explicit negative statement about that competitor -- a defensible, company-specific inference is expected whenever the SAME positioning/pricing/differentiation/review evidence already used for that competitor's strengths/positioning supports one. Valid inferred-weakness categories include: narrower target segment, integration limitation, pricing friction relative to alternatives, workflow complexity, weaker scenario depth, limited prescriptive guidance, enterprise/SMB mismatch, channel limitation, or switching/implementation burden. A DIRECTIONAL inference requires a clear evidence-backed comparison -- e.g. this competitor explicitly lacks a feature multiple comparable alternatives support, its documented positioning is narrower than the analyzed business's target workflow, or its own review-platform/comparison evidence names a specific, material limitation. NEVER produce a weakness from: generic sentiment ("seems expensive", "looks outdated", "probably weak"), assumptions based only on company size/age, or unsupported negative opinion with no evidence behind it -- those must resolve to null/"unavailable", not a guessed weakness. Prefer evidence in this order when more than one is available: (1) official product/pricing/feature documentation, (2) official integration documentation, (3) credible third-party comparisons, (4) documented customer reviews, (5) your own comparative inference grounded in structured evidence already gathered. Set weaknessBasis to "verified" only when the evidence registry directly documents a weakness by name; set it to "directional" when the weakness is your own reasonable inference from that competitor's evidence rather than a directly stated fact. Set weaknesses to null and weaknessBasis to "unavailable" only when neither a documented weakness nor a defensible inference exists for that specific competitor -- never fabricate a weakness with no evidentiary basis at all, and never write generic template criticism that could apply to any competitor.
+
+Porter's Five Forces structured completeness requirement (portersFiveForcesStructured):
+Populate all five named forces -- competitiveRivalry, threatOfNewEntrants, buyerPower, supplierPower, threatOfSubstitutes -- independently and completely; never omit one or leave it thin because the others took more of your attention. Ground each force's level/analysis/implication in this specific business's own value chain, switching costs, distribution dependencies, or margin pressure. For supplierPower specifically, identify this business's own real upstream/platform dependencies as implied by its described product, data, or infrastructure needs (e.g. data or accounting integrations, cloud/AI/model infrastructure, payment rails, or other dependencies actually implied by the business/research context above) -- never a generic or unrelated industry's suppliers. If the business/research context genuinely does not support a defensible rating for a force, set that force's level to "Insufficient evidence" and say so honestly in its analysis/implication -- never fabricate certainty, and never leave any of the five forces blank or missing.
+
 Report quality rules:
 ${buildFullReportStructureDirectives("business_plan").map((directive) => `- ${directive}`).join("\n")}
 ${executiveDecisionSystemVerboseRules}- First silently construct the full Integrated Strategy Model. Do not output it.
@@ -9582,10 +9633,30 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
                       // enforcement, not the advisory prompt convention
                       // #69A-15 tried first and a real regeneration
                       // proved insufficient.
+                      //
+                      // TASK #69A-28 -- same mechanism, same file, a
+                      // SECOND new additional top-level key:
+                      // "portersFiveForcesStructured", scoped the same
+                      // way via the same fieldSchemaOverrides parameter.
+                      // portersFiveForces (one of planFields, the
+                      // existing free-prose string) stays completely
+                      // unchanged. Root cause this fixes: portersFiveForces
+                      // was pure free-form prose with no completeness
+                      // guarantee, and Supplier Power -- the most
+                      // abstract of the five forces -- was confirmed
+                      // live to be the one most often left with an
+                      // empty/missing analysis even though its heading
+                      // still rendered. OpenAI's strict json_schema mode
+                      // now VALIDATES the response against
+                      // PORTERS_FIVE_FORCES_JSON_SCHEMA (all 5 named
+                      // forces required) before ever returning it.
                       format: createFullReportJsonSchema(
                         "zerinix_business_plan_report",
-                        [...planFields, "competitorLandscapeStructured"],
-                        { competitorLandscapeStructured: BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA }
+                        [...planFields, "competitorLandscapeStructured", "portersFiveForcesStructured"],
+                        {
+                          competitorLandscapeStructured: BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA,
+                          portersFiveForcesStructured: PORTERS_FIVE_FORCES_JSON_SCHEMA,
+                        }
                       ),
                     },
                   }, { signal: reportAbort.signal })
@@ -9701,6 +9772,28 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
               buildBusinessCompetitorLandscapeStateFromStructuredResponse(
                 structuredCompetitorLandscapeResponse
               ) || buildBusinessCompetitorLandscapeState(parsedReport.competitorLandscape);
+            // TASK #69A-28 -- Tier 0 (authoritative), same mechanism as
+            // competitorLandscapeStructured immediately above:
+            // portersFiveForcesStructured is a schema-only key, never
+            // one of planFields. No Tier 1 exists here (unlike
+            // competitor landscape, portersFiveForces' own free prose
+            // has never had a deterministic labeled-line format to
+            // parse) -- null falls straight through to each renderer's
+            // own pre-existing, unmodified forceAliases/
+            // extractForceIntensity/extractForceImplication prose-scan
+            // tiers, exactly the historical-report behavior this task
+            // must not disturb.
+            let structuredPortersFiveForcesResponse: unknown;
+            try {
+              structuredPortersFiveForcesResponse = (
+                JSON.parse(responseText) as Record<string, unknown>
+              ).portersFiveForcesStructured;
+            } catch {
+              structuredPortersFiveForcesResponse = undefined;
+            }
+            const portersFiveForcesState = buildPortersFiveForcesStateFromStructuredResponse(
+              structuredPortersFiveForcesResponse
+            );
             const reportMetadataContext = createReportMetadataContext({
               prompt: promptText,
               report: parsedReport,
@@ -9733,11 +9826,12 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             // patch that could silently drop investmentScore/
             // benchmarkFit/benchmarkScore/reportQuality/
             // validationIntelligence from the final persisted metadata.
-            if (businessCompetitorLandscapeState) {
+            if (businessCompetitorLandscapeState || portersFiveForcesState) {
               enqueue(
                 serializePlanReportMetadataChunk(
                   researchAwareFinancialContext,
-                  businessCompetitorLandscapeState
+                  businessCompetitorLandscapeState,
+                  portersFiveForcesState
                 )
               );
             }
@@ -9776,10 +9870,17 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
                     // structured competitor data this generation just
                     // produced, falling back to the weaker prose-parsing
                     // tiers for every subsequent cache-served request.
+                    // TASK #69A-28 -- same reasoning, same additive
+                    // pattern, for portersFiveForcesState (the fourth
+                    // argument): without persisting it here too, a
+                    // future cache HIT would silently lose the
+                    // schema-enforced structured Porter data this
+                    // generation just produced.
                     responseData: createReportCacheData(
                       businessResearch,
                       undefined,
-                      businessCompetitorLandscapeState
+                      businessCompetitorLandscapeState,
+                      portersFiveForcesState
                     ),
                     tokenUsage,
                     estimatedCostUsd,

@@ -119,9 +119,15 @@ test("DUP5: source drift check -- Planner.tsx's PDF export (formatPdfReadableCon
 });
 
 test("DUP6 (no regression): pdfCompleteVisualFields (executiveSummary, tamSamSom, strategicRecommendations, portersFiveForces, competitiveLandscape) are untouched by the DUP5 fix -- they still return empty body text, since their visual is already their complete presentation", () => {
+  // TASK #69A-29B legitimately added "competitorAnalysis" and
+  // "competitorLandscape" (Business Idea Validation's own field name,
+  // previously missing here even though page.tsx's equivalent set has
+  // carried it since #69A-13) to this SAME set, for its own,
+  // separately-ticketed reason -- this test's own concern is only that
+  // the 5 fields DUP6 itself named are still present, untouched.
   assert.match(
     plannerSource,
-    /const pdfCompleteVisualFields = new Set\(\[\s*"executiveSummary",\s*"tamSamSom",\s*"strategicRecommendations",\s*"portersFiveForces",\s*"competitiveLandscape",\s*\]\);/
+    /const pdfCompleteVisualFields = new Set\(\[\s*"executiveSummary",\s*"tamSamSom",\s*"strategicRecommendations",\s*"portersFiveForces",\s*"competitiveLandscape",\s*(?:"competitorAnalysis",\s*"competitorLandscape",\s*)?\]\);/
   );
 });
 

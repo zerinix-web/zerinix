@@ -163,6 +163,16 @@ async function compileGetPorterLayout(source, fileLabel, { needsWrapPdfText }) {
   const pieces = [
     "import { jsPDF } from \"jspdf\";",
     "import { localizePdfPresentationText } from \"/Users/iyslv/Desktop/zerinix/app/lib/pdf-normalization.mjs\";",
+    // TASK #69A-28 -- getPorterLayout's own source now closes over
+    // portersFiveForcesState (the canonical, structured Porter's Five
+    // Forces snapshot -- see porters-five-forces-state.ts) and imports
+    // PORTER_FORCE_ORDER/porterLevelToIntensityBar. null here
+    // deliberately exercises exactly the pre-existing prose-parsing
+    // path these tests are about -- a report with no such canonical
+    // state (every report this test file's own fixtures represent
+    // predates it), never a fabricated canonical record.
+    "import { PORTER_FORCE_ORDER, porterLevelToIntensityBar } from \"/Users/iyslv/Desktop/zerinix/app/lib/report-engine/porters-five-forces-state.ts\";",
+    "const portersFiveForcesState = null;",
     needsWrapPdfText
       ? "import { wrapPdfText as wrapPdfTextWithEngine } from \"/Users/iyslv/Desktop/zerinix/app/lib/pdf-engine/utils.ts\";"
       : "",

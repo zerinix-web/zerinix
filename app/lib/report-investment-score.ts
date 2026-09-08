@@ -4,6 +4,13 @@ export type ReportInvestmentScore = {
   totalScore: number;
   confidence: number;
   recommendation: "GO" | "WAIT" | "PASS" | string;
+  // TASK #69A-27 -- structured decision provenance for a fatal-blocker
+  // override: which named Founder Readiness dimension(s), if any,
+  // forced this recommendation away from "GO" regardless of the
+  // aggregate score. Empty/absent whenever no blocker applied (the
+  // common case) -- absent entirely on any report persisted before
+  // this field existed, never fabricated for a historical report.
+  fatalBlockers?: Array<{ key: string; label: string; score: number }>;
   estimatedValuation?: string;
   fundingStage?: string;
   nextCriticalAction?: string;
@@ -156,6 +163,17 @@ export type ReportMetadata = {
   // unmodified prose-parsing fallback (extractCompetitorRows), never
   // migrated or backfilled. See business-competitor-landscape-state.ts.
   businessCompetitorLandscapeState?: import("@/app/lib/report-engine/business-competitor-landscape-state").BusinessCompetitorLandscapeState;
+  // TASK #69A-28 -- the versioned, structured snapshot of Business Idea
+  // Validation's Porter's Five Forces (level/analysis/implication per
+  // canonical force -- competitiveRivalry/threatOfNewEntrants/
+  // buyerPower/supplierPower/threatOfSubstitutes), captured once at
+  // generation time from the SAME generation call's schema-enforced
+  // portersFiveForcesStructured key. Absent on every report persisted
+  // before this field existed -- a legacy state handled by each
+  // renderer's existing, unmodified prose-parsing fallback
+  // (extractForceIntensity/extractForceImplication), never migrated or
+  // backfilled. See porters-five-forces-state.ts.
+  portersFiveForcesState?: import("@/app/lib/report-engine/porters-five-forces-state").PortersFiveForcesState;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

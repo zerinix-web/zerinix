@@ -305,9 +305,14 @@ test("PDF export preserves visual layouts: the Market-Intelligence-specific comp
 });
 
 test("PDF export preserves visual layouts: Porter's Five Forces' PDF-drawn intensity bars (ReportPdfButton.tsx and Planner.tsx's own downloadPdf) are also real, not the old static array", async () => {
+  // TASK #69A-28 superseded the exact literal fallback-only expression:
+  // extractForceIntensity is now called only when no canonical
+  // portersFiveForcesState record exists for that force (see
+  // porters-five-forces-state.ts) -- still real, still never the old
+  // static array, just structured-first.
   for (const source of [pdfButtonSource, plannerSource]) {
     assert.doesNotMatch(source, /const score = \[72, 54, 66, 48, 60\]\[index\];/);
-    assert.match(source, /const score = extractForceIntensity\(.*?, force\)\?\.width \?\? 0;/);
+    assert.match(source, /: extractForceIntensity\(.*?, force\)\?\.width \?\? 0;/);
   }
 
   const fn = await compileFunction(pdfButtonSource, "extractForceIntensity");

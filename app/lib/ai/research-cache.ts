@@ -20,6 +20,10 @@ import {
   readBusinessCompetitorLandscapeState,
   type BusinessCompetitorLandscapeState,
 } from "@/app/lib/report-engine/business-competitor-landscape-state";
+import {
+  readPortersFiveForcesState,
+  type PortersFiveForcesState,
+} from "@/app/lib/report-engine/porters-five-forces-state";
 import { estimateAiInputTokens } from "@/app/lib/ai/token-optimization";
 import {
   resolveCachedOrExecuteResearch,
@@ -29,7 +33,23 @@ import {
 export { runExclusivelyByKey };
 import { logOperationalInfo } from "@/app/lib/security/logging";
 
-const RESEARCH_CACHE_VERSION = "research-result-v1";
+// TASK #69A-29A -- bumped (v1 -> v2): the "competitors" research
+// requirement's own query text (decision-intelligence/profiles.ts's
+// sharedBusinessResearch, and domain-research.ts's buildTaskStageQueries
+// fieldSynonyms.competitors) now also asks for comparative limitations/
+// feature gaps and third-party review-platform cons, not just
+// positioning/pricing -- a real change to what the ACTUAL web-search
+// queries ask for, not merely a description string. sharedBusinessResearch
+// is reused across many decision-analysis sub-domains (business_plan and
+// several "_decision_analysis" report families), so a cache entry
+// written before this change could plausibly exist for any of them --
+// bumping the shared version here (rather than trying to narrowly
+// enumerate every affected reportFamily and risk missing one) guarantees
+// none of them are ever silently served research gathered under the
+// old, weakness-blind query text again. A cache miss here costs exactly
+// one real re-fetch per previously-cached prompt, not a repeated or
+// unbounded cost.
+const RESEARCH_CACHE_VERSION = "research-result-v2";
 const REPORT_CACHE_VERSION = "pre-research-report-v1";
 const CONVERSATION_RESEARCH_VERSION = "conversation-research-v1";
 // Kept in sync with the actual research-call model in domain-research.ts
@@ -377,16 +397,34 @@ export function getCachedBusinessCompetitorLandscapeStateFromReportData(
   return readBusinessCompetitorLandscapeState({ businessCompetitorLandscapeState: state });
 }
 
+// TASK #69A-28 -- mirrors getCachedBusinessCompetitorLandscapeStateFromReportData
+// exactly: a Business Idea Validation cache-hit replays the ORIGINAL AI
+// response text (JSON.stringify(parsedReport), which only ever carries
+// the plain-string PlanReportFields), never the raw schema-enforced JSON
+// blob that also included portersFiveForcesStructured -- so without
+// this, a cache hit would silently lose the structured Porter data
+// #69A-28's schema enforcement produced when the cache entry was first
+// written.
+export function getCachedPortersFiveForcesStateFromReportData(
+  value: unknown
+): PortersFiveForcesState | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const state = (value as { portersFiveForcesState?: unknown }).portersFiveForcesState;
+  return readPortersFiveForcesState({ portersFiveForcesState: state });
+}
+
 export function createReportCacheData(
   research: DomainResearchBundle,
   marketIntelligenceGraph?: MarketIntelligenceGraph,
-  businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null
+  businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null,
+  portersFiveForcesState?: PortersFiveForcesState | null
 ) {
   return {
     version: REPORT_CACHE_VERSION,
     research,
     ...(marketIntelligenceGraph ? { marketIntelligenceGraph } : {}),
     ...(businessCompetitorLandscapeState ? { businessCompetitorLandscapeState } : {}),
+    ...(portersFiveForcesState ? { portersFiveForcesState } : {}),
   };
 }
 

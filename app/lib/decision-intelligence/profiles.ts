@@ -33,6 +33,25 @@ const rule = (
   weight,
 });
 
+// TASK #69A-29A -- ROOT CAUSE FIX: this is the REAL, load-bearing
+// research-requirement text actually consumed by buildDecisionResearchPlan
+// (research-plan.ts) into every "competitors" task's own query --
+// domain-research.ts's OWN similarly-named `RESEARCH_DOMAIN_TASKS`
+// config (confirmed by tracing, not assumed) is dead configuration
+// never read by the real research-execution path at all, so #69A-29's
+// earlier widening of THAT text had zero effect on the actual queries
+// issued. The real "competitors" requirement's reason text asked only
+// for "substitutes, positioning, and public pricing" -- never
+// comparative limitations -- and its preferredSources were entirely
+// vendor-owned (official company website, company filing, regulator),
+// with no third-party comparison/review source at all. Both are widened
+// here (same 1 requirement, same query budget, zero additional search
+// calls -- see buildDecisionResearchPlan, which concatenates this
+// reason/preferredSources text directly into the task's own query
+// string). Reuses the SAME G2/Capterra/TrustRadius/Trustpilot review
+// platforms already named in domain-research.ts's own
+// businessResearchSourceStages guidance -- not a new, uncontrolled
+// scraping target.
 const sharedBusinessResearch = [
   requirement(
     "company_evidence",
@@ -46,8 +65,8 @@ const sharedBusinessResearch = [
   ),
   requirement(
     "competitors",
-    "Verify competitors, substitutes, positioning, and public pricing.",
-    ["official company website", "company filing", "regulator"]
+    "Verify competitors, substitutes, positioning, public pricing, and any documented feature gaps, limitations, integration constraints, or comparative weaknesses relative to alternatives.",
+    ["official company website", "company filing", "regulator", "product review platform cons and limitations (G2, Capterra, TrustRadius)", "credible third-party comparison"]
   ),
 ];
 

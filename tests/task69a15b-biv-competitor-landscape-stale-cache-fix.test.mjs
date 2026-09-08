@@ -177,13 +177,15 @@ test("fail-before proof: WITHOUT this fix's contract version tag, two requests f
 test("fix proof: plan-executor.ts declares a dedicated BUSINESS_PLAN_GENERATION_CONTRACT_VERSION constant and appends it to the business-plan reportVariant string", () => {
   // Version-tolerant: this constant is DESIGNED to be bumped again by a
   // later ticket whenever the generation contract changes again (see
-  // TASK #69A-16, which bumped v1 -> v2 for a prompt-only change) -- this
-  // test's own concern is that the mechanism exists and is wired
-  // correctly, never the exact version string, which the ticket owning
-  // the actual contract change is expected to choose and bump.
+  // TASK #69A-16, which bumped v1 -> v2 for a prompt-only change, and
+  // TASK #69A-28, which renamed/bumped it again to "porter-structured-v3"
+  // for its own schema-enforcement change) -- this test's own concern is
+  // that the mechanism exists and is wired correctly, never the exact
+  // version string or naming convention, which the ticket owning the
+  // actual contract change is expected to choose and bump.
   assert.match(
     planExecutorSource,
-    /const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "competitor-structured-v\d+";/
+    /const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "[^"]+";/
   );
   assert.match(
     planExecutorSource,
@@ -279,9 +281,13 @@ test("scope proof: the real_estate and domain_decision_analysis createPreResearc
 // --- Preserve #69A-15A's own logic (drift check) -------------------------
 
 test("preserves #69A-15A: the Tier 0 schema-enforced generation call, its schema, and the cache-hit precedence (structured state before Tier 1 prose parse) are unchanged by this fix -- this task only changed cache-key staleness, never the extraction/precedence logic itself", () => {
+  // Field-list-tolerant: TASK #69A-28 legitimately appended a second,
+  // unrelated schema-enforced key ("portersFiveForcesStructured") to
+  // this SAME array; this test's own concern is only that
+  // competitorLandscapeStructured itself is still requested.
   assert.match(
     planExecutorSource,
-    /format: createFullReportJsonSchema\(\s*\n\s*"zerinix_business_plan_report",\s*\n\s*\[\.\.\.planFields, "competitorLandscapeStructured"\],/
+    /format: createFullReportJsonSchema\(\s*\n\s*"zerinix_business_plan_report",\s*\n\s*\[\.\.\.planFields, "competitorLandscapeStructured"(?:, "portersFiveForcesStructured")?\],/
   );
   assert.match(
     planExecutorSource,

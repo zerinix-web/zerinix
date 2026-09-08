@@ -240,8 +240,12 @@ test("Porter's Five Forces: the radar + force cards remain the canonical present
   for (const source of [pageSource, plannerSource, pdfButtonSource]) {
     assert.match(source, /function extractForceImplication/);
   }
-  assert.match(pdfButtonSource, /const implication = extractForceImplication\(content, force\);/);
-  assert.match(plannerSource, /const implication = extractForceImplication\(section\.content, force\);/);
+  // TASK #69A-28 superseded the exact literal fallback-only expression:
+  // extractForceImplication is now called only when no canonical
+  // portersFiveForcesState record exists for that force -- still real,
+  // just structured-first.
+  assert.match(pdfButtonSource, /: extractForceImplication\(content, force\);/);
+  assert.match(plannerSource, /: extractForceImplication\(section\.content, force\);/);
 });
 
 test("Strategic Recommendations: the action cards (Action, Owner, Timeline, Budget, Success Metric, Decision Gate) remain the canonical presentation on-screen and in both PDF exports -- verified this does not silently drop content by confirming extractRecommendationItems captures every non-empty line (verdict prose included), not just marker-prefixed action lines", () => {

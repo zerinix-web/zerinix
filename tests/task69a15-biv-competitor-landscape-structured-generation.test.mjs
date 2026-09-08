@@ -205,9 +205,15 @@ test("requirement G: plan-executor.ts wires businessCompetitorLandscapeState int
     planExecutorSource,
     /const businessCompetitorLandscapeState =\s*\n\s*buildBusinessCompetitorLandscapeStateFromStructuredResponse\(\s*\n\s*structuredCompetitorLandscapeResponse\s*\n\s*\) \|\| buildBusinessCompetitorLandscapeState\(parsedReport\.competitorLandscape\);/
   );
+  // TASK #69A-28 superseded the exact literal condition/argument-list
+  // here too: it now also checks/passes portersFiveForcesState (an
+  // unrelated, additive OR-condition and 3rd argument) -- see
+  // tests/task69a28's own dedicated coverage for that change. This
+  // assertion just confirms businessCompetitorLandscapeState itself is
+  // still checked and still flows into the same call.
   assert.match(
     planExecutorSource,
-    /if \(businessCompetitorLandscapeState\) \{\s*\n\s*enqueue\(\s*\n\s*serializePlanReportMetadataChunk\(\s*\n\s*researchAwareFinancialContext,\s*\n\s*businessCompetitorLandscapeState\s*\n\s*\)\s*\n\s*\);\s*\n\s*\}/
+    /if \(businessCompetitorLandscapeState(?: \|\| portersFiveForcesState)?\) \{\s*\n\s*enqueue\(\s*\n\s*serializePlanReportMetadataChunk\(\s*\n\s*researchAwareFinancialContext,\s*\n\s*businessCompetitorLandscapeState,?\s*\n(?:\s*portersFiveForcesState\s*\n)?\s*\)\s*\n\s*\);\s*\n\s*\}/
   );
   // TASK #69A-15A superseded the exact literal second-argument
   // expression here too: it now prefers cachedBusinessCompetitorLandscapeState
@@ -216,7 +222,7 @@ test("requirement G: plan-executor.ts wires businessCompetitorLandscapeState int
   // tests/task69a15a's own dedicated coverage.
   assert.match(
     planExecutorSource,
-    /serializePlanReportMetadataChunk\(\s*\n\s*cachedUnifiedFinancialContext,[\s\S]{0,300}cachedBusinessCompetitorLandscapeState \|\|\s*\n\s*buildBusinessCompetitorLandscapeState\(parsedCachedReport\.competitorLandscape\)\s*\n\s*\)/
+    /serializePlanReportMetadataChunk\(\s*\n\s*cachedUnifiedFinancialContext,[\s\S]{0,500}cachedBusinessCompetitorLandscapeState \|\|\s*\n\s*buildBusinessCompetitorLandscapeState\(parsedCachedReport\.competitorLandscape\)/
   );
 });
 
@@ -243,9 +249,14 @@ for (const [name, source] of [
   ["page.tsx (saved/reloaded report)", pageSource],
 ]) {
   test(`requirement G: ${name} prefers the structured businessCompetitorLandscapeState over extractCompetitorRows' prose-parsing tiers`, () => {
+    // TASK #69A-29 superseded the exact literal weaknesses mapping:
+    // raw entity.weaknesses is now piped through
+    // formatCompetitorWeaknessForDisplay (adds a "(directional)"
+    // qualifier when the weakness is an inference, never changes the
+    // structured-vs-prose PREFERENCE this test is actually about).
     assert.match(
       source,
-      /const competitors = businessCompetitorLandscapeState\s*\n\s*\? businessCompetitorLandscapeState\.competitors\.map\(\(entity\) => \(\{\s*\n\s*company: entity\.type === "Substitute" \? `\$\{entity\.company\} \(Substitute\)` : entity\.company,\s*\n\s*positioning: entity\.positioning,\s*\n\s*strengths: entity\.strengths,\s*\n\s*weaknesses: entity\.weaknesses,\s*\n\s*threat: entity\.threat,\s*\n\s*\}\)\)\s*\n\s*: extractCompetitorRows\(/
+      /const competitors = businessCompetitorLandscapeState\s*\n\s*\? businessCompetitorLandscapeState\.competitors\.map\(\(entity\) => \(\{\s*\n\s*company: entity\.type === "Substitute" \? `\$\{entity\.company\} \(Substitute\)` : entity\.company,\s*\n\s*positioning: entity\.positioning,\s*\n\s*strengths: entity\.strengths,\s*\n\s*weaknesses: formatCompetitorWeaknessForDisplay\(entity\),\s*\n\s*threat: entity\.threat,\s*\n\s*\}\)\)\s*\n\s*: extractCompetitorRows\(/
     );
   });
 }

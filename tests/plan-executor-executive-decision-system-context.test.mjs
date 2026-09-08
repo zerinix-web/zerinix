@@ -117,10 +117,13 @@ test("does not modify the report section schema, PDF generation, UI, billing, au
   // instead: the original planFields array is spread verbatim (every
   // existing field this test's own concern was about is still present,
   // untouched, in its original order) as the first part of that new
-  // array, not replaced or reordered.
+  // array, not replaced or reordered. TASK #69A-28 later appended a
+  // THIRD, also-unrelated array entry ("portersFiveForcesStructured")
+  // the same way -- still spread, still additive, still never
+  // reordering planFields itself.
   assert.match(
     planExecutorSource,
-    /format: createFullReportJsonSchema\(\s*\n\s*"zerinix_business_plan_report",\s*\n\s*\[\.\.\.planFields, "competitorLandscapeStructured"\],/
+    /format: createFullReportJsonSchema\(\s*\n\s*"zerinix_business_plan_report",\s*\n\s*\[\.\.\.planFields, "competitorLandscapeStructured"(?:, "portersFiveForcesStructured")?\],/
   );
 });
 
