@@ -175,8 +175,15 @@ import {
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
 import {
   readBusinessCompetitorLandscapeState,
+  formatCompetitorWeaknessForDisplay,
   type BusinessCompetitorLandscapeState,
 } from "@/app/lib/report-engine/business-competitor-landscape-state";
+import {
+  readPortersFiveForcesState,
+  porterLevelToIntensityBar,
+  PORTER_FORCE_ORDER,
+  type PortersFiveForcesState,
+} from "@/app/lib/report-engine/porters-five-forces-state";
 import {
   resolveMarketIntelligenceDecisionChangeState,
   selectTopMarketIntelligenceEvidenceGaps,
@@ -2105,7 +2112,7 @@ function resolveCompetitorRowsForDownloadPdf(
       company: entity.type === "Substitute" ? `${entity.company} (Substitute)` : entity.company,
       positioning: entity.positioning,
       strengths: entity.strengths,
-      weaknesses: entity.weaknesses,
+      weaknesses: formatCompetitorWeaknessForDisplay(entity),
       threat: entity.threat,
     }));
   }
@@ -3668,12 +3675,25 @@ const pdfKeyTakeawayCardFields = new Set([
 // Litera/Kira, ...) down to a single truncated fragment of its own first
 // sentence. Removed so all 9 fields get their real body prose back,
 // matching what the surrounding comment always claimed was already true.
+// TASK #69A-29B -- ROOT CAUSE FIX (confirmed live), mirrors the
+// identical fix in ReportPdfButton.tsx exactly: this set carried
+// "competitiveLandscape" (Market Analysis's own field name) but never
+// "competitorLandscape" (Business Idea Validation/Business Plan's own
+// field name) or "competitorAnalysis", even though page.tsx's own
+// equivalent set (cardFirstReportFields) has carried all three since
+// TASK #69A-13. With "competitorLandscape" missing, Planner's own PDF
+// export (downloadPdf) drew BIV's raw free-prose competitorLandscape
+// body text a second time directly below the correct, structured
+// resolveCompetitorRowsForDownloadPdf table -- contradicting it
+// whenever the two independently-generated texts disagree.
 const pdfCompleteVisualFields = new Set([
   "executiveSummary",
   "tamSamSom",
   "strategicRecommendations",
   "portersFiveForces",
   "competitiveLandscape",
+  "competitorAnalysis",
+  "competitorLandscape",
 ]);
 
 function extractSwotBullets(content: string, label: string, fallbackContent = content) {
@@ -4398,8 +4418,18 @@ function dedupePdfSections<T extends { field?: string; title: string; content: s
       .toLowerCase()
       .replace(/\s+/g, " ")
       .slice(0, 360);
+    // TASK #69A-29C -- mirrors the identical fix in ReportPdfButton.tsx
+    // exactly: contentKey must never dedupe two sections that already
+    // have DIFFERENT, real field names -- field identity is already
+    // the authoritative uniqueness signal (this function's own `key`,
+    // above). Without this guard, a shared research-timeout fallback
+    // sentence between two unrelated fields (e.g. marketOpportunity and
+    // competitorLandscape) could silently discard the whole later
+    // section -- its structured visual included -- from Planner's own
+    // independent PDF export too.
+    const hasDistinctFieldIdentity = Boolean(section.field?.trim());
 
-    if (!key || seen.has(key) || (contentKey && seenContent.has(contentKey))) {
+    if (!key || seen.has(key) || (contentKey && !hasDistinctFieldIdentity && seenContent.has(contentKey))) {
       return false;
     }
 
@@ -5072,6 +5102,7 @@ function PremiumSectionVisual({
   executiveSummaryContent = "",
   marketIntelligenceCanonicalState = null,
   businessCompetitorLandscapeState = null,
+  portersFiveForcesState = null,
 }: {
   section: ReportSection;
   investmentScore?: ReportInvestmentScore;
@@ -5100,6 +5131,13 @@ function PremiumSectionVisual({
   // function's own existing extractCompetitorRows prose-parsing tiers,
   // completely unchanged.
   businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
+  // TASK #69A-28 -- the versioned, structured Porter's Five Forces
+  // snapshot captured once at generation time (see
+  // porters-five-forces-state.ts). null on every report persisted
+  // before this field existed -- falls back to this function's own
+  // existing extractForceIntensity/extractForceImplication prose-parsing
+  // tiers, completely unchanged.
+  portersFiveForcesState?: PortersFiveForcesState | null;
 }) {
   const field = section.field;
 
@@ -6198,7 +6236,7 @@ if (field === "swotAnalysis") {
           company: entity.type === "Substitute" ? `${entity.company} (Substitute)` : entity.company,
           positioning: entity.positioning,
           strengths: entity.strengths,
-          weaknesses: entity.weaknesses,
+          weaknesses: formatCompetitorWeaknessForDisplay(entity),
           threat: entity.threat,
         }))
       : extractCompetitorRows(section.content);
@@ -6659,6 +6697,7 @@ if (field === "swotAnalysis") {
 
   if (field === "portersFiveForces") {
     const forces = ["Rivalry", "Entrants", "Buyer Power", "Supplier Power", "Substitutes"];
+    const forceKeys = PORTER_FORCE_ORDER;
 
     return (
       <div className="mb-5 grid gap-4 lg:grid-cols-[0.85fr_1.15fr]">
@@ -6688,9 +6727,18 @@ if (field === "swotAnalysis") {
           })}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          {forces.map((force) => {
-            const intensity = extractForceIntensity(section.content, force);
-            const implication = extractForceImplication(section.content, force);
+          {forces.map((force, index) => {
+            // TASK #69A-28 -- mirrors page.tsx's ReportSectionVisual
+            // exactly: the canonical structured record wins first for
+            // every force, including Supplier Power.
+            const canonicalForce = portersFiveForcesState?.forces[forceKeys[index]] ?? null;
+            const intensity = canonicalForce
+              ? porterLevelToIntensityBar(canonicalForce.level)
+              : extractForceIntensity(section.content, force);
+            const implication = canonicalForce
+              ? `${canonicalForce.analysis} ${canonicalForce.implication}`
+              : extractForceImplication(section.content, force);
+            const isInsufficientEvidence = canonicalForce?.level === "Insufficient evidence";
 
             return (
               <div key={force} className="rounded-3xl border border-white/10 bg-white/[0.035] p-4">
@@ -6712,7 +6760,7 @@ if (field === "swotAnalysis") {
                   </>
                 ) : (
                   <p className="mt-4 text-xs font-semibold uppercase tracking-[0.12em] text-amber-200">
-                    Not specified
+                    {isInsufficientEvidence ? "Insufficient evidence" : "Not specified"}
                   </p>
                 )}
                 {/* CRITICAL FIX -- confirmed live: line-clamp-3 could cut
@@ -8043,6 +8091,7 @@ const ReportSectionCard = memo(
     reportQuality,
     marketIntelligenceCanonicalState = null,
     businessCompetitorLandscapeState = null,
+    portersFiveForcesState = null,
     waitingMessage,
     majorPlayersContent,
     executiveSummaryContent,
@@ -8055,6 +8104,7 @@ const ReportSectionCard = memo(
     reportQuality?: ReportQualityScore;
     marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
     businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
+    portersFiveForcesState?: PortersFiveForcesState | null;
     waitingMessage: string;
     majorPlayersContent?: string;
     executiveSummaryContent?: string;
@@ -8150,6 +8200,7 @@ const ReportSectionCard = memo(
                   executiveSummaryContent={executiveSummaryContent}
                   marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
                   businessCompetitorLandscapeState={businessCompetitorLandscapeState}
+                  portersFiveForcesState={portersFiveForcesState}
                 />
               ) : null}
               {/* Card-first sections (see cardFirstReportFields) already
@@ -8209,6 +8260,7 @@ const ReportPanel = memo(function ReportPanel({
   reportQuality,
   marketIntelligenceCanonicalState = null,
   businessCompetitorLandscapeState = null,
+  portersFiveForcesState = null,
   isMarketIntelligence = false,
   onContinueAsChat,
   onBackToWorkspace,
@@ -8247,6 +8299,10 @@ const ReportPanel = memo(function ReportPanel({
   // the new labeled competitor-line format -- both fall back to the
   // existing extractCompetitorRows prose-parsing path unchanged.
   businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
+  // TASK #69A-28 -- same additive, null-safe contract as
+  // businessCompetitorLandscapeState immediately above, for Porter's
+  // Five Forces.
+  portersFiveForcesState?: PortersFiveForcesState | null;
   isMarketIntelligence?: boolean;
   onContinueAsChat: () => void;
   onBackToWorkspace: () => void;
@@ -9091,6 +9147,24 @@ const ReportPanel = memo(function ReportPanel({
 
       y += 18;
 
+      // TASK #69A-29I -- root cause of the live-proven "renderer starts
+      // but no surviving visible section" bug: "competitiveLandscape" is
+      // Market Analysis's field name; "competitorLandscape" (Business
+      // Plan/BIV's own field name -- note "competitor" vs "competitive")
+      // was NEVER in this Set. getPdfVisualHeight/drawPdfVisual (both
+      // gated by this exact Set, see their own opening
+      // `if (!visualFields.has(section.field)) { return 0; }` guard)
+      // therefore always returned 0/drew nothing for a BIV report's
+      // Competitor Landscape section -- and since its raw prose is
+      // ALSO deliberately suppressed (pdfCompleteVisualFields, fixed
+      // correctly in #69A-29B), the per-section render loop's own
+      // `if (visualHeight <= 0 && !sectionBodyContent.trim()) { return; }`
+      // guard then skipped the ENTIRE section, before any TOC push or
+      // draw call -- confirmed live via temporary trace instrumentation
+      // (since removed) showing resolveCompetitorRowsForDownloadPdf,
+      // called independently of this Set, correctly resolved 4 rows.
+      // "competitorAnalysis" added too, for parity with
+      // ReportPdfButton.tsx's own pdfCompleteVisualFields convention.
       const visualFields = new Set<ReportSection["field"]>([
         "tamSamSom",
         "swotAnalysis",
@@ -9106,6 +9180,8 @@ const ReportPanel = memo(function ReportPanel({
         "risks",
         "kpis",
         "competitiveLandscape",
+        "competitorLandscape",
+        "competitorAnalysis",
         "strategicRecommendations",
         ...pdfKeyTakeawayCardFields,
       ]);
@@ -9188,9 +9264,19 @@ const ReportPanel = memo(function ReportPanel({
       const getPorterLayout = (content: string, width: number) => {
         const previousFontSize = pdf.getFontSize();
         pdf.setFontSize(4.6);
-        const forces = porterForceNames.map((force) => {
-          const score = extractForceIntensity(content, force)?.width ?? 0;
-          const implication = extractForceImplication(content, force);
+        const forces = porterForceNames.map((force, index) => {
+          // TASK #69A-28 -- mirrors the web card's own structured-first
+          // preference exactly: the canonical record (porterForceNames
+          // and PORTER_FORCE_ORDER are the same 5 forces in the same
+          // order by construction) wins first for every force,
+          // including Supplier Power.
+          const canonicalForce = portersFiveForcesState?.forces[PORTER_FORCE_ORDER[index]] ?? null;
+          const score = canonicalForce
+            ? porterLevelToIntensityBar(canonicalForce.level)?.width ?? 0
+            : extractForceIntensity(content, force)?.width ?? 0;
+          const implication = canonicalForce
+            ? `${canonicalForce.analysis} ${canonicalForce.implication}`
+            : extractForceImplication(content, force);
           const lines = implication
             ? (pdf.splitTextToSize(localizePdfPresentationText(implication, pdfLocale), width * 0.38 - 4) as string[]).slice(0, 4)
             : [];
@@ -9779,7 +9865,12 @@ const ReportPanel = memo(function ReportPanel({
           return 52;
         }
 
-        if (section.field === "competitiveLandscape") {
+        // TASK #69A-29I -- widened to also match "competitorLandscape"
+        // (BIV's own field name) -- see visualFields' own comment for
+        // the full root-cause. The isMarketIntelligence check just below
+        // already correctly routes each field to its own real row
+        // source; only the field-name gate itself was too narrow.
+        if (section.field === "competitiveLandscape" || section.field === "competitorLandscape") {
           // Row source must match drawPdfVisual's own fork exactly -- MI
           // reports draw extractMarketIntelligenceCompetitorRows (plus the
           // Market Map), everything else draws extractCompetitorRows with
@@ -9888,7 +9979,11 @@ const ReportPanel = memo(function ReportPanel({
         // rendering as raw "| Vendor | Category | ... |" pipe syntax --
         // mirrored from ReportPdfButton.tsx so this PDF path matches both
         // the on-screen PremiumSectionVisual and the other PDF export.
-        if (section.field === "competitiveLandscape") {
+        // TASK #69A-29I -- widened to also match "competitorLandscape"
+        // (BIV's own field name); see visualFields' own comment for the
+        // full root-cause. isMarketIntelligence below already correctly
+        // routes each report kind to its own real row source/columns.
+        if (section.field === "competitiveLandscape" || section.field === "competitorLandscape") {
           const marketMapGap = 8;
           const marketMapHeight = 50;
           // TASK #45 -- mirrors the identical fix in ReportPdfButton.tsx:
@@ -11695,6 +11790,7 @@ const ReportPanel = memo(function ReportPanel({
             reportQuality={reportQuality}
             marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
             businessCompetitorLandscapeState={businessCompetitorLandscapeState}
+            portersFiveForcesState={portersFiveForcesState}
             waitingMessage={waitingMessage}
             majorPlayersContent={sections.find((entry) => entry.field === "majorPlayers")?.content}
             executiveSummaryContent={sections.find((entry) => entry.field === "executiveSummary")?.content}
@@ -14813,6 +14909,9 @@ export default function Planner({
             businessCompetitorLandscapeState={readBusinessCompetitorLandscapeState(
               currentReportMetadata || initialReport?.metadata
             )}
+            portersFiveForcesState={readPortersFiveForcesState(
+              currentReportMetadata || initialReport?.metadata
+            )}
             isMarketIntelligence={activeReportMode === "market"}
             onContinueAsChat={continueRestrictedReportAsChat}
             onBackToWorkspace={backToWorkspaceFromReportRestriction}
@@ -15098,6 +15197,9 @@ export default function Planner({
                     currentReportMetadata || initialReport?.metadata
                   )}
                   businessCompetitorLandscapeState={readBusinessCompetitorLandscapeState(
+                    currentReportMetadata || initialReport?.metadata
+                  )}
+                  portersFiveForcesState={readPortersFiveForcesState(
                     currentReportMetadata || initialReport?.metadata
                   )}
                   isMarketIntelligence={activeReportMode === "market"}

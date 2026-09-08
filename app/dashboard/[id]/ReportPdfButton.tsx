@@ -82,7 +82,15 @@ import {
   readMarketIntelligenceCanonicalState,
   constrainMarketSizingResolutionToCanonicalState,
 } from "@/app/lib/report-engine/market-intelligence-canonical-state";
-import { readBusinessCompetitorLandscapeState } from "@/app/lib/report-engine/business-competitor-landscape-state";
+import {
+  readBusinessCompetitorLandscapeState,
+  formatCompetitorWeaknessForDisplay,
+} from "@/app/lib/report-engine/business-competitor-landscape-state";
+import {
+  readPortersFiveForcesState,
+  porterLevelToIntensityBar,
+  PORTER_FORCE_ORDER,
+} from "@/app/lib/report-engine/porters-five-forces-state";
 import {
   resolveMarketIntelligenceDecisionChangeState,
   buildMarketIntelligenceGapDrivenActions,
@@ -1502,12 +1510,34 @@ const pdfKeyTakeawayCardFields = new Set([
 // to a single truncated fragment of its own first sentence. Removed so
 // all 9 fields get their real body prose back, matching what the
 // surrounding comment always claimed was already true.
+// TASK #69A-29B -- ROOT CAUSE FIX (confirmed live): this set carried
+// "competitiveLandscape" -- Market Analysis's own field name -- but
+// never "competitorLandscape" (Business Idea Validation/Business
+// Plan's own field name, see prompts/plan.ts) or "competitorAnalysis",
+// even though page.tsx's own equivalent set (cardFirstReportFields)
+// has carried all three since TASK #69A-13. With "competitorLandscape"
+// missing here, isPdfCompleteVisualSection was false for every BIV
+// report's Competitor Landscape section, so its RAW free-prose body
+// text (competitorLandscape's own independently-generated string --
+// the exact labeled-line format its prompt requests, e.g. "COMPETITOR:
+// Float | ... | WEAKNESSES: Not available | ...") was drawn a SECOND
+// time directly below the correct, structured
+// resolveCompetitorRowsForPdf table -- contradicting it whenever the
+// two independently-generated texts disagree (confirmed live: the
+// table correctly showed "—"/a real directional weakness while the
+// duplicate raw prose paragraph showed its own, different "WEAKNESSES:
+// Not available" text for the same competitor). This is not a
+// structured-data bug -- resolveCompetitorRowsForPdf/
+// readBusinessCompetitorLandscapeState were already correct; the PDF
+// was simply also drawing a stale, unrelated second copy underneath.
 const pdfCompleteVisualFields = new Set([
   "executiveSummary",
   "tamSamSom",
   "strategicRecommendations",
   "portersFiveForces",
   "competitiveLandscape",
+  "competitorAnalysis",
+  "competitorLandscape",
 ]);
 
 const tamCircleMaxRadius = 17;
@@ -2851,7 +2881,7 @@ function resolveCompetitorRowsForPdf(report: DashboardReport, content: string) {
       company: entity.type === "Substitute" ? `${entity.company} (Substitute)` : entity.company,
       positioning: entity.positioning,
       strengths: entity.strengths,
-      weaknesses: entity.weaknesses,
+      weaknesses: formatCompetitorWeaknessForDisplay(entity),
       threat: entity.threat,
     }));
   }
@@ -3454,8 +3484,32 @@ function dedupePdfSections<T extends { field?: string; title: string; content: s
       .toLowerCase()
       .replace(/\s+/g, " ")
       .slice(0, 360);
+    // TASK #69A-29C -- ROOT CAUSE FIX (confirmed live, and by direct
+    // execution of this exact function): contentKey is a safety net for
+    // a genuine copy-paste duplicate -- the SAME prose appearing under
+    // two DIFFERENT titles with no field identity of their own. It must
+    // never fire for two sections that already have DIFFERENT, real
+    // field names, since field identity (this function's own `key`,
+    // above) is already the authoritative uniqueness signal. Confirmed
+    // live: Business Idea Validation's marketOpportunity and
+    // competitorLandscape fields can both fall back to the SAME generic
+    // generic, tag-prefixed "... not definitive." research-timeout
+    // fallback sentence (createGroundedDomainTimeoutFallback,
+    // plan-executor.ts) whenever
+    // research times out for both -- collapsing the first 360
+    // normalized characters to an identical string even though they
+    // are two entirely different, legitimately-fielded sections.
+    // Without this guard, dedupePdfSections silently discarded the
+    // WHOLE competitorLandscape section object -- not just its prose,
+    // its structured competitor table too -- purely because of shared
+    // boilerplate wording, before the per-section render loop (and its
+    // own resolveCompetitorRowsForPdf visual) ever ran; the PDF's Table
+    // of Contents then jumped straight from Market Opportunity to
+    // Business Model. A field-less section (title/content-derived key)
+    // still dedupes by content exactly as before.
+    const hasDistinctFieldIdentity = Boolean(section.field?.trim());
 
-    if (!key || seen.has(key) || (contentKey && seenContent.has(contentKey))) {
+    if (!key || seen.has(key) || (contentKey && !hasDistinctFieldIdentity && seenContent.has(contentKey))) {
       return false;
     }
 
@@ -3619,6 +3673,13 @@ export function buildStandardReportPdf({
   report: DashboardReport;
   fontBase64: string;
 }) {
+      // TASK #69A-28 -- computed once, mirrors resolveCompetitorRowsForPdf's
+      // own readBusinessCompetitorLandscapeState(report.metadata) pattern
+      // exactly. null on every report persisted before this field
+      // existed -- getPorterLayout below falls back to its own existing
+      // extractForceIntensity/extractForceImplication prose-parsing tiers
+      // completely unchanged in that case.
+      const portersFiveForcesState = readPortersFiveForcesState(report.metadata);
       const pdf = createPdfDocument();
       const { pageWidth, pageHeight, margin, contentWidth } = getPdfPageMetrics(pdf);
       const bodyX = margin + 20;
@@ -5000,9 +5061,22 @@ export function buildStandardReportPdf({
       const getPorterLayout = (content: string, width: number) => {
         const previousFontSize = pdf.getFontSize();
         pdf.setFontSize(4.6);
-        const forces = porterForceNames.map((force) => {
-          const score = extractForceIntensity(content, force)?.width ?? 0;
-          const implication = extractForceImplication(content, force);
+        const forces = porterForceNames.map((force, index) => {
+          // TASK #69A-28 -- STRUCTURAL AUTHORITY FIX: mirrors the web
+          // card's own structured-first preference exactly (porterForceNames
+          // and PORTER_FORCE_ORDER are the same 5 forces in the same
+          // order by construction). Fixes the confirmed-live defect
+          // (Supplier Power heading present, analysis missing) at its
+          // PDF source: the canonical record wins first for every
+          // force, never independently re-derived from prose when
+          // structured data already exists.
+          const canonicalForce = portersFiveForcesState?.forces[PORTER_FORCE_ORDER[index]] ?? null;
+          const score = canonicalForce
+            ? porterLevelToIntensityBar(canonicalForce.level)?.width ?? 0
+            : extractForceIntensity(content, force)?.width ?? 0;
+          const implication = canonicalForce
+            ? `${canonicalForce.analysis} ${canonicalForce.implication}`
+            : extractForceImplication(content, force);
           const lines = implication
             ? wrapPdfText(localizePdfPresentationText(implication, pdfLocale), width * 0.38 - 4).slice(0, 4)
             : [];

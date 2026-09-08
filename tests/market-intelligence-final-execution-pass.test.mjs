@@ -94,7 +94,11 @@ test("Planner.tsx's downloadPdf: Competitive Landscape still has a real table (+
   assert.ok(visualFieldsMatch, "visualFields not found");
   assert.match(visualFieldsMatch[1], /"competitiveLandscape",/);
 
-  assert.match(plannerSource, /if \(section\.field === "competitiveLandscape"\) \{/);
+  // TASK #69A-29I -- widened: this condition now also matches
+  // "competitorLandscape" (BIV's own field name) -- root cause of a
+  // live-proven bug where the section rendered nothing and vanished
+  // from both TOC and body for every Business Plan/BIV report.
+  assert.match(plannerSource, /if \(section\.field === "competitiveLandscape" \|\| section\.field === "competitorLandscape"\) \{/);
   // TASK #69A-15 superseded the exact literal
   // "const rows = extractCompetitorRows(section.content);" line: it is
   // now resolveCompetitorRowsForDownloadPdf(businessCompetitorLandscapeState,

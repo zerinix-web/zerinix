@@ -238,12 +238,17 @@ test("ReportPdfButton.tsx: the old generic company/positioning-shaped inferMarke
 
 test("Planner.tsx's downloadPdf: the competitor-table drawing branch (drawPdfVisual, field === \"competitiveLandscape\") forks on isMarketIntelligence BEFORE falling back to the generic extractCompetitorRows path", () => {
   const block = plannerSource.slice(
-    plannerSource.indexOf('if (section.field === "competitiveLandscape") {\n          const marketMapGap = 8;'),
+    // TASK #69A-29I -- widened from the exact-literal single-field
+    // check: this condition now also matches "competitorLandscape"
+    // (BIV's own field name, previously missing from this Set/branch
+    // entirely -- root cause of a live-proven bug where the section
+    // rendered nothing and vanished from both TOC and body).
+    plannerSource.indexOf('if (section.field === "competitiveLandscape" || section.field === "competitorLandscape") {\n          const marketMapGap = 8;'),
     // TASK #45 -- widened from 13000: this block grew a new
     // vendorConfidenceScopeCaption constant and its own drawing/height
     // logic (the PDF-carried "Vendor Confidence... does not verify..."
     // scoping caption, mirroring ReportPdfButton.tsx's identical fix).
-    plannerSource.indexOf('if (section.field === "competitiveLandscape") {\n          const marketMapGap = 8;') + 14000
+    plannerSource.indexOf('if (section.field === "competitiveLandscape" || section.field === "competitorLandscape") {\n          const marketMapGap = 8;') + 14000
   );
   const miForkIndex = block.indexOf("if (isMarketIntelligence) {");
   const miExtractorIndex = block.indexOf("extractMarketIntelligenceCompetitorRows(\n              section.content,");
@@ -268,13 +273,15 @@ test("Planner.tsx's downloadPdf: the competitor-table drawing branch (drawPdfVis
 // fallback.
 test("Planner.tsx's downloadPdf: getPdfVisualHeight's competitiveLandscape branch computes height from the SAME row source AND the SAME names-only/sparse fallbacks drawPdfVisual will actually use for each report type", () => {
   const heightBlock = plannerSource.slice(
-    plannerSource.indexOf('if (section.field === "competitiveLandscape") {\n          // Row source'),
+    // TASK #69A-29I -- widened from the exact-literal single-field
+    // check; see this file's own citation above for the full root-cause.
+    plannerSource.indexOf('if (section.field === "competitiveLandscape" || section.field === "competitorLandscape") {\n          // Row source'),
     // TASK #45 -- widened from 2400: the return line grew a short
     // explanatory comment when its header-height budget was split
     // between the empty state (competitorHeaderHeight) and the real
     // full-table state (miCompetitorHeaderHeight, to fit the new
     // Vendor Confidence scoping caption).
-    plannerSource.indexOf('if (section.field === "competitiveLandscape") {\n          // Row source') + 3000
+    plannerSource.indexOf('if (section.field === "competitiveLandscape" || section.field === "competitorLandscape") {\n          // Row source') + 3000
   );
   assert.match(
     heightBlock,
