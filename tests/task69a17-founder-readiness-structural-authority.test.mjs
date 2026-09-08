@@ -184,15 +184,26 @@ test("fix proof: every dimensionScores entry's score matches the SAME numeric va
   assert.equal(ideaQuality.score, marketAttractiveness.score);
 });
 
-test("fix proof: investment-score.ts's confidence/totalScore/recommendation computation is completely untouched by this fix -- dimensionScores is purely additive, attached only to decisionEngine.founderScore", () => {
+test("fix proof: investment-score.ts's totalScore/confidence computation is untouched by THIS (#69A-17) fix -- dimensionScores is purely additive, attached only to decisionEngine.founderScore", () => {
   assert.doesNotMatch(investmentScoreSource, /founderReadinessDimensionScores[\s\S]{0,200}totalScore\s*=/);
   assert.doesNotMatch(investmentScoreSource, /founderReadinessDimensionScores[\s\S]{0,200}confidence\s*=/);
-  // The array is declared once, right after teamFounder, and used exactly
-  // once (attached to founderScore) -- never touching marketScore,
-  // financialScore, executionScore, riskScore, competitionScore, or
-  // technologyScore's own construction.
+  // NOTE (superseded in part by #69A-27): the array is still declared
+  // exactly once, right after teamFounder, and still attached to
+  // founderScore exactly as #69A-17 left it -- never touching
+  // marketScore, financialScore, executionScore, riskScore,
+  // competitionScore, or technologyScore's own construction. #69A-27
+  // added a SEPARATE, later, additive read of this same array
+  // (detectFatalBlockers(founderReadinessDimensionScores)) to compute
+  // fatalBlockers -- which DOES now influence `recommendation`
+  // (deliberately, per #69A-27's own fix: a fatal Founder Readiness
+  // dimension must override a would-be GO) -- so this file's own
+  // occurrence count is now 3 (declaration, founderScore attachment,
+  // fatal-blocker check), not 2. recommendation is intentionally no
+  // longer "completely untouched" by code that reads this array --
+  // see tests/task69a27-decision-engine-corrections.test.mjs for the
+  // full fix-proof and behavioral tests.
   const declarationCount = (investmentScoreSource.match(/founderReadinessDimensionScores/g) || []).length;
-  assert.equal(declarationCount, 2, "expected exactly one declaration and one usage site");
+  assert.equal(declarationCount, 3, "expected the declaration, the founderScore attachment, and #69A-27's fatal-blocker check");
 });
 
 test("fix proof: readFounderReadinessMetrics (the function buildRiskHeatmap's Founder Evidence/Validation Confidence risk classification calls directly) also prefers the structured dimensionScores array over the legacy reasoning regex when both are present", () => {
@@ -439,8 +450,11 @@ test("preserves competitor-landscape structured generation (#69A-15A/16): BUSINE
     "utf8"
   );
   assert.match(businessCompetitorSource, /export const BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA = \{/);
+  // Field-list-tolerant: TASK #69A-28 legitimately appended a second,
+  // unrelated schema-enforced key ("portersFiveForcesStructured") to
+  // this SAME array.
   assert.match(
     planExecutorSource,
-    /format: createFullReportJsonSchema\(\s*\n\s*"zerinix_business_plan_report",\s*\n\s*\[\.\.\.planFields, "competitorLandscapeStructured"\],/
+    /format: createFullReportJsonSchema\(\s*\n\s*"zerinix_business_plan_report",\s*\n\s*\[\.\.\.planFields, "competitorLandscapeStructured"(?:, "portersFiveForcesStructured")?\],/
   );
 });

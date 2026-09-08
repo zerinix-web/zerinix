@@ -139,7 +139,17 @@ function readFounderMetric(reasoning, label) {
   return line?.match(/(\d+)%/)?.[1] ?? null;
 }
 
-test("applyMarketResearchCoverageToContext + refreshInvestmentNarrativeFromResearchCoverage never overwrite Business Model Quality, Validation Confidence, Execution Complexity, or Evidence Confidence with an unrelated research-coverage value", () => {
+test("applyMarketResearchCoverageToContext + refreshInvestmentNarrativeFromResearchCoverage never overwrite Business Model Quality, Validation Confidence, Execution Complexity, Evidence Confidence, or Founder Evidence with an unrelated research-coverage value", () => {
+  // TASK #69A-27B -- "Founder evidence" added to this table. This test
+  // pre-existed (Requirement 3) and already covered its 4 siblings, but
+  // omitted "Founder evidence" itself -- the exact gap that let a real
+  // defect through: unlike its siblings, the "Founder evidence" reasoning
+  // line had NO "original ?? ..." preservation at all, so it
+  // unconditionally printed dimensions.founderReadiness (a general
+  // market/competitive research-coverage signal) in place of the
+  // prompt-derived, founder-signal-specific founderEvidenceScore. Fixed
+  // in market-research-coverage.ts to follow the exact same pattern as
+  // its siblings; this assertion is the regression proof.
   const { model, score } = scoreFor(scenarioPrompts.enterpriseArr);
   const originalReasoning = score.categories.teamFounder.reasoning;
   const originalValues = {
@@ -147,6 +157,7 @@ test("applyMarketResearchCoverageToContext + refreshInvestmentNarrativeFromResea
     validationConfidence: readFounderMetric(originalReasoning, "Validation confidence"),
     executionComplexity: readFounderMetric(originalReasoning, "Execution complexity"),
     evidenceConfidence: readFounderMetric(originalReasoning, "Evidence confidence"),
+    founderEvidence: readFounderMetric(originalReasoning, "Founder evidence"),
   };
 
   for (const [label, value] of Object.entries(originalValues)) {
@@ -176,6 +187,65 @@ test("applyMarketResearchCoverageToContext + refreshInvestmentNarrativeFromResea
   assert.equal(readFounderMetric(decisionEngineReasoning, "Validation confidence"), originalValues.validationConfidence);
   assert.equal(readFounderMetric(decisionEngineReasoning, "Execution complexity"), originalValues.executionComplexity);
   assert.equal(readFounderMetric(decisionEngineReasoning, "Evidence confidence"), originalValues.evidenceConfidence);
+  assert.equal(readFounderMetric(decisionEngineReasoning, "Founder evidence"), originalValues.founderEvidence);
+});
+
+test("[#69A-27B] general market/competitive research coverage cannot inflate the 'Founder evidence' reasoning line above its original founder-specific value", () => {
+  // A direct proof, independent of the fixture above: even when the
+  // research-coverage dimension itself is deliberately set HIGHER than
+  // the original founder-specific evidence score (strong external market
+  // evidence, weak/no founder-specific evidence -- the exact scenario
+  // "general research coverage inflating Founder Evidence" describes),
+  // the post-refresh reasoning line must still report the ORIGINAL,
+  // founder-signal-derived number, never the research dimension.
+  const { model, score } = scoreFor(scenarioPrompts.enterpriseArr);
+  const originalFounderEvidence = Number(
+    readFounderMetric(score.categories.teamFounder.reasoning, "Founder evidence")
+  );
+  const context = { ...model, investmentScore: score, reportIntelligence: {} };
+
+  // A coverageOverride whose founderReadiness dimension is forced far
+  // above the original founder-specific score -- simulating abundant
+  // external market/competitive evidence with no bearing on founder
+  // capability.
+  const inflatedCoverage = {
+    evidenceCount: 40,
+    verifiedSources: 20,
+    independentDomains: 8,
+    competitorBreadth: 5,
+    sourceTypeDiversity: 4,
+    claimCoverage: 90,
+    freshnessScore: 90,
+    averageQuality: 90,
+    verifiedMarketSizeAvailable: true,
+    dimensions: {
+      marketConfidence: 95,
+      competitiveEvidence: 95,
+      financialEvidence: 95,
+      executionReadiness: 95,
+      productEvidence: 95,
+      founderReadiness: Math.min(100, originalFounderEvidence + 40),
+    },
+    overallConfidence: 90,
+    sourceClasses: [],
+  };
+
+  const { context: appliedContext } = applyMarketResearchCoverageToContext(
+    context,
+    { evidence: [] },
+    scenarioPrompts.enterpriseArr,
+    inflatedCoverage
+  );
+
+  const refreshedFounderEvidence = Number(
+    readFounderMetric(appliedContext.investmentScore.decisionEngine.founderScore.reasoning, "Founder evidence")
+  );
+
+  assert.equal(
+    refreshedFounderEvidence,
+    originalFounderEvidence,
+    `inflated research coverage (founderReadiness=${inflatedCoverage.dimensions.founderReadiness}) must not override the original founder-specific evidence value (${originalFounderEvidence}), got ${refreshedFounderEvidence}`
+  );
 });
 
 test("Founder Readiness (teamFounder category score) is identical whether read before or after the market-research-coverage refresh, for a research bundle with zero external evidence", () => {

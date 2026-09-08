@@ -40,12 +40,30 @@ export type InvestmentScoreCategory = {
   dimensionScores?: FounderReadinessDimensionScoreEntry[];
 };
 
+// TASK #69A-27 -- structured, canonical provenance for a fatal-blocker
+// override (see applyFatalBlockerOverride below): which named Founder
+// Readiness dimension(s) fell below FATAL_BLOCKER_SCORE_RATIO and
+// therefore forced the recommendation away from "GO", so a downstream
+// reader (report narrative, decision provenance, a future UI) can
+// reconstruct WHY GO was blocked from structured data alone, never
+// from generated prose or renderer inference.
+export type FatalBlocker = {
+  key: string;
+  label: string;
+  score: number;
+};
+
 export type InvestmentScore = {
   version: "investment_score_engine_v1";
   fingerprint: string;
   totalScore: number;
   confidence: number;
   recommendation: "GO" | "WAIT" | "PASS";
+  // TASK #69A-27 -- empty whenever no fatal blocker exists (the
+  // overwhelmingly common case); non-empty ONLY when
+  // applyFatalBlockerOverride actually downgraded a would-be "GO" to
+  // "WAIT" because of one or more of these entries.
+  fatalBlockers: FatalBlocker[];
   estimatedValuation: string;
   fundingStage: string;
   nextCriticalAction: string;
@@ -156,9 +174,33 @@ function promptSpecificityScore(prompt: string) {
 const negatedEvidenceClaimPattern =
   /\b(?:no|not|zero|without|never (?:had|have|has)|don'?t have|doesn'?t have|do not have|does not have|haven'?t(?:\s+(?:got|had))?|have not(?:\s+(?:got|had))?|hasn'?t(?:\s+(?:got|had))?|has not(?:\s+(?:got|had))?|lack(?:s|ing)? of|no direct|not yet)\s+(?:\w+\s+){0,3}?(?:revenue|sales|customers?|subscribers?|pre[-\s]?orders?|waitlist|loi|pilot|retention|repeat purchase|churn|conversion|cohort|traction|mrr|arr|gelir|satış|satis|müşteri|musteri|abone|abonelik|ön sipariş|on siparis|bekleme listesi)\b/gi;
 
+// TASK #69A-27 -- ROOT CAUSE FIX (#69A-26 P1, adversarial finding: an
+// unsupported revenue PROJECTION alone -- "we project $10M ARR within
+// 18 months... we have no customers, no revenue, no pilots" -- reached
+// recommendation "GO"). Confirmed live: hasValidationEvidence already
+// stripped NEGATED evidence claims, but never stripped FORWARD-LOOKING
+// ones -- "we project $10M ARR" still matched the bare "arr" keyword,
+// so a stated TARGET/FORECAST was indistinguishable from a stated,
+// already-achieved fact. This is the exact mechanism that let a
+// planning assumption satisfy the same evidence bar real, demonstrated
+// traction is supposed to require: hasValidationEvidence's result
+// becomes financial-model.ts's `sources.userProvidedData` ("User
+// supplied validation evidence in the request."), which
+// validation-intelligence.ts's hasUserEvidence reads verbatim to grade
+// the canonical "customer-demand" assumption Validated -- so a bare
+// projection could silently clear the SAME structured evidence-gap
+// check real traction is meant to gate. Same window-based approach as
+// negatedEvidenceClaimPattern above (a fixed nearby-text scan, matching
+// this file's own existing hasNearbyNegation-style precedent), applied
+// to forward-looking/aspirational framing instead of negation.
+const projectedEvidenceClaimPattern =
+  /\b(?:project(?:ed|ing|ions?)?|forecast(?:ed|ing|s)?|expect(?:ed|ing)?|anticipat(?:e|ed|ing)|target(?:ed|ing)?|plan(?:s|ned|ning)?\s+(?:for|to)|aim(?:s|ing)?\s+(?:for|to)|hope(?:s|d|ing)?\s+(?:for|to)|believe|confident (?:that|it|this)?|will (?:be|reach|have|see)|should (?:be|reach|have|see)|going to (?:be|reach|have))\b[^.!?]{0,30}?\b(?:revenue|sales|customers?|subscribers?|pre[-\s]?orders?|waitlist|loi|pilot|retention|repeat purchase|churn|conversion|cohort|traction|mrr|arr)\b/gi;
+
 function hasValidationEvidence(prompt: string) {
   const normalized = normalizePrompt(prompt);
-  const withoutNegatedClaims = normalized.replace(negatedEvidenceClaimPattern, " ");
+  const withoutNegatedClaims = normalized
+    .replace(negatedEvidenceClaimPattern, " ")
+    .replace(projectedEvidenceClaimPattern, " ");
 
   return /\b(revenue|sales|customers?|subscribers?|pre[-\s]?orders?|waitlist|loi|pilot|retention|repeat purchase|churn|conversion|cohort|traction|mrr|arr|gelir|satış|satis|müşteri|musteri|abone|abonelik|ön sipariş|on siparis|bekleme listesi)\b/.test(
     withoutNegatedClaims
@@ -233,10 +275,61 @@ function createWeaknesses(categories: InvestmentScoreCategory[], model: Financia
   return bottomCategories.slice(0, 4);
 }
 
-function createRecommendation(totalScore: number, confidence: number) {
+// TASK #69A-27 -- exported so refreshResearchAwareFinancialContext
+// (financial-assumptions.ts) can recompute the post-research
+// recommendation from THIS one authoritative formula instead of
+// duplicating its threshold logic a second time (the exact
+// "duplicated decision logic" pattern #69A-26 already flagged
+// elsewhere in this codebase for hasValidationEvidence).
+export function createRecommendation(totalScore: number, confidence: number) {
   if (totalScore >= 72 && confidence >= 60) return "GO";
   if (totalScore < 35 && confidence < 35) return "PASS";
   return "WAIT";
+}
+
+// TASK #69A-27 -- ROOT CAUSE FIX (#69A-26 P0 finding: createRecommendation
+// above is a PURE two-threshold gate on the aggregate totalScore/
+// confidence, with no per-category floor -- proven live, and by direct
+// arithmetic, that 7 categories at 90% and ONE catastrophic category
+// (e.g. teamFounder) at 10% still produces totalScore 82, clearing the
+// GO threshold outright). A material/fatal blocker must never be
+// averaged away by strong, unrelated dimensions. Deliberately checks
+// the 7 named Founder Readiness DIMENSION scores, not just the 8
+// top-level categories: teamFounder's own category score is itself an
+// AVERAGE of 6 sub-signals (ideaQuality counted twice, validationLevel,
+// founderEvidence, executionComplexity, a floored metricConfidence), so
+// even a genuinely catastrophic founderEvidenceScore gets diluted back
+// up to a moderate teamFounder category score the same way totalScore
+// dilutes teamFounder itself -- checking at dimension granularity is
+// the only way to catch the blocker before it is averaged away twice
+// over. This is deliberately NOT a prose/keyword scan of the report
+// text -- it reads only the already-computed, structured dimension
+// scores every Founder Readiness renderer already displays.
+export const FATAL_BLOCKER_SCORE_RATIO = 0.15;
+
+export function detectFatalBlockers(
+  dimensionScores: readonly FounderReadinessDimensionScoreEntry[]
+): FatalBlocker[] {
+  return dimensionScores
+    .filter((dimension) => dimension.score < FATAL_BLOCKER_SCORE_RATIO * 100)
+    .map((dimension) => ({ key: dimension.key, label: dimension.label, score: dimension.score }));
+}
+
+// A fatal blocker can only ever downgrade GO -> WAIT; it never manufactures
+// a WAIT -> PASS downgrade on its own (PASS already has its own,
+// independent low-totalScore/low-confidence gate above) and never
+// upgrades anything. This keeps the override narrowly scoped to
+// exactly the proven exploit (a blocker hiding behind a high aggregate
+// score reaching GO), not a broader re-grading of every recommendation.
+export function applyFatalBlockerOverride(
+  recommendation: "GO" | "WAIT" | "PASS",
+  fatalBlockers: readonly FatalBlocker[]
+): "GO" | "WAIT" | "PASS" {
+  if (fatalBlockers.length > 0 && recommendation === "GO") {
+    return "WAIT";
+  }
+
+  return recommendation;
 }
 
 function createVisibleRecommendation(recommendation: "GO" | "WAIT" | "PASS", confidence: number) {
@@ -359,9 +452,32 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
   const defensibilitySignals = hasAny(normalizedPrompt, [
     /\b(proprietary|patent|data moat|network effect|regulated|compliance|brand|luxury|enterprise)\b/,
   ]);
-  const founderSignals = hasAny(normalizedPrompt, [
+  // TASK #69A-27 -- ROOT CAUSE FIX (#69A-26 P0 finding, Case F: a
+  // controlled fixture explicitly stating the founder has "never
+  // operated a company... no technical background... no domain
+  // expertise whatsoever" still produced a Founder Evidence score of
+  // 94/100). ROOT CAUSE: founderSignals was a bare keyword-presence
+  // check with NO negation awareness at all -- unlike
+  // hasValidationEvidence in this same file, already fixed for the
+  // identical class of bug -- so the negated sentence's own
+  // "founder"/"domain"/"expert"-adjacent words still made it evaluate
+  // true. Fixed with the same window-based negation-stripping
+  // technique already established here and in financial-model.ts,
+  // PLUS a separate, higher-priority explicit-inexperience check: a
+  // genuine disclosure that the founder/team lacks relevant experience
+  // must dominate outright, never be diluted by an unrelated positive
+  // mention elsewhere in the same prompt -- the same "a blocker must
+  // not be averaged away" principle applied at signal-detection level,
+  // not just at the final aggregate.
+  const negatedFounderSignalPattern =
+    /\b(?:no|not|zero|without|never|lack(?:s|ing)?(?: of)?|inexperienced|first-time)\b[^.!?]{0,40}?\b(?:founder|team|operator|doctor|engineer|expert|experienced|domain|background)\b/gi;
+  const explicitFounderInexperiencePattern =
+    /\b(?:no founder|no team|founders? (?:has|have) never|team (?:has|have) never|never (?:operated|run|built|led|managed) a company|no (?:domain|industry|technical|relevant|prior) (?:expertise|experience|background)|lacks? (?:any )?(?:domain|industry|technical|relevant|founder|team) experience|no domain expertise|no technical background|no relevant experience|inexperienced founder)\b/i;
+  const founderClaimText = normalizedPrompt.replace(negatedFounderSignalPattern, " ");
+  const founderSignals = hasAny(founderClaimText, [
     /\b(founder|team|operator|doctor|engineer|expert|experienced|domain)\b/,
   ]);
+  const explicitFounderInexperience = explicitFounderInexperiencePattern.test(normalizedPrompt);
   const recurringRevenue =
     model.inputs.businessModel.includes("subscription") ||
     model.inputs.pricingModel.includes("subscription") ||
@@ -400,7 +516,32 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
   // specifically (confirmed live: 34% vs 49%, still readable as "similar"
   // even though every other lifecycle-graded figure showed a clear gap).
   const founderEvidenceScore = clamp(
-    (founderSignals ? 0.72 : 0.34) + lifecycleConfidenceBoost(lifecycleStage),
+    explicitFounderInexperience
+      ? 0.12
+      : (founderSignals ? 0.72 : 0.34) + lifecycleConfidenceBoost(lifecycleStage),
+    0,
+    0.95
+  );
+  // TASK #69A-27 -- de-collapse "Evidence Confidence" from "Founder
+  // Evidence" (#69A-26 P1 finding: both dimensions read the exact same
+  // founderEvidenceScore variable, so they could never disagree with
+  // each other despite representing different concepts -- founder/team
+  // capability specifically, versus how much real evidence backs the
+  // report's numbers overall). Evidence Confidence now reflects two
+  // already-independent, non-founder-specific signals -- average
+  // metric confidence across every financial metric, and whether
+  // genuine (non-projected -- see hasValidationEvidence's own #69A-27
+  // fix) validation evidence exists in the prompt at all -- so it can
+  // no longer be identical to Founder Evidence by construction, and a
+  // founder-inexperience disclosure no longer silently drags down a
+  // dimension that has nothing to do with founder capability.
+  const evidenceConfidenceScore = clamp(
+    average([
+      metricConfidenceScore / 100,
+      validationEvidence
+        ? clamp(0.7 + lifecycleConfidenceBoost(lifecycleStage), 0, 0.95)
+        : 0.35,
+    ]),
     0,
     0.95
   );
@@ -520,7 +661,12 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
       `Business model quality: ${Math.round((businessModel.score / businessModel.maximumScore) * 100)}%`,
       `Validation confidence: ${Math.round(validationLevelScore * 100)}%`,
       `Execution complexity: ${Math.round(executionComplexityScore * 100)}%`,
-      `Evidence confidence: ${Math.round(founderEvidenceScore * 100)}%`,
+      // TASK #69A-27 -- kept in sync with the de-collapsed
+      // evidenceConfidence/founderEvidence dimensionScores entries
+      // below: this reasoning line must report the SAME variable each
+      // dimension's own structured score reads, never a stale
+      // duplicate of the other dimension's value.
+      `Evidence confidence: ${Math.round(evidenceConfidenceScore * 100)}%`,
       `Founder evidence: ${Math.round(founderEvidenceScore * 100)}%`,
       `Founder or domain signals detected: ${founderSignals ? "yes" : "no"}`,
       `Validation evidence detected: ${validationEvidence ? "yes" : "no"}`,
@@ -559,7 +705,7 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
     },
     { key: "validationConfidence", label: "Validation Confidence", score: roundScore(validationLevelScore * 100) },
     { key: "executionComplexity", label: "Execution Complexity", score: roundScore(executionComplexityScore * 100) },
-    { key: "evidenceConfidence", label: "Evidence Confidence", score: roundScore(founderEvidenceScore * 100) },
+    { key: "evidenceConfidence", label: "Evidence Confidence", score: roundScore(evidenceConfidenceScore * 100) },
     { key: "founderEvidence", label: "Founder Evidence", score: roundScore(founderEvidenceScore * 100) },
   ];
 
@@ -635,7 +781,15 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
           : 48,
     ])
   );
-  const recommendation = createRecommendation(totalScore, confidence);
+  // TASK #69A-27 -- fatal blockers checked against the already-computed
+  // Founder Readiness dimensions (defined above, in scope here) and
+  // applied as a narrow override on top of the existing pure aggregate
+  // gate -- see applyFatalBlockerOverride's own doc comment.
+  const fatalBlockers = detectFatalBlockers(founderReadinessDimensionScores);
+  const recommendation = applyFatalBlockerOverride(
+    createRecommendation(totalScore, confidence),
+    fatalBlockers
+  );
   const technologyScore = makeCategory({
     key: "competitiveAdvantage",
     label: "Technology Score",
@@ -722,6 +876,7 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
     totalScore,
     confidence,
     recommendation,
+    fatalBlockers,
     estimatedValuation: createEstimatedValuation(model),
     fundingStage: createFundingStage(model),
     nextCriticalAction: createNextCriticalAction(model, recommendation),

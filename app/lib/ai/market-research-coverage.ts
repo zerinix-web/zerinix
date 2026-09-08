@@ -413,6 +413,30 @@ export function applyMarketResearchCoverageToContext(
   const originalExecutionComplexity = extractOriginalReasoningPercent(originalFounderReasoning, "Execution complexity");
   const originalValidationConfidence = extractOriginalReasoningPercent(originalFounderReasoning, "Validation confidence");
   const originalEvidenceConfidence = extractOriginalReasoningPercent(originalFounderReasoning, "Evidence confidence");
+  // TASK #69A-27B -- ROOT CAUSE FIX: unlike every sibling line above
+  // (Business model quality/Validation confidence/Execution complexity/
+  // Evidence confidence), this one had NO "original ?? ..." preservation
+  // at all -- it unconditionally printed dimensions.founderReadiness (a
+  // general market-research-coverage signal, blended from external
+  // evidence breadth/quality) as "Founder evidence," silently discarding
+  // the prompt-derived, founder-signal-specific founderEvidenceScore
+  // (investment-score.ts) this line is supposed to describe. Founder
+  // Evidence is deliberately founder-specific (domain experience,
+  // operating capacity, explicit-inexperience detection) and must never
+  // be inflated by how much UNRELATED market/competitive evidence
+  // research happened to find -- exactly the "general research coverage
+  // cannot inflate Founder Evidence" invariant this fix restores. This
+  // text was already masked for every current renderer (readFounderReadinessDimensionScore/
+  // resolveDimensionScoreText both prefer the structured dimensionScores
+  // array first, and dimensionScores itself was never touched by this
+  // function), so this had no visible effect on any currently-displayed
+  // number -- but it left a genuinely wrong, independently-recomputed
+  // second "Founder evidence" value sitting in structured decisionEngine
+  // data, one accidental future read away from a real drift. Fixed the
+  // same way its siblings already work: prefer the original,
+  // founder-signal-derived value; fall back to the research dimension
+  // only if that original line is somehow missing.
+  const originalFounderEvidence = extractOriginalReasoningPercent(originalFounderReasoning, "Founder evidence");
   const marketScore = scoreCategory(
     decisionEngine.marketScore,
     dimensions.marketConfidence,
@@ -469,7 +493,7 @@ export function applyMarketResearchCoverageToContext(
       `Validation confidence: ${originalValidationConfidence ?? dimensions.executionReadiness}%`,
       `Execution complexity: ${originalExecutionComplexity ?? dimensions.executionReadiness}%`,
       `Evidence confidence: ${originalEvidenceConfidence ?? coverage.overallConfidence}%`,
-      `Founder evidence: ${dimensions.founderReadiness}%`,
+      `Founder evidence: ${originalFounderEvidence ?? dimensions.founderReadiness}%`,
     ]
   );
   const confidenceLevel = classifyMarketConfidence(coverage.overallConfidence);

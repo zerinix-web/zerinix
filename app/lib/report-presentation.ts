@@ -1138,18 +1138,16 @@ function buildConfidenceRadar(
   investmentScore: ReportInvestmentScore | undefined,
   isTurkish: boolean
 ) {
-  // Each dimension first tries the report's own labeled text (the AI
-  // occasionally writes a real per-dimension score inline); when that
-  // isn't present, it now falls back to a genuinely distinct, independently
-  // computed score from investmentScore.decisionEngine/categories --
-  // never to one shared blended number. Confirmed live: every dimension
-  // previously fell back to the SAME investmentScore.confidence value
-  // whenever the AI's prose didn't happen to contain a literal
-  // "Market Confidence:"/"Execution Readiness:"-style label (which none of
-  // the generation prompts ever ask it to write), collapsing all five
-  // boxes to one identical number (e.g. 54/54/54/54/54). A dimension with
-  // no real, distinct signal available now shows null (rendered as
-  // "Validation Required" by every caller) instead of a fabricated match.
+  // Each dimension's canonical source is its own investmentScore.
+  // decisionEngine category score -- the same structured value every
+  // other Founder/Investment surface in the report already reads.
+  // Content-based label scanning is a fallback ONLY, used when
+  // decisionEngine itself has no value for that category (true for every
+  // Market Intelligence report -- its generation prompts never write
+  // "Market Confidence:"/"Financial Quality:"/etc, and investmentScore is
+  // never populated for this report type). A dimension with no defensible
+  // value either way shows null (rendered as "Validation Required" by
+  // every caller) instead of a fabricated match.
   const dimensions = [
     {
       label: isTurkish ? "Pazar" : "Market",
@@ -1172,38 +1170,92 @@ function buildConfidenceRadar(
       score: investmentScore?.decisionEngine?.technologyScore?.score,
     },
     {
+      // TASK #69A-27A -- ROOT CAUSE FIX: this dimension's alias list used
+      // to include "Evidence Confidence"/"Kanıt Güveni" -- but that exact
+      // label string is not this dimension's own; it is Founder
+      // Readiness's OWN dimension label, written verbatim into the
+      // report's Founder Readiness/AI Founder Score section text (see
+      // buildCanonicalFounderScore, plan-executor.ts: "Evidence
+      // Confidence: NN/100 - ..."), a completely different concept
+      // (founder/validation evidence quality, decisionEngine.founderScore.
+      // dimensionScores.evidenceConfidence) than this "Evidence" radar
+      // dimension's real, structured source below (decisionEngine.
+      // competitionScore -- the competitive-advantage/moat category,
+      // labeled "Evidence" here only because competitive proof is the
+      // closest fit among the 7 decision-engine categories). Confirmed
+      // live: the web dashboard passes only the Executive Summary
+      // section's own content into buildConfidenceRadar, which never
+      // contains that Founder Readiness text, so it correctly fell
+      // through to competitionScore.score (41) -- but the PDF path passes
+      // the FULL concatenation of every section's content (fullReportContent
+      // in ReportPdfButton.tsx), which DOES contain the Founder Readiness
+      // section's "Evidence Confidence: 36/100 - ..." line, so the old
+      // label-matching logic below mistakenly captured Founder Readiness's
+      // number (36) instead. Same investmentScore, same persisted report,
+      // two different displayed numbers -- purely because of how much of
+      // the report happened to be in `content` for a given caller, not
+      // because the underlying score differed. Removing this alias (kept:
+      // "Competitive Evidence"/"Evidence Strength"/"Rekabet Kanıtı"/"Kanıt
+      // Gücü", which are never written by Founder Readiness and remain
+      // legitimate for reports -- e.g. legal, dynamic-report-plan's
+      // evidence_strength section -- that do write them) plus the
+      // structured-first precedence change below together make this
+      // dimension's value the SAME by construction for every caller,
+      // never again by coincidence.
       label: isTurkish ? "Kanıt" : "Evidence",
-      aliases: ["Competitive Evidence", "Evidence Confidence", "Evidence Strength", "Rekabet Kanıtı", "Kanıt Güveni", "Kanıt Gücü"],
+      aliases: ["Competitive Evidence", "Evidence Strength", "Rekabet Kanıtı", "Kanıt Gücü"],
       score: investmentScore?.decisionEngine?.competitionScore?.score,
     },
   ];
 
-  // P0 PRODUCTION FIX -- confirmed live (Market Intelligence confidence-
-  // scoring hardening): extractPercentScore's own unlabeled fallback (used
-  // whenever no exact "Label: value" line exists) scans the ENTIRE content
-  // for the FIRST bare "NN%"/"NN/100" pattern, with no tie to which
-  // dimension is asking. Every dimension here passes the SAME `content`
-  // string, so for any report where none of the alias labels appear
-  // verbatim (true for every Market Intelligence report -- its generation
-  // prompts never write "Market Confidence:"/"Financial Quality:"/etc, and
-  // investmentScore is never populated for this report type) all 5
-  // dimensions collapsed onto the SAME unrelated percentage -- in
-  // production, almost always the Executive Decision banner's own overall
-  // confidence figure (frequently capped at exactly 50 by
-  // capConfidenceForEvidenceGap when a decision-critical evidence gap
-  // exists), producing the reported "uniform ~50/51 across every
-  // dimension" symptom. requireNearbyLabelWord (already the established
-  // safe pattern for buildExecutiveSnapshot's own confidenceScore, a few
-  // lines below) requires the dimension's OWN alias word within 20 chars
-  // of the percentage, so a report that never mentions that dimension by
-  // name correctly falls through to null ("Validation Required", the
-  // existing convention for "no defensible dimension-specific value")
-  // instead of fabricating a shared, unrelated number.
+  // TASK #69A-27A -- STRUCTURAL AUTHORITY FIX: the report's own labeled
+  // text used to be tried FIRST, with the structured decisionEngine score
+  // only a fallback -- but extractPercentScore's label match scans
+  // whatever `content` string this particular caller happened to pass in,
+  // and different callers pass genuinely different amounts of the same
+  // report (a single section for the web dashboard's Executive Snapshot
+  // panel vs. every section concatenated together for the PDF's
+  // fullReportContent). That made a dimension's displayed value depend on
+  // which caller rendered it, not on the report itself, whenever some
+  // OTHER section's prose happened to contain one of this dimension's
+  // alias words within label-matching distance (confirmed live for the
+  // "Evidence" dimension above; see its own comment for the exact
+  // mechanism). A structured decisionEngine score, when present, is
+  // already the one canonical, deterministic, content-independent number
+  // every other Founder/Investment surface in the report reads -- so it
+  // is now the AUTHORITATIVE value whenever it exists, with the prose
+  // label scan demoted to a fallback used ONLY when decisionEngine itself
+  // has nothing for that category (Market Intelligence and any other
+  // report type that never populates investmentScore -- the original,
+  // still-preserved motivating case for this label scan; see the P0
+  // PRODUCTION FIX history below). This does not change any value for a
+  // report that has decisionEngine populated and never had colliding
+  // prose (Market/Financial/Execution/Product here never match any real
+  // generated label today -- confirmed: none of their alias strings are
+  // ever written verbatim by any prompt or report-jobs builder), and it
+  // fixes Evidence for every caller identically, by construction.
+  //
+  // P0 PRODUCTION FIX (preserved history) -- confirmed live (Market
+  // Intelligence confidence-scoring hardening): extractPercentScore's own
+  // unlabeled fallback (used whenever no exact "Label: value" line
+  // exists) scans the ENTIRE content for the FIRST bare "NN%"/"NN/100"
+  // pattern, with no tie to which dimension is asking. Every dimension
+  // here passes the SAME `content` string, so for any report where none
+  // of the alias labels appear verbatim (true for every Market
+  // Intelligence report) all 5 dimensions collapsed onto the SAME
+  // unrelated percentage. requireNearbyLabelWord (already the established
+  // safe pattern for buildExecutiveSnapshot's own confidenceScore) requires
+  // the dimension's OWN alias word within 20 chars of the percentage, so a
+  // report that never mentions that dimension by name correctly falls
+  // through to null ("Validation Required") instead of fabricating a
+  // shared, unrelated number.
   return dimensions.map((dimension) => ({
     label: dimension.label,
     score:
+      (typeof dimension.score === "number" && Number.isFinite(dimension.score)
+        ? Math.max(0, Math.min(100, Math.round(dimension.score)))
+        : null) ??
       extractPercentScore(content, dimension.aliases, { requireNearbyLabelWord: true }) ??
-      dimension.score ??
       null,
   }));
 }

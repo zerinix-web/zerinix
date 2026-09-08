@@ -640,9 +640,26 @@ function isD2cFoodOrFmcg(input: FinancialModelingInputs) {
 const negatedEvidenceClaimPattern =
   /\b(?:no|not|zero|without|never (?:had|have|has)|don'?t have|doesn'?t have|do not have|does not have|haven'?t(?:\s+(?:got|had))?|have not(?:\s+(?:got|had))?|hasn'?t(?:\s+(?:got|had))?|has not(?:\s+(?:got|had))?|lack(?:s|ing)? of|no direct|not yet)\s+(?:\w+\s+){0,3}?(?:revenue|sales|customers?|subscribers?|pre[-\s]?orders?|waitlist|loi|pilot|retention|repeat purchase|churn|conversion|cohort|traction|mrr|arr|gelir|satış|satis|müşteri|musteri|abon[eelik]*|ön sipariş|on siparis|bekleme listesi)\b/gi;
 
+// TASK #69A-27 -- ROOT CAUSE FIX (#69A-26 P1, adversarial finding: "we
+// project $10M ARR within 18 months... we have no customers, no
+// revenue" fed sources.userProvidedData = "User supplied validation
+// evidence in the request.", which validation-intelligence.ts's
+// hasUserEvidence reads verbatim to grade the canonical "customer-
+// demand" assumption Validated -- letting a bare projection satisfy
+// the same evidence bar real, demonstrated traction is supposed to
+// require). Same window-based technique as negatedEvidenceClaimPattern
+// above, and the identical fix already applied to this function's own
+// duplicate in investment-score.ts, applied to forward-looking/
+// aspirational framing instead of negation -- kept in sync with that
+// copy rather than diverging.
+const projectedEvidenceClaimPattern =
+  /\b(?:project(?:ed|ing|ions?)?|forecast(?:ed|ing|s)?|expect(?:ed|ing)?|anticipat(?:e|ed|ing)|target(?:ed|ing)?|plan(?:s|ned|ning)?\s+(?:for|to)|aim(?:s|ing)?\s+(?:for|to)|hope(?:s|d|ing)?\s+(?:for|to)|believe|confident (?:that|it|this)?|will (?:be|reach|have|see)|should (?:be|reach|have|see)|going to (?:be|reach|have))\b[^.!?]{0,30}?\b(?:revenue|sales|customers?|subscribers?|pre[-\s]?orders?|waitlist|loi|pilot|retention|repeat purchase|churn|conversion|cohort|traction|mrr|arr)\b/gi;
+
 function hasValidationEvidence(prompt: string) {
   const normalized = normalizePrompt(prompt);
-  const withoutNegatedClaims = normalized.replace(negatedEvidenceClaimPattern, " ");
+  const withoutNegatedClaims = normalized
+    .replace(negatedEvidenceClaimPattern, " ")
+    .replace(projectedEvidenceClaimPattern, " ");
 
   return /\b(revenue|sales|customers?|subscribers?|pre[-\s]?orders?|waitlist|loi|pilot|retention|repeat purchase|churn|conversion|cohort|traction|mrr|arr|gelir|satış|satis|müşteri|musteri|abon[eelik]*|ön sipariş|on siparis|bekleme listesi)\b/.test(
     withoutNegatedClaims
@@ -698,6 +715,30 @@ function hasNearbyNegation(prompt: string, index: number) {
   );
 }
 
+// TASK #69A-27 -- ROOT CAUSE FIX (#69A-26 P1, adversarial finding: "we
+// project $10M ARR within 18 months... we have no customers, no
+// revenue" reached recommendation "GO"). Confirmed live: unlike
+// extractUserStatedCustomerCount below (which already excludes a
+// figure qualified as "potential/target/addressable/estimated/
+// projected/expected/future"), this shared USD-amount extractor -- the
+// one MRR/ARR/price-per-customer/investment-amount all go through --
+// had no such exclusion at all, so "we project $10M ARR" was extracted
+// as if $10M were the company's real, CURRENT, achieved ARR, which
+// also set that metric's own confidence to "High" (extractUserStatedFinancials's
+// own userStated.arr ? "High" : ... branch) purely because a projected
+// figure was stated, not because any real evidence backs it. Same
+// ~40-character nearby-text-scan technique already established for
+// extractUserStatedCustomerCount's qualifier check, applied here so
+// every caller of extractLabeledUsdAmount is fixed at once rather than
+// individually.
+function hasNearbyProjectionQualifier(prompt: string, index: number) {
+  const precedingContext = prompt.slice(Math.max(0, index - 40), index);
+
+  return /\b(?:potential|target|addressable|total addressable|estimated|projected|expected|forecast(?:ed)?|anticipated|planned|future|goal|aim(?:ing)?|hope(?:d|ing)?|by (?:year|month|q\d)|within \d+\s*(?:months?|years?))\b(?:\s+(?:is|was|of|at|reached|to (?:be|reach|hit))?)?\s*(?:[:=-]\s*)?$/i.test(
+    precedingContext
+  );
+}
+
 function extractLabeledUsdAmount(prompt: string, labelPattern: string): number | null {
   const valueThenLabel = new RegExp(
     `${usdAmountGroup}${sameLineGap}(?:in${sameLineGap}|of${sameLineGap})?(?:${labelPattern})\\b`,
@@ -711,6 +752,7 @@ function extractLabeledUsdAmount(prompt: string, labelPattern: string): number |
   const match = prompt.match(valueThenLabel) || prompt.match(labelThenValue);
   if (!match || typeof match.index !== "number") return null;
   if (hasNearbyNegation(prompt, match.index)) return null;
+  if (hasNearbyProjectionQualifier(prompt, match.index)) return null;
 
   return parseUsdAmount(match[1], match[2] || "");
 }

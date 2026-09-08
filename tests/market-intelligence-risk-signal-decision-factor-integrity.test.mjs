@@ -224,13 +224,25 @@ test("drift check: this fix does not touch resolveMarketIntelligenceExecutiveDec
   }
 });
 
-test("drift check: buildConfidenceRadar's per-dimension null fallback (Market Signal / Decision Factors' own already-correct 'no fabricated shared number' hardening) is untouched by this pass", () => {
+test("[UPDATED BY #69A-27A] drift check: buildConfidenceRadar's per-dimension null fallback (Market Signal / Decision Factors' own already-correct 'no fabricated shared number' hardening) is untouched by this pass", () => {
+  // TASK #69A-27A -- the exact source shape this regex matched changed:
+  // #69A-27A made the structured decisionEngine score AUTHORITATIVE
+  // whenever present (fixing a confirmed live web/PDF Evidence-dimension
+  // drift caused by the old prose-first precedence), demoting
+  // extractPercentScore's label scan to a fallback used only when no
+  // structured score exists -- which is still exactly the case this test
+  // itself is about (Market Intelligence, whose reports never populate
+  // investmentScore/decisionEngine at all). The "no fabricated shared
+  // number" null fallback this test guards is unchanged: dimension.score
+  // is still `undefined` for Market Intelligence, so this still falls
+  // through to extractPercentScore, then to null, exactly as before --
+  // only the field order in the source text moved.
   const presentationSource = readFileSync(
     new URL("../app/lib/report-presentation.ts", import.meta.url),
     "utf8"
   );
   assert.match(
     presentationSource,
-    /extractPercentScore\(content, dimension\.aliases, \{ requireNearbyLabelWord: true \}\) \?\?\s*\n\s*dimension\.score \?\?\s*\n\s*null,/
+    /extractPercentScore\(content, dimension\.aliases, \{ requireNearbyLabelWord: true \}\) \?\?\s*\n\s*null,/
   );
 });

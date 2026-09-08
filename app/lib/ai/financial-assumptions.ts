@@ -41,7 +41,10 @@ import {
   type ValidationType,
 } from "@/app/lib/ai/validation-intelligence";
 import {
+  applyFatalBlockerOverride,
   createInvestmentScore,
+  createRecommendation,
+  detectFatalBlockers,
   formatInvestmentScore,
   refreshInvestmentNarrativeFromResearchCoverage,
   type InvestmentScore,
@@ -175,9 +178,43 @@ function deriveValidationIntelligenceGaps(
 export function refreshResearchAwareFinancialContext(
   context: AiFinancialModelContext
 ): AiFinancialModelContext {
+  const refreshedNarrative = refreshInvestmentNarrativeFromResearchCoverage(context.investmentScore, context);
+  // TASK #69A-27 -- ROOT CAUSE FIX (#69A-26 P0 finding: investmentScore.
+  // totalScore/recommendation were frozen at their pre-research values
+  // forever, while 5 of the 8 displayed categories AND
+  // investmentScore.confidence were already research-aware -- confirmed
+  // live, a real strong-evidence run showed totalScore stuck at 59 while
+  // the displayed categories summed to 71, a decision that could not be
+  // reconstructed from the report's own structured data, and the exact
+  // reason a genuinely strong, well-evidenced report could never reach
+  // "GO" no matter how much real evidence research turned up).
+  // totalScore is now recomputed from these SAME freshly-refreshed
+  // categories (never a second, independently-derived total), and
+  // recommendation is re-derived from that fresh total plus the
+  // already-live confidence via the ONE authoritative
+  // createRecommendation/applyFatalBlockerOverride pair
+  // (investment-score.ts) -- never a duplicated threshold check.
+  // fatalBlockers is recomputed from the Founder Readiness dimension
+  // scores, which are prompt-derived, not research-derived (confirmed
+  // in financial-model.ts/investment-score.ts), so this is a genuine
+  // recomputation rather than a silent pass-through of a stale value.
+  const refreshedTotalScore = Object.values(refreshedNarrative.categories).reduce(
+    (sum, category) => sum + category.score,
+    0
+  );
+  const fatalBlockers = detectFatalBlockers(
+    context.investmentScore.decisionEngine.founderScore.dimensionScores || []
+  );
+  const refreshedRecommendation = applyFatalBlockerOverride(
+    createRecommendation(refreshedTotalScore, context.investmentScore.confidence),
+    fatalBlockers
+  );
   const refreshedInvestmentScore: InvestmentScore = {
     ...context.investmentScore,
-    ...refreshInvestmentNarrativeFromResearchCoverage(context.investmentScore, context),
+    ...refreshedNarrative,
+    totalScore: refreshedTotalScore,
+    recommendation: refreshedRecommendation,
+    fatalBlockers,
   };
 
   // TASK #69A-18A -- INVESTIGATED (not assumed): #69A-18 left a
