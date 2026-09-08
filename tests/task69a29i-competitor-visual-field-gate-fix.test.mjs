@@ -37,10 +37,9 @@
 // no competitor-extraction change, no decision/scoring change.
 //
 // This test exercises the REAL, EXTRACTED bug logic -- the actual
-// `visualFields` Set literal (both git HEAD's pre-fix version and the
-// current, fixed version) and the actual two guard-line conditions,
-// pulled from the real file, not reimplemented by hand -- combined
-// with a REAL jsPDF document and the REAL, unmodified
+// `visualFields` Set literal and the actual two guard-line conditions,
+// pulled from the real, CURRENT file, not reimplemented by hand --
+// combined with a REAL jsPDF document and the REAL, unmodified
 // resolveCompetitorRowsForDownloadPdf/formatCompetitorWeaknessForDisplay
 // functions. Deliberately does NOT call applyPdfFont (which would
 // embed the real Geist TTF and make jsPDF encode all drawn text as
@@ -51,9 +50,23 @@
 // search the final serialized PDF for "Competitor Landscape" and real
 // competitor names, satisfying this ticket's own Section E requirement
 // 6 for a real (if simplified) jsPDF path.
+//
+// TASK #69A-35 -- ROOT CAUSE of a post-commit test failure (not a
+// production regression): the original fail-before proof fetched
+// "the pre-fix version" via `git show HEAD:components/Planner.tsx`.
+// That was only ever true while the #69A-29I fix sat uncommitted in the
+// working tree; once it was committed (see #69A-32/33/34), HEAD BECAME
+// the fixed state, so the proof's own "HEAD must genuinely predate this
+// fix" precondition started failing -- correctly, since its premise
+// was no longer true, not because the shipped fix regressed. Fetching
+// a fixed commit SHA instead would only defer the same failure mode to
+// the next rebase/squash. The fail-before proof below instead derives
+// its "pre-fix" input by programmatically removing the exact two Set
+// entries #69A-29I added from the CURRENT, live visualFields list --
+// entirely independent of git history, HEAD, or any specific commit
+// position, and self-updating forever.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,17 +80,27 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const plannerPath = join(repoRoot, "components/Planner.tsx");
 const currentSource = readFileSync(plannerPath, "utf8");
 
-function headSource() {
-  return execFileSync("git", ["show", "HEAD:components/Planner.tsx"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
-}
-
 function extractVisualFieldsSetLiteral(source) {
   const match = /const visualFields = new Set<ReportSection\["field"\]>\(\[([\s\S]*?)\]\);/.exec(source);
   assert.ok(match, "visualFields Set literal not found");
   return [...match[1].matchAll(/"([^"]+)"/g)].map((entry) => entry[1]);
+}
+
+// Derives the exact pre-#69A-29I membership list by removing the two
+// entries that fix actually added, from the CURRENT, live Set -- never
+// from git history. The guard assertion proves this simulation is
+// meaningful (not vacuous): if the fix were ever genuinely reverted for
+// real, both entries would already be absent and this would fail
+// loudly here, rather than silently producing a no-op "removal".
+function simulatePreFixVisualFieldsList(currentVisualFieldsList) {
+  assert.ok(
+    currentVisualFieldsList.includes("competitorLandscape") && currentVisualFieldsList.includes("competitorAnalysis"),
+    "expected the CURRENT visualFields Set to contain the #69A-29I fix (\"competitorLandscape\"/\"competitorAnalysis\") before simulating its removal -- otherwise this proof would be vacuous"
+  );
+
+  return currentVisualFieldsList.filter(
+    (field) => field !== "competitorLandscape" && field !== "competitorAnalysis"
+  );
 }
 
 // Faithful, minimal replica of the ACTUAL per-section render loop's own
@@ -162,11 +185,11 @@ function buildRealPdfWithSections(visualFieldsList) {
   return { decision, tocEntries, rows, serializedText: text, totalPages: pdf.getNumberOfPages() };
 }
 
-// --- Fail-before proof: git HEAD's own visualFields (pre-fix) --------
+// --- Fail-before proof: the CURRENT visualFields with the fix's own --
+// --- two entries programmatically removed (never git history) -------
 
-test("[FAIL-BEFORE PROOF] with git HEAD's own pre-fix visualFields (missing \"competitorLandscape\"), the real guard sequence skips the section entirely -- no TOC entry, no draw call, reproducing the live-observed bug", () => {
-  const preFixVisualFields = extractVisualFieldsSetLiteral(headSource());
-  assert.ok(!preFixVisualFields.includes("competitorLandscape"), "HEAD must genuinely predate this fix for this proof to be meaningful");
+test("[FAIL-BEFORE PROOF] with the #69A-29I fix's two Set entries removed from the CURRENT visualFields (simulating their absence, independent of git/HEAD), the real guard sequence skips the section entirely -- no TOC entry, no draw call, reproducing the live-observed bug", () => {
+  const preFixVisualFields = simulatePreFixVisualFieldsList(extractVisualFieldsSetLiteral(currentSource));
 
   const result = buildRealPdfWithSections(preFixVisualFields);
 

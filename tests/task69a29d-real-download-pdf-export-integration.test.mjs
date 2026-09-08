@@ -37,9 +37,25 @@
 // branch, and the per-section render loop's own early-return branches
 // were each read directly and confirmed to contain no field-specific
 // exclusion for competitorLandscape).
+//
+// TASK #69A-35 -- ROOT CAUSE of a post-commit test failure (not a
+// production regression): the original fail-before proof fetched "git
+// HEAD's own pre-#69A-29C dedupePdfSections" via `git show HEAD:<path>`.
+// That was only ever true while the #69A-29C fix sat uncommitted in the
+// working tree; once it was committed (see #69A-32/33/34), HEAD BECAME
+// the fixed state, so the proof's own "HEAD must genuinely predate the
+// fix" precondition started failing -- correctly, since its premise was
+// no longer true, not because the shipped fix regressed. Fetching a
+// fixed commit SHA instead would only defer the same failure mode to
+// the next rebase/squash. The fail-before proof below instead derives
+// its "pre-fix" source by programmatically reverting the exact guard
+// #69A-29C added, textually, on the CURRENT source string -- entirely
+// independent of git history, HEAD, or any specific commit position,
+// and self-updating forever (it operates on whatever the current file
+// says, so it stays meaningful even if this function moves or its
+// surrounding code changes shape).
 import assert from "node:assert/strict";
 import test from "node:test";
-import { execFileSync } from "node:child_process";
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -52,11 +68,32 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const pdfButtonPath = join(repoRoot, "app/dashboard/[id]/ReportPdfButton.tsx");
 const currentPdfButtonSource = readFileSync(pdfButtonPath, "utf8");
 
-function headSource(relativePath) {
-  return execFileSync("git", ["show", `HEAD:${relativePath}`], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
+// Derives the exact pre-#69A-29C source by textually reverting the
+// field-identity guard on the CURRENT source string -- never from git
+// history. Both assertions prove this simulation is meaningful (not
+// vacuous): if the fix were ever genuinely reverted for real, the first
+// assertion would already fail here, loudly, rather than silently
+// producing a no-op "reversion".
+function simulatePreFixPdfButtonSource(currentSource) {
+  const declarationPattern = /\s*const hasDistinctFieldIdentity = Boolean\(section\.field\?\.trim\(\)\);\n/;
+  const guardedCondition =
+    "if (!key || seen.has(key) || (contentKey && !hasDistinctFieldIdentity && seenContent.has(contentKey))) {";
+  const revertedCondition =
+    "if (!key || seen.has(key) || (contentKey && seenContent.has(contentKey))) {";
+
+  assert.match(
+    currentSource,
+    declarationPattern,
+    "expected the CURRENT source to contain the #69A-29C fix's hasDistinctFieldIdentity declaration before simulating its removal -- otherwise this proof would be vacuous"
+  );
+  assert.ok(
+    currentSource.includes(guardedCondition),
+    "expected the CURRENT source's guarded condition to match the known post-fix shape before simulating its reversion"
+  );
+
+  return currentSource
+    .replace(declarationPattern, "\n")
+    .replace(guardedCondition, revertedCondition);
 }
 
 function extractBlock(source, startMarker, endMarker) {
@@ -70,7 +107,8 @@ function extractBlock(source, startMarker, endMarker) {
 // Builds and imports the REAL, full section-assembly chain
 // buildStandardReportPdf actually runs, using real imports for every
 // stage except the dedupe/merge block (parametrized so the fail-before
-// proof can swap in git HEAD's pre-#69A-29C version of just that block).
+// proof can swap in a programmatically-reverted, pre-#69A-29C version
+// of just that block -- see simulatePreFixPdfButtonSource above).
 async function compileFullChain(pdfButtonSource) {
   const block = extractBlock(
     pdfButtonSource,
@@ -234,25 +272,25 @@ test("[current source] every canonical competitor from the five-part fixture (ve
   assert.ok(threats.has("High") && threats.has("Medium") && threats.has("Low"), `expected multiple distinct threat levels, got: ${JSON.stringify([...threats])}`);
 });
 
-// --- Fail-before proof: this SAME full chain, with git HEAD's own -------
-// --- pre-#69A-29C dedupe/merge block substituted in, genuinely fails ----
+// --- Fail-before proof: this SAME full chain, with the #69A-29C -------
+// --- guard programmatically reverted on the CURRENT source (never ------
+// --- git history), genuinely fails ---------------------------------------
 
-test("[FAIL-BEFORE PROOF] the identical full chain, using git HEAD's own pre-#69A-29C dedupePdfSections (no field-identity guard), DROPS competitorLandscape when it collides with marketOpportunity's fallback text -- proving this test exercises the real regression, not a tautology", async () => {
-  const headPdfButtonSource = headSource("app/dashboard/[id]/ReportPdfButton.tsx");
-  assert.doesNotMatch(headPdfButtonSource, /hasDistinctFieldIdentity/, "HEAD must genuinely predate the #69A-29C fix for this proof to be meaningful");
+test("[FAIL-BEFORE PROOF] the identical full chain, with the #69A-29C field-identity guard programmatically reverted (simulating its absence, independent of any git commit position), DROPS competitorLandscape when it collides with marketOpportunity's fallback text -- proving this test exercises the real regression, not a tautology", async () => {
+  const simulatedPreFixSource = simulatePreFixPdfButtonSource(currentPdfButtonSource);
 
-  const pipeline = await compileFullChain(headPdfButtonSource);
+  const pipeline = await compileFullChain(simulatedPreFixSource);
   const result = runFullChain(pipeline, baseSections(TIMEOUT_FALLBACK), canonicalMetadata);
   const fields = result.map((s) => s.field);
   assert.ok(
     !fields.includes("competitorLandscape"),
-    `expected the PRE-FIX chain to genuinely drop competitorLandscape (reproducing the reported bug), but it survived: ${JSON.stringify(fields)}`
+    `expected the guard-reverted chain to genuinely drop competitorLandscape (reproducing the reported bug), but it survived: ${JSON.stringify(fields)}`
   );
 });
 
-test("[control] the same pre-#69A-29C chain does NOT drop competitorLandscape when its content does not collide with anything -- confirms the fail-before failure above is specifically the content-collision bug, not a broken fixture", async () => {
-  const headPdfButtonSource = headSource("app/dashboard/[id]/ReportPdfButton.tsx");
-  const pipeline = await compileFullChain(headPdfButtonSource);
+test("[control] the same guard-reverted chain does NOT drop competitorLandscape when its content does not collide with anything -- confirms the fail-before failure above is specifically the content-collision bug, not a broken fixture", async () => {
+  const simulatedPreFixSource = simulatePreFixPdfButtonSource(currentPdfButtonSource);
+  const pipeline = await compileFullChain(simulatedPreFixSource);
   const result = runFullChain(
     pipeline,
     baseSections("COMPETITOR: Float | TYPE: Direct competitor | POSITIONING: real | STRENGTHS: real | WEAKNESSES: real | THREAT: High"),
