@@ -1263,6 +1263,71 @@ function removeLargePlannerQueryPayloads() {
   }
 }
 
+// TASK #69A-42 -- ROOT CAUSE FIX. Confirmed live: immediately after a
+// successful report generation the structured ZERINIX Executive Report
+// UI renders correctly (planReport is set directly, client-side, by the
+// live streaming flow below -- see setPlanReport({ ...reportOutput })).
+// A plain browser refresh of the EXACT SAME URL then regresses to the
+// raw getReportMarkdown chat dump. Root cause: app/plan/page.tsx's
+// server component deliberately sets initialReport to null whenever the
+// URL still carries "new=1" (a fresh-start request) or "reportId=..."
+// (an explicit regenerate-this-report request) -- by design, so neither
+// flow accidentally shows STALE content while the user is mid-generation.
+// removeLargePlannerQueryPayloads above deliberately PRESERVES both
+// params (they are read by the generation request itself), so nothing
+// ever cleared them once generation actually finished -- every
+// subsequent refresh of that same URL kept re-entering the same
+// "force blank, wait for the user to (re)generate" branch forever, for a
+// conversation that, by then, already had a completed report.
+// Planner.tsx's own restoredPlanReport/planReport state (the ONLY thing
+// that repopulates the structured UI on load) is seeded exclusively from
+// that one server-provided initialReport prop -- there is no client-side
+// fallback fetch, so once it is null on the server, the structured panel
+// simply has nothing to show, while the conversation's chat history
+// (loaded independently, unconditionally) still displays the completed
+// message's own raw text with nothing left to suppress it.
+//
+// FIX: once a generation genuinely completes and its report is
+// confirmed saved (the exact point savedReportId becomes known, below),
+// drop "new" and "reportId" from the URL the same way
+// removeLargePlannerQueryPayloads already mutates history for large
+// payloads -- so a subsequent refresh of this same tab naturally lands
+// on page.tsx's OTHER branch (initialReport = conversationResult.latestReport),
+// which deterministically finds and restores this exact just-completed
+// report by content, not by inferring anything from message text. This
+// never touches loadPlanConversations/findLatestCompletedReportWithContent,
+// the message classification in ChatMessages.tsx, or any canonical
+// scoring/competitor/Porter/founder-readiness logic -- it only ever
+// clears two URL query params that had already served their purpose.
+function clearFreshStartAndRegenerationUrlParams() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    const url = new URL(window.location.href);
+    let changed = false;
+
+    for (const param of ["new", "reportId"]) {
+      if (url.searchParams.has(param)) {
+        url.searchParams.delete(param);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${url.search}${url.hash}`
+      );
+    }
+  } catch {
+    // URL cleanup is best-effort; the completed report is already saved
+    // and its id already applied via setActiveReportId regardless.
+  }
+}
+
 function getReportMarkdown(
   title: string,
   reportData: Partial<MarketReport & PlanReport>,
@@ -9810,6 +9875,80 @@ const ReportPanel = memo(function ReportPanel({
           : "These are validated, named competitors from available evidence, but there is not yet enough structured comparison data (category, market position, relative strengths and weaknesses) across enough of them to build a reliable side-by-side table. Additional validated evidence is needed.";
       const minCompetitorTableRows = 3;
 
+      // TASK #69A-45C -- ROOT CAUSE FIX. Confirmed live: ReportPdfButton.tsx's
+      // own generic competitor table was already fixed (#69A-45/#69A-45A/
+      // #69A-45B removed its per-cell line cap and added a dedicated
+      // row-pagination branch), but Planner.tsx's downloadPdf is a
+      // COMPLETELY SEPARATE, parallel PDF export implementation with its
+      // own independent competitor-table drawing code -- never touched by
+      // any of those three tickets. Its own drawing branch (drawPdfVisual,
+      // below) still hard-capped every cell to
+      // truncatePdfCellLines(pdf.splitTextToSize(...), 2), which is
+      // exactly why QuickBooks/Xero's own Positioning/Strengths/Weaknesses
+      // cells were still visibly cut with an ellipsis in a real exported
+      // PDF even after those three tickets landed -- the user was
+      // exporting from THIS component's own "Download PDF" button, not
+      // ReportPdfButton.tsx's.
+      //
+      // FIX: mirrors ReportPdfButton.tsx's own getCompetitorTableLayout
+      // exactly (one shared layout function, used by BOTH getPdfVisualHeight
+      // and drawPdfVisual, so pagination budget and real drawing can never
+      // disagree) -- no per-cell line-count cap, no ellipsis, ever. The
+      // Competitor Landscape section (non-Market-Intelligence reports)
+      // gets its own dedicated, row-pagination-aware branch directly in
+      // pdfSections.forEach (see its own comment, positioned right after
+      // the existing "strategicRecommendations" branch below), mirroring
+      // this exact same TASK #25C precedent this file already uses for
+      // Strategic Recommendations, and mirroring ReportPdfButton.tsx's own
+      // #69A-45B branch.
+      const competitorLineStep = 3.4;
+      const getCompetitorTableLayout = (
+        rows: ReturnType<typeof resolveCompetitorRowsForDownloadPdf>,
+        width: number
+      ) => {
+        const columns = [
+          { label: localizePdfPresentationLabel("Company", pdfLocale), width: width * 0.19 },
+          { label: localizePdfPresentationLabel("Positioning", pdfLocale), width: width * 0.27 },
+          { label: localizePdfPresentationLabel("Strengths", pdfLocale), width: width * 0.2 },
+          { label: localizePdfPresentationLabel("Weaknesses", pdfLocale), width: width * 0.2 },
+          { label: localizePdfPresentationLabel("Threat", pdfLocale), width: width * 0.14 },
+        ];
+        const previousFontSize = pdf.getFontSize();
+        // pdf.splitTextToSize measures at whatever font is currently
+        // active on `pdf` -- pin it to the SAME 5.5pt every cell (other
+        // than the company column, immaterial to wrap width here)
+        // actually draws at, so a budgeting call from getPdfVisualHeight
+        // (which may run right after a totally different section's font
+        // size) can never disagree with the real drawing pass over how
+        // many lines a cell wraps to.
+        pdf.setFontSize(5.5);
+        const rowWrappedValues = rows.map((row) => {
+          const values = [row.company, row.positioning, row.strengths, row.weaknesses, row.threat];
+          return values.map((value, cellIndex) => {
+            const columnWidth = columns[cellIndex]?.width ?? 20;
+            // TASK #69A-45C -- no line-count cap, no truncatePdfCellLines
+            // fallback: the full wrapped array is always returned, and
+            // every line in it is always drawn.
+            return pdf.splitTextToSize(value || "Validation required", columnWidth - 4) as string[];
+          });
+        });
+        pdf.setFontSize(previousFontSize);
+        const rowHeightsForTable = rowWrappedValues.map((wrappedCells) => {
+          const maxLines = Math.max(2, ...wrappedCells.map((lines) => lines.length));
+          return maxLines <= 2 ? competitorRowHeight : competitorRowHeight + (maxLines - 2) * competitorLineStep;
+        });
+        const totalRowsHeight = rowHeightsForTable.reduce((sum, height) => sum + height, 0);
+
+        return {
+          columns,
+          headerHeight: competitorHeaderHeight,
+          rowWrappedValues,
+          rowHeightsForTable,
+          totalRowsHeight,
+          totalHeight: competitorHeaderHeight + totalRowsHeight,
+        };
+      };
+
       const getPdfVisualHeight = (section: ReportSection) => {
         if (!visualFields.has(section.field)) {
           return 0;
@@ -9926,7 +10065,18 @@ const ReportPanel = memo(function ReportPanel({
               sparseCompetitorTableIntro
             ).totalHeight;
           }
-          return competitorHeaderHeight + rows.length * competitorRowHeight + 4;
+          // TASK #69A-45C -- ROOT CAUSE FIX: this used to be the flat
+          // `competitorHeaderHeight + rows.length * competitorRowHeight + 4`
+          // estimate -- always "2 lines' worth" per row -- completely
+          // disconnected from what drawPdfVisual's own branch actually
+          // drew once a cell needed more than 2 lines. Now calls the
+          // SAME getCompetitorTableLayout the dedicated pagination
+          // branch (pdfSections.forEach, below) uses, so this budget can
+          // never disagree with the real drawn height again. (This exact
+          // return value is itself now unused for a real full table --
+          // see that dedicated branch's own comment -- but is left
+          // computing correctly as a defensive fallback.)
+          return getCompetitorTableLayout(rows, bodyWidth).totalHeight + 4;
         }
 
         // TASK #25C -- Strategic Recommendations' own dedicated
@@ -10304,55 +10454,56 @@ const ReportPanel = memo(function ReportPanel({
             return sparseLayout.totalHeight;
           }
 
-          const columns = [
-            { label: localizePdfPresentationLabel("Company", pdfLocale), width: visualWidth * 0.19 },
-            { label: localizePdfPresentationLabel("Positioning", pdfLocale), width: visualWidth * 0.27 },
-            { label: localizePdfPresentationLabel("Strengths", pdfLocale), width: visualWidth * 0.2 },
-            { label: localizePdfPresentationLabel("Weaknesses", pdfLocale), width: visualWidth * 0.2 },
-            { label: localizePdfPresentationLabel("Threat", pdfLocale), width: visualWidth * 0.14 },
-          ];
+          // TASK #69A-45C -- ROOT CAUSE FIX: this drawing pass now calls
+          // the SAME getCompetitorTableLayout getPdfVisualHeight's own
+          // branch uses -- no per-cell line-count cap, no
+          // truncatePdfCellLines ellipsis fallback, ever.
+          //
+          // This is now effectively UNREACHABLE for a real full table:
+          // the dedicated, row-pagination-aware branch added directly in
+          // pdfSections.forEach (see its own comment, positioned right
+          // after the "strategicRecommendations" branch) intercepts and
+          // `return`s before drawPdfVisual is ever called for the
+          // `rows.length >= minCompetitorTableRows` case -- mirroring
+          // ReportPdfButton.tsx's own #69A-45B fix exactly. Left in place
+          // (rather than deleted) purely as a defensive fallback and to
+          // minimize the risk of an incorrect edit inside this deeply
+          // nested function -- it still computes and draws correctly, it
+          // is just never actually invoked for this case any more.
+          const layout = getCompetitorTableLayout(rows, visualWidth);
           let x = bodyX;
 
           pdf.setFillColor("#101113");
           pdf.setDrawColor("#27272a");
-          pdf.roundedRect(
-            bodyX,
-            visualY,
-            visualWidth,
-            competitorHeaderHeight + Math.max(1, rows.length) * competitorRowHeight,
-            3,
-            3,
-            "FD"
-          );
+          pdf.roundedRect(bodyX, visualY, visualWidth, layout.totalHeight, 3, 3, "FD");
           pdf.setFontSize(5.8);
           pdf.setTextColor("#5eead4");
-          columns.forEach((column) => {
+          layout.columns.forEach((column) => {
             pdf.text(column.label.toUpperCase(), x + 2, visualY + 5.2, { maxWidth: column.width - 4 });
             x += column.width;
           });
 
+          let cumulativeRowY = visualY + layout.headerHeight;
           rows.forEach((row, rowIndex) => {
-            const rowY = visualY + competitorHeaderHeight + rowIndex * competitorRowHeight;
-            const values = [row.company, row.positioning, row.strengths, row.weaknesses, row.threat];
+            const rowY = cumulativeRowY;
             let cellX = bodyX;
 
             pdf.setDrawColor("#27272a");
             pdf.line(bodyX, rowY, bodyX + visualWidth, rowY);
-            values.forEach((value, cellIndex) => {
-              const width = columns[cellIndex]?.width ?? 20;
+            layout.rowWrappedValues[rowIndex].forEach((lines, cellIndex) => {
+              const width = layout.columns[cellIndex]?.width ?? 20;
               pdf.setFontSize(cellIndex === 0 ? 6.3 : 5.5);
               pdf.setTextColor(cellIndex === 0 ? "#f4f4f5" : "#d4d4d8");
-              pdf.text(
-                truncatePdfCellLines(pdf.splitTextToSize(value || "Validation required", width - 4) as string[], 2),
-                cellX + 2,
-                rowY + 4.7,
-                { lineHeightFactor: 1.1, maxWidth: width - 4 }
-              );
+              pdf.text(lines, cellX + 2, rowY + 4.7, {
+                lineHeightFactor: 1.1,
+                maxWidth: width - 4,
+              });
               cellX += width;
             });
+            cumulativeRowY += layout.rowHeightsForTable[rowIndex];
           });
 
-          return competitorHeaderHeight + Math.max(1, rows.length) * competitorRowHeight + 4;
+          return layout.totalHeight + 4;
         }
 
         // TASK #25C -- Strategic Recommendations moved out of this
@@ -11531,6 +11682,134 @@ const ReportPanel = memo(function ReportPanel({
 	          }
 
 	          return;
+	        }
+
+	        // TASK #69A-45C -- ROOT CAUSE FIX. getCompetitorTableLayout
+	        // (above) no longer caps line count at all -- every cell wraps
+	        // to however many lines it genuinely needs, with NO ellipsis,
+	        // ever. Since a table with no cap can no longer be assumed to
+	        // always fit on one page, the Competitor Landscape section
+	        // (non-Market-Intelligence reports only -- MI's own competitor
+	        // table/Market Map is a separate, untouched code path) gets its
+	        // own dedicated, row-pagination-aware branch here instead of a
+	        // single drawPdfVisual(section, y) call -- exactly mirroring
+	        // the "strategicRecommendations" branch immediately above (TASK
+	        // #25C) and ReportPdfButton.tsx's own identical #69A-45B fix:
+	        // paginates strictly by WHOLE rows (a row is never split across
+	        // two pages -- "move the whole row to the next page"), each
+	        // continuation card redraws its own title (suffixed
+	        // "continued") and full column header band (so headers/column
+	        // alignment are never lost after a page break), and every
+	        // cell's full wrapped-line array is drawn in full. Only
+	        // intercepts the REAL full-table case (rows.length >=
+	        // minCompetitorTableRows); the empty/sparse states are already
+	        // short, fixed-height layouts that never need pagination, so
+	        // they remain on the generic single-call path below, completely
+	        // unchanged.
+	        if (
+	          !isMarketIntelligence &&
+	          (section.field === "competitiveLandscape" || section.field === "competitorLandscape")
+	        ) {
+	          const competitorRows = resolveCompetitorRowsForDownloadPdf(
+	            businessCompetitorLandscapeState,
+	            section.content
+	          );
+
+	          if (competitorRows.length >= minCompetitorTableRows) {
+	            const maxUsableCardHeight = pageHeight - margin - margin;
+	            const layout = getCompetitorTableLayout(competitorRows, bodyWidth);
+	            let rowCursor = 0;
+	            let isFirstCompetitorChunk = true;
+
+	            while (rowCursor < competitorRows.length) {
+	              let rowsInChunk = 0;
+	              let chunkRowsHeight = 0;
+
+	              for (let candidate = rowCursor; candidate < competitorRows.length; candidate += 1) {
+	                const candidateRowsHeight = chunkRowsHeight + layout.rowHeightsForTable[candidate];
+	                const candidateCardHeight =
+	                  cardHeaderHeight + layout.headerHeight + candidateRowsHeight + cardBottomPadding;
+
+	                // Always keep at least one row per chunk -- a single
+	                // pathologically tall row still gets its own page
+	                // rather than looping forever trying to find a chunk
+	                // that fits (mirrors #25C's identical safeguard).
+	                if (rowsInChunk > 0 && candidateCardHeight > maxUsableCardHeight) {
+	                  break;
+	                }
+
+	                chunkRowsHeight = candidateRowsHeight;
+	                rowsInChunk += 1;
+	              }
+
+	              const chunkCardHeight = Math.max(
+	                31,
+	                cardHeaderHeight + layout.headerHeight + chunkRowsHeight + cardBottomPadding
+	              );
+
+	              ensureSpace(chunkCardHeight);
+
+	              if (isFirstCompetitorChunk) {
+	                tocEntries.push({
+	                  title: getPdfTocEntryTitle(section, pdfLocale),
+	                  page: pdf.getCurrentPageInfo().pageNumber,
+	                });
+	              }
+
+	              drawPdfSectionCardFrame(pdf, { margin, y, contentWidth, cardHeight: chunkCardHeight });
+
+	              pdf.setFont("Geist", "normal");
+	              pdf.setFontSize(14);
+	              pdf.setTextColor("#ffffff");
+	              const displaySectionTitle = getPdfSectionCardTitle(section, pdfLocale);
+	              const chunkTitle = isFirstCompetitorChunk
+	                ? displaySectionTitle
+	                : `${displaySectionTitle}${pdfLocale === "tr" ? " devamı" : " continued"}`;
+	              if (chunkTitle) {
+	                pdf.text(chunkTitle, bodyX, y + 12.5, { maxWidth: bodyWidth });
+	              }
+
+	              const tableTopY = y + 19;
+	              let tableX = bodyX;
+
+	              pdf.setFillColor("#101113");
+	              pdf.setDrawColor("#27272a");
+	              pdf.roundedRect(bodyX, tableTopY, bodyWidth, layout.headerHeight + chunkRowsHeight, 3, 3, "FD");
+	              pdf.setFontSize(5.8);
+	              pdf.setTextColor("#5eead4");
+	              layout.columns.forEach((column) => {
+	                pdf.text(column.label.toUpperCase(), tableX + 2, tableTopY + 5.2, { maxWidth: column.width - 4 });
+	                tableX += column.width;
+	              });
+
+	              let cumulativeRowY = tableTopY + layout.headerHeight;
+	              for (let index = 0; index < rowsInChunk; index += 1) {
+	                const rowIndex = rowCursor + index;
+	                const rowY = cumulativeRowY;
+	                let cellX = bodyX;
+
+	                pdf.setDrawColor("#27272a");
+	                pdf.line(bodyX, rowY, bodyX + bodyWidth, rowY);
+	                layout.rowWrappedValues[rowIndex].forEach((lines, cellIndex) => {
+	                  const width = layout.columns[cellIndex]?.width ?? 20;
+	                  pdf.setFontSize(cellIndex === 0 ? 6.3 : 5.5);
+	                  pdf.setTextColor(cellIndex === 0 ? "#f4f4f5" : "#d4d4d8");
+	                  pdf.text(lines, cellX + 2, rowY + 4.7, {
+	                    lineHeightFactor: 1.1,
+	                    maxWidth: width - 4,
+	                  });
+	                  cellX += width;
+	                });
+	                cumulativeRowY += layout.rowHeightsForTable[rowIndex];
+	              }
+
+	              y += chunkCardHeight + 5;
+	              rowCursor += rowsInChunk;
+	              isFirstCompetitorChunk = false;
+	            }
+
+	            return;
+	          }
 	        }
 
 	        const bodyLines = splitPdfReadableLines(sectionBodyContent, bodyWidth);
@@ -12973,6 +13252,40 @@ export default function Planner({
     }
 
     const supabase = createClient();
+    // ADDENDUM TO #69A-38B -- ROOT CAUSE FIX. Confirmed live by direct
+    // database inspection (not assumed): a completed Business Idea
+    // Validation report's chat message showed the full legacy raw
+    // getReportMarkdown dump (the presentation #69A-9/#69A-10 already
+    // suppress) instead of being suppressed/hidden. The suppression rule
+    // itself (shouldShowReportCompletionHeadline) was completely intact
+    // and unit-tested -- what broke was the ORDER messages come back in
+    // on reload: this call and the sibling persistMessage call for the
+    // assistant's own "streaming" placeholder are both fired via
+    // initialPersistenceTasks without awaiting one before the other
+    // (deliberately, to avoid blocking the UI on two sequential network
+    // round trips -- see #69A-25's own "remove duplicate loading
+    // bottlenecks" reasoning), and this INSERT never sent its own
+    // created_at, leaving Postgres's `default now()` to assign it at
+    // ARRIVAL time. Two concurrent inserts have no guaranteed arrival
+    // order -- a real conversation was found with its assistant row's
+    // created_at (07:31:05.982196) BEFORE its own user row's
+    // (07:31:05.995866), even though the user message was created,
+    // client-side, strictly first. loadPersistedMessages/
+    // loadPlanConversations both order strictly by created_at ascending,
+    // so that conversation reloads with the assistant message at index
+    // 0 -- no preceding message at all, so precedingUserContent is
+    // undefined, and isCompletedBusinessPlanReportMessage (which
+    // correctly requires a real preceding user message) correctly
+    // returns false for a message that should have been suppressed.
+    // FIX: send the message's own already-correct, synchronously-
+    // assigned client-side `createdAt` (ChatMessage.createdAt, set via
+    // Date.now() at the moment each message object was constructed --
+    // strictly increasing across the user-then-assistant call sequence
+    // regardless of which HTTP request happens to reach Supabase first)
+    // as this row's created_at, instead of trusting network arrival
+    // order. No behavior change for the common case where requests
+    // happen to arrive in order; this only matters -- and only helps --
+    // exactly when they do not.
     const { error } = await supabase.from("ai_messages").insert({
       id: message.id,
       conversation_id: conversationId,
@@ -12981,6 +13294,7 @@ export default function Planner({
       content: message.content,
       mode: message.mode === "chat" ? null : message.mode || null,
       status: message.status || "complete",
+      created_at: new Date(message.createdAt).toISOString(),
       attachments: (message.attachments || []).map(
         ({ id, name, size, mimeType, textContent }) => ({
           id,
@@ -14653,6 +14967,7 @@ export default function Planner({
         );
       } else {
         setActiveReportId(savedReportId);
+        clearFreshStartAndRegenerationUrlParams();
         void attributeReportUsage(savedReportId, reportRequestId);
         console.info("[SESSION] persisted", {
           requestId: reportRequestId,

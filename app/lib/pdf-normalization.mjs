@@ -499,6 +499,10 @@ const pdfPresentationLabelPairs = [
     ["Market Attractiveness", "Pazar Çekiciliği"],
     ["Business Model Quality", "İş Modeli Kalitesi"],
     ["Validation Confidence", "Doğrulama Güveni"],
+    // TASK #69A-53 -- "Execution Readiness" is the new canonical label;
+    // "Execution Complexity" is kept so a historical PDF (generated
+    // before this fix) still normalizes/localizes correctly.
+    ["Execution Readiness", "Yürütme Hazırlığı"],
     ["Execution Complexity", "Yürütme Karmaşıklığı"],
     ["Evidence Confidence", "Kanıt Güveni"],
     ["Founder Evidence", "Kurucu Kanıtı"],

@@ -5462,6 +5462,94 @@ export function buildStandardReportPdf({
       // into a full comparative table they cannot support yet.
       const minCompetitorTableRows = 3;
 
+      // TASK #69A-45A -- ROOT CAUSE FIX. Confirmed live: #69A-45 grew
+      // this table's actual DRAWN row height/background to fit a long,
+      // evidence-backed weakness (e.g. Xero's real
+      // enrichCompetitorWeaknessesFromEvidence sentence), but never
+      // touched getVisualHeight's OWN, separate competitor-table branch
+      // -- which still returned the OLD flat `8 + rows.length * 15 + 4`
+      // pagination BUDGET. Since getVisualHeight runs BEFORE
+      // drawSectionVisual to decide how much page space to reserve
+      // (ensureSpace) and where the NEXT section starts, a table that
+      // actually draws taller than that stale budget can render past
+      // the bottom of its own reserved card space -- the real cause of
+      // the reported PDF clipping, distinct from (and deeper than)
+      // #69A-45's own cell-truncation fix. Every other multi-use PDF
+      // measurement in this file (getSwotLayout/getPorterLayout/
+      // getFinancialLayout/getNamesOnlyCompetitorLayout, all defined
+      // above) already follows this exact "one shared layout function,
+      // called by both getVisualHeight and drawSectionVisual" pattern
+      // specifically to make this class of drawing/budget disagreement
+      // structurally impossible -- this table never had one until now.
+      //
+      // TASK #69A-45B -- ROOT CAUSE FIX (supersedes the bound-proof
+      // comment above): confirmed live, the COMPETITOR_CELL_MAX_LINES
+      // cap this bound proof relied on was still hard-truncating a
+      // genuinely long, real evidence-backed sentence (Xero's own
+      // weakness) with an ellipsis -- 8 lines was not always enough for
+      // the REAL jsPDF-measured wrap at this column's width/font, and
+      // no fixed cap can be "always enough" without knowing the true
+      // content length in advance. Removed entirely: every cell now
+      // wraps to however many lines it genuinely needs, with NO
+      // ellipsis fallback, so real competitor content is never
+      // shortened, summarized, or discarded to fit a table cell. The
+      // Competitor Landscape section's own dedicated drawing branch
+      // (pdfSections.forEach, below) now paginates by whole ROWS
+      // instead of assuming the whole table always fits on one page --
+      // see that branch's own comment for the full row-pagination
+      // design (mirrors TASK #25C's identical Strategic Recommendations
+      // precedent).
+      const COMPETITOR_CELL_LINE_STEP = 3.4;
+      const getCompetitorTableLayout = (
+        rows: ReturnType<typeof resolveCompetitorRowsForPdf>,
+        width: number
+      ) => {
+        const columns = [
+          { label: localizePdfPresentationLabel("Company", pdfLocale), width: width * 0.19 },
+          { label: localizePdfPresentationLabel("Positioning", pdfLocale), width: width * 0.27 },
+          { label: localizePdfPresentationLabel("Strengths", pdfLocale), width: width * 0.2 },
+          { label: localizePdfPresentationLabel("Weaknesses", pdfLocale), width: width * 0.2 },
+          { label: localizePdfPresentationLabel("Threat", pdfLocale), width: width * 0.14 },
+        ];
+        const headerHeight = 8;
+        const rowHeight = 15;
+        const previousFontSize = pdf.getFontSize();
+        // wrapPdfText measures at whatever font is currently active on
+        // `pdf` -- pin it to the SAME 5.5pt every cell (other than the
+        // company column, immaterial to wrap width here) actually
+        // draws at, so a budgeting call from getVisualHeight (which may
+        // run right after a totally different section's font size) can
+        // never disagree with the real drawing pass over how many
+        // lines a cell wraps to.
+        pdf.setFontSize(5.5);
+        const rowWrappedValues = rows.map((row) => {
+          const values = [row.company, row.positioning, row.strengths, row.weaknesses, row.threat];
+          return values.map((value, cellIndex) => {
+            const columnWidth = columns[cellIndex]?.width ?? 20;
+            // TASK #69A-45B -- no line-count cap, no truncatePdfCellLines
+            // fallback: the full wrapped array is always returned, and
+            // every line in it is always drawn (see the drawing branch
+            // below).
+            return wrapPdfText(value || "Validation required", columnWidth - 4);
+          });
+        });
+        pdf.setFontSize(previousFontSize);
+        const rowHeightsForTable = rowWrappedValues.map((wrappedCells) => {
+          const maxLines = Math.max(2, ...wrappedCells.map((lines) => lines.length));
+          return maxLines <= 2 ? rowHeight : rowHeight + (maxLines - 2) * COMPETITOR_CELL_LINE_STEP;
+        });
+        const totalRowsHeight = rowHeightsForTable.reduce((sum, height) => sum + height, 0);
+
+        return {
+          columns,
+          headerHeight,
+          rowWrappedValues,
+          rowHeightsForTable,
+          totalRowsHeight,
+          totalHeight: headerHeight + totalRowsHeight,
+        };
+      };
+
       const drawSectionVisual = (section: PdfReportSection, sectionY: number) => {
         const { title, content, field } = section;
         const normalizedTitle = title.toLowerCase();
@@ -6152,18 +6240,34 @@ export function buildStandardReportPdf({
             return sparseLayout.totalHeight;
           }
 
-          const columns = [
-            { label: localizePdfPresentationLabel("Company", pdfLocale), width: bodyWidth * 0.19 },
-            { label: localizePdfPresentationLabel("Positioning", pdfLocale), width: bodyWidth * 0.27 },
-            { label: localizePdfPresentationLabel("Strengths", pdfLocale), width: bodyWidth * 0.2 },
-            { label: localizePdfPresentationLabel("Weaknesses", pdfLocale), width: bodyWidth * 0.2 },
-            { label: localizePdfPresentationLabel("Threat", pdfLocale), width: bodyWidth * 0.14 },
-          ];
+          // TASK #69A-45A -- ROOT CAUSE FIX: this drawing pass and
+          // getVisualHeight's own matching competitor branch (its
+          // pagination BUDGET, computed before this ever runs) now both
+          // call the SAME getCompetitorTableLayout, defined once above.
+          //
+          // TASK #69A-45B -- now effectively UNREACHABLE for a real
+          // (non-Market-Intelligence) full table: the dedicated,
+          // row-pagination-aware branch added directly in
+          // pdfSections.forEach (see its own comment, above where
+          // isTamSamSomPdfSection is handled) now intercepts and
+          // `return`s before drawSectionVisual is ever called for the
+          // `rows.length >= minCompetitorTableRows` case -- that branch
+          // needed real multi-page support once #69A-45B removed
+          // getCompetitorTableLayout's own per-cell line cap (a fixed
+          // cap could no longer guarantee this whole table always fits
+          // on one page, the assumption #69A-45A's own single-call
+          // drawSectionVisual dispatch depended on). Left in place
+          // (rather than deleted) purely as a defensive fallback and to
+          // minimize the risk of an incorrect edit inside this deeply
+          // nested function -- it still computes and draws correctly,
+          // it is just never actually invoked for this case anymore.
+          const layout = getCompetitorTableLayout(rows, bodyWidth);
+          const { columns, rowWrappedValues, rowHeightsForTable } = layout;
           let x = bodyX;
 
           pdf.setFillColor("#101113");
           pdf.setDrawColor("#27272a");
-          pdf.roundedRect(bodyX, visualY, bodyWidth, headerHeight + Math.max(1, rows.length) * rowHeight, 3, 3, "FD");
+          pdf.roundedRect(bodyX, visualY, bodyWidth, layout.totalHeight, 3, 3, "FD");
           pdf.setFontSize(5.8);
           pdf.setTextColor("#5eead4");
           columns.forEach((column) => {
@@ -6171,26 +6275,27 @@ export function buildStandardReportPdf({
             x += column.width;
           });
 
+          let cumulativeRowY = visualY + layout.headerHeight;
           rows.forEach((row, rowIndex) => {
-            const rowY = visualY + headerHeight + rowIndex * rowHeight;
-            const values = [row.company, row.positioning, row.strengths, row.weaknesses, row.threat];
+            const rowY = cumulativeRowY;
             let cellX = bodyX;
 
             pdf.setDrawColor("#27272a");
             pdf.line(bodyX, rowY, bodyX + bodyWidth, rowY);
-            values.forEach((value, cellIndex) => {
+            rowWrappedValues[rowIndex].forEach((lines, cellIndex) => {
               const width = columns[cellIndex]?.width ?? 20;
               pdf.setFontSize(cellIndex === 0 ? 6.3 : 5.5);
               pdf.setTextColor(cellIndex === 0 ? "#f4f4f5" : "#d4d4d8");
-              pdf.text(truncatePdfCellLines(wrapPdfText(value || "Validation required", width - 4), 2), cellX + 2, rowY + 4.7, {
+              pdf.text(lines, cellX + 2, rowY + 4.7, {
                 lineHeightFactor: 1.1,
                 maxWidth: width - 4,
               });
               cellX += width;
             });
+            cumulativeRowY += rowHeightsForTable[rowIndex];
           });
 
-          return headerHeight + Math.max(1, rows.length) * rowHeight + 4;
+          return layout.totalHeight + 4;
         }
 
         // Market Metrics dashboard -- combines real signals already
@@ -6711,7 +6816,25 @@ export function buildStandardReportPdf({
               sparseCompetitorTableIntro
             ).totalHeight;
           }
-          return 8 + rows.length * 15 + 4;
+          // TASK #69A-45A -- ROOT CAUSE FIX: this used to be the flat
+          // `8 + rows.length * 15 + 4` estimate -- always 2 lines' worth
+          // per row -- while drawSectionVisual's own branch (below) now
+          // genuinely grows a row past that for a long, evidence-backed
+          // cell (#69A-45). Reuses the SAME getCompetitorTableLayout
+          // drawSectionVisual calls, so this budget and the real drawn
+          // height can never disagree again.
+          //
+          // TASK #69A-45B -- this return value is now unused for a real
+          // full table: the dedicated competitor branch added directly
+          // in pdfSections.forEach (see its own comment) manages its own
+          // per-page-chunk ensureSpace calls instead of relying on this
+          // single, whole-table budget, since a table with no per-cell
+          // line cap can no longer be assumed to always fit on one page
+          // (the assumption this single-number budget depended on).
+          // Left computing correctly (rather than deleted) purely to
+          // minimize the risk of an incorrect edit inside this deeply
+          // nested function; it is simply never consumed for this case.
+          return getCompetitorTableLayout(rows, bodyWidth).totalHeight + 4;
         }
 
         if (section.field !== "postMergerIntegrationPlan" && normalizedTitle.includes("roadmap")) {
@@ -6943,6 +7066,140 @@ export function buildStandardReportPdf({
           // presentation, so hasBodyText is always false at this point.
 
           return;
+        }
+
+        // TASK #69A-45B -- ROOT CAUSE FIX. #69A-45/#69A-45A grew the
+        // competitor table's row height to fit long, evidence-backed
+        // text, but still hard-capped every cell's WRAPPED LINE COUNT
+        // (COMPETITOR_CELL_MAX_LINES) and fell back to an ellipsis when
+        // that cap was exceeded -- confirmed live, still visibly cutting
+        // Xero's real weakness sentence mid-word in the exported PDF.
+        // Since #69A-45A's own single-page-always bound proof assumed
+        // that cap, simply removing it (below, inside
+        // getCompetitorTableLayout) reopens the exact overflow #69A-45A
+        // fixed: a table whose rows are now genuinely unbounded in
+        // height can no longer be guaranteed to fit on one page by
+        // construction.
+        //
+        // FIX: the Competitor Landscape section (non-Market-Intelligence
+        // reports only -- MI's own competitor table/Market Map is a
+        // separate, untouched code path) now gets its own dedicated,
+        // row-pagination-aware branch instead of a single
+        // drawSectionVisual(section, y) call, exactly mirroring TASK
+        // #25C's own Strategic Recommendations precedent immediately
+        // below: paginates strictly by WHOLE rows (a row is never split
+        // across two pages -- "move the whole row to the next page"),
+        // each continuation card redraws its own title (suffixed
+        // "continued") and full column header band (so headers/column
+        // alignment are never lost after a page break), and every
+        // cell's full wrapped-line array (getCompetitorTableLayout's own
+        // measurement, now genuinely uncapped) is drawn in full -- no
+        // ellipsis, no character/line truncation of real competitor
+        // content, ever. Only intercepts the REAL full-table case
+        // (rows.length >= minCompetitorTableRows); the empty/sparse
+        // states are already short, fixed-height layouts that never
+        // need pagination, so they remain on the generic single-call
+        // path below, completely unchanged.
+        if (
+          !isMarketIntelligenceReport &&
+          (section.title.toLowerCase().includes("competitor") ||
+            section.title.toLowerCase().includes("competitive landscape"))
+        ) {
+          const competitorRows = resolveCompetitorRowsForPdf(report, section.content);
+
+          if (competitorRows.length >= minCompetitorTableRows) {
+            const layout = getCompetitorTableLayout(competitorRows, bodyWidth);
+            let rowCursor = 0;
+            let isFirstCompetitorChunk = true;
+
+            while (rowCursor < competitorRows.length) {
+              let rowsInChunk = 0;
+              let chunkRowsHeight = 0;
+
+              for (let candidate = rowCursor; candidate < competitorRows.length; candidate += 1) {
+                const candidateRowsHeight = chunkRowsHeight + layout.rowHeightsForTable[candidate];
+                const candidateCardHeight =
+                  cardHeaderHeight + layout.headerHeight + candidateRowsHeight + cardBottomPadding;
+
+                // Always keep at least one row per chunk -- a single
+                // pathologically tall row still gets its own page rather
+                // than looping forever trying to find a chunk that fits
+                // (mirrors #25C's identical safeguard).
+                if (rowsInChunk > 0 && candidateCardHeight > maxUsableCardHeight) {
+                  break;
+                }
+
+                chunkRowsHeight = candidateRowsHeight;
+                rowsInChunk += 1;
+              }
+
+              const chunkCardHeight = Math.max(
+                31,
+                cardHeaderHeight + layout.headerHeight + chunkRowsHeight + cardBottomPadding
+              );
+
+              ensureSpace(chunkCardHeight);
+
+              if (isFirstCompetitorChunk) {
+                tocEntries.push({
+                  title: getPdfTocEntryTitle(section, pdfLocale),
+                  page: pdf.getCurrentPageInfo().pageNumber,
+                });
+              }
+
+              drawPdfSectionCardFrame(pdf, { margin, y, contentWidth, cardHeight: chunkCardHeight });
+
+              pdf.setFontSize(14);
+              pdf.setTextColor("#ffffff");
+              const displaySectionTitle = getPdfSectionCardTitle(section, pdfLocale);
+              const chunkTitle = isFirstCompetitorChunk
+                ? displaySectionTitle
+                : `${displaySectionTitle}${pdfLocale === "tr" ? " devamı" : " continued"}`;
+              if (chunkTitle) {
+                pdf.text(chunkTitle, bodyX, y + 12.5, { maxWidth: bodyWidth });
+              }
+
+              const tableTopY = y + 18 + minHeadingToContentGap;
+              let tableX = bodyX;
+
+              pdf.setFillColor("#101113");
+              pdf.setDrawColor("#27272a");
+              pdf.roundedRect(bodyX, tableTopY, bodyWidth, layout.headerHeight + chunkRowsHeight, 3, 3, "FD");
+              pdf.setFontSize(5.8);
+              pdf.setTextColor("#5eead4");
+              layout.columns.forEach((column) => {
+                pdf.text(column.label.toUpperCase(), tableX + 2, tableTopY + 5.2, { maxWidth: column.width - 4 });
+                tableX += column.width;
+              });
+
+              let cumulativeRowY = tableTopY + layout.headerHeight;
+              for (let index = 0; index < rowsInChunk; index += 1) {
+                const rowIndex = rowCursor + index;
+                const rowY = cumulativeRowY;
+                let cellX = bodyX;
+
+                pdf.setDrawColor("#27272a");
+                pdf.line(bodyX, rowY, bodyX + bodyWidth, rowY);
+                layout.rowWrappedValues[rowIndex].forEach((lines, cellIndex) => {
+                  const width = layout.columns[cellIndex]?.width ?? 20;
+                  pdf.setFontSize(cellIndex === 0 ? 6.3 : 5.5);
+                  pdf.setTextColor(cellIndex === 0 ? "#f4f4f5" : "#d4d4d8");
+                  pdf.text(lines, cellX + 2, rowY + 4.7, {
+                    lineHeightFactor: 1.1,
+                    maxWidth: width - 4,
+                  });
+                  cellX += width;
+                });
+                cumulativeRowY += layout.rowHeightsForTable[rowIndex];
+              }
+
+              y += chunkCardHeight + minSectionGap;
+              rowCursor += rowsInChunk;
+              isFirstCompetitorChunk = false;
+            }
+
+            return;
+          }
         }
 
         // TASK #25C -- Strategic Recommendations gets its own dedicated
