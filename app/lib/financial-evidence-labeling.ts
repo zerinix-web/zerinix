@@ -1,8 +1,9 @@
 // Financial evidence labeling: classifies every computed financial
 // metric (ARR, TAM, CAGR, ROI, CAC, LTV, margins, market size, etc.)
-// into exactly one of the 3 required evidence types (PRODUCTION DATA
-// PROVENANCE POLISH), and consolidates the assumptions behind them into
-// one deduplicated list.
+// into the SAME canonical 5-state EvidenceLevel this codebase already
+// uses everywhere else for evidence provenance (report-evidence.ts) --
+// never a second, competing financial-only vocabulary -- and
+// consolidates the assumptions behind them into one deduplicated list.
 //
 // Never invents a classification: every metric already carries real,
 // already-computed `formula` / `benchmarkComparison` / `assumptions`
@@ -13,15 +14,27 @@
 // label than its own derivation text supports (never presents an
 // estimate as a verified fact, and never presents a value calculated
 // from a verified figure -- e.g. ARR = MRR x 12 -- as itself Verified).
+//
+// TASK #69A-46 -- ROOT CAUSE FIX (canonical financial evidence
+// unification): this module used to define its OWN, narrower 3-state
+// `FinancialEvidenceType` ("Verified" | "Derived" | "Benchmark /
+// Assumption") -- a genuine second, competing classification for the
+// exact same underlying concept report-evidence.ts's `EvidenceLevel`
+// already models with 5 states, used pervasively across web/PDF
+// (EvidenceBadge, getFinancialMetricDisplayLabel, Founder Readiness's
+// own Evidence Confidence dimension). Collapsing "benchmarkDerived" and
+// "planningAssumption" into one combined "Benchmark / Assumption"
+// bucket here erased a real, meaningful distinction the ticket's own
+// architecture requires: a metric whose value is read directly from an
+// industry benchmark table (TAM, CAC, ARPA, Gross Margin -- adjusted by
+// a straightforward multiplier) is a materially different provenance
+// shape from a metric COMPOSED by arithmetic over several OTHER
+// already-modeled metrics (CAC Payback, Runway, ARR/MRR when not user-
+// stated, EBITDA, Break-even, ROI -- a model-constructed planning
+// scenario, not a single benchmark lookup). Returns EvidenceLevel
+// directly now, eliminating the duplicate vocabulary entirely.
 import type { ResponseLanguage } from "./report-language.ts";
-
-export const financialEvidenceTypeValues = [
-  "Verified",
-  "Derived",
-  "Benchmark / Assumption",
-] as const;
-
-export type FinancialEvidenceType = (typeof financialEvidenceTypeValues)[number];
+import { getEvidenceLabel, type EvidenceLevel } from "./report-evidence.ts";
 
 export type FinancialMetricLike = {
   label: string;
@@ -53,6 +66,31 @@ const benchmarkSignal = /\b(benchmark|industry)\b/i;
 // the metric is derived by the model's own math from benchmark inputs,
 // not a value calculated from a verified user figure (that case is
 // caught by derivedFromVerifiedSignal above first).
+//
+// TASK #69A-46 -- INVESTIGATED, NOT changed: considered checking this
+// against `metric.formula` alone, before benchmarkSignal, so a
+// composition formula (CAC Payback, Runway, EBITDA, ...) would resolve
+// distinctly from a direct benchmark-table lookup (TAM, CAC, ARPA, Gross
+// Margin, ...) even though every metric's shared assumptions boilerplate
+// also mentions "Industry benchmark" as background context. Reverted:
+// proven live (a real regression against this file's own pre-existing
+// test suite) that TAM/SAM/SOM/ARPA/CAC/Gross Margin/Monthly Burn's OWN
+// formulas ALSO use a multiplier ("industry TAM x geography multiplier",
+// "TAM x serviceable market rate") -- the SAME "contains x/÷" shape a
+// genuine composition formula has -- so checking formula-only composition
+// first would misclassify these direct benchmark lookups as
+// "planningAssumption" too, with no reliable way to tell "benchmark value
+// x adjustment multiplier" apart from "compose several OTHER tracked
+// metrics" from formula text alone without a real risk of drift. Order
+// unchanged from before this ticket: benchmarkSignal (checked against the
+// full derivationText, including the shared "Industry benchmark: X"
+// context every metric carries) is still checked first. The finer
+// benchmark-vs-composed-assumption distinction remains a documented,
+// deliberate architectural gap (see this ticket's own final report) --
+// not attempted here since a wrong, over-eager split would be worse than
+// the current, safely-conservative single "benchmarkDerived" tier every
+// non-user-stated financial-model.ts metric already correctly resolves
+// to (never "verified", which is this function's own core invariant).
 const derivedCompositionSignal = /[×x/]|\bcalculated from\b|\bderived from\b/i;
 
 // Real, non-generic evidence that the user supplied actual operating
@@ -72,65 +110,135 @@ export function hasVerifiedUserProvidedData(userProvidedData: readonly string[])
 export function classifyFinancialMetricEvidenceType(
   metric: FinancialMetricLike,
   hasUserEvidence = false
-): FinancialEvidenceType {
+): EvidenceLevel {
   const derivationText = `${metric.formula} ${metric.benchmarkComparison} ${metric.assumptions.join(" ")}`;
 
   if (verifiedSignal.test(derivationText)) {
-    return "Verified";
+    return "verified";
   }
 
   if (derivedFromVerifiedSignal.test(derivationText)) {
-    return "Derived";
+    return "derived";
   }
 
   if (benchmarkSignal.test(derivationText)) {
-    return "Benchmark / Assumption";
+    return "benchmarkDerived";
   }
 
   if (derivedCompositionSignal.test(metric.formula)) {
-    return "Benchmark / Assumption";
+    return "planningAssumption";
   }
 
   if (hasUserEvidence) {
-    return "Verified";
+    return "verified";
   }
 
-  return "Benchmark / Assumption";
+  return "planningAssumption";
 }
 
-const evidenceTypeLabelTranslations: Record<ResponseLanguage, Record<FinancialEvidenceType, string>> = {
-  English: {
-    Verified: "Verified",
-    Derived: "Derived",
-    "Benchmark / Assumption": "Benchmark / Assumption",
-  },
-  Turkish: {
-    Verified: "Doğrulanmış",
-    Derived: "Türetilmiş",
-    "Benchmark / Assumption": "Benchmark / Varsayım",
-  },
-  German: {
-    Verified: "Verifiziert",
-    Derived: "Abgeleitet",
-    "Benchmark / Assumption": "Benchmark / Annahme",
-  },
-  French: {
-    Verified: "Vérifié",
-    Derived: "Dérivé",
-    "Benchmark / Assumption": "Référence / Hypothèse",
-  },
-  Spanish: {
-    Verified: "Verificado",
-    Derived: "Derivado",
-    "Benchmark / Assumption": "Referencia / Supuesto",
-  },
-};
-
 export function localizeFinancialEvidenceType(
-  type: FinancialEvidenceType,
+  type: EvidenceLevel,
   language: ResponseLanguage = "English"
 ) {
-  return evidenceTypeLabelTranslations[language][type];
+  return getEvidenceLabel(type, language);
+}
+
+// TASK #69A-46 -- CANONICAL FINANCIAL EVIDENCE STRENGTH (new, additive
+// concept -- confirmed absent from the existing architecture before
+// this fix: nothing previously aggregated "what fraction of this
+// report's own financial model rests on Verified/Derived data vs
+// Benchmark/Assumption" into one report-level figure). Deliberately
+// SEPARATE from FinancialConsistencyCheck.quality (financial-model.ts),
+// which measures something genuinely different -- whether the numbers
+// are INTERNALLY COHERENT with each other (LTV >= CAC, ARR = MRR x 12,
+// runway matches burn/investment, ...) -- a model built ENTIRELY from
+// benchmark assumptions can be perfectly internally consistent while
+// still resting on zero observed evidence; the two must never be
+// conflated into one score. This is a pure, deterministic aggregation
+// of already-computed per-metric classifications (no new AI call, no
+// fabricated evidence, no change to any metric's own value) -- read-
+// only reporting/presentation data, never wired into decisionEngine's
+// own threshold math (see this ticket's own requirement 5: weak
+// financial evidence must never itself flip MONITOR/GO eligibility).
+export type FinancialEvidenceStrength = "Strong" | "Moderate" | "Weak";
+
+export type FinancialEvidenceSummary = {
+  version: "financial_evidence_summary_v1";
+  metrics: Record<string, EvidenceLevel>;
+  verifiedCount: number;
+  derivedCount: number;
+  benchmarkDerivedCount: number;
+  planningAssumptionCount: number;
+  totalMetrics: number;
+  // Percentage of tracked metrics resting on real, observed data
+  // (verified, or mathematically derived from a verified figure) as
+  // opposed to a benchmark table or a planning assumption. 0 when the
+  // report supplies no financial metrics at all (never divides by
+  // zero, never fabricates a number).
+  observedEvidenceCoveragePercent: number;
+  strength: FinancialEvidenceStrength;
+};
+
+// Mirrors report-intelligence.ts's own qualityFromScore tiers
+// (>=72 High / >=48 Moderate / else Low) -- reusing this codebase's
+// existing tier convention rather than inventing a new, arbitrary
+// threshold tuned to any one report.
+function strengthFromCoverage(coveragePercent: number): FinancialEvidenceStrength {
+  if (coveragePercent >= 72) return "Strong";
+  if (coveragePercent >= 48) return "Moderate";
+  return "Weak";
+}
+
+// Aggregates the SAME per-metric classification classifyFinancialMetricEvidenceType
+// already computes for every tracked FinancialMetricModel -- never a
+// second, independently-derived scoring path. `metrics` should be
+// FinancialModel["metrics"] (financial-model.ts); passed as a plain
+// keyed record here (not imported) to keep this module dependency-free
+// of financial-model.ts, mirroring classifyFinancialMetricEvidenceType's
+// own FinancialMetricLike pattern.
+export function deriveFinancialEvidenceSummary(
+  metrics: Readonly<Record<string, FinancialMetricLike>>,
+  hasUserEvidence = false
+): FinancialEvidenceSummary {
+  const entries = Object.entries(metrics);
+  const classified: Record<string, EvidenceLevel> = {};
+  let verifiedCount = 0;
+  let derivedCount = 0;
+  let benchmarkDerivedCount = 0;
+  let planningAssumptionCount = 0;
+
+  for (const [key, metric] of entries) {
+    const level = classifyFinancialMetricEvidenceType(metric, hasUserEvidence);
+    classified[key] = level;
+
+    if (level === "verified") verifiedCount += 1;
+    else if (level === "derived") derivedCount += 1;
+    else if (level === "benchmarkDerived") benchmarkDerivedCount += 1;
+    // "planningAssumption" and the defensive "validationRequired"
+    // fallback (never actually reached for a deterministically-
+    // computed metric, see classifyFinancialMetricEvidenceType's own
+    // comment) both count as planning-assumption-tier for this
+    // aggregate -- neither rests on observed or benchmark-table data.
+    else planningAssumptionCount += 1;
+  }
+
+  const totalMetrics = entries.length;
+  const observedEvidenceCoveragePercent =
+    totalMetrics === 0
+      ? 0
+      : Math.round(((verifiedCount + derivedCount) / totalMetrics) * 100);
+
+  return {
+    version: "financial_evidence_summary_v1",
+    metrics: classified,
+    verifiedCount,
+    derivedCount,
+    benchmarkDerivedCount,
+    planningAssumptionCount,
+    totalMetrics,
+    observedEvidenceCoveragePercent,
+    strength: strengthFromCoverage(observedEvidenceCoveragePercent),
+  };
 }
 
 // Normalizes an assumption sentence for deduplication -- strips the

@@ -45,7 +45,46 @@ function escapeRegExp(value: string) {
 // so "6 months" tried against "...|m|...|months?|..." would otherwise
 // match just the "m" in "months" and leave "onths" dangling after a
 // substitution (a real mangling bug caught while testing this module).
-const VALUE_TOKEN = `(?:[<>~≈]?\\s*)?[$€£₺]?\\s*\\d[\\d.,]*\\s*(?:months?|days?|ay\\b|%|k|K|m|M|b|B)?`;
+//
+// TASK #69A-37 -- CRITICAL BUG FIX (confirmed live: a real report's
+// founderRoadmap/goToMarketPlan/risks sections read "LTV:CAC $10kand
+// legal/compliance clearance." and "...proof: LTV:CAC $10kor documented
+// channel plan."). ROOT CAUSE: the trailing `\s*` here sat OUTSIDE the
+// optional unit-suffix group, so it was consumed greedily even when the
+// suffix group went on to match nothing (a bare number with no
+// recognized unit immediately after it, e.g. the model's own "LTV:CAC 3
+// and ..." mention of a dimensionless ratio). That silently swallowed
+// the one real separator space between the matched value and whatever
+// word followed it, and correctMetricMentions' replacement below never
+// restores a space it didn't itself capture -- so substituting the
+// canonical value back in produced "$10kand"/"$10kor" with no space at
+// all. Moving `\s*` INSIDE the same optional group as the suffix means
+// that space is only ever consumed together with a real, matching unit
+// -- if no suffix matches, the whole group (space included) matches
+// zero-width instead, leaving the original separator untouched. This is
+// a general correctness fix, not one specific to CAC: any metric
+// mention whose bare number has no unit immediately after it was
+// equally exposed.
+// TASK #69A-38E -- ROOT CAUSE FIX: a bare integer/decimal immediately
+// followed by a sentence-ending period with no space ("...represented:
+// 5. This supports...") had that period silently swallowed by the old
+// `[\d.,]*` continuation, which treated ANY "."/"," after the first
+// digit as a possible decimal point or thousands separator with no
+// lookahead -- "5." matched as "5." in full, and correctMetricMentions'
+// own replacement (`${label}${connector}${canonicalDisplayValue}`)
+// discards the matched value entirely, so the sentence's own closing
+// period vanished along with it. Confirmed live while wiring #69A-38E's
+// new "Distinct competitor organizations represented: N" correction
+// target -- the exact same defect class already fixed once for a
+// swallowed SPACE (#69A-37's own RATE_SUFFIX_TOKEN fix), now fixed for a
+// swallowed sentence-ending PERIOD. A "." now only continues the number
+// when a digit immediately follows it (a genuine decimal point, e.g.
+// "11.3") -- a trailing period with no digit after it (a sentence
+// boundary) is never consumed, regardless of which metric target
+// matches. Commas are unchanged (still consumed unconditionally, as
+// before) -- this fix is scoped to the exact period-swallowing defect
+// confirmed live, nothing broader.
+const VALUE_TOKEN = `(?:[<>~≈]?\\s*)?[$€£₺]?\\s*\\d(?:[\\d,]|\\.(?=\\d))*(?:\\s*(?:months?|days?|ay\\b|%|k|K|m|M|b|B))?`;
 
 // TASK #69A-3 -- CRITICAL BUG FIX (confirmed live: a real report's
 // financialAssumptions section read "Monthly Burn: $195k/month/month").
@@ -67,6 +106,28 @@ const VALUE_TOKEN = `(?:[<>~≈]?\\s*)?[$€£₺]?\\s*\\d[\\d.,]*\\s*(?:months?
 // rate suffix was equally exposed.
 const RATE_SUFFIX_TOKEN = `(?:\\/(?:month|mo|year|yr)\\b)?`;
 
+// TASK #69A-37 -- CRITICAL BUG FIX (confirmed live, same real report as
+// VALUE_TOKEN's own fix above): "LTV:CAC 3 and legal/compliance
+// clearance" -- a legitimate, dimensionless RATIO mention -- was
+// corrected as if it were a bare "CAC" CURRENCY mention, because
+// `\bCAC\b` matches just as well immediately after "LTV:" (":" is a
+// non-word character, so a word boundary exists there too) as it does
+// standing alone. The ratio's own number then got silently overwritten
+// with CAC's own dollar-denominated canonical value -- the exact
+// "CAC — currency" vs "LTV:CAC — ratio" confusion this task's own
+// investigation was asked to rule out. Every short metric abbreviation
+// this codebase's own compound ratios are built from (LTV:CAC here;
+// EV/ARR is the acquisition-report equivalent, see
+// prompts/acquisition-analysis.ts) is listed once here so `CAC`/`LTV`/
+// `ARR`/etc. mentions immediately adjacent to another one of these
+// abbreviations via ":" or "/" are recognized as part of that compound
+// ratio and left alone -- never treated as a bare mention of either
+// half. Deliberately a short, closed list of ALL-CAPS abbreviations
+// (never a generic \w+ word-class match): "Runway: 6 months" or
+// "CAC: $10k" must keep matching normally, since neither "6" nor "$10k"
+// is one of these abbreviations.
+const COMPOUND_RATIO_NEIGHBOR = "(?:TAM|SAM|SOM|ARR|MRR|CAC|LTV|ROI|IRR|EV|EBITDA)";
+
 function normalizeValueForComparison(value: string) {
   return value.replace(/\s+/g, "").toLowerCase();
 }
@@ -80,7 +141,16 @@ function normalizeValueForComparison(value: string) {
 // itself canonically built from) are left untouched: correcting them
 // against themselves would be a no-op at best and a formatting risk
 // at worst.
-function correctMetricMentions(
+// TASK #69A-38E -- exported so plan-executor.ts can invoke this SAME,
+// already-tested mention corrector a second time, once
+// businessCompetitorLandscapeState (and therefore the real, canonical
+// competitive-evidence numbers) becomes known -- see this function's own
+// call site there. runConsistencyValidationPass's own first pass (still
+// unchanged, still called exactly where it always was) runs BEFORE that
+// canonical state exists, so it can correct every OTHER metric mention
+// but never this one; never a second, independently-reimplemented
+// mention-correction regex.
+export function correctMetricMentions(
   sections: Record<string, string>,
   fields: readonly string[],
   labelPattern: string,
@@ -97,7 +167,7 @@ function correctMetricMentions(
   // NOT an open-ended word-class match, so this can never skip past
   // unrelated words to grab an unconnected number later in the sentence.
   const mentionPattern = new RegExp(
-    `\\b(${labelPattern})\\b(\\s*(?:is|was|of|at|[:=\\-–—])?\\s*(?:only|about|approximately|around|roughly|nearly|almost|just|still|currently|neredeyse|yaklaşık|sadece|yalnızca)?\\s*)(${VALUE_TOKEN}${RATE_SUFFIX_TOKEN})`,
+    `(?<!${COMPOUND_RATIO_NEIGHBOR}\\s*[:\\/]\\s*)\\b(${labelPattern})\\b(?!\\s*[:\\/]\\s*${COMPOUND_RATIO_NEIGHBOR}\\b)(\\s*(?:is|was|of|at|[:=\\-–—])?\\s*(?:only|about|approximately|around|roughly|nearly|almost|just|still|currently|neredeyse|yaklaşık|sadece|yalnızca)?\\s*)(${VALUE_TOKEN}${RATE_SUFFIX_TOKEN})`,
     "gi"
   );
 

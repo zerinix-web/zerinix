@@ -19,8 +19,34 @@ export type FinancialModelInput = {
 export type FinancialModelingInputs = {
   industry: string;
   industryKey: IndustryKey;
+  // TASK #69A-38B -- ROOT CAUSE FIX: `industry`/`targetCustomer` stay
+  // exactly as before (a coarse, bounded classification: `industry` is
+  // literally the selected benchmark table's own display label, needed
+  // for getIndustryBenchmarks(industryKey) lookups and for
+  // translateIndustryBenchmarkLabel's fixed Turkish translation
+  // dictionary in plan-executor.ts) -- do not widen either field itself,
+  // since dozens of existing narrative sentences and every benchmark
+  // lookup already depend on their exact current shape.
+  // `industryDescriptor`/`targetCustomerDescriptor` are NEW, separate,
+  // richer descriptive labels: confirmed live (a fresh report for
+  // "financial planning, cash-flow forecasting, and scenario-planning
+  // SaaS ... for ... small and medium-sized businesses") that
+  // formatCanonicalFinancialAssumptions embeds `industry`/`targetCustomer`
+  // verbatim into the SAME generation prompt sent for EVERY report
+  // section, framed as authoritative "Detected modeling inputs" the
+  // model is explicitly instructed to "reuse ... everywhere" -- so the
+  // coarse benchmark-selection bucket ("AI software / automation") was
+  // anchoring the model's OWN Industry/Target Customer/Competitor/
+  // Porter reasoning away from the user's own explicit, far more
+  // specific description, even on a genuinely fresh (non-fallback)
+  // generation. These two descriptor fields are used ONLY at that one
+  // prompt-embedding call site (formatCanonicalFinancialAssumptions) --
+  // every other existing consumer of `industry`/`targetCustomer` is
+  // completely unaffected.
+  industryDescriptor: string;
   businessModel: string;
   targetCustomer: string;
+  targetCustomerDescriptor: string;
   geography: string;
   pricingModel: string;
   lifecycleStage: CompanyLifecycleStage;
@@ -314,14 +340,164 @@ function looksLikeTurkishPrompt(prompt: string) {
 // separate rewrite at every interpolation site.
 const UNSPECIFIED_GEOGRAPHY = "global markets";
 
+// TASK #69A-38B -- general-purpose, not hardcoded to any one business:
+// captures the functional noun-phrase immediately preceding a generic
+// product-type noun ("SaaS"/"software"/"platform"/"app"/"application"/
+// "tool"/"solution") -- e.g. "financial planning, cash-flow forecasting,
+// and scenario-planning SaaS" -> "financial planning, cash-flow
+// forecasting, and scenario-planning". Returns null (never a guessed or
+// fabricated descriptor) whenever the prompt doesn't follow this common
+// "<functional description> SaaS/software/..." phrasing at all, or the
+// captured span is too short/long to be a real descriptor -- callers
+// must fall back to the existing coarse benchmark label in that case,
+// exactly like every other `firstMatching` fallback in this file.
+function extractExplicitProductDescriptor(normalized: string): string | null {
+  const match = normalized.match(
+    /^(.{3,120}?)\b(?:saas|software|platform|app|application|tool|solution)\b/
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const descriptor = match[1]
+    .replace(/^(?:a|an|the|premium|leading|innovative|next-generation|cutting-edge|advanced)\s+/i, "")
+    .replace(/\b(?:ai[-\s]?powered|artificial intelligence|machine learning)[-\s]*/gi, "")
+    .trim()
+    .replace(/[,;\s]+$/, "");
+
+  return descriptor.length >= 3 ? descriptor : null;
+}
+
+// TASK #69A-38B -- a short adjective for the SAME already-classified
+// targetCustomer segment, used only to compose industryDescriptor below
+// (e.g. "SMB financial planning ... software" instead of a bare
+// "financial planning ... software" with no customer-segment context at
+// all). Never introduces a NEW classification -- purely a display-form
+// derivation of the segment `firstMatching` already resolved.
+function targetCustomerQualifier(targetCustomer: string): string {
+  switch (targetCustomer) {
+    case "startups and SMBs":
+      return "SMB";
+    case "B2B / enterprise customers":
+      return "enterprise";
+    case "mid-market companies":
+      return "mid-market";
+    case "individual consumers":
+      return "consumer";
+    case "professional and service firms":
+      return "professional services";
+    default:
+      return "";
+  }
+}
+
 export function inferFinancialModelingInputs(prompt: string): FinancialModelingInputs {
   const normalized = normalizePrompt(prompt);
   const industryKey = inferIndustryKey(prompt);
   const benchmark = getIndustryBenchmarks(industryKey);
+  const explicitProductDescriptor = extractExplicitProductDescriptor(normalized);
+
+  // TASK #69A-38B -- extracted to local consts (previously computed
+  // inline inside the returned object literal) purely so
+  // industryDescriptor/targetCustomerDescriptor below can reference the
+  // already-resolved targetCustomer/geography values without
+  // recomputing them a second time -- no change to either value or to
+  // how they are derived.
+  const targetCustomer = firstMatching(
+    [
+      [/\b(kahve|coffee|espresso|roastery|specialty coffee|speciality coffee|premium kahve)\b/, "premium coffee consumers, office buyers, boutique HoReCa accounts"],
+      [/\b(hospital|clinic|doctor|patient|healthcare)\b/, "healthcare buyers / operators"],
+      [/\b(sme|smes|smb|smbs|founder|founders|startup|startups|small business|small businesses|small and medium|small-and-medium|small to medium)\b/, "startups and SMBs"],
+      [/\b(mid-market|midmarket|mid market|mid-sized companies|mid sized companies|middle market)\b/, "mid-market companies"],
+      [/\b(consumer|consumers|b2c|individual users|everyday people|retail shoppers|shoppers)\b/, "individual consumers"],
+      [/\b(law firm|law firms|accounting firm|accounting firms|professional services firm|professional services firms|professional service firms|freelancer|freelancers|independent professionals|solo practitioners)\b/, "professional and service firms"],
+      [/\b(enterprise|b2b|company|companies|business|businesses)\b/, "B2B / enterprise customers"],
+      [/\b(luxury|premium|affluent|private|yacht|hotel)\b/, "premium consumer / high-net-worth customers"],
+      [/\b(government|public sector|municipal)\b/, "public-sector buyers"],
+      [/\b(commuter|commuters|student|students|urban|city|tourist|tourists|rider|riders)\b/, "urban riders / commuters"],
+    ],
+    "inferred early adopters",
+    normalized
+  );
+  const geography = (() => {
+    const hasNorthAmerica = /\bnorth america\b/.test(normalized);
+    const regionPatterns: Array<[RegExp, string]> = [
+      [/\b(us|usa|united states)\b/, "United States"],
+      [/\b(uk|united kingdom|london)\b/, "United Kingdom"],
+      [/\b(europe|eu)\b/, "Europe"],
+      [/\b(germany|deutschland)\b/, "Germany"],
+      [/\bfrance\b/, "France"],
+      [/\bitaly\b/, "Italy"],
+      [/\bspain\b/, "Spain"],
+      [/\bgreece\b/, "Greece"],
+      [/\bnorway\b/, "Norway"],
+      [/\b(netherlands|holland)\b/, "Netherlands"],
+      [/\b(turkey|turkiye|tuerkiye|istanbul|türkiye)\b/, "Turkey"],
+      [/\bsingapore\b/, "Singapore"],
+      [/\b(uae|united arab emirates)\b/, "United Arab Emirates"],
+      [/\b(saudi arabia|saudi)\b/, "Saudi Arabia"],
+      [/\bqatar\b/, "Qatar"],
+      [/\b(gcc|dubai|abu dhabi)\b/, "GCC / Middle East"],
+      [/\b(switzerland|swiss|zurich|zürich|geneva)\b/, "Switzerland"],
+      [/\b(japan|tokyo|japanese)\b/, "Japan"],
+      [/\b(south korea|korea|seoul|korean)\b/, "South Korea"],
+      [/\b(mexico|mexico city|mexican)\b/, "Mexico"],
+      [/\b(canada|canadian|toronto|vancouver)\b/, "Canada"],
+    ];
+    const matchedRegions = new Set(
+      regionPatterns
+        .filter(([pattern]) => pattern.test(normalized))
+        .map(([, value]) => value)
+    );
+
+    if (hasNorthAmerica) {
+      matchedRegions.add("North America");
+    } else if (/\bamerica\b/.test(normalized)) {
+      matchedRegions.add("United States");
+    }
+
+    if (matchedRegions.size > 0) {
+      return [...matchedRegions].join(" + ");
+    }
+
+    if (/\b(global|worldwide|international)\b/.test(normalized)) {
+      return "global";
+    }
+
+    return looksLikeTurkishPrompt(prompt) ? "Turkey" : UNSPECIFIED_GEOGRAPHY;
+  })();
+  // TASK #69A-38B -- see FinancialModelingInputs' own comment: composes
+  // a richer, explicit-context-preserving descriptive label ONLY when
+  // the prompt actually contains a recognizable "<functional
+  // description> SaaS/software/..." phrase; otherwise identical to the
+  // existing coarse `industry` value (benchmark.label), so any prompt
+  // that doesn't match this shape behaves exactly as before.
+  const industryDescriptor = explicitProductDescriptor
+    ? [targetCustomerQualifier(targetCustomer), explicitProductDescriptor, "software"]
+        .filter(Boolean)
+        .join(" ")
+    : benchmark.label;
+  // TASK #69A-38B -- geography-qualifies the SMB segment specifically
+  // (the one this task's reported case actually needs: "startups and
+  // SMBs" read as a vague catch-all bucket rather than the explicit,
+  // geography-scoped "small and medium-sized businesses" segment the
+  // user actually named) whenever the prompt's own SMB/SME signal is not
+  // also mixed with startup/founder language. Every other bucket is
+  // left completely unchanged -- this never introduces a new
+  // classification, only a more specific display form of the SAME
+  // already-resolved segment.
+  const targetCustomerDescriptor =
+    targetCustomer === "startups and SMBs" &&
+    /\b(sme|smes|smb|smbs|small business|small businesses|small and medium|small-and-medium|small to medium)\b/.test(normalized) &&
+    !/\b(founder|founders|startup|startups)\b/.test(normalized)
+      ? `${geography === UNSPECIFIED_GEOGRAPHY ? "" : `${geography} `}small and medium-sized businesses`.trim()
+      : targetCustomer;
 
   return {
     industry: benchmark.label,
     industryKey,
+    industryDescriptor,
     businessModel: firstMatching(
       [
         [/\b(kahve|coffee|espresso|roastery|specialty coffee|speciality coffee|premium kahve)\b/, "D2C Brand + Subscription + B2B"],
@@ -352,119 +528,25 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
       benchmark.label,
       normalized
     ),
-    targetCustomer: firstMatching(
-      [
-        [/\b(kahve|coffee|espresso|roastery|specialty coffee|speciality coffee|premium kahve)\b/, "premium coffee consumers, office buyers, boutique HoReCa accounts"],
-        [/\b(hospital|clinic|doctor|patient|healthcare)\b/, "healthcare buyers / operators"],
-        [/\b(enterprise|b2b|company|companies|business)\b/, "B2B / enterprise customers"],
-        [/\b(luxury|premium|affluent|private|yacht|hotel)\b/, "premium consumer / high-net-worth customers"],
-        [/\b(founder|startup|smb|small business)\b/, "startups and SMBs"],
-        [/\b(government|public sector|municipal)\b/, "public-sector buyers"],
-        [/\b(commuter|commuters|student|students|urban|city|tourist|tourists|rider|riders)\b/, "urban riders / commuters"],
-      ],
-      "inferred early adopters",
-      normalized
-    ),
+    // TASK #69A-38 -- ROOT CAUSE FIX (see this function's own local
+    // `targetCustomer`/`geography` consts above, where this
+    // classification now actually lives -- kept here only as `targetCustomer,`
+    // property shorthand): "AI-powered financial planning... SaaS for
+    // small and medium-sized businesses" was classified as "B2B /
+    // enterprise customers" -- the exact opposite of the explicit SMB
+    // segment the user named. Every explicit customer-segment signal
+    // (SMB/SME, mid-market, consumer/B2C, professional services) is
+    // checked BEFORE the generic business/enterprise catch-all and
+    // BEFORE the premium/luxury POSITIONING bucket, and every pattern is
+    // plural-safe.
+    targetCustomer,
+    targetCustomerDescriptor,
     // Confirmed live: a prompt naming "North America + Europe" was
-    // silently collapsed to just "United States" -- firstMatching only
-    // ever returns its first match, and the bare "america" alternative
-    // below matched inside "North America" before the "europe" pattern
-    // was ever considered, discarding the region the user actually
-    // named (and the second region entirely). Every distinct region
-    // mentioned is now collected and joined, instead of picking exactly
-    // one and dropping the rest.
-    geography: (() => {
-      const hasNorthAmerica = /\bnorth america\b/.test(normalized);
-      // Confirmed live: a maritime/shipping fleet-operations prompt naming
-      // "Singapore, Greece, Norway, and the United Arab Emirates" fell
-      // back to the unspecified-geography default -- none of those four
-      // countries were in this list at all (Greece/Norway had no Europe-
-      // adjacent entry, Singapore had no region of its own, and UAE only
-      // matched its own three-letter abbreviation, not the full country
-      // name the prompt actually used). Matches this list's existing
-      // country-to-region granularity (e.g. Germany/France/Italy/Spain all
-      // already map to the single "Europe" value).
-      // Confirmed live: an automotive-procurement prompt naming "Germany,
-      // Japan, South Korea, Mexico, and the United States" resolved to
-      // "United States + Europe + global" -- Japan/South Korea/Mexico had
-      // no entry at all (silently dropped), and "global" was treated as a
-      // co-equal region signal alongside the named countries purely
-      // because the prompt's own "for global automotive manufacturers"
-      // used the word as an ambition descriptor, not a "no specific
-      // region" signal -- so it was incorrectly added on top of, rather
-      // than instead of, the five real countries actually named.
-      const regionPatterns: Array<[RegExp, string]> = [
-        [/\b(us|usa|united states)\b/, "United States"],
-        [/\b(uk|united kingdom|london)\b/, "United Kingdom"],
-        // Confirmed live: a procurement-intelligence prompt explicitly
-        // naming "Germany, ... France, Netherlands, ... Saudi Arabia,
-        // United Arab Emirates, ..." had Germany/France/Netherlands
-        // silently collapsed into a single "Europe" token (Netherlands had
-        // no entry at all) and Saudi Arabia collapsed into "GCC / Middle
-        // East" -- the exact class of bug already fixed for UAE/Switzerland
-        // below: an explicitly named country must never be collapsed into
-        // a region label. "Europe"/"EU" is kept only as a fallback for
-        // genuinely generic mentions that name no specific country.
-        [/\b(europe|eu)\b/, "Europe"],
-        [/\b(germany|deutschland)\b/, "Germany"],
-        [/\bfrance\b/, "France"],
-        [/\bitaly\b/, "Italy"],
-        [/\bspain\b/, "Spain"],
-        [/\bgreece\b/, "Greece"],
-        [/\bnorway\b/, "Norway"],
-        [/\b(netherlands|holland)\b/, "Netherlands"],
-        [/\b(turkey|turkiye|tuerkiye|istanbul|türkiye)\b/, "Turkey"],
-        [/\bsingapore\b/, "Singapore"],
-        // Confirmed live: an AML/Fraud compliance prompt explicitly naming
-        // "United States, United Kingdom, Singapore, United Arab Emirates,
-        // and Switzerland" had the UAE silently replaced with the broader
-        // "GCC / Middle East" region label, and Switzerland was dropped
-        // entirely (no entry existed for it at all). An explicitly named
-        // country must never be collapsed into a region label -- "GCC /
-        // Middle East" is kept only for the broader Gulf signals (Dubai,
-        // Abu Dhabi, or the bare "GCC" acronym) that were never a specific
-        // country name to begin with.
-        [/\b(uae|united arab emirates)\b/, "United Arab Emirates"],
-        [/\b(saudi arabia|saudi)\b/, "Saudi Arabia"],
-        [/\bqatar\b/, "Qatar"],
-        [/\b(gcc|dubai|abu dhabi)\b/, "GCC / Middle East"],
-        [/\b(switzerland|swiss|zurich|zürich|geneva)\b/, "Switzerland"],
-        [/\b(japan|tokyo|japanese)\b/, "Japan"],
-        [/\b(south korea|korea|seoul|korean)\b/, "South Korea"],
-        [/\b(mexico|mexico city|mexican)\b/, "Mexico"],
-        // Confirmed live: "Germany, Japan, South Korea, United States, and
-        // Canada" silently dropped Canada entirely -- no entry existed for
-        // it at all, the same class of gap already fixed for Netherlands/
-        // Switzerland/Qatar above.
-        [/\b(canada|canadian|toronto|vancouver)\b/, "Canada"],
-      ];
-      const matchedRegions = new Set(
-        regionPatterns
-          .filter(([pattern]) => pattern.test(normalized))
-          .map(([, value]) => value)
-      );
-
-      if (hasNorthAmerica) {
-        matchedRegions.add("North America");
-      } else if (/\bamerica\b/.test(normalized)) {
-        matchedRegions.add("United States");
-      }
-
-      if (matchedRegions.size > 0) {
-        return [...matchedRegions].join(" + ");
-      }
-
-      // "global"/"worldwide"/"international" only means anything as a
-      // geography signal when NO specific country was named at all --
-      // once any real region matched above, a prompt's own unrelated use
-      // of "global" (e.g. describing ambition, not geography) must never
-      // be added alongside it.
-      if (/\b(global|worldwide|international)\b/.test(normalized)) {
-        return "global";
-      }
-
-      return looksLikeTurkishPrompt(prompt) ? "Turkey" : UNSPECIFIED_GEOGRAPHY;
-    })(),
+    // silently collapsed to just "United States" (see this function's
+    // own local `geography` const above for the full derivation) --
+    // every distinct region mentioned is collected and joined, instead
+    // of picking exactly one and dropping the rest.
+    geography,
     pricingModel: firstMatching(
       [
         [/\b(kahve|coffee|espresso|roastery|specialty coffee|speciality coffee|premium kahve)\b/, "D2C unit sales, recurring subscriptions, and B2B wholesale accounts"],
