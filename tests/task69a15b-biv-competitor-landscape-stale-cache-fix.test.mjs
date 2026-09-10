@@ -293,9 +293,14 @@ test("preserves #69A-15A: the Tier 0 schema-enforced generation call, its schema
     planExecutorSource,
     /cachedBusinessCompetitorLandscapeState \|\|\s*\n\s*buildBusinessCompetitorLandscapeState\(parsedCachedReport\.competitorLandscape\)/
   );
+  // TASK #69A-40B -- this Tier 0/Tier 1 expression is now wrapped in
+  // enrichCompetitorWeaknessesFromEvidence(...) (a deterministic,
+  // evidence-based safety net for competitors Tier 0/Tier 1 left
+  // "unavailable" -- see that task's own tests) -- the underlying
+  // Tier 0 || Tier 1 fallback logic itself is unchanged.
   assert.match(
     planExecutorSource,
-    /buildBusinessCompetitorLandscapeStateFromStructuredResponse\(\s*\n\s*structuredCompetitorLandscapeResponse\s*\n\s*\) \|\| buildBusinessCompetitorLandscapeState\(parsedReport\.competitorLandscape\);/
+    /buildBusinessCompetitorLandscapeStateFromStructuredResponse\(\s*\n\s*structuredCompetitorLandscapeResponse\s*\n\s*\) \|\| buildBusinessCompetitorLandscapeState\(parsedReport\.competitorLandscape\),/
   );
 });
 

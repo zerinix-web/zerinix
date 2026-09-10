@@ -100,7 +100,12 @@ function stripTsTypes(text) {
     )
     .replace(/let matchedMetric: FinancialMetricModel \| null = null;/g, "let matchedMetric = null;")
     .replace(/: Array<\{ label: string; metric: FinancialMetricModel \}>/, "")
-    .replace(/evidenceType: FinancialEvidenceType/, "evidenceType")
+    // TASK #69A-46 -- classifyFinancialMetricEvidenceType/
+    // toGateRecognizedEvidenceAnnotation now use the canonical
+    // EvidenceLevel type (report-evidence.ts) instead of the old,
+    // narrower FinancialEvidenceType -- strip whichever annotation is
+    // actually present.
+    .replace(/evidenceType: (?:FinancialEvidenceType|EvidenceLevel)/, "evidenceType")
     .replace(/: ReadonlySet<PlanReportField>/, "");
 }
 
@@ -184,7 +189,7 @@ test("real failing claim (solution field ARPA sentence) fails before the fix and
 
   const fixture = buildRealReportFixture(context);
   const annotated = annotate(fixture, context);
-  assert.match(annotated.solution, /\(Assumption\)$/);
+  assert.match(annotated.solution, /\(Estimated -- benchmark source\)$/);
   assert.equal(NUMERIC_CLAIM_LABEL_PATTERN.test(annotated.solution), true);
   assert.equal(NUMERIC_CLAIM_PROVENANCE_PATTERN.test(annotated.solution), true);
   assert.equal(findFailingClaim({ solution: annotated.solution }), undefined);
@@ -196,7 +201,7 @@ test("real failing claim (targetCustomer ARPA sentence) fails before the fix and
 
   const fixture = buildRealReportFixture(context);
   const annotated = annotate(fixture, context);
-  assert.match(annotated.targetCustomer, /\(Assumption\)$/);
+  assert.match(annotated.targetCustomer, /\(Estimated -- benchmark source\)$/);
   assert.equal(findFailingClaim({ targetCustomer: annotated.targetCustomer }), undefined);
 });
 
@@ -212,7 +217,7 @@ test("real failing claim (competitorLandscape citation paragraph, a separate rea
   const citationLine = lines.find((l) => l.startsWith("Direct competitors:"));
   const insightLine = lines.find((l) => l.startsWith("AI Executive Insight: Competitive positioning"));
   assert.match(citationLine, /\(AI Analysis\)$/, "the citation paragraph itself must be independently annotated");
-  assert.match(insightLine, /\(Assumption\)$/, "the separately-lined AI Executive Insight paragraph must also be independently annotated");
+  assert.match(insightLine, /\(Estimated -- benchmark source\)$/, "the separately-lined AI Executive Insight paragraph must also be independently annotated");
   assert.equal(findFailingClaim({ competitorLandscape: annotated.competitorLandscape }), undefined);
 });
 
@@ -247,10 +252,21 @@ test("requirement 7: the full real report fixture passes the quality gate end-to
 
 // Requirement 2: a benchmark-derived numeric planning assumption is
 // allowed only when structurally tagged as benchmark/planning input.
-test("requirement 2: a benchmark-derived metric mention is tagged '(Assumption)', never left bare", () => {
+//
+// TASK #69A-46 -- UPDATED (more precise, not weaker): Gross Margin's own
+// formula ("industry gross margin benchmark") is a direct benchmark-
+// table lookup, which classifyFinancialMetricEvidenceType now correctly
+// distinguishes from a model-COMPOSED planning assumption (e.g. CAC
+// Payback, Runway) -- see financial-evidence-labeling.ts's own comment.
+// It previously collapsed both into one "(Assumption)" tag; now it
+// correctly resolves to the canonical "benchmarkDerived" tier, annotated
+// "(Estimated -- benchmark source)" -- still satisfies BOTH the gate's
+// label pattern ("Estimated") and its provenance pattern ("benchmark
+// source"), and still never claims "Verified".
+test("requirement 2: a benchmark-derived metric mention is tagged '(Estimated -- benchmark source)', never left bare or claimed Verified", () => {
   const fixture = { ...Object.fromEntries(planFields.map((f) => [f, ""])), solution: "Gross Margin runs at 68% based on category norms." };
   const annotated = annotate(fixture, context);
-  assert.match(annotated.solution, /\(Assumption\)$/);
+  assert.match(annotated.solution, /\(Estimated -- benchmark source\)$/);
   assert.equal(findFailingClaim({ solution: annotated.solution }), undefined);
 });
 

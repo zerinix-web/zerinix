@@ -62,7 +62,10 @@ test("CONF-DEPTH-2 (no regression): a dimension that DOES have its own explicit 
 
   const snapshot = buildExecutiveSnapshot(content, undefined, undefined);
   const market = snapshot.confidenceRadar.find((dimension) => dimension.label === "Market");
-  const financial = snapshot.confidenceRadar.find((dimension) => dimension.label === "Financial");
+  // TASK #69A-47/#69A-49 -- renamed from "Financial" to "Financial Signal"
+  // then to "Financial Research Coverage" to avoid colliding with
+  // "Financial Consistency"/"Financial Evidence".
+  const financial = snapshot.confidenceRadar.find((dimension) => dimension.label === "Financial Research Coverage");
 
   assert.equal(market.score, 82, "an explicitly labeled dimension score must still be read correctly");
   assert.equal(financial.score, null, "a dimension with no label of its own must never borrow Market's number");

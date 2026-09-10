@@ -155,8 +155,8 @@ test("[B] web-style and PDF-style content produce an IDENTICAL Confidence Radar 
 
   const web = buildExecutiveSnapshot(executiveSummaryOnly, score, undefined);
   const pdf = buildExecutiveSnapshot(fullConcatenatedReport, score, undefined);
-  const webEvidence = web.confidenceRadar.find((d) => d.label === "Evidence").score;
-  const pdfEvidence = pdf.confidenceRadar.find((d) => d.label === "Evidence").score;
+  const webEvidence = web.confidenceRadar.find((d) => d.label === "Moat Evidence").score;
+  const pdfEvidence = pdf.confidenceRadar.find((d) => d.label === "Moat Evidence").score;
 
   assert.equal(webEvidence, pdfEvidence);
   assert.equal(webEvidence, score.decisionEngine.competitionScore.score);
@@ -328,7 +328,7 @@ test("[H] the verified real BIV case remains fully decision-safe and renderer-co
   // never 36 (Evidence Confidence) or 34 (Founder Evidence).
   const webRadar = Object.fromEntries(web.confidenceRadar.map((d) => [d.label, d.score]));
   const pdfRadar = Object.fromEntries(pdf.confidenceRadar.map((d) => [d.label, d.score]));
-  assert.deepEqual(webRadar, { Market: 55, Financial: 26, Execution: 52, Product: 58, Evidence: 41 });
+  assert.deepEqual(webRadar, { Market: 55, "Financial Research Coverage": 26, Execution: 52, Product: 58, "Moat Evidence": 41 });
   assert.deepEqual(webRadar, pdfRadar);
 
   // The three evidence-related numbers remain genuinely distinct.

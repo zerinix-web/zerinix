@@ -164,12 +164,12 @@ test("[#69A-27A real-case] Executive Snapshot Confidence Radar is structurally s
   const webRadar = byLabel(web);
   const pdfRadar = byLabel(pdf);
 
-  assert.deepEqual(webRadar, { Market: 55, Financial: 26, Execution: 52, Product: 58, Evidence: 41 });
+  assert.deepEqual(webRadar, { Market: 55, "Financial Research Coverage": 26, Execution: 52, Product: 58, "Moat Evidence": 41 });
   // THE FIX: before #69A-27A, this is exactly where PDF diverged to 36
   // (Founder Readiness's own "Evidence Confidence" prose, wrongly matched
   // as this dimension's alias) while web correctly showed 41. Both must
   // now be 41, by construction, not coincidence.
-  assert.deepEqual(pdfRadar, { Market: 55, Financial: 26, Execution: 52, Product: 58, Evidence: 41 });
+  assert.deepEqual(pdfRadar, { Market: 55, "Financial Research Coverage": 26, Execution: 52, Product: 58, "Moat Evidence": 41 });
   assert.deepEqual(webRadar, pdfRadar, "web and PDF Confidence Radar must be identical for the same persisted report");
 });
 
@@ -178,8 +178,8 @@ test("[#69A-27A real-case] web and PDF Confidence Radar Evidence use the same ca
   const web = buildExecutiveSnapshot(executiveSummarySectionContent, score, undefined);
   const pdf = buildExecutiveSnapshot(buildFullReportContent(), score, undefined);
 
-  const webEvidence = web.confidenceRadar.find((d) => d.label === "Evidence").score;
-  const pdfEvidence = pdf.confidenceRadar.find((d) => d.label === "Evidence").score;
+  const webEvidence = web.confidenceRadar.find((d) => d.label === "Moat Evidence").score;
+  const pdfEvidence = pdf.confidenceRadar.find((d) => d.label === "Moat Evidence").score;
 
   assert.equal(webEvidence, score.decisionEngine.competitionScore.score);
   assert.equal(pdfEvidence, score.decisionEngine.competitionScore.score);
@@ -191,7 +191,7 @@ test("[#69A-27A real-case] Founder Readiness Evidence Confidence (36) remains in
   const score = realCaseInvestmentScore();
   const metrics = readFounderReadinessMetrics(score);
   const pdf = buildExecutiveSnapshot(buildFullReportContent(), score, undefined);
-  const radarEvidence = pdf.confidenceRadar.find((d) => d.label === "Evidence").score;
+  const radarEvidence = pdf.confidenceRadar.find((d) => d.label === "Moat Evidence").score;
 
   assert.equal(metrics.evidenceConfidence, 36);
   assert.equal(radarEvidence, 41);
@@ -202,7 +202,7 @@ test("[#69A-27A real-case] Founder Evidence (34) remains independent of both Evi
   const score = realCaseInvestmentScore();
   const metrics = readFounderReadinessMetrics(score);
   const pdf = buildExecutiveSnapshot(buildFullReportContent(), score, undefined);
-  const radarEvidence = pdf.confidenceRadar.find((d) => d.label === "Evidence").score;
+  const radarEvidence = pdf.confidenceRadar.find((d) => d.label === "Moat Evidence").score;
 
   assert.equal(metrics.founderEvidence, 34);
   assert.notEqual(metrics.founderEvidence, metrics.evidenceConfidence);
@@ -213,7 +213,7 @@ test("[#69A-27A real-case] no renderer can silently substitute one evidence metr
   const score = realCaseInvestmentScore();
   const metrics = readFounderReadinessMetrics(score);
   const pdf = buildExecutiveSnapshot(buildFullReportContent(), score, undefined);
-  const radarEvidence = pdf.confidenceRadar.find((d) => d.label === "Evidence").score;
+  const radarEvidence = pdf.confidenceRadar.find((d) => d.label === "Moat Evidence").score;
 
   const distinctValues = new Set([metrics.evidenceConfidence, metrics.founderEvidence, radarEvidence]);
   assert.equal(distinctValues.size, 3, `expected 3 genuinely distinct evidence-related values, got: ${JSON.stringify([...distinctValues])}`);
@@ -227,7 +227,7 @@ test("[#69A-27A real-case, historical report] a persisted report predating decis
     // No decisionEngine at all -- the pre-#69A-17/#69A-27A persisted shape.
   };
   const web = buildExecutiveSnapshot(executiveSummarySectionContent, legacyScore, undefined);
-  const evidence = web.confidenceRadar.find((d) => d.label === "Evidence");
+  const evidence = web.confidenceRadar.find((d) => d.label === "Moat Evidence");
 
   assert.equal(evidence.score, null, "no fabricated Evidence value for a historical report with no structured score and no matching labeled prose");
 });

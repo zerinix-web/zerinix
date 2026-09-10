@@ -240,7 +240,8 @@ test("[7] competitor rows survive into the final serialization -- every real com
     assert.ok(result.serializedText.includes(baseName), `expected "${baseName}" to survive into the serialized PDF bytes`);
   }
   assert.match(result.serializedText, /High/);
-  assert.match(result.serializedText, /directional/);
+  // TASK #69A-40 -- the qualifier is now capitalized "(Directional)".
+  assert.match(result.serializedText, /Directional/);
 });
 
 test("[8] Business Model's own draw call survives immediately after Competitor Landscape's -- neither overwrites the other, both are present in the same final serialization", () => {

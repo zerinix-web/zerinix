@@ -190,7 +190,15 @@ test("ReportPdfButton.tsx: getVisualHeight's competitor-table branch computes he
     // a short explanatory comment when its header-height budget was
     // split between the empty state (8) and the real full-table state
     // (12, to fit the new Vendor Confidence scoping caption).
-    pdfButtonSource.lastIndexOf('if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {') + 3000
+    // TASK #69A-45A -- widened again (3000 -> 3400): the generic
+    // table's own return line grew a short explanatory comment when it
+    // switched from the flat `8 + rows.length * 15 + 4` estimate to
+    // calling the new shared getCompetitorTableLayout.
+    // TASK #69A-45B -- widened again (3400 -> 4300): the same return
+    // line grew a further explanatory comment noting this budget is
+    // now unused for a real full table (the new dedicated,
+    // row-pagination-aware branch handles that case instead).
+    pdfButtonSource.lastIndexOf('if (normalizedTitle.includes("competitor") || normalizedTitle.includes("competitive landscape")) {') + 4300
   );
   assert.match(
     heightBlock,
@@ -227,7 +235,13 @@ test("ReportPdfButton.tsx: getVisualHeight's competitor-table branch computes he
     heightBlock,
     /if \(rows\.length < minCompetitorTableRows\) \{\s*\n\s*return getNamesOnlyCompetitorLayout\(\s*\n\s*rows\.map\(\(row\) => row\.company \|\| "Company"\),\s*\n\s*bodyWidth,\s*\n\s*sparseCompetitorTableIntro\s*\n\s*\)\.totalHeight;\s*\n\s*\}/
   );
-  assert.match(heightBlock, /return 8 \+ rows\.length \* 15 \+ 4;/);
+  // TASK #69A-45A -- ROOT CAUSE FIX: this used to be the flat
+  // `8 + rows.length * 15 + 4` estimate (always "2 lines' worth" per
+  // row), completely disconnected from what the drawing branch below
+  // actually draws once a cell needs more than 2 lines (#69A-45). Now
+  // calls the SAME getCompetitorTableLayout the drawing branch uses, so
+  // the pagination budget and the real drawn height can never disagree.
+  assert.match(heightBlock, /return getCompetitorTableLayout\(rows, bodyWidth\)\.totalHeight \+ 4;/);
 });
 
 test("ReportPdfButton.tsx: the old generic company/positioning-shaped inferMarketMapPosition (the function this fix made unreachable, since the Market Map now always reads MI rows) was removed rather than left as dead code", () => {
@@ -281,7 +295,12 @@ test("Planner.tsx's downloadPdf: getPdfVisualHeight's competitiveLandscape branc
     // between the empty state (competitorHeaderHeight) and the real
     // full-table state (miCompetitorHeaderHeight, to fit the new
     // Vendor Confidence scoping caption).
-    plannerSource.indexOf('if (section.field === "competitiveLandscape" || section.field === "competitorLandscape") {\n          // Row source') + 3000
+    // TASK #69A-45C -- widened again (3000 -> 4400): the generic
+    // table's own final return line grew a further explanatory comment
+    // when it switched from the flat `competitorHeaderHeight +
+    // rows.length * competitorRowHeight + 4` estimate to calling the
+    // new shared getCompetitorTableLayout.
+    plannerSource.indexOf('if (section.field === "competitiveLandscape" || section.field === "competitorLandscape") {\n          // Row source') + 4400
   );
   assert.match(
     heightBlock,
@@ -322,7 +341,13 @@ test("Planner.tsx's downloadPdf: getPdfVisualHeight's competitiveLandscape branc
     heightBlock,
     /if \(rows\.length < minCompetitorTableRows\) \{\s*\n\s*return getNamesOnlyCompetitorLayout\(\s*\n\s*rows\.map\(\(row\) => row\.company \|\| "Company"\),\s*\n\s*bodyWidth,\s*\n\s*sparseCompetitorTableIntro\s*\n\s*\)\.totalHeight;\s*\n\s*\}/
   );
-  assert.match(heightBlock, /return competitorHeaderHeight \+ rows\.length \* competitorRowHeight \+ 4;/);
+  // TASK #69A-45C -- ROOT CAUSE FIX: this used to be the flat
+  // `competitorHeaderHeight + rows.length * competitorRowHeight + 4`
+  // estimate -- always "2 lines' worth" per row -- completely
+  // disconnected from what drawPdfVisual's own branch actually drew
+  // once a cell needed more than 2 lines. Now calls the SAME
+  // getCompetitorTableLayout the dedicated pagination branch uses.
+  assert.match(heightBlock, /return getCompetitorTableLayout\(rows, bodyWidth\)\.totalHeight \+ 4;/);
 });
 
 test("Planner.tsx: the old generic company/positioning-shaped inferPdfMarketMapPosition (the function this fix made unreachable) was removed rather than left as dead code", () => {
@@ -332,12 +357,33 @@ test("Planner.tsx: the old generic company/positioning-shaped inferPdfMarketMapP
 // --- Non-MI reports: generic table completely unchanged -----------------
 
 test("both PDF paths preserve the exact original 5-column generic table (Company/Positioning/Strengths/Weaknesses/Threat) and no Market Map for non-MI reports -- this fix only adds a new MI-only branch, it never modifies Business Plan/Acquisition's existing presentation", () => {
-  for (const source of [pdfButtonSource, plannerSource]) {
-    assert.match(
-      source,
-      /Positioning", pdfLocale\), width: (?:body|visual)Width \* 0\.27 \},\s*\n\s*\{ label: localizePdfPresentationLabel\("Strengths", pdfLocale\), width: (?:body|visual)Width \* 0\.2 \},\s*\n\s*\{ label: localizePdfPresentationLabel\("Weaknesses", pdfLocale\), width: (?:body|visual)Width \* 0\.2 \},\s*\n\s*\{ label: localizePdfPresentationLabel\("Threat", pdfLocale\), width: (?:body|visual)Width \* 0\.14 \},/
-    );
-  }
+  // TASK #69A-45A -- ReportPdfButton.tsx's own copy of these column
+  // definitions moved from inline code (using the outer bodyWidth
+  // closure variable directly) into a shared getCompetitorTableLayout
+  // helper (also used by getVisualHeight's matching pagination-budget
+  // branch, so the two can never disagree again) -- that helper takes
+  // its own `width` parameter, mirroring this file's OWN established
+  // naming for every sibling layout helper (getSwotLayout/getPorterLayout/
+  // getNamesOnlyCompetitorLayout all use bare `width`, never `bodyWidth`,
+  // as their own parameter name).
+  //
+  // TASK #69A-45C -- Planner.tsx's own copy of these column definitions
+  // ALSO moved from inline code (using the outer bodyWidth/visualWidth
+  // closure variable directly) into its own shared getCompetitorTableLayout
+  // helper (mirroring ReportPdfButton.tsx's identical #69A-45A/B fix),
+  // which likewise takes a bare `width` parameter -- so both files'
+  // shared layout helpers now match the SAME `width` pattern, never the
+  // original (?:body|visual)Width pattern (that pattern only still
+  // applies to Planner.tsx's OWN separate, untouched Market-
+  // Intelligence-only competitor table, which remains inline).
+  assert.match(
+    pdfButtonSource,
+    /Positioning", pdfLocale\), width: width \* 0\.27 \},\s*\n\s*\{ label: localizePdfPresentationLabel\("Strengths", pdfLocale\), width: width \* 0\.2 \},\s*\n\s*\{ label: localizePdfPresentationLabel\("Weaknesses", pdfLocale\), width: width \* 0\.2 \},\s*\n\s*\{ label: localizePdfPresentationLabel\("Threat", pdfLocale\), width: width \* 0\.14 \},/
+  );
+  assert.match(
+    plannerSource,
+    /Positioning", pdfLocale\), width: width \* 0\.27 \},\s*\n\s*\{ label: localizePdfPresentationLabel\("Strengths", pdfLocale\), width: width \* 0\.2 \},\s*\n\s*\{ label: localizePdfPresentationLabel\("Weaknesses", pdfLocale\), width: width \* 0\.2 \},\s*\n\s*\{ label: localizePdfPresentationLabel\("Threat", pdfLocale\), width: width \* 0\.14 \},/
+  );
 });
 
 // --- Drift check: AI generation/prompts/schema/business logic untouched -

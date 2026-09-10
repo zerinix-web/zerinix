@@ -173,7 +173,10 @@ test("[B] verified, directional, and unavailable are three genuinely distinct st
 test("[3] unavailable remains unavailable when evidence is genuinely insufficient -- never forced to fill the column", () => {
   const state = buildBusinessCompetitorLandscapeStateFromStructuredResponse(arbitraryCompetitorResponse());
   const clearRunway = state.competitors.find((c) => c.company === "ClearRunway");
-  assert.equal(formatCompetitorWeaknessForDisplay(clearRunway), "—");
+  // TASK #69A-40 -- display text is now the explicit "Not available",
+  // never the ambiguous bare "—" sentinel (the underlying stored value,
+  // asserted elsewhere in this file, is unchanged).
+  assert.equal(formatCompetitorWeaknessForDisplay(clearRunway), "Not available");
 });
 
 // --- 4: renderer never converts directional into verified -----------------
@@ -183,7 +186,8 @@ test("[4] formatCompetitorWeaknessForDisplay never upgrades a directional weakne
   const ledgerly = state.competitors.find((c) => c.company === "Ledgerly");
   const northwind = state.competitors.find((c) => c.company === "Northwind Ledger");
 
-  assert.match(formatCompetitorWeaknessForDisplay(ledgerly), /\(directional\)$/);
+  // TASK #69A-40 -- the qualifier is now capitalized "(Directional)".
+  assert.match(formatCompetitorWeaknessForDisplay(ledgerly), /\(Directional\)$/);
   // A verified weakness must NOT carry the directional qualifier.
   assert.doesNotMatch(formatCompetitorWeaknessForDisplay(northwind), /\(directional\)$/);
 });
@@ -233,7 +237,14 @@ test("[7] the fix widens EXISTING query text only -- no new per-competitor resea
 
 test("[7b] the research CACHE version was bumped so a stale, pre-fix cached research bundle is never silently replayed -- but the shared version constant governs a single one-time invalidation, not repeated re-fetching", () => {
   const source = readFileSync(join(repoRoot, "app/lib/ai/research-cache.ts"), "utf8");
-  assert.match(source, /RESEARCH_CACHE_VERSION = "research-result-v2"/);
+  // Pinned to "v2" originally; #69A-39B bumped it again (v2 -> v3) for an
+  // unrelated later fix (a stale cross-domain-classification cache entry)
+  // using this exact same mechanism -- assert it was bumped at least past
+  // "v1" (this task's own fix) rather than pinning a since-superseded
+  // exact string, so a later legitimate bump doesn't fail this test.
+  const versionMatch = source.match(/RESEARCH_CACHE_VERSION = "research-result-v(\d+)"/);
+  assert.ok(versionMatch, "expected RESEARCH_CACHE_VERSION to still exist");
+  assert.ok(Number(versionMatch[1]) >= 2, "expected the version to be bumped past v1 by this task's own fix");
 });
 
 // --- 8: web/PDF parity ------------------------------------------------------
@@ -301,7 +312,7 @@ test("[10] the currently-verified real BIV fixture (MONITOR/48%, Founder Readine
     evidenceConfidence: 36,
     founderEvidence: 34,
   });
-  assert.deepEqual(radar, { Market: 55, Financial: 26, Execution: 52, Product: 58, Evidence: 41 });
+  assert.deepEqual(radar, { Market: 55, "Financial Research Coverage": 26, Execution: 52, Product: 58, "Moat Evidence": 41 });
 
   const portersSource = readFileSync(join(repoRoot, "app/lib/report-engine/porters-five-forces-state.ts"), "utf8");
   assert.doesNotMatch(portersSource, /#69A-29A/);

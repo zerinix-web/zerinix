@@ -201,19 +201,40 @@ test("requirement G: plan-executor.ts wires businessCompetitorLandscapeState int
   // fallback) -- see tests/task69a15a's own dedicated coverage for that
   // change. This assertion just confirms the variable is still computed
   // and still flows into the same reportMetadata chunk below.
+  // TASK #69A-40B further wrapped the two-tier expression in
+  // enrichCompetitorWeaknessesFromEvidence(...) (a deterministic,
+  // evidence-based safety net) -- the underlying Tier 0 || Tier 1
+  // fallback logic itself, matched below, is unchanged.
+  // TASK #69A-45 wrapped that again in attachWeaknessProvenance(...)
+  // (derives weaknessSourceRefs/weaknessConfidence from the SAME
+  // evidence, never a new tier) -- the inner Tier 0 || Tier 1 fallback
+  // and enrichCompetitorWeaknessesFromEvidence call, matched below, are
+  // still unchanged.
   assert.match(
     planExecutorSource,
-    /const businessCompetitorLandscapeState =\s*\n\s*buildBusinessCompetitorLandscapeStateFromStructuredResponse\(\s*\n\s*structuredCompetitorLandscapeResponse\s*\n\s*\) \|\| buildBusinessCompetitorLandscapeState\(parsedReport\.competitorLandscape\);/
+    /const businessCompetitorLandscapeState = attachWeaknessProvenance\(\s*\n\s*enrichCompetitorWeaknessesFromEvidence\(\s*\n\s*buildBusinessCompetitorLandscapeStateFromStructuredResponse\(\s*\n\s*structuredCompetitorLandscapeResponse\s*\n\s*\) \|\| buildBusinessCompetitorLandscapeState\(parsedReport\.competitorLandscape\),/
   );
   // TASK #69A-28 superseded the exact literal condition/argument-list
-  // here too: it now also checks/passes portersFiveForcesState (an
-  // unrelated, additive OR-condition and 3rd argument) -- see
-  // tests/task69a28's own dedicated coverage for that change. This
-  // assertion just confirms businessCompetitorLandscapeState itself is
-  // still checked and still flows into the same call.
+  // here too: it now also passes portersFiveForcesState (an unrelated,
+  // additive 3rd argument) -- see tests/task69a28's own dedicated
+  // coverage for that change.
+  //
+  // TASK #69A-38D superseded the `if (businessCompetitorLandscapeState
+  // || portersFiveForcesState)` guard entirely: a report with NEITHER
+  // (the exact live-reported case -- zero validated competitors and no
+  // Porter structured response) used to skip this second chunk
+  // altogether, leaving the client stuck on the EARLY chunk's stale,
+  // raw-evidence-derived competitive-evidence score forever. The call
+  // is unconditional now, and its context argument is
+  // finalResearchAwareFinancialContext (the post-generation, canonical-
+  // competitor-corrected context -- see tests/task69a38d's own
+  // dedicated coverage) rather than the pre-correction
+  // researchAwareFinancialContext. This assertion just confirms
+  // businessCompetitorLandscapeState itself still flows into the same
+  // call.
   assert.match(
     planExecutorSource,
-    /if \(businessCompetitorLandscapeState(?: \|\| portersFiveForcesState)?\) \{\s*\n\s*enqueue\(\s*\n\s*serializePlanReportMetadataChunk\(\s*\n\s*researchAwareFinancialContext,\s*\n\s*businessCompetitorLandscapeState,?\s*\n(?:\s*portersFiveForcesState\s*\n)?\s*\)\s*\n\s*\);\s*\n\s*\}/
+    /enqueue\(\s*\n\s*serializePlanReportMetadataChunk\(\s*\n\s*finalResearchAwareFinancialContext,\s*\n\s*businessCompetitorLandscapeState,\s*\n\s*portersFiveForcesState\s*\n\s*\)\s*\n\s*\);/
   );
   // TASK #69A-15A superseded the exact literal second-argument
   // expression here too: it now prefers cachedBusinessCompetitorLandscapeState
@@ -277,8 +298,14 @@ test("requirement G: Planner.tsx's OWN client-side PDF export (downloadPdf, defi
   assert.ok(fnMatch, "resolveCompetitorRowsForDownloadPdf not found");
   assert.match(fnMatch[0], /if \(state\) \{/);
   assert.match(fnMatch[0], /return extractCompetitorRows\(content\);/);
+  // TASK #69A-45C added a THIRD call site: the dedicated, row-
+  // pagination-aware Competitor Landscape branch in pdfSections.forEach
+  // (which intercepts before drawPdfVisual is ever called for a real
+  // full table) resolves its own rows independently, using the SAME
+  // businessCompetitorLandscapeState prop -- never a fourth, divergent
+  // row source.
   const occurrences = plannerSource.match(/resolveCompetitorRowsForDownloadPdf\(\s*\n\s*businessCompetitorLandscapeState,/g) || [];
-  assert.equal(occurrences.length, 2, "expected exactly 2 call sites (height-measurement + drawing)");
+  assert.equal(occurrences.length, 3, "expected exactly 3 call sites (height-measurement + drawing + the #69A-45C dedicated pagination branch)");
 });
 
 test("requirement G: businessCompetitorLandscapeState is threaded as a real prop through PremiumSectionVisual -> ReportSectionCard -> ReportPanel, resolved via readBusinessCompetitorLandscapeState at both the desktop and mobile ReportPanel call sites, exactly mirroring marketIntelligenceCanonicalState's own established threading", () => {

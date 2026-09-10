@@ -219,7 +219,7 @@ test("E (de-collapse proof): Founder Evidence and Evidence Confidence are indepe
   assert.notEqual(founderEvidence, executionComplexity);
   assert.match(investmentScoreSource, /\{ key: "evidenceConfidence", label: "Evidence Confidence", score: roundScore\(evidenceConfidenceScore \* 100\) \}/);
   assert.match(investmentScoreSource, /\{ key: "founderEvidence", label: "Founder Evidence", score: roundScore\(founderEvidenceScore \* 100\) \}/);
-  assert.match(investmentScoreSource, /\{ key: "executionComplexity", label: "Execution Complexity", score: roundScore\(executionComplexityScore \* 100\) \}/);
+  assert.match(investmentScoreSource, /\{ key: "executionComplexity", label: "Execution Readiness", score: roundScore\(executionComplexityScore \* 100\) \}/);
 });
 
 // --- F: large TAM + poor business economics -> MUST NOT ENTER solely ----
@@ -239,7 +239,7 @@ test("G: applyFatalBlockerOverride deterministically converts a would-be GO into
     { key: "marketAttractiveness", label: "Market Attractiveness", score: 90 },
     { key: "businessModelQuality", label: "Business Model Quality", score: 90 },
     { key: "validationConfidence", label: "Validation Confidence", score: 90 },
-    { key: "executionComplexity", label: "Execution Complexity", score: 90 },
+    { key: "executionComplexity", label: "Execution Readiness", score: 90 },
     { key: "evidenceConfidence", label: "Evidence Confidence", score: 90 },
     { key: "founderEvidence", label: "Founder Evidence", score: 12 },
   ];

@@ -304,7 +304,7 @@ test("requirement B: dimensionScores in REVERSED or SHUFFLED array order still r
 
 // --- Requirement C/D: adjacent dimensions cannot bleed into each other --
 
-test("requirement C: Execution Complexity cannot consume Validation Confidence's (or any other adjacent dimension's) score -- constructed with genuinely distinct, adjacent values and verified independently", () => {
+test("requirement C: Execution Readiness cannot consume Validation Confidence's (or any other adjacent dimension's) score -- constructed with genuinely distinct, adjacent values and verified independently", () => {
   const investmentScore = {
     decisionEngine: {
       founderScore: {
@@ -318,14 +318,14 @@ test("requirement C: Execution Complexity cannot consume Validation Confidence's
       },
     },
   };
-  const executionComplexity = readFounderReadinessMetricValue("Execution Complexity", investmentScore, "");
+  const executionComplexity = readFounderReadinessMetricValue("Execution Readiness", investmentScore, "");
   const validationConfidence = readFounderReadinessMetricValue("Validation Confidence", investmentScore, "");
   assert.equal(executionComplexity, 66);
   assert.equal(validationConfidence, 60);
   assert.notEqual(executionComplexity, validationConfidence);
 });
 
-test("requirement D: Evidence Confidence cannot consume Execution Complexity's score -- constructed with genuinely distinct, adjacent values and verified independently", () => {
+test("requirement D: Evidence Confidence cannot consume Execution Readiness's score -- constructed with genuinely distinct, adjacent values and verified independently", () => {
   const investmentScore = {
     decisionEngine: {
       founderScore: {
@@ -333,20 +333,20 @@ test("requirement D: Evidence Confidence cannot consume Execution Complexity's s
         maximumScore: 100,
         reasoning: [],
         dimensionScores: [
-          { key: "executionComplexity", label: "Execution Complexity", score: 66 },
+          { key: "executionComplexity", label: "Execution Readiness", score: 66 },
           { key: "evidenceConfidence", label: "Evidence Confidence", score: 34 },
         ],
       },
     },
   };
-  const executionComplexity = readFounderReadinessMetricValue("Execution Complexity", investmentScore, "");
+  const executionComplexity = readFounderReadinessMetricValue("Execution Readiness", investmentScore, "");
   const evidenceConfidence = readFounderReadinessMetricValue("Evidence Confidence", investmentScore, "");
   assert.equal(evidenceConfidence, 34);
   assert.equal(executionComplexity, 66);
   assert.notEqual(evidenceConfidence, executionComplexity);
 });
 
-test("requirement 7: dimension ordering (FOUNDER_READINESS_DIMENSION_METRICS' own declared order) is unchanged by this fix -- Execution Complexity remains a complexity score (never renamed/reinterpreted as execution readiness), Evidence Confidence remains evidence confidence", () => {
+test("requirement 7: dimension ordering (FOUNDER_READINESS_DIMENSION_METRICS' own declared order) is unchanged by this fix -- the underlying key stays \"executionComplexity\" (minimal, safe internal migration), but the user-facing label is now [UPDATED BY #69A-53] \"Execution Readiness\", not \"Execution Complexity\", since the underlying score has always meant higher = easier/more ready, not higher = more complex", () => {
   const keys = FOUNDER_READINESS_DIMENSION_METRICS.map((dimension) => dimension.key);
   assert.deepEqual(keys, [
     "ideaQuality",
@@ -358,8 +358,12 @@ test("requirement 7: dimension ordering (FOUNDER_READINESS_DIMENSION_METRICS' ow
     "founderEvidence",
   ]);
   const executionComplexityDimension = FOUNDER_READINESS_DIMENSIONS.find((d) => d.key === "executionComplexity");
-  assert.match(executionComplexityDimension.label, /Complexity/);
-  assert.doesNotMatch(executionComplexityDimension.label, /Readiness/);
+  assert.match(executionComplexityDimension.label, /Readiness/);
+  assert.doesNotMatch(executionComplexityDimension.label, /Complexity/);
+  // Backward compatibility: the OLD label is still a recognized alias,
+  // so a historical report's own persisted "Execution Complexity: NN%"
+  // text is still found correctly.
+  assert.ok(executionComplexityDimension.aliases.includes("Execution Complexity"));
 });
 
 // --- Requirement E: PDF visual score and explanatory sentence agree -----
@@ -394,7 +398,7 @@ test("requirement F: a legacy report missing BOTH dimensionScores and any parsea
   const emptyInvestmentScore = {
     decisionEngine: { founderScore: { score: 40, maximumScore: 100, reasoning: [] } },
   };
-  const value = readFounderReadinessMetricValue("Execution Complexity", emptyInvestmentScore, "");
+  const value = readFounderReadinessMetricValue("Execution Readiness", emptyInvestmentScore, "");
   assert.equal(value, null);
 });
 
@@ -412,7 +416,7 @@ test("requirement F: readFounderReadinessDimensionScore-equivalent structured lo
   assert.equal(readFounderReadinessMetricValue("Idea Quality", partialInvestmentScore, ""), 48);
   // executionComplexity has no structured entry here -- must fall back to
   // the legacy text extraction rather than returning null incorrectly.
-  assert.equal(readFounderReadinessMetricValue("Execution Complexity", partialInvestmentScore, LEGACY_FOUNDER_SCORE_TEXT), 66);
+  assert.equal(readFounderReadinessMetricValue("Execution Readiness", partialInvestmentScore, LEGACY_FOUNDER_SCORE_TEXT), 66);
 });
 
 // --- Requirement G: MONITOR/48% decision fixture unchanged --------------

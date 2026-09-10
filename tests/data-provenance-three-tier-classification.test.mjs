@@ -65,28 +65,36 @@ test("getEvidenceBadgeClass returns a distinct class for 'derived', different fr
 });
 
 // --- financial-evidence-labeling.ts: the Financial Assumptions/       ---
-// --- metric-line classifier, standardized to the same 3 categories.  ---
+// --- metric-line classifier, now returning report-evidence.ts's own  ---
+// --- canonical 5-state EvidenceLevel directly (TASK #69A-46 -- see   ---
+// --- that file's own comment: this used to define a second, narrower ---
+// --- 3-state FinancialEvidenceType, a genuine competing vocabulary   ---
+// --- for the same underlying concept EvidenceLevel already models).  ---
 
-const {
-  financialEvidenceTypeValues,
-  classifyFinancialMetricEvidenceType,
-} = await import("../app/lib/financial-evidence-labeling.ts");
+const financialEvidenceLabelingModule = await import("../app/lib/financial-evidence-labeling.ts");
+const { classifyFinancialMetricEvidenceType } = financialEvidenceLabelingModule;
 
-test("financialEvidenceTypeValues is exactly the 3 required categories", () => {
-  assert.deepEqual(
-    [...financialEvidenceTypeValues].sort(),
-    ["Benchmark / Assumption", "Derived", "Verified"]
+test("the old, narrower 3-state FinancialEvidenceType vocabulary (financialEvidenceTypeValues) is gone -- not merely renamed elsewhere -- confirming no second, competing evidence vocabulary remains", () => {
+  assert.equal("financialEvidenceTypeValues" in financialEvidenceLabelingModule, false);
+  assert.equal(
+    classifyFinancialMetricEvidenceType({
+      label: "TAM",
+      formula: "industry TAM x geography multiplier",
+      benchmarkComparison: "",
+      assumptions: [],
+    }),
+    "benchmarkDerived"
   );
 });
 
-test("a benchmark-formula metric (TAM) classifies as 'Benchmark / Assumption', never 'Derived' merely for using x/÷ in its formula", () => {
+test("a benchmark-formula metric (TAM) classifies as 'benchmarkDerived', never 'derived' merely for using x/÷ in its formula", () => {
   const tam = {
     label: "TAM",
     formula: "industry TAM x geography multiplier x idea scope multiplier",
     benchmarkComparison: "Within benchmark range",
     assumptions: [],
   };
-  assert.equal(classifyFinancialMetricEvidenceType(tam), "Benchmark / Assumption");
+  assert.equal(classifyFinancialMetricEvidenceType(tam), "benchmarkDerived");
 });
 
 // --- End-to-end: createFinancialModel's real MRR/ARR overrides -------
@@ -113,44 +121,44 @@ async function importFinancialModel() {
 
 const { createFinancialModel } = await importFinancialModel();
 
-test("the exact live bug: a stated MRR classifies Verified, and the ARR calculated from it classifies Derived -- never Verified, never Benchmark / Assumption", () => {
+test("the exact live bug: a stated MRR classifies verified, and the ARR calculated from it classifies derived -- never verified, never benchmarkDerived", () => {
   const model = createFinancialModel({
     prompt: "An AI-powered SaaS platform for expense management. We currently have $42,000 MRR.",
     reportKind: "business_plan",
   });
 
-  assert.equal(classifyFinancialMetricEvidenceType(model.metrics.mrr, false), "Verified");
-  assert.equal(classifyFinancialMetricEvidenceType(model.metrics.arr, false), "Derived");
+  assert.equal(classifyFinancialMetricEvidenceType(model.metrics.mrr, false), "verified");
+  assert.equal(classifyFinancialMetricEvidenceType(model.metrics.arr, false), "derived");
 });
 
-test("the symmetric case: a stated ARR classifies Verified, and the MRR calculated from it classifies Derived", () => {
+test("the symmetric case: a stated ARR classifies verified, and the MRR calculated from it classifies derived", () => {
   const model = createFinancialModel({
     prompt: "A subscription software company. We have $600,000 ARR today.",
     reportKind: "business_plan",
   });
 
-  assert.equal(classifyFinancialMetricEvidenceType(model.metrics.arr, false), "Verified");
-  assert.equal(classifyFinancialMetricEvidenceType(model.metrics.mrr, false), "Derived");
+  assert.equal(classifyFinancialMetricEvidenceType(model.metrics.arr, false), "verified");
+  assert.equal(classifyFinancialMetricEvidenceType(model.metrics.mrr, false), "derived");
 });
 
-test("with no stated MRR/ARR at all, both metrics classify Benchmark / Assumption, unaffected", () => {
+test("with no stated MRR/ARR at all, both metrics classify benchmarkDerived, unaffected", () => {
   const model = createFinancialModel({
     prompt: "An AI-powered SaaS platform for expense management targeting mid-market companies.",
     reportKind: "business_plan",
   });
 
-  assert.equal(classifyFinancialMetricEvidenceType(model.metrics.mrr, false), "Benchmark / Assumption");
-  assert.equal(classifyFinancialMetricEvidenceType(model.metrics.arr, false), "Benchmark / Assumption");
+  assert.equal(classifyFinancialMetricEvidenceType(model.metrics.mrr, false), "benchmarkDerived");
+  assert.equal(classifyFinancialMetricEvidenceType(model.metrics.arr, false), "benchmarkDerived");
 });
 
-test("TAM/SAM/SOM and other pure benchmark metrics never classify Verified or Derived when no user evidence is present", () => {
+test("TAM/SAM/SOM and other pure benchmark metrics never classify verified or derived when no user evidence is present", () => {
   const model = createFinancialModel({
     prompt: "An AI-powered SaaS platform for expense management. We currently have $42,000 MRR.",
     reportKind: "business_plan",
   });
 
   for (const key of ["tam", "sam", "som", "cac", "grossMargin"]) {
-    assert.equal(classifyFinancialMetricEvidenceType(model.metrics[key], false), "Benchmark / Assumption", `${key} should classify Benchmark / Assumption`);
+    assert.equal(classifyFinancialMetricEvidenceType(model.metrics[key], false), "benchmarkDerived", `${key} should classify benchmarkDerived`);
   }
 });
 

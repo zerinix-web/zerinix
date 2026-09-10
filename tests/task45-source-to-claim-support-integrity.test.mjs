@@ -219,9 +219,24 @@ test("DRIFT CHECK: Task #44's negatedVerifiedPattern and Task #43B's recommendat
 
 test("DRIFT CHECK: the generic (Business Plan/Acquisition) competitor table drawing code is completely untouched by this Market-Intelligence-scoped fix", () => {
   assert.match(pdfButtonSource, /const columns = \[\s*\n\s*\{ label: localizePdfPresentationLabel\("Company", pdfLocale\)/);
+  // TASK #69A-45 -- ROOT CAUSE FIX (a separate, later, explicitly-
+  // scoped ticket) legitimately changed this exact roundedRect call:
+  // the generic table previously hard-truncated every cell to 2 lines
+  // inside a FIXED `headerHeight + Math.max(1, rows.length) * rowHeight`
+  // background, silently clipping a real, evidence-backed weakness
+  // sentence (confirmed live for Xero). It now measures each row's real
+  // wrapped line count and sizes the background dynamically instead --
+  // a genuine, intentional height formula change, not drift from this
+  // ticket's own ("#45") ancestor.
+  // TASK #69A-45A -- the per-row measurement was further extracted into
+  // a shared getCompetitorTableLayout (also used by getVisualHeight's
+  // own matching pagination-budget branch, so the two can never
+  // disagree again) -- the drawing call now sizes the background to
+  // `layout.totalHeight` (that shared function's own computed total)
+  // rather than a locally-recomputed `headerHeight + totalRowsHeight`.
   assert.match(
     pdfButtonSource,
-    /pdf\.roundedRect\(bodyX, visualY, bodyWidth, headerHeight \+ Math\.max\(1, rows\.length\) \* rowHeight, 3, 3, "FD"\);/,
-    "the generic table's own roundedRect call must still use the original, unmodified headerHeight"
+    /pdf\.roundedRect\(bodyX, visualY, bodyWidth, layout\.totalHeight, 3, 3, "FD"\);/,
+    "the generic table's own roundedRect call must use the shared getCompetitorTableLayout's totalHeight, never a locally-recomputed or the old fixed-2-line-per-row formula"
   );
 });

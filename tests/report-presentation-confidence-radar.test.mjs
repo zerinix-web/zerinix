@@ -71,10 +71,15 @@ test("each confidenceRadar dimension maps to its own real decisionEngine categor
   const byLabel = Object.fromEntries(snapshot.confidenceRadar.map((d) => [d.label, d.score]));
 
   assert.equal(byLabel.Market, 70);
-  assert.equal(byLabel.Financial, 40);
+  // TASK #69A-47/#69A-49 -- renamed from "Financial" to "Financial Signal"
+  // then to "Financial Research Coverage" to avoid colliding with Report
+  // Quality's own "Financial Consistency" and #69A-46's canonical
+  // "Financial Evidence" (a genuinely different concept from this
+  // dimension's real source, decisionEngine.financialScore).
+  assert.equal(byLabel["Financial Research Coverage"], 40);
   assert.equal(byLabel.Execution, 30);
   assert.equal(byLabel.Product, 65);
-  assert.equal(byLabel.Evidence, 80);
+  assert.equal(byLabel["Moat Evidence"], 80);
 });
 
 test("a dimension with no real signal available (no investmentScore, no labeled text) reports null (rendered as 'Validation Required'), never a fabricated shared number", () => {
@@ -134,7 +139,7 @@ test("[#69A-27A] Evidence Confidence prose text (Founder Readiness's own dimensi
   ].join("\n");
 
   const withDecisionEngine = buildExecutiveSnapshot(content, investmentScore(), undefined);
-  const evidenceWithEngine = withDecisionEngine.confidenceRadar.find((d) => d.label === "Evidence");
+  const evidenceWithEngine = withDecisionEngine.confidenceRadar.find((d) => d.label === "Moat Evidence");
   assert.equal(
     evidenceWithEngine.score,
     80,
@@ -142,7 +147,7 @@ test("[#69A-27A] Evidence Confidence prose text (Founder Readiness's own dimensi
   );
 
   const withoutDecisionEngine = buildExecutiveSnapshot(content, undefined, undefined);
-  const evidenceWithoutEngine = withoutDecisionEngine.confidenceRadar.find((d) => d.label === "Evidence");
+  const evidenceWithoutEngine = withoutDecisionEngine.confidenceRadar.find((d) => d.label === "Moat Evidence");
   assert.notEqual(
     evidenceWithoutEngine.score,
     36,

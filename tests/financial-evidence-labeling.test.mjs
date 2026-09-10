@@ -2,89 +2,114 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  financialEvidenceTypeValues,
   classifyFinancialMetricEvidenceType,
   hasVerifiedUserProvidedData,
   localizeFinancialEvidenceType,
+  deriveFinancialEvidenceSummary,
   consolidateFinancialAssumptions,
   formatKeyFinancialAssumptionsList,
 } from "../app/lib/financial-evidence-labeling.ts";
 
-test("only the 3 required financial evidence labels exist (PRODUCTION DATA PROVENANCE POLISH)", () => {
-  assert.deepEqual(
-    [...financialEvidenceTypeValues].sort(),
-    ["Benchmark / Assumption", "Derived", "Verified"].sort()
-  );
+// TASK #69A-46 -- ROOT CAUSE FIX (canonical financial evidence
+// unification): classifyFinancialMetricEvidenceType used to return a
+// second, narrower, competing 3-state vocabulary (financialEvidenceTypeValues:
+// "Verified" | "Derived" | "Benchmark / Assumption") for the exact same
+// concept report-evidence.ts's EvidenceLevel already models with 5
+// states, used pervasively across web/PDF. It now returns EvidenceLevel
+// directly -- financialEvidenceTypeValues is gone entirely, not renamed.
+
+test("only the canonical EvidenceLevel vocabulary exists -- the old, narrower 3-state financialEvidenceTypeValues export is gone", async () => {
+  const financialEvidenceLabelingModule = await import("../app/lib/financial-evidence-labeling.ts");
+  assert.equal("financialEvidenceTypeValues" in financialEvidenceLabelingModule, false);
 });
 
 // --- Classification is derived from each metric's own real formula/ ---
 // --- benchmarkComparison/assumptions text, never fabricated. ---
 
-test("a benchmark-derived formula (TAM, CAC, gross margin, monthly burn) is classified Benchmark / Assumption", () => {
+test("a benchmark-derived formula (TAM, CAC, gross margin, monthly burn) is classified benchmarkDerived", () => {
   const tam = { label: "TAM", formula: "industry TAM x geography multiplier x idea scope multiplier", benchmarkComparison: "Derived from benchmark market scope.", assumptions: [] };
   const cac = { label: "CAC", formula: "benchmark CAC x complexity multiplier", benchmarkComparison: "Within range", assumptions: [] };
   const grossMargin = { label: "Gross Margin", formula: "industry gross margin benchmark", benchmarkComparison: "Within range", assumptions: [] };
 
-  assert.equal(classifyFinancialMetricEvidenceType(tam), "Benchmark / Assumption");
-  assert.equal(classifyFinancialMetricEvidenceType(cac), "Benchmark / Assumption");
-  assert.equal(classifyFinancialMetricEvidenceType(grossMargin), "Benchmark / Assumption");
+  assert.equal(classifyFinancialMetricEvidenceType(tam), "benchmarkDerived");
+  assert.equal(classifyFinancialMetricEvidenceType(cac), "benchmarkDerived");
+  assert.equal(classifyFinancialMetricEvidenceType(grossMargin), "benchmarkDerived");
 });
 
-test("a pure calculation composed from other benchmark-derived metrics (LTV, CAC payback, runway) is classified Benchmark / Assumption, not Derived", () => {
-  const ltv = { label: "LTV", formula: "ARPA x Gross Margin x lifetime months", benchmarkComparison: "Within range", assumptions: ["Lifetime: 24 months"] };
-  const payback = { label: "CAC Payback", formula: "CAC / monthly gross profit per customer", benchmarkComparison: "Within range", assumptions: [] };
-  const runway = { label: "Runway", formula: "Investment Needed / Monthly Burn", benchmarkComparison: "Runway is calculated from financing need and monthly burn.", assumptions: [] };
+test("a pure calculation composed from other benchmark-derived metrics (LTV, CAC payback, runway) resolves benchmarkDerived when its assumptions carry the real pipeline's shared 'Industry benchmark' context, and planningAssumption (via the composition signal) when they do not", () => {
+  // Mirrors the REAL financial-model.ts shape: every metric's own
+  // `assumptions` array is seeded with the same sharedAssumptions
+  // boilerplate, whose first entry is always "Industry benchmark:
+  // <label>" -- so in practice, every one of these composed metrics
+  // still resolves to benchmarkDerived via that shared context, never
+  // to planningAssumption. This is a documented, deliberate scope
+  // decision (see financial-evidence-labeling.ts's own comment): a
+  // finer benchmark-vs-composed-assumption split was investigated and
+  // reverted after proving it misclassified TAM/SAM/SOM/ARPA/CAC/Gross
+  // Margin (which ALSO use a multiplier in their own formula) as
+  // planningAssumption too.
+  const ltv = { label: "LTV", formula: "ARPA x Gross Margin x lifetime months", benchmarkComparison: "Within range", assumptions: ["Industry benchmark: SaaS", "Lifetime: 24 months"] };
+  const payback = { label: "CAC Payback", formula: "CAC / monthly gross profit per customer", benchmarkComparison: "Within range", assumptions: ["Industry benchmark: SaaS"] };
+  const runway = { label: "Runway", formula: "Investment Needed / Monthly Burn", benchmarkComparison: "Runway is calculated from financing need and monthly burn.", assumptions: ["Industry benchmark: SaaS"] };
 
-  assert.equal(classifyFinancialMetricEvidenceType(ltv), "Benchmark / Assumption");
-  assert.equal(classifyFinancialMetricEvidenceType(payback), "Benchmark / Assumption");
-  assert.equal(classifyFinancialMetricEvidenceType(runway), "Benchmark / Assumption");
+  assert.equal(classifyFinancialMetricEvidenceType(ltv), "benchmarkDerived");
+  assert.equal(classifyFinancialMetricEvidenceType(payback), "benchmarkDerived");
+  assert.equal(classifyFinancialMetricEvidenceType(runway), "benchmarkDerived");
+
+  // Without that shared context (an isolated composition formula with
+  // genuinely no benchmark/industry word anywhere), the composition
+  // signal correctly resolves it to planningAssumption instead --
+  // proving the composition check is still real, load-bearing logic,
+  // not dead code.
+  const isolatedPayback = { label: "CAC Payback", formula: "CAC / monthly gross profit per customer", benchmarkComparison: "Within range", assumptions: [] };
+  assert.equal(classifyFinancialMetricEvidenceType(isolatedPayback), "planningAssumption");
 });
 
-test("a metric with no benchmark/composition signal defaults to Benchmark / Assumption, never Verified, without real user evidence", () => {
+test("a metric with no benchmark/composition signal defaults to planningAssumption, never verified, without real user evidence", () => {
   const metric = { label: "Custom", formula: "flat estimate", benchmarkComparison: "N/A", assumptions: ["Assumed conservatively"] };
-  assert.equal(classifyFinancialMetricEvidenceType(metric, false), "Benchmark / Assumption");
+  assert.equal(classifyFinancialMetricEvidenceType(metric, false), "planningAssumption");
 });
 
-test("Verified is only ever returned when real user-provided evidence is passed in -- never guessed", () => {
+test("verified is only ever returned when real user-provided evidence is passed in -- never guessed", () => {
   const metric = { label: "Custom", formula: "flat estimate", benchmarkComparison: "N/A", assumptions: [] };
-  assert.equal(classifyFinancialMetricEvidenceType(metric, true), "Verified");
-  assert.notEqual(classifyFinancialMetricEvidenceType(metric, false), "Verified");
+  assert.equal(classifyFinancialMetricEvidenceType(metric, true), "verified");
+  assert.notEqual(classifyFinancialMetricEvidenceType(metric, false), "verified");
 });
 
 // --- New tier: a value mathematically derived only from another ---
-// --- verified value (e.g. ARR = MRR x 12) is Derived, never Verified. ---
+// --- verified value (e.g. ARR = MRR x 12) is derived, never verified. ---
 
-test("a metric whose formula/assumptions say it was stated directly by the user is classified Verified", () => {
+test("a metric whose formula/assumptions say it was stated directly by the user is classified verified", () => {
   const arr = {
     label: "ARR",
     formula: "User-provided (stated directly in the request)",
     benchmarkComparison: "ARR reflects the actual figure supplied in the request, not a benchmark estimate.",
     assumptions: ["Actual, user-provided ARR: $600k"],
   };
-  assert.equal(classifyFinancialMetricEvidenceType(arr), "Verified");
+  assert.equal(classifyFinancialMetricEvidenceType(arr), "verified");
 });
 
-test("the exact live bug: a metric calculated only from another verified metric (ARR derived from a stated MRR) is classified Derived, never Verified and never Benchmark / Assumption", () => {
+test("the exact live bug: a metric calculated only from another verified metric (ARR derived from a stated MRR) is classified derived, never verified and never benchmarkDerived", () => {
   const arr = {
     label: "ARR",
     formula: "Derived from the verified MRR (x 12)",
     benchmarkComparison: "ARR is derived directly from the verified MRR, not a benchmark estimate.",
     assumptions: ["Derived value: ARR calculated from the verified MRR of $25k."],
   };
-  assert.equal(classifyFinancialMetricEvidenceType(arr), "Derived");
+  assert.equal(classifyFinancialMetricEvidenceType(arr), "derived");
 });
 
-test("Derived text mentioning 'verified' as a modifier on the source value is never misclassified as Verified (word-collision guard)", () => {
+test("derived text mentioning 'verified' as a modifier on the source value is never misclassified as verified (word-collision guard)", () => {
   const mrr = {
     label: "MRR",
     formula: "Derived from the verified ARR (/ 12)",
     benchmarkComparison: "MRR is derived directly from the verified ARR, not a benchmark estimate.",
     assumptions: ["Derived value: MRR calculated from the verified ARR of $600k."],
   };
-  assert.equal(classifyFinancialMetricEvidenceType(mrr), "Derived");
+  assert.equal(classifyFinancialMetricEvidenceType(mrr), "derived");
 });
 
-test("Derived text mentioning 'benchmark' as a negation is never misclassified as Benchmark / Assumption (word-collision guard)", () => {
+test("derived text mentioning 'benchmark' as a negation is never misclassified as benchmarkDerived (word-collision guard)", () => {
   // The literal word "benchmark" appears here only inside "not a
   // benchmark estimate" -- a negation describing what this value is
   // NOT, not a benchmark classification of the value itself.
@@ -94,7 +119,7 @@ test("Derived text mentioning 'benchmark' as a negation is never misclassified a
     benchmarkComparison: "ARR is derived directly from the verified MRR, not a benchmark estimate.",
     assumptions: [],
   };
-  assert.equal(classifyFinancialMetricEvidenceType(arr), "Derived");
+  assert.equal(classifyFinancialMetricEvidenceType(arr), "derived");
 });
 
 test("hasVerifiedUserProvidedData ignores the generic 'no direct operating data' placeholder", () => {
@@ -103,18 +128,80 @@ test("hasVerifiedUserProvidedData ignores the generic 'no direct operating data'
   assert.equal(hasVerifiedUserProvidedData(["User reported $12,000 MRR from Stripe."]), true);
 });
 
-test("a benchmark signal always wins over a composition signal, even if the formula also divides/multiplies (both now resolve to the same Benchmark / Assumption tier)", () => {
+test("a benchmark signal always wins over a composition signal, even if the formula also divides/multiplies (both now resolve to the same benchmarkDerived tier)", () => {
   const metric = { label: "X", formula: "industry benchmark rate x adjustment", benchmarkComparison: "", assumptions: [] };
-  assert.equal(classifyFinancialMetricEvidenceType(metric), "Benchmark / Assumption");
+  assert.equal(classifyFinancialMetricEvidenceType(metric), "benchmarkDerived");
 });
 
 test("localizeFinancialEvidenceType renders in all 5 supported languages with distinct text", () => {
-  const english = localizeFinancialEvidenceType("Benchmark / Assumption", "English");
+  const english = localizeFinancialEvidenceType("benchmarkDerived", "English");
   for (const language of ["Turkish", "German", "French", "Spanish"]) {
-    const localized = localizeFinancialEvidenceType("Benchmark / Assumption", language);
+    const localized = localizeFinancialEvidenceType("benchmarkDerived", language);
     assert.notEqual(localized, english);
     assert.ok(localized.length > 0);
   }
+});
+
+// --- TASK #69A-46 -- the new, canonical, report-level financial ---
+// --- evidence strength aggregate (deliberately separate from ---
+// --- financialConsistency, which measures internal coherence, not ---
+// --- evidence strength). ---
+
+test("deriveFinancialEvidenceSummary aggregates the SAME per-metric classification, never a second, independently-derived scoring path", () => {
+  const metrics = {
+    mrr: { label: "MRR", formula: "User-provided (stated directly in the request)", benchmarkComparison: "", assumptions: ["Actual, user-provided MRR: $18k"] },
+    arr: { label: "ARR", formula: "Derived from the verified MRR (x 12)", benchmarkComparison: "", assumptions: [] },
+    tam: { label: "TAM", formula: "industry TAM x geography multiplier", benchmarkComparison: "", assumptions: [] },
+    runway: { label: "Runway", formula: "Investment Needed / Monthly Burn", benchmarkComparison: "", assumptions: [] },
+  };
+  const summary = deriveFinancialEvidenceSummary(metrics, false);
+
+  assert.equal(summary.metrics.mrr, "verified");
+  assert.equal(summary.metrics.arr, "derived");
+  assert.equal(summary.metrics.tam, "benchmarkDerived");
+  assert.equal(summary.metrics.runway, "planningAssumption");
+  assert.equal(summary.verifiedCount, 1);
+  assert.equal(summary.derivedCount, 1);
+  assert.equal(summary.benchmarkDerivedCount, 1);
+  assert.equal(summary.planningAssumptionCount, 1);
+  assert.equal(summary.totalMetrics, 4);
+  // 2 of 4 metrics rest on real, observed data (verified + derived) --
+  // 50% coverage lands in the Moderate tier (>=48, <72), mirroring
+  // report-intelligence.ts's own qualityFromScore tier boundaries.
+  assert.equal(summary.observedEvidenceCoveragePercent, 50);
+  assert.equal(summary.strength, "Moderate");
+});
+
+test("deriveFinancialEvidenceSummary reports Weak strength (0% coverage) when every metric is benchmark/assumption-derived and no user evidence exists -- the real, common case for a fresh idea with no operating history", () => {
+  const metrics = {
+    tam: { label: "TAM", formula: "industry TAM x geography multiplier", benchmarkComparison: "", assumptions: [] },
+    cacPayback: { label: "CAC Payback", formula: "CAC / monthly gross profit per customer", benchmarkComparison: "", assumptions: [] },
+  };
+  const summary = deriveFinancialEvidenceSummary(metrics, false);
+
+  assert.equal(summary.observedEvidenceCoveragePercent, 0);
+  assert.equal(summary.strength, "Weak");
+  assert.equal(summary.verifiedCount, 0);
+  assert.equal(summary.derivedCount, 0);
+});
+
+test("deriveFinancialEvidenceSummary reports Strong strength when every metric is verified or derived from verified data", () => {
+  const metrics = {
+    mrr: { label: "MRR", formula: "User-provided (stated directly in the request)", benchmarkComparison: "", assumptions: [] },
+    arr: { label: "ARR", formula: "Derived from the verified MRR (x 12)", benchmarkComparison: "", assumptions: [] },
+  };
+  const summary = deriveFinancialEvidenceSummary(metrics, false);
+
+  assert.equal(summary.observedEvidenceCoveragePercent, 100);
+  assert.equal(summary.strength, "Strong");
+});
+
+test("deriveFinancialEvidenceSummary never divides by zero -- an empty metrics object reports 0% coverage, never NaN or a fabricated number", () => {
+  const summary = deriveFinancialEvidenceSummary({}, false);
+  assert.equal(summary.totalMetrics, 0);
+  assert.equal(summary.observedEvidenceCoveragePercent, 0);
+  assert.equal(summary.strength, "Weak");
+  assert.equal(Number.isNaN(summary.observedEvidenceCoveragePercent), false);
 });
 
 // --- Requirement 5: the same assumption behind multiple financial ---

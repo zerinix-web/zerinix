@@ -118,7 +118,7 @@ const pageSource = readFileSync(new URL("../app/dashboard/[id]/page.tsx", import
 
 // --- 1. Internal system language removed -----------------------------------
 
-test("getReportQualityBreakdown labels no longer read 'Evidence'/'Source Confidence'/'Data Reliability' -- now 'Data Completeness'/'Planning Confidence'", () => {
+test("getReportQualityBreakdown labels no longer read 'Evidence'/'Source Confidence'/'Data Reliability' -- now 'Data Completeness'/'Source Strength'", () => {
   const breakdown = getReportQualityBreakdown({
     totalScore: 70,
     dimensions: {
@@ -130,11 +130,15 @@ test("getReportQualityBreakdown labels no longer read 'Evidence'/'Source Confide
     },
   });
   const labels = breakdown.map((item) => item.label);
-  for (const bannedLabel of ["Evidence Quality", "Source Confidence", "Data Reliability", "Analysis Rigor"]) {
+  // TASK #69A-44 -- "Planning Confidence" (sourceConfidence's own prior
+  // label) also now banned: it measured research source quality/
+  // diversity, not confidence in the financial plan, and collided with
+  // an unrelated Market-Intelligence-only label sharing the same text.
+  for (const bannedLabel of ["Evidence Quality", "Source Confidence", "Data Reliability", "Analysis Rigor", "Planning Confidence"]) {
     assert.ok(!labels.includes(bannedLabel), `should not include the literal '${bannedLabel}' label`);
   }
   assert.ok(labels.includes("Data Completeness"));
-  assert.ok(labels.includes("Planning Confidence"));
+  assert.ok(labels.includes("Source Strength"));
 });
 
 test("the financial-dashboard-only badge wrapper renames 'Verified' to 'Founder-Confirmed' in both page.tsx and Planner.tsx, without touching the protected report-evidence.ts taxonomy", () => {

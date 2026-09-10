@@ -357,9 +357,24 @@ test("regression 3: Benchmark Intelligence's validationGaps and the Executive Su
   }
 });
 
-test("requirement: no separate parallel gap engine was introduced -- refreshResearchAwareFinancialContext is the only category-validation-gap deriver, reused (not duplicated) by both refresh call sites", () => {
+test("requirement: no separate parallel gap engine was introduced -- refreshResearchAwareFinancialContext is the only category-validation-gap deriver, reused (not duplicated) by every refresh call site", () => {
   const occurrences = [...planExecutorSource.matchAll(/refreshResearchAwareFinancialContext\(/g)];
-  assert.equal(occurrences.length, 2, "exactly the two known call sites (live-generation and cached-reuse) should use the shared helper");
+  // TASK #69A-38D added a THIRD, legitimate call site: once
+  // businessCompetitorLandscapeState is known (after generation), the
+  // fresh-generation path calls this SAME shared helper again -- never a
+  // second, independently-reimplemented gap-scoring function -- to
+  // correct decisionEngine.competitionScore (and therefore totalScore/
+  // recommendation/categories/validationGaps) from raw-evidence-derived
+  // competitive evidence to the real, canonical competitor state.
+  // TASK #69A-38F added a FOURTH: the timeout/quality-gate-failure
+  // fallback path (createGroundedBusinessTimeoutFallback) never sent a
+  // corrected metadata chunk at all before, and never had a corrected
+  // competitionScore either -- fixed the identical way, once more via
+  // this SAME shared helper, since a total generation failure means the
+  // canonical competitor state is unambiguously null/zero. Still exactly
+  // one deriveAuthoritativeCategoryValidationGaps definition (asserted
+  // below), reused by all four call sites.
+  assert.equal(occurrences.length, 4, "exactly four known call sites (live-generation, its post-generation competitor-evidence correction, its timeout-fallback equivalent, and cached-reuse) should use the shared helper");
 
   const financialAssumptionsSource = readFileSync(
     new URL("../app/lib/ai/financial-assumptions.ts", import.meta.url),

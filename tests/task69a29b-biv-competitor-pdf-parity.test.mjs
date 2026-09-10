@@ -136,9 +136,12 @@ test("[5b] verified/directional/unavailable weakness semantics survive the canon
   const directionalDisplay = formatCompetitorWeaknessForDisplay(byCompany["Beta Books"]);
   const unavailableDisplay = formatCompetitorWeaknessForDisplay(byCompany["Gamma Flow"]);
 
-  assert.doesNotMatch(verifiedDisplay, /\(directional\)$/, "a verified weakness must never carry the directional qualifier");
-  assert.match(directionalDisplay, /\(directional\)$/, "a directional weakness must always carry the qualifier -- never silently promoted to verified-looking text");
-  assert.equal(unavailableDisplay, "—", "genuinely unavailable evidence must render the honest unavailable marker, never fabricated text");
+  // TASK #69A-40 -- the qualifier is now capitalized "(Directional)" and
+  // the unavailable case renders the explicit "Not available" rather than
+  // the ambiguous bare "—" sentinel.
+  assert.doesNotMatch(verifiedDisplay, /\(Directional\)$/, "a verified weakness must never carry the directional qualifier");
+  assert.match(directionalDisplay, /\(Directional\)$/, "a directional weakness must always carry the qualifier -- never silently promoted to verified-looking text");
+  assert.equal(unavailableDisplay, "Not available", "genuinely unavailable evidence must render the honest unavailable marker, never fabricated text");
 
   // Same record, called twice (simulating web's own call and PDF's own
   // call against the identical canonical object) -- must be byte-identical.

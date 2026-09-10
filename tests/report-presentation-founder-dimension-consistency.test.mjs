@@ -103,7 +103,12 @@ test("readFounderReadinessMetricValue prefers the report's own rendered text ove
   ].join("\n");
 
   for (const [label, expected] of [
-    ["Execution Complexity", 30],
+    // TASK #69A-53 -- label updated to "Execution Readiness" (the
+    // canonical label callers now pass); the narrative text above still
+    // says "Execution Complexity: 30/100" -- matched via the backward-
+    // compatible alias FOUNDER_READINESS_TEXT_ALIASES keeps for that
+    // exact reason.
+    ["Execution Readiness", 30],
     ["Evidence Confidence", 31],
     ["Business Model Quality", 32],
   ]) {
@@ -133,7 +138,7 @@ test("readFounderReadinessMetricValue falls back to investmentScore only when no
   };
 
   assert.equal(
-    readFounderReadinessMetricValue("Execution Complexity", investmentScore, undefined),
+    readFounderReadinessMetricValue("Execution Readiness", investmentScore, undefined),
     42
   );
   assert.equal(readFounderReadinessMetricValue("Founder Readiness Score", investmentScore, undefined), 25);
@@ -176,7 +181,7 @@ test("box and narrative can never disagree for the same report content (drift ch
     "Market Attractiveness",
     "Business Model Quality",
     "Validation Confidence",
-    "Execution Complexity",
+    "Execution Readiness",
     "Evidence Confidence",
     "Founder Evidence",
   ];

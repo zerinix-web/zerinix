@@ -174,15 +174,26 @@ test("root cause confirmation: deriveAuthoritativeCategoryValidationGaps operate
 
 test("root cause confirmation, REAL REPRO: for the real business-idea prompt this ticket series shares, the pre-research validationGaps snapshot (BEFORE this fix would have existed) never mentioned customer demand, CAC, pricing, or retention specifically -- only coarse category labels", () => {
   const context = createCanonicalFinancialAssumptions({ prompt: REAL_PROMPT, reportKind: "business_plan" });
-  // Confirmed live: this prompt's own dimensionScores show Evidence
-  // Confidence and Founder Evidence both at 34/100 -- genuinely material,
-  // individually-deficient dimensions -- while teamFounder's own blended
-  // decisionEngine.founderScore.score is comfortably higher, proving the
-  // averaging effect this root cause describes.
+  // [UPDATED BY #69A-51] Confirmed live: this prompt's own dimensionScores
+  // show Founder Evidence at 34/100 -- a genuinely material, individually-
+  // deficient dimension -- while teamFounder's own blended decisionEngine.
+  // founderScore.score is comfortably higher, proving the averaging
+  // effect this root cause describes. Evidence Confidence itself is no
+  // longer asserted low here: #69A-51 fixed a real unit-conversion bug
+  // (metricConfidenceScore -- already a 0-1 fraction -- was divided by
+  // 100 a second time inside evidenceConfidenceScore's own formula,
+  // crushing a genuinely strong metric-confidence signal toward zero
+  // regardless of how well-evidenced a report actually was). For THIS
+  // prompt, every financial metric happens to carry "High" derivation
+  // confidence and hasValidationEvidence's own keyword match fires on
+  // "customer" in the prompt's instructional framing ("...including
+  // customer pain points...") -- a separate, pre-existing, unrelated
+  // behavior of that function, not something #69A-51 changed -- so
+  // Evidence Confidence now honestly reads higher for this specific
+  // prompt. Founder Evidence remains the reliable, genuinely-low
+  // dimension for this fixture.
   const dimensionScores = context.investmentScore.decisionEngine.founderScore.dimensionScores;
-  const evidenceConfidence = dimensionScores.find((d) => d.key === "evidenceConfidence").score;
   const founderEvidence = dimensionScores.find((d) => d.key === "founderEvidence").score;
-  assert.ok(evidenceConfidence < 50, "Evidence Confidence must be a genuinely low, material dimension for this real prompt");
   assert.ok(founderEvidence < 50, "Founder Evidence must be a genuinely low, material dimension for this real prompt");
 });
 
@@ -342,12 +353,18 @@ test("requirement D, REAL REPRO: the SAME real-prompt context's benchmarkFit.val
 // --- Requirement E: low Founder Readiness evidence + false "no gaps" ----
 // --- can never coexist ----------------------------------------------------
 
-test("requirement E: when Founder Readiness's Evidence Confidence/Founder Evidence dimensions are genuinely low (the real prompt's own case), benchmarkFit.validationGaps is never empty at the same time", () => {
+test("requirement E: when Founder Readiness's Founder Evidence dimension is genuinely low (the real prompt's own case), benchmarkFit.validationGaps is never empty at the same time", () => {
   const context = createCanonicalFinancialAssumptions({ prompt: REAL_PROMPT, reportKind: "business_plan" });
   const dimensionScores = context.investmentScore.decisionEngine.founderScore.dimensionScores;
-  const evidenceConfidence = dimensionScores.find((d) => d.key === "evidenceConfidence").score;
   const founderEvidence = dimensionScores.find((d) => d.key === "founderEvidence").score;
-  assert.ok(evidenceConfidence < 50 && founderEvidence < 50, "sanity: this fixture's Founder Readiness evidence dimensions are genuinely low");
+  // [UPDATED BY #69A-51] narrowed from "Evidence Confidence AND Founder
+  // Evidence" to Founder Evidence alone -- see the sibling "root cause
+  // confirmation" test's own comment for why Evidence Confidence is no
+  // longer genuinely low for this specific prompt after #69A-51's real
+  // unit-conversion bug fix. Founder Evidence alone remains a genuinely
+  // low, material dimension, which is sufficient to exercise this
+  // requirement's own invariant.
+  assert.ok(founderEvidence < 50, "sanity: this fixture's Founder Evidence dimension is genuinely low");
   assert.ok(context.benchmarkFit.validationGaps.length > 0, "a low-evidence Founder Readiness state must never coexist with an empty (false 'no gaps') Benchmark Intelligence state");
 });
 

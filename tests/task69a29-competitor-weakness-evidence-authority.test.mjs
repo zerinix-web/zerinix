@@ -151,7 +151,8 @@ test("[3] web and PDF renderers resolve an IDENTICAL display string for the same
   const pdfDisplay = formatCompetitorWeaknessForDisplay(northwind);
 
   assert.equal(webDisplay, pdfDisplay);
-  assert.match(webDisplay, /\(directional\)$/);
+  // TASK #69A-40 -- the qualifier is now capitalized "(Directional)".
+  assert.match(webDisplay, /\(Directional\)$/);
 });
 
 // --- 4: valid weakness is not replaced by "Not available" -----------------
@@ -173,7 +174,10 @@ test("[5] a competitor with genuinely no supported weakness keeps the honest una
 
   assert.equal(clearRunway.weaknesses, "—");
   assert.equal(clearRunway.weaknessBasis, "unavailable");
-  assert.equal(formatCompetitorWeaknessForDisplay(clearRunway), "—");
+  // TASK #69A-40 -- the DISPLAY text is now the explicit "Not available"
+  // (never the ambiguous bare "—" sentinel); the underlying STORED value
+  // above is unchanged.
+  assert.equal(formatCompetitorWeaknessForDisplay(clearRunway), "Not available");
 });
 
 // --- 6: an inferred weakness can never masquerade as verified fact -------
@@ -305,7 +309,7 @@ test("[10/11/12] the currently-verified real BIV fixture (MONITOR/48%, Founder R
     evidenceConfidence: 36,
     founderEvidence: 34,
   });
-  assert.deepEqual(radar, { Market: 55, Financial: 26, Execution: 52, Product: 58, Evidence: 41 });
+  assert.deepEqual(radar, { Market: 55, "Financial Research Coverage": 26, Execution: 52, Product: 58, "Moat Evidence": 41 });
 });
 
 test("[13] Porter's Five Forces state module is untouched by this task", () => {

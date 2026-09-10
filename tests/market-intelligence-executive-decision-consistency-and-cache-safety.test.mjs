@@ -393,7 +393,17 @@ test("E) conversationResearchIdentityMatches: reportFamily/analysisMode are deli
 test("research-cache.ts: resolveDomainResearchWithCache enforces conversationResearchIdentityMatches before trusting a conversation snapshot (the fresh-generation path, used by every caller across the codebase)", () => {
   assert.match(
     researchCacheSource,
-    /const conversationSnapshot =\s*\n\s*rawConversationSnapshot &&\s*\n\s*conversationResearchIdentityMatches\(rawConversationSnapshot\.identity, input\.identity\)\s*\n\s*\? rawConversationSnapshot\s*\n\s*: null;/
+    /const conversationSnapshot =\s*\n\s*rawConversationSnapshot &&\s*\n\s*conversationResearchIdentityMatches\(rawConversationSnapshot\.identity, input\.identity\)/
+  );
+  // TASK #69A-39B -- identity match is necessary but no longer
+  // sufficient: a snapshot's own cached domain classification must also
+  // still match current classifier behavior, or a stale cross-domain
+  // snapshot (proven live: an "accounting"-classified bundle for a
+  // "business" prompt) could be trusted just because the prompt/asset/
+  // language matched.
+  assert.match(
+    researchCacheSource,
+    /conversationResearchIdentityMatches\(rawConversationSnapshot\.identity, input\.identity\) &&\s*\n\s*isCachedResearchDomainStillValid\(input\.identity, rawConversationSnapshot\.research\)\s*\n\s*\? rawConversationSnapshot\s*\n\s*: null;/
   );
 });
 

@@ -113,7 +113,12 @@ test("getReportQualityBreakdown no longer labels metric cards 'Evidence Quality'
   assert.ok(!labels.includes("Analysis Rigor"), "should not include the now-superseded 'Analysis Rigor' label");
   assert.ok(!labels.includes("Data Reliability"), "should not include the now-superseded 'Data Reliability' label");
   assert.ok(labels.includes("Data Completeness"));
-  assert.ok(labels.includes("Planning Confidence"));
+  // TASK #69A-44 -- "Planning Confidence" was renamed to "Source
+  // Strength": it measures research source quality/diversity, not
+  // confidence in the financial plan, and collided with an unrelated
+  // Market-Intelligence-only label sharing the same exact text.
+  assert.ok(!labels.includes("Planning Confidence"), "should not include the now-superseded 'Planning Confidence' label");
+  assert.ok(labels.includes("Source Strength"));
 });
 
 test("Planner.tsx's live executive-summary card no longer labels a metric 'Missing Evidence'", () => {

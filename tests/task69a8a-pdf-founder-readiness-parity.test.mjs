@@ -131,7 +131,7 @@ function buildFounderScoreText(values, overallScore = 40) {
     `Market Attractiveness: ${values.marketAttractiveness}/100 - explanation B.`,
     `Business Model Quality: ${values.businessModelQuality}/100 - explanation C.`,
     `Validation Confidence: ${values.validationConfidence}/100 - explanation D.`,
-    `Execution Complexity: ${values.executionComplexity}/100 - explanation E.`,
+    `Execution Readiness: ${values.executionComplexity}/100 - explanation E.`,
     `Evidence Confidence: ${values.evidenceConfidence}/100 - explanation F.`,
     `Founder Evidence: ${values.founderEvidence}/100 - explanation G.`,
   ].join("\n");
@@ -161,7 +161,7 @@ test("requirement B: the PDF card array preserves each of the 7 deliberately dis
   assert.equal(byLabel["Market Attractiveness"], 22);
   assert.equal(byLabel["Business Model Quality"], 33);
   assert.equal(byLabel["Validation Confidence"], 44);
-  assert.equal(byLabel["Execution Complexity"], 55);
+  assert.equal(byLabel["Execution Readiness"], 55);
   assert.equal(byLabel["Evidence Confidence"], 66);
   assert.equal(byLabel["Founder Evidence"], 77);
 });
@@ -176,7 +176,7 @@ test("requirement B: the drawing loop's index is used only for grid layout math,
   }
   const byLabel = Object.fromEntries(drawn.map((d) => [d.displayLabel, d.score]));
   assert.equal(byLabel["Validation Confidence"], 44);
-  assert.equal(byLabel["Execution Complexity"], 55);
+  assert.equal(byLabel["Execution Readiness"], 55);
 });
 
 // Regression: reordering input array data cannot alter identity after
@@ -215,7 +215,7 @@ test("regression: reordering the underlying reasoning array cannot change which 
   assert.deepEqual(forwardCards, reversedCards);
   const byLabel = Object.fromEntries(forwardCards.map((c) => [c.label, c.score]));
   assert.equal(byLabel["Validation Confidence"], 44);
-  assert.equal(byLabel["Execution Complexity"], 55);
+  assert.equal(byLabel["Execution Readiness"], 55);
 });
 
 // Regression: omitting one optional/legacy positional field cannot shift
@@ -229,10 +229,10 @@ test("regression: omitting one dimension's line leaves every OTHER PDF card unsh
 
   assert.equal(byLabel["Validation Confidence"], null);
   // Every dimension after the missing one keeps its OWN value -- a
-  // positional/array-shift bug would have pulled "Execution Complexity"
+  // positional/array-shift bug would have pulled "Execution Readiness"
   // (55) into "Validation Confidence"'s card slot and left "Founder
   // Evidence" with no value.
-  assert.equal(byLabel["Execution Complexity"], 55);
+  assert.equal(byLabel["Execution Readiness"], 55);
   assert.equal(byLabel["Evidence Confidence"], 66);
   assert.equal(byLabel["Founder Evidence"], 77);
   assert.equal(byLabel["Business Model Quality"], 33);
@@ -273,7 +273,7 @@ test("requirement C: the PDF's explanatory body text and its dimension cards res
     ["Market Attractiveness", 22],
     ["Business Model Quality", 33],
     ["Validation Confidence", 44],
-    ["Execution Complexity", 55],
+    ["Execution Readiness", 55],
     ["Evidence Confidence", 66],
     ["Founder Evidence", 77],
   ]) {
