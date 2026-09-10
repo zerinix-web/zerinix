@@ -280,6 +280,118 @@ export function readPortersFiveForcesState(metadata: unknown): PortersFiveForces
   };
 }
 
+// TASK #69A-38 -- ROOT CAUSE FIX: when portersFiveForcesStructured comes
+// back null/incomplete from a generation (whatever the cause -- the model
+// left the field blank, a schema mismatch, or a per-field AI-failure
+// fallback substituted a single generic paragraph), every caller
+// previously fell all the way through to each RENDERER's own independent
+// forceAliases/extractForceIntensity/extractForceImplication prose scan of
+// the single free-text portersFiveForces field -- confirmed live: a fresh
+// report whose model output (or fallback text) only substantively
+// discussed Buyer Power and Threat of New Entrants in one merged sentence
+// produced exactly "Rivalry empty, Entrants generic, Buyer near-duplicate
+// generic, Supplier empty, Substitutes empty" once 3 independent per-force
+// regex scans ran against that single uneven paragraph -- the EXACT
+// pre-#69A-28 defect this task's own history describes, reintroduced
+// anywhere Tier 0 is incomplete. This is a NEW Tier 1, generation-time
+// synthesis: it runs the SAME alias-scoped intensity/implication
+// extraction every renderer already performs (mirrored here, not
+// duplicated a 4th time in each renderer), but -- unlike any single
+// renderer's own copy -- guarantees exactly 5 independent, well-formed
+// force records: a force the prose genuinely discusses keeps its REAL
+// extracted level/analysis (never fabricated), and any force the prose
+// does not support gets the SAME honest "Insufficient evidence" sentence
+// Tier 0 already uses, never left blank and never duplicated from another
+// force's text. Persisted into the SAME versioned portersFiveForcesState
+// key Tier 0 writes, so every renderer's existing
+// `readPortersFiveForcesState(metadata) ?? own-legacy-scan` call site
+// automatically prefers this for every report generated from here on,
+// with zero renderer changes and zero risk to any report persisted before
+// this function existed (those have no portersFiveForcesState key at all,
+// and keep using their own renderer-local legacy scan exactly as before).
+const LEGACY_PROSE_FORCE_ALIASES: Readonly<Record<PorterForceKey, string[]>> = {
+  competitiveRivalry: ["rivalry", "competitive rivalry", "rekabet yoğunluğu"],
+  threatOfNewEntrants: ["threat of (?:new )?entr(?:y|ants)", "new entrants", "barriers? to entry", "giriş engeli"],
+  buyerPower: ["buyer power", "bargaining power of buyers", "alıcı gücü"],
+  supplierPower: ["supplier power", "bargaining power of suppliers", "tedarikçi gücü"],
+  threatOfSubstitutes: ["threat of substitutes?", "substitute products?", "substitutes", "ikame ürün"],
+};
+
+function extractLegacyProseForceLevel(content: string, force: PorterForceKey): PorterForceLevel | null {
+  for (const alias of LEGACY_PROSE_FORCE_ALIASES[force]) {
+    const match = content.match(
+      new RegExp(
+        `(?:${alias})[^.\\n]{0,70}?\\b(high|strong|significant|intense|severe|yüksek|güçlü|moderate|medium|orta|low|weak|limited|minimal|düşük|zayıf)\\b`,
+        "i"
+      )
+    );
+
+    if (match) {
+      const word = match[1].toLowerCase();
+
+      if (/high|strong|significant|intense|severe|yüksek|güçlü/.test(word)) {
+        return "High";
+      }
+      if (/moderate|medium|orta/.test(word)) {
+        return "Moderate";
+      }
+      return "Low";
+    }
+  }
+
+  return null;
+}
+
+function extractLegacyProseForceImplication(content: string, force: PorterForceKey): string {
+  const sentenceSafeSegmentPattern = "(?:[^.\\n]|(?<=\\d)\\.(?=\\d))*";
+  const sentenceTerminatorPattern = "(?:(?<!\\d)\\.|\\.(?!\\d))";
+
+  for (const alias of LEGACY_PROSE_FORCE_ALIASES[force]) {
+    const match = content.match(
+      new RegExp(
+        `${sentenceSafeSegmentPattern}\\b(?:${alias})\\b${sentenceSafeSegmentPattern}${sentenceTerminatorPattern}`,
+        "i"
+      )
+    );
+
+    if (match) {
+      return match[0].trim().replace(/^[-*•]\s+/, "");
+    }
+  }
+
+  return "";
+}
+
+// Never null, never returns fewer than 5 forces -- the completeness
+// invariant every consumer of PortersFiveForcesState already relies on
+// (buildPortersFiveForcesStateFromStructuredResponse's own contract).
+// Called only at generation time, only when Tier 0 (the schema-enforced
+// response) is null -- never retroactively applied to an already-
+// persisted report's metadata via readPortersFiveForcesState, which is
+// untouched by this function.
+export function buildPortersFiveForcesStateFromLegacyProse(
+  content: string
+): PortersFiveForcesState {
+  const forces = {} as Record<PorterForceKey, PorterForceRecord>;
+
+  for (const key of PORTER_FORCE_ORDER) {
+    const label = PORTER_FORCE_LABELS[key];
+    const level = content ? extractLegacyProseForceLevel(content, key) : null;
+    const implication = content ? extractLegacyProseForceImplication(content, key) : "";
+
+    forces[key] = {
+      level: level ?? "Insufficient evidence",
+      analysis: normalizeStructuredPorterText(implication, label),
+      implication: normalizeStructuredPorterText(implication, label),
+    };
+  }
+
+  return {
+    version: PORTERS_FIVE_FORCES_STATE_VERSION,
+    forces,
+  };
+}
+
 // Shared, canonical mapping from a force's qualitative level onto the
 // SAME visual bucket every renderer's own pre-existing intensity bar
 // already uses (High -> 82% width, Moderate -> 55%, Low -> 28%,

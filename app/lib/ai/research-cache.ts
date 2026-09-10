@@ -10,6 +10,7 @@ import {
 } from "@/app/lib/ai/governance";
 import {
   DOMAIN_RESEARCH_MODEL,
+  classifyResearchDomain,
   type DomainResearchBundle,
 } from "@/app/lib/ai/domain-research";
 import {
@@ -49,7 +50,37 @@ import { logOperationalInfo } from "@/app/lib/security/logging";
 // old, weakness-blind query text again. A cache miss here costs exactly
 // one real re-fetch per previously-cached prompt, not a repeated or
 // unbounded cost.
-const RESEARCH_CACHE_VERSION = "research-result-v2";
+//
+// TASK #69A-39B -- bumped again (v2 -> v3): ROOT CAUSE FIX. Confirmed
+// live, by direct inspection of the actual persisted ai_response_cache row
+// (service-role, read-only, scratch script deleted immediately after
+// use): the exact real "premium AI-powered financial planning, cash-flow
+// forecasting... QuickBooks and Xero..." business_plan prompt had a
+// cached research bundle with research.domain === "accounting" and a
+// task plan of finance/accounting-category tasks (finance_official_filings,
+// finance_industry_benchmarks, finance_macro_inputs -- audited filings,
+// margin benchmarks, Fed/BLS macro data) instead of "business"-category
+// tasks (market_competitor_landscape, market_vendor_discovery,
+// market_product_evidence) -- i.e. this exact prompt was misclassified
+// into the wrong research domain at some earlier point (the same false-
+// positive class #69A-38C fixed in domain.ts: naming the accounting
+// SOFTWARE it integrates with, QuickBooks/Xero, hijacked classification
+// before it ever ran competitor-discovery research at all), then CACHED
+// under this key with a 7-day TTL. This cache key (createResearchResultCacheKey,
+// below) has never included the classified domain or a version tied to
+// classifier fixes, so #69A-38C's later classifier fix never invalidated
+// this specific already-poisoned entry -- every subsequent request for
+// the identical prompt (proven across #69A-39/#69A-39A's own diagnostics)
+// kept silently being served the SAME stale, wrong-domain bundle,
+// completely independent of any downstream pipeline fix. Bumping the
+// version clears every currently-cached entry immediately (a one-time,
+// bounded re-fetch per previously-cached prompt, exactly as #69A-29A's own
+// comment above describes -- never an unbounded cost). See
+// isCachedResearchDomainStillValid below for the complementary, ongoing
+// fix that prevents this exact bug class from silently recurring after
+// any FUTURE classifier change, without requiring anyone to remember to
+// bump this constant again.
+const RESEARCH_CACHE_VERSION = "research-result-v3";
 const REPORT_CACHE_VERSION = "pre-research-report-v1";
 const CONVERSATION_RESEARCH_VERSION = "conversation-research-v1";
 // Kept in sync with the actual research-call model in domain-research.ts
@@ -224,6 +255,41 @@ function isReusableResearch(research: DomainResearchBundle) {
     !research.fallbackUsed &&
     research.evidence.length > 0
   );
+}
+
+// TASK #69A-39B -- ROOT CAUSE FIX. A cached research bundle's own
+// `domain` (accounting/business/finance/legal/etc.) determines WHICH
+// research tasks were planned and executed for it (domain-research.ts's
+// createDomainResearchPlan) -- a bundle classified into the wrong domain
+// never even attempted the right domain's research tasks (e.g. an
+// "accounting"-classified bundle has no competitor-discovery task at
+// all). RESEARCH_CACHE_VERSION bumps clear an already-known-bad
+// classification once it's discovered, but nothing previously re-checked
+// a bundle already served from cache against what CURRENT classifier
+// code would produce for the SAME prompt -- so any FUTURE classifier
+// fix would silently keep serving a bundle poisoned by whatever bug it
+// just fixed, for that bundle's full remaining TTL (up to 7 days),
+// exactly as happened here. Mirrors createDomainResearchPlan's own
+// isMarketIntelligence override so a Market Intelligence bundle (always
+// forced to "business" regardless of classifyResearchDomain's own
+// result) is never incorrectly flagged as stale. Classification is a
+// pure, synchronous keyword/regex check with no AI call -- re-running it
+// on every cache read is negligible cost, never a repeated or unbounded
+// one. Only the prompt text is reclassified (assets aren't recoverable
+// from `uploadedAssetHash`, a hash/fingerprint, not the original
+// content) -- if asset content had contributed to the original
+// classification, this can only ever produce an unnecessary but SAFE
+// cache miss (one bounded re-fetch), never a false cache hit.
+function isCachedResearchDomainStillValid(
+  identity: ResearchCacheIdentity,
+  research: DomainResearchBundle
+): boolean {
+  const isMarketIntelligence = identity.analysisMode === "market";
+  const expectedDomain = isMarketIntelligence
+    ? "business"
+    : classifyResearchDomain(identity.normalizedPrompt, []);
+
+  return expectedDomain === research.domain;
 }
 
 function getResearchCacheTtlDays(identity: ResearchCacheIdentity) {
@@ -471,7 +537,8 @@ export async function resolveDomainResearchWithCache(input: {
   // guarantee holds regardless of caller.
   const conversationSnapshot =
     rawConversationSnapshot &&
-    conversationResearchIdentityMatches(rawConversationSnapshot.identity, input.identity)
+    conversationResearchIdentityMatches(rawConversationSnapshot.identity, input.identity) &&
+    isCachedResearchDomainStillValid(input.identity, rawConversationSnapshot.research)
       ? rawConversationSnapshot
       : null;
 
@@ -516,6 +583,14 @@ export async function resolveDomainResearchWithCache(input: {
         } catch {
           payload = null;
         }
+      }
+      if (payload && !isCachedResearchDomainStillValid(input.identity, payload.research)) {
+        logOperationalInfo("[research-cache] discarded stale cross-domain result", {
+          reportFamily: input.identity.reportFamily,
+          analysisMode: input.identity.analysisMode,
+          cachedDomain: payload.research.domain,
+        });
+        return null;
       }
       return payload?.research ?? null;
     },

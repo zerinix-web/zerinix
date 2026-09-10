@@ -206,7 +206,32 @@ const marketIntelligenceLegalPriorityPattern = new RegExp(
 
 const specializedDomainSignals: Array<[Exclude<ReportDomain, "business" | "real_estate">, RegExp]> = [
   ["legal", /\b(contract|agreement|clause|legal|compliance|liability|indemnity|termination|governing law|sözleşme|hukuk|uyum|sorumluluk|tazminat|fesih)\b/i],
-  ["accounting", /\b(accounting|invoice|ledger|trial balance|tax|vat|ifrs|gaap|muhasebe|fatura|vergi|kdv|defter)\b/i],
+  // TASK #69A-38C -- ROOT CAUSE FIX. Confirmed live: a genuine, unambiguous
+  // Business Idea Validation prompt ("...premium AI-powered financial
+  // planning, cash-flow forecasting, and scenario-planning SaaS
+  // specifically for SMBs... integrate with accounting platforms such as
+  // QuickBooks and Xero...") classified as "accounting" purely because it
+  // named the accounting SOFTWARE it integrates with, not because the
+  // report itself is an accounting request -- the exact same false-
+  // positive class already fixed for "vendor" (procurement, see the
+  // comment immediately below) and "financing structure" (acquisition,
+  // see this file's own header comment): a bare, generic word that is
+  // ordinary PRODUCT/FEATURE/INTEGRATION vocabulary in countless
+  // unrelated SaaS pitches (any fintech, ERP, expense, or ops tool can
+  // mention "accounting" once while describing an integration) hijacked
+  // domain classification before operatingBusinessSignals ever got a
+  // chance to recognize the prompt's own unambiguous SaaS/business-plan
+  // shape. Downstream, this specific misclassification made
+  // isCompletedBusinessPlanReportMessage (ChatMessages.tsx) -- which
+  // requires an EXACT "business" domain match with no tolerance for a
+  // near-miss -- fail to suppress the completed report's redundant raw
+  // getReportMarkdown dump, exposing it above the structured report.
+  // Narrowed to require the business's own CORE ask to be an accounting
+  // service/compliance matter (never a bare word than could just as
+  // easily be a feature/integration mention) -- mirrors the "vendor
+  // management"/"vendor sourcing" compound-phrase narrowing already
+  // established immediately below for the identical reason.
+  ["accounting", /\b(accounting (?:services|review|report|compliance|reconciliation|close|firm|practice|audit|advisory)|bookkeeping|invoice processing|invoicing workflow|ledger reconciliation|trial balance (?:review|reconciliation)?|ifrs compliance|gaap compliance|vat (?:return|filing|compliance)|tax (?:filing|preparation|return|compliance)|muhasebe (?:hizmetleri|denetimi|mutabakatı|danışmanlığı)|fatura işleme|vergi beyannamesi|kdv beyannamesi|defter tutma)\b/i],
   // Confirmed live: an event-planning SaaS ("manage vendor bookings,
   // guest RSVPs, and on-site logistics") was classified into the
   // procurement domain purely because it mentioned "vendor" -- a word
