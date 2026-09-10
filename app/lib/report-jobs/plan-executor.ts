@@ -36,6 +36,7 @@ import {
   validateDomainResearchQualitySafely,
   NUMERIC_CLAIM_LABEL_PATTERN,
   NUMERIC_CLAIM_PROVENANCE_PATTERN,
+  fieldContentHasUnprovenClaim,
   type DomainResearchBundle,
   type DomainResearchEvidence,
 } from "@/app/lib/ai/domain-research";
@@ -65,7 +66,10 @@ import {
   refreshResearchAwareFinancialContext,
   type AiFinancialModelContext,
 } from "@/app/lib/ai/financial-assumptions";
-import { applyMarketResearchCoverageToContext } from "@/app/lib/ai/market-research-coverage";
+import {
+  applyMarketResearchCoverageToContext,
+  deriveCanonicalCompetitiveEvidence,
+} from "@/app/lib/ai/market-research-coverage";
 import {
   compactReportFieldPrompt,
   createAiCostOptimizationMetrics,
@@ -124,11 +128,13 @@ import {
   formatKeyFinancialAssumptionsList,
   hasVerifiedUserProvidedData,
   localizeFinancialEvidenceType,
-  type FinancialEvidenceType,
 } from "@/app/lib/financial-evidence-labeling";
+import type { EvidenceLevel } from "@/app/lib/report-evidence";
 import type { FinancialMetricModel } from "@/app/lib/ai/financial-model";
 import {
   runConsistencyValidationPass,
+  correctMetricMentions,
+  type ConsistencyCorrection,
   type MetricConsistencyTarget,
 } from "@/app/lib/report-consistency-validation";
 import { assertReportIsolation } from "@/app/lib/report-engine/report-isolation-validator";
@@ -232,10 +238,13 @@ import { prepareRealEstateReportForPresentation } from "@/app/lib/report-engine/
 import {
   buildBusinessCompetitorLandscapeState,
   buildBusinessCompetitorLandscapeStateFromStructuredResponse,
+  enrichCompetitorWeaknessesFromEvidence,
+  attachWeaknessProvenance,
   BUSINESS_COMPETITOR_LANDSCAPE_JSON_SCHEMA,
   type BusinessCompetitorLandscapeState,
 } from "@/app/lib/report-engine/business-competitor-landscape-state";
 import {
+  buildPortersFiveForcesStateFromLegacyProse,
   buildPortersFiveForcesStateFromStructuredResponse,
   PORTERS_FIVE_FORCES_JSON_SCHEMA,
   type PortersFiveForcesState,
@@ -268,6 +277,15 @@ type PlanReportMetadataChunk = {
     benchmarkScore: AiFinancialModelContext["benchmarkScore"];
     reportQuality: AiFinancialModelContext["reportIntelligence"];
     validationIntelligence: AiFinancialModelContext["validationIntelligenceV2"];
+    // TASK #69A-46 -- canonical, report-level financial evidence
+    // provenance (see financial-evidence-labeling.ts's own comment).
+    // Optional, mirroring businessCompetitorLandscapeState/
+    // portersFiveForcesState's own established contract just below: a
+    // historical report persisted before this field existed simply has
+    // no financialEvidence key at all, and every reader treats that as
+    // "fall back to the existing prose-inference path", never a
+    // fabricated reconstruction.
+    financialEvidence?: AiFinancialModelContext["financialEvidence"];
     // TASK #69A-15 -- optional: only present once competitorLandscape's
     // own generated content has actually been parsed (i.e. never on the
     // EARLY metadata chunk enqueued before the report call even starts).
@@ -330,8 +348,170 @@ const DECISION_INTELLIGENCE_PIPELINE = "decision_intelligence_v1";
 // generic sentiment) and a source-preference order -- a cache entry
 // written before this exists was generated under the looser, less
 // specific guidance and must not be served as if it already reflects
-// this task's stricter negative-claim safety rules.
-const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "weakness-comparison-rules-v5";
+// this task's stricter negative-claim safety rules. TASK #69A-37A
+// bumped this again (v5 -> v6): CONFIRMED LIVE by direct inspection of
+// the actual persisted `reports` rows (not assumed) -- the exact same
+// "LTV:CAC $10kand"/"$10kor"/"$10klegal" corruption #69A-37 fixed at
+// the correction-pass level (report-consistency-validation.ts) kept
+// reappearing byte-for-byte identically across every "fresh"
+// regeneration, because `cacheResponseText` below is
+// JSON.stringify(parsedReport) -- the report AFTER normalizeFullPlanReport
+// (and therefore after the OLD, pre-#69A-37 buggy consistency pass) had
+// already run once, at this exact cache entry's original write time.
+// #69A-37's fix, however correct for a genuinely fresh generation,
+// cannot repair text that was already merged into "$10kand"/"$10kor"/
+// "$10klegal" inside an existing cache entry -- by the time that text
+// is read back, "CAC" no longer looks like a correctable mention of
+// itself at all (correctly, per the fix), so the already-corrupted
+// wording simply survives, cache hit after cache hit, unless the cache
+// key itself changes. Bumping this shared version is what forces a
+// genuinely fresh AI call (and therefore a fresh, #69A-37-fixed
+// normalization pass) the next time any of these prompts are
+// requested; the underlying canonical financial values (CAC/LTV/
+// payback/margin) are completely unaffected by this bump, since they
+// are computed independently, not read from the cache.
+// TASK #69A-40A -- bumped again (v6 -> v7): ROOT CAUSE FIX. Confirmed
+// live, by direct inspection of the actual persisted `reports` rows and
+// their backing ai_response_cache entries: a "fresh" regeneration
+// requested AFTER #69A-40's weakness-schema/prompt fix landed was served
+// byte-identical competitorLandscape content (Intuit QuickBooks/Xero/
+// Dryrun all "Not available") to a report generated BEFORE that fix --
+// executionMs ~1.2s, totalOpenAiCalls: 0, entirely served from this
+// exact cache key (fullReportCacheKey below), because
+// createPreResearchReportCacheKey's own cache key has no dependency on
+// the WEAKNESS SCHEMA/prompt text the model is asked to satisfy -- only
+// on this shared contract-version string, the canonical financial
+// assumptions fingerprint, and context. #69A-40 changed what the model
+// is asked to produce (naming the "embedded feature within a broader
+// platform vs. dedicated specialization" inference pattern) without
+// bumping this version, so the already-cached, pre-fix report kept being
+// replayed for its full 7-day TTL regardless of the prompt fix.
+// Mirrors #69A-37A's own identical bump for the identical reason (a
+// generation-affecting fix that must force a genuinely fresh AI call,
+// not just apply to reports generated after the fix by coincidence) --
+// a one-time, bounded re-fetch per previously-cached prompt, never a
+// repeated or unbounded cost.
+// TASK #69A-40B -- bumped again (v7 -> v8): the businessCompetitorLandscapeState
+// computed and cached alongside a full report now includes
+// enrichCompetitorWeaknessesFromEvidence's own deterministic enrichment
+// -- a report cached under v7 (or earlier) has an UNENRICHED state baked
+// into its cache payload (getCachedBusinessCompetitorLandscapeStateFromReportData
+// reads that stored value directly, it is never recomputed on a cache
+// hit), so it would keep replaying the pre-#69A-40B "Not available"
+// result for QuickBooks/Xero indefinitely without this bump -- the exact
+// same class of staleness #69A-40A already fixed once for the weakness-
+// schema/prompt change itself. A one-time, bounded re-fetch per
+// previously-cached prompt.
+// TASK #69A-41 -- bumped again (v8 -> v9): the founderScore section's
+// own persisted TEXT (built by buildCanonicalFounderScore, cached
+// verbatim as part of the full-report cache payload) is what this fix
+// changes -- a report cached under v8 or earlier has the leaked
+// "Composite Founder Readiness: 48/100. Diagnostics:." text baked into
+// its cache entry (getCachedResearchFromReportData's sibling report-text
+// cache is never recomputed on a cache hit), so it would keep replaying
+// the exact live contradiction this task fixes for its full remaining
+// TTL without this bump -- the same class of staleness #69A-40A/#69A-40B
+// already fixed twice for unrelated generation-affecting changes. A
+// one-time, bounded re-fetch per previously-cached prompt.
+// TASK #69A-43 -- bumped again (v9 -> v10): the persisted
+// reportIntelligence.dimensions.financialConsistency/validationReadiness
+// values (cached verbatim as part of the full-report cache payload) are
+// what this fix corrects -- a report cached under v9 or earlier has the
+// contaminated "financialConsistency = external evidence coverage %"
+// value baked into its cache entry (never recomputed on a cache hit), so
+// it would keep replaying the exact contradiction this task fixes for
+// its full remaining TTL without this bump. A one-time, bounded
+// re-fetch per previously-cached prompt.
+// TASK #69A-44 -- bumped again (v10 -> v11): consolidated
+// reportIntelligence.dimensions.validationReadiness onto the same
+// validationIntelligenceV2.overallScore source formatValidationIntelligenceSummary
+// already uses (was independently computed from the cruder V1
+// validationIntelligence model, producing a different number -- e.g. 19
+// vs 47 -- for the identical "validation maturity" concept). Also
+// renamed two display-only labels ("Evidence" -> "Moat Evidence" on the
+// Confidence Radar; "Planning Confidence" -> "Source Strength" on the
+// Report Quality breakdown's sourceConfidence dimension) to remove
+// collisions with Founder Readiness's own, legitimately distinct
+// "Evidence Confidence"/"Validation Confidence" dimensions. All three
+// values are cached verbatim in the full-report payload, so a report
+// cached under v10 or earlier would keep replaying the old
+// validationReadiness number and the old labels for its full remaining
+// TTL without this bump. A one-time, bounded re-fetch per
+// previously-cached prompt.
+// TASK #69A-45 -- bumped again (v11 -> v12): fixed a real tokenization
+// defect in extractCompetitorEntityTokens (business-competitor-
+// landscape-state.ts) that silently disabled enrichCompetitorWeaknessesFromEvidence
+// for any multi-word, undelimited competitor name (confirmed live:
+// "Intuit QuickBooks" never enriched across 5 consecutive fresh
+// reports, while single-word "Xero" always did, for the exact same
+// evidence shape) -- also added attachWeaknessProvenance
+// (weaknessSourceRefs/weaknessConfidence). Both are baked into
+// businessCompetitorLandscapeState, which is cached verbatim as part of
+// the full-report payload -- a report cached under v11 or earlier would
+// keep replaying QuickBooks' stale "Not available" and the missing
+// provenance fields for its full remaining TTL without this bump. A
+// one-time, bounded re-fetch per previously-cached prompt.
+// TASK #69A-47 -- bumped again (v12 -> v13): fixed a real defect in
+// applyMarketResearchCoverageToContext (market-research-coverage.ts)
+// where decisionEngine.founderScore.score (the headline "Founder
+// Readiness Score" every renderer reads via readFounderScoreValue/
+// readFounderReadinessScoreValue) was silently overwritten by
+// dimensions.founderReadiness -- a coarse, prompt-keyword-derived
+// proxy -- during the post-research refresh, discarding the richer
+// teamFounder-derived computation its own 7 displayed dimensionScores
+// already correctly preserved. A report cached under v12 or earlier
+// would keep replaying the deflated, contaminated headline score for
+// its full remaining TTL without this bump.
+// TASK #69A-50 -- bumped again (v13 -> v14): fixed the same contamination
+// class in applyMarketResearchCoverageToContext (market-research-
+// coverage.ts) for reportIntelligence.dimensions.evidenceQuality ("Data
+// Completeness") -- it was silently overwritten by dimensions.
+// marketConfidence (how much EXTERNAL market research exists), discarding
+// the original input-completeness measure (investmentScore.confidence +
+// decisionConfidence.confidenceScore + whether the founder supplied real
+// user/customer/revenue evidence). A report cached under v13 or earlier
+// would keep replaying a Data Completeness score derived from the wrong
+// concept for its full remaining TTL without this bump.
+// TASK #69A-51 -- bumped again (v14 -> v15): fixed the headline Founder
+// Readiness Score's own aggregation in investment-score.ts's teamFounder
+// category -- it used to average 6 terms that EXCLUDED 2 of the 7
+// displayed Founder Readiness dimensions (Business Model Quality,
+// Evidence Confidence) and included a 6th, undisplayed term artificially
+// floored at 55%; also fixed a unit-conversion bug in evidenceConfidenceScore
+// itself (metricConfidenceScore, already a 0-1 fraction, was divided by
+// 100 a second time). A report cached under v14 or earlier would keep
+// replaying a Founder Readiness Score computed from the old, evidence-
+// excluding formula for its full remaining TTL without this bump.
+// TASK #69A-52 -- bumped again (v15 -> v16): added a non-compensatory
+// founder/validation-evidence ceiling to teamFounder's own aggregate
+// (investment-score.ts) -- opportunity quality, business model,
+// execution ease, and Evidence Confidence can no longer lift the
+// headline Founder Readiness Score above what founderEvidenceScore/
+// validationLevelScore alone can support (plus a fixed headroom
+// margin). A report cached under v15 or earlier would keep replaying a
+// Founder Readiness Score computed without this ceiling for its full
+// remaining TTL without this bump.
+// TASK #69A-53 -- bumped again (v16 -> v17): renamed the persisted
+// founderScore section's "Execution Complexity" label/prompt/explanation
+// to "Execution Readiness" (plan-executor.ts's buildCanonicalFounderScore
+// and the founderScore prompt, prompts/plan.ts) -- the underlying score
+// was never inverted (it already meant higher = easier/more ready), so
+// this is a text-only correction, but a report cached under v16 or
+// earlier would keep replaying the old, directionally-confusing label
+// and the model's own contradictory "...raises complexity" explanation
+// for its full remaining TTL without this bump.
+// TASK #69A-54 -- bumped again (v17 -> v18): made executionComplexityScore
+// (investment-score.ts) evidence-sensitive -- 7 new, bounded execution-
+// burden categories (AI/ML model requirements, integration dependency,
+// data infrastructure, regulatory/compliance, distribution/channel,
+// talent/expertise, implementation/onboarding) can now lower it below
+// the #69A-53 baseline when the submitted prompt genuinely states that
+// evidence, and the founderScore section's own explanation is now built
+// dynamically from those same detected categories instead of a single,
+// always-the-same sentence. A report cached under v17 or earlier would
+// keep replaying a score/explanation computed without this evidence-
+// sensitivity for its full remaining TTL without this bump.
+const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "ltv-cac-ratio-integrity-v18";
 const FULL_REPORT_MAX_OUTPUT_TOKENS = 8_000;
 const FULL_REPORT_OPENAI_TIMEOUT_MS = 24_000;
 const REAL_ESTATE_REPORT_TIMEOUT_MS = 60_000;
@@ -355,6 +535,32 @@ const BUSINESS_PLAN_PIPELINE_BUDGET_MS = 200_000;
 // Business Plan report call its own, larger ceiling instead of racing the
 // smaller specialized-domain budget.
 const BUSINESS_PLAN_REPORT_OPENAI_TIMEOUT_MS = 90_000;
+// TASK #69A-39 -- ROOT CAUSE FIX. Confirmed live: 3 consecutive real fresh
+// business_plan generations all fell through to
+// createGroundedBusinessTimeoutFallback (proven by DB inspection -- their
+// persisted competitorLandscape/portersFiveForces/executiveSummary content
+// was byte-identical to createPlanFieldFallback's generic templates).
+// FULL_REPORT_MAX_OUTPUT_TOKENS (8,000) is shared with the real-estate/
+// domain-analysis/acquisition report paths, which only ever require the
+// planFields free-prose strings. The business_plan call additionally
+// requires -- in the SAME response, under the SAME strict json_schema
+// enforcement -- two large, densely-required structured keys added by
+// #69A-15A (competitorLandscapeStructured: up to 5 competitor records x 7
+// fields) and #69A-28 (portersFiveForcesStructured: 5 forces x 3 fields,
+// each requiring substantive analytical text), on top of all 24 planFields.
+// That is strictly more required output than the shared 8,000-token ceiling
+// was ever sized for -- exactly the same class of resource-starvation bug
+// already found and fixed for TIME above (see
+// BUSINESS_PLAN_REPORT_OPENAI_TIMEOUT_MS's own comment). When gpt-5-mini
+// runs out of this budget mid-JSON, the Responses API returns
+// status: "incomplete", incomplete_details.reason: "max_output_tokens" --
+// assertCompletedOpenAiResponse throws immediately, and
+// shouldUseGroundedFallback (hardcoded true) sends every real report down
+// the empty-JSON skeleton, with a genuinely null/zero competitor state.
+// Giving the business_plan call its own, larger ceiling (mirroring how the
+// timeout budget was already split out for the identical reason) lets the
+// model actually finish the JSON object instead of being truncated.
+const BUSINESS_PLAN_REPORT_MAX_OUTPUT_TOKENS = 24_000;
 const FULL_REPORT_POST_PROCESS_TIMEOUT_MS = 2_000;
 const REAL_ESTATE_SECTION_CONCURRENCY = 4;
 
@@ -588,6 +794,7 @@ function serializePlanReportMetadataChunk(
       benchmarkScore: context.benchmarkScore,
       reportQuality: context.reportIntelligence,
       validationIntelligence: context.validationIntelligenceV2,
+      ...(context.financialEvidence ? { financialEvidence: context.financialEvidence } : {}),
       ...(businessCompetitorLandscapeState ? { businessCompetitorLandscapeState } : {}),
       ...(portersFiveForcesState ? { portersFiveForcesState } : {}),
     },
@@ -1764,7 +1971,10 @@ function getOpenAiResponseStatusDetails(response: unknown) {
   };
 }
 
-function assertCompletedOpenAiResponse(response: unknown) {
+function assertCompletedOpenAiResponse(
+  response: unknown,
+  tokenUsage?: { completionTokens?: number }
+) {
   const details = getOpenAiResponseStatusDetails(response);
 
   if (details.status !== "completed") {
@@ -1773,6 +1983,14 @@ function assertCompletedOpenAiResponse(response: unknown) {
         `OpenAI response ended with status "${details.status}".`,
         details.incompleteReason ? `Incomplete reason: ${details.incompleteReason}.` : "",
         details.errorMessage ? `Provider error: ${details.errorMessage}.` : "",
+        // TASK #69A-39 -- carries the actual completion-token count into the
+        // thrown message (and therefore into the catch block's errorMessage/
+        // logOperationalInfo call below) so an output-token-budget
+        // truncation is distinguishable from every other generation
+        // failure without needing to re-instrument the provider call.
+        typeof tokenUsage?.completionTokens === "number"
+          ? `Completion tokens used: ${tokenUsage.completionTokens}.`
+          : "",
       ]
         .filter(Boolean)
         .join(" ")
@@ -3202,6 +3420,14 @@ const FOUNDER_DIMENSION_STOP_LABELS = [
   "İş Modeli Kalitesi",
   "Validation Confidence",
   "Doğrulama Güveni",
+  // TASK #69A-53 -- "Execution Readiness"/"Execution Feasibility" are
+  // the NEW labels the prompt now asks the model to write; "Execution
+  // Complexity"/"Yürütme Karmaşıklığı" are kept so a CACHED model
+  // response generated under the old prompt (before this fix) still
+  // has its own explanation boundary recognized correctly.
+  "Execution Readiness",
+  "Execution Feasibility",
+  "Yürütme Hazırlığı",
   "Execution Complexity",
   "Yürütme Karmaşıklığı",
   "Evidence Confidence",
@@ -3237,6 +3463,36 @@ function extractFounderDimensionExplanation(content: string, label: string) {
     (other) => other.toLowerCase() !== label.toLowerCase()
   )
     .map((other) => other.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    // TASK #69A-41 -- ROOT CAUSE FIX. Confirmed live: a real fresh
+    // report's own founderScore text ended with "Founder Evidence:
+    // 34/100 - no founder-specific execution proof provided. Composite
+    // Founder Readiness: 48/100. Diagnostics:." on one continuous,
+    // newline-free run -- the model wrote two stray trailing lines
+    // (its own self-computed, uncontrolled "Composite" figure and an
+    // empty "Diagnostics:" label) that this task's own explicit prompt
+    // instruction ("Do not expose internal formulas or system scoring
+    // logic... Do not repeat recommendation, roadmap, or risk section")
+    // never anticipated by exact name. Neither stray label was in the
+    // enumerated FOUNDER_DIMENSION_STOP_LABELS list above, so this
+    // function's own capture for "Founder Evidence" (the LAST
+    // dimension, with no next named label to stop it) ran straight
+    // through both stray sentences and spliced the model's own
+    // "Composite Founder Readiness: 48/100" directly into the canonical,
+    // deterministic report text -- a real, contradictory second score
+    // next to the correct "Founder Readiness Score: 40/100" headline
+    // this SAME function already builds from the one true source
+    // (founder.score). This was never a second, legitimately-different
+    // metric to reconcile -- it was uncontrolled model prose leaking
+    // through an extraction-regex gap.
+    //
+    // FIX: a generic, enumeration-free stop pattern -- any run of 1-5
+    // Title-Case words immediately followed by a colon (the exact shape
+    // "Composite Founder Readiness:"/"Diagnostics:" and any future
+    // stray label the model might invent all share) -- so this
+    // extraction can never again run past the end of a dimension's own
+    // real explanation into an unrelated, unrequested labeled line,
+    // regardless of what the model happens to call it.
+    .concat(["[A-Z][a-zA-Z]*(?:\\s+[A-Z][a-zA-Z]*){0,4}:\\s"])
     .join("|");
   const guardedChar = `(?:(?!${stopLookahead})[^\\n])`;
   // The model's own founderScore text often states its own 0-100 score
@@ -3358,6 +3614,20 @@ function buildCanonicalFounderScore(
   const evidenceConfidence = resolveDimensionScoreText("evidenceConfidence", "Evidence confidence");
   const founderEvidence = resolveDimensionScoreText("founderEvidence", "Founder evidence");
   const ideaQuality = resolveDimensionScoreText("ideaQuality", "Market attractiveness");
+  // TASK #69A-54 -- reads the SAME canonical evidence line the score
+  // above was computed from (investment-score.ts's own new "Execution
+  // readiness factors: ..." reasoning entry) rather than independently
+  // re-scanning the prompt with a second, potentially-drifting
+  // detector -- the explanation below is built from the IDENTICAL
+  // categories that actually moved the number. Always English (this
+  // reasoning line is never localized, matching every sibling
+  // "Label: NN%" line in this same array), so the "no specific burden"
+  // sentinel comparison below is language-independent.
+  const executionReadinessFactorsSummary =
+    /Execution readiness factors: ([^|]*)/i.exec(founderReasoning)?.[1]?.trim() || "";
+  const hasIdentifiedExecutionBurden =
+    executionReadinessFactorsSummary.length > 0 &&
+    !executionReadinessFactorsSummary.startsWith("no specific");
   // TASK #69A-6 -- CRITICAL BUG FIX (confirmed live: the founderScore
   // field's own headline read "Founder Readiness Score: 51/100" while
   // the canonical investment-score.ts engine's own founder.score --
@@ -3397,10 +3667,33 @@ function buildCanonicalFounderScore(
     "Doğrulama Güveni",
     reportText(language, "Missing traction lowers confidence, not the underlying idea quality.", "Eksik çekiş, temel fikir kalitesini değil güven düzeyini düşürür.")
   );
+  // TASK #69A-53 -- searches the model's own text for "Execution
+  // Readiness" (the new prompt label going forward); a report whose
+  // underlying model text was generated/cached before this fix (still
+  // saying "Execution Complexity") simply falls through to the
+  // direction-corrected fallback sentence below -- never a stale,
+  // wrong-direction sentence, and never a crash.
+  // TASK #69A-54 -- the fallback sentence is now DYNAMIC, built from
+  // this exact report's own detected burden categories (via
+  // executionReadinessFactorsSummary above) instead of a single,
+  // always-the-same static sentence that used to claim "integration
+  // depth, model-training requirements, and channel-building
+  // complexity" applied to every report regardless of whether any of
+  // that was actually true for it.
   const executionComplexityExplanation = dimensionExplanation(
-    "Execution Complexity",
-    "Yürütme Karmaşıklığı",
-    reportText(language, "Execution requires disciplined launch sequencing, channel proof, and operational control.", "Yürütme disiplinli lansman sıralaması, kanal kanıtı ve operasyonel kontrol gerektirir.")
+    "Execution Readiness",
+    "Yürütme Hazırlığı",
+    hasIdentifiedExecutionBurden
+      ? reportText(
+          language,
+          `Execution readiness is constrained by ${executionReadinessFactorsSummary}.`,
+          `Yürütme hazırlığı ${executionReadinessFactorsSummary} nedeniyle sınırlıdır.`
+        )
+      : reportText(
+          language,
+          "No specific integration, technical, regulatory, or distribution execution burden was identified in the submitted information.",
+          "Sunulan bilgilerde belirli bir entegrasyon, teknik, düzenleyici veya dağıtım yürütme yükü tanımlanmadı."
+        )
   );
   const evidenceConfidenceExplanation = dimensionExplanation(
     "Evidence Confidence",
@@ -3419,7 +3712,7 @@ function buildCanonicalFounderScore(
     reportText(language, `Market Attractiveness: ${marketAttractiveness}/100 - ${marketAttractivenessExplanation}`, `Pazar Çekiciliği: ${marketAttractiveness}/100 - ${marketAttractivenessExplanation}`),
     reportText(language, `Business Model Quality: ${businessModelQuality}/100 - ${businessModelQualityExplanation}`, `İş Modeli Kalitesi: ${businessModelQuality}/100 - ${businessModelQualityExplanation}`),
     reportText(language, `Validation Confidence: ${validationConfidence}/100 - ${validationConfidenceExplanation}`, `Doğrulama Güveni: ${validationConfidence}/100 - ${validationConfidenceExplanation}`),
-    reportText(language, `Execution Complexity: ${executionComplexity}/100 - ${executionComplexityExplanation}`, `Yürütme Karmaşıklığı: ${executionComplexity}/100 - ${executionComplexityExplanation}`),
+    reportText(language, `Execution Readiness: ${executionComplexity}/100 - ${executionComplexityExplanation}`, `Yürütme Hazırlığı: ${executionComplexity}/100 - ${executionComplexityExplanation}`),
     reportText(language, `Evidence Confidence: ${evidenceConfidence}/100 - ${evidenceConfidenceExplanation}`, `Kanıt Güveni: ${evidenceConfidence}/100 - ${evidenceConfidenceExplanation}`),
     reportText(language, `Founder Evidence: ${founderEvidence}/100 - ${founderEvidenceExplanation}`, `Kurucu Kanıtı: ${founderEvidence}/100 - ${founderEvidenceExplanation}`),
   ].join("\n");
@@ -3558,6 +3851,24 @@ function buildExecutiveInsight(context: AiFinancialModelContext, focus: string, 
   );
 }
 
+// TASK #69A-38F -- SEMANTIC AUDIT (requested, not a scoring change):
+// `competition` below is decisionEngine.competitionScore itself
+// (market-research-coverage.ts's canonical, now-corrected competitive-
+// EVIDENCE-strength score -- "how much validated evidence proves this
+// business has competitive moat/differentiation"), reused verbatim as
+// this Opportunity Score's own "Competition Score" sub-metric. That is
+// a DELIBERATE reuse (per this function's own header comment: "the
+// same decision engine that drives the report's GO/WAIT/PASS
+// recommendation everywhere else"), not an independent "how favorable
+// are competitive CONDITIONS" (rivalry intensity/barriers-to-entry)
+// metric -- those two concepts are NOT the same, and this codebase has
+// no separately-computed, evidence-backed "competitive favorability"
+// signal to reuse instead without fabricating one. Rather than either
+// (a) silently leaving the ambiguity in place, or (b) inventing a new,
+// unvalidated favorability score, the label is clarified in place --
+// the smallest safe structural change -- so a reader never mistakes
+// this for a judgment about how easy the competitive landscape is to
+// win in.
 function buildOpportunityScore(context: AiFinancialModelContext, language: ResponseLanguage) {
   const engine = context.investmentScore.decisionEngine;
   const demand = scorePercent(engine.marketScore.score, engine.marketScore.maximumScore);
@@ -3575,7 +3886,11 @@ function buildOpportunityScore(context: AiFinancialModelContext, language: Respo
 
   return [
     reportText(language, `- Demand Score: ${demand}/100`, `- Talep Skoru: ${demand}/100`),
-    reportText(language, `- Competition Score: ${competition}/100`, `- Rekabet Skoru: ${competition}/100`),
+    reportText(
+      language,
+      `- Competition Score: ${competition}/100 (competitive-evidence strength -- how much validated evidence supports a defensible moat, not how favorable competitive conditions are)`,
+      `- Rekabet Skoru: ${competition}/100 (rekabetçi kanıt gücü -- savunulabilir bir üstünlüğü destekleyen doğrulanmış kanıt miktarı, rekabet koşullarının ne kadar uygun olduğu değil)`
+    ),
     reportText(language, `- Timing Score: ${timing}/100`, `- Zamanlama Skoru: ${timing}/100`),
     reportText(language, `- Execution Difficulty: ${executionDifficulty}/100`, `- Yürütme Zorluğu: ${executionDifficulty}/100`),
     reportText(language, `- Revenue Potential: ${revenuePotential}/100`, `- Gelir Potansiyeli: ${revenuePotential}/100`),
@@ -3970,6 +4285,76 @@ function buildPlanFinancialConsistencyTargets(
   ];
 }
 
+// TASK #69A-38E -- ROOT CAUSE FIX. Confirmed live: a report with ZERO
+// validated competitors ("No competitor data could be validated for
+// this market yet.") simultaneously showed "Competitive evidence: 93%;
+// Distinct competitor organizations represented: 5" in Executive
+// Summary AND "Competition Score: 93/100" in Market Opportunity --
+// TWO SEPARATE AI-generated fields both quoting the SAME "Decision
+// factors: - Competition Score: 93/100. Competitive evidence: 93%;
+// Distinct competitor organizations represented: 5" line from
+// investmentScoreContext (financial-assumptions.ts's
+// formatInvestmentScore, embedded in the shared generation prompt via
+// financialAssumptionsContext -- see that prompt's own explicit
+// instruction to "reuse the calculated score and category reasoning
+// above"). #69A-38D's own fix correctly recomputes the STRUCTURED
+// decisionEngine.competitionScore/dimensions.competitiveEvidence from
+// the canonical competitor state -- but only AFTER generation, once
+// businessCompetitorLandscapeState is known. The model had already
+// copied the OLD, pre-correction numbers verbatim into its own
+// generated prose by then; a metadata-only fix can never retroactively
+// edit text the model already wrote. This mirrors #69A-37's own root
+// cause exactly (a report can cite a canonical number correctly at the
+// moment of generation and still go stale the instant that number is
+// corrected afterward) -- fixed the same way: a targeted, post-
+// generation mention correction, reusing report-consistency-validation.ts's
+// own already-tested correctMetricMentions (never a second,
+// independently-reimplemented regex), called a second time once the
+// canonical competitive-evidence numbers are actually known.
+function buildCompetitiveEvidenceConsistencyTargets(
+  canonicalCompetitiveEvidence: number,
+  canonicalCompetitorBreadth: number
+): MetricConsistencyTarget[] {
+  return [
+    { labelPattern: "Competitive evidence", canonicalDisplayValue: `${canonicalCompetitiveEvidence}%`, type: "financial_metric_mismatch" },
+    { labelPattern: "Competition Score", canonicalDisplayValue: `${canonicalCompetitiveEvidence}`, type: "financial_metric_mismatch" },
+    { labelPattern: "Distinct competitor organizations represented", canonicalDisplayValue: `${canonicalCompetitorBreadth}`, type: "financial_metric_mismatch" },
+  ];
+}
+
+// Applied to every planField (never just executiveSummary/
+// marketOpportunity -- the model is free to cite this line from any
+// section, and #69A-37's own established convention is to scan every
+// field rather than guess which ones a given mention could appear in),
+// mutating `report` in place. Returns the number of real corrections
+// applied, purely for observability/testing -- callers never need to
+// branch on it, since a zero-correction call is always safe.
+function correctCompetitiveEvidenceMentions(
+  report: Record<PlanReportField, string>,
+  canonicalCompetitiveEvidence: number,
+  canonicalCompetitorBreadth: number
+): number {
+  const corrections: ConsistencyCorrection[] = [];
+  const protectedFields = new Set<PlanReportField>();
+
+  for (const target of buildCompetitiveEvidenceConsistencyTargets(
+    canonicalCompetitiveEvidence,
+    canonicalCompetitorBreadth
+  )) {
+    correctMetricMentions(
+      report,
+      planFields,
+      target.labelPattern,
+      target.canonicalDisplayValue,
+      target.type ?? "financial_metric_mismatch",
+      protectedFields,
+      corrections
+    );
+  }
+
+  return corrections.length;
+}
+
 // TASK #69A-4 -- CRITICAL BUG FIX (confirmed live: a real Business Idea
 // Validation generation failed domain-research.ts's quality gate --
 // "Report quality gate failed: unsupported numeric claim lacks evidence
@@ -4045,9 +4430,24 @@ function buildPlanFinancialConsistencyTargets(
 // Derived is grounded in the bare word "formula" (accurate, since this
 // tier is reached only when the metric's own derivation text says it is
 // mathematically derived from another verified value).
-function toGateRecognizedEvidenceAnnotation(evidenceType: FinancialEvidenceType): string {
-  if (evidenceType === "Verified") return "(Verified) [User]";
-  if (evidenceType === "Derived") return "(Estimated -- formula-derived)";
+//
+// TASK #69A-46 -- classifyFinancialMetricEvidenceType now returns the
+// canonical 5-state EvidenceLevel (report-evidence.ts) instead of the
+// old, narrower 3-state FinancialEvidenceType -- "benchmarkDerived" is
+// the ONE new case this gate-vocabulary mapping needs, grounded in the
+// bare word "benchmark source" (satisfies NUMERIC_CLAIM_PROVENANCE_PATTERN's
+// own "benchmark source" phrase) alongside the label word "Estimated"
+// (satisfies NUMERIC_CLAIM_LABEL_PATTERN) -- the same honest "Estimated"
+// vocabulary this report already uses for benchmark-derived figures
+// elsewhere (prompts/plan.ts: "benchmark-derived values are Estimated"),
+// never "Verified". "validationRequired" is defensive only -- a
+// deterministically-computed FinancialMetricModel metric's own formula/
+// benchmarkComparison/assumptions text always matches one of the four
+// preceding tiers in practice, so this never actually occurs here.
+function toGateRecognizedEvidenceAnnotation(evidenceType: EvidenceLevel): string {
+  if (evidenceType === "verified") return "(Verified) [User]";
+  if (evidenceType === "derived") return "(Estimated -- formula-derived)";
+  if (evidenceType === "benchmarkDerived") return "(Estimated -- benchmark source)";
   return "(Assumption)";
 }
 
@@ -4237,13 +4637,38 @@ function annotateUnclassifiedCanonicalMetricMentions(
 // authoritative decision everywhere else in this file (getVisibleDecision,
 // localizeDecision, consistency validation); GO/WAIT/PASS is never replaced,
 // only translated for the opening block.
+// TASK #69A-48 -- decisionOverride lets a later, more-informed
+// recomputation (see the outer call site below, right after
+// finalResearchAwareFinancialContext is known) refresh confidence/
+// confidenceFactors/topReasons/why/missingEvidence/immediateNextAction
+// from the freshest context, while PINNING decision to whatever token
+// was already validated against the rest of the report body
+// (assertNoDecisionContradiction/runConsistencyValidationPass, both of
+// which run against the EARLIER context's own decision, before
+// businessCompetitorLandscapeState exists). Never applies to the two
+// existing, unmodified call sites (normalizeFullPlanReport's own
+// primary build; createPlanFieldFallback's per-field repair), which
+// still derive decision the original way, unchanged.
+// TASK #69A-48 -- extracted so the outer, post-competitor-evidence
+// correction call site (below) can derive the SAME already-validated
+// decision token from researchAwareFinancialContext.investmentScore.
+// recommendation, without duplicating this exact mapping a second time
+// (a second, independently-maintained copy is exactly the kind of drift
+// this ticket exists to eliminate).
+function mapInvestmentRecommendationToExecutiveDecisionCode(
+  recommendation: AiFinancialModelContext["investmentScore"]["recommendation"]
+): ExecutiveDecisionCode {
+  return recommendation === "GO" ? "GO" : recommendation === "WAIT" ? "CONDITIONAL_GO" : "NO_GO";
+}
+
 function buildPlanExecutiveDecisionBrief(
   context: AiFinancialModelContext,
-  language: ResponseLanguage
+  language: ResponseLanguage,
+  decisionOverride?: ExecutiveDecisionCode
 ): ExecutiveDecisionBrief {
   const score = context.investmentScore;
   const decision: ExecutiveDecisionCode =
-    score.recommendation === "GO" ? "GO" : score.recommendation === "WAIT" ? "CONDITIONAL_GO" : "NO_GO";
+    decisionOverride ?? mapInvestmentRecommendationToExecutiveDecisionCode(score.recommendation);
 
   // strengths[0] is the single biggest upside; the remaining strengths
   // become the supporting reasons so Top 3 Reasons never restates itself.
@@ -4842,6 +5267,7 @@ function parseFullPlanReport(
 
   const report = {} as Record<PlanReportField, string>;
   const failureFields: string[] = [];
+  const unprovenClaimFields: string[] = [];
   const repairedFields: string[] = [];
 
   for (const field of planFields) {
@@ -4861,7 +5287,76 @@ function parseFullPlanReport(
     }
 
     if (isReportGenerationFailureText(sanitizedContent)) {
+      // TASK #69A-39A -- ROOT CAUSE FIX. Confirmed live: a REAL, fully
+      // completed business_plan generation (status "completed",
+      // outputLength=24709, well inside #69A-39's own token-budget fix)
+      // had exactly ONE of the 24 planFields ("risks") match
+      // isReportGenerationFailureText -- a heuristic designed to catch a
+      // provider/model error message that leaked into content (rate
+      // limit, quota, timeout, "this section is waiting for AI output",
+      // etc.). A company-specific Risk Matrix legitimately discussing
+      // this business's own third-party API dependency risk (e.g.
+      // QuickBooks/Xero "service unavailable" or "network error" during
+      // sync) can organically contain the same generic technical
+      // vocabulary those patterns match -- true positive or false
+      // positive, ONE field tripping this heuristic previously discarded
+      // the ENTIRE 24-field report (including the genuinely-generated,
+      // schema-validated competitorLandscapeStructured/
+      // portersFiveForcesStructured data from the SAME successful
+      // response) by throwing here and falling through to
+      // createGroundedBusinessTimeoutFallback's empty-JSON skeleton --
+      // which is exactly the proven live symptom (0% competitive
+      // evidence, "No competitor data could be validated for this
+      // market yet.") this task traces back to.
+      //
+      // FIX: mirror app/api/market-analysis/route.ts's own, already-
+      // proven handling of the IDENTICAL check (its per-field loop swaps
+      // ONLY the flagged field for createMarketFieldFallback and keeps
+      // every other field -- it never discards the whole report). This
+      // field alone gets an honest fallback; every other field --
+      // including any real competitor/Porter evidence -- survives
+      // completely untouched.
+      report[field] = ensureCompleteReportText(
+        createPlanFieldFallback(field, parsed, context, language)
+      );
       failureFields.push(field);
+      continue;
+    }
+
+    if (fieldContentHasUnprovenClaim(sanitizedContent)) {
+      // TASK #69A-39C -- ROOT CAUSE FIX. Confirmed live: a REAL, fully
+      // completed, evidence-rich business_plan generation (competitor
+      // names Float/Dryrun/Fathom/Jirav/LivePlan genuinely present, real
+      // QuickBooks/Xero product-feature and Porter's Five Forces
+      // analysis) passed the isReportGenerationFailureText check above
+      // cleanly, only to have validateDomainResearchQuality's own
+      // content-shape gate (domain-research.ts, joined-reportText scope)
+      // throw "unsupported numeric claim lacks evidence and source or
+      // method provenance" moments later at this report's own success-
+      // path validation call -- because ONE field somewhere had a single
+      // unlabeled dollar/percentage figure. That gate has no field
+      // attribution and throws for the WHOLE 24-field report on ANY
+      // single violation anywhere, discarding the genuinely-valid
+      // competitor/Porter data along with it -- the exact same
+      // disproportionate-blast-radius pattern this task's own #69A-39A
+      // predecessor already fixed for isReportGenerationFailureText, just
+      // tripped by a different gate this time.
+      //
+      // FIX: heal the SAME violation here, per field, using the EXACT
+      // same three checks the gate itself enforces
+      // (fieldContentHasUnprovenClaim mirrors them byte-for-byte, see its
+      // own comment in domain-research.ts) -- so by the time
+      // validateDomainResearchQuality runs on the assembled report, no
+      // field can trip it, and the gate's own throwing behavior is never
+      // touched for any other caller. This never fabricates a citation or
+      // relaxes the provenance requirement itself -- the offending
+      // field's unsupported claim is replaced with createPlanFieldFallback's
+      // own honest, no-vendor-name generic template, identical to the
+      // isReportGenerationFailureText healing immediately above.
+      report[field] = ensureCompleteReportText(
+        createPlanFieldFallback(field, parsed, context, language)
+      );
+      unprovenClaimFields.push(field);
       continue;
     }
 
@@ -4873,15 +5368,17 @@ function parseFullPlanReport(
   }
 
   if (failureFields.length) {
-    throw new Error(
-      [
-        "Full report JSON validation failed.",
-        failureFields.length ? `Failure-text fields: ${failureFields.join(", ")}.` : "",
-        `outputLength=${value.length}`,
-      ]
-        .filter(Boolean)
-        .join(" ")
-    );
+    logOperationalInfo("[api:plan] replaced failure-text field(s) with fallback, kept the rest of the report", {
+      failureFields,
+      outputLength: value.length,
+    });
+  }
+
+  if (unprovenClaimFields.length) {
+    logOperationalInfo("[api:plan] replaced unproven-claim field(s) with fallback, kept the rest of the report", {
+      unprovenClaimFields,
+      outputLength: value.length,
+    });
   }
 
   if (repairedFields.length) {
@@ -7847,7 +8344,7 @@ Do not include commentary outside the JSON object.`);
                 responseLanguage
               ),
               input: buildAnalysisProviderInput(input, analysisAssets),
-              max_output_tokens: 8_000,
+              max_output_tokens: FULL_REPORT_MAX_OUTPUT_TOKENS,
               reasoning: { effort: "minimal" },
               text: {
                 verbosity: "low",
@@ -8321,7 +8818,7 @@ Do not include commentary outside the JSON object.`);
               model,
               instructions: buildAcquisitionAnalysisInstructions(responseLanguage),
               input: buildAnalysisProviderInput(input, analysisAssets),
-              max_output_tokens: 8_000,
+              max_output_tokens: FULL_REPORT_MAX_OUTPUT_TOKENS,
               reasoning: { effort: "minimal" },
               text: {
                 verbosity: "low",
@@ -9088,6 +9585,7 @@ ${executiveDecisionSystemVerboseRules}- First silently construct the full Integr
 - Align Decision Confidence with evidence quality and the calculated decision inputs; avoid extreme confidence values unless the evidence clearly supports them.
 - Distinguish Verified, Estimated, Assumption, and AI Analysis whenever factual certainty matters. User-provided values are Verified; benchmark-derived values are Estimated; inferred values are Assumptions; interpretation is AI Analysis.
 - Use only that exact evidence-label set, and attach a label to every important numeric claim.
+- Never present an unvalidated unit-economics figure (CAC, LTV, retention, willingness-to-pay, payback) as proof that the underlying strategy is already validated or attractive. Recommend validating the specific planning threshold instead of asserting it as an achieved fact -- e.g. "Validate CAC at or below the $9k planning threshold before scaling paid acquisition," never "CAC is $9k, therefore paid acquisition is attractive."
 - Make examples, KPIs, risks, roadmap actions, and financial interpretation specific to the detected industry instead of using generic startup templates.
 - Use honest assumption language instead of vague source claims such as "industry reports".
 - Finish with a complete sentence or complete bullet. Do not end mid-sentence.
@@ -9200,11 +9698,20 @@ Write only the content for this section. Do not write a JSON object, field name,
         const cachedPortersFiveForcesState = getCachedPortersFiveForcesStateFromReportData(
           cachedFullReport.responseData
         );
+        // TASK #69A-38D -- ROOT CAUSE FIX: unlike the fresh-generation
+        // path (see that call site's own comment), cachedBusinessCompetitorLandscapeState
+        // is already known at this point in the cache-hit path -- passed
+        // straight into the SAME evaluation call, so competitionScore/
+        // overallConfidence/reportIntelligence are correct from a single
+        // consistent pass, never a raw-evidence guess later replayed
+        // alongside the real canonical state.
         const cachedMarketResearchCoverageResult = cachedBusinessResearch
           ? applyMarketResearchCoverageToContext(
               canonicalFinancialAssumptions,
               cachedBusinessResearch,
-              promptText
+              promptText,
+              undefined,
+              deriveCanonicalCompetitiveEvidence(cachedBusinessCompetitorLandscapeState)
             )
           : null;
         const cachedUnifiedFinancialContext = cachedMarketResearchCoverageResult
@@ -9215,6 +9722,21 @@ Write only the content for this section. Do not write a JSON object, field name,
           cachedUnifiedFinancialContext,
           responseLanguage,
           promptText
+        );
+        // TASK #69A-38E -- mirrors the fresh-generation path's own
+        // identical fix: the cached response text may itself already
+        // carry a stale "Competition Score: NN/100. Competitive
+        // evidence: NN%; Distinct competitor organizations represented:
+        // NN" mention (baked in at the ORIGINAL generation time, before
+        // #69A-38D/#69A-38E existed), and cachedUnifiedFinancialContext
+        // is already corrected above (cachedBusinessCompetitorLandscapeState
+        // is known before that call, unlike the fresh-generation path) --
+        // so the corrected numbers are available immediately here, with
+        // no need for a second context recomputation.
+        correctCompetitiveEvidenceMentions(
+          parsedCachedReport,
+          cachedUnifiedFinancialContext.investmentScore.decisionEngine.competitionScore.score,
+          cachedBusinessCompetitorLandscapeState?.competitors.length ?? 0
         );
 
         if (cachedBusinessResearch) {
@@ -9317,11 +9839,16 @@ Write only the content for this section. Do not write a JSON object, field name,
             // live-generation path's identical tier preference.
             cachedBusinessCompetitorLandscapeState ||
               buildBusinessCompetitorLandscapeState(parsedCachedReport.competitorLandscape),
-            // TASK #69A-28 -- no Tier 1 fallback exists for Porter (see
-            // its own comment at the live-generation call site): null
-            // here correctly falls through to each renderer's own
-            // pre-existing prose-parsing tiers, unchanged.
-            cachedPortersFiveForcesState
+            // TASK #69A-38 -- mirrors the live-generation call site's own
+            // identical fix: cachedPortersFiveForcesState null (a cache
+            // entry written before this state existed, or one whose
+            // original generation never populated it) now falls through
+            // to the same Tier 1 legacy-prose synthesis, guaranteeing 5
+            // well-formed forces here too, instead of each renderer's own
+            // independent (and, for an uneven single paragraph, incomplete)
+            // prose-parsing tiers.
+            cachedPortersFiveForcesState ||
+              buildPortersFiveForcesStateFromLegacyProse(parsedCachedReport.portersFiveForces)
           ) + serializePlanReportChunks(parsedCachedReport)
         ), {
           headers: {
@@ -9503,6 +10030,7 @@ ${executiveDecisionSystemVerboseRules}- First silently construct the full Integr
 - Executive Recommendation must reuse the deterministic Report Quality Confidence derived from evidence quality, source coverage, financial certainty, benchmark fit, and validation readiness.
 - State the confidence level from the Investment Scoring Engine as High / Medium / Low or % and explain the evidence basis.
 - Clearly distinguish Verified, Estimated, Assumption, and AI Analysis where factual certainty matters.
+- Never present an unvalidated unit-economics figure (CAC, LTV, retention, willingness-to-pay, payback) as proof that the underlying strategy is already validated or attractive. Recommend validating the specific planning threshold instead of asserting it as an achieved fact -- e.g. "Validate CAC at or below the $9k planning threshold before scaling paid acquisition," never "CAC is $9k, therefore paid acquisition is attractive."
 - Research is complete. Cite external material claims with their [R#] evidence registry ID and exact source URL. Do not invent or reconstruct source references.
 - Every numeric claim must carry evidence classification plus a source, formula, benchmark source, user reference, or explicit calculation method.
 - The research sufficiency decision is ${businessResearch.recommendedOutput}. Do not give a confident recommendation when the evidence supports only a preliminary report.
@@ -9521,6 +10049,7 @@ ${executiveDecisionSystemVerboseRules}- First silently construct the full Integr
 - Respect each field contract. Executive Summary=verdict; Recommendation=decision logic; Roadmaps=proof-gated execution; financial fields=numbers; Risks=failure mechanisms.
 - Keep an internal insight ledger: explain each insight once, then use a <=12-word cross-reference plus only the new section-owned implication. Achieve at least 20% output-token compression by removing repetition/filler only.
 - Use the supplied financial model unchanged across financial and decision sections. Classify material numbers as Verified, Estimated, Assumption, or AI Analysis and include source/formula/method.
+- Frame unvalidated CAC/LTV/retention/WTP/payback figures as thresholds to validate, never as proof the underlying strategy is already attractive or de-risked.
 - Research is complete. Cite exact [R#]/URL references, preserve the ${businessResearch.recommendedOutput} sufficiency level, and never invent or reconstruct evidence.
 - Financial Assumptions lists all model assumptions by User-provided fact, AI assumption, or Market-derived estimate.
 - Sources / Assumptions separates user inputs from deduplicated authoritative sources. Use supplied metadata only; otherwise write exactly "AI-derived analysis (not externally verified)".
@@ -9609,7 +10138,15 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
                       dedupedFullReportInput,
                       analysisAssets
                     ),
-                    max_output_tokens: FULL_REPORT_MAX_OUTPUT_TOKENS,
+                    // TASK #69A-39 -- see BUSINESS_PLAN_REPORT_MAX_OUTPUT_TOKENS's
+                    // own comment: this call alone requires 24 planFields
+                    // PLUS competitorLandscapeStructured PLUS
+                    // portersFiveForcesStructured in one strict-schema
+                    // response, so it needs a materially larger ceiling
+                    // than the shared FULL_REPORT_MAX_OUTPUT_TOKENS used by
+                    // the lighter-weight real-estate/domain-analysis/
+                    // acquisition report calls below/above in this file.
+                    max_output_tokens: BUSINESS_PLAN_REPORT_MAX_OUTPUT_TOKENS,
                     reasoning: {
                       effort: "minimal",
                     },
@@ -9686,7 +10223,7 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             const tokenUsage = extractTokenUsage(response);
             const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
             const responseTimeMs = Date.now() - startedAt;
-            assertCompletedOpenAiResponse(response);
+            assertCompletedOpenAiResponse(response, tokenUsage);
             fullReportStage = "response_extraction";
             const responseText = extractResponseText(response);
             if (!responseText.trim()) {
@@ -9768,21 +10305,55 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             } catch {
               structuredCompetitorLandscapeResponse = undefined;
             }
-            const businessCompetitorLandscapeState =
-              buildBusinessCompetitorLandscapeStateFromStructuredResponse(
-                structuredCompetitorLandscapeResponse
-              ) || buildBusinessCompetitorLandscapeState(parsedReport.competitorLandscape);
+            // TASK #69A-40B -- ROOT CAUSE FIX: a competitor Tier 0/Tier 1
+            // left "unavailable" may still have safely-attributable,
+            // already-paid-for evidence supporting a directional
+            // weakness (confirmed live: QuickBooks/Xero's own official
+            // documentation, evidence IDs the SAME response already
+            // cited elsewhere in its own free-form prose) -- see
+            // enrichCompetitorWeaknessesFromEvidence's own extensive
+            // comment for the full entity-attribution/claim-shape safety
+            // design. Never a second AI call, never touches a weakness
+            // the model itself already supplied.
+            // TASK #69A-45 -- attachWeaknessProvenance runs immediately
+            // after enrichCompetitorWeaknessesFromEvidence, over the SAME
+            // businessResearch.evidence registry (never a second fetch,
+            // never re-parsing prose): it derives weaknessSourceRefs/
+            // weaknessConfidence from whichever [R#] citation is already
+            // present in each competitor's weaknesses text -- Tier 0/
+            // Tier 1's own model- or prose-authored citation, or Tier
+            // 1.5's own generated one -- extending the SAME canonical
+            // record rather than adding a parallel structure.
+            const businessCompetitorLandscapeState = attachWeaknessProvenance(
+              enrichCompetitorWeaknessesFromEvidence(
+                buildBusinessCompetitorLandscapeStateFromStructuredResponse(
+                  structuredCompetitorLandscapeResponse
+                ) || buildBusinessCompetitorLandscapeState(parsedReport.competitorLandscape),
+                businessResearch.evidence
+              ),
+              businessResearch.evidence
+            );
             // TASK #69A-28 -- Tier 0 (authoritative), same mechanism as
             // competitorLandscapeStructured immediately above:
             // portersFiveForcesStructured is a schema-only key, never
-            // one of planFields. No Tier 1 exists here (unlike
-            // competitor landscape, portersFiveForces' own free prose
-            // has never had a deterministic labeled-line format to
-            // parse) -- null falls straight through to each renderer's
-            // own pre-existing, unmodified forceAliases/
-            // extractForceIntensity/extractForceImplication prose-scan
-            // tiers, exactly the historical-report behavior this task
-            // must not disturb.
+            // one of planFields.
+            //
+            // TASK #69A-38 -- ROOT CAUSE FIX: Tier 0 returning null used
+            // to fall straight through to each renderer's own independent
+            // legacy prose scan of the single free-text portersFiveForces
+            // field -- confirmed live to reproduce the exact pre-#69A-28
+            // defect (some forces empty, some near-duplicate generic) any
+            // time that prose is a single uneven paragraph (e.g. a
+            // per-field AI-failure fallback that only substantively
+            // discusses 2 of the 5 forces). buildPortersFiveForcesStateFromLegacyProse
+            // is a new Tier 1, generation-time synthesis that guarantees
+            // exactly 5 independent, well-formed force records (real
+            // extracted content where the prose supports it, an honest
+            // "Insufficient evidence" sentence otherwise) -- never null,
+            // never partial. Only used when Tier 0 is null; every
+            // already-persisted report (no portersFiveForcesState key at
+            // all) is completely unaffected and keeps using its own
+            // renderer-local legacy scan exactly as before.
             let structuredPortersFiveForcesResponse: unknown;
             try {
               structuredPortersFiveForcesResponse = (
@@ -9791,13 +10362,124 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             } catch {
               structuredPortersFiveForcesResponse = undefined;
             }
-            const portersFiveForcesState = buildPortersFiveForcesStateFromStructuredResponse(
-              structuredPortersFiveForcesResponse
+            const portersFiveForcesState =
+              buildPortersFiveForcesStateFromStructuredResponse(
+                structuredPortersFiveForcesResponse
+              ) || buildPortersFiveForcesStateFromLegacyProse(parsedReport.portersFiveForces);
+            // TASK #69A-38D -- ROOT CAUSE FIX: researchAwareFinancialContext
+            // (built at line ~9392-9408, long before this point) was
+            // scored using ONLY raw, pre-generation research evidence --
+            // businessCompetitorLandscapeState did not exist yet at that
+            // time, since it is the AI's OWN generation response, parsed
+            // above. Confirmed live: this let a report show "Competitive
+            // evidence: 93%; Distinct competitor organizations
+            // represented: 5" (Executive Summary / Confidence Radar
+            // "Evidence", both sourced from decisionEngine.competitionScore
+            // -- see market-research-coverage.ts's own comment) while the
+            // SAME report's Competitor Landscape said "No competitor data
+            // could be validated for this market yet." -- an internally
+            // contradictory report. Re-running applyMarketResearchCoverageToContext
+            // now that businessCompetitorLandscapeState is known --
+            // starting from canonicalFinancialAssumptions (the pre-research
+            // base, never the already-once-refreshed
+            // researchAwareFinancialContext, so this is a single
+            // consistent recomputation, not a second research-coverage
+            // pass layered on top of the first) -- replaces the raw
+            // guess with the real, canonical competitor evidence for
+            // every dependent field (competitionScore, overallConfidence,
+            // reportIntelligence) in one pass. Every OTHER dimension
+            // (market/financial/product/execution/founder) is derived
+            // from the SAME unchanged raw evidence, so it recomputes
+            // identically -- this only changes what competitor evidence
+            // actually affects.
+            const canonicalCompetitiveEvidence = deriveCanonicalCompetitiveEvidence(businessCompetitorLandscapeState);
+            const finalResearchAwareFinancialContext = refreshResearchAwareFinancialContext(
+              applyMarketResearchCoverageToContext(
+                canonicalFinancialAssumptions,
+                businessResearch,
+                promptText,
+                undefined,
+                canonicalCompetitiveEvidence
+              ).context
+            );
+            // TASK #69A-38E -- ROOT CAUSE FIX (see buildCompetitiveEvidenceConsistencyTargets'
+            // own doc comment): #69A-38D's finalResearchAwareFinancialContext
+            // fix above corrects the STRUCTURED decisionEngine.competitionScore,
+            // but the model already copied the OLD, pre-correction
+            // "Competition Score: 93/100. Competitive evidence: 93%;
+            // Distinct competitor organizations represented: 5" line
+            // verbatim into its own generated prose (confirmed live in
+            // BOTH executiveSummary and marketOpportunity) before this
+            // point -- a metadata fix alone can never retroactively edit
+            // that text. Mutates parsedReport in place, BEFORE it is
+            // cached/streamed/persisted, so every downstream consumer
+            // (cache, web, PDF) reads the corrected mention, never the
+            // stale one.
+            correctCompetitiveEvidenceMentions(
+              parsedReport,
+              finalResearchAwareFinancialContext.investmentScore.decisionEngine.competitionScore.score,
+              canonicalCompetitiveEvidence.competitorBreadth
+            );
+            // TASK #69A-48 -- ROOT CAUSE FIX. Confirmed live: a fresh
+            // Business Idea Validation report showed Executive Summary
+            // (Confidence: 58%) while Executive Snapshot/PDF both showed
+            // 65% for the SAME report -- the decision itself (MONITOR)
+            // agreed everywhere. Root cause is the exact same two-pass
+            // timing shape #69A-38D/#69A-38E already fixed for
+            // competitive-evidence mentions, just never applied to the
+            // Executive Decision Brief's own confidence: parsedReport
+            // above (json_parse, ~line 10142) built its executiveSummary
+            // banner from buildPlanExecutiveDecisionBrief(
+            // researchAwareFinancialContext, ...) -- scored using ONLY
+            // raw, pre-generation research evidence, before
+            // businessCompetitorLandscapeState existed. finalResearch
+            // AwareFinancialContext (just above) re-scores with the real,
+            // now-known competitor evidence, and IS what
+            // serializePlanReportMetadataChunk below persists as
+            // investmentScore -- the SAME structured field
+            // report-presentation.ts's buildExecutiveSnapshot (both web's
+            // Executive Snapshot panel and the PDF button) already reads
+            // directly, with no prose fallback, for confidenceScore. So
+            // 65% was already the single value every OTHER consumer used;
+            // only the Executive Summary's own baked banner text still
+            // carried the earlier pass's 58%, because nothing rebuilt it
+            // after finalResearchAwareFinancialContext became available.
+            // FIX: rebuild the confidence-dependent brief fields
+            // (confidence/confidenceDirection/confidenceFactors/
+            // topReasons/why/missingEvidence/immediateNextAction) from
+            // finalResearchAwareFinancialContext -- the same authority
+            // every other consumer already trusts -- while explicitly
+            // PINNING decision to mapInvestmentRecommendationToExecutive
+            // DecisionCode(researchAwareFinancialContext.investmentScore.
+            // recommendation): the EXACT token already checked for
+            // contradiction against this report's own body sections
+            // (assertNoDecisionContradiction/runConsistencyValidationPass,
+            // both of which ran earlier, inside normalizeFullPlanReport,
+            // against researchAwareFinancialContext's own decision, before
+            // businessCompetitorLandscapeState was known). This guarantees
+            // MONITOR (or any other decision word) can never silently flip
+            // as a side effect of this fix -- only confidence and its own
+            // supporting reasoning are refreshed, never the decision
+            // itself. Mutates parsedReport in place, BEFORE it is
+            // cached/streamed/persisted (mirroring correctCompetitive
+            // EvidenceMentions immediately above), so cache/web/PDF all
+            // read the corrected banner, never the stale one.
+            const finalPlanExecutiveDecisionBrief = buildPlanExecutiveDecisionBrief(
+              finalResearchAwareFinancialContext,
+              responseLanguage,
+              mapInvestmentRecommendationToExecutiveDecisionCode(
+                researchAwareFinancialContext.investmentScore.recommendation
+              )
+            );
+            parsedReport.executiveSummary = formatExecutiveDecisionBrief(
+              finalPlanExecutiveDecisionBrief,
+              responseLanguage,
+              "business_plan"
             );
             const reportMetadataContext = createReportMetadataContext({
               prompt: promptText,
               report: parsedReport,
-              context: researchAwareFinancialContext,
+              context: finalResearchAwareFinancialContext,
               operationType: "plan_report",
               estimatedCostUsd,
             });
@@ -9814,27 +10496,37 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             }
 
             fullReportStage = "stream_response";
-            // TASK #69A-15 -- a SECOND reportMetadata chunk, sent only
-            // once real structured competitor data was actually parsed
-            // above. worker.ts's own event handling REPLACES its
-            // accumulated metadata object wholesale on every
-            // reportMetadata event rather than merging one in, so this
-            // chunk re-sends every field the EARLY chunk (enqueued
-            // before the report call even started, from
-            // researchAwareFinancialContext -- unchanged by generation)
-            // already sent, plus this new field -- never a partial
-            // patch that could silently drop investmentScore/
-            // benchmarkFit/benchmarkScore/reportQuality/
-            // validationIntelligence from the final persisted metadata.
-            if (businessCompetitorLandscapeState || portersFiveForcesState) {
-              enqueue(
-                serializePlanReportMetadataChunk(
-                  researchAwareFinancialContext,
-                  businessCompetitorLandscapeState,
-                  portersFiveForcesState
-                )
-              );
-            }
+            // TASK #69A-15 -- a SECOND reportMetadata chunk. worker.ts's
+            // own event handling REPLACES its accumulated metadata object
+            // wholesale on every reportMetadata event rather than merging
+            // one in, so this chunk re-sends every field the EARLY chunk
+            // (enqueued before the report call even started, from the
+            // PRE-correction researchAwareFinancialContext) already sent,
+            // plus this new field -- never a partial patch that could
+            // silently drop investmentScore/benchmarkFit/benchmarkScore/
+            // reportQuality/validationIntelligence from the final
+            // persisted metadata.
+            //
+            // TASK #69A-38D -- ROOT CAUSE FIX: this chunk used to be
+            // gated on `businessCompetitorLandscapeState ||
+            // portersFiveForcesState`, so a report with NEITHER (the
+            // exact reported case -- zero validated competitors AND no
+            // Porter structured response) never sent this correction at
+            // all, leaving the client permanently stuck on the EARLY
+            // chunk's stale, raw-evidence-derived competitive-evidence
+            // score. Sent unconditionally now, using
+            // finalResearchAwareFinancialContext (the post-generation,
+            // canonical-competitor-corrected context, always the
+            // freshest available context regardless of whether either
+            // structured state exists), so the client always ends up
+            // with the FINAL, internally consistent snapshot.
+            enqueue(
+              serializePlanReportMetadataChunk(
+                finalResearchAwareFinancialContext,
+                businessCompetitorLandscapeState,
+                portersFiveForcesState
+              )
+            );
             enqueue(serializePlanReportChunks(parsedReport));
 
             // Awaited (not fire-and-forget): the usage-write below marks
@@ -9949,15 +10641,31 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
                 : "GenerationFailed");
             const providerTimedOut =
               /timed out|timeout|aborted|abort/i.test(errorMessage);
+            // TASK #69A-39 -- distinguishes an output-token-budget
+            // truncation (assertCompletedOpenAiResponse's own thrown
+            // message, enriched above with "Incomplete reason:
+            // max_output_tokens." and "Completion tokens used: N.") from
+            // every other non-timeout failure. Previously this collapsed
+            // into the same opaque "generation_error" bucket as a JSON
+            // parse failure or a quality-gate rejection, so a real,
+            // reproducible resource-starvation bug (see
+            // BUSINESS_PLAN_REPORT_MAX_OUTPUT_TOKENS's own comment) was
+            // indistinguishable from unrelated failures in every log this
+            // pipeline ever produced.
+            const providerRanOutOfOutputTokens =
+              /max_output_tokens/i.test(errorMessage);
             // CRITICAL PRODUCTION FIX: any failure at this stage -- timeout,
             // quality-gate rejection, or the full-report JSON failing parse/
             // schema/isolation/contradiction validation inside
             // parseFullPlanReport/normalizeFullPlanReport -- means the raw
             // model output for this request cannot be trusted as-is. The
             // narrow version of this check (timeout or quality-gate only)
-            // let every OTHER failure reason (a JSON parse error, a field
-            // matching isReportGenerationFailureText, an isolation/decision-
-            // contradiction violation) fall through to the single-field
+            // let every OTHER failure reason (a JSON parse error, an
+            // isolation/decision-contradiction violation -- #69A-39A moved
+            // a single field matching isReportGenerationFailureText OFF
+            // this list entirely; that case no longer throws at all, see
+            // parseFullPlanReport's own per-field fallback) fall through
+            // to the single-field
             // "Plan report generation failed at ..." stub below instead --
             // which enqueues ONLY executiveSummary and leaves every other
             // required field absent from the stream, so worker.ts's schema
@@ -9973,11 +10681,55 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             const shouldUseGroundedFallback = true;
 
             if (shouldUseGroundedFallback) {
+              // TASK #69A-38F -- ROOT CAUSE FIX. Confirmed live: a REAL
+              // fresh report showing this exact fallback's own generic
+              // templates verbatim (competitorLandscape's "Direct
+              // competitors, substitutes, and status-quo alternatives
+              // within ... should be mapped against this business's
+              // specific wedge", executiveSummary's
+              // formatExecutiveDecisionBrief shape) PROVES the actual
+              // AI generation call for that report failed/timed out and
+              // fell through to THIS branch -- not the success path
+              // #69A-38D/#69A-38E's own corrections live in. This branch
+              // built `fallbackReport` from `researchAwareFinancialContext`
+              // (the PRE-competitor-correction context) and NEVER sent a
+              // reportMetadata chunk at all -- so the client/persistence
+              // kept whatever the EARLY, pre-generation metadata chunk
+              // (line ~9604) had already sent, which still carried the
+              // raw-evidence-derived "Competitive evidence: 93%;
+              // Distinct competitor organizations represented: 5"
+              // (dimensions.competitiveEvidence, market-research-
+              // coverage.ts). #69A-38D/#69A-38E's fixes never ran here at
+              // all -- they are wired only into the SUCCESS branch, which
+              // this generation never reached. A total generation
+              // failure means there is definitively no AI-produced
+              // competitor list to speak of -- the canonical competitor
+              // state here is unambiguously null/zero, never a guess.
+              const finalResearchAwareFinancialContext = refreshResearchAwareFinancialContext(
+                applyMarketResearchCoverageToContext(
+                  canonicalFinancialAssumptions,
+                  businessResearch,
+                  promptText,
+                  undefined,
+                  deriveCanonicalCompetitiveEvidence(null)
+                ).context
+              );
               const fallbackReport = createGroundedBusinessTimeoutFallback({
-                context: researchAwareFinancialContext,
+                context: finalResearchAwareFinancialContext,
                 research: businessResearch,
                 language: responseLanguage,
               });
+              // Defense in depth, mirroring the success-path fix exactly:
+              // even though fallbackReport's own templates already read
+              // the corrected context directly (so this should be a
+              // no-op in practice), this guarantees no stale mention can
+              // survive regardless of how any given fallback template is
+              // worded.
+              correctCompetitiveEvidenceMentions(
+                fallbackReport,
+                finalResearchAwareFinancialContext.investmentScore.decisionEngine.competitionScore.score,
+                0
+              );
               validateDomainResearchQualitySafely({
                 report: fallbackReport,
                 bundle: businessResearch,
@@ -9993,6 +10745,42 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
               if (strategicDecisionMemoReportSection) {
                 fallbackReport.executiveSummary = strategicDecisionMemoReportSection;
               }
+              // TASK #69A-38F -- mirrors the success path's own Tier 0/
+              // Tier 1 competitor and Porter state computation exactly:
+              // a fallback report's competitorLandscape/portersFiveForces
+              // fields are the generic createPlanFieldFallback templates
+              // (no schema-enforced JSON exists for a failed generation,
+              // so Tier 0 is correctly always null here), so Tier 1
+              // legitimately returns null competitors (no "COMPETITOR: X
+              // | ..." labeled lines exist in that generic template --
+              // the honest empty state, per this task's own instruction
+              // not to fabricate) and exactly 5 honestly-"Insufficient
+              // evidence" Porter forces. Computing and sending both
+              // explicitly (instead of leaving every renderer to fall
+              // through to its own independent, legacy per-renderer
+              // prose scan) guarantees web/PDF read the SAME canonical
+              // state for a failed generation as they would for a
+              // successful one.
+              const fallbackCompetitorLandscapeState = buildBusinessCompetitorLandscapeState(
+                fallbackReport.competitorLandscape
+              );
+              const fallbackPortersFiveForcesState = buildPortersFiveForcesStateFromLegacyProse(
+                fallbackReport.portersFiveForces
+              );
+              // TASK #69A-38F -- this fallback path never sent a
+              // reportMetadata chunk at all before, leaving the client/
+              // persistence stuck on the EARLY, pre-generation snapshot.
+              // Sent unconditionally, mirroring the success path's own
+              // now-unconditional second chunk, so a failed/timed-out
+              // generation's persisted investmentScore is exactly as
+              // truthful as a successful one's.
+              enqueue(
+                serializePlanReportMetadataChunk(
+                  finalResearchAwareFinancialContext,
+                  fallbackCompetitorLandscapeState,
+                  fallbackPortersFiveForcesState
+                )
+              );
               enqueue(serializePlanReportChunks(fallbackReport));
               logReportTimingSummary({
                 requestId: reportRequestId,
@@ -10017,7 +10805,14 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
                     ? "timeout"
                     : error instanceof ExecutiveQualityGateError
                       ? "quality_gate"
-                      : "generation_error",
+                      : providerRanOutOfOutputTokens
+                        ? "output_token_limit"
+                        : "generation_error",
+                  // TASK #69A-39 -- the raw provider/validation error text
+                  // (never user prompt content) so an "generation_error"
+                  // classification is diagnosable after the fact instead
+                  // of opaque.
+                  errorDetail: errorMessage.slice(0, 500),
                 }
               );
               return;

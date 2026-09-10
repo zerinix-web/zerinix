@@ -215,6 +215,96 @@ function isD2cFoodOrFmcg(model: FinancialModel) {
   );
 }
 
+// TASK #69A-54 -- ROOT CAUSE FIX. #69A-53 corrected executionComplexityScore's
+// DIRECTION (higher = better readiness), but left its own accuracy
+// unaudited: the score was, and remains, a flat 3-way bucket (capitalHeavy
+// ? 0.42 : d2cFoodOrFmcg ? 0.5 : 0.66) keyed to a narrow physical-
+// capital-intensity keyword list -- confirmed live, a real SMB AI
+// forecasting SaaS prompt ("AI-powered financial planning... integrating
+// with QuickBooks/Xero") matched neither capitalHeavy nor d2cFoodOrFmcg,
+// so it silently defaulted to 0.66 (the EASIEST bucket) even though its
+// own generated narrative separately, correctly identified real
+// execution burden ("integrations, model training, and channel building
+// raise complexity") -- the exact number/narrative mismatch #69A-53 set
+// out to prevent, just from a missed SIGNAL rather than a wrong
+// DIRECTION.
+//
+// FIX: 7 bounded, evidence-specific execution-burden categories, each
+// checked against literal USER INPUT (the submitted prompt text --
+// explicitly a sanctioned evidence source; see this function's own doc
+// comment), NEVER a large uncontrolled keyword bag -- each category is a
+// single, narrow regex tied to a real, named burden type (never a bare
+// "ai"/"integration" alone, which would fire on unrelated marketing
+// language). A category counts AT MOST ONCE regardless of how many of
+// its own keywords match (no double counting within a category), and
+// each matched category subtracts the SAME small, fixed, bounded amount
+// (EXECUTION_BURDEN_CATEGORY_PENALTY) from the existing capitalHeavy/
+// d2cFoodOrFmcg baseline -- purely ADDITIVE on top of #69A-53's own
+// unchanged formula, so a prompt that matches NONE of these categories
+// (the common case for most existing test fixtures) produces the exact
+// same score as before, byte-for-byte. Deliberately excludes the
+// "Operational complexity" and "Distribution/channel complexity"
+// categories the ticket also names: those are already covered by the
+// EXISTING capitalHeavy (physical/capital-intensive operations) and
+// d2cFoodOrFmcg (D2C/FMCG retail distribution) checks respectively --
+// adding a second, separate keyword check for the same concept would be
+// duplicate counting, not new signal.
+export type ExecutionBurdenCategoryKey =
+  | "productTechnical"
+  | "integrationDependency"
+  | "dataInfrastructure"
+  | "regulatoryCompliance"
+  | "distributionChannel"
+  | "talentExpertise"
+  | "implementationOnboarding";
+
+const EXECUTION_BURDEN_CATEGORY_PATTERNS: Record<ExecutionBurdenCategoryKey, RegExp> = {
+  // AI/ML model training, data-quality-dependent forecasting/prediction --
+  // literal "ai-powered"/"machine learning" branding is included
+  // deliberately (a genuinely AI/ML-driven product carries real model-
+  // build/data-quality complexity as an inherent, literal, user-stated
+  // characteristic -- this is bounded inference from stated input, not
+  // hallucination), but bare "ai" alone is never enough on its own.
+  productTechnical:
+    /\b(ai-powered|ai-driven|ai-enabled|machine learning|predictive model(?:s|ing)?|forecasting (?:model|algorithm|engine)|model training|train(?:ing)? (?:a |an |the )?(?:ai|ml) model|proprietary algorithm|fine-tun(?:e|ing))\b/,
+  integrationDependency:
+    /\b(integrat(?:e|es|ing|ion|ions) with|third-party integrations?|api integrations?|multiple integrations|depends? on (?:external|third-party) (?:platforms?|apis?|systems?))\b/,
+  dataInfrastructure:
+    /\b(data migration|data infrastructure|data pipeline|data quality requirements?|legacy data|data warehouse)\b/,
+  regulatoryCompliance:
+    /\b(regulatory (?:burden|requirements?|approval)|compliance burden|multi-jurisdiction|cross-border compliance|licensing requirements?|hipaa|gdpr|sox compliance|pci compliance)\b/,
+  distributionChannel:
+    /\b(channel (?:building|development|partnerships?)|distribution (?:motion|strategy) (?:is |remains )?unvalidated|reseller network|partner channel)\b/,
+  talentExpertise:
+    /\b(specialized talent|niche expertise|hard to hire|scarce talent|domain experts? required|specialized (?:engineers|staff|personnel))\b/,
+  implementationOnboarding:
+    /\b(long onboarding|lengthy deployment|enterprise implementation|multi-month (?:onboarding|deployment|implementation)|complex onboarding|extended (?:onboarding|deployment) cycles?)\b/,
+};
+
+// Short, human-readable fragments for the SAME categories, reused
+// verbatim by plan-executor.ts's buildCanonicalFounderScore (via the
+// reasoning line this function writes below) so the explanation a
+// reader sees is built from the IDENTICAL evidence the score used --
+// never a second, independently-worded description that could drift.
+const EXECUTION_BURDEN_CATEGORY_DESCRIPTIONS: Record<ExecutionBurdenCategoryKey, string> = {
+  productTechnical: "AI/ML model or data-quality requirements",
+  integrationDependency: "dependency on multiple third-party integrations",
+  dataInfrastructure: "data migration and infrastructure requirements",
+  regulatoryCompliance: "regulatory or compliance burden",
+  distributionChannel: "an unvalidated or difficult distribution/channel motion",
+  talentExpertise: "dependency on specialized or scarce talent",
+  implementationOnboarding: "long onboarding or enterprise implementation cycles",
+};
+
+const EXECUTION_BURDEN_CATEGORY_PENALTY = 0.05;
+const EXECUTION_READINESS_FLOOR = 0.15;
+
+function detectExecutionBurdenCategories(normalizedPrompt: string): ExecutionBurdenCategoryKey[] {
+  return (Object.keys(EXECUTION_BURDEN_CATEGORY_PATTERNS) as ExecutionBurdenCategoryKey[]).filter((key) =>
+    EXECUTION_BURDEN_CATEGORY_PATTERNS[key].test(normalizedPrompt)
+  );
+}
+
 function makeCategory(input: {
   key: InvestmentScoreCategoryKey;
   label: string;
@@ -296,8 +386,11 @@ export function createRecommendation(totalScore: number, confidence: number) {
 // averaged away by strong, unrelated dimensions. Deliberately checks
 // the 7 named Founder Readiness DIMENSION scores, not just the 8
 // top-level categories: teamFounder's own category score is itself an
-// AVERAGE of 6 sub-signals (ideaQuality counted twice, validationLevel,
-// founderEvidence, executionComplexity, a floored metricConfidence), so
+// AVERAGE of the same 7 sub-signals displayed as Founder Readiness
+// dimensions ([UPDATED BY #69A-51] ideaQuality counted twice --
+// see teamFounder's own construction below for why -- plus
+// businessModelQuality, validationLevel, evidenceConfidence,
+// founderEvidence, and executionComplexity, each counted once), so
 // even a genuinely catastrophic founderEvidenceScore gets diluted back
 // up to a moderate teamFounder category score the same way totalScore
 // dilutes teamFounder itself -- checking at dimension granularity is
@@ -535,9 +628,31 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
   // no longer be identical to Founder Evidence by construction, and a
   // founder-inexperience disclosure no longer silently drags down a
   // dimension that has nothing to do with founder capability.
+  //
+  // TASK #69A-51 -- ROOT CAUSE FIX (unit-conversion bug, found while
+  // auditing this exact dimension for low-evidence inflation):
+  // metricConfidenceScore (above) is already a normalizeHigherBetter
+  // result -- a 0-1 FRACTION, exactly like every other *Score variable
+  // in this file (ideaQualityScore, founderEvidenceScore, ...), never a
+  // 0-100 percentage. Dividing it by 100 here treated it as if it were
+  // already a percentage, crushing a genuinely perfect metric-confidence
+  // signal (1.0, i.e. every financial metric derived with "High"
+  // confidence) down to 0.01 before averaging -- silently making it
+  // almost impossible for real, strong metric confidence to ever raise
+  // Evidence Confidence, regardless of how well-evidenced the report
+  // actually was. Confirmed live: a fixture with 900 paying enterprise
+  // customers, validated CAC/payback, and every financial metric at
+  // "High" confidence still scored Evidence Confidence at 47/100 --
+  // explained exactly by this bug (average([0.01, ~0.93]) ~= 0.47), not
+  // by any real evidence weakness. This bug predates #69A-51 and was
+  // previously invisible because evidenceConfidenceScore was never part
+  // of the headline Founder Readiness aggregate (see teamFounder's own
+  // construction below) -- #69A-51's own fix (correctly including it)
+  // is what surfaced this bug's real impact for the first time, so
+  // fixing it here is required for that fix to behave correctly.
   const evidenceConfidenceScore = clamp(
     average([
-      metricConfidenceScore / 100,
+      metricConfidenceScore,
       validationEvidence
         ? clamp(0.7 + lifecycleConfidenceBoost(lifecycleStage), 0, 0.95)
         : 0.35,
@@ -545,7 +660,17 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
     0,
     0.95
   );
-  const executionComplexityScore = capitalHeavy ? 0.42 : d2cFoodOrFmcg ? 0.5 : 0.66;
+  const executionBaselineEase = capitalHeavy ? 0.42 : d2cFoodOrFmcg ? 0.5 : 0.66;
+  const matchedExecutionBurdenCategories = detectExecutionBurdenCategories(normalizedPrompt);
+  const executionComplexityScore = clamp(
+    executionBaselineEase - matchedExecutionBurdenCategories.length * EXECUTION_BURDEN_CATEGORY_PENALTY,
+    EXECUTION_READINESS_FLOOR,
+    executionBaselineEase
+  );
+  const executionBurdenSummary =
+    matchedExecutionBurdenCategories.length > 0
+      ? matchedExecutionBurdenCategories.map((key) => EXECUTION_BURDEN_CATEGORY_DESCRIPTIONS[key]).join("; ")
+      : "no specific integration, technical, regulatory, or distribution burden identified in the submitted information";
 
   const marketOpportunity = makeCategory({
     key: "marketOpportunity",
@@ -643,17 +768,111 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
     ],
   });
 
+  // TASK #69A-51 -- ROOT CAUSE FIX. Confirmed live and by direct,
+  // reproducible test: this average used to silently EXCLUDE two of the
+  // 7 dimensions its own reasoning text (below) already claims to
+  // describe -- businessModelQuality and evidenceConfidenceScore --
+  // while including a 6th term, Math.max(metricConfidenceScore, 0.55),
+  // that is never displayed as a Founder Readiness dimension at all and
+  // is artificially FLOORED at 55%, so it could never pull the aggregate
+  // down no matter how weak real metric confidence actually was. Net
+  // effect: "Evidence Confidence" (how much genuine evidence backs this
+  // analysis) had ZERO weight in the headline "Founder Readiness Score"
+  // a reader sees directly above it, and a hidden, artificially-propped
+  // term filled its place instead -- exactly the "low-evidence
+  // inflation" this ticket exists to close. Reproduced live: a fixture
+  // with Evidence Confidence=18/Founder Evidence=34/Validation
+  // Confidence=45 (all weak, genuine directional/unvalidated evidence)
+  // still produced a Founder Readiness Score of 60/100, mathematically
+  // explained by metricConfidenceScore's own floor plus the excluded
+  // dimensions, not by any real founder/customer proof.
+  //
+  // FIX: the average now includes EXACTLY the same 7 sub-signals already
+  // displayed as this report's own Founder Readiness dimensions --
+  // ideaQualityScore is counted twice because it legitimately backs TWO
+  // displayed dimensions (Idea Quality and Market Attractiveness,
+  // #69A-17's own established design, unchanged) -- so every displayed
+  // number the user actually sees has equal, direct influence on the
+  // headline score, and no hidden, undisplayed, artificially-floored
+  // term can prop it up. metricConfidenceScore is not deleted: it
+  // remains part of evidenceConfidenceScore's own, unfloored formula
+  // (see that variable's definition above), so its real signal still
+  // reaches the aggregate through its rightful, displayed channel
+  // instead of a shadow duplicate.
+  // TASK #69A-52 -- ROOT CAUSE FIX. Audited whether Evidence Confidence
+  // literally reads external market-research-coverage fields: it does
+  // not -- evidenceConfidenceScore (above) is built entirely from
+  // metricConfidenceScore (the financial model's OWN "High"/"Medium"/
+  // "Low" derivation-confidence tags, assigned at prompt-time, long
+  // before any research evidence exists -- confirmed in #69A-50's own
+  // trace: financialModel/metrics are never touched by
+  // applyMarketResearchCoverageToContext) and hasValidationEvidence's
+  // prompt-keyword check -- neither one is "external research evidence"
+  // in the sense of government/vendor/market/competitor sources.
+  //
+  // The REAL defect this ticket's own report exposes is narrower but
+  // just as real: metricConfidenceScore reads as "the model's own
+  // derivation is standard/well-formed" -- a signal that is HIGH for
+  // almost any benchmark-driven business plan regardless of whether the
+  // founder has proven anything -- so evidenceConfidenceScore (and,
+  // through it, this category's aggregate) can read comfortably high
+  // even when the two genuinely founder/validation-specific dimensions
+  // (founderEvidenceScore, validationLevelScore) are weak. Averaging all
+  // 7 displayed dimensions with equal weight (#69A-51's own fix) still
+  // lets 5 more optimistic dimensions dilute -- "average away" -- the 2
+  // that actually answer "is this founder/team ready, based on
+  // founder-specific and primary-validation evidence." Confirmed live:
+  // Founder Evidence=34/Validation Confidence=45 (both genuinely weak)
+  // coexisted with a 60/100 headline score.
+  //
+  // FIX: founderValidationCeiling is a NON-COMPENSATORY cap, not a
+  // reweighting -- opportunity quality, business model, execution ease,
+  // and evidence confidence may never lift the aggregate ABOVE what
+  // founder-specific + primary-validation evidence alone can support
+  // (plus a fixed headroom margin, reusing FATAL_BLOCKER_SCORE_RATIO's
+  // own established 15%-margin convention rather than inventing a new
+  // constant). Uses Math.min, not an average, of founderEvidenceScore
+  // and validationLevelScore: EACH must independently support the
+  // ceiling -- a strong validation signal must never "rescue" weak
+  // founder evidence by averaging with it (or vice versa), which is
+  // exactly what an average-based ceiling would still allow, one level
+  // removed from the original defect. A genuinely strong founder AND
+  // validation case (e.g. #69A-51's own STRONG_LOGISTICS fixture, both
+  // dimensions 70+) is never constrained by this cap; a case where
+  // EITHER is weak is, regardless of how strong every other dimension
+  // reads. Individual dimensionScores (Idea Quality, Evidence
+  // Confidence, ...) are completely unaffected -- only the AGGREGATE is
+  // capped, so Confidence Radar/Report Quality/every other displayed
+  // number stays exactly as its own formula computes it.
+  // MIN, not average: founderEvidenceScore and validationLevelScore must
+  // EACH independently constrain the ceiling -- a strong validation
+  // signal must never "rescue" catastrophically weak founder evidence
+  // (or vice versa) by averaging with it. Confirmed live: an average-
+  // based ceiling let a fixture with founderEvidenceScore=0.12 (explicit
+  // founder inexperience) but strong, validated CAC/payback evidence
+  // keep a ~62% ceiling -- exactly the "one weak dimension gets
+  // averaged away by a strong sibling" failure mode this ticket exists
+  // to close, one level removed. min() guarantees either dimension
+  // alone gates the ceiling; both must be genuinely strong for it to be
+  // generous.
+  const founderValidationCeiling = clamp(
+    Math.min(founderEvidenceScore, validationLevelScore) + FATAL_BLOCKER_SCORE_RATIO,
+    0,
+    0.95
+  );
+  const teamFounderRawAverage = average([
+    ideaQualityScore,
+    ideaQualityScore,
+    businessModel.score / businessModel.maximumScore,
+    validationLevelScore,
+    executionComplexityScore,
+    evidenceConfidenceScore,
+    founderEvidenceScore,
+  ]);
   const teamFounder = makeCategory({
     key: "teamFounder",
     label: "Team / Founder",
-    normalizedScore: average([
-      ideaQualityScore,
-      ideaQualityScore,
-      validationLevelScore,
-      founderEvidenceScore,
-      executionComplexityScore,
-      Math.max(metricConfidenceScore, 0.55),
-    ]),
+    normalizedScore: Math.min(teamFounderRawAverage, founderValidationCeiling),
     explanation:
       "Founder readiness separates the quality of the opportunity from the current level of validation and founder-specific evidence.",
     reasoning: [
@@ -661,6 +880,15 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
       `Business model quality: ${Math.round((businessModel.score / businessModel.maximumScore) * 100)}%`,
       `Validation confidence: ${Math.round(validationLevelScore * 100)}%`,
       `Execution complexity: ${Math.round(executionComplexityScore * 100)}%`,
+      // TASK #69A-54 -- a NEW, dedicated line (never replacing the
+      // "Execution complexity: NN%" line above, which #69A-47's own
+      // cross-file extraction in market-research-coverage.ts still
+      // matches by exact label text) carrying the SAME evidence the
+      // score above was computed from, so plan-executor.ts's
+      // buildCanonicalFounderScore can build its explanation from this
+      // canonical data instead of independently re-scanning the prompt
+      // with a second, potentially-drifting detector.
+      `Execution readiness factors: ${executionBurdenSummary}`,
       // TASK #69A-27 -- kept in sync with the de-collapsed
       // evidenceConfidence/founderEvidence dimensionScores entries
       // below: this reasoning line must report the SAME variable each
@@ -704,7 +932,12 @@ export function createInvestmentScore(input: InvestmentScoreInput): InvestmentSc
       score: roundScore((businessModel.score / businessModel.maximumScore) * 100),
     },
     { key: "validationConfidence", label: "Validation Confidence", score: roundScore(validationLevelScore * 100) },
-    { key: "executionComplexity", label: "Execution Complexity", score: roundScore(executionComplexityScore * 100) },
+    // TASK #69A-53 -- label corrected to "Execution Readiness" (this
+    // .label field is not itself read by any renderer -- report-
+    // presentation.ts's FOUNDER_READINESS_DIMENSIONS is the real,
+    // canonical display-label source -- but keeping it accurate avoids
+    // a stale, wrong-direction label sitting in this structured data).
+    { key: "executionComplexity", label: "Execution Readiness", score: roundScore(executionComplexityScore * 100) },
     { key: "evidenceConfidence", label: "Evidence Confidence", score: roundScore(evidenceConfidenceScore * 100) },
     { key: "founderEvidence", label: "Founder Evidence", score: roundScore(founderEvidenceScore * 100) },
   ];

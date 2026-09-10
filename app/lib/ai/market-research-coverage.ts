@@ -4,6 +4,7 @@ import type {
   DomainResearchEvidence,
 } from "@/app/lib/ai/domain-research";
 import { isAuthoritativeMarketEvidenceSource } from "@/app/lib/ai/commercial-vendor-intelligence";
+import type { BusinessCompetitorLandscapeState } from "@/app/lib/report-engine/business-competitor-landscape-state";
 
 export type MarketSourceClass =
   | "government_statistics"
@@ -272,9 +273,82 @@ function coversCompetitorEvidence(item: DomainResearchEvidence) {
   );
 }
 
+// TASK #69A-38D -- ROOT CAUSE FIX. Confirmed live: a fresh Business Idea
+// Validation report showed "Competitive evidence: 93%; Distinct
+// competitor organizations represented: 5" (Executive Summary /
+// Competitive Advantage category / Confidence Radar "Evidence") while
+// the SAME report's Competitor Landscape said "No competitor data could
+// be validated for this market yet." and Benchmark Intelligence said
+// "Competitor Insights: evidence missing" -- an internally contradictory
+// report. ROOT CAUSE: `competitorBreadth`/`dimensions.competitiveEvidence`
+// below were derived entirely from RAW, unstructured research evidence
+// (`competitorSources`, matched by field/claim/sourceType/impactReason
+// text against /compet|major.players|.../i) -- a rough estimate that
+// predates, and is completely independent of, the AI's own schema-
+// enforced `competitorLandscapeStructured` response
+// (business-competitor-landscape-state.ts's `businessCompetitorLandscapeState`,
+// #69A-15A's canonical, authoritative competitor source). Raw evidence
+// items can legitimately mention competitor-shaped text (a vendor
+// comparison snippet, a "product_evidence" research result) even when
+// the model's own FINAL structured competitor array comes back empty --
+// and since this coverage evaluation runs BEFORE report generation even
+// starts (plan-executor.ts calls it on the raw research bundle, long
+// before the AI response -- and therefore businessCompetitorLandscapeState
+// -- exists), it had no way to know that at the time. The two numbers
+// (a rough pre-generation estimate vs. the real post-generation
+// canonical list) were never reconciled once the canonical list became
+// available, so the report shipped whichever one each surface happened
+// to read.
+//
+// FIX: `canonicalCompetitorEvidence`, when provided, REPLACES the raw-
+// evidence-derived competitorBreadth/competitiveEvidence with the
+// canonical, structurally-authoritative values derived from
+// businessCompetitorLandscapeState (see deriveCanonicalCompetitiveEvidence
+// below) -- zero real competitors validated means competitorBreadth=0
+// and competitiveEvidence=0, never a leftover raw-evidence guess. Every
+// OTHER dimension (marketConfidence/financialEvidence/productEvidence/
+// executionReadiness/founderReadiness) is completely unaffected -- this
+// task is scoped to competitor evidence specifically, matching what was
+// actually proven wrong. Called a second time, after
+// businessCompetitorLandscapeState is known, by plan-executor.ts (see
+// its own #69A-38D comment) -- never called instead of the original,
+// pre-generation call, which must still run to produce the OTHER four
+// dimensions the generation prompt itself depends on.
+export function deriveCanonicalCompetitiveEvidence(
+  competitorState: Pick<BusinessCompetitorLandscapeState, "competitors"> | null | undefined
+): { competitorBreadth: number; competitiveEvidence: number } {
+  const competitors = competitorState?.competitors ?? [];
+  const competitorBreadth = competitors.length;
+
+  if (competitorBreadth === 0) {
+    return { competitorBreadth: 0, competitiveEvidence: 0 };
+  }
+
+  // Evidence QUALITY per validated competitor: how many of its own
+  // independently-captured fields (positioning/strengths/weaknesses/
+  // threat) are genuinely populated -- never the canonical "—" missing-
+  // value marker every Tier 0/Tier 1 builder already uses for a field
+  // the model could not support with evidence. Averaged across every
+  // real, named competitor, so one thin record among several well-
+  // evidenced ones does not by itself collapse the score, and one
+  // thin record ALONE cannot inflate it either.
+  const fieldCompletenessRatios = competitors.map((competitor) => {
+    const fields = [competitor.positioning, competitor.strengths, competitor.weaknesses, competitor.threat];
+    return fields.filter((field) => field && field !== "—").length / fields.length;
+  });
+  const averageFieldCompleteness = average(fieldCompletenessRatios);
+
+  const competitiveEvidence = clamp(
+    Math.min(competitorBreadth, 6) * 12 + averageFieldCompleteness * 28
+  );
+
+  return { competitorBreadth, competitiveEvidence };
+}
+
 export function evaluateMarketResearchCoverage(
   evidence: readonly DomainResearchEvidence[],
-  prompt = ""
+  prompt = "",
+  canonicalCompetitorEvidence?: { competitorBreadth: number; competitiveEvidence: number } | null
 ): MarketResearchCoverage {
   const verified = evidence.filter(isVerifiedExternal);
   const domains = new Set(verified.map((item) => normalizedDomain(item.url)).filter(Boolean));
@@ -311,12 +385,23 @@ export function evaluateMarketResearchCoverage(
   const sourceBreadthScore = clamp(Math.min(domains.size, 6) * 14);
   const sourceTypeScore = clamp(Math.min(classes.size, 5) * 18);
   const claimCoverage = clamp((coveredClaims / coveragePatterns.length) * 100);
-  const competitorBreadth = competitorOrganizations.size;
-  const competitiveEvidence = clamp(
-    Math.min(competitorBreadth, 6) * 12 +
+  // TASK #69A-38D -- see this function's own canonicalCompetitorEvidence
+  // parameter doc comment above: when the canonical, post-generation
+  // competitor state is available, it REPLACES this raw-evidence-only
+  // estimate entirely, rather than being blended with or overridden by
+  // it inconsistently.
+  const rawCompetitorBreadth = competitorOrganizations.size;
+  const rawCompetitiveEvidence = clamp(
+    Math.min(rawCompetitorBreadth, 6) * 12 +
       Math.min(new Set(competitorSources.map((item) => normalizedDomain(item.url))).size, 5) * 5 +
       quality * 0.15
   );
+  const competitorBreadth = canonicalCompetitorEvidence
+    ? canonicalCompetitorEvidence.competitorBreadth
+    : rawCompetitorBreadth;
+  const competitiveEvidence = canonicalCompetitorEvidence
+    ? canonicalCompetitorEvidence.competitiveEvidence
+    : rawCompetitiveEvidence;
   const marketConfidence = clamp(
     quality * 0.32 + sourceBreadthScore * 0.25 + sourceTypeScore * 0.18 + claimCoverage * 0.2 + fresh * 0.05
   );
@@ -402,10 +487,18 @@ export function applyMarketResearchCoverageToContext(
   context: AiFinancialModelContext,
   bundle: Pick<DomainResearchBundle, "evidence">,
   prompt: string,
-  coverageOverride?: MarketResearchCoverage
+  coverageOverride?: MarketResearchCoverage,
+  // TASK #69A-38D -- see evaluateMarketResearchCoverage's own doc
+  // comment. Threaded through here so plan-executor.ts's post-generation
+  // correction call (once businessCompetitorLandscapeState is known) can
+  // re-run this SAME function -- recomputing overallConfidence/
+  // competitionScore/reportIntelligence consistently in one pass -- with
+  // only competitor evidence replaced, never a second, divergent
+  // recomputation path.
+  canonicalCompetitorEvidence?: { competitorBreadth: number; competitiveEvidence: number } | null
 ) {
   const coverage =
-    coverageOverride || evaluateMarketResearchCoverage(bundle.evidence, prompt);
+    coverageOverride || evaluateMarketResearchCoverage(bundle.evidence, prompt, canonicalCompetitorEvidence);
   const dimensions = coverage.dimensions;
   const decisionEngine = context.investmentScore.decisionEngine;
   const originalFounderReasoning = decisionEngine.founderScore.reasoning;
@@ -475,27 +568,69 @@ export function applyMarketResearchCoverageToContext(
   // above) means thin external search coverage alone can no longer zero
   // this out, while a prompt with neither external corroboration nor any
   // self-reported evidence still scores low, honestly.
-  const founderScore = scoreCategory(
-    decisionEngine.founderScore,
-    dimensions.founderReadiness,
-    [
-      `Market attractiveness: ${Math.round((dimensions.marketConfidence + dimensions.founderReadiness) / 2)}%`,
-      // Business model quality, validation confidence, execution
-      // complexity, and evidence confidence are founder/business-model
-      // judgments (recurring revenue, margin, payback, lifecycle stage --
-      // see investment-score.ts) -- not something external web-research
-      // coverage can verify, so the category's own original,
-      // already-lifecycle-aware value is reused verbatim instead of
-      // being replaced by an unrelated research-coverage dimension. Falls
-      // back to the coverage dimension only if the original line was
-      // somehow missing (defensive, should not happen in practice).
-      `Business model quality: ${originalBusinessModelQuality ?? dimensions.productEvidence}%`,
-      `Validation confidence: ${originalValidationConfidence ?? dimensions.executionReadiness}%`,
-      `Execution complexity: ${originalExecutionComplexity ?? dimensions.executionReadiness}%`,
-      `Evidence confidence: ${originalEvidenceConfidence ?? coverage.overallConfidence}%`,
-      `Founder evidence: ${originalFounderEvidence ?? dimensions.founderReadiness}%`,
-    ]
-  );
+  // TASK #69A-47 -- ROOT CAUSE FIX. Confirmed live (and by direct,
+  // reproducible test): scoreCategory below overwrites founderScore.score
+  // with dimensions.founderReadiness -- a coarse, PROMPT-KEYWORD-derived
+  // proxy (promptReadiness, this file) -- discarding the richer,
+  // lifecycle-aware teamFounder category score investment-score.ts
+  // already computed (ideaQuality x2, validationLevel, founderEvidence,
+  // executionComplexity, a floored metricConfidence). #69A-27B's own
+  // comment immediately below ALREADY establishes that "Business model
+  // quality, validation confidence, execution complexity, and evidence
+  // confidence are founder/business-model judgments... not something
+  // external web-research coverage can verify" -- and correctly
+  // protects each of those four dimensions' own reasoning text AND
+  // dimensionScores entries from this contamination. But the CATEGORY
+  // TOTAL itself (founderScore.score, the exact field
+  // readFounderReadinessScoreValue reads for the headline "Founder
+  // Readiness Score") was never given the same protection: reproduced
+  // live, a fresh context with teamFounder.score=60 pre-refresh
+  // collapsed to founderScore.score=25 post-refresh -- exactly
+  // dimensions.founderReadiness, with ZERO founder-specific research
+  // evidence involved (an abundant-but-generic external evidence
+  // fixture was enough to trigger it) -- while its own 7 displayed
+  // dimensionScores (Idea Quality, Business Model Quality, ...) stayed
+  // completely unchanged. This is precisely the "same concept
+  // recomputed differently in different sections" defect this ticket
+  // exists to close: the headline Founder Readiness Score must be
+  // computed the SAME way its own displayed dimensions are, never
+  // silently replaced by an unrelated market-research-coverage signal.
+  //
+  // FIX: mirrors the EXACT preservation pattern this file's own #69A-43
+  // fix already established for financialConsistency/benchmarkFit/
+  // validationReadiness (report-intelligence.ts dimensions) -- the
+  // original, pre-refresh founderScore.score is preserved verbatim.
+  // Only .reasoning (informational text, already correctly protected by
+  // #69A-27B's own original-value preservation below) is refreshed.
+  // refreshInvestmentNarrativeFromResearchCoverage (investment-score.ts)
+  // reads this SAME, now-corrected decisionEngine.founderScore.score to
+  // recompute investmentScore.categories.teamFounder.score immediately
+  // afterward in this pipeline's own established call order -- so this
+  // one preservation point is sufficient; no second fix is needed there.
+  const founderScore = {
+    ...scoreCategory(
+      decisionEngine.founderScore,
+      dimensions.founderReadiness,
+      [
+        `Market attractiveness: ${Math.round((dimensions.marketConfidence + dimensions.founderReadiness) / 2)}%`,
+        // Business model quality, validation confidence, execution
+        // complexity, and evidence confidence are founder/business-model
+        // judgments (recurring revenue, margin, payback, lifecycle stage --
+        // see investment-score.ts) -- not something external web-research
+        // coverage can verify, so the category's own original,
+        // already-lifecycle-aware value is reused verbatim instead of
+        // being replaced by an unrelated research-coverage dimension. Falls
+        // back to the coverage dimension only if the original line was
+        // somehow missing (defensive, should not happen in practice).
+        `Business model quality: ${originalBusinessModelQuality ?? dimensions.productEvidence}%`,
+        `Validation confidence: ${originalValidationConfidence ?? dimensions.executionReadiness}%`,
+        `Execution complexity: ${originalExecutionComplexity ?? dimensions.executionReadiness}%`,
+        `Evidence confidence: ${originalEvidenceConfidence ?? coverage.overallConfidence}%`,
+        `Founder evidence: ${originalFounderEvidence ?? dimensions.founderReadiness}%`,
+      ]
+    ),
+    score: decisionEngine.founderScore.score,
+  };
   const confidenceLevel = classifyMarketConfidence(coverage.overallConfidence);
   const reportConfidenceLevel = `${confidenceLevel} Confidence` as
     | "High Confidence"
@@ -528,14 +663,118 @@ export function applyMarketResearchCoverageToContext(
         confidenceLevel: reportConfidenceLevel,
         overallQuality,
         dimensions: {
-          evidenceQuality: dimensions.marketConfidence,
+          // TASK #69A-50 -- ROOT CAUSE FIX, same pattern and same audit
+          // class as financialConsistency/benchmarkFit/validationReadiness
+          // immediately below: this line used to unconditionally read
+          // `dimensions.marketConfidence` -- how much EXTERNAL, VERIFIED
+          // market research evidence exists -- for a dimension
+          // report-presentation.ts labels "Data Completeness" (see
+          // getReportQualityBreakdown), which report-intelligence.ts's
+          // own createReportIntelligenceModel originally computes as
+          // `clampScore(investmentScore.confidence*0.45 +
+          // decisionConfidence.confidenceScore*0.25 +
+          // (hasUserEvidence?22:4))` -- a measure of how complete the
+          // INPUTS to this analysis are, INCLUDING whether the founder
+          // supplied real user/customer/revenue evidence. These are
+          // unrelated concepts: a founder who has supplied real MRR,
+          // paying-customer, and waitlist figures has genuinely complete
+          // input data regardless of how much INDEPENDENT external market
+          // research this pipeline happened to find. Confirmed live and
+          // by direct, reproducible test: a fixture with real, stated
+          // MRR/paying-customer/waitlist evidence scored evidenceQuality=70
+          // pre-refresh, then collapsed to 0 post-refresh purely because
+          // external research evidence was sparse for that market --
+          // while nothing about the founder's own supplied data changed
+          // at all. FIX: preserve the original, pre-refresh value, mirroring
+          // the exact preservation pattern already established for
+          // financialConsistency/benchmarkFit/validationReadiness below.
+          evidenceQuality: context.reportIntelligence?.dimensions?.evidenceQuality ?? 0,
           sourceConfidence: clamp(
             coverage.averageQuality * 0.55 +
               Math.min(coverage.independentDomains, 6) * 7.5
           ),
-          financialConsistency: dimensions.financialEvidence,
-          benchmarkFit: dimensions.competitiveEvidence,
-          validationReadiness: dimensions.executionReadiness,
+          // TASK #69A-43 -- ROOT CAUSE FIX. Confirmed live: a fresh
+          // report showed Report Quality's "Financial Consistency:
+          // 67/100" and Confidence Radar "Financial: 67" while the
+          // report's own financial assumptions (ARPA/CAC/LTV/gross
+          // margin/burn/runway/investment need) were still entirely
+          // unvalidated planning estimates -- no paying customers, no
+          // pilots, no observed retention/CAC. ROOT CAUSE: this line
+          // read `dimensions.financialEvidence` -- how much EXTERNAL
+          // market/industry research evidence was found about financial
+          // topics (Census/BLS/GAO-style macro data; #69A-40B's own
+          // investigation traced exactly this kind of evidence) -- a
+          // completely unrelated concept from "Financial Consistency"
+          // (whether THIS business's own financial model is internally
+          // coherent: margin vs. CAC vs. LTV vs. runway), which shares
+          // no conceptual overlap with research-evidence coverage at
+          // all. Having many external sources about the market or
+          // industry does not validate this business's own CAC, LTV, or
+          // burn assumptions -- exactly the semantic-contamination
+          // pattern #69A-38G already fixed once for benchmarkFit,
+          // immediately below, just unaudited for this sibling
+          // dimension at the time. report-intelligence.ts's own
+          // createReportIntelligenceModel already computes this exact
+          // dimension correctly and deterministically from
+          // context.financialConsistency.quality (the financial model's
+          // own internal-coherence check -- Healthy/Needs Validation/
+          // Poor -- computed once from the canonical financial
+          // assumptions, confirmed never touched by market research:
+          // see #69A-18A's own comment on this file listing
+          // financialConsistency among the four inputs market research
+          // never alters). That already-correct, already-computed value
+          // is preserved verbatim here -- never silently replaced with
+          // an unrelated dimension merely because both happened to need
+          // *some* number under this refresh's object literal.
+          financialConsistency:
+            context.reportIntelligence?.dimensions?.financialConsistency ?? 34,
+          // TASK #69A-38G -- ROOT CAUSE FIX. Confirmed live: a fresh
+          // report showed Executive Snapshot/Report Quality's "Benchmark
+          // Fit: 0/100" while the SAME report's Benchmark Intelligence
+          // panel said "Overall Fit: 70/100" -- an internally
+          // contradictory report. ROOT CAUSE: this line used to read
+          // `dimensions.competitiveEvidence` -- a completely unrelated
+          // metric (competitive EVIDENCE strength, #69A-38D/#69A-38E/
+          // #69A-38F's own now-corrected value, honestly 0 when no
+          // competitors are validated) that happens to share no
+          // conceptual overlap with "benchmark fit" at all -- it was
+          // never re-derived from context.benchmarkFit (financial-
+          // model.ts's own createBenchmarkFit, the SAME structured
+          // object Benchmark Intelligence's own overallFit is built
+          // from via createBenchmarkIntelligenceScore) the way
+          // report-intelligence.ts's own benchmarkFitScore(context)
+          // originally computed this exact dimension at context-
+          // creation time. context.benchmarkFit is never changed by
+          // market research at all (it depends only on the financial
+          // model's own benchmark comparison, computed once from the
+          // prompt), so this dimension's already-correct, already-
+          // computed value from context.reportIntelligence.dimensions.benchmarkFit
+          // is preserved verbatim here -- never silently replaced with
+          // an unrelated dimension merely because both happened to need
+          // *some* number under this refresh's object literal. Optional
+          // chaining is defensive only, for a hand-built partial test
+          // context (e.g. `reportIntelligence: {}`) that never runs
+          // through createCanonicalFinancialAssumptions -- every real
+          // caller's context already has this field populated, since
+          // AiFinancialModelContext requires it non-optionally.
+          benchmarkFit: context.reportIntelligence?.dimensions?.benchmarkFit ?? 0,
+          // TASK #69A-43 -- ROOT CAUSE FIX, same pattern and same audit
+          // pass as financialConsistency immediately above:
+          // "Validation Readiness" (how ready is customer-demand/
+          // pricing/CAC/retention validation, per
+          // report-intelligence.ts's own validationReadinessScore(context.validationIntelligence))
+          // was being silently replaced by `dimensions.executionReadiness`
+          // -- a business-model/capital/team execution-difficulty signal
+          // with no conceptual relationship to validation status at all.
+          // context.validationIntelligence is untouched by this refresh
+          // (only investmentScore/reportIntelligence are ever
+          // overwritten by the object literal below; every other
+          // context field, including validationIntelligence, survives
+          // via the `...context` spread above), so the already-correct,
+          // already-computed value is preserved verbatim, never
+          // silently replaced with an unrelated dimension.
+          validationReadiness:
+            context.reportIntelligence?.dimensions?.validationReadiness ?? 42,
         },
         confidenceSummary: coverage.verifiedMarketSizeAvailable
           ? "Market confidence reflects aggregate source, competitor, product, and financial coverage."

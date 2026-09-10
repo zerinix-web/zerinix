@@ -1,7 +1,7 @@
 import type { FinancialConsistencyCheck, FinancialModel } from "@/app/lib/ai/financial-model";
 import type { InvestmentScore } from "@/app/lib/ai/investment-score";
 import type { SourceIntelligenceModel } from "@/app/lib/ai/source-intelligence";
-import type { ValidationIntelligenceModel } from "@/app/lib/ai/validation-intelligence";
+import type { ValidationIntelligence } from "@/app/lib/ai/validation-intelligence";
 import { deriveReportQualityConfidence } from "@/app/lib/report-confidence-quality.mjs";
 
 export type ReportQualityLevel = "High Confidence" | "Moderate Confidence" | "Low Confidence";
@@ -102,22 +102,39 @@ function benchmarkFitScore(context: ReportIntelligenceInput) {
   return clampScore(fitBase + confidenceAdjustment - gapPenalty);
 }
 
-function validationReadinessScore(validationIntelligence?: ValidationIntelligenceModel) {
-  if (!validationIntelligence) {
+// TASK #69A-44 -- ROOT CAUSE FIX (canonical metric consolidation).
+// Confirmed live: a fresh report's Executive Snapshot showed "Validation
+// Readiness: 19/100" while the SAME report's own
+// formatValidationIntelligenceSummary text (financial-assumptions.ts,
+// embedded elsewhere in the same report) showed "Validation Readiness
+// Score: 47/100" -- two DIFFERENT numbers already carrying the
+// near-identical label "Validation Readiness"/"Validation Readiness
+// Score" for what is unambiguously meant to be the SAME concept
+// (how mature is this business's real-world validation).
+//
+// ROOT CAUSE: this dimension used to read context.validationIntelligence
+// (ValidationIntelligenceModel, "V1" -- a crude score/experiments-count
+// model, #69A-4-era) instead of context.validationIntelligenceV2
+// (ValidationIntelligence, "V2" -- the richer, per-assumption
+// customer-demand/pricing/CAC/retention/operational model that already
+// IS this report's own single canonical validation-maturity source
+// everywhere else: formatValidationIntelligenceSummary's own "Validation
+// Readiness Score" text, and the persisted metadata.validationIntelligence
+// object every renderer's dedicated validation panel reads). V1 and V2
+// are two independently-computed scoring functions for the exact same
+// semantic metric, calculated inconsistently -- a genuine duplicate,
+// not two legitimately different concepts. V1 is never touched by
+// market research (same as V2 -- both read only financialModel/
+// financialConsistency/sourceIntelligence/decisionConfidence, confirmed
+// in financial-assumptions.ts), so this is a pure consolidation onto the
+// existing, richer, already-canonical source -- not a new computation
+// and not a formula change to any OTHER metric.
+function validationReadinessScore(validationIntelligenceV2?: ValidationIntelligence) {
+  if (!validationIntelligenceV2) {
     return 42;
   }
 
-  const scoreBase =
-    validationIntelligence.score === "Validated"
-      ? 84
-      : validationIntelligence.score === "In Progress"
-        ? 62
-        : 34;
-  const requiredExperiments = validationIntelligence.experiments.filter(
-    (experiment) => experiment.score !== "Validated"
-  ).length;
-
-  return clampScore(scoreBase - Math.min(18, requiredExperiments * 3));
+  return clampScore(validationIntelligenceV2.overallScore);
 }
 
 function hasUserEvidence(context: ReportIntelligenceInput) {
@@ -130,7 +147,11 @@ type ReportIntelligenceInput = FinancialModel & {
   investmentScore: InvestmentScore;
   financialConsistency: FinancialConsistencyCheck;
   sourceIntelligence?: SourceIntelligenceModel;
-  validationIntelligence?: ValidationIntelligenceModel;
+  // TASK #69A-44 -- consolidated onto V2 (the richer, per-assumption
+  // model already used as this report's single canonical validation-
+  // maturity source everywhere else); V1 (ValidationIntelligenceModel)
+  // is intentionally no longer read here.
+  validationIntelligenceV2?: ValidationIntelligence;
   decisionConfidence: {
     confidenceScore: number;
     decision: "GO" | "WAIT" | "NO-GO";
@@ -155,7 +176,7 @@ export function createReportIntelligenceModel(context: ReportIntelligenceInput):
   const executionReadiness = categoryScore(context, "executionRisk");
   const sourceConfidence = sourceConfidenceScore(context.sourceIntelligence);
   const benchmarkFit = benchmarkFitScore(context);
-  const validationReadiness = validationReadinessScore(context.validationIntelligence);
+  const validationReadiness = validationReadinessScore(context.validationIntelligenceV2);
   const weightedScore = clampScore(
     (evidenceQuality * 0.25) +
       (sourceConfidence * 0.2) +

@@ -698,14 +698,42 @@ export const FOUNDER_READINESS_DIMENSIONS: readonly FounderReadinessDimension[] 
     aliases: ["Validation Confidence", "Doğrulama Güveni"],
   },
   {
+    // TASK #69A-53 -- LABEL RENAME, REQUIRED FOR CORRECTNESS (not
+    // cosmetic): traced executionComplexityScore's own formula
+    // (investment-score.ts: capitalHeavy ? 0.42 : d2cFoodOrFmcg ? 0.5 :
+    // 0.66) and confirmed it already means execution EASE/readiness --
+    // higher = less capital-heavy/operationally-risky = MORE ready to
+    // execute, exactly the same "higher = better" direction every other
+    // Founder Readiness dimension uses. The label "Execution Complexity"
+    // implies the opposite (higher = harder), and confirmed live this
+    // actively causes the AI MODEL's own free-written explanation
+    // (plan-executor.ts's buildCanonicalFounderScore, via
+    // extractFounderDimensionExplanation) to describe REASONS FOR
+    // COMPLEXITY next to a HIGH, good-looking number -- e.g. "Execution
+    // Complexity: 66/100 -- integrations, model training, and channel
+    // building raise complexity," which reads as contradictory (a high
+    // score should mean strong readiness, not "raises complexity").
+    // Renamed to "Execution Readiness" -- the ticket's own top
+    // recommendation, and the name that matches what the underlying
+    // score has always actually measured. No inversion of the
+    // underlying score: it was already oriented higher-is-better, so a
+    // historical report's already-persisted number needs no adapter --
+    // it is read back under the exact same meaning it was written
+    // with. The internal key stays "executionComplexity" (minimal,
+    // safe migration, per this ticket's own instruction not to perform
+    // a broad unrelated rename) -- only the user-facing label and
+    // prompt/explanation wording change (see plan-executor.ts).
     key: "executionComplexity",
-    label: "Execution Complexity",
+    label: "Execution Readiness",
     aliases: [
+      "Execution Readiness",
+      "Execution Feasibility",
       "Execution Complexity",
       "executionComplexity",
       "Execution Difficulty",
       "executionDifficulty",
       "Execution",
+      "Yürütme Hazırlığı",
       "Uygulama Karmaşıklığı",
       "Yürütme Karmaşıklığı",
       "Uygulama Zorluğu",
@@ -959,11 +987,30 @@ export function getReportQualityBreakdown(
   // what each dimension actually measures: how complete the underlying
   // data is, and how much confidence the plan as a whole supports given
   // what has and hasn't been validated.
+  //
+  // TASK #69A-44 -- LABEL RENAME ONLY (no value/formula change):
+  // sourceConfidence's own label, "Planning Confidence", was confirmed
+  // live to mislead: it measures research SOURCE quality/diversity
+  // (coverage.averageQuality + independent-domain diversity, market-
+  // research-coverage.ts), not "how confident are we in the financial
+  // plan" -- a reasonable, wrong inference right next to this exact
+  // panel's own "Financial Consistency"/"Validation Readiness" cards,
+  // which genuinely ARE about the plan itself. It also happens to share
+  // its exact text with Planner.tsx's own, entirely different,
+  // Market-Intelligence-only override of a DIFFERENT metric
+  // (investmentScore.confidence, that report type's own overall
+  // confidence) -- two unrelated concepts in two different report
+  // types coincidentally sharing one label. Renamed to "Source
+  // Strength" -- specific to what this dimension actually measures,
+  // never reintroducing the internal-sounding "Source Confidence"/
+  // "Evidence Quality" phrasing this exact label was already, and
+  // deliberately, moved away from once before (see this comment's own
+  // history above).
   const labels = isTurkish
     ? {
         totalScore: "Genel Kalite Skoru",
         evidenceQuality: "Veri Bütünlüğü",
-        sourceConfidence: "Planlama Güveni",
+        sourceConfidence: "Kaynak Gücü",
         financialConsistency: "Finansal Tutarlılık",
         benchmarkFit: "Benchmark Uyumu",
         validationReadiness: "Doğrulama Hazırlığı",
@@ -971,7 +1018,7 @@ export function getReportQualityBreakdown(
     : {
         totalScore: "Overall Quality Score",
         evidenceQuality: "Data Completeness",
-        sourceConfidence: "Planning Confidence",
+        sourceConfidence: "Source Strength",
         financialConsistency: "Financial Consistency",
         benchmarkFit: "Benchmark Fit",
         validationReadiness: "Validation Readiness",
@@ -1155,8 +1202,57 @@ function buildConfidenceRadar(
       score: investmentScore?.decisionEngine?.marketScore?.score,
     },
     {
-      label: isTurkish ? "Finansal" : "Financial",
-      aliases: ["Financial Confidence", "Financial Quality", "Finansal Güven", "Finansal Kalite"],
+      // TASK #69A-47 -- LABEL RENAME (superseded by #69A-49 below):
+      // confirmed live, a fresh report showed Confidence Radar
+      // "Financial: 67" directly beside Executive Snapshot's own
+      // "Financial Consistency: 34" -- this dimension's real source
+      // (decisionEngine.financialScore, market-research-coverage.ts's
+      // scoreCategory driven by dimensions.financialEvidence) is a
+      // genuinely different concept from "Financial Consistency"
+      // (reportIntelligence.dimensions.financialConsistency, the
+      // financial MODEL's own internal coherence -- LTV vs. CAC vs.
+      // margin vs. runway, #69A-43's own established, unchanged source)
+      // and from #69A-46's own canonical "Financial Evidence"
+      // (per-metric Verified/Derived/Benchmark/Assumption classification
+      // of THIS business's financial inputs). Renamed to "Financial
+      // Signal" at the time, only ruling out those two collisions.
+      //
+      // TASK #69A-49 -- FOLLOW-UP FIX (same value/formula, label refined
+      // again): re-traced dimensions.financialEvidence's own formula
+      // (market-research-coverage.ts's evaluateMarketResearchCoverage)
+      // to its exact definition -- NOT a generic "how much financial
+      // research exists" guess, but precisely: 58 + up to 22 for
+      // financial-filing source count + a small quality term when a
+      // verified market-size figure was found in research, or a much
+      // lower 22 + up to 24 for filing count + quality when none was
+      // found. In other words: the strength of EXTERNAL, independently
+      // verified market-size/financial-filing evidence available to
+      // benchmark this business's own financial assumptions against --
+      // a real, legitimate, and now precisely definable concept (matching
+      // the "strength of external market/benchmark signals supporting
+      // financial assumptions" shape), never reused or aliased from an
+      // unrelated dimension. But "Financial Signal" still reads as
+      // generically as "Financial Consistency" or "Financial Evidence"
+      // to a founder scanning the same executive area -- confirmed live,
+      // "Financial Signal: 67" sitting beside "Financial Consistency: 34"
+      // is still reasonably read as two measurements of the same thing.
+      // Renamed to "Financial Research Coverage" -- names the SOURCE
+      // (external research, not this business's own model or inputs)
+      // and the SHAPE (coverage/breadth of verified market-size and
+      // financial-filing evidence), so it can no longer be mistaken for
+      // either Financial Consistency (internal model coherence) or
+      // Financial Evidence (this business's own input provenance).
+      label: isTurkish ? "Finansal Araştırma Kapsamı" : "Financial Research Coverage",
+      aliases: [
+        "Financial Research Coverage",
+        "Financial Signal",
+        "Financial Confidence",
+        "Financial Quality",
+        "Finansal Araştırma Kapsamı",
+        "Finansal Sinyal",
+        "Finansal Güven",
+        "Finansal Kalite",
+      ],
       score: investmentScore?.decisionEngine?.financialScore?.score,
     },
     {
@@ -1202,8 +1298,27 @@ function buildConfidenceRadar(
       // structured-first precedence change below together make this
       // dimension's value the SAME by construction for every caller,
       // never again by coincidence.
-      label: isTurkish ? "Kanıt" : "Evidence",
-      aliases: ["Competitive Evidence", "Evidence Strength", "Rekabet Kanıtı", "Kanıt Gücü"],
+      //
+      // TASK #69A-44 -- LABEL RENAME ONLY (no value/formula change):
+      // confirmed live, a fresh report showed Confidence Radar "Evidence:
+      // 71/100" (this dimension, decisionEngine.competitionScore --
+      // competitive-advantage/moat evidence strength) directly beside
+      // Founder Readiness's own "Evidence Confidence: 18/100" (a
+      // completely different metric: financial-metric confidence blended
+      // with founder validation-evidence presence). The bare word
+      // "Evidence" here reads, to a founder, as the same concept as
+      // Founder Readiness's "Evidence Confidence" purely because both
+      // labels share that one word -- even though this dimension's own
+      // #69A-27A comment above already establishes it is a "closest fit"
+      // proxy for a genuinely different concept (competitive moat
+      // strength, not founder/financial evidence quality). Renamed to
+      // "Moat Evidence" -- specific enough that it can no longer be
+      // mistaken for Founder Readiness's own dimension, and consistent
+      // with the "competitive-EVIDENCE strength" framing an earlier
+      // ticket already established for this exact same
+      // decisionEngine.competitionScore value.
+      label: isTurkish ? "Rekabet Kanıtı" : "Moat Evidence",
+      aliases: ["Moat Evidence", "Competitive Evidence", "Evidence Strength", "Rekabet Kanıtı", "Kanıt Gücü"],
       score: investmentScore?.decisionEngine?.competitionScore?.score,
     },
   ];

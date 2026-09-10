@@ -57,6 +57,11 @@ import {
   inferEvidenceLevel,
   sourceTypeToEvidenceLevel,
 } from "@/app/lib/report-evidence";
+import {
+  deriveFinancialEvidenceSummary,
+  hasVerifiedUserProvidedData,
+  type FinancialEvidenceSummary,
+} from "@/app/lib/financial-evidence-labeling";
 
 export type ReportKind = "business_plan" | "market_analysis";
 export type AiFinancialModelContext = FinancialModel & {
@@ -68,6 +73,15 @@ export type AiFinancialModelContext = FinancialModel & {
   sourceIntelligence: SourceIntelligenceModel;
   validationIntelligence: ValidationIntelligenceModel;
   validationIntelligenceV2: ValidationIntelligence;
+  // TASK #69A-46 -- canonical, report-level financial evidence
+  // provenance summary (see financial-evidence-labeling.ts's own
+  // comment): a pure aggregation of the SAME per-metric classification
+  // classifyFinancialMetricEvidenceType already computes, deliberately
+  // SEPARATE from financialConsistency (internal coherence, above) --
+  // never wired into decisionEngine's own threshold math. Optional so a
+  // historical report computed before this field existed degrades
+  // honestly (no reconstruction from prose) rather than fabricating it.
+  financialEvidence?: FinancialEvidenceSummary;
   // TASK #69A-5 -- the ORIGINAL 3 prompt-text-only heuristic validation
   // gaps createBenchmarkFit (financial-model.ts) computes, preserved here
   // verbatim and separately from the authoritative, evidence-derived ones
@@ -391,13 +405,28 @@ export function createCanonicalFinancialAssumptions(input: {
     sourceIntelligence,
   };
 
+  // TASK #69A-46 -- computed once here, from the SAME financialModel.metrics
+  // and financialConsistency.sources.userProvidedData every other
+  // evidence-aware computation in this function already reads -- never
+  // a second, independently-derived evidence signal.
+  const financialEvidence = deriveFinancialEvidenceSummary(
+    financialModel.metrics,
+    hasVerifiedUserProvidedData(financialConsistency.sources.userProvidedData)
+  );
+
   return {
     ...contextWithoutReportIntelligence,
     validationIntelligence,
     validationIntelligenceV2,
+    financialEvidence,
     reportIntelligence: createReportIntelligenceModel({
       ...contextWithoutReportIntelligence,
-      validationIntelligence,
+      // TASK #69A-44 -- consolidated onto V2 (see report-intelligence.ts's
+      // own comment): validationReadinessScore now reads the same richer,
+      // per-assumption model formatValidationIntelligenceSummary already
+      // uses as this report's single canonical validation-maturity
+      // source, instead of the cruder, independently-scored V1 model.
+      validationIntelligenceV2,
     }),
   };
 }
@@ -461,16 +490,34 @@ export function formatCanonicalFinancialAssumptions(
     ? "This company already has verified paying customers -- never write 'validate willingness to pay', 'get first customers', or similar pre-revenue validation language anywhere in the report. Write about retention, net revenue retention, expansion revenue, CAC payback, and sales efficiency instead."
     : "This company has not yet reported paying customers or verified revenue -- validation-focused language (customer interviews, willingness to pay, first paid activation) is appropriate here.";
 
+  // TASK #69A-38B -- ROOT CAUSE FIX: this exact block is embedded
+  // verbatim into the generation prompt for EVERY report section (see
+  // plan-executor.ts's own `${financialAssumptionsContext}`
+  // interpolation), framed below as the "single source of truth ...
+  // reuse ... everywhere" -- confirmed live that showing the coarse,
+  // bounded benchmark-selection classification here (e.g. "Industry: AI
+  // software / automation") anchored the model's OWN Industry/Target
+  // Customer/Competitor/Porter reasoning away from the business's own,
+  // far more specific stated description, even on a genuinely fresh
+  // generation. `industryDescriptor`/`targetCustomerDescriptor` (see
+  // financial-model.ts's own #69A-38B comment) are a richer, explicit-
+  // context-preserving label used ONLY for this display line -- they
+  // fall back to the exact same coarse value whenever the prompt has no
+  // extractable, more specific description, so a vague/generic prompt's
+  // prompt text is completely unchanged. `industryKey`/`industry`
+  // themselves are untouched everywhere else (benchmark lookups,
+  // Turkish translation, every other narrative sentence).
   return `Data-Driven Financial Analysis Engine (${context.version}, ${context.fingerprint})
 Business idea fingerprint: ${context.normalizedBusinessIdea}
 Detected modeling inputs:
-- Industry: ${context.inputs.industry}
+- Industry: ${context.inputs.industryDescriptor} (benchmark basis: ${context.inputs.industry})
 - Company lifecycle stage: ${lifecycleStageLabel(lifecycleStage)}. ${lifecycleInstruction}
 - Business model: ${context.inputs.businessModel}
-- Target customer: ${context.inputs.targetCustomer}
+- Target customer: ${context.inputs.targetCustomerDescriptor}
 - Geography: ${context.inputs.geography}
 - Pricing model: ${context.inputs.pricingModel}
 - Benchmark basis: ${context.benchmark.basis}
+- These Industry/Target customer values describe the business itself; never narrow them to a generic category label when the submitted business context below states a more specific product, customer segment, or integration -- describe Industry/Target Customer/Competitors/Porter's Five Forces using the business's own specific stated language, not a generic template.
 
 Structured financial model:
 ${metricRows}
@@ -726,18 +773,29 @@ export function formatReportIntelligenceSummary(
 
     return dictionary[value] || value;
   };
+  // TASK #69A-44 -- LABEL CONSISTENCY FIX (no value/formula change):
+  // this function is currently unused (no call sites anywhere in the
+  // codebase), but its exported label map was left using the older,
+  // internal-sounding "Evidence Quality"/"Source Confidence" phrasing
+  // report-presentation.ts's getReportQualityBreakdown already moved
+  // away from ("Data Completeness"/"Source Strength", this exact same
+  // canonical taxonomy pass). Aligned here so the SAME
+  // reportIntelligence.dimensions object can never again be displayed
+  // under two different label sets depending on which formatter
+  // happens to render it, if this function is ever wired into a
+  // report section in the future.
   const dimensionLabels =
     language === "Turkish"
       ? {
-          evidenceQuality: "Kanıt Kalitesi",
-          sourceConfidence: "Kaynak Güveni",
+          evidenceQuality: "Veri Bütünlüğü",
+          sourceConfidence: "Kaynak Gücü",
           financialConsistency: "Finansal Tutarlılık",
           benchmarkFit: "Benchmark Uyumu",
           validationReadiness: "Doğrulama Hazırlığı",
         }
       : {
-          evidenceQuality: "Evidence Quality",
-          sourceConfidence: "Source Confidence",
+          evidenceQuality: "Data Completeness",
+          sourceConfidence: "Source Strength",
           financialConsistency: "Financial Consistency",
           benchmarkFit: "Benchmark Fit",
           validationReadiness: "Validation Readiness",

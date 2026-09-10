@@ -138,8 +138,18 @@ export const planPrompts = {
     maxTokens: 1050,
   },
   founderScore: {
+    // TASK #69A-53 -- "Execution Complexity" renamed to "Execution
+    // Readiness" here because the underlying score has always meant
+    // execution EASE/readiness (higher = better, exactly like every
+    // other dimension in this list) -- confirmed live, the old label
+    // caused the model to write its own explanation as if a HIGH score
+    // meant HIGH complexity ("...raise complexity"), directly
+    // contradicting the number sitting next to it. The explicit
+    // "higher score = better readiness" instruction stops the model
+    // from writing a complexity-framed sentence for a readiness-framed
+    // score.
     prompt:
-      "Write only executive readiness evaluation. Separate Idea Quality, Validation Confidence, and Founder Evidence. Founder Score must include Market Attractiveness, Business Model Quality, Validation Confidence, Execution Complexity, and Evidence Confidence. Do not punish idea quality only because founder data is missing; lower only validation confidence and founder evidence when proof is absent. Use 0-100 scores with concise explanations. Do not expose internal formulas or system scoring logic. Do not repeat recommendation, roadmap, or risk section. Max 190 words.",
+      "Write only executive readiness evaluation. Separate Idea Quality, Validation Confidence, and Founder Evidence. Founder Score must include Market Attractiveness, Business Model Quality, Validation Confidence, Execution Readiness, and Evidence Confidence. For every dimension, a higher score means better readiness -- Execution Readiness measures how EASY execution is, not how complex it is; never describe a high score as complex or difficult, and explain a low score in terms of what makes execution harder (integration burden, technical build complexity, channel-building difficulty, operational/regulatory load). Do not punish idea quality only because founder data is missing; lower only validation confidence and founder evidence when proof is absent. Use 0-100 scores with concise explanations. Do not expose internal formulas or system scoring logic. Do not repeat recommendation, roadmap, or risk section. Max 190 words.",
     maxTokens: 800,
   },
   sourcesAssumptions: {

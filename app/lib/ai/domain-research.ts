@@ -4722,6 +4722,76 @@ export const NUMERIC_CLAIM_LABEL_PATTERN =
 export const NUMERIC_CLAIM_PROVENANCE_PATTERN =
   /(?:\[R\d+\]|\[Asset:[^\]]+\]|\[User\]|\[Method:[^\]]+\]|\[Basis:[^\]]+\]|https?:\/\/|\b(?:benchmark source|formula|assumption)\b)/i;
 
+// TASK #69A-39C -- ROOT CAUSE FIX. Confirmed live: a REAL, fully
+// completed, evidence-rich business_plan generation (competitor names
+// Float/Dryrun/Fathom/Jirav/LivePlan genuinely present in the model's own
+// research-grounded output, real QuickBooks/Xero product-feature and
+// Porter's Five Forces analysis) was discarded ENTIRELY -- including its
+// genuinely-valid competitorLandscapeStructured/portersFiveForcesStructured
+// data -- because validateDomainResearchQuality's own content-shape gates
+// below operate on `Object.values(report).join("\n")`: a single unlabeled
+// numeric/external/factual claim ANYWHERE across all 24 planFields throws
+// for the WHOLE report, with no field attribution at all. This is the
+// exact same disproportionate-blast-radius pattern #69A-39A already fixed
+// for isReportGenerationFailureText -- one field's minor labeling slip
+// destroying 23 other genuinely valid fields -- just tripped by a
+// different gate this time.
+//
+// This reuses the SAME three content-shape checks validateDomainResearchQuality
+// enforces below (unsupported externally-verified claim, unsupported
+// labeled claim, unsupported numeric claim), byte-for-byte, but scoped to
+// a SINGLE field's own text instead of the whole joined report -- so a
+// caller (plan-executor.ts's business_plan success path) can detect and
+// heal (replace with a safe fallback) only the specific offending
+// field(s) BEFORE the gate ever runs, exactly mirroring #69A-39A's own
+// per-field isolation. validateDomainResearchQuality's own throwing
+// behavior, and every one of its other call sites (real estate, domain
+// analysis, acquisition, every cached-reuse path), is completely
+// unchanged -- this is a new, separate, non-throwing check, not a
+// modification to the gate itself.
+export function fieldContentHasUnprovenClaim(text: string): boolean {
+  const externalClaims =
+    text.match(
+      /\[(?:Verified from official source|Verified from external source)\][^\n]*/gi
+    ) || [];
+  if (externalClaims.some((claim) => !/\[R\d+\]|https?:\/\//i.test(claim))) {
+    return true;
+  }
+
+  const labeledClaims =
+    text.match(
+      /\[(?:Verified from uploaded asset|Verified from official source|Verified from external source|User-provided|Estimate)\][^\n]*/gi
+    ) || [];
+  const hasUnsupportedLabeled = labeledClaims.some((claim) => {
+    if (/^\[Verified from uploaded asset\]/i.test(claim)) {
+      return !/\[Asset:[^\]]+\]/i.test(claim);
+    }
+    if (
+      /^\[(?:Verified from official source|Verified from external source)\]/i.test(
+        claim
+      )
+    ) {
+      return !/(?:\[R\d+\]|https?:\/\/)/i.test(claim);
+    }
+    if (/^\[User-provided\]/i.test(claim)) {
+      return !/\[User\]/i.test(claim);
+    }
+    return !/(?:\[R\d+\]|\[Asset:[^\]]+\]|\[User\]|\[Method:[^\]]+\]|\[Basis:[^\]]+\])/i.test(
+      claim
+    );
+  });
+  if (hasUnsupportedLabeled) {
+    return true;
+  }
+
+  const numericClaims = text.match(NUMERIC_CLAIM_LINE_PATTERN) || [];
+  return numericClaims.some(
+    (claim) =>
+      !NUMERIC_CLAIM_LABEL_PATTERN.test(claim) ||
+      !NUMERIC_CLAIM_PROVENANCE_PATTERN.test(claim)
+  );
+}
+
 export function validateDomainResearchQuality({
   report,
   bundle,
