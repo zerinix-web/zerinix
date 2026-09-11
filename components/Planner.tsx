@@ -176,7 +176,10 @@ import {
 import {
   readBusinessCompetitorLandscapeState,
   formatCompetitorWeaknessForDisplay,
+  readCompetitorResearchStatus,
+  formatCompetitorResearchEmptyStateMessage,
   type BusinessCompetitorLandscapeState,
+  type CompetitorResearchStatus,
 } from "@/app/lib/report-engine/business-competitor-landscape-state";
 import {
   readPortersFiveForcesState,
@@ -5167,6 +5170,7 @@ function PremiumSectionVisual({
   executiveSummaryContent = "",
   marketIntelligenceCanonicalState = null,
   businessCompetitorLandscapeState = null,
+  competitorResearchStatus = undefined,
   portersFiveForcesState = null,
 }: {
   section: ReportSection;
@@ -5196,6 +5200,12 @@ function PremiumSectionVisual({
   // function's own existing extractCompetitorRows prose-parsing tiers,
   // completely unchanged.
   businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
+  // TASK #69A-63 -- WHY the competitor table is empty (undefined on
+  // every report persisted before this field existed -- falls back to
+  // the honest, pre-existing "no data validated" message, never a
+  // regression). See formatCompetitorResearchEmptyStateMessage's own
+  // comment for the exact distinction this drives.
+  competitorResearchStatus?: CompetitorResearchStatus;
   // TASK #69A-28 -- the versioned, structured Porter's Five Forces
   // snapshot captured once at generation time (see
   // porters-five-forces-state.ts). null on every report persisted
@@ -6371,7 +6381,7 @@ if (field === "swotAnalysis") {
                   "see" the exact section already on screen was a
                   self-referential, useless copy-paste artifact. Matches
                   page.tsx's own wording for the identical empty state. */}
-              No competitor data could be validated for this market yet.
+              {formatCompetitorResearchEmptyStateMessage(competitorResearchStatus)}
             </p>
           </div>
         )}
@@ -8156,6 +8166,7 @@ const ReportSectionCard = memo(
     reportQuality,
     marketIntelligenceCanonicalState = null,
     businessCompetitorLandscapeState = null,
+    competitorResearchStatus = undefined,
     portersFiveForcesState = null,
     waitingMessage,
     majorPlayersContent,
@@ -8169,6 +8180,7 @@ const ReportSectionCard = memo(
     reportQuality?: ReportQualityScore;
     marketIntelligenceCanonicalState?: MarketIntelligenceCanonicalState | null;
     businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
+    competitorResearchStatus?: CompetitorResearchStatus;
     portersFiveForcesState?: PortersFiveForcesState | null;
     waitingMessage: string;
     majorPlayersContent?: string;
@@ -8265,6 +8277,7 @@ const ReportSectionCard = memo(
                   executiveSummaryContent={executiveSummaryContent}
                   marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
                   businessCompetitorLandscapeState={businessCompetitorLandscapeState}
+                  competitorResearchStatus={competitorResearchStatus}
                   portersFiveForcesState={portersFiveForcesState}
                 />
               ) : null}
@@ -8325,6 +8338,7 @@ const ReportPanel = memo(function ReportPanel({
   reportQuality,
   marketIntelligenceCanonicalState = null,
   businessCompetitorLandscapeState = null,
+  competitorResearchStatus = undefined,
   portersFiveForcesState = null,
   isMarketIntelligence = false,
   onContinueAsChat,
@@ -8364,6 +8378,11 @@ const ReportPanel = memo(function ReportPanel({
   // the new labeled competitor-line format -- both fall back to the
   // existing extractCompetitorRows prose-parsing path unchanged.
   businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
+  // TASK #69A-63 -- resolved by the caller via readCompetitorResearchStatus
+  // the same way businessCompetitorLandscapeState already is. undefined
+  // for every report generated before this task -- falls back to the
+  // existing, honest "no data validated" message unchanged.
+  competitorResearchStatus?: CompetitorResearchStatus;
   // TASK #69A-28 -- same additive, null-safe contract as
   // businessCompetitorLandscapeState immediately above, for Porter's
   // Five Forces.
@@ -10407,7 +10426,10 @@ const ReportPanel = memo(function ReportPanel({
             pdf.setFontSize(6.2);
             pdf.setTextColor("#a1a1aa");
             pdf.text(
-              localizePdfPresentationText("No competitor data could be validated for this market yet.", pdfLocale),
+              localizePdfPresentationText(
+                formatCompetitorResearchEmptyStateMessage(competitorResearchStatus),
+                pdfLocale
+              ),
               bodyX + 3,
               visualY + 14,
               { maxWidth: visualWidth - 6 }
@@ -12069,6 +12091,7 @@ const ReportPanel = memo(function ReportPanel({
             reportQuality={reportQuality}
             marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
             businessCompetitorLandscapeState={businessCompetitorLandscapeState}
+            competitorResearchStatus={competitorResearchStatus}
             portersFiveForcesState={portersFiveForcesState}
             waitingMessage={waitingMessage}
             majorPlayersContent={sections.find((entry) => entry.field === "majorPlayers")?.content}
@@ -15224,6 +15247,9 @@ export default function Planner({
             businessCompetitorLandscapeState={readBusinessCompetitorLandscapeState(
               currentReportMetadata || initialReport?.metadata
             )}
+            competitorResearchStatus={readCompetitorResearchStatus(
+              currentReportMetadata || initialReport?.metadata
+            )}
             portersFiveForcesState={readPortersFiveForcesState(
               currentReportMetadata || initialReport?.metadata
             )}
@@ -15512,6 +15538,9 @@ export default function Planner({
                     currentReportMetadata || initialReport?.metadata
                   )}
                   businessCompetitorLandscapeState={readBusinessCompetitorLandscapeState(
+                    currentReportMetadata || initialReport?.metadata
+                  )}
+                  competitorResearchStatus={readCompetitorResearchStatus(
                     currentReportMetadata || initialReport?.metadata
                   )}
                   portersFiveForcesState={readPortersFiveForcesState(

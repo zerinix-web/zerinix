@@ -379,8 +379,16 @@ test("B4: no defensible competitor evidence at all -- Competitive Landscape stay
 
 test("B5: both PDF Competitive Landscape render branches use the honest empty-state wording, never the self-referential fallback", () => {
   assert.doesNotMatch(pdfSource, /See the Competitive Landscape section for full competitor detail\./);
-  const matches = pdfSource.match(/No competitor data could be validated for this market yet\./g) || [];
-  assert.ok(matches.length >= 2, "both the Market Intelligence and generic competitor branches must use the honest wording");
+  // The Market Intelligence branch still renders this literal directly.
+  const literalMatches = pdfSource.match(/No competitor data could be validated for this market yet\./g) || [];
+  assert.ok(literalMatches.length >= 1, "the Market Intelligence competitor branch must use the honest literal wording");
+  // TASK #69A-63 -- the generic/BIV branch now resolves its wording
+  // through formatCompetitorResearchEmptyStateMessage instead of a
+  // hardcoded literal, so a genuine research timeout/generation error
+  // can render an honest, DIFFERENT message instead of falsely implying
+  // research completed and found nothing. The function itself still
+  // returns this exact literal for the SUCCESS_NO_EVIDENCE/default case.
+  assert.match(pdfSource, /formatCompetitorResearchEmptyStateMessage/);
 });
 
 // ===========================================================================

@@ -52,6 +52,22 @@ const rule = (
 // platforms already named in domain-research.ts's own
 // businessResearchSourceStages guidance -- not a new, uncontrolled
 // scraping target.
+//
+// TASK #69A-29B -- widened again, same 1 requirement, same query
+// budget: a real fresh report found real, named, standalone
+// competitors (Jirav, Spotlight Reporting, Fathom, Float) whose
+// positioning/strengths came through fine, but for which this
+// requirement's own prior wording never explicitly asked for the
+// specific comparative signals a defensible weakness most often needs
+// for a STANDALONE product (as opposed to #69A-29A's own embedded-
+// feature-within-a-broader-platform case) -- target-customer
+// orientation, workflow/feature scope boundaries, and depth of
+// automation/scenario-planning/recommendation capability relative to
+// this business's own proposition. Complements (never replaces) the
+// deterministic, evidence-gap fallback business-competitor-landscape-
+// state.ts's own enrichCompetitorWeaknessesFromEvidence now applies
+// when even this richer research still leaves a competitor
+// "unavailable".
 const sharedBusinessResearch = [
   requirement(
     "company_evidence",
@@ -65,7 +81,7 @@ const sharedBusinessResearch = [
   ),
   requirement(
     "competitors",
-    "Verify competitors, substitutes, positioning, public pricing, and any documented feature gaps, limitations, integration constraints, or comparative weaknesses relative to alternatives.",
+    "Verify competitors, substitutes, positioning, public pricing, target-customer orientation, workflow/feature scope, and any documented feature gaps, limitations, integration constraints, automation or scenario-planning depth, recommendation/advisory depth, or comparative weaknesses relative to alternatives.",
     ["official company website", "company filing", "regulator", "product review platform cons and limitations (G2, Capterra, TrustRadius)", "credible third-party comparison"]
   ),
 ];

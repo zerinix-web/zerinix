@@ -217,9 +217,16 @@ test("prototype/design-partner evidence raises founder readiness by exactly one 
 
 test("applyMarketResearchCoverageToContext's Market attractiveness line blends founderReadiness with marketConfidence, so it can no longer be zeroed purely by thin external research coverage (drift check)", () => {
   const coverageSource = readFileSync(join(repoRoot, "app/lib/ai/market-research-coverage.ts"), "utf8");
+  // TASK #69A-59 -- this blend formula is now only the FALLBACK for the
+  // rare case where the original, pre-refresh "Market attractiveness"
+  // reasoning line was somehow missing (see this ticket's own fix, which
+  // preserves the original value verbatim otherwise -- unlike this
+  // formula, the original value stays consistent with the report's own
+  // canonical dimensionScores). The formula itself is unchanged and
+  // still present, just no longer applied unconditionally.
   assert.match(
     coverageSource,
-    /Market attractiveness: \$\{Math\.round\(\(dimensions\.marketConfidence \+ dimensions\.founderReadiness\) \/ 2\)\}%/
+    /Market attractiveness: \$\{originalMarketAttractiveness \?\? Math\.round\(\(dimensions\.marketConfidence \+ dimensions\.founderReadiness\) \/ 2\)\}%/
   );
 });
 

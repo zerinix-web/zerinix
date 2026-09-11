@@ -232,23 +232,40 @@ test("requirement G: plan-executor.ts wires businessCompetitorLandscapeState int
   // researchAwareFinancialContext. This assertion just confirms
   // businessCompetitorLandscapeState itself still flows into the same
   // call.
+  // TASK #69A-63 added a 4th argument (competitorResearchStatus,
+  // classifying this as SUCCESS_WITH_EVIDENCE/SUCCESS_NO_EVIDENCE) to
+  // this same call -- the assertion now allows an optional trailing
+  // argument instead of requiring the call to close right after
+  // portersFiveForcesState.
   assert.match(
     planExecutorSource,
-    /enqueue\(\s*\n\s*serializePlanReportMetadataChunk\(\s*\n\s*finalResearchAwareFinancialContext,\s*\n\s*businessCompetitorLandscapeState,\s*\n\s*portersFiveForcesState\s*\n\s*\)\s*\n\s*\);/
+    /enqueue\(\s*\n\s*serializePlanReportMetadataChunk\(\s*\n\s*finalResearchAwareFinancialContext,\s*\n\s*businessCompetitorLandscapeState,\s*\n\s*portersFiveForcesState,?[\s\S]{0,260}\)\s*\n\s*\);/
   );
   // TASK #69A-15A superseded the exact literal second-argument
   // expression here too: it now prefers cachedBusinessCompetitorLandscapeState
   // (Tier 0, read back from the AI response cache) before falling back
   // to this same #69A-15 prose-line parse (Tier 1) -- see
   // tests/task69a15a's own dedicated coverage.
+  // TASK #69A-63 extracted this Tier 0/Tier 1 expression into its own
+  // finalCachedCompetitorLandscapeState const (so it can also be reused
+  // to classify competitorResearchStatus), computed just above the call
+  // rather than inline inside it -- the preference order itself is
+  // unchanged.
   assert.match(
     planExecutorSource,
-    /serializePlanReportMetadataChunk\(\s*\n\s*cachedUnifiedFinancialContext,[\s\S]{0,500}cachedBusinessCompetitorLandscapeState \|\|\s*\n\s*buildBusinessCompetitorLandscapeState\(parsedCachedReport\.competitorLandscape\)/
+    /const finalCachedCompetitorLandscapeState =\s*\n\s*cachedBusinessCompetitorLandscapeState \|\|\s*\n\s*buildBusinessCompetitorLandscapeState\(parsedCachedReport\.competitorLandscape\);/
+  );
+  assert.match(
+    planExecutorSource,
+    /serializePlanReportMetadataChunk\(\s*\n\s*cachedUnifiedFinancialContext,\s*\n\s*finalCachedCompetitorLandscapeState,/
   );
 });
 
 test("requirement G: serializePlanReportMetadataChunk includes businessCompetitorLandscapeState in the SAME chunk as every other metadata field -- never a partial patch that could drop investmentScore/benchmarkFit/benchmarkScore/reportQuality/validationIntelligence from the final persisted metadata (worker.ts replaces wholesale, never merges)", () => {
-  const fnMatch = /function serializePlanReportMetadataChunk\([\s\S]{0,700}/.exec(planExecutorSource);
+  // Widened from 700: TASK #69A-63 added a 4th (competitorResearchStatus)
+  // parameter to the signature, pushing the chunk body further from the
+  // function-name marker without changing its own shape.
+  const fnMatch = /function serializePlanReportMetadataChunk\([\s\S]{0,900}/.exec(planExecutorSource);
   assert.ok(fnMatch, "serializePlanReportMetadataChunk not found");
   assert.match(fnMatch[0], /investmentScore: context\.investmentScore,/);
   assert.match(fnMatch[0], /benchmarkFit: context\.benchmarkFit,/);

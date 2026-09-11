@@ -312,11 +312,26 @@ test("plan-executor.ts runs the consistency validation pass as the last step bef
   // statement is no longer "return deduped;" -- the invariant this test
   // guards (consistency validation runs LAST, right before the function
   // returns) still holds.
+  // TASK #69A-62 -- annotateUnclassifiedCanonicalMetricMentions' own
+  // result is now assigned to `annotated` (no longer returned directly)
+  // so a final, catch-all per-field quality-gate healing pass can run
+  // one step later, on that same annotated text, before the function
+  // actually returns -- see that ticket's own fix. The invariant this
+  // test guards still holds: consistency validation, then metric
+  // annotation, then the gate-healing pass are the LAST three steps,
+  // strictly in that order, right before the function returns.
   const returnAnnotatedIndex = planSource.indexOf(
-    "return annotateUnclassifiedCanonicalMetricMentions(deduped, context);",
+    "const annotated = annotateUnclassifiedCanonicalMetricMentions(deduped, context);",
     lastPassIndex
   );
-  assert.ok(lastPassIndex > 0 && returnAnnotatedIndex > lastPassIndex);
+  const healingPassIndex = planSource.indexOf("TASK #69A-62", returnAnnotatedIndex);
+  const returnHealedIndex = planSource.indexOf("return healed;", healingPassIndex);
+  assert.ok(
+    lastPassIndex > 0 &&
+      returnAnnotatedIndex > lastPassIndex &&
+      healingPassIndex > returnAnnotatedIndex &&
+      returnHealedIndex > healingPassIndex
+  );
 });
 
 test("market-analysis route.ts runs the consistency validation pass as the last step before returning the finalized report", () => {

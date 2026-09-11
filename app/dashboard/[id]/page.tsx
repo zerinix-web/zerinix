@@ -98,7 +98,10 @@ import {
 import {
   readBusinessCompetitorLandscapeState,
   formatCompetitorWeaknessForDisplay,
+  readCompetitorResearchStatus,
+  formatCompetitorResearchEmptyStateMessage,
   type BusinessCompetitorLandscapeState,
+  type CompetitorResearchStatus,
 } from "@/app/lib/report-engine/business-competitor-landscape-state";
 import {
   readPortersFiveForcesState,
@@ -2837,6 +2840,7 @@ function ReportSectionVisual({
   executiveSummaryContent = "",
   marketIntelligenceCanonicalState = null,
   businessCompetitorLandscapeState = null,
+  competitorResearchStatus = undefined,
   portersFiveForcesState = null,
 }: {
   title: string;
@@ -2867,6 +2871,12 @@ function ReportSectionVisual({
   // function's own existing extractCompetitorRows prose-parsing tiers,
   // completely unchanged.
   businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
+  // TASK #69A-63 -- WHY the competitor table is empty (undefined on
+  // every report persisted before this field existed -- falls back to
+  // the honest, pre-existing "no data validated" message, never a
+  // regression). See formatCompetitorResearchEmptyStateMessage's own
+  // comment for the exact distinction this drives.
+  competitorResearchStatus?: CompetitorResearchStatus;
   // TASK #69A-28 -- the versioned, structured Porter's Five Forces
   // snapshot captured once at generation time (see
   // porters-five-forces-state.ts). null on every report persisted
@@ -4098,7 +4108,7 @@ function ReportSectionVisual({
         ) : (
           <div className="flex min-h-36 items-center justify-center p-6 text-center">
             <p className="max-w-md text-sm leading-6 text-zinc-400">
-              No competitor data could be validated for this market yet.
+              {formatCompetitorResearchEmptyStateMessage(competitorResearchStatus)}
             </p>
           </div>
         )}
@@ -6235,6 +6245,11 @@ export default async function ReportDetailPage({
   // computed once and threaded to the Competitor Landscape card, one
   // source of truth per render, never re-derived per section.
   const businessCompetitorLandscapeState = readBusinessCompetitorLandscapeState(report.metadata);
+  // TASK #69A-63 -- mirrors the identical "computed once, threaded
+  // through" pattern immediately above: distinguishes a genuinely
+  // completed research pass that found nothing from a generation that
+  // never finished, so the empty-state message can be honest either way.
+  const competitorResearchStatus = readCompetitorResearchStatus(report.metadata);
   // TASK #69A-28 -- mirrors the identical pattern immediately above:
   // computed once and threaded to the Porter's Five Forces card, one
   // source of truth per render, never re-derived per section.
@@ -6493,6 +6508,7 @@ export default async function ReportDetailPage({
                                 }
                                 marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
                                 businessCompetitorLandscapeState={businessCompetitorLandscapeState}
+                                competitorResearchStatus={competitorResearchStatus}
                                 portersFiveForcesState={portersFiveForcesState}
                               />
                             ) : null}
@@ -6970,6 +6986,7 @@ export default async function ReportDetailPage({
                                 }
                                 marketIntelligenceCanonicalState={marketIntelligenceCanonicalState}
                                 businessCompetitorLandscapeState={businessCompetitorLandscapeState}
+                                competitorResearchStatus={competitorResearchStatus}
                                 portersFiveForcesState={portersFiveForcesState}
                               />
                               {/* Card-first sections (see cardFirstReportFields) already

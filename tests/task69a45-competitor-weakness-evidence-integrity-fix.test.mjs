@@ -167,8 +167,8 @@ test("F. real-case result table: QuickBooks/Xero become directional (real offici
   assert.equal(byCompany.Xero.weaknessBasis, "directional");
   assert.equal(byCompany.Fathom.weaknessBasis, "unavailable");
   assert.equal(byCompany.Dryrun.weaknessBasis, "unavailable");
-  assert.equal(formatCompetitorWeaknessForDisplay(byCompany.Fathom), "Not available");
-  assert.equal(formatCompetitorWeaknessForDisplay(byCompany.Dryrun), "Not available");
+  assert.equal(formatCompetitorWeaknessForDisplay(byCompany.Fathom), "No evidence-backed weakness identified");
+  assert.equal(formatCompetitorWeaknessForDisplay(byCompany.Dryrun), "No evidence-backed weakness identified");
 });
 
 // --- 4/5: unsupported negative claims are rejected; absence != verified

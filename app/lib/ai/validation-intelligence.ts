@@ -293,8 +293,26 @@ export function createValidationIntelligence(input: {
       assumption: lowConfidenceSource?.area || "Operational delivery",
       riskLevel: riskFromStatus(operationStatus),
       evidenceStatus: operationStatus,
-      experiment: "Test the smallest delivery workflow before scaling",
-      successMetric: "Core workflow completes within target cost, quality, and delivery threshold",
+      // TASK #69A-59 -- ROOT CAUSE FIX. Confirmed live: this entry's own
+      // `assumption` field already correctly took on the lowest-confidence
+      // source's real area name (e.g. "Competitor Insights"), but
+      // `experiment`/`successMetric` stayed hardcoded to a generic
+      // delivery-workflow test regardless -- producing gap text like
+      // "Competitor Insights: evidence missing -- Test the smallest
+      // delivery workflow before scaling to establish Core workflow
+      // completes within target cost, quality, and delivery threshold,"
+      // a closure action with no relationship to the actual gap. The
+      // sibling validation-experiments builder above (createValidation
+      // Experiments, priority 5) already branches on this exact same
+      // `lowConfidenceSource?.area === "Competitor Insights"` condition
+      // with a genuinely relevant closure action -- reused verbatim here
+      // rather than inventing a second, divergent one.
+      experiment: lowConfidenceSource?.area === "Competitor Insights"
+        ? "Validate competitors, substitutes, and pricing from primary sources"
+        : "Test the smallest delivery workflow before scaling",
+      successMetric: lowConfidenceSource?.area === "Competitor Insights"
+        ? "5+ verified competitor/source checks"
+        : "Core workflow completes within target cost, quality, and delivery threshold",
       timeframe: "30 days",
       priority: 5,
     },

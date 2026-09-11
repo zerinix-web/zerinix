@@ -452,13 +452,20 @@ function formatMetricRow(metric: FinancialMetricModel, benchmarkSource: string) 
   ].join(" | ");
 }
 
+// TASK #69A-58 -- PRECISION FIX, mirrors the identical fix in
+// financial-model.ts's own formatUsd (see that file's comment): keeps
+// one decimal place for every "k"-suffixed value here too, since this
+// copy renders the SAME revenue-forecast/metric-row figures embedded
+// verbatim into the shared generation prompt -- leaving one copy
+// coarser than the other would make the AI's own displayed numbers
+// inconsistent with each other for no reason.
 function formatUsd(value: number) {
   const abs = Math.abs(value);
   const sign = value < 0 ? "-" : "";
 
   if (abs >= 1_000_000_000) return `${sign}$${(abs / 1_000_000_000).toFixed(1)}B`;
   if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${sign}$${Math.round(abs / 1_000)}k`;
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}k`;
 
   return `${sign}$${Math.round(abs).toLocaleString("en-US")}`;
 }
@@ -551,8 +558,10 @@ Financial modeling rules:
 - Do not replace these values with generic ranges, generic templates, or unrelated benchmarks.
 - Explain every major number with its formula, assumptions, benchmark comparison, and evidence label from the canonical set.
 - If evidence is AI Analysis or Assumption, explicitly warn that the claim needs validation instead of presenting it as precise.
-- Financial Dashboard, Unit Economics, Scenario Analysis, Executive Summary, Executive Recommendation, KPI Dashboard, and Financial Assumptions must reuse these same values.
+- Financial Dashboard, Unit Economics, Scenario Analysis, Executive Summary, Executive Recommendation, KPI Dashboard, Financial Assumptions, Target Customer/ICP, Business Model, and Pricing Strategy must reuse these same values.
 - Scenario Analysis may vary these values for worst/base/best cases, but Base Case must match this calculated model exactly.
+- ARPA above is the one canonical price: a fixed amount, currency, billing period, and pricing unit (per customer/account, not per seat). Any willingness-to-pay, ACV, ARPA, or price-point figure written anywhere in the report (ICP, Business Model, Pricing Strategy, KPI Dashboard, or elsewhere) must restate this exact amount and this exact billing period and pricing unit -- never convert it to a different period (e.g. monthly to annual) or a different unit (e.g. per customer to per seat), and never invent a second, independent price. Only describe a different pricing unit (such as per-seat) if the user explicitly stated one; otherwise keep every price statement in the canonical per-account/company, canonical billing period form shown above.
+- "Target customer" above is the one canonical customer/segment description. When any section (Business Model, Pricing Strategy, Go-to-Market, Sales Strategy, KPI Dashboard, or elsewhere) needs a short reference to the target customer, reuse this exact description -- never revert to a generic catch-all label (e.g. "startups and SMBs") once the block above already names a more specific segment (e.g. a stated employee-count range, buyer type, or industry). The full ICP section may elaborate with additional detail the user actually stated, but every OTHER section's brief mention must stay consistent with this same canonical description, not a vaguer restatement of it.
 - Use the Investment Scoring Engine as the source of truth for Total Investment Score, confidence, strengths, weaknesses, Founder Score, and investment recommendation logic.
 - Do not invent static investment scores or category scores; reuse the calculated score and category reasoning above.
 - Executive Summary and Executive Recommendation must use the calculated Recommendation, Estimated Valuation, Funding Stage, Top Risks, and Next Critical Action from the Investment Scoring Engine.
@@ -784,20 +793,27 @@ export function formatReportIntelligenceSummary(
   // under two different label sets depending on which formatter
   // happens to render it, if this function is ever wired into a
   // report section in the future.
+  //
+  // TASK #69A-31 -- kept aligned with report-presentation.ts's own
+  // identical rename (see that file's own comment for the full
+  // rationale: this dimension is a confidence/validation-gap measure of
+  // the report's OWN benchmark-fit classification, never the richer
+  // benchmarkScore.overallFit metric-alignment score Benchmark
+  // Intelligence's "Overall Fit" displays).
   const dimensionLabels =
     language === "Turkish"
       ? {
           evidenceQuality: "Veri Bütünlüğü",
           sourceConfidence: "Kaynak Gücü",
           financialConsistency: "Finansal Tutarlılık",
-          benchmarkFit: "Benchmark Uyumu",
+          benchmarkFit: "Benchmark Doğrulama Güveni",
           validationReadiness: "Doğrulama Hazırlığı",
         }
       : {
           evidenceQuality: "Data Completeness",
           sourceConfidence: "Source Strength",
           financialConsistency: "Financial Consistency",
-          benchmarkFit: "Benchmark Fit",
+          benchmarkFit: "Benchmark Validation Confidence",
           validationReadiness: "Validation Readiness",
         };
 

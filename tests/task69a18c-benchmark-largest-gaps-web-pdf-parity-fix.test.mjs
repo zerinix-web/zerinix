@@ -89,7 +89,16 @@ test("root cause confirmation: materialValidationGaps can never exceed 5 entries
 
 test("root cause confirmation: the 4th observed gap ('Competitor Insights') is validationIntelligenceV2's real 'operations' assumption, not fabricated -- its label is deterministically derived from sourceIntelligence, never prose-parsed", () => {
   assert.match(validationIntelligenceSource, /assumption: lowConfidenceSource\?\.area \|\| "Operational delivery",/);
-  assert.match(validationIntelligenceSource, /experiment: "Test the smallest delivery workflow before scaling",/);
+  // TASK #69A-59 -- the `experiment` text is no longer a single
+  // unconditional literal: it now branches on the same
+  // `lowConfidenceSource?.area === "Competitor Insights"` condition the
+  // `assumption` field already used, so a genuine "Competitor Insights"
+  // gap gets a semantically relevant closure action instead of the
+  // unrelated generic delivery-workflow test. Both branches are still
+  // deterministic literals, never prose-parsed.
+  assert.match(validationIntelligenceSource, /experiment: lowConfidenceSource\?\.area === "Competitor Insights"/);
+  assert.match(validationIntelligenceSource, /"Validate competitors, substitutes, and pricing from primary sources"/);
+  assert.match(validationIntelligenceSource, /"Test the smallest delivery workflow before scaling",/);
 });
 
 // --- Requirement A: canonical Largest Gaps has ONE authoritative source ---

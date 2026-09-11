@@ -173,10 +173,11 @@ test("[B] verified, directional, and unavailable are three genuinely distinct st
 test("[3] unavailable remains unavailable when evidence is genuinely insufficient -- never forced to fill the column", () => {
   const state = buildBusinessCompetitorLandscapeStateFromStructuredResponse(arbitraryCompetitorResponse());
   const clearRunway = state.competitors.find((c) => c.company === "ClearRunway");
-  // TASK #69A-40 -- display text is now the explicit "Not available",
-  // never the ambiguous bare "—" sentinel (the underlying stored value,
-  // asserted elsewhere in this file, is unchanged).
-  assert.equal(formatCompetitorWeaknessForDisplay(clearRunway), "Not available");
+  // TASK #69A-40 -- display text is an explicit sentence, never the
+  // ambiguous bare "—" sentinel (the underlying stored value, asserted
+  // elsewhere in this file, is unchanged). TASK #69A-58 updated the exact
+  // wording to "No evidence-backed weakness identified".
+  assert.equal(formatCompetitorWeaknessForDisplay(clearRunway), "No evidence-backed weakness identified");
 });
 
 // --- 4: renderer never converts directional into verified -----------------

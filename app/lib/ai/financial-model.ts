@@ -487,11 +487,32 @@ export function inferFinancialModelingInputs(prompt: string): FinancialModelingI
   // left completely unchanged -- this never introduces a new
   // classification, only a more specific display form of the SAME
   // already-resolved segment.
+  // TASK #69A-60 -- ROOT CAUSE FIX. Confirmed live: a prompt explicitly
+  // stating "the target customers are smbs with 10-200 employees" still
+  // produced the bare "United States small and medium-sized businesses"
+  // descriptor above -- correctly geography-scoped, but silently dropping
+  // the one concrete, user-stated sizing fact that most distinguishes
+  // this specific segment from a generic SMB catch-all. When the prompt
+  // states an explicit employee-count range in the same customer-segment
+  // context (this whole branch only ever runs once SMB/SME language
+  // without founder/startup language has already been confirmed above,
+  // so this range can only be describing the CUSTOMER segment, never the
+  // founder's own team -- see extractUserStatedEmployeeCount's own,
+  // separate exclusion logic for that distinct concern), append it in
+  // parentheses. Never invents a range; only surfaces one the user
+  // already stated.
+  const targetCustomerEmployeeRangeMatch = normalized.match(
+    /\b([\d][\d,]*)\s*(?:-|–|—|to)\s*([\d][\d,]*)\s*employees?\b/
+  );
   const targetCustomerDescriptor =
     targetCustomer === "startups and SMBs" &&
     /\b(sme|smes|smb|smbs|small business|small businesses|small and medium|small-and-medium|small to medium)\b/.test(normalized) &&
     !/\b(founder|founders|startup|startups)\b/.test(normalized)
-      ? `${geography === UNSPECIFIED_GEOGRAPHY ? "" : `${geography} `}small and medium-sized businesses`.trim()
+      ? `${`${geography === UNSPECIFIED_GEOGRAPHY ? "" : `${geography} `}small and medium-sized businesses`.trim()}${
+          targetCustomerEmployeeRangeMatch
+            ? ` (${targetCustomerEmployeeRangeMatch[1]}-${targetCustomerEmployeeRangeMatch[2]} employees)`
+            : ""
+        }`
       : targetCustomer;
 
   return {
@@ -946,6 +967,38 @@ function extractUserStatedInvestmentAmount(prompt: string): number | null {
   );
 }
 
+// TASK #69A-58 -- ROOT CAUSE FIX. Confirmed live: a real BIV prompt
+// describing the TARGET CUSTOMER as "SMBs with 10-200 employees" had
+// this line rendered verbatim as "Team size: 200 employees" in
+// Financial Assumptions -- the founder's own company size, silently
+// fabricated from a description of who the founder's CUSTOMERS are,
+// not of the founder's own team. Two independent, general-purpose
+// (never hardcoded to "SMB" or any one business) signals now exclude a
+// match:
+//   1. Range-shaped ("10-200 employees", "10 to 200 employees"): no
+//      single company can literally have "10 to 200" employees itself
+//      -- a range is always describing a SEGMENT/BAND of many
+//      different companies, never one company's own real headcount.
+//   2. Nearby customer/segment framing ("target(ing)", "serve/serving",
+//      "sell(ing) to", "customers/clients/companies/businesses/
+//      organizations/firms/SMBs/SMEs/enterprises/prospects with/
+//      having"): the number is answering "who do we sell to," not
+//      "how many people work here."
+// A genuine self-description ("Our startup has 12 employees", "a team
+// of 8", "we are a 15-person team") matches neither signal and is
+// extracted exactly as before -- this fix only narrows FALSE positives,
+// it never removes a real founder-stated fact.
+function isLikelyTargetCustomerEmployeeMention(prompt: string, matchIndex: number): boolean {
+  const precedingContext = prompt.slice(Math.max(0, matchIndex - 70), matchIndex);
+
+  const rangeShaped = /[\d][\d,]*\s*(?:-|–|—|to)\s*$/.test(precedingContext);
+  if (rangeShaped) return true;
+
+  return /\b(?:target(?:ing|s)?|serv(?:e|es|ing)|sell(?:s|ing)?\s+to|market(?:ed|ing)?\s+to|customers?|clients?|companies|businesses|organizations|firms|smbs?|smes?|enterprises?|prospects?)\s+(?:with|having)\s*$/i.test(
+    precedingContext
+  );
+}
+
 // CRITICAL FIX -- preserve user-provided facts. Employee count had no
 // extraction at all; it does not drive an existing financial formula, but
 // it is a real fact the founder stated and must be preserved and labeled
@@ -959,6 +1012,7 @@ function extractUserStatedEmployeeCount(prompt: string): number | null {
     prompt.match(new RegExp(`\\b([\\d][\\d,]*)[\\s-]person${sameLineGap}team\\b`, "i"));
   if (!match || typeof match.index !== "number") return null;
   if (hasNearbyNegation(prompt, match.index)) return null;
+  if (isLikelyTargetCustomerEmployeeMention(prompt, match.index)) return null;
 
   return Number(match[1].replace(/,/g, ""));
 }
@@ -1117,13 +1171,27 @@ function createBenchmarkFit(input: {
   };
 }
 
+// TASK #69A-58 -- PRECISION FIX. Confirmed live: a fresh real report
+// displayed "ARPA: $2k/month" (rounded from an actual value near
+// $1,502) alongside "Month-12 customers: 48" and "ARR: $865k" -- a
+// reader multiplying the two DISPLAYED figures (48 x $2,000 x 12 =
+// $1.152M) sees an apparent contradiction with the displayed ARR,
+// even though the underlying, unrounded numbers (arr = mrr * 12 =
+// month12Customers * arpa * 12, see this file's own construction of
+// those three values) reconcile exactly. Rounding a $1,000-$9,999
+// value to a bare integer "k" (the previous `Math.round(abs / 1_000)`)
+// discards up to $999 of precision -- proportionally far coarser than
+// the M/B branches just above it, which already keep one decimal
+// place. Keeping that same one-decimal precision for every "k" value
+// (not just M/B) closes that gap without changing which magnitude
+// suffix is used for any value.
 function formatUsd(value: number) {
   const abs = Math.abs(value);
   const sign = value < 0 ? "-" : "";
 
   if (abs >= 1_000_000_000) return `${sign}$${(abs / 1_000_000_000).toFixed(1)}B`;
   if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${sign}$${Math.round(abs / 1_000)}k`;
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}k`;
 
   return `${sign}$${Math.round(abs).toLocaleString("en-US")}`;
 }
@@ -1381,7 +1449,16 @@ export function createFinancialModel(input: FinancialModelInput): FinancialModel
   const sharedAssumptions = [
     `Industry benchmark: ${benchmark.label}`,
     `Business model: ${inputs.businessModel}`,
-    `Target customer: ${inputs.targetCustomer}`,
+    // TASK #69A-60 -- ROOT CAUSE FIX. inputs.targetCustomer is the coarse,
+    // benchmark-lookup enum value (e.g. "startups and SMBs") -- correct
+    // for benchmark selection, but a leak into report-facing text once it
+    // shows up here, since it silently replaces the report's own richer,
+    // specific customer description with a generic catch-all label. Every
+    // metric's own assumptions list is user-visible (Unit Economics,
+    // Financial Dashboard, Financial Assumptions), so this must read the
+    // same richer, explicit-context-preserving descriptor those sections
+    // already show, never the coarse lookup key.
+    `Target customer: ${inputs.targetCustomerDescriptor}`,
     `Geography: ${inputs.geography}`,
     `Pricing model: ${inputs.pricingModel}`,
     `Validation evidence: ${hasValidationEvidence(input.prompt) ? "present in prompt" : "not yet supplied; planning assumptions require validation"}`,

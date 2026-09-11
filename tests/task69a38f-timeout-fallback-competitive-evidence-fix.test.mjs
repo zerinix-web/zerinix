@@ -232,10 +232,18 @@ test("[8] Founder Readiness's Evidence Confidence is never forced to equal decis
 test("[9] the timeout-fallback path now sends its Tier 0/Tier 1 competitor and Porter state through the SAME serializePlanReportMetadataChunk every other path uses -- web and PDF read one canonical snapshot regardless of how the report was produced", () => {
   const markerIndex = planExecutorSource.indexOf("TASK #69A-38F -- mirrors the success path's own Tier 0/");
   assert.ok(markerIndex > -1);
-  const section = planExecutorSource.slice(markerIndex, markerIndex + 2500);
+  // Widened from 2500: TASK #69A-63 inserted its own explanatory comment
+  // between the fallback state computation and the serialize call, pushing
+  // the call further from the marker without changing its relative order.
+  const section = planExecutorSource.slice(markerIndex, markerIndex + 3200);
   assert.match(section, /const fallbackCompetitorLandscapeState = buildBusinessCompetitorLandscapeState\(/);
   assert.match(section, /const fallbackPortersFiveForcesState = buildPortersFiveForcesStateFromLegacyProse\(/);
   assert.match(section, /serializePlanReportMetadataChunk\(\s*\n\s*finalResearchAwareFinancialContext,\s*\n\s*fallbackCompetitorLandscapeState,\s*\n\s*fallbackPortersFiveForcesState/);
+  // TASK #69A-63 -- the same call now also passes a 4th argument
+  // classifying WHY this fallback happened (TIMEOUT vs GENERATION_ERROR),
+  // so a renderer can tell "research never finished" apart from
+  // "research completed and found nothing" without fabricating evidence.
+  assert.match(section, /fallbackPortersFiveForcesState,\s*\n\s*providerTimedOut \? "TIMEOUT" : "GENERATION_ERROR"/);
 });
 
 // --- [10] cached/persisted stale 93/5 data is corrected or safely -------

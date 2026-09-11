@@ -502,6 +502,21 @@ export function applyMarketResearchCoverageToContext(
   const dimensions = coverage.dimensions;
   const decisionEngine = context.investmentScore.decisionEngine;
   const originalFounderReasoning = decisionEngine.founderScore.reasoning;
+  // TASK #69A-59 -- ROOT CAUSE FIX. Confirmed live: this line had no
+  // "original ?? ..." preservation at all (unlike every sibling line
+  // below it), so it unconditionally overwrote the founder-readiness
+  // "Market attractiveness" reasoning line with an unrelated formula --
+  // see the founderScore reasoning line below, which read this exact
+  // label but recomputed it from (dimensions.marketConfidence +
+  // dimensions.founderReadiness) / 2. investment-score.ts's own teamFounder
+  // construction intentionally scores "Market attractiveness" identically
+  // to "Idea Quality" (see that file's own comment on
+  // founderReadinessDimensionScores) -- so the reasoning TEXT for that
+  // same dimension must stay consistent with the value its own
+  // dimensionScores entry already reports, never a second, independently
+  // -recomputed number. This mirrors the exact preservation pattern the
+  // four sibling lines below already use.
+  const originalMarketAttractiveness = extractOriginalReasoningPercent(originalFounderReasoning, "Market attractiveness");
   const originalBusinessModelQuality = extractOriginalReasoningPercent(originalFounderReasoning, "Business model quality");
   const originalExecutionComplexity = extractOriginalReasoningPercent(originalFounderReasoning, "Execution complexity");
   const originalValidationConfidence = extractOriginalReasoningPercent(originalFounderReasoning, "Validation confidence");
@@ -612,7 +627,17 @@ export function applyMarketResearchCoverageToContext(
       decisionEngine.founderScore,
       dimensions.founderReadiness,
       [
-        `Market attractiveness: ${Math.round((dimensions.marketConfidence + dimensions.founderReadiness) / 2)}%`,
+        // TASK #69A-59 -- Market attractiveness, like its four siblings
+        // below, is a founder/business-model judgment inside
+        // investment-score.ts (intentionally scored identically to Idea
+        // Quality there -- see that file's own comment), not something
+        // external web-research coverage can verify. Reuses the
+        // category's own original value instead of the unrelated
+        // (marketConfidence + founderReadiness) / 2 blend this line used
+        // to compute unconditionally. Falls back to that blend only if
+        // the original line was somehow missing (defensive, should not
+        // happen in practice).
+        `Market attractiveness: ${originalMarketAttractiveness ?? Math.round((dimensions.marketConfidence + dimensions.founderReadiness) / 2)}%`,
         // Business model quality, validation confidence, execution
         // complexity, and evidence confidence are founder/business-model
         // judgments (recurring revenue, margin, payback, lifecycle stage --

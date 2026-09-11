@@ -196,7 +196,10 @@ test("6. the Confidence Radar's financial dimension is labeled 'Financial Resear
 
 test("7. the new label does not collide, textually, with the labels used for Financial Consistency or Report Quality's Source Strength", () => {
   const radarLabel = "Financial Research Coverage";
-  const qualityLabels = ["Financial Consistency", "Source Strength", "Validation Readiness", "Benchmark Fit", "Data Completeness"];
+  // TASK #69A-31 -- "Benchmark Fit" was itself renamed to "Benchmark
+  // Validation Confidence" (see report-presentation.ts's own comment);
+  // updated here to keep this collision check against the CURRENT label.
+  const qualityLabels = ["Financial Consistency", "Source Strength", "Validation Readiness", "Benchmark Validation Confidence", "Data Completeness"];
   for (const qualityLabel of qualityLabels) {
     assert.notEqual(radarLabel, qualityLabel);
     assert.ok(

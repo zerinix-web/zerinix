@@ -161,9 +161,15 @@ test("[1e] no regression to previously-correct verticals (coffee, healthcare, lu
 
 // --- [2] Explicit customer segment survives into GTM/pricing fallback text -
 
-test("[2] every narrative fallback field that names a target-customer label reads context.inputs.targetCustomer -- the SAME corrected classifier output -- never a second, independent classification", () => {
-  const targetCustomerLabelDeclaration = planExecutorSource.match(/const targetCustomerLabel = context\?\.inputs\.targetCustomer \|\| "[^"]+";/);
-  assert.ok(targetCustomerLabelDeclaration, "expected exactly one targetCustomerLabel declaration sourced from context.inputs.targetCustomer");
+test("[2] every narrative fallback field that names a target-customer label reads context.inputs.targetCustomerDescriptor -- the SAME corrected classifier output's richer, report-facing form -- never a second, independent classification", () => {
+  // TASK #69A-60 -- redirected from the coarse context.inputs.targetCustomer
+  // (a benchmark-lookup enum value, e.g. "startups and SMBs") to
+  // context.inputs.targetCustomerDescriptor (the richer, report-facing
+  // form of that SAME classifier output, e.g. "United States small and
+  // medium-sized businesses (10-200 employees)") -- see that ticket's own
+  // fix. Still one single classification, never a second one.
+  const targetCustomerLabelDeclaration = planExecutorSource.match(/const targetCustomerLabel = context\?\.inputs\.targetCustomerDescriptor \|\| "[^"]+";/);
+  assert.ok(targetCustomerLabelDeclaration, "expected exactly one targetCustomerLabel declaration sourced from context.inputs.targetCustomerDescriptor");
   const usages = (planExecutorSource.match(/\$\{targetCustomerLabel\}/g) || []).length;
   assert.ok(usages >= 5, `expected targetCustomerLabel to be reused across multiple GTM/pricing/Porter/roadmap fallback fields, found ${usages} usages`);
 });

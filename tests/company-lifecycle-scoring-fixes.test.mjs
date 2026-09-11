@@ -387,9 +387,15 @@ test("plan-executor.ts's AI Action Plan roadmap block branches by lifecycle stag
 });
 
 test("plan-executor.ts's Roadmap builder is wired into normalized.roadmap306090 via buildAiActionPlanLines (drift check)", () => {
+  // TASK #69A-59 -- the unconditional append call was replaced with a
+  // gate (roadmapAlreadyIncludesAiActionPlanStructure) so the model's own
+  // free-written roadmap306090 text can never silently shadow this
+  // canonical block with a stale/guessed figure -- see that ticket's own
+  // fix. buildAiActionPlanLines(context, language) is still the exact
+  // same call, just reached through the gate instead of unconditionally.
   assert.match(
     planExecutorSource,
-    /normalized\.roadmap306090 = appendIntelligenceBlock\(\s*normalized\.roadmap306090,\s*reportLabel\(language, "AI Action Plan", "AI Aksiyon Planı"\),\s*buildAiActionPlanLines\(context, language\)/
+    /normalized\.roadmap306090 = roadmapAlreadyIncludesAiActionPlanStructure\(normalized\.roadmap306090\)\s*\n\s*\? normalized\.roadmap306090\s*\n\s*: appendIntelligenceBlock\(\s*normalized\.roadmap306090,\s*reportLabel\(language, "AI Action Plan", "AI Aksiyon Planı"\),\s*buildAiActionPlanLines\(context, language\)/
   );
 });
 

@@ -218,7 +218,12 @@ test("SAFETY: the quality gate's own instantiation/threshold logic is untouched 
   );
 });
 
-test("SAFETY: research execution's own timeout/budget constants are untouched by this fix", () => {
+test("SAFETY: research execution's own pipeline budget constant is untouched by this fix", () => {
   assert.match(planExecutorSource, /const BUSINESS_PLAN_PIPELINE_BUDGET_MS = 200_000;/);
-  assert.match(planExecutorSource, /const BUSINESS_PLAN_REPORT_OPENAI_TIMEOUT_MS = 90_000;/);
 });
+
+// NOTE: BUSINESS_PLAN_REPORT_OPENAI_TIMEOUT_MS itself was intentionally
+// raised from 90_000 to 150_000 in TASK #69A-63, after direct log
+// evidence proved the fixed 90s ceiling -- not this pipeline budget --
+// was the sole binding constraint causing real report-generation
+// timeouts. See tests/task69a63-nondeterministic-competitor-loss-fix.test.mjs.

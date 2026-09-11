@@ -295,6 +295,28 @@ type PlanReportMetadataChunk = {
     // time it is set -- never sent as a partial patch that could drop
     // the earlier chunk's own fields.
     businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null;
+    // TASK #69A-63 -- ROOT CAUSE FIX. Confirmed live: a genuine AI
+    // generation timeout (the report call ran the full
+    // BUSINESS_PLAN_REPORT_OPENAI_TIMEOUT_MS and was aborted, discarding
+    // a real, evidence-backed in-progress response) produces the exact
+    // same observable state as a genuinely completed generation that
+    // validated zero real competitors -- businessCompetitorLandscapeState
+    // is null/absent either way, and every renderer's "No competitor
+    // data could be validated for this market yet." message fires
+    // identically for both. That message is only honest for the SECOND
+    // case. This field records WHICH case actually happened, so a
+    // renderer can distinguish "research completed and genuinely found
+    // nothing" from "generation never finished" without ever fabricating
+    // a competitor. Optional, mirroring every other field in this
+    // object's own established contract: a historical report persisted
+    // before this field existed simply has no key, and every reader
+    // treats that as "unknown provenance, fall back to the existing
+    // message" -- never a regression for old reports.
+    competitorResearchStatus?:
+      | "SUCCESS_WITH_EVIDENCE"
+      | "SUCCESS_NO_EVIDENCE"
+      | "TIMEOUT"
+      | "GENERATION_ERROR";
     // TASK #69A-28 -- same additive-optional contract as
     // businessCompetitorLandscapeState immediately above: only present
     // once portersFiveForcesStructured has actually been parsed and
@@ -511,7 +533,62 @@ const DECISION_INTELLIGENCE_PIPELINE = "decision_intelligence_v1";
 // always-the-same sentence. A report cached under v17 or earlier would
 // keep replaying a score/explanation computed without this evidence-
 // sensitivity for its full remaining TTL without this bump.
-const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "ltv-cac-ratio-integrity-v18";
+// TASK #69A-60 -- CACHE FIX. Confirmed live: a fresh report generated
+// after #69A-59's roadmap306090/pricing-unit fixes still showed the
+// pre-fix "record paid-conversion evidence at the $2k/month planning
+// input" line, and financialAssumptions still showed the pre-fix
+// generic "Target customer: startups and SMBs" line -- both exactly
+// reproducing the OLD, pre-fix normalized text. Root cause: those fixes
+// changed how normalizeFullPlanReport builds/gates several fields, but
+// never bumped this version, so the full-report cache (keyed on this
+// constant, see reportVariant below) kept serving an already-normalized
+// report generated under v18, whose cached roadmap306090 legitimately
+// already contained the OLD prompt's full "AI Action Plan" horizon
+// structure -- which #69A-59's own roadmapAlreadyIncludesAiActionPlanStructure
+// gate then (correctly, by its own logic) read as "already present" and
+// left untouched. A version bump, not a code-only fix, is required to
+// invalidate that stale cache entry, mirroring #69A-37A's own identical
+// precedent.
+// TASK #69A-29C -- ROOT CAUSE FIX (bumped again, v19 -> v20). Confirmed
+// live: a real fresh Business Idea Validation report still rendered
+// "No evidence-backed weakness identified" for Jirav/Spotlight
+// Reporting/Fathom/Float in BOTH web and PDF, even after #69A-29B's new
+// Tier 1.5c capability-gap enrichment was implemented and its own
+// deterministic, fixture-based tests all passed. The tests called
+// enrichCompetitorWeaknessesFromEvidence directly as a pure function,
+// bypassing the AI-response cache entirely -- so they always exercised
+// the NEW code. A real "fresh" report request, by contrast, first calls
+// getCachedAiResponse(fullReportCacheKey); on a cache HIT,
+// businessCompetitorLandscapeState is read back verbatim from
+// cachedFullReport.responseData via
+// getCachedBusinessCompetitorLandscapeStateFromReportData -- it is
+// NEVER recomputed on a cache hit (see #69A-40B's own identical
+// precedent for this exact mechanism, immediately above). #69A-29B
+// changed what enrichCompetitorWeaknessesFromEvidence computes but
+// never bumped this shared contract-version string, so any business
+// idea + financial-fingerprint combination that had ALREADY been cached
+// (including, but not limited to, this exact reference business idea,
+// generated repeatedly across this session's own prior tickets) kept
+// silently replaying its pre-#69A-29B "unavailable" weakness state for
+// its full remaining TTL, completely bypassing the new Tier 1.5c
+// enrichment -- explaining precisely why Porter's Five Forces (never
+// touched by #69A-29B) stayed correct while weakness alone stayed
+// stale: both are baked into the SAME cache entry, but only one of them
+// was actually fixed by code that never got a chance to run again.
+// Also discovered while auditing this same staleness class: #69A-61
+// (pricing-unit mismatch replacement labeling) and #69A-62 (the
+// catch-all per-field healing pass in normalizeFullPlanReport) each
+// independently changed generation-affecting, cache-baked content
+// without bumping this version either -- this single bump closes all
+// three latent staleness gaps at once, mirroring #69A-40A's own
+// precedent of a version bump correcting a PRIOR task's own missed
+// bump. A one-time, bounded re-fetch per previously-cached prompt, never
+// a repeated or unbounded cost -- and every renderer/PDF fix already
+// shipped in #69A-29B remains completely unchanged; only the cache key
+// changes, forcing a genuinely fresh AI call (and therefore a fresh,
+// #69A-29B-enriched competitor weakness computation) the next time any
+// of these prompts are requested.
+const BUSINESS_PLAN_GENERATION_CONTRACT_VERSION = "ltv-cac-ratio-integrity-v20";
 const FULL_REPORT_MAX_OUTPUT_TOKENS = 8_000;
 const FULL_REPORT_OPENAI_TIMEOUT_MS = 24_000;
 const REAL_ESTATE_REPORT_TIMEOUT_MS = 60_000;
@@ -534,7 +611,32 @@ const BUSINESS_PLAN_PIPELINE_BUDGET_MS = 200_000;
 // every run aborted at exactly 24s with 0 output tokens. This gives the
 // Business Plan report call its own, larger ceiling instead of racing the
 // smaller specialized-domain budget.
-const BUSINESS_PLAN_REPORT_OPENAI_TIMEOUT_MS = 90_000;
+// TASK #69A-63 -- ROOT CAUSE FIX. Confirmed live, by direct dev-server
+// log inspection of a real fresh generation: research took 40.68s, the
+// report-generation call ran the FULL 90 seconds and was aborted by
+// this exact timeout (`reason: 'timeout', errorDetail: 'OpenAI report
+// generation timed out after 90 seconds.'`), discarding the whole
+// report -- competitor/Porter data included -- even though evidence
+// existed (evidenceCount: 69) and the model had genuinely started
+// writing a real response. This is inherent LLM latency variance for a
+// large, strictly-schema-validated response (24 planFields plus the
+// competitorLandscapeStructured and portersFiveForcesStructured arrays,
+// up to BUSINESS_PLAN_REPORT_MAX_OUTPUT_TOKENS below): the SAME prompt
+// can legitimately take meaningfully longer on one call than another,
+// with no code defect on either side. The providerTimeoutMs call site
+// below already caps this at min(this constant, remaining
+// BUSINESS_PLAN_PIPELINE_BUDGET_MS) -- confirmed live that ~40s of
+// research left roughly 155-160s of pipeline budget still available at
+// the point the report call starts, so the 90s ceiling here (not the
+// 200s pipeline budget) was the sole binding constraint, wasting ~65s
+// of already-allocated budget the model was never allowed to use.
+// Raised to 150s -- still leaves a real, non-degenerate margin inside
+// BUSINESS_PLAN_PIPELINE_BUDGET_MS (200s) for research's own ~40-90s+
+// variance plus post-processing, and stays well inside the route's own
+// 300s maxDuration -- directly reducing how often this exact timeout
+// fires, without adding a single extra API call or any additional cost
+// (the SAME one generation call simply gets more time to complete).
+const BUSINESS_PLAN_REPORT_OPENAI_TIMEOUT_MS = 150_000;
 // TASK #69A-39 -- ROOT CAUSE FIX. Confirmed live: 3 consecutive real fresh
 // business_plan generations all fell through to
 // createGroundedBusinessTimeoutFallback (proven by DB inspection -- their
@@ -785,7 +887,8 @@ function serializePlanReportChunks(report: Record<PlanReportField, string>) {
 function serializePlanReportMetadataChunk(
   context: AiFinancialModelContext,
   businessCompetitorLandscapeState?: BusinessCompetitorLandscapeState | null,
-  portersFiveForcesState?: PortersFiveForcesState | null
+  portersFiveForcesState?: PortersFiveForcesState | null,
+  competitorResearchStatus?: PlanReportMetadataChunk["reportMetadata"]["competitorResearchStatus"]
 ) {
   const chunk: PlanReportMetadataChunk = {
     reportMetadata: {
@@ -797,6 +900,7 @@ function serializePlanReportMetadataChunk(
       ...(context.financialEvidence ? { financialEvidence: context.financialEvidence } : {}),
       ...(businessCompetitorLandscapeState ? { businessCompetitorLandscapeState } : {}),
       ...(portersFiveForcesState ? { portersFiveForcesState } : {}),
+      ...(competitorResearchStatus ? { competitorResearchStatus } : {}),
     },
   };
 
@@ -2754,7 +2858,7 @@ function createPlanFieldFallback(
   // itself is unavailable (e.g. a section fallback requested before the
   // financial model was built).
   const industryLabel = context?.inputs.industry || "the detected industry";
-  const targetCustomerLabel = context?.inputs.targetCustomer || "the primary target buyer";
+  const targetCustomerLabel = context?.inputs.targetCustomerDescriptor || "the primary target buyer";
   const businessModelLabel = context?.inputs.businessModel || "the detected business model";
   const geographyLabel = context?.inputs.geography || "the target market";
   const pricingModelLabel = context?.inputs.pricingModel || "the detected pricing approach";
@@ -3130,6 +3234,27 @@ const scenarioConfidenceSpread: Record<
 
 function buildCanonicalScenarioAnalysis(context: AiFinancialModelContext, language: ResponseLanguage = "English") {
   const { metrics, revenueForecast, investmentScore } = context;
+  // TASK #69A-59 -- ROOT CAUSE FIX. Confirmed live: the Base Case line
+  // below used to interpolate investmentScore.recommendation directly --
+  // the RAWEST internal scoring-engine value ("GO" | "WAIT" | "PASS"),
+  // never intended for direct display -- producing "Decision: WAIT" in
+  // the SAME report whose one real, canonical, user-facing decision is
+  // "MONITOR" (the business_plan vocabulary's ENTER/MONITOR/AVOID
+  // family; see executive-decision-brief.ts). Neither existing mention-
+  // correction pass catches this: correctRecommendationMentions only
+  // scans for the OLDER legacy PASS/HOLD/VALIDATE/REJECT tokens, and
+  // correctExecutiveDecisionMentions only scans for the CURRENT
+  // ENTER/MONITOR/AVOID tokens -- "WAIT" belongs to neither vocabulary,
+  // so it passed both checks untouched. Reuses
+  // mapInvestmentRecommendationToExecutiveDecisionCode (the SAME,
+  // already-established mapping the Executive Decision brief itself is
+  // built from) so this line can never show a decision word from a
+  // vocabulary the rest of the report doesn't use.
+  const baseCaseDecisionLabel = localizeExecutiveDecision(
+    mapInvestmentRecommendationToExecutiveDecisionCode(investmentScore.recommendation),
+    language,
+    "business_plan"
+  );
   const baseRevenue = metrics.arr.value;
   const baseRunway = metrics.runway.value;
   const spread = scenarioConfidenceSpread[metrics.arr.confidence] ?? scenarioConfidenceSpread.Medium;
@@ -3146,8 +3271,8 @@ function buildCanonicalScenarioAnalysis(context: AiFinancialModelContext, langua
     ),
     reportText(
       language,
-      `Planning assumption — Base Case: Revenue ${metrics.arr.displayValue}; ${metrics.mrr.label} ${metrics.mrr.displayValue}; burn ${metrics.monthlyBurn.displayValue}; runway ${metrics.runway.displayValue}. Risk: ${investmentScore.topRisks[1] || "validation risk"}. Decision: ${investmentScore.recommendation}.`,
-      `Planlama varsayımı — Baz Senaryo: Gelir ${metrics.arr.displayValue}; ${metrics.mrr.label} ${metrics.mrr.displayValue}; nakit yakımı ${metrics.monthlyBurn.displayValue}; finansal pist ${metrics.runway.displayValue}. Risk: ${investmentScore.topRisks[1] || "doğrulama riski"}. Karar: ${localizeDecision(investmentScore.recommendation, language)}.`
+      `Planning assumption — Base Case: Revenue ${metrics.arr.displayValue}; ${metrics.mrr.label} ${metrics.mrr.displayValue}; burn ${metrics.monthlyBurn.displayValue}; runway ${metrics.runway.displayValue}. Risk: ${investmentScore.topRisks[1] || "validation risk"}. Decision: ${baseCaseDecisionLabel}.`,
+      `Planlama varsayımı — Baz Senaryo: Gelir ${metrics.arr.displayValue}; ${metrics.mrr.label} ${metrics.mrr.displayValue}; nakit yakımı ${metrics.monthlyBurn.displayValue}; finansal pist ${metrics.runway.displayValue}. Risk: ${investmentScore.topRisks[1] || "doğrulama riski"}. Karar: ${baseCaseDecisionLabel}.`
     ),
     reportText(
       language,
@@ -3172,7 +3297,7 @@ function buildAiActionPlanLines(context: AiFinancialModelContext, language: Resp
   if (!isRevenueOrGrowthStage(stage)) {
     return [
       reportText(language, `- Immediate Actions: ${context.investmentScore.nextCriticalAction}. Expected impact: resolves the highest-risk decision gate.`, `- Acil Aksiyonlar: ${context.investmentScore.nextCriticalAction}. Beklenen etki: en riskli karar kapısını çözer.`),
-      reportText(language, `- Next 30 Days: test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomer} and record paid-conversion evidence at the ${context.metrics.arpa.displayValue} planning input. Expected impact: establishes a credible demand gate.`, `- Sonraki 30 Gün: ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile test et ve ${context.metrics.arpa.displayValue} planlama girdisinde ücretli dönüşüm kanıtını kaydet. Beklenen etki: güvenilir bir talep kapısı oluşturur.`),
+      reportText(language, `- Next 30 Days: test the ${context.inputs.pricingModel} offer with ${context.inputs.targetCustomerDescriptor} and record paid-conversion evidence at the ${context.metrics.arpa.displayValue} planning input. Expected impact: establishes a credible demand gate.`, `- Sonraki 30 Gün: ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomerDescriptor} ile test et ve ${context.metrics.arpa.displayValue} planlama girdisinde ücretli dönüşüm kanıtını kaydet. Beklenen etki: güvenilir bir talep kapısı oluşturur.`),
       reportText(language, `- Next 90 Days: repeat the winning acquisition and delivery motion for the ${context.inputs.businessModel} model. Expected impact: tests whether the operating loop is repeatable.`, `- Sonraki 90 Gün: ${context.inputs.businessModel} modeli için kazanan edinim ve teslimat hareketini tekrarla. Beklenen etki: operasyon döngüsünün tekrarlanabilirliğini test eder.`),
       reportText(language, `- Next 6 Months: hold ${context.metrics.grossMargin.displayValue} gross margin while demonstrating ${context.metrics.cacPayback.displayValue} payback and repeat behavior. Expected impact: proves capital efficiency.`, `- Sonraki 6 Ay: ${context.metrics.cacPayback.displayValue} geri ödeme ve tekrar davranışını gösterirken ${context.metrics.grossMargin.displayValue} brüt marjı koru. Beklenen etki: sermaye verimliliğini kanıtlar.`),
       reportText(language, `- Next 12 Months: expand the ${context.inputs.industry} model beyond the beachhead only after those proof gates hold in ${context.inputs.geography}. Expected impact: scales from verified operating evidence.`, `- Sonraki 12 Ay: ${translateIndustryBenchmarkLabel(context.inputs.industry)} modelini yalnızca bu kanıt kapıları ${context.inputs.geography} içinde sağlandıktan sonra başlangıç pazarının ötesine genişlet. Beklenen etki: doğrulanmış operasyon kanıtından ölçeklenir.`),
@@ -3184,7 +3309,7 @@ function buildAiActionPlanLines(context: AiFinancialModelContext, language: Resp
   return [
     reportText(language, `- Immediate Actions: ${context.investmentScore.nextCriticalAction}. Expected impact: resolves the highest-risk decision gate.`, `- Acil Aksiyonlar: ${context.investmentScore.nextCriticalAction}. Beklenen etki: en riskli karar kapısını çözer.`),
     reportText(language, `- Next 30 Days: instrument retention, net revenue retention, and CAC payback on the existing ${context.metrics.arr.displayValue} paying base. Expected impact: replaces assumption with measured expansion and efficiency data.`, `- Sonraki 30 Gün: mevcut ${context.metrics.arr.displayValue} ödeme yapan tabanda elde tutma, net gelir elde tutma ve CAC geri ödemesini ölçmeye başla. Beklenen etki: varsayımı ölçülen genişleme ve verimlilik verisiyle değiştirir.`),
-    reportText(language, `- Next 90 Days: formalize the upsell and cross-sell motion for the ${context.inputs.businessModel} model to grow revenue within the existing ${context.inputs.targetCustomer} accounts. Expected impact: tests whether expansion revenue is repeatable.`, `- Sonraki 90 Gün: mevcut ${context.inputs.targetCustomer} hesaplarında geliri büyütmek için ${context.inputs.businessModel} modelinde ek satış ve çapraz satış hareketini resmileştir. Beklenen etki: genişleme gelirinin tekrarlanabilir olup olmadığını test eder.`),
+    reportText(language, `- Next 90 Days: formalize the upsell and cross-sell motion for the ${context.inputs.businessModel} model to grow revenue within the existing ${context.inputs.targetCustomerDescriptor} accounts. Expected impact: tests whether expansion revenue is repeatable.`, `- Sonraki 90 Gün: mevcut ${context.inputs.targetCustomerDescriptor} hesaplarında geliri büyütmek için ${context.inputs.businessModel} modelinde ek satış ve çapraz satış hareketini resmileştir. Beklenen etki: genişleme gelirinin tekrarlanabilir olup olmadığını test eder.`),
     reportText(language, `- Next 6 Months: protect ${context.metrics.grossMargin.displayValue} gross margin and ${context.metrics.cacPayback.displayValue} CAC payback while scaling acquisition spend. Expected impact: proves growth does not come at the cost of unit economics.`, `- Sonraki 6 Ay: edinim harcamasını ölçeklerken ${context.metrics.grossMargin.displayValue} brüt marjı ve ${context.metrics.cacPayback.displayValue} CAC geri ödemesini koru. Beklenen etki: büyümenin birim ekonomisi pahasına gerçekleşmediğini kanıtlar.`),
     reportText(
       language,
@@ -3221,13 +3346,13 @@ function buildValidationStageKpiDashboard(context: AiFinancialModelContext, lang
     ),
     reportText(
       language,
-      `Activation: Not yet measured | Target: prove the first paid activation from ${context.inputs.targetCustomer} on the ${context.inputs.pricingModel} offer before scaling | Status: Pending validation`,
-      `Aktivasyon: Henüz ölçülmedi | Hedef: ölçeklemeden önce ${context.inputs.targetCustomer} için ${context.inputs.pricingModel} teklifinden ilk ücretli aktivasyonu kanıtla | Durum: Doğrulama bekleniyor`
+      `Activation: Not yet measured | Target: prove the first paid activation from ${context.inputs.targetCustomerDescriptor} on the ${context.inputs.pricingModel} offer before scaling | Status: Pending validation`,
+      `Aktivasyon: Henüz ölçülmedi | Hedef: ölçeklemeden önce ${context.inputs.targetCustomerDescriptor} için ${context.inputs.pricingModel} teklifinden ilk ücretli aktivasyonu kanıtla | Durum: Doğrulama bekleniyor`
     ),
     reportText(
       language,
-      `Retention: Not yet measured | Target: validate repeat purchase or renewal behavior for ${context.inputs.targetCustomer} before increasing acquisition spend | Status: Pending validation`,
-      `Elde Tutma: Henüz ölçülmedi | Hedef: edinim harcamasını artırmadan önce ${context.inputs.targetCustomer} için tekrar satın alma veya yenileme davranışını doğrula | Durum: Doğrulama bekleniyor`
+      `Retention: Not yet measured | Target: validate repeat purchase or renewal behavior for ${context.inputs.targetCustomerDescriptor} before increasing acquisition spend | Status: Pending validation`,
+      `Elde Tutma: Henüz ölçülmedi | Hedef: edinim harcamasını artırmadan önce ${context.inputs.targetCustomerDescriptor} için tekrar satın alma veya yenileme davranışını doğrula | Durum: Doğrulama bekleniyor`
     ),
     reportText(
       language,
@@ -3246,13 +3371,13 @@ function buildValidationStageKpiDashboard(context: AiFinancialModelContext, lang
     ),
     reportText(
       language,
-      `Sales cycle: Not yet measured | Target: measure time from a qualified ${context.inputs.targetCustomer} lead to first paid conversion in the ${context.inputs.businessModel} model | Status: Pending validation`,
-      `Satış Döngüsü: Henüz ölçülmedi | Hedef: ${context.inputs.businessModel} modelinde nitelikli ${context.inputs.targetCustomer} adayından ilk ücretli dönüşüme kadar geçen süreyi ölç | Durum: Doğrulama bekleniyor`
+      `Sales cycle: Not yet measured | Target: measure time from a qualified ${context.inputs.targetCustomerDescriptor} lead to first paid conversion in the ${context.inputs.businessModel} model | Status: Pending validation`,
+      `Satış Döngüsü: Henüz ölçülmedi | Hedef: ${context.inputs.businessModel} modelinde nitelikli ${context.inputs.targetCustomerDescriptor} adayından ilk ücretli dönüşüme kadar geçen süreyi ölç | Durum: Doğrulama bekleniyor`
     ),
     reportText(
       language,
-      `Conversion: Not yet measured | Target: prove repeatable conversion from ${context.inputs.targetCustomer} on the ${context.inputs.pricingModel} offer before scaling spend | Status: Pending validation`,
-      `Dönüşüm: Henüz ölçülmedi | Hedef: harcamayı ölçeklemeden önce ${context.inputs.targetCustomer} için ${context.inputs.pricingModel} teklifinden tekrarlanabilir dönüşümü kanıtla | Durum: Doğrulama bekleniyor`
+      `Conversion: Not yet measured | Target: prove repeatable conversion from ${context.inputs.targetCustomerDescriptor} on the ${context.inputs.pricingModel} offer before scaling spend | Status: Pending validation`,
+      `Dönüşüm: Henüz ölçülmedi | Hedef: harcamayı ölçeklemeden önce ${context.inputs.targetCustomerDescriptor} için ${context.inputs.pricingModel} teklifinden tekrarlanabilir dönüşümü kanıtla | Durum: Doğrulama bekleniyor`
     ),
   ].join("\n");
 }
@@ -3282,8 +3407,8 @@ function buildRevenueStageKpiDashboard(context: AiFinancialModelContext, languag
     ),
     reportText(
       language,
-      `Gross Retention: Not provided | Target: hold gross customer retention high on the existing ${context.inputs.targetCustomer} base | Status: Track from paying accounts`,
-      `Brüt Elde Tutma: Sağlanmadı | Hedef: mevcut ${context.inputs.targetCustomer} tabanında brüt müşteri elde tutmayı yüksek tut | Durum: Ödeme yapan hesaplardan izle`
+      `Gross Retention: Not provided | Target: hold gross customer retention high on the existing ${context.inputs.targetCustomerDescriptor} base | Status: Track from paying accounts`,
+      `Brüt Elde Tutma: Sağlanmadı | Hedef: mevcut ${context.inputs.targetCustomerDescriptor} tabanında brüt müşteri elde tutmayı yüksek tut | Durum: Ödeme yapan hesaplardan izle`
     ),
     reportText(
       language,
@@ -3292,8 +3417,8 @@ function buildRevenueStageKpiDashboard(context: AiFinancialModelContext, languag
     ),
     reportText(
       language,
-      `Customer Expansion: Not provided | Target: increase the share of existing ${context.inputs.targetCustomer} accounts buying additional seats or products | Status: Track from paying accounts`,
-      `Müşteri Genişlemesi: Sağlanmadı | Hedef: mevcut ${context.inputs.targetCustomer} hesaplarından ek koltuk veya ürün satın alan payı artır | Durum: Ödeme yapan hesaplardan izle`
+      `Customer Expansion: Not provided | Target: increase the share of existing ${context.inputs.targetCustomerDescriptor} accounts buying additional seats or products | Status: Track from paying accounts`,
+      `Müşteri Genişlemesi: Sağlanmadı | Hedef: mevcut ${context.inputs.targetCustomerDescriptor} hesaplarından ek koltuk veya ürün satın alan payı artır | Durum: Ödeme yapan hesaplardan izle`
     ),
     reportText(
       language,
@@ -3324,19 +3449,19 @@ function buildValidationStageKpiGovernance(context: AiFinancialModelContext, lan
     language === "Turkish"
       ? [
           ["Edinim", "Growth Lead", `${Math.ceil(context.revenueForecast[0].customers / 12).toLocaleString("en-US")} net yeni müşteri/ay`, "Hedef 2 hafta üst üste kaçarsa", "Kanal karmasını ve edinim harcamasını yeniden tahsis et"],
-          ["Aktivasyon", "Product Lead", `${context.inputs.targetCustomer} için ilk ücretli aktivasyonu ${context.inputs.pricingModel} teklifinde doğrula`, "Nitelikli talep ödemeye dönüşmezse", "Onboarding, teklif ve fiyatlandırma testini daralt"],
-          ["Elde Tutma", "Founder / Ops", `${context.inputs.targetCustomer} için tekrar satın alma veya yenileme kanıtı`, "Tekrar davranışı zayıf kalırsa", "Ürün kapsamını ve müşteri başarı ritmini gözden geçir"],
+          ["Aktivasyon", "Product Lead", `${context.inputs.targetCustomerDescriptor} için ilk ücretli aktivasyonu ${context.inputs.pricingModel} teklifinde doğrula`, "Nitelikli talep ödemeye dönüşmezse", "Onboarding, teklif ve fiyatlandırma testini daralt"],
+          ["Elde Tutma", "Founder / Ops", `${context.inputs.targetCustomerDescriptor} için tekrar satın alma veya yenileme kanıtı`, "Tekrar davranışı zayıf kalırsa", "Ürün kapsamını ve müşteri başarı ritmini gözden geçir"],
           ["Gelir", "Finance Lead", `${context.metrics.mrr.displayValue} aylık baz senaryo`, "Gelir modeli baz senaryonun altında kalırsa", "Fiyat, paket ve kanal varsayımlarını yeniden test et"],
           ["CAC", "Growth Lead", `${context.metrics.cac.displayValue} veya daha iyi`, "CAC geri ödeme eşiğini aşarsa", "Ücretli edinimi yavaşlat ve organik/ortak kanal testlerine kay"],
-          ["Dönüşüm", "Sales / GTM", `${context.inputs.targetCustomer} için tekrarlanabilir ücretli dönüşüm`, "Nitelikli adaylar ödeme yapmazsa", `${context.inputs.businessModel} modelinde ICP, mesaj ve satış sürecini yeniden konumlandır`],
+          ["Dönüşüm", "Sales / GTM", `${context.inputs.targetCustomerDescriptor} için tekrarlanabilir ücretli dönüşüm`, "Nitelikli adaylar ödeme yapmazsa", `${context.inputs.businessModel} modelinde ICP, mesaj ve satış sürecini yeniden konumlandır`],
         ]
       : [
           ["Acquisition", "Growth Lead", `${Math.ceil(context.revenueForecast[0].customers / 12).toLocaleString("en-US")} net new customers/month`, "Target is missed for 2 consecutive weeks", "Reallocate channel mix and acquisition spend"],
-          ["Activation", "Product Lead", `Validate first paid activation from ${context.inputs.targetCustomer} on the ${context.inputs.pricingModel} offer`, "Qualified demand does not convert to payment", "Narrow onboarding, offer, and pricing tests"],
-          ["Retention", "Founder / Ops", `Evidence of repeat purchase or renewal from ${context.inputs.targetCustomer}`, "Repeat behavior remains weak", "Review product scope and customer success cadence"],
+          ["Activation", "Product Lead", `Validate first paid activation from ${context.inputs.targetCustomerDescriptor} on the ${context.inputs.pricingModel} offer`, "Qualified demand does not convert to payment", "Narrow onboarding, offer, and pricing tests"],
+          ["Retention", "Founder / Ops", `Evidence of repeat purchase or renewal from ${context.inputs.targetCustomerDescriptor}`, "Repeat behavior remains weak", "Review product scope and customer success cadence"],
           ["Revenue", "Finance Lead", `${context.metrics.mrr.displayValue} monthly base case`, "Revenue model falls below base case", "Retest pricing, packaging, and channel assumptions"],
           ["CAC", "Growth Lead", `${context.metrics.cac.displayValue} or better`, "CAC exceeds payback threshold", "Slow paid acquisition and shift to organic/partner channel tests"],
-          ["Conversion", "Sales / GTM", `Repeatable paid conversion from ${context.inputs.targetCustomer}`, "Qualified leads do not pay", `Reposition ICP, message, and sales process for the ${context.inputs.businessModel} model`],
+          ["Conversion", "Sales / GTM", `Repeatable paid conversion from ${context.inputs.targetCustomerDescriptor}`, "Qualified leads do not pay", `Reposition ICP, message, and sales process for the ${context.inputs.businessModel} model`],
         ];
 
   return rows;
@@ -3353,7 +3478,7 @@ function buildRevenueStageKpiGovernance(context: AiFinancialModelContext, langua
           ["ARR Büyümesi", "Finance Lead", `${context.metrics.arr.displayValue} ARR tabanından referans oranında büyüme`, "ARR büyümesi baz senaryonun altında kalırsa", "Fiyat, paket ve kanal varsayımlarını yeniden test et"],
           ["MRR Büyümesi", "Finance Lead", `${context.metrics.mrr.displayValue} MRR tabanından ay be ay büyüme`, "MRR büyümesi ardışık aylarda düz kalırsa", "Faturalama kohortlarını gözden geçir ve fiyatlandırma/paketleme testlerini daralt"],
           ["Net Gelir Elde Tutma", "Founder / Ops", `${context.metrics.arr.displayValue} tabanında ek satış ve çapraz satışla genişleme`, "Net gelir elde tutma %100'ün altına düşerse", "Genişleme oyun kitabını ve hesap planlama sürecini gözden geçir"],
-          ["Brüt Elde Tutma", "Founder / Ops", `Mevcut ${context.inputs.targetCustomer} tabanında yüksek brüt elde tutma`, "Elde tutma referans aralığın altına düşerse", "Müşteri başarısı ritmini ve ürün kapsamını gözden geçir"],
+          ["Brüt Elde Tutma", "Founder / Ops", `Mevcut ${context.inputs.targetCustomerDescriptor} tabanında yüksek brüt elde tutma`, "Elde tutma referans aralığın altına düşerse", "Müşteri başarısı ritmini ve ürün kapsamını gözden geçir"],
           ["Genişleme Geliri", "Sales / GTM", `Aylık ${context.metrics.arpa.displayValue} ortalama hesap değerinin üzerine çıkış`, "Genişleme geliri düz kalırsa", "Ek satış ve çapraz satış hareketini resmileştir"],
           ["Müşteri Genişlemesi", "Sales / GTM", `Ek koltuk veya ürün satın alan mevcut hesap payını artır`, "Müşteri genişleme oranı düz kalırsa", "Hesap içi upsell/cross-sell oyun kitabını resmileştir"],
           ["Satış Verimliliği", "Growth Lead", `Harcanan dolar başına yeni ARR'yi artır`, "Satış verimliliği düşerse", "Kanal karmasını ve satış sürecini yeniden değerlendir"],
@@ -3364,7 +3489,7 @@ function buildRevenueStageKpiGovernance(context: AiFinancialModelContext, langua
           ["ARR Growth", "Finance Lead", `Growth from the ${context.metrics.arr.displayValue} ARR base at a benchmark-consistent rate`, "ARR growth falls below the base case", "Retest pricing, packaging, and channel assumptions"],
           ["MRR Growth", "Finance Lead", `Month-over-month growth from the ${context.metrics.mrr.displayValue} MRR base`, "MRR growth stays flat for consecutive months", "Review billing cohorts and narrow pricing/packaging tests"],
           ["Net Revenue Retention", "Founder / Ops", `Expansion within the ${context.metrics.arr.displayValue} base via upsell and cross-sell`, "Net revenue retention falls below 100%", "Review the expansion playbook and account planning process"],
-          ["Gross Retention", "Founder / Ops", `High gross retention on the existing ${context.inputs.targetCustomer} base`, "Retention falls below the benchmark range", "Review customer success cadence and product scope"],
+          ["Gross Retention", "Founder / Ops", `High gross retention on the existing ${context.inputs.targetCustomerDescriptor} base`, "Retention falls below the benchmark range", "Review customer success cadence and product scope"],
           ["Expansion Revenue", "Sales / GTM", `Grow beyond the ${context.metrics.arpa.displayValue}/month average account value`, "Expansion revenue stays flat", "Formalize the upsell and cross-sell motion"],
           ["Customer Expansion", "Sales / GTM", `Increase the share of existing accounts buying additional seats or products`, "Customer expansion rate stays flat", "Formalize the account-level upsell/cross-sell playbook"],
           ["Sales Efficiency", "Growth Lead", `Increase new ARR generated per dollar spent`, "Sales efficiency declines", "Reassess channel mix and sales process"],
@@ -3814,6 +3939,25 @@ function risksAlreadyIncludeRiskMatrix(content: string) {
   );
 }
 
+// TASK #69A-59 -- defense-in-depth mirror of risksAlreadyIncludeRiskMatrix
+// immediately above, for the same class of defect: appendIntelligenceBlock's
+// generic duplicate-heading guard only ever checks for the literal title
+// string ("AI Action Plan"), so if the model's own free-written roadmap306090
+// text happens to contain that heading anyway (the #69A-59 prompt fix in
+// plan.ts removes the instruction that used to invite this, but is not a
+// hard guarantee), the guard would skip appending the canonical,
+// context-accurate action plan and silently leave the model's own,
+// independently-guessed figures (e.g. a rounded planning price that does
+// not match the report's real, canonical ARPA) as the final text with no
+// correction. Checking for the actual multi-horizon STRUCTURE (at least two
+// of the canonical horizon labels together), not just a bare heading,
+// keeps the canonical block winning even if a stray heading slips through.
+function roadmapAlreadyIncludesAiActionPlanStructure(content: string) {
+  const horizonLabelPattern = /\b(?:Immediate Actions|Acil Aksiyonlar|Next 30 Days|Sonraki 30 Gün|Next 90 Days|Sonraki 90 Gün)\b/gi;
+  const matches = content.match(horizonLabelPattern);
+  return Boolean(matches && matches.length >= 2);
+}
+
 function removeLegacyValidationIntelligenceBlock(content: string) {
   return content
     .split(/\n{2,}/)
@@ -3919,13 +4063,13 @@ function buildRiskResponse(
 
   if (/\b(compet|substitut|incumbent|rekabet|rakip|ikame)\b/i.test(risk)) {
     return {
-      mitigation: reportText(language, `prove a measurable switching benefit for ${context.inputs.targetCustomer} before broad positioning spend`, `geniş konumlandırma harcamasından önce ${context.inputs.targetCustomer} için ölçülebilir geçiş faydasını kanıtla`),
+      mitigation: reportText(language, `prove a measurable switching benefit for ${context.inputs.targetCustomerDescriptor} before broad positioning spend`, `geniş konumlandırma harcamasından önce ${context.inputs.targetCustomerDescriptor} için ölçülebilir geçiş faydasını kanıtla`),
       signal: reportText(language, "qualified buyers prefer the incumbent workflow after a direct offer comparison", "nitelikli alıcılar doğrudan teklif karşılaştırmasından sonra mevcut çözümü tercih eder"),
     };
   }
 
   return {
-    mitigation: reportText(language, `run paid ${context.inputs.targetCustomer} validation against the ${context.inputs.pricingModel} offer before scaling`, `ölçeklemeden önce ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomer} ile ücretli doğrulamaya tabi tut`),
+    mitigation: reportText(language, `run paid ${context.inputs.targetCustomerDescriptor} validation against the ${context.inputs.pricingModel} offer before scaling`, `ölçeklemeden önce ${context.inputs.pricingModel} teklifini ${context.inputs.targetCustomerDescriptor} ile ücretli doğrulamaya tabi tut`),
     signal: reportText(language, `qualified demand does not convert at the ${context.metrics.arpa.displayValue} planning input`, `nitelikli talep ${context.metrics.arpa.displayValue} planlama girdisinde dönüşmez`),
   };
 }
@@ -4236,7 +4380,7 @@ function buildCanonicalFinancialAssumptions(context: AiFinancialModelContext, la
     reportText(language, "- TAM/SAM/SOM values are owned by the dedicated market sizing section.", "- TAM/SAM/SOM değerleri özel pazar büyüklüğü bölümünün tek kaynağıdır."),
     reportText(language, `- Pricing model: ${context.inputs.pricingModel}`, `- Fiyatlandırma modeli: ${context.inputs.pricingModel}`),
     reportText(language, `- Business model: ${context.inputs.businessModel}`, `- İş modeli: ${context.inputs.businessModel}`),
-    reportText(language, `- Target customer: ${context.inputs.targetCustomer}`, `- Hedef müşteri: ${context.inputs.targetCustomer}`),
+    reportText(language, `- Target customer: ${context.inputs.targetCustomerDescriptor}`, `- Hedef müşteri: ${context.inputs.targetCustomerDescriptor}`),
     `${reportLabel(language, "Gross Margin", "Brüt Marj")}: ${context.metrics.grossMargin.displayValue}`,
     `- CAC: ${context.metrics.cac.displayValue}`,
     `- LTV: ${context.metrics.ltv.displayValue}`,
@@ -4271,6 +4415,17 @@ function buildPlanFinancialConsistencyTargets(
     { labelPattern: "TAM", canonicalDisplayValue: metrics.tam.displayValue, type: "market_size_mismatch" },
     { labelPattern: "SAM", canonicalDisplayValue: metrics.sam.displayValue, type: "market_size_mismatch" },
     { labelPattern: "SOM", canonicalDisplayValue: metrics.som.displayValue, type: "market_size_mismatch" },
+    // TASK #69A-58 -- ARPA was missing from this list entirely, so a
+    // literal "ARPA: $X/month" (or WTP-labeled) mention anywhere in the
+    // report that drifted from the canonical, single-source-of-truth
+    // ARPA figure had no safety net correcting it -- unlike every other
+    // metric here. This is a defense-in-depth backstop alongside the
+    // prompt-level anchoring fix (see the ICP/Business Model/Pricing
+    // Strategy/Unit Economics prompts and financial-assumptions.ts's own
+    // "single canonical price" instruction) which prevents the mismatch
+    // at generation time.
+    { labelPattern: metrics.arpa.label, canonicalDisplayValue: metrics.arpa.displayValue, type: "financial_metric_mismatch" },
+    { labelPattern: "WTP", canonicalDisplayValue: metrics.arpa.displayValue, type: "financial_metric_mismatch" },
     { labelPattern: "ARR", canonicalDisplayValue: metrics.arr.displayValue, type: "financial_metric_mismatch" },
     { labelPattern: "MRR", canonicalDisplayValue: metrics.mrr.displayValue, type: "financial_metric_mismatch" },
     { labelPattern: "CAC Payback", canonicalDisplayValue: metrics.cacPayback.displayValue, type: "timeline_mismatch" },
@@ -4854,6 +5009,68 @@ const trailingProseValidationRequiredPattern =
   /\b(?:validation required|doğrulama gerekli)\b(?=\s*[.;:\n]|\s*$)/gim;
 const bareValidationRequiredValuePattern = /\b(?:Validation [Rr]equired|Doğrulama [Gg]erekli)\b/g;
 
+// TASK #69A-59 -- ROOT CAUSE FIX. Confirmed live: even after the #69A-58
+// prompt-anchoring fix (ICP/Business Model/Pricing Strategy/Unit
+// Economics prompts now explicitly instruct the model to restate the
+// exact canonical ARPA amount, billing period, and pricing unit), a
+// fresh real report's ICP field still wrote its own, independently
+// -guessed "$1k-$2k ACV per seat" willingness-to-pay figure -- an
+// annual, per-seat framing the financial engine has no basis for at all
+// (there is no seat-based pricing input anywhere in the canonical
+// model) -- while the SAME report's KPI Dashboard/Unit Economics/
+// Financial Assumptions all correctly showed the canonical "$1.5k/month"
+// ARPA. Prompt instructions are inherently probabilistic; this is the
+// deterministic backstop the ticket's own "do not paper over the
+// contradiction with prose" instruction calls for. Deliberately narrow:
+// only fires when the model's own text pairs a dollar amount (or range)
+// with "ACV"/"annual contract value" or "per seat" framing -- vocabulary
+// this codebase's financial engine never produces itself, so a genuine,
+// already-canonical mention (e.g. "$1.5k/month per company") can never
+// match and is left completely untouched. Never fabricates a new number;
+// always replaces with the SAME canonical ARPA display value every other
+// section already uses.
+const pricingUnitMismatchPattern =
+  /\$[\d][\d,.]*\s*k?(?:\s*(?:-|–|—|to)\s*\$?[\d][\d,.]*\s*k?)?\s*(?:\/|per)?\s*(?:ACV|annual contract value)(?:\s*(?:\/|per)\s*seat)?|\$[\d][\d,.]*\s*k?(?:\s*(?:-|–|—|to)\s*\$?[\d][\d,.]*\s*k?)?\s*(?:\/|per)\s*seat\b/gi;
+
+// TASK #69A-61 -- ROOT CAUSE FIX. Confirmed live, by direct log
+// inspection of a real fresh generation: this correction runs inside
+// normalizeFullPlanReport, AFTER parseFullPlanReport's own per-field
+// fieldContentHasUnprovenClaim healing loop (#69A-39C) has already
+// checked and cleared every field. Replacing "$1k-$2k ACV per seat"
+// with the bare "$1.5k/month per company" introduced a fresh, genuinely
+// unlabeled numeric claim into targetCustomer/businessModel -- neither
+// field is in strategyRecommendationPlanFields, so
+// annotateUnclassifiedCanonicalMetricMentions' own later healing pass
+// never reaches it either (it only auto-labels a bare number in a
+// field that field-set names as this report's own strategic/governance
+// prose). The result: validateDomainResearchQuality's whole-report gate
+// (domain-research.ts) rejected the ENTIRE report over this one
+// unlabeled line, discarding genuinely-valid competitor/Porter data
+// along with it -- byte-identical to the #69A-39A/#69A-39C
+// disproportionate-blast-radius pattern those tickets already fixed,
+// just triggered by this correction instead. Fixed the same way: the
+// replacement now carries its own evidence annotation (the metric's
+// real, already-computed classification, via the SAME
+// toGateRecognizedEvidenceAnnotation/classifyFinancialMetricEvidenceType
+// pair the gate-healing passes already use elsewhere in this file) so
+// it is self-sufficient and gate-compliant on its own line, regardless
+// of which field it lands in or whether a later healing pass ever sees
+// it.
+function correctPricingUnitMismatches(
+  content: string,
+  canonicalArpaDisplayValue: string,
+  evidenceAnnotation: string
+) {
+  if (!pricingUnitMismatchPattern.test(content)) {
+    return content;
+  }
+
+  return content.replace(
+    pricingUnitMismatchPattern,
+    `${canonicalArpaDisplayValue} per company ${evidenceAnnotation}`
+  );
+}
+
 function replaceBareValidationRequiredValue(content: string, language: ResponseLanguage) {
   const valueReplacement = language === "Turkish" ? "Henüz ölçülmedi" : "Not yet measured";
   const proseReplacement = language === "Turkish" ? "doğrulama gerektiriyor" : "requires validation";
@@ -5022,15 +5239,15 @@ function normalizeFullPlanReport(
       metricDisplayValues[localizedLabel] = metric.displayValue;
     }
   }
-  // context.inputs.targetCustomer is the same single source of truth the
+  // context.inputs.targetCustomerDescriptor is the same single source of truth the
   // rest of this report already treats as known (Financial Assumptions,
   // the SWOT and executive-decision builders all read it unconditionally)
   // -- reused here so Business Model's "who pays" and Go-to-Market's
   // "beachhead positioning" can never claim that same concept is
   // unavailable while the Target Customer / ICP section already states it.
   const knownFacts = {
-    buyer: context.inputs.targetCustomer,
-    beachhead: context.inputs.targetCustomer,
+    buyer: context.inputs.targetCustomerDescriptor,
+    beachhead: context.inputs.targetCustomerDescriptor,
   };
 
   for (const field of planFields) {
@@ -5093,11 +5310,42 @@ function normalizeFullPlanReport(
         buildRiskMatrix(context, language)
       )
     : normalized.risks;
-  normalized.roadmap306090 = appendIntelligenceBlock(
-    normalized.roadmap306090,
-    reportLabel(language, "AI Action Plan", "AI Aksiyon Planı"),
-    buildAiActionPlanLines(context, language)
+  // TASK #69A-59 -- gated the same way shouldAppendRiskMatrix gates the
+  // risks append immediately above: only append the canonical, context
+  // -accurate action plan when the model's own text doesn't already
+  // contain a genuine multi-horizon action-plan structure (see
+  // roadmapAlreadyIncludesAiActionPlanStructure's own comment).
+  normalized.roadmap306090 = roadmapAlreadyIncludesAiActionPlanStructure(normalized.roadmap306090)
+    ? normalized.roadmap306090
+    : appendIntelligenceBlock(
+        normalized.roadmap306090,
+        reportLabel(language, "AI Action Plan", "AI Aksiyon Planı"),
+        buildAiActionPlanLines(context, language)
+      );
+
+  // TASK #69A-59 -- deterministic backstop for the ICP/Business Model/
+  // Pricing Strategy pricing-unit mismatch (see
+  // correctPricingUnitMismatches's own comment): these are exactly the
+  // three sections whose prompts (plan.ts) ask the model to restate
+  // willingness-to-pay/pricing in its own words, so they are the only
+  // sections that can ever contain a mismatched ACV/per-seat framing.
+  // TASK #69A-61 -- the replacement itself now carries the ARPA metric's
+  // own, real evidence classification (see correctPricingUnitMismatches'
+  // own comment) so it can never introduce an unlabeled numeric claim
+  // into a field the later gate-healing passes don't cover.
+  const arpaEvidenceAnnotation = toGateRecognizedEvidenceAnnotation(
+    classifyFinancialMetricEvidenceType(
+      context.metrics.arpa,
+      hasVerifiedUserProvidedData(context.financialConsistency.sources.userProvidedData)
+    )
   );
+  for (const pricingField of ["targetCustomer", "businessModel", "pricingStrategy"] as const) {
+    normalized[pricingField] = correctPricingUnitMismatches(
+      normalized[pricingField],
+      context.metrics.arpa.displayValue,
+      arpaEvidenceAnnotation
+    );
+  }
 
   // Eliminate filler: strip generic AI hedge sentences and exact-duplicate
   // sentences from every field. Runs after every content-adding pass above
@@ -5238,7 +5486,55 @@ function normalizeFullPlanReport(
   // metric or cites real [R#] evidence without one; it never changes a
   // decision, a number, or a section's own meaning, and never touches a
   // field that already satisfies the gate.
-  return annotateUnclassifiedCanonicalMetricMentions(deduped, context);
+  const annotated = annotateUnclassifiedCanonicalMetricMentions(deduped, context);
+
+  // TASK #69A-62 -- ROOT CAUSE FIX. Confirmed live, by direct dev-server
+  // log inspection: #69A-61's own fix (correctPricingUnitMismatches
+  // self-labeling its replacement) did NOT stop a real fresh generation
+  // from being discarded by the exact same "unsupported numeric claim"
+  // whole-report gate -- because that fix only closed the ONE specific
+  // trigger it found. parseFullPlanReport's own per-field
+  // fieldContentHasUnprovenClaim healing loop (#69A-39C) runs on the
+  // RAW, pre-normalization `parsed[field]` values, strictly BEFORE this
+  // entire function (normalizeFullPlanReport) ever runs -- so it can
+  // never see a violation introduced by ANY of this function's own later
+  // transformations (appendIntelligenceBlock's Market Opportunity Score/
+  // AI Executive Insight/Risk Matrix/AI Action Plan blocks,
+  // correctPricingUnitMismatches, dedupeReportParagraphsAcrossSections,
+  // runConsistencyValidationPass, or annotateUnclassifiedCanonicalMetricMentions
+  // itself). annotateUnclassifiedCanonicalMetricMentions only auto-labels
+  // a bare number that either names a recognized canonical metric label,
+  // already carries a citation, or sits in a strategyRecommendationPlanFields
+  // field -- any OTHER field's own free-prose numeric mention (e.g. a
+  // competitor price or market-size figure the model wrote inline in
+  // competitorLandscape/marketOpportunity/problem/solution/swotAnalysis/
+  // portersFiveForces/goToMarketPlan/salesStrategy/risks with no
+  // citation) is left completely unannotated and reaches the outer
+  // gate unprotected -- a different field each generation, depending on
+  // what the model happens to write, which is exactly why the identical
+  // failure kept recurring after a fix that only patched one known
+  // trigger. FIX: re-run the SAME #69A-39C healing check one more time,
+  // here, on the FINAL, fully-normalized text -- catching a violation
+  // from ANY of this function's own transformations regardless of which
+  // one introduced it. Only ever replaces the ONE offending field with
+  // createPlanFieldFallback's own honest fallback (mirroring #69A-39A/
+  // #69A-39C's identical "heal the one bad field, never discard the
+  // other 23" precedent) -- crucially, this NEVER touches
+  // businessCompetitorLandscapeState/portersFiveForcesState, which are
+  // built later, directly from the model's own structured JSON response,
+  // never from this field's free-prose text -- so even a healed
+  // competitorLandscape narrative can never erase the real, separately
+  // -canonicalized competitor/Porter evidence.
+  const healed = { ...annotated };
+  for (const field of planFields) {
+    if (fieldContentHasUnprovenClaim(healed[field])) {
+      healed[field] = ensureCompleteReportText(
+        createPlanFieldFallback(field, parsed, context, language)
+      );
+    }
+  }
+
+  return healed;
 }
 
 function parseFullPlanReport(
@@ -9830,15 +10126,17 @@ Write only the content for this section. Do not write a JSON object, field name,
           parsedCachedReport.executiveSummary = strategicDecisionMemoReportSection;
         }
 
+        // TASK #69A-15A -- prefer the schema-enforced state cached
+        // alongside this exact response (Tier 0) over #69A-15's own
+        // labeled-line text parse (Tier 1), mirroring the
+        // live-generation path's identical tier preference.
+        const finalCachedCompetitorLandscapeState =
+          cachedBusinessCompetitorLandscapeState ||
+          buildBusinessCompetitorLandscapeState(parsedCachedReport.competitorLandscape);
         return new Response(encoder.encode(
           serializePlanReportMetadataChunk(
             cachedUnifiedFinancialContext,
-            // TASK #69A-15A -- prefer the schema-enforced state cached
-            // alongside this exact response (Tier 0) over #69A-15's own
-            // labeled-line text parse (Tier 1), mirroring the
-            // live-generation path's identical tier preference.
-            cachedBusinessCompetitorLandscapeState ||
-              buildBusinessCompetitorLandscapeState(parsedCachedReport.competitorLandscape),
+            finalCachedCompetitorLandscapeState,
             // TASK #69A-38 -- mirrors the live-generation call site's own
             // identical fix: cachedPortersFiveForcesState null (a cache
             // entry written before this state existed, or one whose
@@ -9848,7 +10146,15 @@ Write only the content for this section. Do not write a JSON object, field name,
             // independent (and, for an uneven single paragraph, incomplete)
             // prose-parsing tiers.
             cachedPortersFiveForcesState ||
-              buildPortersFiveForcesStateFromLegacyProse(parsedCachedReport.portersFiveForces)
+              buildPortersFiveForcesStateFromLegacyProse(parsedCachedReport.portersFiveForces),
+            // TASK #69A-63 -- a cache hit only ever replays an ORIGINALLY
+            // successful generation (the fallback path never writes to
+            // this cache -- see that branch's own comment), so the status
+            // is always one of the two SUCCESS variants, never TIMEOUT/
+            // GENERATION_ERROR.
+            finalCachedCompetitorLandscapeState?.competitors.length
+              ? "SUCCESS_WITH_EVIDENCE"
+              : "SUCCESS_NO_EVIDENCE"
           ) + serializePlanReportChunks(parsedCachedReport)
         ), {
           headers: {
@@ -10324,12 +10630,20 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             // Tier 1's own model- or prose-authored citation, or Tier
             // 1.5's own generated one -- extending the SAME canonical
             // record rather than adding a parallel structure.
+            // TASK #69A-29B -- 3rd arg: this report's own normalized
+            // business idea text, the ONE additional input
+            // deriveCapabilityGapWeakness (inside
+            // enrichCompetitorWeaknessesFromEvidence) needs to detect a
+            // defensible, evidence-gap directional weakness for a
+            // competitor Tiers 0/1/1.5a/1.5b all left "unavailable" --
+            // see that function's own extensive comment.
             const businessCompetitorLandscapeState = attachWeaknessProvenance(
               enrichCompetitorWeaknessesFromEvidence(
                 buildBusinessCompetitorLandscapeStateFromStructuredResponse(
                   structuredCompetitorLandscapeResponse
                 ) || buildBusinessCompetitorLandscapeState(parsedReport.competitorLandscape),
-                businessResearch.evidence
+                businessResearch.evidence,
+                researchAwareFinancialContext.normalizedBusinessIdea
               ),
               businessResearch.evidence
             );
@@ -10520,11 +10834,21 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
             // freshest available context regardless of whether either
             // structured state exists), so the client always ends up
             // with the FINAL, internally consistent snapshot.
+            // TASK #69A-63 -- this branch is a genuinely COMPLETED
+            // generation (the try block reached this point without
+            // throwing), so businessCompetitorLandscapeState being
+            // empty/null here means the model itself validated zero real
+            // competitors, never an infrastructure failure -- the honest
+            // SUCCESS_NO_EVIDENCE case, distinct from the fallback
+            // branch's TIMEOUT/GENERATION_ERROR below.
             enqueue(
               serializePlanReportMetadataChunk(
                 finalResearchAwareFinancialContext,
                 businessCompetitorLandscapeState,
-                portersFiveForcesState
+                portersFiveForcesState,
+                businessCompetitorLandscapeState?.competitors.length
+                  ? "SUCCESS_WITH_EVIDENCE"
+                  : "SUCCESS_NO_EVIDENCE"
               )
             );
             enqueue(serializePlanReportChunks(parsedReport));
@@ -10774,11 +11098,21 @@ ${executiveDecisionSystemCompactRule}- Never quote the raw request or expose hid
               // now-unconditional second chunk, so a failed/timed-out
               // generation's persisted investmentScore is exactly as
               // truthful as a successful one's.
+              // TASK #69A-63 -- fallbackCompetitorLandscapeState is
+              // always null here (the generic template has no
+              // "COMPETITOR: X | ..." lines to parse), but that null is
+              // NEVER honest evidence that competitors don't exist -- the
+              // generation that would have validated them never
+              // completed. Recording TIMEOUT/GENERATION_ERROR here lets a
+              // renderer tell "research genuinely found nothing" apart
+              // from "research never finished" without fabricating a
+              // competitor either way.
               enqueue(
                 serializePlanReportMetadataChunk(
                   finalResearchAwareFinancialContext,
                   fallbackCompetitorLandscapeState,
-                  fallbackPortersFiveForcesState
+                  fallbackPortersFiveForcesState,
+                  providerTimedOut ? "TIMEOUT" : "GENERATION_ERROR"
                 )
               );
               enqueue(serializePlanReportChunks(fallbackReport));

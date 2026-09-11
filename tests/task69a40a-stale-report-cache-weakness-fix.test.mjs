@@ -188,7 +188,7 @@ test("6. unavailable remains honest when evidence is genuinely insufficient (Dry
   ];
   const state = buildBusinessCompetitorLandscapeStateFromStructuredResponse(response);
   assert.equal(state.competitors[0].weaknessBasis, "unavailable");
-  assert.equal(formatCompetitorWeaknessForDisplay(state.competitors[0]), "Not available");
+  assert.equal(formatCompetitorWeaknessForDisplay(state.competitors[0]), "No evidence-backed weakness identified");
 });
 
 test("7. no hardcoded competitor weakness (Float/Cash Flow Frog/Futrli/QuickBooks/Xero/Dryrun-specific text) was introduced by this fix's own diff", () => {

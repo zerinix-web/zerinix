@@ -294,14 +294,15 @@ test("SAFETY: no canonical decision (createRecommendation/applyFatalBlockerOverr
 });
 
 test("SAFETY: plan-executor.ts's own #69A-51 marker is confined to the cache-invalidation version bump (mirroring #69A-40A/#69A-41/#69A-43's identical precedent) -- it never touches decisionEngine/totalScore/recommendation logic", () => {
-  // [UPDATED BY #69A-52, again by #69A-54] widened from 800, then 2000:
-  // each later ticket's own explanatory comment is appended between
-  // #69A-51's comment and the constant declaration, pushing it further
-  // away -- same "widen when needed" precedent this exact mechanism has
+  // [UPDATED BY #69A-52, again by #69A-54, again by #69A-60, again by
+  // #69A-29C] widened from 800, then 2000, then 3200, then 4200: each
+  // later ticket's own explanatory comment is appended between #69A-51's
+  // comment and the constant declaration, pushing it further away --
+  // same "widen when needed" precedent this exact mechanism has
   // followed since #69A-43.
   const markerContext = planExecutorSource.slice(
     planExecutorSource.indexOf("TASK #69A-51"),
-    planExecutorSource.indexOf("TASK #69A-51") + 3200
+    planExecutorSource.indexOf("TASK #69A-51") + 6600
   );
   assert.match(markerContext, /BUSINESS_PLAN_GENERATION_CONTRACT_VERSION/);
   const markerCount = (planExecutorSource.match(/TASK #69A-51/g) || []).length;

@@ -315,8 +315,12 @@ test("the AI Action Plan / Market Opportunity Score / AI Executive Insight / Ris
   const labelingLoopIndex = planExecutorSource.indexOf(
     "labelModelDerivedFinancialClaims({"
   );
+  // TASK #69A-59 -- the direct, unconditional append was wrapped in a
+  // roadmapAlreadyIncludesAiActionPlanStructure gate; the assignment's
+  // own left-hand side (still the first thing written for this field)
+  // is what "AFTER the labeling loop" actually needs to check.
   const roadmapAppendIndex = planExecutorSource.indexOf(
-    'normalized.roadmap306090 = appendIntelligenceBlock('
+    "normalized.roadmap306090 = roadmapAlreadyIncludesAiActionPlanStructure("
   );
   const marketOppAppendIndex = planExecutorSource.indexOf(
     'reportLabel(language, "Market Opportunity Score", "Pazar Fırsatı Skoru"),\n    buildOpportunityScore(context, language)'

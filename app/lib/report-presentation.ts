@@ -1006,13 +1006,39 @@ export function getReportQualityBreakdown(
   // "Evidence Quality" phrasing this exact label was already, and
   // deliberately, moved away from once before (see this comment's own
   // history above).
+  //
+  // TASK #69A-31 -- LABEL RENAME ONLY (no value/formula change).
+  // Confirmed live: a fresh report showed "Report Quality: Benchmark
+  // Fit: 46/100" directly alongside "Benchmark Intelligence: Overall
+  // Fit: 70/100" -- both nominally about "benchmark fit," but computed
+  // from two genuinely different formulas (an earlier ticket already traced and
+  // fixed the real authority-drift bug here -- a post-research refresh
+  // overwriting this dimension with an unrelated competitiveEvidence
+  // value -- and confirmed these are legitimately DIFFERENT concepts,
+  // never meant to be numerically equal). This dimension
+  // (benchmarkFitScore, report-intelligence.ts) is a coarse, 3-input
+  // measure of how much CONFIDENCE/VALIDATION backs the report's own
+  // fit/confidence CLASSIFICATION (context.benchmarkFit.fit/.confidence,
+  // penalized per validation gap) -- it never incorporates the richer,
+  // 5-dimension financial-metric-vs-benchmark-range analysis
+  // (industry/business-model/geography/pricing/financial fit)
+  // benchmarkScore.overallFit actually measures. The bare word
+  // "Benchmark Fit" reads, next to a "Benchmark Intelligence" panel
+  // literally titled "Overall Fit," as the SAME number restated --
+  // even though an earlier ticket's own fix already made them independently
+  // correct, the LABEL collision remained. Renamed to "Benchmark
+  // Validation Confidence" -- mirrors this exact panel's own
+  // "Validation Readiness" naming convention and precisely names what
+  // the formula measures (confidence in the classification, net of
+  // known gaps), never confusable with Benchmark Intelligence's own
+  // "Overall Fit" metric-alignment score.
   const labels = isTurkish
     ? {
         totalScore: "Genel Kalite Skoru",
         evidenceQuality: "Veri Bütünlüğü",
         sourceConfidence: "Kaynak Gücü",
         financialConsistency: "Finansal Tutarlılık",
-        benchmarkFit: "Benchmark Uyumu",
+        benchmarkFit: "Benchmark Doğrulama Güveni",
         validationReadiness: "Doğrulama Hazırlığı",
       }
     : {
@@ -1020,7 +1046,7 @@ export function getReportQualityBreakdown(
         evidenceQuality: "Data Completeness",
         sourceConfidence: "Source Strength",
         financialConsistency: "Financial Consistency",
-        benchmarkFit: "Benchmark Fit",
+        benchmarkFit: "Benchmark Validation Confidence",
         validationReadiness: "Validation Readiness",
       };
 

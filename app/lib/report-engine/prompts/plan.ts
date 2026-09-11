@@ -25,7 +25,7 @@ export const planPrompts = {
   },
   targetCustomer: {
     prompt:
-      "Define only the ICP. Include beachhead segment, buyer/user, budget owner, adoption trigger, urgency, willingness to pay, disqualifying profile, and highest-probability first 50 customers. Do not repeat market size, product features, pricing mechanics, or GTM channel tactics. Max 155 words.",
+      "Define only the ICP. Include beachhead segment, buyer/user, budget owner, adoption trigger, urgency, willingness to pay, disqualifying profile, and highest-probability first 50 customers. State willingness to pay using the exact canonical ARPA amount, billing period, and pricing unit from the Data-Driven Financial Analysis Engine block -- never a different number, period, or unit (e.g. never restate a monthly per-account price as an annual or per-seat figure). Do not repeat market size, product features, pricing mechanics, or GTM channel tactics. Max 155 words.",
     maxTokens: 750,
   },
   marketOpportunity: {
@@ -59,7 +59,7 @@ export const planPrompts = {
   },
   businessModel: {
     prompt:
-      "Explain only revenue mechanics. Cover who pays, what they pay for, pricing unit, recurring/transactional logic, gross margin logic, retention loop, operational leverage, and why the model can compound. Do not repeat product features, ICP, acquisition channels, or financial KPI dashboard detail. Max 165 words.",
+      "Explain only revenue mechanics. Cover who pays, what they pay for, pricing unit, recurring/transactional logic, gross margin logic, retention loop, operational leverage, and why the model can compound. State the pricing unit and amount using the exact canonical ARPA amount, billing period, and pricing unit from the Data-Driven Financial Analysis Engine block -- never a converted period or unit. Do not repeat product features, ICP, acquisition channels, or financial KPI dashboard detail. Max 165 words.",
     maxTokens: 850,
   },
   tamSamSom: {
@@ -79,7 +79,7 @@ export const planPrompts = {
   },
   pricingStrategy: {
     prompt:
-      "Recommend only pricing logic. Include value metric, packaging, entry price logic, premium tier, pilot economics, expansion path, and pricing validation tests. Do not repeat revenue model, unit economics, financial dashboard, or GTM channels. Max 145 words.",
+      "Recommend only pricing logic. Include value metric, packaging, entry price logic, premium tier, pilot economics, expansion path, and pricing validation tests. The entry price must be the exact canonical ARPA amount, billing period, and pricing unit from the Data-Driven Financial Analysis Engine block -- never a converted period or unit. Do not repeat revenue model, unit economics, financial dashboard, or GTM channels. Max 145 words.",
     maxTokens: 750,
   },
   goToMarketPlan: {
@@ -94,7 +94,7 @@ export const planPrompts = {
   },
   unitEconomics: {
     prompt:
-      "Write only financial unit metrics as a compact explainable table. Include ARPA/ACV if relevant, gross margin, CAC, LTV, LTV:CAC, payback period, retention/churn assumption, and the single assumption that most affects viability. For each key metric show value, formula, assumption, confidence, and benchmark source in compressed form. No strategic prose, market claims, or GTM explanation. Max 145 words.",
+      "Write only financial unit metrics as a compact explainable table. Include the canonical ARPA (its exact amount, billing period, and pricing unit -- never converted or relabeled as ACV unless the user explicitly described an annual contract), gross margin, CAC, LTV, LTV:CAC, payback period, retention/churn assumption, and the single assumption that most affects viability. For each key metric show value, formula, assumption, confidence, and benchmark source in compressed form. No strategic prose, market claims, or GTM explanation. Max 145 words.",
     maxTokens: 850,
   },
   financialDashboard: {
@@ -122,9 +122,26 @@ export const planPrompts = {
       "Define only the KPI governance logic, not another dashboard. For each KPI category, state owner, review cadence, decision trigger, and what action changes if the metric misses. Never output placeholder numbers such as 1, Target: 1, or 1 / Target:1. If a threshold is unknown, write Validation Required. Do not repeat KPI Dashboard values, Unit Economics, Financial Dashboard metrics, roadmap tasks, or market claims. Max 120 words.",
     maxTokens: 750,
   },
+  // TASK #69A-59 -- ROOT CAUSE FIX. Confirmed live: this prompt used to
+  // ask the model to write its own "AI Action Plan" with the exact same
+  // Immediate Actions / Next 30 Days / Next 90 Days / Next 6 Months /
+  // Next 12 Months horizons plan-executor.ts's own buildAiActionPlanLines
+  // deterministically appends afterward from canonical context.metrics
+  // (see that function and its appendIntelligenceBlock call site) --
+  // guaranteeing the model's raw text already contained a literal "AI
+  // Action Plan" heading, which appendIntelligenceBlock's own duplicate
+  // -heading guard then read as "already present" and skipped appending
+  // the canonical block entirely. The model's own guessed pricing figure
+  // (e.g. a rounded "$2k/month" invented independently of the report's
+  // real, canonical ARPA) was left as the final, uncorrected text with no
+  // safety net -- exactly the "$2k/month planning input" contradiction
+  // this fix closes. This prompt now asks only for the narrative
+  // milestones, never a heading or horizon-labeled structure that could
+  // collide with the deterministic block that is supposed to exclusively
+  // own that content.
   roadmap306090: {
     prompt:
-      "Create only the AI Action Plan with Immediate Actions, Next 30 Days, Next 90 Days, Next 6 Months, and Next 12 Months. Begin with the exact strategic action selected by Executive Summary's First 90-Day Action Plan, then translate it into business-specific milestones, owners or operating objects, the proof needed before moving on, and expected impact. Every later horizon must depend on evidence from the prior horizon. Do not repeat the recommendation rationale, GTM, sales process, KPIs, or founder execution detail from Founder Roadmap. Max 190 words.",
+      "Describe only the 30/60/90/180-day milestone narrative, in plain prose (no headings, no 'Immediate Actions'/'Next 30 Days'-style labeled list). Begin with the exact strategic action selected by Executive Summary's First 90-Day Action Plan, then translate it into business-specific milestones, owners or operating objects, the proof needed before moving on, and expected impact. Every later milestone must depend on evidence from the prior one. Do not repeat the recommendation rationale, GTM, sales process, KPIs, or founder execution detail from Founder Roadmap. Max 190 words.",
     maxTokens: 900,
   },
   founderRoadmap: {

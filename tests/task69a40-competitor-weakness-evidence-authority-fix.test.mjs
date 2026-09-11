@@ -175,13 +175,15 @@ test("B: a directional weakness remains explicitly labeled through the canonical
   assert.match(formatCompetitorWeaknessForDisplay(xero), /\(Directional\)$/);
 });
 
-test("C: unavailable renders the explicit 'Not available', never an ambiguous bare dash", () => {
+test("C: unavailable renders an explicit honest sentence, never an ambiguous bare dash", () => {
   const state = buildBusinessCompetitorLandscapeStateFromStructuredResponse(realCaseFixtureResponse());
   const dryrun = state.competitors.find((c) => c.company === "Dryrun");
 
   assert.equal(dryrun.weaknessBasis, "unavailable");
   assert.equal(dryrun.weaknesses, "—", "internal storage sentinel is unchanged");
-  assert.equal(formatCompetitorWeaknessForDisplay(dryrun), "Not available");
+  // TASK #69A-58 updated the exact wording to "No evidence-backed
+  // weakness identified".
+  assert.equal(formatCompetitorWeaknessForDisplay(dryrun), "No evidence-backed weakness identified");
 });
 
 // --- D/F: absence of evidence can never become a negative claim; generic

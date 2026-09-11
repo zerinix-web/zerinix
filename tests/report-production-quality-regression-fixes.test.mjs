@@ -142,7 +142,10 @@ test("the narrative fallback fields no longer use the banned '[Section] for [nam
 
 test("the 10 improved narrative fallback fields pull from the same already-detected context.inputs values used elsewhere in the report (drift check)", () => {
   assert.match(planExecutorSource, /const industryLabel = context\?\.inputs\.industry \|\| /);
-  assert.match(planExecutorSource, /const targetCustomerLabel = context\?\.inputs\.targetCustomer \|\| /);
+  // TASK #69A-60 -- redirected to the richer, report-facing
+  // targetCustomerDescriptor (see that ticket's own fix); still the
+  // SAME already-detected classifier output, never a second one.
+  assert.match(planExecutorSource, /const targetCustomerLabel = context\?\.inputs\.targetCustomerDescriptor \|\| /);
   assert.match(planExecutorSource, /const businessModelLabel = context\?\.inputs\.businessModel \|\| /);
   assert.match(planExecutorSource, /const geographyLabel = context\?\.inputs\.geography \|\| /);
   assert.match(planExecutorSource, /const pricingModelLabel = context\?\.inputs\.pricingModel \|\| /);
@@ -177,7 +180,7 @@ test("a fallback field still works (with sensible defaults) even when context is
   // createPlanFieldFallback.
   const context = undefined;
   const industryLabel = context?.inputs.industry || "the detected industry";
-  const targetCustomerLabel = context?.inputs.targetCustomer || "the primary target buyer";
+  const targetCustomerLabel = context?.inputs.targetCustomerDescriptor || "the primary target buyer";
 
   assert.equal(industryLabel, "the detected industry");
   assert.equal(targetCustomerLabel, "the primary target buyer");

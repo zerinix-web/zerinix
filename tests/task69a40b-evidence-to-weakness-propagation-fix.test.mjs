@@ -171,7 +171,7 @@ test("4. LivePlan (only a generic multi-vendor aggregate citation, never its own
   const enriched = enrichCompetitorWeaknessesFromEvidence(state, realCaseEvidence());
   const liveplan = enriched.competitors.find((c) => c.company.startsWith("LivePlan"));
   assert.equal(liveplan.weaknessBasis, "unavailable");
-  assert.equal(formatCompetitorWeaknessForDisplay(liveplan), "Not available");
+  assert.equal(formatCompetitorWeaknessForDisplay(liveplan), "No evidence-backed weakness identified");
 });
 
 test("4b. Fathom/DryRun (a real official-domain match with genuinely content-less evidence) remains honestly Unavailable -- entity attribution alone is never sufficient without real claim content", () => {
@@ -179,7 +179,7 @@ test("4b. Fathom/DryRun (a real official-domain match with genuinely content-les
   const enriched = enrichCompetitorWeaknessesFromEvidence(state, realCaseEvidence());
   const fathomDryrun = enriched.competitors.find((c) => c.company.startsWith("Fathom"));
   assert.equal(fathomDryrun.weaknessBasis, "unavailable");
-  assert.equal(formatCompetitorWeaknessForDisplay(fathomDryrun), "Not available");
+  assert.equal(formatCompetitorWeaknessForDisplay(fathomDryrun), "No evidence-backed weakness identified");
 });
 
 test("D. a generic multi-vendor aggregate citation is never mistaken for one named competitor's own evidence -- hostname-only matching structurally excludes it", () => {
@@ -221,9 +221,13 @@ test("6. competitorLandscapeStructured and every planField (including 'problem',
   // The enrichment call site reads businessResearch.evidence -- the SAME
   // evidence object already used to build the generation prompt earlier
   // in this exact request, never a freshly re-fetched one.
+  // TASK #69A-29B widened this call with a 3rd argument
+  // (researchAwareFinancialContext.normalizedBusinessIdea) immediately
+  // after businessResearch.evidence -- still the SAME already-built
+  // context object, never a fresh fetch.
   assert.match(
     planExecutorSource,
-    /enrichCompetitorWeaknessesFromEvidence\(\s*\n[\s\S]{0,300}?businessResearch\.evidence\s*\n\s*\);/
+    /enrichCompetitorWeaknessesFromEvidence\(\s*\n[\s\S]{0,300}?businessResearch\.evidence,?\s*\n[\s\S]{0,120}?\)[,;]/
   );
 });
 
@@ -259,7 +263,7 @@ test("7. web and PDF still consume the identical canonical formatCompetitorWeakn
 
 test("8. the fix never reads report prose/planFields text as its input -- only the raw research evidence registry (id/url/claim/value), never parsedReport or responseText", () => {
   const fnMatch = stateSource.match(
-    /export function enrichCompetitorWeaknessesFromEvidence\([\s\S]{0,3000}?\n\}/
+    /export function enrichCompetitorWeaknessesFromEvidence\([\s\S]{0,4500}?\n\}/
   );
   assert.ok(fnMatch);
   assert.doesNotMatch(fnMatch[0], /parsedReport|responseText|competitorLandscape\b/);
@@ -270,7 +274,7 @@ test("8. the fix never reads report prose/planFields text as its input -- only t
 test("9. no new AI/research call was introduced -- the enrichment is pure, synchronous string/URL matching over already-fetched evidence", () => {
   assert.doesNotMatch(domainResearchSource, /TASK #69A-40B/);
   const fnMatch = stateSource.match(
-    /export function enrichCompetitorWeaknessesFromEvidence\([\s\S]{0,3000}?\n\}/
+    /export function enrichCompetitorWeaknessesFromEvidence\([\s\S]{0,4500}?\n\}/
   );
   assert.ok(fnMatch);
   assert.doesNotMatch(fnMatch[0], /await|fetch\(|client\.responses\.create|async /);
@@ -278,7 +282,7 @@ test("9. no new AI/research call was introduced -- the enrichment is pure, synch
 
 test("9b. SAFETY: no hardcoded competitor-specific weakness text was introduced -- the enrichment's own output template is generic and reusable for any competitor", () => {
   const fnMatch = stateSource.match(
-    /export function enrichCompetitorWeaknessesFromEvidence\([\s\S]{0,3000}?\n\}/
+    /export function enrichCompetitorWeaknessesFromEvidence\([\s\S]{0,4500}?\n\}/
   );
   assert.ok(fnMatch);
   assert.doesNotMatch(fnMatch[0], /Float|Cash Flow Frog|Futrli|QuickBooks|Xero|LivePlan|Dryrun|DryRun|Fathom|Intuit/i);

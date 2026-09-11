@@ -184,18 +184,32 @@ export type BivCompetitorRecord = {
 // genuinely verified one) so that case's visible text is byte-identical
 // to before this task.
 //
-// TASK #69A-40 -- the UNAVAILABLE case now returns the explicit "Not
-// available" (never the bare "—" sentinel) -- an ambiguous dash reads as
-// "this cell was left blank" rather than "evidence genuinely could not
-// support a claim here", which this fix's own root-cause work confirmed
-// live is a legitimate, honest outcome for a real competitor (not a
-// defect to hide). "—" remains the internal, storage-level sentinel
-// (every comparison elsewhere in this file still checks against it
-// directly) -- only this function's own DISPLAY text changed, so no
-// persisted data or internal comparison anywhere else is affected.
+// TASK #69A-40 -- the UNAVAILABLE case now returns an explicit sentence
+// (never the bare "—" sentinel) -- an ambiguous dash reads as "this cell
+// was left blank" rather than "evidence genuinely could not support a
+// claim here", which this fix's own root-cause work confirmed live is a
+// legitimate, honest outcome for a real competitor (not a defect to
+// hide). "—" remains the internal, storage-level sentinel (every
+// comparison elsewhere in this file still checks against it directly)
+// -- only this function's own DISPLAY text changed, so no persisted data
+// or internal comparison anywhere else is affected.
+//
+// TASK #69A-58 -- WORDING FIX. Confirmed live: a real report with 4
+// genuinely-unresearched competitors (no official-domain evidence
+// matched the narrow "embedded feature" pattern this file's own
+// enrichCompetitorWeaknessesFromEvidence requires -- see that
+// function's comments) rendered "Not available" for every one of
+// them. Read cold, that phrasing is indistinguishable from a missing
+// or broken field; it does not communicate that this is the correct,
+// deliberate outcome of an honest evidence check. The canonical
+// `weaknessBasis: "unavailable"` state and the internal "—" sentinel
+// are both completely unchanged -- this is a wording-only fix to the
+// one shared function web (dashboard page, Planner.tsx) and PDF
+// (ReportPdfButton.tsx) already both call, so both surfaces update
+// together automatically.
 export function formatCompetitorWeaknessForDisplay(record: Pick<BivCompetitorRecord, "weaknesses" | "weaknessBasis">) {
   if (record.weaknesses === "—") {
-    return "Not available";
+    return "No evidence-backed weakness identified";
   }
 
   if (record.weaknessBasis !== "directional") {
@@ -523,6 +537,80 @@ export function buildBusinessCompetitorLandscapeStateFromStructuredResponse(
 // is left completely untouched, still honestly "unavailable".
 const EMBEDDED_FEATURE_EVIDENCE_PATTERN =
   /\b(?:built[- ]?in|built directly into|embedded|bundled|natively (?:built|integrated) into)\b/i;
+
+// TASK #69A-60 -- ROOT CAUSE FIX. Confirmed by code audit: the research
+// plan (domain-research.ts) already explicitly instructs the research
+// step to capture a review platform's own "Cons"/limitations/drawbacks
+// section when found ("capture its own documented limitations, feature
+// gaps, or 'cons'/drawbacks section too"), so the plan itself is not
+// biased toward positive-only evidence. But findOfficialDomainEvidenceForCompetitor
+// above only ever accepts evidence whose URL HOSTNAME belongs to the
+// competitor's own domain -- entirely correct for attributing an
+// "embedded feature" claim (the hardest-to-fake identity signal for a
+// vendor's own marketing/docs), but it structurally excludes the one
+// place a genuine "Cons" section actually lives: third-party review
+// platforms, whose hostname (g2.com, capterra.com, ...) is shared across
+// every product they review and can never itself name one specific
+// competitor. A real Fathom review on g2.com/products/fathom/reviews IS
+// safely attributable to Fathom -- not via hostname, but via the
+// competitor's own name appearing in the URL PATH, which is how every
+// major review platform structures its product-review URLs. Restricted
+// to a small, curated allowlist of well-known review/comparison
+// platforms specifically (never an arbitrary domain) so this stays as
+// hard to fake as the official-domain check: a random blog whose PATH
+// happens to contain a competitor's name is not in this list and is
+// never matched this way.
+const REVIEW_PLATFORM_HOSTNAMES = new Set([
+  "g2.com",
+  "www.g2.com",
+  "capterra.com",
+  "www.capterra.com",
+  "trustradius.com",
+  "www.trustradius.com",
+  "trustpilot.com",
+  "www.trustpilot.com",
+  "getapp.com",
+  "www.getapp.com",
+  "softwareadvice.com",
+  "www.softwareadvice.com",
+]);
+
+// TASK #69A-60 -- companion to REVIEW_PLATFORM_HOSTNAMES above: a
+// genuine "Cons"/limitation claim is recognized only when the evidence
+// item's own claim/value text carries an explicit stated-limitation
+// shape -- either a structural review-platform label ("Cons:",
+// "Drawbacks:", "Limitations:", ...) or an explicit stated-absence verb
+// phrase ("lacks", "does not support", "no support for", "missing",
+// "limited to only"). Deliberately narrower than a bare negative
+// adjective match (never "expensive"/"weak"/"difficult" alone with no
+// structural or absence framing) so this can never manufacture a
+// generic negative from ordinary descriptive text that merely mentions
+// a feature -- it only recognizes text that is ALREADY framed, by its
+// own source, as a stated limitation.
+const STATED_LIMITATION_EVIDENCE_PATTERN =
+  /\b(?:cons?|drawbacks?|limitations?|downsides?|disadvantages?|complaints?)\s*[:\-–—]|\b(?:lacks?|does\s+not\s+support|doesn't\s+support|no\s+support\s+for|missing|limited\s+to\s+only)\b/i;
+
+function findReviewPlatformEvidenceForCompetitor(
+  tokens: readonly string[],
+  evidence: readonly { id: string; url: string; claim: string; value: string }[]
+) {
+  return evidence.find((item) => {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(item.url);
+    } catch {
+      return false;
+    }
+
+    const hostname = parsedUrl.hostname.toLowerCase();
+    if (!REVIEW_PLATFORM_HOSTNAMES.has(hostname)) {
+      return false;
+    }
+
+    const path = parsedUrl.pathname.toLowerCase();
+    return tokens.some((token) => path.includes(token));
+  });
+}
 const MIN_COMPETITOR_ENTITY_TOKEN_LENGTH = 4;
 
 // TASK #69A-45 -- ROOT CAUSE FIX. Confirmed live (5 consecutive fresh
@@ -616,11 +704,119 @@ function findOfficialDomainEvidenceForCompetitor(
   });
 }
 
+// TASK #69A-60 -- the claim/value text is real research evidence, not
+// report prose -- trimmed to a bounded length so one long-tail claim
+// can never dominate the weaknesses cell, but never rewritten or
+// reworded (a paraphrase risks silently drifting from what the source
+// actually said).
+function truncateEvidenceQuote(text: string, maxLength = 160) {
+  const trimmed = text.trim();
+  return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength - 1).trimEnd()}…` : trimmed;
+}
+
+// TASK #69A-29B -- ROOT CAUSE FIX. Confirmed live: a fresh real BIV
+// report that successfully discovered and structured 4 real, named
+// competitors (Jirav, Spotlight Reporting, Fathom, Float) -- with
+// populated, evidence-aware positioning and strengths -- still rendered
+// "No evidence-backed weakness identified" for every one of them. Both
+// existing Tier 1.5 strategies above are each narrow BY DESIGN and, by
+// construction, structurally cannot fire for any of these four: Tier
+// 1.5a (embedded-feature) only recognizes a capability described as
+// embedded within a BROADER platform -- these four are dedicated,
+// standalone FP&A/forecasting tools, not embedded add-ons, so the
+// pattern has nothing to match. Tier 1.5b (review-platform Cons) only
+// fires when the research corpus happened to fetch a G2/Capterra/etc.
+// review page for that SPECIFIC competitor with an explicit "Cons:"-
+// shaped section -- for these four, research surfaced positioning/
+// strengths evidence but never that specific review-platform shape.
+//
+// The ticket's own worked example names the actual comparative shape
+// that DOES apply here, and that the existing schema/prompt already
+// permits the model to draw (but reliably still didn't, for these
+// specific real competitors -- the same LLM caution-bias asymmetry
+// #69A-29A/#69A-40B/#69A-45/#69A-60 each independently found and fixed
+// with a deterministic code-level fallback for a different evidence
+// shape):
+//
+//   Verified fact (this competitor's own ALREADY-evidence-backed
+//   positioning/strengths, from Tier 0/Tier 1 above): the vendor's own
+//   documented scope is reporting/forecasting/analysis, e.g. for
+//   accountants/advisors.
+//   Verified fact (this report's own business idea, the ONE input this
+//   entire generation is already grounded in): this business's own
+//   proposition explicitly differentiates on a specific advanced
+//   capability -- e.g. AI-generated prescriptive recommendations,
+//   automated risk alerting, or forward-looking scenario planning.
+//   Permitted, honest DIRECTIONAL inference: "<capability> is not
+//   established in the reviewed evidence" -- an evidence-GAP statement
+//   about THIS competitor's own documented scope, never a claim that
+//   the competitor lacks it (the ticket's own explicit distinction:
+//   "The competitor has weak AI" invents a negative; "X is not
+//   established in the reviewed evidence" honestly reports what the
+//   evidence does and does not show).
+//
+// Deliberately bounded to a small, curated set of capability
+// categories (mirroring EMBEDDED_FEATURE_EVIDENCE_PATTERN/
+// STATED_LIMITATION_EVIDENCE_PATTERN's own precedent immediately above
+// -- a fixed, reviewed regex list, never an open-ended LLM-style
+// inference) rather than an attempt to auto-detect ANY differentiator
+// from arbitrary prose, which would risk manufacturing a claim from a
+// coincidental word match. Only ever fires when: (1) the business's own
+// idea text names the capability, (2) this SPECIFIC competitor's own
+// already-verified positioning+strengths text says nothing about it
+// (checked with the SAME pattern, so a competitor that DOES claim the
+// capability is correctly left alone), and (3) this competitor has at
+// least one non-"—" verified fact (positioning or strengths) to ground
+// the comparison in at all -- never fired against a competitor with no
+// verified facts whatsoever. Runs only after both existing Tier 1.5
+// strategies found nothing, and never overrides a weakness either of
+// them already supplied.
+const CAPABILITY_DIFFERENTIATOR_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
+  {
+    label: "Prescriptive recommendation depth",
+    pattern: /\b(?:prescriptive|ai[-\s]?(?:powered|generated|driven)\s+recommendations?|automated\s+(?:financial\s+)?recommendations?)\b/i,
+  },
+  {
+    label: "Automated risk-alerting depth",
+    pattern: /\b(?:risk\s+alerts?|(?:automated|automatic)\s+risk\s+(?:detection|monitoring|alerting))\b/i,
+  },
+  {
+    label: "Scenario-planning depth",
+    pattern: /\bscenario\s+(?:planning|modeling|analysis)\b/i,
+  },
+];
+
+function deriveCapabilityGapWeakness(
+  competitor: Pick<BivCompetitorRecord, "positioning" | "strengths">,
+  normalizedBusinessIdea: string
+): string | null {
+  if (!normalizedBusinessIdea) {
+    return null;
+  }
+
+  const verifiedFacts = [competitor.positioning, competitor.strengths].filter(
+    (value) => value && value !== "—"
+  );
+  if (verifiedFacts.length === 0) {
+    return null;
+  }
+  const competitorOwnText = verifiedFacts.join(" ");
+
+  for (const { label, pattern } of CAPABILITY_DIFFERENTIATOR_PATTERNS) {
+    if (pattern.test(normalizedBusinessIdea) && !pattern.test(competitorOwnText)) {
+      return `${label} is not established in the reviewed evidence for this competitor, based on its own documented positioning and strengths.`;
+    }
+  }
+
+  return null;
+}
+
 export function enrichCompetitorWeaknessesFromEvidence(
   state: BusinessCompetitorLandscapeState | null,
-  evidence: readonly { id: string; url: string; claim: string; value: string }[]
+  evidence: readonly { id: string; url: string; claim: string; value: string }[],
+  normalizedBusinessIdea = ""
 ): BusinessCompetitorLandscapeState | null {
-  if (!state || !evidence.length) {
+  if (!state) {
     return state;
   }
 
@@ -632,25 +828,65 @@ export function enrichCompetitorWeaknessesFromEvidence(
       }
 
       const tokens = extractCompetitorEntityTokens(competitor.company);
-      if (!tokens.length) {
-        return competitor;
+
+      if (tokens.length && evidence.length) {
+        const officialEvidence = findOfficialDomainEvidenceForCompetitor(tokens, evidence);
+        if (officialEvidence) {
+          const combinedText = `${officialEvidence.claim} ${officialEvidence.value}`;
+          if (EMBEDDED_FEATURE_EVIDENCE_PATTERN.test(combinedText)) {
+            return {
+              ...competitor,
+              weaknesses: `Its own official product documentation describes the relevant capability as a feature embedded within a broader general-purpose platform rather than a dedicated, purpose-built specialization [${officialEvidence.id}].`,
+              weaknessBasis: "directional" as const,
+            };
+          }
+        }
+
+        // TASK #69A-60 -- second, independent attribution+claim-shape pair
+        // (see REVIEW_PLATFORM_HOSTNAMES/STATED_LIMITATION_EVIDENCE_PATTERN's
+        // own comments): a genuine review-platform "Cons"/limitation claim,
+        // safely attributed via the competitor's name in the URL path
+        // rather than the (shared, unusable) hostname. Only ever fires when
+        // the official-domain/embedded-feature pair above found nothing --
+        // never overrides a weakness that pair already supplied.
+        const reviewPlatformEvidence = findReviewPlatformEvidenceForCompetitor(tokens, evidence);
+        if (reviewPlatformEvidence) {
+          const combinedText = `${reviewPlatformEvidence.claim} ${reviewPlatformEvidence.value}`;
+          if (STATED_LIMITATION_EVIDENCE_PATTERN.test(combinedText)) {
+            const quotedClaim = truncateEvidenceQuote(
+              reviewPlatformEvidence.claim || reviewPlatformEvidence.value
+            );
+            return {
+              ...competitor,
+              weaknesses: `Third-party review evidence documents a stated limitation: "${quotedClaim}" [${reviewPlatformEvidence.id}].`,
+              weaknessBasis: "directional" as const,
+            };
+          }
+        }
       }
 
-      const officialEvidence = findOfficialDomainEvidenceForCompetitor(tokens, evidence);
-      if (!officialEvidence) {
-        return competitor;
+      // TASK #69A-29B -- third, independent fallback (see
+      // deriveCapabilityGapWeakness's own extensive comment above): a
+      // defensible, evidence-gap DIRECTIONAL inference from this
+      // competitor's own already-verified positioning/strengths, relative
+      // to a capability this business's own idea explicitly
+      // differentiates on. No [R#] citation is generated here (there is
+      // no single evidence item to cite -- the inference is grounded in
+      // the competitor's own already-cited positioning/strengths facts
+      // instead), so attachWeaknessProvenance correctly leaves
+      // weaknessSourceRefs/weaknessConfidence unpopulated for this case --
+      // never a fabricated citation for evidence that isn't actually
+      // being cited.
+      const capabilityGapWeakness = deriveCapabilityGapWeakness(competitor, normalizedBusinessIdea);
+      if (capabilityGapWeakness) {
+        return {
+          ...competitor,
+          weaknesses: capabilityGapWeakness,
+          weaknessBasis: "directional" as const,
+        };
       }
 
-      const combinedText = `${officialEvidence.claim} ${officialEvidence.value}`;
-      if (!EMBEDDED_FEATURE_EVIDENCE_PATTERN.test(combinedText)) {
-        return competitor;
-      }
-
-      return {
-        ...competitor,
-        weaknesses: `Its own official product documentation describes the relevant capability as a feature embedded within a broader general-purpose platform rather than a dedicated, purpose-built specialization [${officialEvidence.id}].`,
-        weaknessBasis: "directional" as const,
-      };
+      return competitor;
     }),
   };
 }
@@ -749,4 +985,54 @@ export function readBusinessCompetitorLandscapeState(
     version: BUSINESS_COMPETITOR_LANDSCAPE_STATE_VERSION,
     competitors: typedState.competitors,
   };
+}
+
+export type CompetitorResearchStatus =
+  | "SUCCESS_WITH_EVIDENCE"
+  | "SUCCESS_NO_EVIDENCE"
+  | "TIMEOUT"
+  | "GENERATION_ERROR";
+
+// TASK #69A-63 -- ROOT CAUSE FIX. Confirmed live: a genuine AI
+// generation timeout discards a real, evidence-backed in-progress
+// response, leaving businessCompetitorLandscapeState null/absent --
+// the EXACT SAME observable state as a generation that genuinely
+// completed and validated zero real competitors. Every renderer's own
+// "No competitor data could be validated for this market yet." message
+// used to fire identically for both, which is only honest for the
+// second case. Mirrors readBusinessCompetitorLandscapeState's own
+// defensive-parsing contract immediately above: a historical report
+// persisted before this field existed simply has no key, and this
+// resolves to undefined -- never a regression for old reports.
+export function readCompetitorResearchStatus(metadata: unknown): CompetitorResearchStatus | undefined {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return undefined;
+  }
+
+  const status = (metadata as { competitorResearchStatus?: unknown }).competitorResearchStatus;
+  return status === "SUCCESS_WITH_EVIDENCE" ||
+    status === "SUCCESS_NO_EVIDENCE" ||
+    status === "TIMEOUT" ||
+    status === "GENERATION_ERROR"
+    ? status
+    : undefined;
+}
+
+// TASK #69A-63 -- the ONE canonical message for the "no structured
+// competitor table to show" state, reused by every renderer (web,
+// Planner, PDF) so this distinction can never drift between them.
+// Never fabricates a competitor either way -- only the WORDING differs,
+// based on WHY the table is empty: a genuinely completed research pass
+// that found nothing real (SUCCESS_NO_EVIDENCE, or no status at all --
+// the pre-#69A-63 historical default) versus a generation that never
+// finished (TIMEOUT/GENERATION_ERROR), which must never be presented as
+// if it had proven competitors don't exist.
+export function formatCompetitorResearchEmptyStateMessage(
+  competitorResearchStatus: CompetitorResearchStatus | undefined
+): string {
+  if (competitorResearchStatus === "TIMEOUT" || competitorResearchStatus === "GENERATION_ERROR") {
+    return "Competitor research did not finish generating for this report. This is not evidence that no competitors exist -- regenerate the report to try again.";
+  }
+
+  return "No competitor data could be validated for this market yet.";
 }

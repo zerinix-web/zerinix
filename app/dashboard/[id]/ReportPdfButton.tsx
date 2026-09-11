@@ -85,6 +85,8 @@ import {
 import {
   readBusinessCompetitorLandscapeState,
   formatCompetitorWeaknessForDisplay,
+  readCompetitorResearchStatus,
+  formatCompetitorResearchEmptyStateMessage,
 } from "@/app/lib/report-engine/business-competitor-landscape-state";
 import {
   readPortersFiveForcesState,
@@ -6193,9 +6195,20 @@ export function buildStandardReportPdf({
             pdf.roundedRect(bodyX, visualY, bodyWidth, headerHeight + rowHeight, 3, 3, "FD");
             pdf.setFontSize(6.2);
             pdf.setTextColor("#a1a1aa");
-            pdf.text(localizePdfPresentationText("No competitor data could be validated for this market yet.", pdfLocale), bodyX + 3, visualY + 14, {
-              maxWidth: bodyWidth - 6,
-            });
+            // TASK #69A-63 -- distinguishes "research genuinely found
+            // nothing" from "generation never finished" -- see
+            // formatCompetitorResearchEmptyStateMessage's own comment.
+            pdf.text(
+              localizePdfPresentationText(
+                formatCompetitorResearchEmptyStateMessage(readCompetitorResearchStatus(report.metadata)),
+                pdfLocale
+              ),
+              bodyX + 3,
+              visualY + 14,
+              {
+                maxWidth: bodyWidth - 6,
+              }
+            );
             return headerHeight + rowHeight + 4;
           }
 

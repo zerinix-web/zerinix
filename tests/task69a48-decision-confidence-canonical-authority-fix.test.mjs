@@ -209,8 +209,14 @@ test("3. exactly one decision-mapping function exists and is reused by both the 
   ).length;
   // 1 function declaration's own parameter list + 1 default-mapping call
   // site (inside buildPlanExecutiveDecisionBrief) + 1 #69A-48
-  // correction-site call = 3 occurrences of the name followed by "(".
-  assert.equal(totalOccurrences, 3, "expected the declaration plus exactly two call sites: the default mapping and the #69A-48 correction");
+  // correction-site call + 1 #69A-59 call site (buildCanonicalScenarioAnalysis's
+  // own Base Case decision label, fixing a raw "WAIT" token that used to
+  // leak into Scenario Analysis) = 4 occurrences of the name followed by
+  // "(". Each new caller REUSES this same one declaration -- the count
+  // grows only because a new site correctly adopted the canonical
+  // mapping, never because a second, independently-maintained copy of it
+  // was added.
+  assert.equal(totalOccurrences, 4, "expected the declaration plus exactly three call sites: the default mapping, the #69A-48 correction, and the #69A-59 Scenario Analysis fix");
 });
 
 test("4. the rebuilt brief is rendered with formatExecutiveDecisionBrief using the 'business_plan' vocabulary, matching the original primary build exactly", () => {

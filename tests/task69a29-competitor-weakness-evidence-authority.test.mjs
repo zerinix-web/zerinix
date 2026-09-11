@@ -174,10 +174,11 @@ test("[5] a competitor with genuinely no supported weakness keeps the honest una
 
   assert.equal(clearRunway.weaknesses, "—");
   assert.equal(clearRunway.weaknessBasis, "unavailable");
-  // TASK #69A-40 -- the DISPLAY text is now the explicit "Not available"
-  // (never the ambiguous bare "—" sentinel); the underlying STORED value
-  // above is unchanged.
-  assert.equal(formatCompetitorWeaknessForDisplay(clearRunway), "Not available");
+  // TASK #69A-40 -- the DISPLAY text is an explicit sentence (never the
+  // ambiguous bare "—" sentinel); the underlying STORED value above is
+  // unchanged. TASK #69A-58 updated the exact wording to "No
+  // evidence-backed weakness identified".
+  assert.equal(formatCompetitorWeaknessForDisplay(clearRunway), "No evidence-backed weakness identified");
 });
 
 // --- 6: an inferred weakness can never masquerade as verified fact -------
