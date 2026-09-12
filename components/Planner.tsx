@@ -4917,16 +4917,39 @@ function ExecutiveSummaryVisual({
   const resolvedDecision = isMarketIntelligence
     ? null
     : resolveCanonicalDecisionFromReportText(section.content, investmentScore?.recommendation);
+  // TASK #69A-35A -- ROOT CAUSE FIX. Confirmed live: this "Investment
+  // Decision Snapshot" badge (line ~5011 below) rendered "Proceed with
+  // Conditions" while the SAME report's own Executive Decision banner
+  // said "Decision: MONITOR" -- getCanonicalDecisionLabel only ever
+  // produces one of the 4 cross-report-normalized words, never the
+  // report's own native ENTER/MONITOR/AVOID word, regardless of whether
+  // structuredInvestmentRecommendation or resolvedDecision supplied the
+  // value. buildExecutiveSnapshot (report-presentation.ts) already
+  // solves this correctly for its own decision field --
+  // its own decision-token extraction (the identical helper this fix now reuses) reads
+  // the EXACT literal word already rendered by the report's own
+  // deterministic banner, guaranteed to agree byte-for-byte since both
+  // read the identical generated text. Adopting that same,
+  // already-established pattern here as the FIRST priority --
+  // structuredInvestmentRecommendation/resolvedDecision/
+  // detectRecommendation remain the fallback, unchanged, for any report
+  // whose text lacks this deterministic banner entirely. decisionColorKey
+  // below is intentionally left reading resolvedDecision?.decision (never
+  // this native token), so the badge's COLOR keeps resolving through the
+  // already-correct 4-value mapping this fix does not touch.
+  const nativeDecisionMatch = isMarketIntelligence ? null : extractExecutiveDecisionFromText(section.content);
   const recommendation = marketDecision
     ? marketDecision.decisionLabel
-    : structuredInvestmentRecommendation
-      ? getCanonicalDecisionLabel(
-          mapInvestmentScoreRecommendationToCanonicalDecision(structuredInvestmentRecommendation),
-          evidenceLocale
-        )
-      : resolvedDecision
-        ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
-        : detectRecommendation(section.content) || "—";
+    : nativeDecisionMatch
+      ? nativeDecisionMatch.token.toUpperCase()
+      : structuredInvestmentRecommendation
+        ? getCanonicalDecisionLabel(
+            mapInvestmentScoreRecommendationToCanonicalDecision(structuredInvestmentRecommendation),
+            evidenceLocale
+          )
+        : resolvedDecision
+          ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
+          : detectRecommendation(section.content) || "—";
   // TASK #30 -- confirmed live (canonical-decision-pipeline audit):
   // getDecisionClasses only recognizes the generic GO/CONDITIONAL_GO/
   // NO_GO-family words and the canonical PROCEED/PROCEED_WITH_CONDITIONS/

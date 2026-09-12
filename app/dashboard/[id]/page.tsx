@@ -86,7 +86,10 @@ import {
   reconcileMarketIntelligenceDecisionText,
   resolveCanonicalDecisionFromReportText,
 } from "@/app/lib/report-engine/executive-decision-vocabulary";
-import { localizedLabelVariants } from "@/app/lib/report-engine/executive-decision-brief";
+import {
+  extractExecutiveDecisionFromText,
+  localizedLabelVariants,
+} from "@/app/lib/report-engine/executive-decision-brief";
 import {
   readMarketIntelligenceCanonicalState,
   resolveMarketIntelligenceConfidenceFactors,
@@ -1807,6 +1810,31 @@ function getDecisionSummaryItems(
   // it first here, and only ever falling back to prose parsing when it is
   // genuinely absent, makes this tile agree with every other structured-
   // first surface by construction rather than by coincidence.
+  //
+  // TASK #69A-35A -- ROOT CAUSE FIX. Confirmed live: a fresh report
+  // showed "Executive Decision: MONITOR" in its own text while this tile
+  // (and ExecutiveSummaryVisual's own "Investment Decision Snapshot"
+  // badge below) rendered "Proceed with Conditions" -- getCanonicalDecisionLabel
+  // ONLY ever produces one of 4 cross-report-normalized words (Proceed/
+  // Proceed with Conditions/Pause Pending Review/Reject), never the
+  // report's own native ENTER/MONITOR/AVOID word, regardless of which
+  // upstream source (structured score or resolvedDecision) supplied the
+  // value. buildExecutiveSnapshot (report-presentation.ts) already
+  // solves this correctly for its own decision field:
+  // its own decision-token extraction (the identical helper this fix now reuses) reads
+  // the EXACT literal word already rendered by the report's own
+  // deterministic "Decision: MONITOR (Confidence: 56%)" banner (the same
+  // banner "Executive Decision" itself displays) -- guaranteed to agree
+  // with it byte-for-byte, since both are reading the identical
+  // generated text. Adopting that same, already-established pattern here
+  // as the FIRST priority (never removing the existing
+  // structuredInvestmentRecommendation/resolvedDecision/
+  // detectRecommendation chain, which remains the fallback for any
+  // report whose text lacks this deterministic banner entirely --
+  // historical reports predating it, or a genuinely malformed one).
+  const nativeDecisionMatch = isMarketIntelligence
+    ? null
+    : extractExecutiveDecisionFromText(`${executiveRecommendation}\n${executiveSummary}\n${fullContent}`);
   const structuredInvestmentRecommendation =
     !isMarketIntelligence &&
     (investmentScore?.recommendation === "GO" ||
@@ -1821,20 +1849,22 @@ function getDecisionSummaryItems(
       );
   const decisionSignal =
     marketDecisionSignal ??
-    (structuredInvestmentRecommendation
-      ? getCanonicalDecisionLabel(
-          mapInvestmentScoreRecommendationToCanonicalDecision(structuredInvestmentRecommendation),
-          dashboardLocale === "tr" ? "Turkish" : "English"
-        )
-      : resolvedDecision
+    (nativeDecisionMatch
+      ? nativeDecisionMatch.token.toUpperCase()
+      : structuredInvestmentRecommendation
         ? getCanonicalDecisionLabel(
-            resolvedDecision.decision,
-            dashboardLocale === "tr" ? "Turkish" : resolvedDecision.language
+            mapInvestmentScoreRecommendationToCanonicalDecision(structuredInvestmentRecommendation),
+            dashboardLocale === "tr" ? "Turkish" : "English"
           )
-        : detectRecommendation(`${executiveRecommendation}\n${executiveSummary}\n${fullContent}`) ||
-          extractMetricValue(executiveRecommendation, "Decision") ||
-          extractMetricValue(executiveRecommendation, "Recommendation") ||
-          "—");
+        : resolvedDecision
+          ? getCanonicalDecisionLabel(
+              resolvedDecision.decision,
+              dashboardLocale === "tr" ? "Turkish" : resolvedDecision.language
+            )
+          : detectRecommendation(`${executiveRecommendation}\n${executiveSummary}\n${fullContent}`) ||
+            extractMetricValue(executiveRecommendation, "Decision") ||
+            extractMetricValue(executiveRecommendation, "Recommendation") ||
+            "—");
   // CRITICAL FIX -- confirmed live: for Market Intelligence, "Next
   // Action"/"Main Risk" previously fell back to a bare keyword scan
   // across fullContent (the ENTIRE report) whenever no literal "Next
@@ -2320,11 +2350,35 @@ function ExecutiveSummaryVisual({
   const resolvedDecision = isMarketIntelligence
     ? null
     : resolveCanonicalDecisionFromReportText(content, investmentScore?.recommendation);
+  // TASK #69A-35A -- ROOT CAUSE FIX. Confirmed live: this "Investment
+  // Decision Snapshot" badge rendered "Proceed with Conditions" while the
+  // SAME report's own Executive Decision banner said "Decision: MONITOR"
+  // -- getCanonicalDecisionLabel(resolvedDecision.decision, ...) only
+  // ever produces one of the 4 cross-report-normalized words, never the
+  // report's own native ENTER/MONITOR/AVOID word, regardless of which
+  // upstream tier inside resolveCanonicalDecisionFromReportText actually
+  // supplied the value. buildExecutiveSnapshot (report-presentation.ts)
+  // already solves this correctly for its own decision field --
+  // its own decision-token extraction (the identical helper this fix now reuses) reads
+  // the EXACT literal word already rendered by the report's own
+  // deterministic "Decision: MONITOR (Confidence: 56%)" banner (the SAME
+  // banner "Executive Decision" itself displays), guaranteed to agree
+  // byte-for-byte since both read the identical generated text. Adopting
+  // that same, already-established pattern here as the FIRST priority --
+  // resolvedDecision/detectRecommendation remain the fallback, unchanged,
+  // for any report whose text lacks this deterministic banner entirely.
+  // decisionColorKey below is intentionally left reading
+  // resolvedDecision?.decision (never this native token), so the badge's
+  // COLOR keeps resolving through the already-correct 4-value mapping
+  // this fix does not touch.
+  const nativeDecisionMatch = isMarketIntelligence ? null : extractExecutiveDecisionFromText(content);
   const recommendation = marketDecision
     ? marketDecision.decisionLabel
-    : resolvedDecision
-      ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
-      : detectRecommendation(content) || "—";
+    : nativeDecisionMatch
+      ? nativeDecisionMatch.token.toUpperCase()
+      : resolvedDecision
+        ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
+        : detectRecommendation(content) || "—";
   // TASK #30 -- confirmed live (canonical-decision-pipeline audit):
   // getDecisionClasses only ever recognized the generic GO/CONDITIONAL_GO/
   // NO_GO-family words and the canonical PROCEED/PROCEED_WITH_CONDITIONS/

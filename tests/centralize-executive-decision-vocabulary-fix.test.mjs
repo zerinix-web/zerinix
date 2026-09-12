@@ -82,8 +82,16 @@ test("Business Plan / Market Intelligence / Acquisition / Strategic Advisory's s
 });
 
 test("Business Plan's raw investment-score.ts recommendation maps correctly", () => {
+  // TASK #69A-35 -- "WAIT" corrected from "PAUSE_PENDING_REVIEW" to
+  // "PROCEED_WITH_CONDITIONS": plan-executor.ts's own
+  // mapInvestmentRecommendationToExecutiveDecisionCode proves "WAIT" and
+  // "CONDITIONAL_GO" are ALWAYS the same underlying decision (WAIT is
+  // investmentScore.recommendation's own source for CONDITIONAL_GO), so
+  // this mapper must agree with mapExecutiveDecisionCodeToCanonicalDecision's
+  // CONDITIONAL_GO -> PROCEED_WITH_CONDITIONS above for the same tier --
+  // see this function's own updated comment for the full trace.
   assert.equal(mapInvestmentScoreRecommendationToCanonicalDecision("GO"), "PROCEED");
-  assert.equal(mapInvestmentScoreRecommendationToCanonicalDecision("WAIT"), "PAUSE_PENDING_REVIEW");
+  assert.equal(mapInvestmentScoreRecommendationToCanonicalDecision("WAIT"), "PROCEED_WITH_CONDITIONS");
   assert.equal(mapInvestmentScoreRecommendationToCanonicalDecision("PASS"), "REJECT");
 });
 
@@ -154,7 +162,12 @@ test("resolves a Turkish-language report's 'Karar: EVET' line and preserves the 
 });
 
 test("falls back to investment-score.ts's raw recommendation only when no text signal is present", () => {
-  assert.equal(resolveCanonicalDecisionFromReportText("No decision-shaped text here.", "WAIT").decision, "PAUSE_PENDING_REVIEW");
+  // TASK #69A-35 -- "WAIT" corrected to "PROCEED_WITH_CONDITIONS" (see
+  // mapInvestmentScoreRecommendationToCanonicalDecision's own updated
+  // comment): the same decision tier must resolve identically whether
+  // this fallback path or the brief-text path above it is the one that
+  // actually fires.
+  assert.equal(resolveCanonicalDecisionFromReportText("No decision-shaped text here.", "WAIT").decision, "PROCEED_WITH_CONDITIONS");
   assert.equal(resolveCanonicalDecisionFromReportText("No decision-shaped text here."), null);
 });
 
@@ -253,9 +266,20 @@ test("app/dashboard/page.tsx's reports-list decision signal resolves through the
 test("app/dashboard/[id]/page.tsx's Decision KPI card and Decision Signal card both resolve through the centralized vocabulary", () => {
   assert.match(dashboardReportSource, /resolveCanonicalDecisionFromReportText\(/);
   assert.match(dashboardReportSource, /getCanonicalDecisionLabel\(/);
-  // The old, now-superseded direct extractExecutiveDecisionFromText call
-  // sites are gone -- resolution now flows through one shared resolver.
-  assert.doesNotMatch(dashboardReportSource, /extractExecutiveDecisionFromText/);
+  // TASK #69A-35A -- SUPERSEDES this test's own prior "extractExecutiveDecisionFromText
+  // is gone" claim. Confirmed live: getCanonicalDecisionLabel/
+  // resolveCanonicalDecisionFromReportText only ever produce one of the
+  // 4 cross-report-normalized words (Proceed/Proceed with Conditions/
+  // Pause Pending Review/Reject) -- never the report's own native
+  // ENTER/MONITOR/AVOID word -- so a fresh report's "Decision: MONITOR"
+  // banner and this same page's "Investment Decision Snapshot"/Decision
+  // Summary badges disagreed. Both now call extractExecutiveDecisionFromText
+  // directly FIRST (mirroring buildExecutiveSnapshot's own established,
+  // already-correct pattern in report-presentation.ts), falling back to
+  // resolveCanonicalDecisionFromReportText/getCanonicalDecisionLabel only
+  // for a report whose text lacks the deterministic banner entirely.
+  const callSites = [...dashboardReportSource.matchAll(/extractExecutiveDecisionFromText\(/g)];
+  assert.equal(callSites.length, 2, "getDecisionSummaryItems and ExecutiveSummaryVisual must each call it once");
 });
 
 // NOTE: superseded by the "Market Intelligence executive language
@@ -275,9 +299,17 @@ test("components/Planner.tsx's live Decision KPI card resolves through the centr
     /resolveCanonicalDecisionFromReportText\(section\.content, investmentScore\?\.recommendation\)/
   );
   assert.match(plannerSource, /getCanonicalDecisionLabel\(resolvedDecision\.decision, evidenceLocale\)/);
-  // Untouched sites: still present, still using the original extractor.
+  // TASK #69A-35A -- this card's own "Investment Decision Snapshot" badge
+  // now calls extractExecutiveDecisionFromText directly FIRST (a third
+  // call site, alongside the two untouched pre-existing ones -- the
+  // decision segmented control and the PDF drawing code), for the exact
+  // same reason as page.tsx's own identical fix: getCanonicalDecisionLabel/
+  // resolveCanonicalDecisionFromReportText only ever produce the 4
+  // cross-report-normalized words, never the report's own native
+  // ENTER/MONITOR/AVOID word a fresh report's banner already shows
+  // elsewhere on this same card.
   const remainingCallSites = plannerSource.match(/extractExecutiveDecisionFromText\(/g) || [];
-  assert.equal(remainingCallSites.length, 2, "the decision segmented-control and PDF-drawing call sites must be untouched");
+  assert.equal(remainingCallSites.length, 3, "the new Investment Decision Snapshot call site plus the two untouched pre-existing ones");
 });
 
 test("getDecisionClasses in both dashboard files and Planner.tsx still colors the canonical labels correctly (green/amber/red), not just the old raw words", () => {

@@ -223,9 +223,14 @@ test("D/E: /plan live UI (Planner.tsx), dashboard/report view (page.tsx), and bo
 // -----------------------------------------------------------------------
 
 test("F: Task #69A's getDecisionSummaryItems fix (dashboard Decision Summary grid) is untouched by this task", () => {
+  // TASK #69A-35A widened this expression's own OUTER shape (a new
+  // nativeDecisionMatch tier now takes priority before
+  // structuredInvestmentRecommendation -- see that fix's own comment),
+  // but never removed structuredInvestmentRecommendation from the chain
+  // this test's own intent is checking for.
   assert.match(
     pageSource,
-    /const decisionSignal =\s*\n\s*marketDecisionSignal \?\?\s*\n\s*\(structuredInvestmentRecommendation/
+    /const decisionSignal =\s*\n\s*marketDecisionSignal \?\?\s*\n\s*\(nativeDecisionMatch\s*\n\s*\? nativeDecisionMatch\.token\.toUpperCase\(\)\s*\n\s*: structuredInvestmentRecommendation/
   );
   assert.match(
     pageSource,

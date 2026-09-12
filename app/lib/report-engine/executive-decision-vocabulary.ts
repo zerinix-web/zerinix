@@ -111,11 +111,38 @@ export function mapExecutiveDecisionCodeToCanonicalDecision(
 // distinct from that file's own internal-only "VALIDATE"/"HOLD"/"PASS"
 // remap (createVisibleRecommendation), which is never rendered to a
 // user and is left untouched.
+//
+// TASK #69A-35 -- ROOT CAUSE FIX. Confirmed live: a fresh Business Idea
+// Validation report showed "Executive Decision: MONITOR" (the report's
+// own generated executive-decision-brief banner) directly beside an
+// "Investment Decision Snapshot" panel badge reading "Pause Pending
+// Review" -- two apparently different decisions for the same report.
+// Traced end-to-end: plan-executor.ts's own
+// mapInvestmentRecommendationToExecutiveDecisionCode is the SOLE,
+// authoritative source of the Executive Decision brief's code, and maps
+// investmentScore.recommendation directly: "GO" -> "GO", "WAIT" ->
+// "CONDITIONAL_GO", "PASS" -> "NO_GO" -- meaning a report's
+// investmentScore.recommendation and its own Executive Decision code are
+// ALWAYS the same underlying decision, never independently derived.
+// mapExecutiveDecisionCodeToCanonicalDecision (below) correctly maps
+// that SAME "CONDITIONAL_GO" to "PROCEED_WITH_CONDITIONS" -- but this
+// function, used by page.tsx/Planner.tsx's "Investment Decision
+// Snapshot" badge whenever a structured investmentScore.recommendation
+// is present, independently mapped the equivalent "WAIT" case to
+// "PAUSE_PENDING_REVIEW" instead: a different canonical value for what
+// is provably the identical decision tier. This was not a legitimate,
+// separate "investment-score interpretation" -- it was the same decision
+// rendered through two inconsistent mappers. Aligned so "WAIT" resolves
+// to the SAME canonical value "CONDITIONAL_GO" already produces
+// ("PROCEED_WITH_CONDITIONS"), closing the drift at its source for every
+// caller (the two UI badges above, and this module's own
+// resolveCanonicalDecisionFromReportText last-resort fallback below),
+// without touching investment-score.ts's scoring/threshold logic itself.
 export function mapInvestmentScoreRecommendationToCanonicalDecision(
   recommendation: "GO" | "WAIT" | "PASS"
 ): CanonicalExecutiveDecision {
   if (recommendation === "GO") return "PROCEED";
-  if (recommendation === "WAIT") return "PAUSE_PENDING_REVIEW";
+  if (recommendation === "WAIT") return "PROCEED_WITH_CONDITIONS";
   return "REJECT"; // PASS
 }
 

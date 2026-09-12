@@ -114,9 +114,17 @@ test("F (Market Intelligence unchanged): the structured gate is unconditionally 
 // -----------------------------------------------------------------------
 
 test("A/D (structural): decisionSignal checks structuredInvestmentRecommendation BEFORE resolvedDecision's prose parse, and both are subordinate to Market Intelligence's own marketDecisionSignal", () => {
+  // TASK #69A-35A added one new, even-higher-priority tier
+  // (nativeDecisionMatch, extractExecutiveDecisionFromText's own literal
+  // decision token -- see that fix's own comment) directly under
+  // marketDecisionSignal, ABOVE structuredInvestmentRecommendation. This
+  // test's own intent -- structuredInvestmentRecommendation still
+  // outranks resolvedDecision's prose parse, which still outranks
+  // detectRecommendation -- is unchanged; only the regex's outer shape
+  // widened to admit the new tier before it.
   assert.match(
     pageSource,
-    /const decisionSignal =\s*\n\s*marketDecisionSignal \?\?\s*\n\s*\(structuredInvestmentRecommendation\s*\n\s*\? getCanonicalDecisionLabel\(\s*\n\s*mapInvestmentScoreRecommendationToCanonicalDecision\(structuredInvestmentRecommendation\),/
+    /const decisionSignal =\s*\n\s*marketDecisionSignal \?\?\s*\n\s*\(nativeDecisionMatch\s*\n\s*\? nativeDecisionMatch\.token\.toUpperCase\(\)\s*\n\s*: structuredInvestmentRecommendation\s*\n\s*\? getCanonicalDecisionLabel\(\s*\n\s*mapInvestmentScoreRecommendationToCanonicalDecision\(structuredInvestmentRecommendation\),/
   );
   // The prose-parse branch (resolvedDecision) and the unsafe bare-keyword
   // fallback (detectRecommendation) must appear ONLY after
