@@ -290,9 +290,17 @@ for (const [label, source] of [
   ["Planner.tsx", plannerSource],
 ]) {
   test(`${label}: the Executive Summary card's "Market Signal" KPI no longer scans the whole executive summary for any line starting with "Market"/"TAM" for Market Intelligence -- there is no reliable canonical source for it in the deterministic banner, so it shows the neutral placeholder directly instead of guessing from arbitrary prose`, () => {
+    // TASK #69A-36 -- the non-MI branch itself was ALSO replaced (it had
+    // the identical unbounded-prose-scan defect this test's own title
+    // already names for Market Intelligence -- see that ticket's own
+    // dedicated coverage). This test's own intent -- Market Intelligence
+    // shows the neutral "—" placeholder directly, never a prose guess --
+    // is preserved; only the regex's trailing (now-superseded) non-MI
+    // shape is widened to match the new structured resolveMarketSignal
+    // -derived value instead.
     assert.match(
       source,
-      /value: isMarketIntelligence\s*\n\s*\? (?:"Review"|"—")\s*\n\s*: extractMetricValue\([^,]+, "Market"\) \|\| extractMetricValue\([^,]+, "TAM"\) \|\| (?:"Review"|"—"),/
+      /value: isMarketIntelligence\s*\n\s*\? (?:"Review"|"—")\s*\n\s*: executiveSnapshot\?\.marketSignal/
     );
   });
 

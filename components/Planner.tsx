@@ -4950,6 +4950,17 @@ function ExecutiveSummaryVisual({
         : resolvedDecision
           ? getCanonicalDecisionLabel(resolvedDecision.decision, evidenceLocale)
           : detectRecommendation(section.content) || "—";
+  // TASK #69A-36 -- the ONE canonical source for this panel's own
+  // "Market Signal"/"Risk Posture" tiles below -- the SAME
+  // buildExecutiveSnapshot call the "Executive Snapshot" section (and
+  // PDF) already use, so this tile's riskLevel/mainRisk/marketSignal can
+  // never independently diverge from what those surfaces show for the
+  // identical report. Market Intelligence never computes
+  // decisionEngine.marketScore at all (see resolveMarketSignal's own
+  // comment in report-presentation.ts), so this is skipped entirely for
+  // that report kind, exactly like every other investmentScore-derived
+  // value on this page.
+  const executiveSnapshot = isMarketIntelligence ? null : buildExecutiveSnapshot(section.content, investmentScore);
   // TASK #30 -- confirmed live (canonical-decision-pipeline audit):
   // getDecisionClasses only recognizes the generic GO/CONDITIONAL_GO/
   // NO_GO-family words and the canonical PROCEED/PROCEED_WITH_CONDITIONS/
@@ -4998,10 +5009,26 @@ function ExecutiveSummaryVisual({
       // deterministic banner, so Market Intelligence shows the neutral
       // placeholder directly instead of guessing from arbitrary prose.
       // Business Plan/Acquisition are completely untouched.
+      // TASK #69A-36 -- ROOT CAUSE FIX. Confirmed live: for Business Plan,
+      // extractMetricValue(section.content, "Market") scanned the ENTIRE
+      // free-form executive summary for any bare "Market"/"TAM" word
+      // followed by a colon/dash, with no boundary awareness of sentence
+      // or quotation structure -- it could start its capture mid-sentence,
+      // inside a quoted clause, producing malformed fragments like
+      // `size data" remains...`. Replaced with executiveSnapshot.marketSignal
+      // -- resolveMarketSignal's own structured derivation from
+      // decisionEngine.marketScore (report-presentation.ts), the SAME
+      // category the Confidence Radar's own "Market" dimension already
+      // reads. null only when that category is genuinely absent (a report
+      // predating investment-score.ts's decisionEngine); "Insufficient
+      // evidence" is this codebase's own existing sentinel (see Porter's
+      // Five Forces' identical vocabulary), never a fabricated signal.
       label: "Market Signal",
       value: isMarketIntelligence
         ? "—"
-        : extractMetricValue(section.content, "Market") || extractMetricValue(section.content, "TAM") || "—",
+        : executiveSnapshot?.marketSignal
+          ? `${executiveSnapshot.marketSignal.level} — ${executiveSnapshot.marketSignal.explanation}`
+          : "Insufficient evidence",
       accent: "from-sky-300/18 to-teal-300/5",
       evidence: "benchmarkDerived" as EvidenceLevel,
     },
@@ -5013,10 +5040,21 @@ function ExecutiveSummaryVisual({
       // uses), taking only the first named risk for this compact KPI
       // value, rather than an unlabeled "any line starting with Risk"
       // scan of the whole summary.
+      //
+      // TASK #69A-36 -- ROOT CAUSE FIX. Confirmed live: for Business Plan,
+      // extractMetricValue(section.content, "Risk") had the identical
+      // unbounded-scan defect as Market Signal above, producing truncated
+      // fragments like `Execution readiness:...`. Replaced with
+      // executiveSnapshot.riskLevel/.mainRisk -- the SAME canonical Risk
+      // Level/Main Risk fields the "Executive Snapshot" section (and PDF)
+      // already read from this identical buildExecutiveSnapshot call, so
+      // this tile can never disagree with them about the dominant risk.
       label: "Risk Posture",
       value: isMarketIntelligence
         ? takeFirstListItem(extractMetricValueFromAliases(section.content, localizedLabelVariants("topRisks"))) || "Tracked"
-        : extractMetricValue(section.content, "Risk") || extractMetricValue(section.content, "Main Risk") || "Tracked",
+        : executiveSnapshot
+          ? `${executiveSnapshot.riskLevel} — ${executiveSnapshot.mainRisk}`
+          : "Tracked",
       accent: "from-amber-300/18 to-teal-300/5",
       evidence: "validationRequired" as EvidenceLevel,
     },

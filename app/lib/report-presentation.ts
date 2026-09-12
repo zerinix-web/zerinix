@@ -6,6 +6,22 @@ import {
 import { extractExecutiveDecisionFromText } from "@/app/lib/report-engine/executive-decision-brief";
 import { type EvidenceLevel, inferEvidenceLevel } from "@/app/lib/report-evidence";
 
+// TASK #69A-36 -- the ONE canonical, structured Market Signal
+// representation: never a prose excerpt. Derived from
+// decisionEngine.marketScore -- the SAME structured category the
+// Confidence Radar's own "Market" dimension already reads (market-
+// research-coverage.ts's scoreCategory, scored from
+// dimensions.marketConfidence: market evidence coverage, independent
+// domains, claim coverage). null (never fabricated) when this category
+// is absent -- a report persisted before investment-score.ts computed
+// decisionEngine, or a report kind (Market Intelligence) that never
+// populates it at all.
+export type MarketSignalLevel = "Strong" | "Moderate" | "Weak" | "Insufficient evidence";
+export type MarketSignal = {
+  level: MarketSignalLevel;
+  explanation: string;
+};
+
 export type ExecutiveSnapshot = {
   decision: string;
   confidence: string;
@@ -14,6 +30,7 @@ export type ExecutiveSnapshot = {
   founderScoreValue: number | null;
   financialQuality: string;
   reportQuality: string;
+  marketSignal: MarketSignal | null;
   mainRisk: string;
   nextAction: string;
   riskLevel: "Low" | "Medium" | "High";
@@ -29,6 +46,40 @@ export type ExecutiveSnapshot = {
   risks: string[];
   actions: string[];
 };
+
+// Mirrors this codebase's own established >=72/>=48 tier convention
+// (financial-evidence-labeling.ts's strengthFromCoverage,
+// report-intelligence.ts's qualityFromScore, market-research-coverage.ts's
+// classifyMarketConfidence, this file's own classifyStructuralRiskLevel
+// below) rather than inventing a new, arbitrary threshold. "Strong"/
+// "Moderate"/"Weak" (not "High"/"Medium"/"Low") to read as a market-
+// opportunity SIGNAL, distinct from Confidence Radar's own "Market"
+// confidence percentage this same score also drives.
+function classifyMarketSignalLevel(scorePercent: number): "Strong" | "Moderate" | "Weak" {
+  if (scorePercent >= 72) return "Strong";
+  if (scorePercent >= 48) return "Moderate";
+  return "Weak";
+}
+
+// TASK #69A-36 -- the ONE place Market Signal is derived. Never touches
+// report prose: decisionEngine.marketScore.score/.reasoning[0] are
+// already-computed, structured fields (market-research-coverage.ts),
+// never re-parsed from the executive summary's own free text. Returns
+// null (never a fabricated signal) when this category is genuinely
+// absent -- the caller's own existing "—" placeholder convention
+// (matching Market Intelligence's identical, already-correct pattern)
+// handles that case.
+function resolveMarketSignal(investmentScore?: ReportInvestmentScore): MarketSignal | null {
+  const marketScore = investmentScore?.decisionEngine?.marketScore;
+  if (!marketScore || typeof marketScore.score !== "number") {
+    return null;
+  }
+
+  return {
+    level: classifyMarketSignalLevel(marketScore.score),
+    explanation: marketScore.reasoning?.[0] || `Market evidence coverage: ${marketScore.score}%`,
+  };
+}
 
 export type ReportQualityBreakdownItem = {
   label: string;
@@ -1568,6 +1619,7 @@ export function buildExecutiveSnapshot(
           ["Overall Report Quality", "Report Quality", "Rapor Kalitesi", "Genel Rapor Kalitesi"],
           isTurkish ? "Orta Güven" : "Moderate Confidence"
         ),
+    marketSignal: resolveMarketSignal(investmentScore),
     mainRisk: normalizeExecutiveRiskPresentation(
       investmentScore?.topRisks?.[0] || normalizedRiskBullets[0],
       isTurkish
