@@ -60,6 +60,11 @@ import {
 } from "@/app/lib/ai/response-sanitization";
 import { stripInternalImplementationTokens } from "@/app/lib/report-output-sanitization";
 import {
+  correctConfidenceDecisionConflation,
+  stripUnsupportedPreferenceClaims,
+} from "@/app/lib/report-engine/executive-decision-brief";
+import { attachNumericProvenanceLabels } from "@/app/lib/report-engine/numeric-provenance-guard";
+import {
   addTokenUsage,
   CHAT_RESPONSE_CONTINUATION_INPUT,
   getContinuationMaxOutputTokens,
@@ -864,7 +869,41 @@ function buildAdvisorClarification(
   ].join("\n");
 }
 
-function textStream(content: string) {
+// TASK #69A-37C -- ROOT CAUSE FIX. Confirmed live: #69A-37B wired the
+// same three guards below into the FRESH-GENERATION streaming branch's
+// own final flush block, but a fresh localhost request that happened to
+// hit this route's CACHE-HIT branch (getCachedAiResponse, further down)
+// returned `cachedChatResponse.responseText` straight into textStream()
+// with ZERO decision/numeric correction -- the exact bytes a STALE cache
+// row (written before this fix existed, or by any code path that never
+// ran these guards) would still ship to Safari unmodified. This is why
+// #69A-37B's own tests all passed (they proved the guard functions work,
+// and that the FRESH-GENERATION branch of route.ts calls them) while a
+// real "fresh" HTTP request could still surface the bug: "fresh" from
+// the browser's perspective is not "fresh" from the server's cache
+// perspective -- the SAME prompt/intent/expert combination served a
+// pre-fix (or otherwise unguarded) cached response untouched. Extracted
+// into one named, exported, pure function -- reused by BOTH the cache-
+// hit path and the fresh-generation flush path -- so there is exactly
+// ONE place this composition can drift out of sync, not two. Every
+// function it calls is proven idempotent and a no-op on text with no
+// matching pattern (see their own test suites), so it is always safe to
+// apply unconditionally to any cached chat response, regardless of which
+// request mode originally generated it -- the cache key does not
+// distinguish analysisMode, so a cache entry written under one mode can
+// legitimately be served to another; gating this on the CURRENT
+// request's isDirectStrategicAdvisory flag would miss exactly that case.
+export function resolveFinalStrategicAdvisoryText(rawText: string): string {
+  if (!rawText) {
+    return rawText;
+  }
+
+  return stripUnsupportedPreferenceClaims(
+    attachNumericProvenanceLabels(correctConfidenceDecisionConflation(rawText))
+  );
+}
+
+export function textStream(content: string) {
   const encoder = new TextEncoder();
   // P0 FIX #8 (hardening pass) -- confirmed live: chat, like Market
   // Analysis, injects the market intelligence graph as raw JSON into the
@@ -1651,7 +1690,11 @@ async function handleChatPost(req: Request) {
           },
         });
 
-        return textStream(cachedChatResponse.responseText);
+        // TASK #69A-37C -- ROOT CAUSE FIX (see resolveFinalStrategicAdvisoryText's
+        // own comment above for the full trace): this is the exact
+        // branch that shipped a stale/unguarded cached response straight
+        // to the client with no decision/numeric correction at all.
+        return textStream(resolveFinalStrategicAdvisoryText(cachedChatResponse.responseText));
       }
     }
 
@@ -2004,6 +2047,28 @@ async function handleChatPost(req: Request) {
           let continuationLimitReached = false;
           let usedDisplayFallback = false;
           let tokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+          // TASK #69A-37B -- ROOT CAUSE FIX. Confirmed live: a real
+          // Strategic Advisory chat request (analysisMode: "chat" ->
+          // isDirectStrategicAdvisory below) streamed raw
+          // response.output_text.delta chunks straight to the client as
+          // they arrived, with zero post-processing -- "Confidence: GO
+          // with 95% confidence (per your preference)..." and several
+          // unlabeled numeric thresholds reached the user exactly as the
+          // model wrote them. #69A-37/#69A-37A's decision/confidence and
+          // numeric-provenance guards were never wired into this route at
+          // all; they only ever ran inside the UNRELATED domain-analysis/
+          // acquisition-analysis report pipeline (plan-executor.ts), a
+          // completely separate code path this chat route never calls.
+          // Live token-by-token delta streaming cannot be corrected
+          // in-flight (a guard needs the FULL sentence -- e.g. the number
+          // after "Confidence: GO with 95%" -- which does not exist yet
+          // mid-stream), so for this one mode specifically, the raw
+          // per-chunk enqueue below is suppressed and the full response is
+          // instead corrected once, then sent as a single flush right
+          // after the response completes (see the flush block after this
+          // while loop). Every other chat mode keeps its existing live
+          // streaming behavior untouched.
+          const shouldStreamLiveDeltas = !isDirectStrategicAdvisory;
 
           try {
             let activeStream = stream;
@@ -2021,7 +2086,9 @@ async function handleChatPost(req: Request) {
                   if (deltaText) {
                     currentAttemptText += deltaText;
                     streamedText += deltaText;
-                    controller.enqueue(encoder.encode(deltaText));
+                    if (shouldStreamLiveDeltas) {
+                      controller.enqueue(encoder.encode(deltaText));
+                    }
                   }
                 }
 
@@ -2031,7 +2098,9 @@ async function handleChatPost(req: Request) {
                   if (doneText) {
                     currentAttemptText = doneText;
                     streamedText += doneText;
-                    controller.enqueue(encoder.encode(doneText));
+                    if (shouldStreamLiveDeltas) {
+                      controller.enqueue(encoder.encode(doneText));
+                    }
                   }
                 }
 
@@ -2041,7 +2110,9 @@ async function handleChatPost(req: Request) {
                   if (itemText) {
                     currentAttemptText = itemText;
                     streamedText += itemText;
-                    controller.enqueue(encoder.encode(itemText));
+                    if (shouldStreamLiveDeltas) {
+                      controller.enqueue(encoder.encode(itemText));
+                    }
                   }
                 }
 
@@ -2072,7 +2143,9 @@ async function handleChatPost(req: Request) {
                     const sanitizedCompletedText = stripInternalImplementationTokens(sanitizeAiResponseText(completedText));
                     currentAttemptText = sanitizedCompletedText;
                     streamedText += sanitizedCompletedText;
-                    controller.enqueue(encoder.encode(sanitizedCompletedText));
+                    if (shouldStreamLiveDeltas) {
+                      controller.enqueue(encoder.encode(sanitizedCompletedText));
+                    }
                   }
                 }
 
@@ -2101,7 +2174,9 @@ async function handleChatPost(req: Request) {
                     const sanitizedCompletedText = stripInternalImplementationTokens(sanitizeAiResponseText(completedText));
                     currentAttemptText = sanitizedCompletedText;
                     streamedText += sanitizedCompletedText;
-                    controller.enqueue(encoder.encode(sanitizedCompletedText));
+                    if (shouldStreamLiveDeltas) {
+                      controller.enqueue(encoder.encode(sanitizedCompletedText));
+                    }
                   }
                 }
 
@@ -2190,16 +2265,41 @@ async function handleChatPost(req: Request) {
               controller.enqueue(encoder.encode(streamedText));
             }
 
+            // TASK #69A-37B -- ROOT CAUSE FIX. This is the deterministic
+            // final-output guard for the REAL Strategic Advisory chat
+            // runtime path: shouldStreamLiveDeltas suppressed every raw
+            // per-chunk enqueue above for this one mode specifically, so
+            // nothing has reached the client yet for this response --
+            // this is where the full, now-complete text is corrected
+            // and sent as a single flush. Order matters: confidence/
+            // decision conflation first (it operates on a decision-word
+            // + percentage shape that numeric-provenance tagging must
+            // not touch), then numeric-provenance labeling, then the
+            // unsupported-preference-claim strip (safe to run last since
+            // it only ever removes a fixed, contentless phrase and
+            // cannot interact with either prior pass). Skipped when
+            // usedDisplayFallback is true: that branch already enqueued
+            // its own deterministic, non-model fallback text directly
+            // above, which carries no decision/numeric content to heal.
+            if (isDirectStrategicAdvisory && !usedDisplayFallback) {
+              streamedText = resolveFinalStrategicAdvisoryText(streamedText);
+              controller.enqueue(encoder.encode(streamedText));
+            }
+
             // P0 FIX #8 (hardening pass) -- this sanitizes the ACCUMULATED
             // text used for caching (storeCachedAiResponse below) and
-            // logging; it does not retroactively touch the raw
-            // response.output_text.delta chunks already enqueued to the
-            // client above as they streamed in (a pre-existing
-            // characteristic of this streaming loop that predates this
-            // fix and applies equally to every sanitizeAiResponseText
-            // protection, not just this one -- fixing it would mean
-            // buffering/delaying the live token stream, which is a
-            // streaming-behavior change outside this fix's scope).
+            // logging; for every OTHER chat mode it does not
+            // retroactively touch the raw response.output_text.delta
+            // chunks already enqueued to the client above as they
+            // streamed in (a pre-existing characteristic of this
+            // streaming loop that predates this fix and applies equally
+            // to every sanitizeAiResponseText protection, not just this
+            // one -- fixing it for every mode would mean buffering/
+            // delaying the live token stream for all of them, which is a
+            // streaming-behavior change outside this fix's scope). The
+            // Strategic Advisory mode above is the one deliberate
+            // exception, buffered for exactly the correctness reason
+            // this fix exists to close.
             streamedText = stripInternalImplementationTokens(sanitizeAiResponseText(streamedText));
 
             controller.close();

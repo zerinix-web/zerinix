@@ -42,13 +42,28 @@ export const domainAnalysisPrompts = {
   scenarioAnalysis:
     "Provide evidence-based downside, base, and upside or alternative scenarios. Numeric scenarios require explicit source or method provenance.",
   decisionAssessment:
-    "Assess evidence sufficiency and decision readiness. Confidence must decrease when critical evidence remains unresolved.",
+    "Assess evidence sufficiency and decision readiness. Confidence must decrease when critical evidence remains unresolved. State confidence only as a percentage or a plain-language certainty level (e.g. High/Moderate/Low) -- never as the decision word itself (proceed, proceed conditionally, do not proceed, or any equivalent call).",
   missingInformation:
     "List unresolved critical facts. For each: why it specifically matters to this decision, what proxy or adjacent evidence was used in its place if any, how its absence changed confidence, and what part of the decision cannot be finalized until it is resolved. Vary the explanation to the actual fact each time -- never reuse the same sentence shape across items.",
   recommendedActions:
     "Provide prioritized, domain-specific next actions with owner, evidence target, and decision gate.",
+  // TASK #69A-37 -- ROOT CAUSE FIX. Confirmed live: a real Strategic
+  // Advisory response wrote "... Confidence: GO (95%)." -- the decision
+  // call and the confidence figure conflated into one mislabeled
+  // sentence, because this prompt asked for both "the call" and "the
+  // confidence level" without ever saying they must be two separate
+  // statements, or that confidence must be numeric. Decision and
+  // confidence are different concepts and must never share one label.
+  // Also broadened "the call" itself: the bare three-word posture
+  // (proceed / proceed conditionally / do not proceed) is a coarse
+  // internal classification, not a decision-useful action -- the call
+  // must name the SPECIFIC strategic action the evidence supports (e.g.
+  // "slow aggressive growth spending and prioritize unit-economics
+  // improvement" rather than a bare "proceed conditionally"), derived
+  // from this business's own decision question, never a fixed template
+  // phrase for any one scenario.
   finalRecommendation:
-    "Write this as the report's single executive decision, not a research summary. Open with the call in one sentence: proceed, proceed conditionally, or do not proceed, and why, in language a CEO would use in a Monday decision meeting -- not a restatement of findings. State the confidence level and the specific evidence gap it depends on. Name the one condition that would change the call. Never overstate certainty, never pad with generic caution language, and never restate findings already established earlier in the report -- only their decision implication belongs here.",
+    "Write this as the report's single executive decision, not a research summary. Open with the call in one sentence: name the SPECIFIC strategic action the evidence supports for this exact decision question (not a generic proceed/wait/avoid label), and why, in language a CEO would use in a Monday decision meeting -- not a restatement of findings. Then, on its own separate sentence, state confidence ONLY as a percentage or a plain-language certainty level (e.g. 'Confidence: 82%' or 'Confidence: Moderate') together with the specific evidence gap it depends on -- confidence must never itself be, or contain, a decision/recommendation word (proceed, proceed conditionally, do not proceed, GO, MONITOR, PROCEED WITH CONDITIONS, or any equivalent call); that call belongs only in the opening sentence, never repeated inside the confidence statement. Name the one condition that would change the call. Never overstate certainty, never pad with generic caution language, and never restate findings already established earlier in the report -- only their decision implication belongs here.",
   sources:
     "List every uploaded asset and external evidence registry entry actually used, including exact source title, publisher, and URL.",
 } as const;
@@ -167,7 +182,24 @@ export function buildDomainAnalysisInstructions(
     `Respond entirely in ${language}. Evidence registry reference numbers (R#) and asset filenames stay as-is; every word around them, including evidence-classification labels, must be written in ${language} -- never leave an English label or phrase inside a ${language} report.`,
     buildStrictReportLanguageInstruction(language),
     "Use the uploaded assets as primary evidence and the completed research registry as external evidence.",
-    "Classify a claim only when its evidence status materially affects the decision, using one word: Verified, Estimated, Assumption, Unknown, or Recommendation, written in the report's own language. Do not decorate every sentence with a label -- a label on every line stops carrying any signal.",
+    "Classify a claim only when its evidence status materially affects the decision, using one word: Verified, Benchmark, Estimated, Assumption, Unknown, or Recommendation, written in the report's own language. Use Benchmark ONLY when a real external reference actually supports that specific number -- a named industry report, a comparable-company figure, or an [R#] registry entry (e.g. a target CAC payback period, an LTV:CAC ratio, an NRR range, an ACV/ARPU improvement band, when you can point to where that figure comes from). If you produced the number yourself with no such external reference, it is never Benchmark -- label it Estimated (your own approximate cost, duration, or impact figure) or Assumption (a planning input you chose to construct a scenario) instead. Do not decorate every sentence with a label -- a label on every line stops carrying any signal.",
+    // TASK #69A-37A -- ROOT CAUSE FIX. Confirmed live: a real Strategic
+    // Advisory response's Recommended Actions/Final Recommendation
+    // named many material numeric thresholds, budgets, and impact
+    // ranges (a CAC-reduction gate, an LTV/CAC ratio, a payback window,
+    // several dollar spend ranges, several improvement-percentage
+    // ranges, a percentage-point NRR shift, a sprint-length range) with
+    // NO provenance attached to most of them -- none were supplied by
+    // the user, so an unlabeled number reads as a verified fact about
+    // this specific business when it is really a planning assumption,
+    // an illustrative benchmark, or an approximate estimate. Broadened
+    // the field scope beyond Recommended Actions/Final Recommendation
+    // (Decision Assessment, Financial Implications, and Scenario
+    // Analysis carry the same numbers just as often), and replaced "the
+    // first time it appears" with an explicit requirement that the
+    // label sit in the SAME clause or sentence as the number itself --
+    // never only once, early, or in a separate disclaimer paragraph.
+    "Every numeric threshold, budget, spend range, timeframe, or improvement figure named anywhere in Decision Assessment, Financial Implications, Scenario Analysis, Recommended Actions, or the Final Recommendation must carry its provenance directly next to that number, in the same clause or sentence -- never only as a disclaimer elsewhere in the field, and never left completely unlabeled. If the user directly stated it, or it is mathematically derived from a figure the user stated, mark it Verified and name the user's own figure it comes from. If it rests on a real external reference (a named industry report, a comparable-company figure, or an [R#] registry entry), mark it Benchmark and name that reference. If you constructed it yourself as a planning input to build a scenario, mark it Assumption. If it is your own approximate cost, duration, or impact figure with no external reference, mark it Estimated. For example: 'Planning assumption: use a >=20% CAC reduction as the initial re-acceleration gate.' or 'Illustrative benchmark -- verify for this specific segment: an LTV/CAC of 3 or higher.' or 'Estimated implementation cost: $10-30k.' Never state a Benchmark, Estimated, or Assumption figure as if it were a verified fact about this specific user's own business.",
     "Give material factual claims inline provenance (an asset filename, an [R#] registry reference, or a named method) where it strengthens trust; do not force provenance onto claims that do not need it.",
     "Never invent numeric values, sources, professional conclusions, legal status, accounting treatment, prices, or operational findings.",
     "Read Domain Findings, Regulatory/Compliance, Financial Implications, Operational Implications, and Risk Analysis as one continuous argument, each building on what the last one established, ending in the Recommendation. Do not write any of them as an isolated observation disconnected from that chain.",

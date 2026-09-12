@@ -325,6 +325,21 @@ const decisionKeywordPatterns: Array<{ code: ExecutiveDecisionCode; pattern: Reg
   },
 ];
 
+// TASK #69A-37 -- the decision word this SAME text can (and, confirmed
+// live, does) place directly inside its own "Confidence: X (NN%)" line
+// -- e.g. "Confidence: GO (95%)." -- a real Strategic Advisory model
+// response conflating the decision call and the confidence figure into
+// one mislabeled sentence. Bounded to this codebase's own actual
+// decision-vocabulary words (never an arbitrary phrase) so the
+// confidence regex below can skip PAST one of these words sitting
+// between "Confidence:" and the real number, without risking a false
+// match on an unrelated later sentence that happens to also contain a
+// percentage (e.g. "Confidence: We interviewed 15 customers and found
+// 95% renewal intent." must still resolve to the conservative default,
+// never 95, since "We interviewed..." is not one of these words).
+const decisionWordInsideConfidencePattern =
+  "(?:GO|NO[\\s-]?GO|CONDITIONAL\\s+GO|PROCEED(?:\\s+WITH\\s+CONDITIONS)?|PROCEED\\s+CONDITIONALLY|PAUSE\\s+PENDING\\s+REVIEW|REJECT|WAIT|AVOID|ENTER|MONITOR|PASS|DO\\s+NOT\\s+PROCEED|INSUFFICIENT\\s+EVIDENCE)";
+
 // Best-effort decision/confidence extraction from qualitative narrative
 // text, for report types (Strategic Advisory) that have no numeric
 // decision-scoring engine of their own. Never fabricates a number: when no
@@ -341,7 +356,28 @@ export function extractGenericDecisionSignal(text: string) {
     }
   }
 
-  const confidenceMatch = normalized.match(/\b(\d{1,3})\s*%\s*confidence\b|\bconfidence\s*[:\-–—]?\s*(\d{1,3})\s*%/i);
+  // TASK #69A-37 -- ROOT CAUSE FIX. Confirmed live: for the exact real
+  // response "Confidence: GO (95%).", the ORIGINAL pattern
+  // (`confidence\s*[:\-–—]?\s*(\d{1,3})\s*%`) requires the percentage to
+  // sit IMMEDIATELY after "confidence:" with nothing but whitespace in
+  // between -- "GO" is not whitespace, so neither alternative matched at
+  // all, and this function silently fell back to the conservative
+  // default (50) instead of the real, stated 95. This corrupted not just
+  // the model's own displayed sentence but this function's own
+  // CANONICAL derived confidence value -- the same number
+  // buildDomainAnalysisExecutiveDecisionBrief's deterministic banner
+  // then displays as "Decision: X (Confidence: 50%)", wrong by 45 points,
+  // for a report that never had a numeric confidence problem at all.
+  // FIX: the second alternative now optionally skips over exactly one of
+  // this codebase's own known decision words (never arbitrary text)
+  // sitting between "confidence:" and the number, so this exact
+  // conflation is parsed correctly instead of silently defaulting.
+  const confidenceMatch = normalized.match(
+    new RegExp(
+      `\\b(\\d{1,3})\\s*%\\s*confidence\\b|\\bconfidence\\s*(?:level)?\\s*[:\\-–—]?\\s*(?:${decisionWordInsideConfidencePattern}\\s*)?\\(?\\s*(\\d{1,3})\\s*%`,
+      "i"
+    )
+  );
   const parsedConfidence = confidenceMatch
     ? Number(confidenceMatch[1] ?? confidenceMatch[2])
     : null;
@@ -351,6 +387,90 @@ export function extractGenericDecisionSignal(text: string) {
       : 50;
 
   return { decision, confidence };
+}
+
+// TASK #69A-37 -- ROOT CAUSE FIX (display companion to
+// extractGenericDecisionSignal's own identical fix above). A real
+// Strategic Advisory response's own free-text finalRecommendation field
+// -- not just the deterministic banner -- can contain the SAME
+// conflated "Confidence: GO (95%)." sentence verbatim, since the model
+// writes that field's prose itself. Confidence and decision/
+// recommendation are separate concepts (this ticket's own core
+// requirement): this deterministically rewrites any such sentence
+// in-place to "Confidence: 95%." -- dropping only the decision word,
+// keeping the SAME number the model actually wrote (never substituting
+// a different, externally-computed figure, and never fabricating one
+// when no percentage is present in the match at all, in which case the
+// text is left untouched rather than guessing). The decision itself is
+// never lost: the report's own prompt already requires the call to be
+// stated as the OPENING sentence of this same field, so removing a
+// second, duplicate/mislabeled copy of it from the confidence clause
+// loses no information.
+export function correctConfidenceDecisionConflation(text: string): string {
+  if (!text) {
+    return text;
+  }
+
+  const pattern = new RegExp(
+    `\\bconfidence\\s*(?:level)?\\s*[:\\-–—]\\s*${decisionWordInsideConfidencePattern}\\s*\\(?\\s*(\\d{1,3})\\s*%\\)?`,
+    "gi"
+  );
+
+  const withParenFormFixed = text.replace(
+    pattern,
+    (_match, percent: string) => `Confidence: ${percent}%`
+  );
+
+  // TASK #69A-37B -- ROOT CAUSE FIX. Confirmed live in the REAL runtime
+  // Strategic Advisory chat path (app/api/chat/route.ts,
+  // isDirectStrategicAdvisory): a fresh response wrote "Confidence: GO
+  // with 95% confidence (per your preference)..." -- a second
+  // conflation shape #69A-37's own pattern above never covered, because
+  // it requires the percentage to sit immediately (optionally inside
+  // one "(...)" pair) after the decision word, with no connector word
+  // and no repeated "confidence" noun in between. This shape instead
+  // has a connector ("with") before the number and restates the word
+  // "confidence" again AFTER the percentage. Same guarantee as above:
+  // never fabricates a number, drops only the decision word/connector/
+  // repeated noun, keeps the model's own stated percentage, and leaves
+  // text with no match completely untouched.
+  const connectorPattern = new RegExp(
+    `\\bconfidence\\s*(?:level)?\\s*[:\\-–—]\\s*${decisionWordInsideConfidencePattern}\\b` +
+      `(?:\\s+with)?\\s*\\(?\\s*(\\d{1,3})\\s*%\\s*(?:confidence\\b)?\\)?`,
+    "gi"
+  );
+
+  return withParenFormFixed.replace(
+    connectorPattern,
+    (_match, percent: string) => `Confidence: ${percent}%`
+  );
+}
+
+// TASK #69A-37B -- ROOT CAUSE FIX. Confirmed live in the SAME real
+// Strategic Advisory chat response: the model appended an unsupported,
+// vague parenthetical -- "(per your preference)" -- attributing the
+// confidence figure to a user preference the current request never
+// actually stated. The model must never invent a user preference. This
+// deterministically strips only the VAGUE, unnamed form (a bare "per
+// your preference"/"per the user's preference" with no specific
+// preference named) -- never a specific, named claim like "(per your
+// stated preference for aggressive growth)", which is at least
+// falsifiable/checkable and may be genuinely true; only the contentless
+// generic form is stripped, since it adds no decision value regardless
+// of whether some preference exists somewhere in the conversation.
+// Never fabricates replacement text -- the phrase is simply removed,
+// and text with no match is returned untouched.
+const vagueUserPreferenceClaimPattern =
+  /\s*[,(]\s*(?:as\s+)?(?:per|based on)\s+(?:your|the user'?s?)\s+preference\s*[,)]?/gi;
+
+export function stripUnsupportedPreferenceClaims(text: string): string {
+  if (!text) {
+    return text;
+  }
+
+  return text
+    .replace(vagueUserPreferenceClaimPattern, "")
+    .replace(/[ \t]{2,}/g, " ");
 }
 
 // Locale-agnostic extraction of the deterministic "Decision: TOKEN" line

@@ -142,11 +142,14 @@ import { labelModelDerivedFinancialClaims } from "@/app/lib/report-engine/financ
 import {
   formatExecutiveDecisionBrief,
   extractGenericDecisionSignal,
+  correctConfidenceDecisionConflation,
+  stripUnsupportedPreferenceClaims,
   localizeExecutiveDecision,
   type ExecutiveDecisionBrief,
   type ExecutiveDecisionCode,
 } from "@/app/lib/report-engine/executive-decision-brief";
 import { assertNoDecisionContradiction } from "@/app/lib/report-engine/decision-contradiction-gate";
+import { attachNumericProvenanceLabels } from "@/app/lib/report-engine/numeric-provenance-guard";
 import { cleanupTemplatePresentationArtifacts } from "@/app/lib/report-presentation";
 import { isRevenueOrGrowthStage } from "@/app/lib/ai/company-lifecycle";
 import { buildEvidenceSummary } from "@/app/lib/report-engine/evidence-summary";
@@ -1207,6 +1210,49 @@ function parseDomainAnalysisReport(
 
   for (const field of domainAnalysisFields) {
     validated[field] = stripFillerAndDuplicateSentences(validated[field]);
+    // TASK #69A-37 -- ROOT CAUSE FIX. Confirmed live: a real Strategic
+    // Advisory response's own finalRecommendation field wrote "...
+    // Confidence: GO (95%)." verbatim -- the decision word and the
+    // confidence figure conflated into one mislabeled sentence, in the
+    // model's own free prose (finalRecommendation's prompt asks it to
+    // both "open with the call" and "state the confidence level" in the
+    // same field, with nothing forbidding it from merging the two).
+    // Confidence must only ever represent numeric certainty; the
+    // decision/recommendation belongs in its own sentence -- which the
+    // prompt's own "open with the call" instruction already guarantees
+    // is stated separately, earlier in this same field, so removing a
+    // second, duplicate/mislabeled copy from the confidence clause loses
+    // no information. Applied to every field defensively (the model
+    // could in principle write this pattern anywhere, not only
+    // finalRecommendation), never fabricating a number: a field with no
+    // matching pattern is returned byte-identical.
+    validated[field] = correctConfidenceDecisionConflation(validated[field]);
+    // TASK #69A-37A -- ROOT CAUSE FIX. Confirmed live: the SAME real
+    // Strategic Advisory response's Recommended Actions/Final
+    // Recommendation fields also named many material numeric
+    // thresholds, budgets, and impact ranges (a CAC-reduction gate, an
+    // LTV/CAC ratio, a payback window, several dollar spend ranges,
+    // several improvement-percentage ranges) with no provenance
+    // attached to most of them -- none of these were supplied by the
+    // user, so an unlabeled number reads as a verified fact about this
+    // specific business when it is really the model's own planning
+    // assumption, illustrative benchmark, or approximate estimate.
+    // domainAnalysisPrompts' own updated instructions now require the
+    // model to attach a label directly next to every such number at
+    // generation time; this is the deterministic backstop for whatever
+    // still slips through -- it only ever appends the single safest
+    // label ("(Estimate)"), never "Benchmark" or "Verified" (which would
+    // fabricate a stronger evidentiary status than actually exists),
+    // and leaves any number that already carries a recognized
+    // provenance signal nearby completely untouched.
+    validated[field] = attachNumericProvenanceLabels(validated[field]);
+    // TASK #69A-37B -- defensive parity with the chat-path fix (the
+    // real bug's own location was app/api/chat/route.ts, not this
+    // pipeline -- see that file's own #69A-37B comment); applied here
+    // too in case the model ever writes the same vague, unnamed
+    // preference attribution into a structured report field. Only ever
+    // removes a fixed, contentless phrase -- never fabricates text.
+    validated[field] = stripUnsupportedPreferenceClaims(validated[field]);
   }
 
   // Defensive: Strategic Advisory must inherit neither Business Idea
@@ -1275,6 +1321,26 @@ function parseAcquisitionAnalysisReport(
 
   for (const field of acquisitionAnalysisFields) {
     validated[field] = stripFillerAndDuplicateSentences(validated[field]);
+    // TASK #69A-37 -- mirrors parseDomainAnalysisReport's own identical
+    // fix: buildAcquisitionAnalysisExecutiveDecisionBrief reads
+    // extractGenericDecisionSignal over report.finalInvestmentRecommendation,
+    // the exact same shared extractor whose own confidence regex this
+    // task fixed -- this call closes the SAME conflation
+    // ("Confidence: GO (95%).") in the model's own displayed prose,
+    // never fabricating a number, never touching a field with no match.
+    validated[field] = correctConfidenceDecisionConflation(validated[field]);
+    // TASK #69A-37A -- mirrors parseDomainAnalysisReport's own identical
+    // fix: Acquisition Due Diligence shares the same free-prose numeric-
+    // provenance risk (deal-specific spend/timeline/threshold figures
+    // stated with no attached provenance). Only ever appends the safest
+    // label ("(Estimate)"), never touches a figure already carrying a
+    // recognized provenance signal -- including this report's own
+    // [Verified]/[Derived] deal-facts labels -- and never touches a
+    // field with no matching pattern.
+    validated[field] = attachNumericProvenanceLabels(validated[field]);
+    // TASK #69A-37B -- defensive parity, see parseDomainAnalysisReport's
+    // own identical addition above.
+    validated[field] = stripUnsupportedPreferenceClaims(validated[field]);
   }
 
   // Acquisition Due Diligence must never carry Business Idea Validation's,
