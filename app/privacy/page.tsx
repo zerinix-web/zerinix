@@ -25,7 +25,7 @@ export const metadata: Metadata = {
 };
 
 const LAST_UPDATED = "September 12, 2026";
-const CONTACT_EMAIL = "admin@zerinix.com";
+const CONTACT_EMAIL = "zerinix@zerinix.com";
 
 function Section({
   id,
