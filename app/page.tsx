@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   ArrowUpRight,
   Bot,
@@ -25,6 +26,7 @@ import {
 } from "lucide-react";
 import WaitlistForm from "@/components/WaitlistForm";
 import { getRequestDictionary } from "@/app/lib/i18n/server";
+import { createClient } from "@/app/lib/supabase/server";
 
 export const metadata: Metadata = {
   title: "ZERINIX | AI Business Planning for Founders",
@@ -47,6 +49,34 @@ const trustSignalIcons = [Building2, ShieldCheck, CircleDollarSign];
 const highlightedPricingIndex = 1;
 
 export default async function Home() {
+  // ROOT CAUSE FIX -- confirmed live: the Capacitor iOS app's server.url
+  // (capacitor.config.ts) has no path suffix, so every app launch loads
+  // this exact page fresh, with no way to "already be on /dashboard"
+  // the way a returning web visitor with a bookmark or prior navigation
+  // would be. This page never checked for an existing authenticated
+  // session, so an already-signed-in user relaunching the app always
+  // saw the public marketing/waitlist page again instead of continuing
+  // to their dashboard/mobile Home. This check reuses the exact same
+  // cookie-backed Supabase session read every other protected page
+  // already performs (supabase.auth.getUser(), server-verified against
+  // Supabase Auth, never a client-trusted JWT) -- it grants no new
+  // access and enforces no new rule: a session can only exist here if
+  // the user already passed the private-beta gate at
+  // app/auth/callback/route.ts (which signs the user out immediately on
+  // a failed beta check, so a rejected user can never reach this branch
+  // with a persisted session), or via an existing account's normal
+  // returning-user login. Only redirects an ALREADY authenticated
+  // request; a signed-out visitor (including every first-time visitor)
+  // still renders the full public landing page exactly as before.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (user) {
+    redirect("/dashboard");
+  }
+
   const { dictionary } = await getRequestDictionary();
   const pageWorkflowSteps = dictionary.landing.workflowSteps;
   const pageChatMessages = [

@@ -488,7 +488,18 @@ export default async function DashboardPage() {
         <DashboardSidebar showMobileNavigation={!mobileChatHomeEnabled} />
 
         {mobileChatHomeEnabled ? (
-          <MobileChatHome featureFlagEnabled={mobileChatHomeEnabled} />
+          <MobileChatHome
+            featureFlagEnabled={mobileChatHomeEnabled}
+            workspaces={workspaces}
+            recentReports={recentReports.map((report) => ({
+              id: report.id,
+              workspaceId: report.workspaceId,
+              title: report.title,
+              type: report.type,
+              status: report.status,
+              createdAt: report.createdAt,
+            }))}
+          />
         ) : null}
 
         <section

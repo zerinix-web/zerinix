@@ -20,7 +20,7 @@ export default async function ReportsPage() {
     redirect("/login?next=/dashboard/reports");
   }
 
-  const { reports, error } = await loadUserReportPreviews(supabase, user);
+  const { reports, error, totalCount } = await loadUserReportPreviews(supabase, user);
   const desktopReports: DashboardReport[] = reports.map((report) => ({
     id: report.id,
     workspaceId: report.workspaceId,
@@ -43,7 +43,11 @@ export default async function ReportsPage() {
         <DashboardSidebar />
 
         <section className="flex-1 lg:hidden">
-          <MobileReportsHome reports={reports} hasError={Boolean(error)} />
+          <MobileReportsHome
+            reports={reports}
+            hasError={Boolean(error)}
+            totalCount={totalCount}
+          />
         </section>
 
         <section className="hidden flex-1 px-4 pb-28 pt-5 sm:px-8 lg:block lg:px-10 lg:py-9">

@@ -102,7 +102,9 @@ export const dictionaries = {
       billing: "Billing",
       usage: "Usage",
       account: "Account",
-      workspace: "Workspace",
+      workspace: "Projects",
+      mobileHome: "Home",
+      mobileAsk: "Ask",
     },
     landing: {
       metadataTitle: "ZERINIX | AI Business Planning for Founders",
@@ -335,7 +337,9 @@ export const dictionaries = {
       billing: "Faturalama",
       usage: "Kullanım",
       account: "Hesap",
-      workspace: "Çalışma Alanı",
+      workspace: "Projeler",
+      mobileHome: "Ana Sayfa",
+      mobileAsk: "Sor",
     },
     landing: {
       metadataTitle: "ZERINIX | Girişimciler İçin AI İş Planlama",
@@ -582,7 +586,9 @@ export const dictionaries = {
       billing: "Abrechnung",
       usage: "Nutzung",
       account: "Konto",
-      workspace: "Arbeitsbereich",
+      workspace: "Projekte",
+      mobileHome: "Start",
+      mobileAsk: "Fragen",
     },
     landing: {
       metadataTitle: "ZERINIX | AI-Geschäftsplanung für Gründer",

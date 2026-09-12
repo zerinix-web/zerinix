@@ -415,15 +415,17 @@ export function normalizeReport(row: ReportRow): DashboardReport {
   };
 }
 
-function normalizeWorkspace(row: ReportRow): DashboardWorkspace {
-  const reports = Array.isArray(row.reports) ? row.reports : [];
-
+// `reportCount` is now passed in explicitly (a real Postgres COUNT(*),
+// see loadUserWorkspaces below) rather than derived from an embedded
+// `reports(id)` relation's own array length -- see loadUserWorkspaces'
+// own comment for why.
+function normalizeWorkspace(row: ReportRow, reportCount: number): DashboardWorkspace {
   return {
     id: readString(row, ["id"], crypto.randomUUID()),
     name: readString(row, ["name"], "General"),
     createdAt: readString(row, ["created_at", "createdAt"], ""),
     updatedAt: readString(row, ["updated_at", "updatedAt"], ""),
-    reportCount: reports.length,
+    reportCount,
   };
 }
 
@@ -470,10 +472,30 @@ export async function ensureDefaultWorkspace(supabase: SupabaseClient, user: Use
   return createdWorkspace.id as string;
 }
 
+// ROOT CAUSE FIX -- confirmed live: the mobile Projects/Workspaces
+// screen showed "1000 reports" under a workspace regardless of that
+// workspace's real report count. `reportCount` used to come from
+// `.select("...,reports(id)")` -- an embedded PostgREST relation --
+// via `reports.length` in normalizeWorkspace. PostgREST's own API-wide
+// "Max Rows" setting (1000 by default) caps ANY single response's row
+// count, including an embedded relation's own array, so once a
+// workspace's real report count reached that cap, its displayed count
+// froze at exactly 1000 with no error. Confirmed `reports(id)` was
+// used for nothing besides this `.length` call (DashboardWorkspace
+// never exposes the raw relation to any caller; getActiveWorkspace,
+// the only other consumer, only reads the already-computed
+// `reportCount`/`updatedAt`/`createdAt` fields) -- safe to replace
+// entirely rather than keep alongside a separate count.
+// Fetches a real Postgres COUNT(*) per workspace instead (`count:
+// "exact", head: true` -- no rows returned, just the exact total,
+// immune to the response row cap), run in parallel across this user's
+// (typically small) set of workspaces. The workspace list query itself
+// is unchanged in shape/ordering; only the per-workspace count moved
+// from "length of a capped relation" to "exact server-side count".
 export async function loadUserWorkspaces(supabase: SupabaseClient, user: User) {
   const { data, error } = await supabase
     .from("report_workspaces")
-    .select("id,user_id,name,created_at,updated_at,reports(id)")
+    .select("id,user_id,name,created_at,updated_at")
     .eq("user_id", user.id)
     .order("created_at", { ascending: true });
 
@@ -481,8 +503,24 @@ export async function loadUserWorkspaces(supabase: SupabaseClient, user: User) {
     return { workspaces: [] as DashboardWorkspace[], error: error.message };
   }
 
+  const workspaceRows = data || [];
+  const reportCounts = await Promise.all(
+    workspaceRows.map((row) =>
+      supabase
+        .from("reports")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("workspace_id", row.id)
+    )
+  );
+
   return {
-    workspaces: (data || []).map((row) => normalizeWorkspace(row as ReportRow)),
+    workspaces: workspaceRows.map((row, index) =>
+      normalizeWorkspace(
+        row as ReportRow,
+        reportCounts[index].error ? 0 : reportCounts[index].count || 0
+      )
+    ),
     error: "",
   };
 }
@@ -605,14 +643,31 @@ export async function countUserCompletedReports(
   }, 0);
 }
 
+// ROOT CAUSE FIX -- confirmed live: the mobile Reports screen displayed
+// "1000 REPORTS" regardless of how many reports a user actually has.
+// This query previously had no `.limit()` at all and returned `data`
+// alone; the UI derived its displayed count from that returned array's
+// own `.length` (see MobileReportsHome.tsx). PostgREST's own API-wide
+// "Max Rows" setting silently caps any single response's row count
+// (1000 by default) -- so once a user's real report count reached that
+// cap, `data.length` froze at exactly 1000 forever, with no error and
+// no way to tell it apart from a genuine total of 1000. Adding
+// `{ count: "exact" }` to this SAME select asks Postgres for a real
+// `COUNT(*)` alongside the (still potentially page-capped) `data` rows,
+// in the same request -- it never changes which rows come back or how
+// many, only adds an accurate total that is immune to the response
+// row cap. `totalCount` is new, additive return data; `reports` and
+// `error` are unchanged, so the list itself, its ordering, and its
+// existing callers are unaffected.
 export async function loadUserReportPreviews(
   supabase: SupabaseClient,
   user: User
 ) {
-  const { data, error } = await supabase
+  const { data, error, count } = await supabase
     .from("reports")
     .select(
-      "id,user_id,workspace_id,title,prompt,report_type,status,created_at,metadata"
+      "id,user_id,workspace_id,title,prompt,report_type,status,created_at,metadata",
+      { count: "exact" }
     )
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
@@ -621,6 +676,7 @@ export async function loadUserReportPreviews(
     return {
       reports: [] as MobileReportPreview[],
       error: error.message,
+      totalCount: 0,
     };
   }
 
@@ -629,6 +685,7 @@ export async function loadUserReportPreviews(
       normalizeMobileReportPreview(row as ReportRow)
     ),
     error: "",
+    totalCount: count ?? (data || []).length,
   };
 }
 
@@ -670,11 +727,15 @@ export async function loadWorkspaceReports(
     .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
 
+  // Out of this ticket's scope (only the Reports list screen and the
+  // Workspaces LIST screen's per-workspace count were reported/fixed
+  // above) -- kept as a same-behavior compatibility adaptation to
+  // normalizeWorkspace's new explicit-count signature, not a new fix:
+  // `(data || []).length` is exactly what this call site already
+  // counted before (the workspace's own already-fetched report list),
+  // unchanged.
   return {
-    workspace: normalizeWorkspace({
-      ...(workspace as ReportRow),
-      reports: data || [],
-    }),
+    workspace: normalizeWorkspace(workspace as ReportRow, (data || []).length),
     reports: error ? [] : (data || []).map((row) => normalizeReport(row as ReportRow)),
     error: error?.message || "",
   };

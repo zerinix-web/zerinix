@@ -20,7 +20,12 @@ const loadingSource = await readFile(
 );
 
 test("reports route isolates the new library to mobile and preserves the desktop manager", () => {
-  assert.match(pageSource, /<MobileReportsHome reports=\{reports\}/);
+  // TASK -- "1000 REPORTS" fix: MobileReportsHome now also receives an
+  // explicit `totalCount` prop (see loadUserReportPreviews's real
+  // COUNT(*) below), so this call is multi-line now -- match across
+  // whitespace/newlines rather than requiring it on one literal line.
+  assert.match(pageSource, /<MobileReportsHome\s+reports=\{reports\}/);
+  assert.match(pageSource, /totalCount=\{totalCount\}/);
   assert.match(pageSource, /className="flex-1 lg:hidden"/);
   assert.match(
     pageSource,

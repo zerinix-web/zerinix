@@ -41,6 +41,13 @@ import {
   restoreSupabaseSession,
 } from "@/app/lib/supabase/client";
 import SignOutButton from "@/components/auth/SignOutButton";
+import { MobileBottomNavigation } from "@/components/MobileNavigation";
+import type { DashboardWorkspace } from "@/app/dashboard/report-utils";
+import {
+  RecentProjectsSection,
+  ContinueActivitySection,
+  type MobileHomeReportSummary,
+} from "@/components/mobile/MobileHomeSections";
 
 const MOBILE_CONVERSATION_STORAGE_KEY = "zerinix.mobileChatConversationId";
 const INTERNAL_REPORT_DIAGNOSTIC_LINE =
@@ -71,17 +78,9 @@ type ContextualAction = MobileRecommendation & {
   keywords: RegExp;
 };
 
-const QUICK_START_PROMPTS = [
-  "Validate my startup idea",
-  "Analyze my competitors",
-  "Build a business plan",
-  "Estimate market size",
-  "Create a go-to-market strategy",
-];
-
 const MOBILE_RECOMMENDATIONS: MobileRecommendation[] = [
   {
-    label: "Validate Business Idea",
+    label: "Business Idea Validation",
     description: "Validate and improve your startup idea.",
     prompt:
       "Help me validate my business idea. Start by asking me the most important question.",
@@ -95,7 +94,7 @@ const MOBILE_RECOMMENDATIONS: MobileRecommendation[] = [
     icon: BarChart3,
   },
   {
-    label: "Strategic Report",
+    label: "Strategic Advisory",
     description: "Generate an executive-level business report.",
     prompt:
       "Help me develop the context for a professional strategic report. Ask what you need to know first.",
@@ -680,8 +679,12 @@ async function getAuthenticatedSession() {
 
 export default function MobileChatHome({
   featureFlagEnabled,
+  workspaces,
+  recentReports,
 }: {
   featureFlagEnabled: boolean;
+  workspaces: DashboardWorkspace[];
+  recentReports: MobileHomeReportSummary[];
 }) {
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<MobileChatMessage[]>([]);
@@ -889,15 +892,6 @@ export default function MobileChatHome({
 
     return () => window.cancelAnimationFrame(animationFrame);
   }, [hasEnteredConversation]);
-
-  const insertLandingPrompt = useCallback((value: string) => {
-    setPrompt(value);
-
-    window.requestAnimationFrame(() => {
-      landingTextareaRef.current?.focus();
-      landingTextareaRef.current?.setSelectionRange(value.length, value.length);
-    });
-  }, []);
 
   const insertConversationPrompt = useCallback((value: string) => {
     setPrompt(value);
@@ -1300,19 +1294,16 @@ export default function MobileChatHome({
     : "";
 
   return (
-    <section className="relative z-10 flex h-[100dvh] min-h-[100svh] w-full flex-col overflow-hidden bg-black text-white lg:hidden">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_82%_0%,rgba(45,212,191,0.16),transparent_36%),radial-gradient(circle_at_0%_62%,rgba(20,184,166,0.07),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.025),transparent_42%)]" />
+    <section className="relative z-10 flex h-[100dvh] min-h-[100svh] w-full flex-col overflow-hidden bg-[#050706] text-white lg:hidden">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_82%_0%,rgba(45,212,191,0.18),transparent_38%),radial-gradient(circle_at_0%_58%,rgba(13,148,136,0.09),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent_46%)]" />
 
-      <header className="relative z-10 flex shrink-0 items-center gap-3 border-b border-white/10 bg-black/80 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] shadow-xl shadow-black/20 backdrop-blur-2xl">
-        <span className="flex h-10 w-10 items-center justify-center rounded-[1rem] bg-white text-xs font-black tracking-[0.12em] text-black shadow-lg shadow-white/10">
+      <header className="relative z-10 flex shrink-0 items-center gap-2.5 border-b border-white/[0.06] bg-black/40 px-4 pb-2.5 pt-[max(0.6rem,env(safe-area-inset-top))] backdrop-blur-2xl">
+        <span className="flex h-8 w-8 items-center justify-center rounded-[0.85rem] bg-white text-[10px] font-black tracking-[0.1em] text-black shadow-md shadow-white/5">
           ZX
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold tracking-[0.16em] text-white">
+          <p className="text-[13px] font-bold leading-tight tracking-[0.14em] text-white">
             ZERINIX
-          </p>
-          <p className="text-[11px] text-zinc-500">
-            AI Business Assistant
           </p>
         </div>
         <button
@@ -1321,9 +1312,9 @@ export default function MobileChatHome({
           aria-label="Open account menu"
           aria-haspopup="dialog"
           aria-expanded={accountMenuOpen}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-zinc-300 transition active:bg-white/[0.12]"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-zinc-300 transition active:bg-white/[0.1]"
         >
-          <UserRound className="h-[1.1rem] w-[1.1rem]" />
+          <UserRound className="h-[1.05rem] w-[1.05rem]" />
         </button>
       </header>
 
@@ -1387,27 +1378,31 @@ export default function MobileChatHome({
         <div
           ref={landingScrollRef}
           aria-hidden={!showLanding}
-          className={`absolute inset-0 overflow-y-auto overscroll-contain px-4 pb-8 pt-[max(3rem,env(safe-area-inset-top))] [scroll-padding-top:max(3rem,env(safe-area-inset-top))] [-webkit-overflow-scrolling:touch] transition-all duration-500 ease-out ${
+          className={`absolute inset-0 overflow-y-auto overscroll-contain px-4 pb-8 pt-5 [scroll-padding-top:1.25rem] [-webkit-overflow-scrolling:touch] transition-all duration-500 ease-out ${
             showLanding
               ? "translate-y-0 opacity-100"
               : "pointer-events-none -translate-y-4 opacity-0"
           }`}
         >
           <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col">
-            <div className="mb-5">
-              <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10 shadow-[0_16px_40px_rgba(20,184,166,0.12)]">
-                <Sparkles className="h-5 w-5 text-teal-100" />
+            <div className="relative mb-4">
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -left-6 -top-10 h-28 w-40 rounded-full bg-teal-300/[0.08] blur-2xl"
+              />
+              <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-xl border border-teal-200/20 bg-teal-200/10">
+                <Sparkles className="h-[0.95rem] w-[0.95rem] text-teal-100" />
               </span>
-              <h1 className="mt-8 max-w-md text-[2.55rem] font-semibold leading-[1.02] tracking-[-0.055em] text-white">
-                What would you like to build today?
+              <h1 className="relative mt-3 max-w-sm text-[1.9rem] font-semibold leading-[1.12] tracking-[-0.045em] text-white">
+                What do you want to accomplish today?
               </h1>
-              <p className="mt-5 max-w-sm text-[15px] leading-7 text-zinc-400">
-                Describe your startup, business, or challenge in natural
-                language.
+              <p className="relative mt-2.5 max-w-[19rem] text-[13.5px] leading-[1.42] text-zinc-400">
+                Turn your ideas into insights, professional analysis,
+                reports and strategic guidance.
               </p>
             </div>
 
-            <div className="rounded-[1.55rem] border border-white/[0.11] bg-white/[0.055] p-2 shadow-[0_20px_55px_rgba(0,0,0,0.42)] ring-1 ring-white/[0.02] backdrop-blur-2xl transition duration-300 focus-within:border-teal-200/30 focus-within:bg-white/[0.07]">
+            <div className="rounded-[1.5rem] border border-white/[0.09] bg-white/[0.05] p-2 shadow-[0_18px_48px_rgba(0,0,0,0.4)] ring-1 ring-white/[0.02] backdrop-blur-2xl transition duration-300 focus-within:border-teal-300/25 focus-within:bg-white/[0.065] focus-within:shadow-[0_0_0_1px_rgba(94,234,212,0.06),0_18px_48px_rgba(0,0,0,0.4)]">
               <textarea
                 ref={landingTextareaRef}
                 value={prompt}
@@ -1419,7 +1414,7 @@ export default function MobileChatHome({
                 tabIndex={showLanding ? 0 : -1}
                 aria-label="Ask ZERINIX about your business"
                 placeholder="Ask anything about your business..."
-                className="min-h-[4.75rem] w-full resize-none bg-transparent px-3 py-2.5 text-[16px] leading-6 text-white outline-none placeholder:text-zinc-500"
+                className="min-h-[3.75rem] w-full resize-none bg-transparent px-3 py-2.5 text-[15.5px] leading-6 text-white outline-none placeholder:text-zinc-500"
               />
               <div className="flex items-center justify-between gap-3 px-2 pb-1">
                 <p className="text-[11px] tracking-[0.01em] text-zinc-600">
@@ -1434,37 +1429,18 @@ export default function MobileChatHome({
                   disabled={!prompt.trim() || isLoading || isInitializing}
                   tabIndex={showLanding ? 0 : -1}
                   aria-label="Send message"
-                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-lg shadow-white/10 transition duration-200 hover:scale-[1.03] hover:bg-teal-100 active:scale-95 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-zinc-600 disabled:shadow-none"
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-teal-200 text-black shadow-[0_8px_20px_rgba(45,212,191,0.28)] transition duration-200 hover:scale-[1.03] hover:bg-teal-100 active:scale-95 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-zinc-600 disabled:shadow-none"
                 >
                   <Send className="h-4 w-4" />
                 </button>
               </div>
             </div>
 
-            <section aria-label="Quick Start" className="mt-7">
+            <section aria-label="Core actions" className="mt-6">
               <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                Quick Start
+                Get Started
               </p>
-              <div className="-mx-4 flex snap-x gap-2.5 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {QUICK_START_PROMPTS.map((quickPrompt) => (
-                  <button
-                    key={quickPrompt}
-                    type="button"
-                    onClick={() => insertLandingPrompt(quickPrompt)}
-                    tabIndex={showLanding ? 0 : -1}
-                    className="min-h-11 shrink-0 snap-start whitespace-nowrap rounded-full border border-white/[0.1] bg-white/[0.045] px-5 py-3 text-[12px] font-medium leading-5 text-zinc-300 shadow-md shadow-black/15 transition duration-200 hover:-translate-y-0.5 hover:border-teal-200/20 hover:bg-white/[0.07] hover:text-white active:scale-[0.97]"
-                  >
-                    {quickPrompt}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <div className="mt-10 pb-[max(1.5rem,calc(env(safe-area-inset-bottom)_+_0.75rem))]">
-              <p className="mb-4 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                Suggested analyses
-              </p>
-              <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-2.5">
               {MOBILE_RECOMMENDATIONS.map((recommendation) => {
                 const Icon = recommendation.icon;
 
@@ -1474,27 +1450,37 @@ export default function MobileChatHome({
                     type="button"
                     onClick={() => enterConversation(recommendation.prompt)}
                     tabIndex={showLanding ? 0 : -1}
-                    className="group flex min-h-[5.5rem] w-full items-center gap-4 rounded-2xl border border-white/[0.09] bg-white/[0.035] px-4 py-3.5 text-left shadow-[0_12px_35px_rgba(0,0,0,0.2)] transition duration-300 hover:-translate-y-0.5 hover:border-teal-200/20 hover:bg-white/[0.06] active:-translate-y-1 active:scale-[0.99]"
+                    className="group relative flex min-h-[6.75rem] flex-col items-start justify-between overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.035] p-2.5 text-left shadow-[0_12px_30px_rgba(0,0,0,0.22),0_0_28px_-14px_rgba(45,212,191,0.35)] transition duration-300 active:-translate-y-0.5 active:scale-[0.97] active:border-teal-200/20 active:bg-white/[0.06]"
                   >
-                    <span className="flex h-[3.1rem] w-[3.1rem] shrink-0 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.05] text-zinc-400 transition duration-300 group-hover:border-teal-200/20 group-hover:bg-teal-200/10 group-hover:text-teal-100">
-                      <Icon className="h-[1.3rem] w-[1.3rem]" />
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute -right-4 -top-4 h-14 w-14 rounded-full bg-teal-300/10 blur-xl transition duration-300 group-active:bg-teal-300/20"
+                    />
+                    <span className="relative flex h-8 w-8 items-center justify-center rounded-xl border border-teal-200/15 bg-teal-200/[0.08] text-teal-100 transition duration-300 group-active:border-teal-200/30 group-active:bg-teal-200/15">
+                      <Icon className="h-[0.9rem] w-[0.9rem]" />
                     </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-[14px] font-semibold leading-5 text-zinc-100">
+                    <span className="relative min-w-0">
+                      <span className="block text-[12.5px] font-semibold leading-[1.2] text-zinc-100">
                         {recommendation.label}
                       </span>
-                      <span className="mt-1 block text-[12px] leading-5 text-zinc-500">
+                      <span className="mt-1 block text-[10.5px] leading-[1.35] text-zinc-500 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">
                         {recommendation.description}
                       </span>
                     </span>
-                    <ArrowRight className="h-4 w-4 shrink-0 text-zinc-600 transition duration-300 group-hover:translate-x-0.5 group-hover:text-zinc-300" />
                   </button>
                 );
               })}
               </div>
-            </div>
+            </section>
+
+            <RecentProjectsSection workspaces={workspaces} focusable={showLanding} />
+            <ContinueActivitySection reports={recentReports} focusable={showLanding} />
+
+            <div className="pb-[calc(6.5rem+env(safe-area-inset-bottom))]" />
           </div>
         </div>
+
+        {showLanding ? <MobileBottomNavigation /> : null}
 
         <div
           ref={conversationScrollRef}

@@ -102,9 +102,18 @@ function MobileReportsError() {
 export default function MobileReportsHome({
   reports,
   hasError = false,
+  totalCount,
 }: {
   reports: MobileReportPreview[];
   hasError?: boolean;
+  // Real Postgres COUNT(*) for this user's reports (see
+  // loadUserReportPreviews), immune to the response row cap that
+  // `reports.length` silently hit before this fix. Optional so any
+  // other/older caller that doesn't pass it still renders (falling
+  // back to the previous, list-length-based count for that caller
+  // only -- this component's own real caller, app/dashboard/reports/page.tsx,
+  // always supplies it).
+  totalCount?: number;
 }) {
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] =
@@ -124,6 +133,16 @@ export default function MobileReportsHome({
       return matchesType && matchesQuery;
     });
   }, [activeFilter, deferredQuery, reports]);
+  // Shows the real, exact total only for the default, unfiltered view --
+  // once a search or type filter narrows the list, the count correctly
+  // reflects how many match that filter (a client-side subset count,
+  // never affected by the row-cap bug this fix addresses). Falls back
+  // to the list length only if a caller doesn't supply totalCount.
+  const isUnfiltered = activeFilter === "All" && !deferredQuery.trim();
+  const displayedReportCount =
+    isUnfiltered && typeof totalCount === "number"
+      ? totalCount
+      : filteredReports.length;
 
   return (
     <div className="relative min-h-[calc(100dvh-4.5rem)] overflow-hidden px-4 pb-[calc(8.5rem+env(safe-area-inset-bottom))] pt-7 text-white lg:hidden">
@@ -228,8 +247,8 @@ export default function MobileReportsHome({
               <section className="mt-6" aria-label="Saved reports">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                    {filteredReports.length}{" "}
-                    {filteredReports.length === 1 ? "report" : "reports"}
+                    {displayedReportCount}{" "}
+                    {displayedReportCount === 1 ? "report" : "reports"}
                   </p>
                   <Link
                     href="/plan?new=1&mode=plan"

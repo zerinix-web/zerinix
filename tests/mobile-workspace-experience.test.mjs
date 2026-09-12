@@ -83,7 +83,12 @@ test("workspace list stays lightweight and detail data loads only on the opened 
     reportDataSource.indexOf("export async function loadUserReports")
   );
 
-  assert.match(workspaceListLoader, /reports\(id\)/);
+  // TASK -- "1000 reports" fix: the embedded `reports(id)` relation
+  // (whose own array length silently capped at PostgREST's 1000-row
+  // response limit) was replaced with a real, per-workspace
+  // COUNT(*) query -- lighter still (head: true returns no rows at
+  // all), and still never touches heavy report fields.
+  assert.match(workspaceListLoader, /count:\s*"exact",\s*head:\s*true/);
   assert.doesNotMatch(workspaceListLoader, /sections|metadata|prompt/);
   assert.doesNotMatch(listPageSource, /loadWorkspaceReports/);
   assert.match(detailPageSource, /loadWorkspaceReports\(supabase, user, id\)/);

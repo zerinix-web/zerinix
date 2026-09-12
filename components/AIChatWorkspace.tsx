@@ -1030,6 +1030,51 @@ export default function AIChatWorkspace({
   const [clearProfileConfirmOpen, setClearProfileConfirmOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  // TASK -- Mobile Ask composer keyboard fix. Confirmed live: on the
+  // iPhone Simulator, opening the software keyboard left the textarea
+  // visible but hid the composer's own action row (Upload files / model
+  // select / Ask advisor) underneath it. Root cause: this Capacitor
+  // WebView has no @capacitor/keyboard plugin installed, and WKWebView
+  // does not resize the layout viewport when the on-screen keyboard
+  // appears -- it simply overlays on top, so <main>'s `h-[100dvh]
+  // min-h-[100svh]` never shrinks and the bottom of this tall composer
+  // (attachments preview + textarea + action row + tips row) ends up
+  // underneath the keyboard. `window.visualViewport`, unlike the layout
+  // viewport, DOES report the real, keyboard-reduced visible height --
+  // used below to size <main> to match, which (via the EXISTING flex
+  // column: header -> flex-1 min-h-0 message list -> shrink-0 composer)
+  // pulls the composer's action row back above the keyboard using the
+  // same flex layout already in place, with no new hardcoded offset.
+  // `null` means "no override" (desktop, or keyboard closed) -- <main>
+  // keeps its normal Tailwind-driven height exactly as before.
+  const [mobileKeyboardViewportHeight, setMobileKeyboardViewportHeight] =
+    useState<number | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) {
+      return;
+    }
+
+    const viewport = window.visualViewport;
+    const MOBILE_BREAKPOINT_PX = 768; // matches this file's own `md:` usage
+    const KEYBOARD_HEIGHT_THRESHOLD_PX = 120;
+
+    function handleViewportResize() {
+      if (window.innerWidth >= MOBILE_BREAKPOINT_PX) {
+        setMobileKeyboardViewportHeight(null);
+        return;
+      }
+
+      const keyboardLikelyOpen =
+        window.innerHeight - viewport.height > KEYBOARD_HEIGHT_THRESHOLD_PX;
+      setMobileKeyboardViewportHeight(keyboardLikelyOpen ? viewport.height : null);
+    }
+
+    handleViewportResize();
+    viewport.addEventListener("resize", handleViewportResize);
+
+    return () => viewport.removeEventListener("resize", handleViewportResize);
+  }, []);
   const [activeReportMemoryId] = useState(() =>
     initialReportMemory?.id || getReportIdFromLocation() || getStoredActiveReportId()
   );
@@ -1845,6 +1890,11 @@ export default function AIChatWorkspace({
   return (
     <main
       className="flex h-[100dvh] min-h-[100svh] overflow-hidden bg-black pb-20 text-white md:pb-0"
+      style={
+        mobileKeyboardViewportHeight !== null
+          ? { height: mobileKeyboardViewportHeight, minHeight: mobileKeyboardViewportHeight }
+          : undefined
+      }
       onDragEnter={(event) => {
         event.preventDefault();
         setIsDraggingFiles(true);
@@ -1860,7 +1910,7 @@ export default function AIChatWorkspace({
       }}
       onDrop={handleDropFiles}
     >
-      <MobileBottomNavigation />
+      {mobileKeyboardViewportHeight === null ? <MobileBottomNavigation /> : null}
       {renameTarget ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl">
           <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-zinc-950 p-6 shadow-2xl shadow-black/60">
