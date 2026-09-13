@@ -2,7 +2,6 @@
 
 import {
   memo,
-  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -15,6 +14,8 @@ import {
   sanitizeAiResponseText,
   extractChatStreamError,
 } from "@/app/lib/ai/response-sanitization";
+import { splitStreamingMarkdownIntoSettledAndActive } from "@/app/lib/streaming-markdown-split";
+import { useThrottledStreamingReveal } from "@/app/lib/streaming-reveal";
 import { MobileBottomNavigation } from "@/components/MobileNavigation";
 import {
   AlertCircle,
@@ -494,6 +495,19 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
   );
 }
 
+// ROOT CAUSE FIX (deeper streaming-stability pass) -- confirmed live:
+// this is a SEPARATE, local copy of the same hand-rolled markdown
+// parser used by components/planner/MarkdownRenderer.tsx -- the "Ask"
+// screen (this file) never imported that shared component, so an
+// earlier fix applied there never reached here. Same defect, same
+// fix: every span/code/strong element below used to be keyed by its
+// own text content (`${part}-${index}`), which changes on nearly
+// every streamed token, forcing React to discard and recreate the DOM
+// node for that segment on every token instead of updating its text
+// in place. Position-only keys (`index`) fix this -- safe here
+// because these segments are only ever appended to or extended, never
+// reordered or removed from the middle. Same reasoning applies to the
+// table keys in MarkdownTable below.
 function InlineMarkdown({ text }: { text: string }) {
   const parts = text.split(/(`[^`\n]+`|\*\*[^*]+\*\*)/g);
 
@@ -503,7 +517,7 @@ function InlineMarkdown({ text }: { text: string }) {
         if (part.startsWith("`") && part.endsWith("`")) {
           return (
             <code
-              key={`${part}-${index}`}
+              key={index}
               className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[0.92em] text-teal-100"
             >
               {part.slice(1, -1)}
@@ -513,13 +527,13 @@ function InlineMarkdown({ text }: { text: string }) {
 
         if (part.startsWith("**") && part.endsWith("**")) {
           return (
-            <strong key={`${part}-${index}`} className="font-semibold text-white">
+            <strong key={index} className="font-semibold text-white">
               {part.slice(2, -2)}
             </strong>
           );
         }
 
-        return <span key={`${part}-${index}`}>{part}</span>;
+        return <span key={index}>{part}</span>;
       })}
     </>
   );
@@ -550,7 +564,7 @@ function MarkdownTable({ lines }: { lines: string[] }) {
         <thead className="bg-white/[0.04] text-zinc-200">
           <tr>
             {header.map((cell, cellIndex) => (
-              <th key={`header-${cellIndex}-${cell}`} className="border-b border-white/10 px-4 py-3 font-semibold">
+              <th key={cellIndex} className="border-b border-white/10 px-4 py-3 font-semibold">
                 <InlineMarkdown text={cell} />
               </th>
             ))}
@@ -558,9 +572,9 @@ function MarkdownTable({ lines }: { lines: string[] }) {
         </thead>
         <tbody className="divide-y divide-white/10 text-zinc-300">
           {bodyRows.map((row, rowIndex) => (
-            <tr key={`row-${rowIndex}-${row.join("-")}`}>
+            <tr key={rowIndex}>
               {row.map((cell, cellIndex) => (
-                <td key={`${cell}-${cellIndex}`} className="px-4 py-3 align-top">
+                <td key={cellIndex} className="px-4 py-3 align-top">
                   <InlineMarkdown text={cell} />
                 </td>
               ))}
@@ -647,6 +661,196 @@ function parseMarkdownSegments(content: string) {
   return segments;
 }
 
+// Extracted so it can be called twice with independently keyed, disjoint
+// inputs -- see MarkdownRenderer below. Same rationale and behavior as
+// the identical extraction in components/planner/MarkdownRenderer.tsx's
+// parseMarkdownBlocks: `keyPrefix` keeps the "settled" and "active" trees'
+// keys from colliding; calling it once over the full text (the
+// non-streaming path) is byte-identical to the previous single-parse
+// behavior.
+function parseMarkdownBlocksLocal(text: string, keyPrefix: string): ReactNode[] {
+  const blocks = parseMarkdownSegments(text);
+
+  return blocks.map((block, blockIndex) => {
+      if (block.type === "code") {
+        return (
+          <CodeBlock
+            key={`${keyPrefix}-code-${blockIndex}`}
+            language={block.language}
+            code={block.code}
+          />
+        );
+      }
+
+      const lines = block.content.split("\n");
+      const elements: ReactNode[] = [];
+      let paragraph: string[] = [];
+      let table: string[] = [];
+      let list: string[] = [];
+      let listOrdered = false;
+
+      const flushParagraph = () => {
+        if (!paragraph.length) {
+          return;
+        }
+
+        elements.push(
+          <p key={`${keyPrefix}-p-${blockIndex}-${elements.length}`} className="whitespace-pre-wrap text-zinc-300">
+            <InlineMarkdown text={paragraph.join("\n")} />
+          </p>
+        );
+        paragraph = [];
+      };
+
+      const flushTable = () => {
+        if (!table.length) {
+          return;
+        }
+
+        elements.push(
+          <MarkdownTable key={`${keyPrefix}-table-${blockIndex}-${elements.length}`} lines={table} />
+        );
+        table = [];
+      };
+
+      const flushList = () => {
+        if (!list.length) {
+          return;
+        }
+
+        const ListTag = listOrdered ? "ol" : "ul";
+
+        elements.push(
+          <ListTag
+            key={`${keyPrefix}-list-${blockIndex}-${elements.length}`}
+            className={listOrdered ? "list-decimal space-y-2.5 pl-5" : "space-y-2.5"}
+          >
+            {list.map((item, itemIndex) => (
+              <li
+                key={itemIndex}
+                className={listOrdered ? "pl-1 text-zinc-300" : "flex gap-3 text-zinc-300"}
+              >
+                {!listOrdered ? (
+                  <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
+                ) : null}
+                <span className="min-w-0">
+                  <InlineMarkdown text={item.replace(/^[-*]\s+/, "").replace(/^\d+[.)]\s+/, "")} />
+                </span>
+              </li>
+            ))}
+          </ListTag>
+        );
+        list = [];
+        listOrdered = false;
+      };
+
+      lines.forEach((line) => {
+        if (!line.trim()) {
+          flushParagraph();
+          flushTable();
+          flushList();
+          return;
+        }
+
+        if (line.startsWith("### ")) {
+          flushParagraph();
+          flushTable();
+          flushList();
+          elements.push(
+            <h4 key={`${keyPrefix}-h4-${blockIndex}-${elements.length}`} className="pt-2 text-base font-semibold text-white">
+              <InlineMarkdown text={line.slice(4)} />
+            </h4>
+          );
+          return;
+        }
+
+        if (line.startsWith("## ")) {
+          flushParagraph();
+          flushTable();
+          flushList();
+          elements.push(
+            <h3 key={`${keyPrefix}-h3-${blockIndex}-${elements.length}`} className="pt-2 text-lg font-semibold text-white">
+              <InlineMarkdown text={line.slice(3)} />
+            </h3>
+          );
+          return;
+        }
+
+        if (/^[-*]\s+/.test(line) || /^\d+[.)]\s+/.test(line)) {
+          flushParagraph();
+          flushTable();
+          const ordered = /^\d+[.)]\s+/.test(line);
+
+          if (list.length && ordered !== listOrdered) {
+            flushList();
+          }
+
+          listOrdered = ordered;
+          list.push(line);
+          return;
+        }
+
+        if (line.includes("|") && line.trim().startsWith("|")) {
+          flushParagraph();
+          flushList();
+          table.push(line);
+          return;
+        }
+
+        flushTable();
+        flushList();
+        paragraph.push(line);
+      });
+
+      flushParagraph();
+      flushTable();
+      flushList();
+
+      return (
+        <div key={`${keyPrefix}-block-${blockIndex}`} className="space-y-4">
+          {elements}
+        </div>
+      );
+    });
+}
+
+// /chat's <AIChatWorkspace> is a single responsive component serving
+// both mobile and desktop widths (unlike the other two streaming
+// renderers, which each have separate, permanently mobile-or-desktop
+// call sites) -- so throttling only the mobile reading pace here needs
+// a real runtime viewport check rather than a fixed prop. Mirrors this
+// file's own existing 768px breakpoint convention (see the
+// mobileKeyboardViewportHeight effect above).
+function useIsMobileViewport(): boolean {
+  const MOBILE_MARKDOWN_BREAKPOINT_PX = 768;
+
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return window.innerWidth < MOBILE_MARKDOWN_BREAKPOINT_PX;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) {
+      return;
+    }
+
+    const query = window.matchMedia(
+      `(max-width: ${MOBILE_MARKDOWN_BREAKPOINT_PX - 1}px)`
+    );
+
+    const handleChange = () => setIsMobile(query.matches);
+    handleChange();
+
+    query.addEventListener("change", handleChange);
+    return () => query.removeEventListener("change", handleChange);
+  }, []);
+
+  return isMobile;
+}
+
 function MarkdownRenderer({
   content,
   streaming = false,
@@ -654,153 +858,44 @@ function MarkdownRenderer({
   content: string;
   streaming?: boolean;
 }) {
-  const deferredContent = useDeferredValue(content);
-  const renderedContent = streaming ? deferredContent : content;
-  const blocks = parseMarkdownSegments(renderedContent);
+  // READING-PACE FIX -- see app/lib/streaming-reveal.ts. Only throttles
+  // the reveal rate on mobile viewports; on desktop this is a pure
+  // passthrough (content returned unchanged, every tick).
+  const isMobileViewport = useIsMobileViewport();
+  const revealedContent = useThrottledStreamingReveal(
+    content,
+    streaming,
+    isMobileViewport
+  );
+
+  // ROOT CAUSE FIX (progressive-streaming pass) -- see the identical fix
+  // and full explanation in components/planner/MarkdownRenderer.tsx:
+  // useDeferredValue hid the cost of re-parsing the whole accumulated
+  // message behind React's low-priority scheduling, which under a
+  // steady stream of urgent token updates made the visible text lag and
+  // catch up in bursts instead of revealing continuously. Splitting into
+  // a memoized, frozen "settled" prefix and a small, cheap-to-reparse
+  // "active" remainder removes the need for that deferral -- the
+  // non-streaming (finalized) path still parses the full content in one
+  // pass, unchanged from before.
+  const { settled, active } = useMemo(() => {
+    if (!streaming) {
+      return { settled: revealedContent, active: "" };
+    }
+
+    return splitStreamingMarkdownIntoSettledAndActive(revealedContent);
+  }, [revealedContent, streaming]);
+
+  const settledBlocks = useMemo(
+    () => parseMarkdownBlocksLocal(settled, "settled"),
+    [settled]
+  );
+  const activeBlocks = active ? parseMarkdownBlocksLocal(active, "active") : [];
 
   return (
     <div className="min-w-0 max-w-full space-y-4 text-[15px] leading-8 text-zinc-300 [overflow-wrap:anywhere]">
-      {blocks.map((block, blockIndex) => {
-        if (block.type === "code") {
-          return (
-            <CodeBlock
-              key={`code-${blockIndex}`}
-              language={block.language}
-              code={block.code}
-            />
-          );
-        }
-
-        const lines = block.content.split("\n");
-        const elements: ReactNode[] = [];
-        let paragraph: string[] = [];
-        let table: string[] = [];
-        let list: string[] = [];
-        let listOrdered = false;
-
-        const flushParagraph = () => {
-          if (!paragraph.length) {
-            return;
-          }
-
-          elements.push(
-            <p key={`p-${blockIndex}-${elements.length}`} className="whitespace-pre-wrap text-zinc-300">
-              <InlineMarkdown text={paragraph.join("\n")} />
-            </p>
-          );
-          paragraph = [];
-        };
-
-        const flushTable = () => {
-          if (!table.length) {
-            return;
-          }
-
-          elements.push(
-            <MarkdownTable key={`table-${blockIndex}-${elements.length}`} lines={table} />
-          );
-          table = [];
-        };
-
-        const flushList = () => {
-          if (!list.length) {
-            return;
-          }
-
-          const ListTag = listOrdered ? "ol" : "ul";
-
-          elements.push(
-            <ListTag
-              key={`list-${blockIndex}-${elements.length}`}
-              className={listOrdered ? "list-decimal space-y-2.5 pl-5" : "space-y-2.5"}
-            >
-              {list.map((item, itemIndex) => (
-                <li
-                  key={`item-${blockIndex}-${itemIndex}-${item}`}
-                  className={listOrdered ? "pl-1 text-zinc-300" : "flex gap-3 text-zinc-300"}
-                >
-                  {!listOrdered ? (
-                    <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
-                  ) : null}
-                  <span className="min-w-0">
-                    <InlineMarkdown text={item.replace(/^[-*]\s+/, "").replace(/^\d+[.)]\s+/, "")} />
-                  </span>
-                </li>
-              ))}
-            </ListTag>
-          );
-          list = [];
-          listOrdered = false;
-        };
-
-        lines.forEach((line) => {
-          if (!line.trim()) {
-            flushParagraph();
-            flushTable();
-            flushList();
-            return;
-          }
-
-          if (line.startsWith("### ")) {
-            flushParagraph();
-            flushTable();
-            flushList();
-            elements.push(
-              <h4 key={`h4-${blockIndex}-${elements.length}`} className="pt-2 text-base font-semibold text-white">
-                <InlineMarkdown text={line.slice(4)} />
-              </h4>
-            );
-            return;
-          }
-
-          if (line.startsWith("## ")) {
-            flushParagraph();
-            flushTable();
-            flushList();
-            elements.push(
-              <h3 key={`h3-${blockIndex}-${elements.length}`} className="pt-2 text-lg font-semibold text-white">
-                <InlineMarkdown text={line.slice(3)} />
-              </h3>
-            );
-            return;
-          }
-
-          if (/^[-*]\s+/.test(line) || /^\d+[.)]\s+/.test(line)) {
-            flushParagraph();
-            flushTable();
-            const ordered = /^\d+[.)]\s+/.test(line);
-
-            if (list.length && ordered !== listOrdered) {
-              flushList();
-            }
-
-            listOrdered = ordered;
-            list.push(line);
-            return;
-          }
-
-          if (line.includes("|") && line.trim().startsWith("|")) {
-            flushParagraph();
-            flushList();
-            table.push(line);
-            return;
-          }
-
-          flushTable();
-          flushList();
-          paragraph.push(line);
-        });
-
-        flushParagraph();
-        flushTable();
-        flushList();
-
-        return (
-          <div key={`block-${blockIndex}`} className="space-y-4">
-            {elements}
-          </div>
-        );
-      })}
+      {settledBlocks}
+      {activeBlocks}
     </div>
   );
 }
@@ -1889,7 +1984,15 @@ export default function AIChatWorkspace({
 
   return (
     <main
-      className="flex h-[100dvh] min-h-[100svh] overflow-hidden bg-black pb-20 text-white md:pb-0"
+      // BUG FIX -- `pb-20` (5rem) under-reserved space for the fixed
+      // MobileBottomNavigation, which can render up to ~7rem tall on
+      // devices with a large safe-area-inset-bottom (home-indicator
+      // devices). `pb-28` matches the same reserved height
+      // MobilePageContainer already uses everywhere else in the app for
+      // this exact nav (components/MobileNavigation.tsx) -- no new
+      // constant invented, just applied consistently here too so the nav
+      // never covers the composer or the tail of a streamed response.
+      className="flex h-[100dvh] min-h-[100svh] overflow-hidden bg-black pb-28 text-white md:pb-0"
       style={
         mobileKeyboardViewportHeight !== null
           ? { height: mobileKeyboardViewportHeight, minHeight: mobileKeyboardViewportHeight }

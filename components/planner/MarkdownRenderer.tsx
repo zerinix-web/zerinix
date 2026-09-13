@@ -7,13 +7,15 @@
 // of their call sites lived inside this same cluster in Planner.tsx),
 // so only MarkdownRenderer is exported. Its hooks are self-contained:
 // CodeBlock's useState is local copy-button UI state, and
-// MarkdownRenderer's useDeferredValue operates only on its own
-// `content` prop -- neither touches Planner's own component state.
+// MarkdownRenderer's useMemo calls operate only on its own `content`
+// prop -- neither touches Planner's own component state.
 
-import { useDeferredValue, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Clipboard, ClipboardCheck } from "lucide-react";
 import { normalizeReportPresentationText } from "@/app/lib/report-presentation";
 import { cleanEvidenceMetadataForDisplay } from "@/components/planner/report-utils";
+import { splitStreamingMarkdownIntoSettledAndActive } from "@/app/lib/streaming-markdown-split";
+import { useThrottledStreamingReveal } from "@/app/lib/streaming-reveal";
 
 function highlightCode(code: string) {
   const escaped = code
@@ -95,9 +97,29 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
   );
 }
 
+// ROOT CAUSE FIX (deeper streaming-stability pass) -- confirmed live:
+// even after the outer block-parse was memoized, already-rendered
+// words kept visibly shaking during streaming. The cause was here, one
+// layer deeper: every inline span/code/bold element below was keyed as
+// `${part}-${index}` -- the key embedded the segment's OWN TEXT
+// CONTENT, which changes on nearly every streamed token as it grows
+// ("Hello wor" -> "Hello world" -> ...). React treats a changed key as
+// a DIFFERENT element, not an update to the same one -- so on every
+// token, React discarded the existing DOM text node for that segment
+// and mounted a brand-new one in its place, forcing the browser to
+// redo layout for that fragment (and often its neighbors) every single
+// token. Keying purely by position (`index`) instead means the SAME
+// logical segment at the SAME position is recognized as the SAME
+// element across renders, so React updates its text content in place
+// -- no unmount, no remount, no forced reflow -- while still correctly
+// mounting a fresh element only when the text at that position
+// genuinely changes shape (e.g. a `**bold**` marker completes and a
+// plain-text run really does split into two segments). Index keys are
+// safe here because these segments are only ever appended to or
+// extended, never reordered or removed from the middle.
 function InlineMarkdown({ text }: { text: string }) {
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
-  const renderTextPart = (part: string, partKey: string) =>
+  const renderTextPart = (part: string) =>
     part.split(/(\$?\d+(?:[.,]\d+)*(?:\.\d+)?\s?(?:k|K|m|M|b|B|%|months?|days?)?)/g).map((segment, segmentIndex) => {
       const isNumberToken = /^\$?\d+(?:[.,]\d+)*(?:\.\d+)?\s?(?:k|K|m|M|b|B|%|months?|days?)?$/.test(
         segment
@@ -105,7 +127,7 @@ function InlineMarkdown({ text }: { text: string }) {
 
       return (
         <span
-          key={`${partKey}-${segmentIndex}`}
+          key={segmentIndex}
           className={isNumberToken ? "whitespace-nowrap" : undefined}
         >
           {segment}
@@ -119,7 +141,7 @@ function InlineMarkdown({ text }: { text: string }) {
         if (part.startsWith("`") && part.endsWith("`")) {
           return (
             <code
-              key={`${part}-${index}`}
+              key={index}
               className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[0.92em] text-teal-100"
             >
               {part.slice(1, -1)}
@@ -129,13 +151,13 @@ function InlineMarkdown({ text }: { text: string }) {
 
         if (part.startsWith("**") && part.endsWith("**")) {
           return (
-            <strong key={`${part}-${index}`} className="font-semibold text-white">
+            <strong key={index} className="font-semibold text-white">
               {part.slice(2, -2)}
             </strong>
           );
         }
 
-        return <span key={`${part}-${index}`}>{renderTextPart(part, `${part}-${index}`)}</span>;
+        return <span key={index}>{renderTextPart(part)}</span>;
       })}
     </>
   );
@@ -188,7 +210,7 @@ function MarkdownTable({ lines }: { lines: string[] }) {
           <tr>
             {header.map((cell, cellIndex) => (
               <th
-                key={`header-${cellIndex}-${cell}`}
+                key={cellIndex}
                 className="min-w-[7rem] border-b border-white/10 px-4 py-3 font-semibold [overflow-wrap:normal]"
               >
                 <InlineMarkdown text={cell} />
@@ -198,10 +220,10 @@ function MarkdownTable({ lines }: { lines: string[] }) {
         </thead>
         <tbody className="divide-y divide-white/10 text-zinc-300">
           {bodyRows.map((row, rowIndex) => (
-            <tr key={`row-${rowIndex}-${row.join("-")}`}>
+            <tr key={rowIndex}>
               {row.map((cell, cellIndex) => (
                 <td
-                  key={`${cell}-${cellIndex}`}
+                  key={cellIndex}
                   className="min-w-[7rem] px-4 py-3 align-top [overflow-wrap:normal]"
                 >
                   <InlineMarkdown text={cell} />
@@ -215,146 +237,216 @@ function MarkdownTable({ lines }: { lines: string[] }) {
   );
 }
 
-export function MarkdownRenderer({
-  content,
-  streaming = false,
-}: {
-  content: string;
-  streaming?: boolean;
-}) {
-  const deferredContent = useDeferredValue(content);
-  const renderedContent = normalizeReportPresentationText(
-    cleanEvidenceMetadataForDisplay(streaming ? deferredContent : content)
-  );
-  const blocks = renderedContent.split(/```/g);
+// Extracted so it can be called TWICE with different, independently
+// keyed inputs (see MarkdownRenderer below): once for the "settled"
+// prefix of a streaming message (memoized -- only recomputes when a
+// new block actually completes) and once for the small "active"
+// trailing remainder still being typed (cheap regardless of how long
+// the overall response has grown, since its cost is bounded by the
+// CURRENT block's own size, not the whole message). `keyPrefix` keeps
+// the two resulting trees' keys from ever colliding with each other.
+// Byte-identical behavior to a single call over the full text when
+// `text` IS the full text (the non-streaming/finalized path below) --
+// this function does not change what gets rendered, only how much of
+// it needs to be (re)computed on a given call.
+function parseMarkdownBlocks(text: string, keyPrefix: string): ReactNode[] {
+  const blocks = text.split(/```/g);
 
-  return (
-    <div className="min-w-0 space-y-4 text-[15px] leading-8 text-zinc-300 [overflow-wrap:anywhere]">
-      {blocks.map((block, blockIndex) => {
-        if (blockIndex % 2 === 1) {
-          const [language = "", ...codeLines] = block.replace(/^\n/, "").split("\n");
-          return (
-            <CodeBlock
-              key={`code-${blockIndex}`}
-              language={language.trim()}
-              code={codeLines.join("\n").trimEnd()}
-            />
-          );
-        }
+  return blocks.map((block, blockIndex) => {
+    if (blockIndex % 2 === 1) {
+      const [language = "", ...codeLines] = block.replace(/^\n/, "").split("\n");
+      return (
+        <CodeBlock
+          key={`${keyPrefix}-code-${blockIndex}`}
+          language={language.trim()}
+          code={codeLines.join("\n").trimEnd()}
+        />
+      );
+    }
 
-        const lines = block.split("\n");
-        const elements: ReactNode[] = [];
-        let paragraph: string[] = [];
-        let table: string[] = [];
-        let list: string[] = [];
+    const lines = block.split("\n");
+    const elements: ReactNode[] = [];
+    let paragraph: string[] = [];
+    let table: string[] = [];
+    let list: string[] = [];
 
-        const flushParagraph = () => {
-          if (paragraph.length === 0) {
-            return;
-          }
+    const flushParagraph = () => {
+      if (paragraph.length === 0) {
+        return;
+      }
 
-          elements.push(
-            <p
-              key={`p-${blockIndex}-${elements.length}`}
-              className="max-w-4xl whitespace-pre-wrap text-zinc-300"
-            >
-              <InlineMarkdown text={paragraph.join("\n")} />
-            </p>
-          );
-          paragraph = [];
-        };
+      elements.push(
+        <p
+          key={`${keyPrefix}-p-${blockIndex}-${elements.length}`}
+          className="max-w-4xl whitespace-pre-wrap text-zinc-300"
+        >
+          <InlineMarkdown text={paragraph.join("\n")} />
+        </p>
+      );
+      paragraph = [];
+    };
 
-        const flushTable = () => {
-          if (table.length === 0) {
-            return;
-          }
+    const flushTable = () => {
+      if (table.length === 0) {
+        return;
+      }
 
-          elements.push(
-            <MarkdownTable key={`table-${blockIndex}-${elements.length}`} lines={table} />
-          );
-          table = [];
-        };
+      elements.push(
+        <MarkdownTable key={`${keyPrefix}-table-${blockIndex}-${elements.length}`} lines={table} />
+      );
+      table = [];
+    };
 
-        const flushList = () => {
-          if (list.length === 0) {
-            return;
-          }
+    const flushList = () => {
+      if (list.length === 0) {
+        return;
+      }
 
-          elements.push(
-            <ul
-              key={`list-${blockIndex}-${elements.length}`}
-              className="space-y-2.5 text-zinc-300"
-            >
-              {list.map((item, itemIndex) => (
-                <li key={`item-${blockIndex}-${itemIndex}-${item}`} className="flex gap-3">
-                  <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
-                  <span>
-                    <InlineMarkdown text={item.replace(/^[-*]\s+/, "")} />
-                  </span>
-                </li>
-              ))}
-            </ul>
-          );
-          list = [];
-        };
+      elements.push(
+        <ul
+          key={`${keyPrefix}-list-${blockIndex}-${elements.length}`}
+          className="space-y-2.5 text-zinc-300"
+        >
+          {list.map((item, itemIndex) => (
+            <li key={itemIndex} className="flex gap-3">
+              <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-200/80" />
+              <span>
+                <InlineMarkdown text={item.replace(/^[-*]\s+/, "")} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      );
+      list = [];
+    };
 
-        lines.forEach((line) => {
-          if (!line.trim()) {
-            flushParagraph();
-            flushTable();
-            flushList();
-            return;
-          }
-
-          if (line.startsWith("### ")) {
-            flushParagraph();
-            flushTable();
-            flushList();
-            elements.push(
-              <h4 key={`h4-${blockIndex}-${elements.length}`} className="pt-2 text-base font-semibold text-white">
-                <InlineMarkdown text={line.slice(4)} />
-              </h4>
-            );
-            return;
-          }
-
-          if (line.startsWith("## ")) {
-            flushParagraph();
-            flushTable();
-            flushList();
-            elements.push(
-              <h3 key={`h3-${blockIndex}-${elements.length}`} className="pt-2 text-lg font-semibold text-white">
-                <InlineMarkdown text={line.slice(3)} />
-              </h3>
-            );
-            return;
-          }
-
-          if (/^[-*]\s+/.test(line)) {
-            flushParagraph();
-            flushTable();
-            list.push(line);
-            return;
-          }
-
-          if (line.includes("|") && line.trim().startsWith("|")) {
-            flushParagraph();
-            flushList();
-            table.push(line);
-            return;
-          }
-
-          flushTable();
-          flushList();
-          paragraph.push(line);
-        });
-
+    lines.forEach((line) => {
+      if (!line.trim()) {
         flushParagraph();
         flushTable();
         flushList();
+        return;
+      }
 
-        return elements;
-      })}
+      if (line.startsWith("### ")) {
+        flushParagraph();
+        flushTable();
+        flushList();
+        elements.push(
+          <h4 key={`${keyPrefix}-h4-${blockIndex}-${elements.length}`} className="pt-2 text-base font-semibold text-white">
+            <InlineMarkdown text={line.slice(4)} />
+          </h4>
+        );
+        return;
+      }
+
+      if (line.startsWith("## ")) {
+        flushParagraph();
+        flushTable();
+        flushList();
+        elements.push(
+          <h3 key={`${keyPrefix}-h3-${blockIndex}-${elements.length}`} className="pt-2 text-lg font-semibold text-white">
+            <InlineMarkdown text={line.slice(3)} />
+          </h3>
+        );
+        return;
+      }
+
+      if (/^[-*]\s+/.test(line)) {
+        flushParagraph();
+        flushTable();
+        list.push(line);
+        return;
+      }
+
+      if (line.includes("|") && line.trim().startsWith("|")) {
+        flushParagraph();
+        flushList();
+        table.push(line);
+        return;
+      }
+
+      flushTable();
+      flushList();
+      paragraph.push(line);
+    });
+
+    flushParagraph();
+    flushTable();
+    flushList();
+
+    return elements;
+  });
+}
+
+export function MarkdownRenderer({
+  content,
+  streaming = false,
+  mobile = false,
+}: {
+  content: string;
+  streaming?: boolean;
+  // This component is shared between components/planner/ChatMessages.tsx
+  // (desktop -- never passes this, stays false) and Planner.tsx's mobile
+  // renderMessageContent callback feeding
+  // components/planner/MobileConversationExperience.tsx (always mobile --
+  // that call site passes true). It is not a live viewport check because
+  // each call site is already permanently one or the other.
+  mobile?: boolean;
+}) {
+  const renderedContent = normalizeReportPresentationText(
+    cleanEvidenceMetadataForDisplay(content)
+  );
+
+  // READING-PACE FIX -- see app/lib/streaming-reveal.ts. Only throttles
+  // the reveal rate on the mobile call site; desktop's ChatMessages.tsx
+  // never passes `mobile`, so `enabled` is false there and this is a
+  // pure passthrough (renderedContent returned unchanged, every tick).
+  const revealedContent = useThrottledStreamingReveal(
+    renderedContent,
+    streaming,
+    mobile
+  );
+
+  // ROOT CAUSE FIX (progressive-streaming pass) -- confirmed live: after
+  // the previous stability fix removed the visible shake, streaming
+  // felt "too static" -- text seemed to wait and catch up in bursts
+  // instead of revealing continuously. Cause: useDeferredValue was
+  // hiding the cost of re-parsing the WHOLE accumulated message on
+  // every token behind React's low-priority scheduling -- under a
+  // steady stream of new tokens (each one an "urgent" state update),
+  // that low-priority render kept getting preempted before it could
+  // commit, so the displayed text only advanced in irregular jumps
+  // whenever a gap in incoming tokens finally let it catch up.
+  // Splitting the message into a "settled" prefix (parsed once,
+  // memoized, frozen -- see parseMarkdownBlocks/
+  // splitStreamingMarkdownIntoSettledAndActive) and a small "active"
+  // trailing remainder (cheap to re-parse on every token, since its
+  // size is bounded by the current block, not the whole response)
+  // removes the need for that deferral entirely: the per-token render
+  // is now cheap enough to happen synchronously, so new text can
+  // reveal immediately as it arrives while everything before it stays
+  // untouched. The non-streaming path (finalized message) is
+  // unaffected -- it parses the full content in one pass, exactly as
+  // before.
+  const { settled, active } = useMemo(() => {
+    if (!streaming) {
+      return { settled: revealedContent, active: "" };
+    }
+
+    return splitStreamingMarkdownIntoSettledAndActive(revealedContent);
+  }, [revealedContent, streaming]);
+
+  const settledBlocks = useMemo(
+    () => parseMarkdownBlocks(settled, "settled"),
+    [settled]
+  );
+  const activeBlocks = active ? parseMarkdownBlocks(active, "active") : [];
+
+  return (
+    <div className="min-w-0 space-y-4 text-[15px] leading-8 text-zinc-300 [overflow-wrap:anywhere]">
+      {settledBlocks}
+      {activeBlocks}
     </div>
   );
 }

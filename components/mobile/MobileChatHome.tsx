@@ -23,7 +23,6 @@ import {
   Fragment,
   memo,
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -36,12 +35,13 @@ import {
   sanitizeAiResponseText,
   extractChatStreamError,
 } from "@/app/lib/ai/response-sanitization";
+import { splitStreamingMarkdownIntoSettledAndActive } from "@/app/lib/streaming-markdown-split";
+import { useThrottledStreamingReveal } from "@/app/lib/streaming-reveal";
 import {
   createClient,
   restoreSupabaseSession,
 } from "@/app/lib/supabase/client";
 import SignOutButton from "@/components/auth/SignOutButton";
-import { MobileBottomNavigation } from "@/components/MobileNavigation";
 import type { DashboardWorkspace } from "@/app/dashboard/report-utils";
 import {
   RecentProjectsSection,
@@ -164,6 +164,15 @@ function getContextualActions(context: string) {
     .map(({ action }) => action);
 }
 
+// ROOT CAUSE FIX (deeper streaming-stability pass) -- see the
+// identical fix and full explanation in components/planner/MarkdownRenderer.tsx's
+// own InlineMarkdown: every span/code/strong/em below used to be keyed
+// by its own text content (`${part}-${index}`), which changes on
+// nearly every streamed token, forcing React to discard and recreate
+// the DOM node for that segment on every token instead of updating its
+// text in place. Position-only keys (`index`) fix this -- safe here
+// because these segments are only ever appended to or extended, never
+// reordered or removed from the middle.
 function MobileInlineMarkdown({ text }: { text: string }) {
   const parts = text.split(
     /(`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_)/g
@@ -175,7 +184,7 @@ function MobileInlineMarkdown({ text }: { text: string }) {
         if (part.startsWith("`") && part.endsWith("`")) {
           return (
             <code
-              key={`${part}-${index}`}
+              key={index}
               className="rounded-md border border-white/10 bg-white/[0.06] px-1.5 py-0.5 font-mono text-[0.9em] text-teal-100"
             >
               {part.slice(1, -1)}
@@ -189,7 +198,7 @@ function MobileInlineMarkdown({ text }: { text: string }) {
         ) {
           return (
             <strong
-              key={`${part}-${index}`}
+              key={index}
               className="font-semibold text-zinc-50"
             >
               {part.slice(2, -2)}
@@ -203,7 +212,7 @@ function MobileInlineMarkdown({ text }: { text: string }) {
         ) {
           return (
             <em
-              key={`${part}-${index}`}
+              key={index}
               className="italic text-zinc-200"
             >
               {part.slice(1, -1)}
@@ -211,7 +220,7 @@ function MobileInlineMarkdown({ text }: { text: string }) {
           );
         }
 
-        return <span key={`${part}-${index}`}>{part}</span>;
+        return <span key={index}>{part}</span>;
       })}
     </>
   );
@@ -235,7 +244,7 @@ function isMarkdownTableDivider(line: string) {
   );
 }
 
-function buildMobileMarkdown(content: string) {
+function buildMobileMarkdown(content: string, keyPrefix: string) {
   const lines = content.replace(/\r\n/g, "\n").split("\n");
   const elements: ReactNode[] = [];
   let paragraph: string[] = [];
@@ -251,7 +260,7 @@ function buildMobileMarkdown(content: string) {
 
     elements.push(
       <p
-        key={`paragraph-${elements.length}`}
+        key={`${keyPrefix}-paragraph-${elements.length}`}
         className="whitespace-pre-wrap text-pretty"
       >
         <MobileInlineMarkdown text={paragraph.join(" ")} />
@@ -269,7 +278,7 @@ function buildMobileMarkdown(content: string) {
 
     elements.push(
       <ListTag
-        key={`list-${elements.length}`}
+        key={`${keyPrefix}-list-${elements.length}`}
         className={
           listOrdered
             ? "list-decimal space-y-3.5 pl-6 marker:font-semibold marker:text-zinc-500"
@@ -278,7 +287,7 @@ function buildMobileMarkdown(content: string) {
       >
         {list.map((item, index) => (
           <li
-            key={`${item}-${index}`}
+            key={index}
             className={
               listOrdered
                 ? "pl-1.5"
@@ -310,7 +319,7 @@ function buildMobileMarkdown(content: string) {
 
     elements.push(
       <pre
-        key={`code-${elements.length}`}
+        key={`${keyPrefix}-code-${elements.length}`}
         className="max-w-full overflow-x-auto rounded-2xl border border-white/[0.09] bg-black/45 p-4 font-mono text-[13px] leading-6 text-zinc-300 shadow-inner shadow-black/30 [scrollbar-width:thin]"
       >
         <code>{code.join("\n")}</code>
@@ -370,7 +379,7 @@ function buildMobileMarkdown(content: string) {
 
       elements.push(
         <div
-          key={`table-${elements.length}`}
+          key={`${keyPrefix}-table-${elements.length}`}
           className="max-w-full overflow-x-auto rounded-2xl border border-white/[0.09] bg-black/20 [scrollbar-width:thin]"
         >
           <table className="min-w-[34rem] w-full border-collapse text-left text-[13px] leading-5">
@@ -378,7 +387,7 @@ function buildMobileMarkdown(content: string) {
               <tr>
                 {headers.map((header, index) => (
                   <th
-                    key={`${header}-${index}`}
+                    key={index}
                     scope="col"
                     className="border-b border-white/[0.09] px-3.5 py-3 font-semibold"
                   >
@@ -390,12 +399,12 @@ function buildMobileMarkdown(content: string) {
             <tbody className="divide-y divide-white/[0.065] text-zinc-400">
               {rows.map((row, rowIndex) => (
                 <tr
-                  key={`${row.join("-")}-${rowIndex}`}
+                  key={rowIndex}
                   className="transition-colors hover:bg-white/[0.025]"
                 >
                   {headers.map((_, cellIndex) => (
                     <td
-                      key={`${row[cellIndex] || ""}-${cellIndex}`}
+                      key={cellIndex}
                       className="px-3.5 py-3 align-top"
                     >
                       <MobileInlineMarkdown text={row[cellIndex] || ""} />
@@ -425,7 +434,7 @@ function buildMobileMarkdown(content: string) {
 
       elements.push(
         <HeadingTag
-          key={`heading-${elements.length}`}
+          key={`${keyPrefix}-heading-${elements.length}`}
           className={headingClassName}
         >
           <MobileInlineMarkdown text={heading} />
@@ -449,7 +458,7 @@ function buildMobileMarkdown(content: string) {
 
       elements.push(
         <blockquote
-          key={`quote-${elements.length}`}
+          key={`${keyPrefix}-quote-${elements.length}`}
           className="rounded-r-xl border-l-2 border-teal-200/45 bg-teal-200/[0.045] py-2.5 pl-4 pr-3 italic text-zinc-300"
         >
           <MobileInlineMarkdown text={quoteLines.join(" ")} />
@@ -492,17 +501,45 @@ function MobileAssistantContent({
   content: string;
   streaming: boolean;
 }) {
-  const deferredContent = useDeferredValue(content);
-  const renderedContent = streaming ? deferredContent : content;
-  const markdown = useMemo(
-    () => buildMobileMarkdown(renderedContent),
-    [renderedContent]
+  // READING-PACE FIX -- this component is ZERINIX's mobile chat surface
+  // (its root section is CSS-hidden on desktop widths, but always
+  // mounted, so `enabled` here is unconditionally true rather than a
+  // runtime viewport check). `content` still arrives at full network/
+  // model speed -- this only throttles how much of it is SHOWN at once,
+  // revealing whole word groups at a comfortable, human reading cadence
+  // instead of as fast as tokens physically arrive. See
+  // app/lib/streaming-reveal.ts for the full rationale.
+  const revealedContent = useThrottledStreamingReveal(content, streaming, true);
+
+  // ROOT CAUSE FIX (progressive-streaming pass) -- see the identical fix
+  // and full explanation in components/planner/MarkdownRenderer.tsx:
+  // useDeferredValue hid the cost of re-parsing the whole accumulated
+  // message behind React's low-priority scheduling, which under a
+  // steady stream of urgent token updates made the visible text lag and
+  // catch up in bursts instead of revealing continuously. Splitting into
+  // a memoized, frozen "settled" prefix and a small, cheap-to-reparse
+  // "active" remainder removes the need for that deferral -- the
+  // non-streaming (finalized) path still parses the full content in one
+  // pass, unchanged from before.
+  const { settled, active } = useMemo(() => {
+    if (!streaming) {
+      return { settled: revealedContent, active: "" };
+    }
+
+    return splitStreamingMarkdownIntoSettledAndActive(revealedContent);
+  }, [revealedContent, streaming]);
+
+  const settledMarkdown = useMemo(
+    () => buildMobileMarkdown(settled, "settled"),
+    [settled]
   );
+  const activeMarkdown = active ? buildMobileMarkdown(active, "active") : [];
 
   return (
     <div className="min-w-0 space-y-6 text-[15.5px] leading-[2.05] tracking-[-0.006em] text-zinc-300 [overflow-wrap:anywhere]">
-      {markdown}
-      {streaming && renderedContent ? (
+      {settledMarkdown}
+      {activeMarkdown}
+      {streaming && (settled || active) ? (
         <span
           aria-hidden="true"
           className="ml-1 inline-block h-4 w-[2px] animate-pulse rounded-full bg-teal-100/55 align-[-2px]"
@@ -1477,7 +1514,17 @@ export default function MobileChatHome({
           </div>
         </div>
 
-        {showLanding ? <MobileBottomNavigation /> : null}
+        {/* BUG FIX -- MobileBottomNavigation used to render HERE, gated
+            behind `showLanding`, so it vanished the moment a question was
+            asked. It's now rendered by app/dashboard/page.tsx instead, as
+            a plain sibling of this whole component with no
+            overflow-hidden/fixed-height ancestor between it and the
+            viewport (see that file for the full rationale) -- so it stays
+            persistently visible above this component regardless of
+            landing/conversation state, without a second, duplicate copy
+            here. The conversation composer footer below still reserves
+            `pb-28` clearance for it (see its own className) so it's never
+            covered. */}
 
         <div
           ref={conversationScrollRef}
@@ -1525,7 +1572,23 @@ export default function MobileChatHome({
 
       <div
         aria-hidden={showLanding}
-        className={`relative z-10 shrink-0 border-t border-white/[0.08] bg-black/90 px-3 pb-[max(1.25rem,calc(env(safe-area-inset-bottom)_+_0.5rem))] pt-3 shadow-[0_-12px_38px_rgba(0,0,0,0.34)] backdrop-blur-2xl transition-all duration-500 ease-out ${
+        className={`relative z-10 shrink-0 border-t border-white/[0.08] bg-black/90 px-3 pt-3 shadow-[0_-12px_38px_rgba(0,0,0,0.34)] backdrop-blur-2xl transition-all duration-500 ease-out ${
+          // BUG FIX -- app/dashboard/page.tsx now renders
+          // MobileBottomNavigation persistently above this whole
+          // component (see that file), so this composer needs enough
+          // bottom clearance to sit above the fixed nav bar instead of
+          // underneath it. `pb-28` is the same reserved height
+          // MobilePageContainer already uses everywhere else in the app
+          // for this exact nav (components/MobileNavigation.tsx), so it
+          // already safely covers the nav's own tallest case (its own
+          // env(safe-area-inset-bottom) included) -- no new constant
+          // invented. The landing screen keeps its original safe-area-only
+          // padding since its own inline composer is unaffected (landing's
+          // scroll content, not this footer, reserves nav clearance there).
+          showLanding
+            ? "pb-[max(1.25rem,calc(env(safe-area-inset-bottom)_+_0.5rem))]"
+            : "pb-28"
+        } ${
           !isInitializing && !showLanding
             ? "translate-y-0 opacity-100"
             : "pointer-events-none translate-y-full opacity-0"

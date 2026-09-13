@@ -15324,7 +15324,15 @@ export default function Planner({
 
   return (
     <main
-      className="flex h-[100dvh] min-h-[100svh] flex-col overflow-hidden bg-black pb-20 text-white md:flex-row md:pb-0"
+      // BUG FIX -- `pb-20` (5rem) under-reserved space for the fixed
+      // MobileBottomNavigation, which can render up to ~7rem tall on
+      // devices with a large safe-area-inset-bottom (home-indicator
+      // devices). `pb-28` matches the same reserved height
+      // MobilePageContainer already uses everywhere else in the app for
+      // this exact nav (components/MobileNavigation.tsx) -- no new
+      // constant invented, just applied consistently here too so the nav
+      // never covers the composer or the tail of a streamed response.
+      className="flex h-[100dvh] min-h-[100svh] flex-col overflow-hidden bg-black pb-28 text-white md:flex-row md:pb-0"
       onDragEnter={(event) => {
         event.preventDefault();
         setIsDraggingFiles(true);
@@ -15496,6 +15504,7 @@ export default function Planner({
                     : message.content
                 }
                 streaming={message.status === "streaming"}
+                mobile
               />
             );
           }}

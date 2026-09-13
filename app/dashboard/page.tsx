@@ -44,6 +44,7 @@ import {
   type DashboardWorkspace,
 } from "./report-utils";
 import MobileChatHome from "@/components/mobile/MobileChatHome";
+import { MobileBottomNavigation } from "@/components/MobileNavigation";
 
 export const dynamic = "force-dynamic";
 const mobileChatHomeEnabled =
@@ -486,6 +487,22 @@ export default async function DashboardPage() {
       <div className={dashboardTheme.grid} />
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <DashboardSidebar showMobileNavigation={!mobileChatHomeEnabled} />
+
+        {/* BUG FIX -- confirmed live: MobileChatHome used to render this
+            SAME nav itself, nested inside its own `h-[100dvh] overflow-hidden`
+            root section. It stayed visible on the landing state (nav was
+            gated behind `showLanding` there) but was reported missing once
+            a question was asked and the internal view switched to the
+            conversation/response state, even after removing that gate.
+            Rendering it here instead -- a plain sibling inside this
+            page's ordinary min-h-screen flex wrapper, with no
+            overflow-hidden or fixed-height ancestor between it and the
+            viewport -- exactly mirrors how DashboardSidebar's own
+            showMobileNavigation branch above (used by every OTHER mobile
+            dashboard page) already renders this exact component
+            successfully. MobileChatHome no longer renders its own copy
+            (see its own render body) to avoid a duplicate nav. */}
+        {mobileChatHomeEnabled ? <MobileBottomNavigation /> : null}
 
         {mobileChatHomeEnabled ? (
           <MobileChatHome
