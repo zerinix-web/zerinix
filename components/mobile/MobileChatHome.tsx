@@ -1416,10 +1416,7 @@ export default function MobileChatHome({
                 placeholder="Ask anything about your business..."
                 className="min-h-[3.75rem] w-full resize-none bg-transparent px-3 py-2.5 text-[15.5px] leading-6 text-white outline-none placeholder:text-zinc-500"
               />
-              <div className="flex items-center justify-between gap-3 px-2 pb-1">
-                <p className="text-[11px] tracking-[0.01em] text-zinc-600">
-                  Shift + Enter for a new line
-                </p>
+              <div className="flex items-center justify-end gap-3 px-2 pb-1">
                 <button
                   type="button"
                   onClick={() => {

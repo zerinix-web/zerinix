@@ -2619,7 +2619,8 @@ export default function AIChatWorkspace({
             <div className="mt-3 flex flex-wrap items-center justify-center gap-3 text-center text-xs text-zinc-600">
               <span className="inline-flex items-center gap-1">
                 <CornerDownLeft className="h-3.5 w-3.5" />
-                Enter to send · Shift + Enter for newline
+                <span>Enter to send</span>
+                <span className="hidden md:inline"> · Shift + Enter for newline</span>
               </span>
               <span className="inline-flex items-center gap-1">
                 <MoreHorizontal className="h-3.5 w-3.5" />
