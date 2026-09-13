@@ -78,9 +78,69 @@ const config: CapacitorConfig = {
     : undefined,
   ios: {
     contentInset: "automatic",
+    // BUG FIX -- confirmed live on a true iOS cold launch: Capacitor's
+    // CAPBridgeViewController defaults an unconfigured WKWebView (and
+    // its scrollView) to UIColor.systemBackground, which is white/light
+    // in the default appearance. That native WebView background is
+    // exposed for real, visible time on a cold launch -- during the
+    // network round-trip to https://zerinix.com and again in the gap
+    // before the page's own content has painted -- producing the
+    // reported white flash. Setting it here makes the WebView's native
+    // background match the splash's own near-black, so there is never a
+    // white surface to expose no matter how that timing lands. iOS-only
+    // (nested under `ios`), so Android's own WebView background is
+    // completely unaffected.
+    backgroundColor: "#050706",
   },
   android: {
     allowMixedContent: mobileServerUsesCleartext,
+  },
+  // Premium native launch experience -- confirmed live: the web content
+  // used to appear the instant the WebView had anything to paint, with
+  // no deliberate branded moment beforehand. @capacitor/splash-screen
+  // holds the SAME native launch screen (ios/App/App/Base.lproj/
+  // LaunchScreen.storyboard on iOS; the windowSplashScreen* theme
+  // attributes on Android, see android/app/src/main/res/values/styles.xml)
+  // visible after launch, then fades it out.
+  //
+  // BUG FIX -- launchAutoHide was briefly set to `false`, relying solely
+  // on components/NativeSplashLifecycle.tsx to call SplashScreen.hide()
+  // once the web app mounts. That call only ever runs from whatever code
+  // is ACTUALLY DEPLOYED at https://zerinix.com -- this session never
+  // commits/pushes/deploys, so the production site does not yet contain
+  // that component, hide() was never reachable, and the splash hung
+  // forever (confirmed live). launchAutoHide is restored to `true` with
+  // a bounded launchShowDuration as a GUARANTEED native-only fallback
+  // that never depends on any web code existing or running. This is not
+  // a race back to the original bug: SplashScreen.hide() (native side)
+  // already no-ops safely once the splash is already hidden (see
+  // node_modules/@capacitor/splash-screen's SplashScreen.swift/.java --
+  // `if !isVisible { return }`), so once NativeSplashLifecycle.tsx's own
+  // call actually ships to production, it will simply win the race and
+  // hide the splash earlier, the instant real content is ready, and this
+  // timer's later-scheduled callback becomes a harmless no-op -- not a
+  // conflicting double-hide. Until then, this fallback is the only path
+  // that ever fires, so the splash still always dismisses. The white-
+  // flash fix above (ios.backgroundColor) is independent of this timing
+  // and still holds even if this fallback fires before the page has
+  // fully painted -- the WebView underneath is near-black either way,
+  // never white. launchShowDuration is a safety-net ceiling, not the
+  // primary hide trigger, so it's set generously (matching this same
+  // plugin's own built-in default `showDuration` of 3000ms elsewhere)
+  // rather than tuned as a tight "feels premium" number. This is a
+  // shared (not iOS-only) plugin setting, so it also restores the
+  // identical, already-working fallback on Android -- a safe, compatible
+  // change there since Android's hide() path guards the same way. No app
+  // code outside SplashScreen config/the existing hide() call changed,
+  // so auth/session logic and the Home/Login routing decision remain
+  // completely untouched.
+  plugins: {
+    SplashScreen: {
+      launchAutoHide: true,
+      launchShowDuration: 3000,
+      backgroundColor: "#050706",
+      showSpinner: false,
+    },
   },
 };
 

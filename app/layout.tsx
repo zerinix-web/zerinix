@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { getRequestLocale } from "@/app/lib/i18n/server";
+import { NativeSplashLifecycle } from "@/components/NativeSplashLifecycle";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -32,7 +33,10 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head />
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <NativeSplashLifecycle />
+        {children}
+      </body>
     </html>
   );
 }
