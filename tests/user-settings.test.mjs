@@ -60,10 +60,15 @@ test("session revocation uses global sign out and connected devices remain place
   assert.match(settingsPage, /Device-level session inventory is not connected yet/);
 });
 
-test("danger zone does not perform automatic account deletion or expose secrets", () => {
-  assert.match(settingsPage, /Delete account/);
-  assert.match(settingsActions, /Account deletion requires a manual security review/);
-  assert.doesNotMatch(settingsActions, /auth\.admin\.deleteUser|service_role|SERVICE_ROLE/);
+test("danger zone deletes the account through the server-only deletion service without exposing secrets", () => {
+  const deleteAccountForm = readFileSync("components/account/DeleteAccountForm.tsx", "utf8");
+
+  assert.match(settingsPage, /<DeleteAccountForm \/>/);
+  assert.match(deleteAccountForm, /Delete account/);
+  assert.match(deleteAccountForm, /action=\{deleteAccount\}/);
+  assert.match(settingsActions, /deleteAccountWithServiceRole\(\{ userId: user\.id/);
+  assert.doesNotMatch(settingsActions, /manual security review/);
+  assert.doesNotMatch(settingsActions, /auth\.admin\.deleteUser|service_role|SERVICE_ROLE|createServiceRoleClient/);
   assert.doesNotMatch(settingsPage, /session token|refresh token|secret key|service-role/i);
 });
 

@@ -89,7 +89,8 @@ test("service-role access is isolated to server-only admin modules", () => {
       file === "app/lib/report-jobs/worker.ts" ||
       file.startsWith("app/admin/") ||
       file === "app/lib/billing/stripe-webhook.ts" ||
-      file === "app/lib/integrations/email-events.ts"
+      file === "app/lib/integrations/email-events.ts" ||
+      file === "app/lib/account/account-deletion-service.ts"
     ) {
       continue;
     }

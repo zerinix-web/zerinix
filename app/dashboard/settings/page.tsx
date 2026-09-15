@@ -13,7 +13,6 @@ import {
   Mail,
   Palette,
   ShieldCheck,
-  Trash2,
   Upload,
   UserRound,
 } from "lucide-react";
@@ -26,12 +25,13 @@ import {
 } from "../report-utils";
 import { loadBillingOverview } from "../billing/billing-data";
 import {
-  requestAccountDeletion,
   signOutAllDevices,
   updatePassword,
   updateProfileSettings,
 } from "./actions";
 import { loadUserSettingsProfile } from "./settings-data";
+import { getAccountDeletionErrorMessage } from "@/app/lib/account/account-deletion";
+import DeleteAccountForm from "@/components/account/DeleteAccountForm";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +62,9 @@ export default async function SettingsPage({
     loadUserReportCount(supabase, user),
   ]);
   const displayNameLabel = settings.displayName || "Display name not set";
+  // Only fixed, known deletion error codes map to a specific message;
+  // anything else in the query string keeps the generic banner.
+  const accountDeletionError = getAccountDeletionErrorMessage(error);
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
@@ -77,6 +80,7 @@ export default async function SettingsPage({
             hasDataError={Boolean(
               billing.usageError || reportCount.error
             )}
+            accountDeletionError={accountDeletionError}
           />
         </section>
 
@@ -128,7 +132,7 @@ export default async function SettingsPage({
 
           {error ? (
             <div className="mt-6 rounded-3xl border border-red-300/20 bg-red-950/30 p-5 text-sm leading-6 text-red-100">
-              Settings could not be updated. Please try again shortly.
+              {accountDeletionError ?? "Settings could not be updated. Please try again shortly."}
             </div>
           ) : null}
 
@@ -562,34 +566,7 @@ export default async function SettingsPage({
                 </button>
               </section>
 
-              <form action={requestAccountDeletion} className="rounded-2xl border border-red-300/20 bg-red-950/20 p-4">
-                <input type="hidden" name="intent" value="delete_account" />
-                <Trash2 className="h-5 w-5 text-red-100" />
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <h3 className="font-semibold text-white">Delete account</h3>
-                  <span className="rounded-full border border-red-300/20 bg-red-300/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-red-100/70">
-                    Manual review
-                  </span>
-                </div>
-                <p className="mt-2 text-sm leading-6 text-red-100/75">
-                  Automatic deletion is not available yet. This request starts a manual
-                  security review and does not immediately remove your account or data.
-                </p>
-                <input
-                  name="confirmation"
-                  required
-                  autoComplete="off"
-                  placeholder="Type DELETE"
-                  aria-label="Type DELETE to request account deletion review"
-                  className="mt-4 min-h-11 w-full rounded-2xl border border-red-300/20 bg-black/35 px-4 text-sm text-white outline-none placeholder:text-red-100/35 focus:border-red-300/40 focus:ring-2 focus:ring-red-200/10"
-                />
-                <button
-                  type="submit"
-                  className="mt-3 inline-flex min-h-10 items-center justify-center rounded-2xl border border-red-300/25 bg-red-300/10 px-4 text-sm font-semibold text-red-100 transition hover:bg-red-300/15 focus:outline-none focus:ring-2 focus:ring-red-200/20"
-                >
-                  Request deletion review
-                </button>
-              </form>
+              <DeleteAccountForm />
             </div>
           </section>
         </section>

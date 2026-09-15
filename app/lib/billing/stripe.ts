@@ -487,3 +487,159 @@ export function buildStripeUsageRecord(input: {
     idempotencyKey: input.idempotencyKey,
   };
 }
+
+type StripeSubscriptionSummary = {
+  id?: string;
+  status?: string;
+};
+
+type StripeJsonResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; status: number; code: string };
+
+// Subscriptions in these states can no longer bill and cannot be canceled.
+const FINISHED_STRIPE_SUBSCRIPTION_STATUSES = new Set(["canceled", "incomplete_expired"]);
+
+async function requestStripeJson<T = unknown>(
+  method: "GET" | "DELETE",
+  path: string
+): Promise<StripeJsonResult<T>> {
+  let response: Response;
+
+  try {
+    response = await fetch(`https://api.stripe.com/v1/${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}` },
+      cache: "no-store",
+    });
+  } catch (error) {
+    logOperationalError("[stripe:request]", error, { method });
+
+    return { ok: false, status: 0, code: "network_error" };
+  }
+
+  if (!response.ok) {
+    let code = "";
+
+    try {
+      const payload = (await response.json()) as {
+        error?: { code?: string; type?: string };
+      };
+
+      code = payload.error?.code || payload.error?.type || "";
+    } catch {
+      code = "unreadable_error";
+    }
+
+    logOperationalError("[stripe:request]", new Error("Stripe rejected the request."), {
+      method,
+      status: response.status,
+      requestId: response.headers.get("request-id") || "",
+      providerError: code,
+    });
+
+    return { ok: false, status: response.status, code };
+  }
+
+  return { ok: true, data: (await response.json()) as T };
+}
+
+// Used by account deletion (app/lib/account/account-deletion-service.ts).
+// Cancels every subscription on the customer that can still bill, so a
+// deleted account is never charged again. Cancellation is immediate with
+// Stripe's defaults (no proration credit, no final invoice). Stripe keeps
+// its own customer, invoice, and payment records.
+export async function cancelStripeSubscriptionsForAccountDeletion(input: {
+  customerId: string | null;
+  subscriptionId: string | null;
+}): Promise<{ ok: true; canceledCount: number } | { ok: false; message: string }> {
+  const customerId = input.customerId?.trim() || "";
+  const subscriptionId = input.subscriptionId?.trim() || "";
+
+  if (!customerId && !subscriptionId) {
+    return { ok: true, canceledCount: 0 };
+  }
+
+  if (!process.env.STRIPE_SECRET_KEY) {
+    return { ok: false, message: "STRIPE_SECRET_KEY is not configured." };
+  }
+
+  const statuses = new Map<string, string>();
+
+  if (customerId) {
+    let startingAfter = "";
+
+    for (;;) {
+      const query = new URLSearchParams({ customer: customerId, status: "all", limit: "100" });
+
+      if (startingAfter) {
+        query.set("starting_after", startingAfter);
+      }
+
+      const result = await requestStripeJson<{
+        data?: StripeSubscriptionSummary[];
+        has_more?: boolean;
+      }>("GET", `subscriptions?${query.toString()}`);
+
+      if (!result.ok) {
+        // The customer no longer exists in Stripe, so nothing can bill.
+        if (result.code === "resource_missing") {
+          break;
+        }
+
+        return { ok: false, message: "Stripe subscriptions could not be listed." };
+      }
+
+      const page = result.data.data ?? [];
+
+      for (const subscription of page) {
+        if (subscription.id) {
+          statuses.set(subscription.id, subscription.status || "");
+        }
+      }
+
+      const lastId = page[page.length - 1]?.id;
+
+      if (!result.data.has_more || !lastId) {
+        break;
+      }
+
+      startingAfter = lastId;
+    }
+  }
+
+  if (subscriptionId && !statuses.has(subscriptionId)) {
+    const result = await requestStripeJson<StripeSubscriptionSummary>(
+      "GET",
+      `subscriptions/${encodeURIComponent(subscriptionId)}`
+    );
+
+    if (result.ok) {
+      statuses.set(subscriptionId, result.data.status || "");
+    } else if (result.code !== "resource_missing") {
+      return { ok: false, message: "Stripe subscription could not be loaded." };
+    }
+  }
+
+  let canceledCount = 0;
+
+  for (const [id, status] of statuses) {
+    if (FINISHED_STRIPE_SUBSCRIPTION_STATUSES.has(status)) {
+      continue;
+    }
+
+    const result = await requestStripeJson("DELETE", `subscriptions/${encodeURIComponent(id)}`);
+
+    if (!result.ok) {
+      if (result.code === "resource_missing") {
+        continue;
+      }
+
+      return { ok: false, message: "Stripe subscription could not be canceled." };
+    }
+
+    canceledCount += 1;
+  }
+
+  return { ok: true, canceledCount };
+}

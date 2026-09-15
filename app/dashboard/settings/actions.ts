@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { deleteAccountWithServiceRole } from "@/app/lib/account/account-deletion-service";
+import { logServerError } from "@/app/lib/security/errors";
 import { createClient } from "@/app/lib/supabase/server";
 import { checkRateLimit, getServerActionClientIp } from "@/app/lib/security/rate-limit";
 import { getAuthenticatedUser } from "../report-utils";
@@ -163,7 +165,10 @@ export async function requestPersonalDataExport(formData: FormData) {
   });
 }
 
-export async function requestAccountDeletion(formData: FormData) {
+// Permanently deletes the signed-in user's account (see
+// app/lib/account/account-deletion.ts for the exact order and scope). The
+// user id always comes from the authenticated session, never from the form.
+export async function deleteAccount(formData: FormData) {
   if (!validateIntent(formData, "delete_account")) {
     settingsRedirect({ settings_error: "Invalid deletion request." });
   }
@@ -174,8 +179,19 @@ export async function requestAccountDeletion(formData: FormData) {
     settingsRedirect({ settings_error: "Type DELETE to confirm account deletion." });
   }
 
-  await getSettingsContext("delete-account");
-  settingsRedirect({
-    settings_notice: "Account deletion requires a manual security review and was not executed automatically.",
-  });
+  const { supabase, user } = await getSettingsContext("delete-account");
+  const result = await deleteAccountWithServiceRole({ userId: user.id, email: user.email ?? null });
+
+  if (!result.ok) {
+    settingsRedirect({ settings_error: result.code });
+  }
+
+  try {
+    // The auth user no longer exists; this only clears the session cookies.
+    await supabase.auth.signOut({ scope: "local" });
+  } catch (error) {
+    logServerError("settings:delete-account:sign-out", error);
+  }
+
+  redirect("/delete-account/deleted");
 }

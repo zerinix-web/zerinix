@@ -24,7 +24,7 @@ export const metadata: Metadata = {
   },
 };
 
-const LAST_UPDATED = "September 12, 2026";
+const LAST_UPDATED = "September 15, 2026";
 const CONTACT_EMAIL = "zerinix@zerinix.com";
 
 function Section({
@@ -278,8 +278,14 @@ export default function PrivacyPolicyPage() {
               you can continue to access your own content. Certain AI
               responses may be cached temporarily (for a limited number of
               days) to avoid reprocessing an identical request. Usage and
-              billing records are retained as needed to operate the Service
-              and to meet our accounting and legal obligations.
+              billing records are retained while your account is active to
+              operate the Service.
+            </p>
+            <p>
+              When you delete your account, the data associated with it is
+              deleted, except for the limited billing, accounting, and
+              security records described in &ldquo;Account Deletion / Data
+              Requests&rdquo; below.
             </p>
           </Section>
 
@@ -309,8 +315,9 @@ export default function PrivacyPolicyPage() {
               Depending on where you are located, applicable data protection
               law may give you rights over your personal information, such
               as the right to request access to, correction of, or deletion
-              of the information we hold about you. You can exercise these
-              choices by contacting us at{" "}
+              of the information we hold about you. You can delete your
+              account directly in the Service, as described below. For other
+              requests, contact us at{" "}
               <a
                 href={`mailto:${CONTACT_EMAIL}`}
                 className="font-medium text-teal-200 underline decoration-teal-200/40 underline-offset-2 hover:text-teal-100"
@@ -323,17 +330,42 @@ export default function PrivacyPolicyPage() {
 
           <Section id="account-deletion" title="Account Deletion / Data Requests">
             <p>
-              You can request deletion of your account and associated data,
-              or a copy of your personal data, by contacting us at{" "}
+              You can delete your account yourself from the Account page of
+              the Service, on the website or in the mobile app, by typing
+              DELETE to confirm. Deletion starts as soon as you confirm: any
+              active paid subscription is canceled in Stripe, your account
+              and its associated data are deleted, and you are signed out.
+              This includes your reports, workspaces, conversation history,
+              assistant memory, and usage records. Remaining subscription
+              time is not automatically refunded.
+            </p>
+            <p>
+              A limited set of records is kept after deletion. Stripe keeps
+              its own payment, invoice, and customer records. AI cost
+              accounting records (such as token counts and estimated costs,
+              without the content of your prompts or reports) and records of
+              administrative actions taken on your account are kept with
+              your account ID removed.
+            </p>
+            <p>
+              If you cannot sign in, you can request deletion by emailing{" "}
               <a
                 href={`mailto:${CONTACT_EMAIL}`}
                 className="font-medium text-teal-200 underline decoration-teal-200/40 underline-offset-2 hover:text-teal-100"
               >
                 {CONTACT_EMAIL}
-              </a>
-              . These requests currently go through a manual review process
-              rather than an automated, self-service flow, so please allow
-              us time to verify your request and process it securely.
+              </a>{" "}
+              from the email address associated with your account, with the
+              subject &ldquo;Delete My ZERINIX Account&rdquo;. Email deletion
+              requests and requests for a copy of your personal data are
+              handled manually. See our{" "}
+              <Link
+                href="/delete-account"
+                className="font-medium text-teal-200 underline decoration-teal-200/40 underline-offset-2 hover:text-teal-100"
+              >
+                account deletion page
+              </Link>{" "}
+              for full details.
             </p>
           </Section>
 

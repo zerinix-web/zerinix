@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import type { BillingOverview } from "@/app/dashboard/billing/billing-data";
 import type { UserSettingsProfile } from "@/app/dashboard/settings/settings-data";
+import DeleteAccountForm from "@/components/account/DeleteAccountForm";
 import SignOutButton from "@/components/auth/SignOutButton";
 
 type AccountRowProps = {
@@ -102,11 +103,13 @@ export default function MobileAccountHome({
   billing,
   reportCount,
   hasDataError = false,
+  accountDeletionError = null,
 }: {
   settings: UserSettingsProfile;
   billing: BillingOverview;
   reportCount: number;
   hasDataError?: boolean;
+  accountDeletionError?: string | null;
 }) {
   const displayName = settings.displayName || "ZERINIX Member";
   const currentPlan =
@@ -127,6 +130,15 @@ export default function MobileAccountHome({
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_92%_0%,rgba(45,212,191,0.12),transparent_29%),radial-gradient(circle_at_8%_42%,rgba(255,255,255,0.04),transparent_25%)]" />
 
       <div className="relative mx-auto max-w-xl">
+        {accountDeletionError ? (
+          <div
+            role="alert"
+            className="mb-5 rounded-2xl border border-red-300/20 bg-red-950/30 px-4 py-3 text-xs leading-5 text-red-100"
+          >
+            {accountDeletionError}
+          </div>
+        ) : null}
+
         <header>
           <p className="text-[11px] font-semibold uppercase tracking-[0.23em] text-teal-200/70">
             Your workspace
@@ -379,6 +391,13 @@ export default function MobileAccountHome({
               badge="Soon"
             />
           </div>
+        </section>
+
+        <section className="mt-7">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+            Account deletion
+          </h2>
+          <DeleteAccountForm className="mt-3 rounded-[1.6rem]" />
         </section>
 
         <section className="mt-7">
