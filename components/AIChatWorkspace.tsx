@@ -2160,7 +2160,7 @@ export default function AIChatWorkspace({
       ) : null}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex h-[100dvh] max-h-[100dvh] w-[min(20rem,calc(100vw-1.25rem))] flex-col border-r border-white/10 bg-zinc-950/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-2xl transition-transform [padding-bottom:max(1rem,env(safe-area-inset-bottom))] md:static md:w-80 md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex h-[100dvh] max-h-[100dvh] w-[min(20rem,calc(100vw-1.25rem))] flex-col border-r border-white/10 bg-zinc-950/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-2xl transition-transform [padding-bottom:max(1rem,env(safe-area-inset-bottom))] [padding-top:max(1rem,env(safe-area-inset-top))] md:static md:w-80 md:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -2497,7 +2497,11 @@ export default function AIChatWorkspace({
 
       <section className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.15),transparent_34%),linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.032)_1px,transparent_1px)] bg-[size:auto,54px_54px,54px_54px] opacity-80" />
-        <header className="relative z-10 flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-black/80 px-4 py-3 shadow-xl shadow-black/20 backdrop-blur-xl sm:px-6 sm:py-4">
+        {/* The conversation header is the topmost element on mobile (this
+            screen renders no shared MobileHeader), so it owns the top
+            safe-area inset. `max()` keeps the existing py-3 / sm:py-4
+            spacing on web, where the inset is 0. */}
+        <header className="relative z-10 flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-black/80 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] shadow-xl shadow-black/20 backdrop-blur-xl sm:px-6 sm:pb-4 sm:pt-[max(1rem,env(safe-area-inset-top))]">
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
@@ -2559,7 +2563,14 @@ export default function AIChatWorkspace({
           onScroll={(event) => updateScrollIntent(event.currentTarget)}
           className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-6"
         >
-          <div className="mx-auto flex max-w-5xl flex-col gap-5 pb-48 sm:pb-44">
+          {/* BUG FIX -- this list used to carry `pb-48 sm:pb-44` (12rem)
+              from when the composer was an overlay. The composer is now a
+              normal `shrink-0` flex sibling below this scroller, so that
+              padding reserved the composer's height a second time and
+              rendered as a large empty gap under short answers. Only a
+              normal reading gap is needed now; the flex column keeps the
+              composer directly after the conversation. */}
+          <div className="mx-auto flex max-w-5xl flex-col gap-5 pb-6">
             {conversationIssue ? (
               <ChatStatusNotice
                 issue={conversationIssue}

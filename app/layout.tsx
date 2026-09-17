@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { getRequestLocale } from "@/app/lib/i18n/server";
 import { NativeSplashLifecycle } from "@/components/NativeSplashLifecycle";
@@ -17,6 +17,20 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ZERINIX",
   description: "A premium AI operating system for founders.",
+};
+
+// BUG FIX -- iOS status bar overlapped the in-app headers. Capacitor's
+// WKWebView lays the page out behind the status bar, but without
+// `viewport-fit=cover` every `env(safe-area-inset-*)` value resolves to
+// 0, so the safe-area padding this app already uses (bottom navigation,
+// composers, mobile headers) had nothing to read and content rendered
+// underneath the status bar / home indicator. `width` and `initialScale`
+// restate Next's own defaults, because declaring this export replaces the
+// default viewport meta rather than extending it.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default async function RootLayout({
