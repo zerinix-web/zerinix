@@ -15,7 +15,11 @@ import {
 } from "@/app/lib/ai/response-sanitization";
 import { splitStreamingMarkdownIntoSettledAndActive } from "@/app/lib/streaming-markdown-split";
 import { useThrottledStreamingReveal } from "@/app/lib/streaming-reveal";
-import { MobileBottomNavigation } from "@/components/MobileNavigation";
+import {
+  MobileBottomNavigation,
+  MOBILE_NAV_CLEARANCE,
+  MOBILE_SAFE_AREA_TOP,
+} from "@/components/MobileNavigation";
 import {
   AlertCircle,
   Bot,
@@ -1994,7 +1998,7 @@ export default function AIChatWorkspace({
       // nav's own `lg:hidden` -- with `md:pb-0` the nav stayed visible on
       // tablets while nothing reserved space for it, so it covered the
       // composer between 768px and 1024px.
-      className="flex h-[100dvh] min-h-[100svh] overflow-hidden bg-black pb-[calc(4.75rem+env(safe-area-inset-bottom))] text-white lg:pb-0"
+      className={`flex h-[100dvh] min-h-[100svh] overflow-hidden bg-black text-white lg:pb-0 ${MOBILE_NAV_CLEARANCE}`}
       style={
         mobileKeyboardViewportHeight !== null
           ? { height: mobileKeyboardViewportHeight, minHeight: mobileKeyboardViewportHeight }
@@ -2161,7 +2165,7 @@ export default function AIChatWorkspace({
       ) : null}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex h-[100dvh] max-h-[100dvh] w-[min(20rem,calc(100vw-1.25rem))] flex-col border-r border-white/10 bg-zinc-950/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-2xl transition-transform [padding-bottom:max(1rem,env(safe-area-inset-bottom))] [padding-top:max(1rem,env(safe-area-inset-top))] md:static md:w-80 md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex h-[100dvh] max-h-[100dvh] w-[min(20rem,calc(100vw-1.25rem))] flex-col border-r border-white/10 bg-zinc-950/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-2xl transition-transform [padding-bottom:calc(1rem+env(safe-area-inset-bottom))] ${MOBILE_SAFE_AREA_TOP} md:static md:w-80 md:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -2502,7 +2506,9 @@ export default function AIChatWorkspace({
             screen renders no shared MobileHeader), so it owns the top
             safe-area inset. `max()` keeps the existing py-3 / sm:py-4
             spacing on web, where the inset is 0. */}
-        <header className="relative z-10 flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-black/80 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] shadow-xl shadow-black/20 backdrop-blur-xl sm:px-6 sm:pb-4 sm:pt-[max(1rem,env(safe-area-inset-top))]">
+        <header
+          className={`relative z-10 flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-black/80 px-4 pb-3 shadow-xl shadow-black/20 backdrop-blur-xl sm:px-6 sm:pb-4 ${MOBILE_SAFE_AREA_TOP}`}
+        >
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"

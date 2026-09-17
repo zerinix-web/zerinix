@@ -31,22 +31,27 @@ test("safe-area insets resolve because the app opts into viewport-fit cover", ()
 });
 
 test("the Ask conversation header starts below the iOS status bar", () => {
-  const headerStart = chatWorkspace.indexOf('<header className="relative z-10 flex shrink-0');
+  // Anchored to the header's own class list rather than the literal JSX
+  // opening tag, so the guard survives attribute/formatting changes.
+  const headerStart = chatWorkspace.indexOf(
+    "relative z-10 flex shrink-0 items-center justify-between gap-3 border-b"
+  );
   const headerSource = chatWorkspace.slice(headerStart, headerStart + 400);
 
-  assert.match(headerSource, /pt-\[max\(0\.75rem,env\(safe-area-inset-top\)\)\]/);
-  assert.match(headerSource, /sm:pt-\[max\(1rem,env\(safe-area-inset-top\)\)\]/);
+  assert.ok(headerStart > -1, "Ask header not found");
+  assert.match(headerSource, /MOBILE_SAFE_AREA_TOP/);
   // The old symmetric padding must be gone, or the inset would be ignored.
   assert.doesNotMatch(headerSource, /\bpy-3\b/);
 });
 
 test("the Ask sidebar also clears the status bar without double padding", () => {
-  assert.match(chatWorkspace, /\[padding-top:max\(1rem,env\(safe-area-inset-top\)\)\]/);
-  // Exactly one top-inset rule per element: the header and the sidebar.
+  // Header and slide-over sidebar both take the top inset from the shared
+  // constant, so Ask never restates env(safe-area-inset-top) inline.
+  assert.equal((chatWorkspace.match(/MOBILE_SAFE_AREA_TOP/g) || []).length, 3);
   assert.equal(
-    (chatWorkspace.match(/safe-area-inset-top/g) || []).length,
-    3,
-    "expected top insets only on the header (2 breakpoints) and the sidebar"
+    (chatWorkspace.match(/env\(safe-area-inset-top\)/g) || []).length,
+    0,
+    "Ask must not restate the top inset inline"
   );
 });
 
@@ -121,13 +126,13 @@ test("short Ask content leaves no oversized gap before the bottom navigation", (
   // that left slack under the composer.
   assert.match(
     chatWorkspace,
-    /className="flex h-\[100dvh\] min-h-\[100svh\] overflow-hidden bg-black pb-\[calc\(4\.75rem\+env\(safe-area-inset-bottom\)\)\] text-white lg:pb-0"/
+    /className=\{`flex h-\[100dvh\] min-h-\[100svh\] overflow-hidden bg-black text-white lg:pb-0 \$\{MOBILE_NAV_CLEARANCE\}`\}/
   );
   assert.doesNotMatch(chatWorkspace, /pb-28 text-white/);
 
   // The reservation breakpoint must track the navigation's own `lg:hidden`,
   // or the nav is visible on tablets with nothing reserving space for it.
-  assert.doesNotMatch(chatWorkspace, /pb-\[calc\(4\.75rem\+env\(safe-area-inset-bottom\)\)\] text-white md:pb-0/);
+  assert.doesNotMatch(chatWorkspace, /text-white md:pb-0/);
 
   // The home-indicator inset must be applied once, by the navigation. The
   // composer only takes it from `lg`, where the navigation is hidden.

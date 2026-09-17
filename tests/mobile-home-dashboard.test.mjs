@@ -82,7 +82,7 @@ test("Home scrolls naturally and clears the bottom navigation exactly once", () 
   // Nav clearance comes from the shared constant the navigation exports, so
   // the reserved height can never drift from the bar it reserves for.
   assert.match(home, /MOBILE_NAV_CLEARANCE/);
-  assert.match(home, /pt-\[max\(0\.6rem,env\(safe-area-inset-top\)\)\]/);
+  assert.match(home, /MOBILE_SAFE_AREA_TOP/);
 
   // Natural document scrolling: no fixed-height shell, no inner scroller.
   // (`overflow-hidden` on the line-clamped card text is unrelated layout.)

@@ -21,8 +21,11 @@ test("the navigation owns the shared safe-area constants", () => {
   );
   assert.match(
     navigation,
-    /export const MOBILE_NAV_CLEARANCE = "pb-\[calc\(4\.75rem\+env\(safe-area-inset-bottom\)\)\]";/
+    /"pb-\[calc\(4\.75rem\+max\(0\.65rem,env\(safe-area-inset-bottom\)\)\)\]"/
   );
+  // calc(fallback + env), never max(fallback, env): a WebView reporting the
+  // inset as 0 must still get the full fallback rather than collapsing to it.
+  assert.doesNotMatch(navigation, /pt-\[max\([^\]]*env\(safe-area-inset-top\)/);
   // The bar itself consumes the bottom inset for the bar, and the shared
   // clearance is the only other place a screen gets it from.
   assert.match(navigation, /pb-\[max\(0\.65rem,env\(safe-area-inset-bottom\)\)\]/);
@@ -55,14 +58,6 @@ test("every mobile screen begins below the iOS status bar, applying the top inse
     const source = read(path);
     const topInsetCount = (source.match(/safe-area-inset-top/g) || []).length;
 
-    if (path.endsWith("MobileHomeDashboard.tsx")) {
-      // Home owns the inset on its own sticky brand header instead of the
-      // page root, so it is stated inline exactly once.
-      assert.equal(topInsetCount, 1, `${path} must own the top inset once`);
-      assert.match(source, /pt-\[max\(0\.6rem,env\(safe-area-inset-top\)\)\]/);
-      continue;
-    }
-
     assert.match(source, /MOBILE_SAFE_AREA_TOP/, `${path} must use the shared top inset`);
     assert.equal(
       topInsetCount,
@@ -81,10 +76,11 @@ test("every mobile screen begins below the iOS status bar, applying the top inse
 test("the Ask shell keeps its own single top and bottom ownership", () => {
   const chat = read("components/AIChatWorkspace.tsx");
 
-  // Header (two breakpoints) and the slide-over sidebar each own the top
-  // inset once; nothing else restates it.
-  assert.equal((chat.match(/safe-area-inset-top/g) || []).length, 3);
-  assert.match(chat, /pb-\[calc\(4\.75rem\+env\(safe-area-inset-bottom\)\)\] text-white lg:pb-0/);
+  // Ask takes the top inset from the shared constant on both its header and
+  // its slide-over sidebar, and never restates it inline.
+  assert.equal((chat.match(/safe-area-inset-top/g) || []).length, 0);
+  assert.match(chat, /MOBILE_SAFE_AREA_TOP/);
+  assert.match(chat, /MOBILE_NAV_CLEARANCE/);
   // The composer only takes the bottom inset from lg, where the fixed
   // navigation is hidden and it becomes the bottom-most element.
   assert.match(chat, /lg:\[padding-bottom:max\(1rem,env\(safe-area-inset-bottom\)\)\]/);

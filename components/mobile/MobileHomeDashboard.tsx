@@ -6,7 +6,10 @@ import {
   RecentProjectsSection,
   type MobileHomeReportSummary,
 } from "@/components/mobile/MobileHomeSections";
-import { MOBILE_NAV_CLEARANCE } from "@/components/MobileNavigation";
+import {
+  MOBILE_NAV_CLEARANCE,
+  MOBILE_SAFE_AREA_TOP,
+} from "@/components/MobileNavigation";
 
 // Mobile Home: an executive command center, not a second AI chat entry
 // point. Free-form advisory lives on the Ask tab (/chat), which is the only
@@ -79,7 +82,9 @@ export default function MobileHomeDashboard({
 
   return (
     <div className="relative z-10 flex w-full flex-col lg:hidden">
-      <header className="flex shrink-0 items-center gap-2.5 border-b border-white/[0.06] bg-black/40 px-4 pb-2.5 pt-[max(0.6rem,env(safe-area-inset-top))] backdrop-blur-2xl">
+      <header
+        className={`flex shrink-0 items-center gap-2.5 border-b border-white/[0.06] bg-black/40 px-4 pb-2.5 backdrop-blur-2xl ${MOBILE_SAFE_AREA_TOP}`}
+      >
         <span className="flex h-8 w-8 items-center justify-center rounded-[0.85rem] bg-white text-[10px] font-black tracking-[0.1em] text-black shadow-md shadow-white/5">
           ZX
         </span>
