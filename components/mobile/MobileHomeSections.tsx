@@ -1,10 +1,8 @@
 "use client";
 
 // Focused, presentation-only building blocks for the mobile Home screen
-// (components/mobile/MobileChatHome.tsx). Kept in their own file so
-// MobileChatHome.tsx -- which already owns the real chat/session logic
-// (submit, streaming, persistence) -- does not keep growing just to fit
-// new layout sections. Both components below only ever render REAL data
+// (components/mobile/MobileHomeDashboard.tsx). Both components below only
+// ever render REAL data
 // passed in as props (workspaces/reports already loaded server-side by
 // app/dashboard/page.tsx for the desktop dashboard) and link to routes
 // that already exist (/dashboard/workspaces, /dashboard/workspaces/[id],
@@ -67,13 +65,10 @@ export function RecentProjectsSection({
   focusable = true,
 }: {
   workspaces: DashboardWorkspace[];
-  // Mirrors the tabIndex convention every other interactive element in
-  // MobileChatHome's landing view already uses (see e.g. the composer
-  // textarea/send button): the landing view is kept mounted (not
-  // display:none) while the user is in an active conversation, only
-  // toggled via aria-hidden/pointer-events-none, so its own links must
-  // still be pulled out of the tab order in that state or a keyboard
-  // user could tab into invisible content.
+  // Lets a caller pull these links out of the tab order when the section is
+  // rendered but visually hidden (for example behind aria-hidden rather than
+  // display:none), so a keyboard user cannot tab into invisible content.
+  // Defaults to focusable, which is what the mobile Home dashboard needs.
   focusable?: boolean;
 }) {
   const recentWorkspaces = [...workspaces]

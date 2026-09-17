@@ -1,7 +1,7 @@
 "use client";
 
 // Shared by every streaming markdown renderer (components/planner/MarkdownRenderer.tsx,
-// components/AIChatWorkspace.tsx, components/mobile/MobileChatHome.tsx) to
+// components/AIChatWorkspace.tsx) to
 // solve a UX problem distinct from streaming-markdown-split.ts's stability
 // concern: even after that fix, mobile streaming reveals new text as fast
 // as tokens physically arrive over the network -- often faster than a

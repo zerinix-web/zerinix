@@ -1,6 +1,6 @@
 // Shared by every streaming markdown renderer (components/planner/MarkdownRenderer.tsx,
-// components/AIChatWorkspace.tsx's local copy, components/mobile/MobileChatHome.tsx's
-// buildMobileMarkdown) to solve the same problem each of them has:
+// components/AIChatWorkspace.tsx's local copy) to solve the same problem
+// each of them has:
 // while a response is actively streaming, re-parsing and re-rendering
 // the WHOLE accumulated message on every token makes the per-token
 // render cost grow with the response's own length -- expensive enough

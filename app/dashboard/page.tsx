@@ -43,7 +43,7 @@ import {
   type DashboardReport,
   type DashboardWorkspace,
 } from "./report-utils";
-import MobileChatHome from "@/components/mobile/MobileChatHome";
+import MobileHomeDashboard from "@/components/mobile/MobileHomeDashboard";
 import { MobileBottomNavigation } from "@/components/MobileNavigation";
 
 export const dynamic = "force-dynamic";
@@ -387,6 +387,12 @@ export default async function DashboardPage() {
     (workspace) => workspace.reportCount > 0
   ).length;
   const recentReports = reports.slice(0, 4);
+  // Derived from the summary list already loaded above -- no extra query and
+  // no invented status: normalizeReportSummary only ever yields "completed"
+  // or "failed", so this counts reports that genuinely did not complete.
+  const reportsNeedingAttention = reports.filter(
+    (report) => report.status.toLowerCase() !== "completed"
+  ).length;
   const completedReports = completedReportsCount;
   const activeWorkspace = getActiveWorkspace(workspaces);
   const activeWorkspaceReports = activeWorkspace
@@ -488,26 +494,20 @@ export default async function DashboardPage() {
       <div className="relative z-10 flex min-h-screen flex-col lg:flex-row">
         <DashboardSidebar showMobileNavigation={!mobileChatHomeEnabled} />
 
-        {/* BUG FIX -- confirmed live: MobileChatHome used to render this
-            SAME nav itself, nested inside its own `h-[100dvh] overflow-hidden`
-            root section. It stayed visible on the landing state (nav was
-            gated behind `showLanding` there) but was reported missing once
-            a question was asked and the internal view switched to the
-            conversation/response state, even after removing that gate.
-            Rendering it here instead -- a plain sibling inside this
-            page's ordinary min-h-screen flex wrapper, with no
-            overflow-hidden or fixed-height ancestor between it and the
-            viewport -- exactly mirrors how DashboardSidebar's own
-            showMobileNavigation branch above (used by every OTHER mobile
-            dashboard page) already renders this exact component
-            successfully. MobileChatHome no longer renders its own copy
-            (see its own render body) to avoid a duplicate nav. */}
+        {/* The mobile navigation is rendered here, as a plain sibling inside
+            this page's ordinary min-h-screen flex wrapper, rather than inside
+            the Home component itself -- the same way DashboardSidebar's
+            showMobileNavigation branch above serves every other mobile
+            dashboard page. Keeping it out of the Home component means no
+            fixed-height or overflow-hidden ancestor sits between the nav and
+            the viewport, and there is only ever one copy of it. */}
         {mobileChatHomeEnabled ? <MobileBottomNavigation /> : null}
 
         {mobileChatHomeEnabled ? (
-          <MobileChatHome
-            featureFlagEnabled={mobileChatHomeEnabled}
+          <MobileHomeDashboard
             workspaces={workspaces}
+            completedReports={completedReports}
+            reportsNeedingAttention={reportsNeedingAttention}
             recentReports={recentReports.map((report) => ({
               id: report.id,
               workspaceId: report.workspaceId,

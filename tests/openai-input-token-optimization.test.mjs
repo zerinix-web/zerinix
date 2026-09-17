@@ -21,10 +21,6 @@ const tokenOptimization = readFileSync(
   "utf8"
 );
 const domainResearch = readFileSync("app/lib/ai/domain-research.ts", "utf8");
-const mobileChatHome = readFileSync(
-  "components/mobile/MobileChatHome.tsx",
-  "utf8"
-);
 const aiChatWorkspace = readFileSync("components/AIChatWorkspace.tsx", "utf8");
 const planner = readFileSync("components/Planner.tsx", "utf8");
 
@@ -90,7 +86,6 @@ test("conversation memory retains boundary context when the language has no keyw
 });
 
 test("all chat clients submit available history for centralized server compaction", () => {
-  assert.doesNotMatch(mobileChatHome, /contextualMemoryMessages/);
   assert.doesNotMatch(
     aiChatWorkspace,
     /const memoryMessages = currentMessages[\s\S]{0,400}\.slice\(-8\)/
