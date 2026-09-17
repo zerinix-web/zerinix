@@ -79,9 +79,9 @@ test("metrics and calls to action are omitted when there is nothing real to show
 });
 
 test("Home scrolls naturally and clears the bottom navigation exactly once", () => {
-  // Nav clearance comes from the navigation's own height plus the device
-  // inset -- the same convention the Ask shell uses.
-  assert.match(home, /pb-\[calc\(4\.75rem\+env\(safe-area-inset-bottom\)\)\]/);
+  // Nav clearance comes from the shared constant the navigation exports, so
+  // the reserved height can never drift from the bar it reserves for.
+  assert.match(home, /MOBILE_NAV_CLEARANCE/);
   assert.match(home, /pt-\[max\(0\.6rem,env\(safe-area-inset-top\)\)\]/);
 
   // Natural document scrolling: no fixed-height shell, no inner scroller.
@@ -97,6 +97,7 @@ test("Home scrolls naturally and clears the bottom navigation exactly once", () 
   // (Typography such as text-[11px] is unrelated and allowed.)
   assert.doesNotMatch(home, /(?:p[btlrxy]?|m[btlrxy]?|top|bottom|inset)-\[\d+(?:\.\d+)?px\]/);
 
-  // The bottom inset is applied once on Home; the navigation owns its own.
-  assert.equal((home.match(/safe-area-inset-bottom/g) || []).length, 1);
+  // Home never restates the bottom inset inline; it comes from the shared
+  // constant, and the navigation owns its own.
+  assert.equal((home.match(/safe-area-inset-bottom/g) || []).length, 0);
 });

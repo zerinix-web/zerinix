@@ -148,6 +148,28 @@ export function MobileHeader({
   );
 }
 
+// Safe-area ownership for every mobile screen that sits under the fixed
+// MobileBottomNavigation. Exported from this file because this is where the
+// navigation itself is defined, so the reserved height can never drift from
+// the thing it reserves for.
+//
+// Rules, applied exactly once each:
+//   - MOBILE_SAFE_AREA_TOP goes on a screen's topmost element. These routes
+//     render no shared header (DashboardSidebar only renders MobileHeader
+//     when showMobileNavigation is set, which these pages do not do), so the
+//     screen root is the top boundary and owns the status-bar inset.
+//   - MOBILE_NAV_CLEARANCE goes on the same screen root. 4.75rem is this
+//     navigation's own composition below (pt-2 + p-1.5 twice + min-h-14),
+//     and the env() term is the home-indicator inset the navigation itself
+//     adds -- so the screen reserves the real height, never a guess.
+//   - The navigation's own pb-[max(0.65rem,env(safe-area-inset-bottom))]
+//     below is the ONLY place the bottom inset is consumed for the bar.
+//
+// On web and desktop every env() term resolves to 0, so spacing collapses
+// back to the plain rem values.
+export const MOBILE_SAFE_AREA_TOP = "pt-[calc(1.25rem+env(safe-area-inset-top))]";
+export const MOBILE_NAV_CLEARANCE = "pb-[calc(4.75rem+env(safe-area-inset-bottom))]";
+
 export function MobileBottomNavigation({
   labels,
 }: {
@@ -195,7 +217,7 @@ export function MobilePageContainer({
   className?: string;
 }) {
   return (
-    <div className={`pb-28 lg:pb-0 ${className}`}>
+    <div className={`${MOBILE_NAV_CLEARANCE} lg:pb-0 ${className}`}>
       {children}
     </div>
   );

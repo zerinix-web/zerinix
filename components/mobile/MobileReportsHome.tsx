@@ -17,6 +17,10 @@ import type {
   MobileReportPreview,
   MobileReportType,
 } from "@/app/dashboard/report-utils";
+import {
+  MOBILE_NAV_CLEARANCE,
+  MOBILE_SAFE_AREA_TOP,
+} from "@/components/MobileNavigation";
 
 type MobileReportFilter = "All" | MobileReportType;
 
@@ -145,7 +149,9 @@ export default function MobileReportsHome({
       : filteredReports.length;
 
   return (
-    <div className="relative min-h-[calc(100dvh-4.5rem)] overflow-hidden px-4 pb-[calc(8.5rem+env(safe-area-inset-bottom))] pt-7 text-white lg:hidden">
+    <div
+      className={`relative min-h-dvh overflow-hidden px-4 text-white lg:hidden ${MOBILE_SAFE_AREA_TOP} ${MOBILE_NAV_CLEARANCE}`}
+    >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_92%_0%,rgba(45,212,191,0.11),transparent_28%),radial-gradient(circle_at_8%_38%,rgba(255,255,255,0.04),transparent_25%)]" />
 
       <div className="relative mx-auto max-w-xl">

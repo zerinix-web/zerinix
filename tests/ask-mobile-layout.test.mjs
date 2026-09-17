@@ -134,7 +134,7 @@ test("short Ask content leaves no oversized gap before the bottom navigation", (
   const composerStart = chatWorkspace.indexOf('className="relative z-10 shrink-0 border-t border-white/10');
   const composerClasses = chatWorkspace.slice(composerStart, composerStart + 400);
 
-  assert.match(composerClasses, /\bpb-3\b/);
+  assert.match(composerClasses, /\bpb-2\b/);
   assert.match(composerClasses, /lg:\[padding-bottom:max\(1rem,env\(safe-area-inset-bottom\)\)\]/);
   assert.doesNotMatch(composerClasses, /backdrop-blur-2xl \[padding-bottom:max/);
 

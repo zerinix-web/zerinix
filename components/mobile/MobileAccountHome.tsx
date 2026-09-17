@@ -24,6 +24,10 @@ import type { BillingOverview } from "@/app/dashboard/billing/billing-data";
 import type { UserSettingsProfile } from "@/app/dashboard/settings/settings-data";
 import DeleteAccountForm from "@/components/account/DeleteAccountForm";
 import SignOutButton from "@/components/auth/SignOutButton";
+import {
+  MOBILE_NAV_CLEARANCE,
+  MOBILE_SAFE_AREA_TOP,
+} from "@/components/MobileNavigation";
 
 type AccountRowProps = {
   icon: LucideIcon;
@@ -126,7 +130,9 @@ export default function MobileAccountHome({
     billing.usage.marketAnalysisUsed > 0;
 
   return (
-    <div className="relative min-h-[calc(100dvh-4.5rem)] overflow-hidden px-4 pb-[calc(8.75rem+env(safe-area-inset-bottom))] pt-7 text-white lg:hidden">
+    <div
+      className={`relative min-h-dvh overflow-hidden px-4 text-white lg:hidden ${MOBILE_SAFE_AREA_TOP} ${MOBILE_NAV_CLEARANCE}`}
+    >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_92%_0%,rgba(45,212,191,0.12),transparent_29%),radial-gradient(circle_at_8%_42%,rgba(255,255,255,0.04),transparent_25%)]" />
 
       <div className="relative mx-auto max-w-xl">

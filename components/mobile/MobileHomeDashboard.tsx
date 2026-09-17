@@ -6,6 +6,7 @@ import {
   RecentProjectsSection,
   type MobileHomeReportSummary,
 } from "@/components/mobile/MobileHomeSections";
+import { MOBILE_NAV_CLEARANCE } from "@/components/MobileNavigation";
 
 // Mobile Home: an executive command center, not a second AI chat entry
 // point. Free-form advisory lives on the Ask tab (/chat), which is the only
@@ -24,8 +25,6 @@ import {
 // MobileBottomNavigation with its own height plus the bottom inset, and the
 // page scrolls naturally -- no fixed-height shell, no spacer elements, no
 // negative margins, no device-specific offsets.
-
-const NAV_CLEARANCE = "pb-[calc(4.75rem+env(safe-area-inset-bottom))]";
 
 const ANALYSIS_ACTIONS = [
   {
@@ -89,7 +88,7 @@ export default function MobileHomeDashboard({
         </p>
       </header>
 
-      <div className={`px-4 pt-6 ${NAV_CLEARANCE}`}>
+      <div className={`px-4 pt-6 ${MOBILE_NAV_CLEARANCE}`}>
         <section aria-label="Overview">
           <h1 className="max-w-[17rem] text-[1.75rem] font-semibold leading-[1.15] tracking-[-0.04em] text-white">
             Your decision workspace

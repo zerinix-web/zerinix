@@ -65,7 +65,9 @@ test("mobile Account includes safe loading, empty, and partial-error states", ()
     mobileSource,
     /Your account activity will appear here after your first/
   );
-  assert.match(mobileSource, /env\(safe-area-inset-bottom\)/);
+  // Bottom-navigation clearance now comes from the shared constant the
+  // navigation exports rather than an inline inset restated per screen.
+  assert.match(mobileSource, /MOBILE_NAV_CLEARANCE/);
   assert.match(loadingSource, /mobile-account-usage/);
   assert.match(loadingSource, /animate-pulse/);
   assert.match(loadingSource, /env\(safe-area-inset-bottom\)/);

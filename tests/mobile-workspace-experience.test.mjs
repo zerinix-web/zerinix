@@ -74,7 +74,9 @@ test("mobile detail shows workspace information, reports, conversations, and bac
   assert.match(detailSource, /Conversation history is currently account-level/);
   assert.match(detailSource, /No reports in this workspace/);
   assert.match(detailSource, /No recent conversations/);
-  assert.match(detailSource, /env\(safe-area-inset-bottom\)/);
+  // Bottom-navigation clearance now comes from the shared constant the
+  // navigation exports rather than an inline inset restated per screen.
+  assert.match(detailSource, /MOBILE_NAV_CLEARANCE/);
 });
 
 test("workspace list stays lightweight and detail data loads only on the opened route", () => {

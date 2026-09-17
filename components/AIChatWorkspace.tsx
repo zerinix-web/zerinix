@@ -2643,7 +2643,7 @@ export default function AIChatWorkspace({
             as dead space between the composer and the nav. From `lg` the
             nav is hidden (`lg:hidden`) and the composer is bottom-most, so
             it takes the inset there instead. */}
-        <div className="relative z-10 shrink-0 border-t border-white/10 bg-black/80 px-4 pb-3 pt-3 shadow-2xl shadow-black/40 backdrop-blur-2xl sm:px-6 sm:pb-4 sm:pt-4 lg:[padding-bottom:max(1rem,env(safe-area-inset-bottom))]">
+        <div className="relative z-10 shrink-0 border-t border-white/10 bg-black/80 px-4 pb-2 pt-2.5 shadow-2xl shadow-black/40 backdrop-blur-2xl sm:px-6 sm:pb-4 sm:pt-4 lg:[padding-bottom:max(1rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto max-w-5xl">
             {attachments.length > 0 ? (
               <div className="mb-3 flex flex-wrap gap-2">
@@ -2774,7 +2774,7 @@ export default function AIChatWorkspace({
               </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center justify-center gap-3 text-center text-xs text-zinc-600">
+            <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-[11px] text-zinc-600 sm:mt-3 sm:gap-3 sm:text-xs">
               <span className="inline-flex items-center gap-1">
                 <CornerDownLeft className="h-3.5 w-3.5" />
                 <span>Enter to send</span>
