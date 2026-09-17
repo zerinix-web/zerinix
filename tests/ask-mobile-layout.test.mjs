@@ -93,9 +93,14 @@ test("the conversation list no longer reserves the composer height twice", () =>
 
   // The composer stays a normal flex sibling after the scroller, so the
   // conversation flows straight into it instead of being spaced away.
+  // Anchored to the composer's own container rather than a padding value,
+  // so this ordering guard survives spacing changes.
   const scrollerIndex = chatWorkspace.indexOf('ref={scrollerRef}');
-  const composerIndex = chatWorkspace.indexOf('[padding-bottom:max(0.75rem,env(safe-area-inset-bottom))]');
-  assert.ok(scrollerIndex > -1 && composerIndex > scrollerIndex);
+  const composerIndex = chatWorkspace.indexOf(
+    'className="relative z-10 shrink-0 border-t border-white/10'
+  );
+  assert.ok(scrollerIndex > -1, "scroller not found");
+  assert.ok(composerIndex > scrollerIndex, "composer must follow the scroller");
   assert.match(chatWorkspace, /className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain/);
   assert.match(chatWorkspace, /className="relative z-10 shrink-0 border-t border-white\/10/);
 });
@@ -107,5 +112,32 @@ test("streaming stickiness stays a distance measure, not a padding artifact", ()
 
 test("the bottom navigation keeps its own safe-area behavior", () => {
   assert.match(mobileNavigation, /pb-\[max\(0\.65rem,env\(safe-area-inset-bottom\)\)\]/);
-  assert.match(chatWorkspace, /pb-28 text-white md:pb-0/);
+  assert.match(mobileNavigation, /lg:hidden/);
+});
+
+test("short Ask content leaves no oversized gap before the bottom navigation", () => {
+  // The shell reserves the navigation's real height (its own 4.75rem of
+  // padding/rows plus the device inset it adds) instead of a flat guess
+  // that left slack under the composer.
+  assert.match(
+    chatWorkspace,
+    /className="flex h-\[100dvh\] min-h-\[100svh\] overflow-hidden bg-black pb-\[calc\(4\.75rem\+env\(safe-area-inset-bottom\)\)\] text-white lg:pb-0"/
+  );
+  assert.doesNotMatch(chatWorkspace, /pb-28 text-white/);
+
+  // The reservation breakpoint must track the navigation's own `lg:hidden`,
+  // or the nav is visible on tablets with nothing reserving space for it.
+  assert.doesNotMatch(chatWorkspace, /pb-\[calc\(4\.75rem\+env\(safe-area-inset-bottom\)\)\] text-white md:pb-0/);
+
+  // The home-indicator inset must be applied once, by the navigation. The
+  // composer only takes it from `lg`, where the navigation is hidden.
+  const composerStart = chatWorkspace.indexOf('className="relative z-10 shrink-0 border-t border-white/10');
+  const composerClasses = chatWorkspace.slice(composerStart, composerStart + 400);
+
+  assert.match(composerClasses, /\bpb-3\b/);
+  assert.match(composerClasses, /lg:\[padding-bottom:max\(1rem,env\(safe-area-inset-bottom\)\)\]/);
+  assert.doesNotMatch(composerClasses, /backdrop-blur-2xl \[padding-bottom:max/);
+
+  // No negative-margin or fixed-offset workarounds anywhere in the screen.
+  assert.doesNotMatch(chatWorkspace, /className="[^"]*\s-m[btlrxy]?-/);
 });

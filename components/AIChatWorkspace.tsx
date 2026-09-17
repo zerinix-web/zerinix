@@ -1985,15 +1985,16 @@ export default function AIChatWorkspace({
 
   return (
     <main
-      // BUG FIX -- `pb-20` (5rem) under-reserved space for the fixed
-      // MobileBottomNavigation, which can render up to ~7rem tall on
-      // devices with a large safe-area-inset-bottom (home-indicator
-      // devices). `pb-28` matches the same reserved height
-      // MobilePageContainer already uses everywhere else in the app for
-      // this exact nav (components/MobileNavigation.tsx) -- no new
-      // constant invented, just applied consistently here too so the nav
-      // never covers the composer or the tail of a streamed response.
-      className="flex h-[100dvh] min-h-[100svh] overflow-hidden bg-black pb-28 text-white md:pb-0"
+      // Reserves exactly the fixed MobileBottomNavigation's own height:
+      // 4.75rem is that nav's composition (pt-2 + p-1.5 twice + min-h-14 =
+      // 76px, see components/MobileNavigation.tsx) and the env() term is
+      // the home-indicator inset the nav itself adds. A flat `pb-28` (7rem)
+      // guessed at that total, so it left slack below the composer on top
+      // of the inset the nav already applies. The breakpoint matches the
+      // nav's own `lg:hidden` -- with `md:pb-0` the nav stayed visible on
+      // tablets while nothing reserved space for it, so it covered the
+      // composer between 768px and 1024px.
+      className="flex h-[100dvh] min-h-[100svh] overflow-hidden bg-black pb-[calc(4.75rem+env(safe-area-inset-bottom))] text-white lg:pb-0"
       style={
         mobileKeyboardViewportHeight !== null
           ? { height: mobileKeyboardViewportHeight, minHeight: mobileKeyboardViewportHeight }
@@ -2635,7 +2636,14 @@ export default function AIChatWorkspace({
           </div>
         </div>
 
-        <div className="relative z-10 shrink-0 border-t border-white/10 bg-black/80 px-4 pt-3 shadow-2xl shadow-black/40 backdrop-blur-2xl [padding-bottom:max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:pt-4">
+        {/* The home-indicator inset belongs to whichever element actually
+            sits above it. On mobile that is the fixed bottom navigation,
+            which already applies `max(0.65rem,env(safe-area-inset-bottom))`,
+            so repeating it here stacked the same inset twice and showed up
+            as dead space between the composer and the nav. From `lg` the
+            nav is hidden (`lg:hidden`) and the composer is bottom-most, so
+            it takes the inset there instead. */}
+        <div className="relative z-10 shrink-0 border-t border-white/10 bg-black/80 px-4 pb-3 pt-3 shadow-2xl shadow-black/40 backdrop-blur-2xl sm:px-6 sm:pb-4 sm:pt-4 lg:[padding-bottom:max(1rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto max-w-5xl">
             {attachments.length > 0 ? (
               <div className="mb-3 flex flex-wrap gap-2">
