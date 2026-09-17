@@ -51,6 +51,36 @@ const acceptedMimeTypesByExtension: Record<string, string[]> = {
   avif: ["image/avif"],
 };
 
+// Shared `accept` value so every composer offers exactly the file families
+// validateSelectedFile() below will actually accept. Without it, iOS/WKWebView
+// offers every file type and the user only learns a file is unsupported after
+// picking it.
+export const ATTACHMENT_ACCEPT_ATTRIBUTE = Object.entries(
+  acceptedMimeTypesByExtension
+)
+  .flatMap(([extension, mimeTypes]) => [`.${extension}`, ...mimeTypes])
+  .filter((value, index, all) => all.indexOf(value) === index)
+  .join(",");
+
+// The single serialization contract for every analysis endpoint
+// (/api/chat, /api/plan). It must stay in the shape the server-side
+// validator in app/lib/ai/analysis-assets.ts accepts: `type` and `dataUrl`
+// are what turn an upload into an input_image / input_file part for the
+// model, so dropping either silently reduces the request to a filename.
+export function serializeAttachmentsForAnalysis(
+  attachments: PlannerAttachment[]
+) {
+  return attachments
+    .filter((attachment) => attachment.status !== "error")
+    .map((attachment) => ({
+      name: attachment.name,
+      type: attachment.mimeType || "",
+      size: attachment.size,
+      textContent: attachment.textContent || "",
+      dataUrl: attachment.dataUrl || "",
+    }));
+}
+
 function sanitizeClientFileName(value: string) {
   return value
     .replace(/[\u0000-\u001f\u007f]/g, "")

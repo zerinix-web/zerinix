@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type DragEvent,
   type ReactNode,
 } from "react";
 import Link from "next/link";
@@ -41,6 +40,12 @@ import {
   X,
 } from "lucide-react";
 import { createClient } from "@/app/lib/supabase/client";
+import {
+  ATTACHMENT_ACCEPT_ATTRIBUTE,
+  serializeAttachmentsForAnalysis,
+  useAttachments,
+  type PlannerAttachment,
+} from "@/components/planner/useAttachments";
 
 type ChatModelPreference = "fast" | "balanced";
 
@@ -48,6 +53,7 @@ type ChatAttachment = {
   id: string;
   name: string;
   size: number;
+  mimeType?: string;
   textContent?: string;
 };
 
@@ -1107,7 +1113,27 @@ export default function AIChatWorkspace({
   );
   const [activeConversationId, setActiveConversationId] = useState(initialConversationId);
   const [prompt, setPrompt] = useState("");
-  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  // Shared with the planner composer so both surfaces read file bytes,
+  // validate size/MIME, and serialize attachments identically.
+  const {
+    attachments,
+    setAttachments,
+    attachmentError,
+    setAttachmentError,
+    isDraggingFiles,
+    setIsDraggingFiles,
+    handleFiles,
+    handleDropFiles,
+  } = useAttachments({ createId: createMessageId });
+  // Binary attachment data is deliberately never persisted to ai_messages
+  // (see persistMessage), so regenerating a file-backed answer needs the
+  // originals from this session kept in memory for the last sent request.
+  // Scoped to the conversation it belongs to, so regenerating in another
+  // conversation can never reuse a previous conversation's files.
+  const lastRequestAttachmentsRef = useRef<{
+    conversationId: string;
+    attachments: PlannerAttachment[];
+  }>({ conversationId: "", attachments: [] });
   const [modelPreference, setModelPreference] = useState<ChatModelPreference>("fast");
   const [loading, setLoading] = useState(false);
   const [conversationError, setConversationError] = useState(conversationLoadError);
@@ -1124,7 +1150,6 @@ export default function AIChatWorkspace({
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
   const [clearProfileConfirmOpen, setClearProfileConfirmOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   // TASK -- Mobile Ask composer keyboard fix. Confirmed live: on the
   // iPhone Simulator, opening the software keyboard left the textarea
   // visible but hid the composer's own action row (Upload files / model
@@ -1613,48 +1638,9 @@ export default function AIChatWorkspace({
     });
   }
 
-  async function readAttachmentText(file: File) {
-    const textLike =
-      file.type.startsWith("text/") ||
-      /\.(txt|md|csv|json|ts|tsx|js|jsx|css|html|sql)$/i.test(file.name);
-
-    if (!textLike || file.size > 220_000) {
-      return "";
-    }
-
-    try {
-      return (await file.text()).slice(0, 20_000);
-    } catch (error) {
-      console.error("[attachment text read failed]", error);
-      return "";
-    }
-  }
-
-  async function handleFiles(files: FileList | null) {
-    if (!files) {
-      return;
-    }
-
-    const uploadedFiles = await Promise.all(
-      Array.from(files).map(async (file) => ({
-        id: createMessageId(),
-        name: file.name,
-        size: file.size,
-        textContent: await readAttachmentText(file),
-      }))
-    );
-
-    setAttachments((current) => [...current, ...uploadedFiles]);
-  }
-
   function removeAttachment(id: string) {
+    setAttachmentError("");
     setAttachments((current) => current.filter((attachment) => attachment.id !== id));
-  }
-
-  function handleDropFiles(event: DragEvent<HTMLElement>) {
-    event.preventDefault();
-    setIsDraggingFiles(false);
-    void handleFiles(event.dataTransfer.files);
   }
 
   function updateAssistantMessage(
@@ -1765,7 +1751,14 @@ export default function AIChatWorkspace({
     const title = shouldAutoTitleConversation(conversation?.title || "New conversation")
       ? generateConversationTitle(submittedPrompt)
       : conversation?.title || generateConversationTitle(submittedPrompt);
-    const currentAttachments = attachments;
+    // Regenerate (addToHistory === false) runs after the composer was
+    // cleared, so it reuses the exact assets of the request it is replacing
+    // instead of silently asking the model about files it never received.
+    const currentAttachments = addToHistory
+      ? attachments
+      : lastRequestAttachmentsRef.current.conversationId === conversationId
+        ? lastRequestAttachmentsRef.current.attachments
+        : [];
     const currentMessages = conversation?.messages || [];
     const replacementMessage = replacementAssistantMessageId
       ? currentMessages.find((message) => message.id === replacementAssistantMessageId)
@@ -1798,12 +1791,23 @@ export default function AIChatWorkspace({
     await ensurePersistedConversation(conversationId, title);
 
     if (addToHistory) {
+      lastRequestAttachmentsRef.current = {
+        conversationId,
+        attachments: currentAttachments,
+      };
       const userMessage: ChatMessage = {
         id: createMessageId(),
         role: "user",
         mode: "chat",
         content: submittedPrompt,
-        attachments: currentAttachments,
+        // Metadata only: raw file bytes are never written to ai_messages.
+        attachments: currentAttachments.map((attachment) => ({
+          id: attachment.id,
+          name: attachment.name,
+          size: attachment.size,
+          mimeType: attachment.mimeType || "",
+          textContent: attachment.textContent || "",
+        })),
         status: "complete",
         createdAt: getClientTimestamp(),
       };
@@ -1868,11 +1872,7 @@ export default function AIChatWorkspace({
           prompt: submittedPrompt,
           conversationId,
           modelPreference,
-          attachments: currentAttachments.map((attachment) => ({
-            name: attachment.name,
-            size: attachment.size,
-            textContent: attachment.textContent || "",
-          })),
+          attachments: serializeAttachmentsForAnalysis(currentAttachments),
           messages: memoryMessages,
           reportId: activeReportMemoryId,
         }),
@@ -1890,6 +1890,7 @@ export default function AIChatWorkspace({
       if (addToHistory) {
         setPrompt("");
         setAttachments([]);
+        setAttachmentError("");
       }
     } catch (error) {
       const aborted = error instanceof DOMException && error.name === "AbortError";
@@ -2623,6 +2624,11 @@ export default function AIChatWorkspace({
                       {attachment.name}
                     </span>
                     <span className="text-zinc-600">{formatFileSize(attachment.size)}</span>
+                    {attachment.status === "processing" ? (
+                      <span className="text-teal-200">Reading...</span>
+                    ) : attachment.status === "error" ? (
+                      <span className="text-red-200">Could not be read</span>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => removeAttachment(attachment.id)}
@@ -2633,6 +2639,15 @@ export default function AIChatWorkspace({
                     </button>
                   </span>
                 ))}
+              </div>
+            ) : null}
+
+            {attachmentError ? (
+              <div
+                role="alert"
+                className="mb-3 rounded-2xl border border-red-300/20 bg-red-400/[0.08] px-4 py-2.5 text-xs leading-5 text-red-100"
+              >
+                {attachmentError}
               </div>
             ) : null}
 
@@ -2675,6 +2690,7 @@ export default function AIChatWorkspace({
                     <input
                       type="file"
                       multiple
+                      accept={ATTACHMENT_ACCEPT_ATTRIBUTE}
                       className="hidden"
                       onChange={(event) => void handleFiles(event.target.files)}
                     />
@@ -2708,7 +2724,13 @@ export default function AIChatWorkspace({
                   ) : null}
                   <button
                     type="button"
-                    disabled={!prompt.trim() || loading}
+                    disabled={
+                      !prompt.trim() ||
+                      loading ||
+                      // Never send while a file is still being read, and never
+                      // send an unreadable file as if the model received it.
+                      attachments.some((attachment) => attachment.status !== "ready")
+                    }
                     onClick={() => void sendMessage()}
                     className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/40 transition hover:-translate-y-0.5 hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
                   >

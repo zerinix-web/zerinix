@@ -24,6 +24,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>ZERINIX uses the camera when you choose Take Photo to attach a photo to an advisor request.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>ZERINIX uses your photo library when you attach an image to an advisor request.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
