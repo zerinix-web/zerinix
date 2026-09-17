@@ -77,7 +77,21 @@ const config: CapacitorConfig = {
       }
     : undefined,
   ios: {
-    contentInset: "automatic",
+    // BUG FIX -- the iOS status bar overlapped the in-app headers even
+    // after the web layer was correct (`viewport-fit=cover` in
+    // app/layout.tsx plus `env(safe-area-inset-top)` padding on the
+    // headers, both confirmed present in the deployed CSS). Root cause is
+    // here: `contentInset` maps straight to the WKWebView UIScrollView's
+    // `contentInsetAdjustmentBehavior`, and `"automatic"` hands safe-area
+    // handling to UIKit -- which makes WebKit report every
+    // `env(safe-area-inset-*)` as 0. The app's full-screen shells are
+    // `h-[100dvh]` + `overflow-hidden`, so the document never scrolls and
+    // UIKit's own adjustment has nothing to inset either: both mechanisms
+    // cancel out and content renders under the status bar. `"never"` is
+    // Capacitor's own documented default and returns real inset values to
+    // the CSS safe-area architecture this app already uses everywhere
+    // (bottom navigation, composers, mobile headers). No pixel offsets.
+    contentInset: "never",
     // BUG FIX -- confirmed live on a true iOS cold launch: Capacitor's
     // CAPBridgeViewController defaults an unconfigured WKWebView (and
     // its scrollView) to UIColor.systemBackground, which is white/light

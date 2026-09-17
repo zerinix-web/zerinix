@@ -6,6 +6,20 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 const chatWorkspace = read("components/AIChatWorkspace.tsx");
 const rootLayout = read("app/layout.tsx");
 const mobileNavigation = read("components/MobileNavigation.tsx");
+const capacitorConfig = read("capacitor.config.ts");
+// The baked native copies are `npx cap sync` output and are gitignored, so
+// they only exist in a synced working copy -- never in CI or a fresh clone.
+const readIfPresent = (path) => {
+  try {
+    return read(path);
+  } catch {
+    return null;
+  }
+};
+const nativeConfigs = [
+  "ios/App/App/capacitor.config.json",
+  "android/app/src/main/assets/capacitor.config.json",
+].map(readIfPresent);
 
 test("safe-area insets resolve because the app opts into viewport-fit cover", () => {
   assert.match(rootLayout, /export const viewport: Viewport = \{/);
@@ -36,8 +50,43 @@ test("the Ask sidebar also clears the status bar without double padding", () => 
   );
 });
 
+test("iOS lets WebKit report real safe-area insets to the CSS architecture", () => {
+  // "automatic" hands safe-area handling to UIKit, which zeroes every
+  // env(safe-area-inset-*) value and silently defeats the CSS above.
+  assert.match(capacitorConfig, /contentInset: "never"/);
+  assert.doesNotMatch(capacitorConfig, /contentInset: "automatic"/);
+
+  // The native projects build from their synced copies, so where those
+  // exist locally they must not still carry the old value.
+  for (const nativeConfig of nativeConfigs) {
+    if (!nativeConfig) {
+      continue;
+    }
+
+    assert.match(nativeConfig, /"contentInset": "never"/);
+    assert.doesNotMatch(nativeConfig, /"contentInset": "automatic"/);
+  }
+});
+
+test("the conversation anchors to the composer instead of leaving a gap", () => {
+  assert.match(
+    chatWorkspace,
+    /<div className="mx-auto flex min-h-full max-w-5xl flex-col justify-end gap-5 pt-4 pb-6 sm:pt-6">/
+  );
+  // min-h-full resolves against the scroller's content box, so the scroller
+  // must not add vertical padding on top of it or the view stays scrollable
+  // by that amount even when the conversation is short.
+  assert.match(
+    chatWorkspace,
+    /className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6"/
+  );
+  // The welcome card sizes to the available space rather than a fixed 52vh
+  // block that manufactured its own gap above the composer.
+  assert.match(chatWorkspace, /<div className="flex flex-1 items-center justify-center text-center">/);
+  assert.doesNotMatch(chatWorkspace, /className="[^"]*min-h-\[52vh\]/);
+});
+
 test("the conversation list no longer reserves the composer height twice", () => {
-  assert.match(chatWorkspace, /<div className="mx-auto flex max-w-5xl flex-col gap-5 pb-6">/);
   // Anchored to the class attribute so the explanatory comment above it
   // (which names the old value) does not satisfy this guard.
   assert.doesNotMatch(chatWorkspace, /className="[^"]*\bpb-48\b/);

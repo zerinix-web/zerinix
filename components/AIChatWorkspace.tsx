@@ -2558,10 +2558,15 @@ export default function AIChatWorkspace({
           </div>
         </header>
 
+        {/* Vertical padding lives on the inner wrapper instead of this
+            scroller, so the wrapper's `min-h-full` (which resolves against
+            this element's content box) cannot overflow by the padding
+            amount and leave the view permanently scrollable when the
+            conversation is short. */}
         <div
           ref={scrollerRef}
           onScroll={(event) => updateScrollIntent(event.currentTarget)}
-          className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-6"
+          className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6"
         >
           {/* BUG FIX -- this list used to carry `pb-48 sm:pb-44` (12rem)
               from when the composer was an overlay. The composer is now a
@@ -2570,7 +2575,13 @@ export default function AIChatWorkspace({
               rendered as a large empty gap under short answers. Only a
               normal reading gap is needed now; the flex column keeps the
               composer directly after the conversation. */}
-          <div className="mx-auto flex max-w-5xl flex-col gap-5 pb-6">
+          {/* `min-h-full` + `justify-end` keeps the conversation anchored to
+              the bottom of this flex-1 scroller, so the composer follows the
+              last message directly instead of being pushed to the viewport
+              bottom with the scroller's leftover space showing as a gap.
+              Longer conversations simply exceed min-h-full and scroll as
+              before, so streaming and long answers are unaffected. */}
+          <div className="mx-auto flex min-h-full max-w-5xl flex-col justify-end gap-5 pt-4 pb-6 sm:pt-6">
             {conversationIssue ? (
               <ChatStatusNotice
                 issue={conversationIssue}
@@ -2582,7 +2593,10 @@ export default function AIChatWorkspace({
             ) : null}
 
             {messages.length === 0 ? (
-              <div className="flex min-h-[52vh] items-center justify-center text-center">
+              // `flex-1` centres the welcome card in whatever space the
+              // scroller actually has, instead of forcing a 52vh block that
+              // added its own empty space above the composer.
+              <div className="flex flex-1 items-center justify-center text-center">
                 <div className="w-full max-w-4xl rounded-[2rem] border border-white/10 bg-white/[0.05] p-6 shadow-2xl shadow-black/40 ring-1 ring-white/[0.03] backdrop-blur-2xl sm:p-8">
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl border border-teal-200/20 bg-teal-200/10 shadow-2xl shadow-teal-950/20">
                     <Sparkles className="h-6 w-6 text-teal-200" />
