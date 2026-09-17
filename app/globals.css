@@ -2,9 +2,19 @@
 @source "../app";
 @source "../components";
 
+/* ZERINIX is a dark product on every surface, and on iOS the root element
+   is what paints the safe-area regions: with viewport-fit=cover the strip
+   behind the status bar (and the overscroll area behind the fixed bottom
+   navigation) is painted by html/body, never by a screen's own bg-black,
+   which starts below the header's top inset. A light --background therefore
+   showed as a white strip above the header on any device not in Dark
+   appearance. Pinning the root to the same colour Capacitor gives the
+   native WebView (ios.backgroundColor #050706) makes that seam invisible,
+   and color-scheme: dark keeps form controls and overscroll dark too. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
+  --background: #050706;
+  --foreground: #ededed;
 }
 
 @theme inline {
@@ -14,13 +24,6 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
@@ -28,6 +31,13 @@ body {
 }
 
 html {
+  /* Also painted on html so the area revealed by iOS overscroll/rubber-band
+     -- above the status bar and below the home indicator -- matches the app
+     instead of exposing the default white canvas. */
+  background: var(--background);
+  /* 100dvh, unlike 100vh, includes the safe-area regions under
+     viewport-fit=cover, so the dark background reaches the physical edges. */
+  min-height: 100dvh;
   scroll-behavior: smooth;
   scrollbar-color: rgba(94, 234, 212, 0.32) rgba(24, 24, 27, 0.68);
   scrollbar-width: thin;

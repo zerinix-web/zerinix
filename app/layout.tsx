@@ -31,6 +31,10 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Matches the root background and Capacitor's native ios.backgroundColor,
+  // so the status-bar area and any native chrome stay on the app's own dark
+  // surface rather than defaulting to white.
+  themeColor: "#050706",
 };
 
 export default async function RootLayout({
@@ -47,7 +51,7 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head />
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex flex-col bg-[color:var(--background)]">
         <NativeSplashLifecycle />
         {children}
       </body>

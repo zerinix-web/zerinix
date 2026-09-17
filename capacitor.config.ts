@@ -26,19 +26,32 @@ import type { CapacitorConfig } from "@capacitor/cli";
 //      app/lib/integrations/config.ts) -- trusted here ONLY when it
 //      resolves to a genuine https:// URL, i.e. a real deployed
 //      environment, never a local http://localhost value.
-//   3. undefined -- Capacitor then loads the bundled capacitor-web
-//      placeholder page instead of attempting any network request. That
-//      page explicitly says "Connect the native app to a production
-//      ZERINIX URL before release" -- a visible, honest signal that the
-//      URL was never configured, instead of a silent black-screen
-//      timeout against a stale address.
+//   3. PRODUCTION_SERVER_URL -- the canonical production origin, used
+//      whenever neither override applies.
+//
+// BUG FIX -- step 3 used to be `undefined`, which made Capacitor bake NO
+// server block at all and load the bundled capacitor-web placeholder
+// instead. That turned a missing environment variable into a silently
+// broken native app: a plain `npx cap sync` (rather than
+// `npm run mobile:sync:production`) produced an iOS build that showed the
+// placeholder page instead of ZERINIX, and the failure was invisible until
+// someone launched the build. Defaulting to production means a normal sync
+// can never remove server.url, while both overrides above still work for
+// local device testing.
+const PRODUCTION_SERVER_URL = "https://zerinix.com";
 const explicitDevServerUrl = process.env.CAPACITOR_SERVER_URL?.trim() || undefined;
 const canonicalAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim() || undefined;
 const canonicalAppUrlIsProduction = Boolean(canonicalAppUrl && /^https:\/\//i.test(canonicalAppUrl));
 
-const mobileServerUrl =
-  explicitDevServerUrl || (canonicalAppUrlIsProduction ? canonicalAppUrl : undefined);
-const mobileServerUsesCleartext = mobileServerUrl?.startsWith("http://") ?? false;
+// Always a real URL -- never undefined, so the generated native config
+// always carries server.url. The explicit `string` annotation keeps that
+// invariant checked by the compiler rather than only true at runtime.
+const mobileServerUrl: string =
+  explicitDevServerUrl ||
+  (canonicalAppUrlIsProduction && canonicalAppUrl
+    ? canonicalAppUrl
+    : PRODUCTION_SERVER_URL);
+const mobileServerUsesCleartext = mobileServerUrl.startsWith("http://");
 
 // CRITICAL FIX -- confirmed live: https://zerinix.com returns an HTTP 308
 // redirect to https://www.zerinix.com (Vercel's standard apex-to-www
@@ -54,28 +67,31 @@ const mobileServerUsesCleartext = mobileServerUrl?.startsWith("http://") ?? fals
 // entirely inside the app; every other host (mailto: links, unrelated
 // third-party sites) is intentionally left to fall through to Safari.
 const mobileServerHostname = (() => {
-  if (!mobileServerUrl) return undefined;
   try {
     return new URL(mobileServerUrl).hostname;
   } catch {
     return undefined;
   }
 })();
-const allowNavigationHostnames = mobileServerUrl
-  ? Array.from(new Set([mobileServerHostname, "zerinix.com", "www.zerinix.com"].filter((host): host is string => Boolean(host))))
-  : undefined;
+const allowNavigationHostnames = Array.from(
+  new Set(
+    [mobileServerHostname, "zerinix.com", "www.zerinix.com"].filter(
+      (host): host is string => Boolean(host)
+    )
+  )
+);
 
 const config: CapacitorConfig = {
   appId: "com.zerinix.app",
   appName: "ZERINIX",
   webDir: "capacitor-web",
-  server: mobileServerUrl
-    ? {
-        url: mobileServerUrl,
-        cleartext: mobileServerUsesCleartext,
-        allowNavigation: allowNavigationHostnames,
-      }
-    : undefined,
+  // Unconditional: mobileServerUrl always resolves to a real URL, so a sync
+  // can never generate a native config without server.url.
+  server: {
+    url: mobileServerUrl,
+    cleartext: mobileServerUsesCleartext,
+    allowNavigation: allowNavigationHostnames,
+  },
   ios: {
     // BUG FIX -- the iOS status bar overlapped the in-app headers even
     // after the web layer was correct (`viewport-fit=cover` in
