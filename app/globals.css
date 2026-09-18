@@ -12,6 +12,13 @@
    native WebView (ios.backgroundColor #050706) makes that seam invisible,
    and color-scheme: dark keeps form controls and overscroll dark too. */
 :root {
+  /* Single source of truth for the iOS top safe area.
+     --zx-status-bar is the height of the status-bar strip itself, and
+     --zx-safe-area-top is that plus the app-s normal top padding. Screens
+     consume ONLY --zx-safe-area-top (via MOBILE_SAFE_AREA_TOP), so the inset
+     is defined once here and never restated per page. */
+  --zx-status-bar: env(safe-area-inset-top, 0px);
+  --zx-safe-area-top: calc(1.25rem + var(--zx-status-bar));
   color-scheme: dark;
   --background: #050706;
   --foreground: #ededed;
@@ -22,6 +29,31 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+}
+
+/* Capacitor iOS only. The installed native shell still runs
+   contentInset "automatic", which hands safe-area handling to UIKit and makes
+   WebKit report env(safe-area-inset-top) as 0 -- so the calc() above collapses
+   to its 1.25rem padding and the clock lands on top of the header. Until a
+   native rebuild ships contentInset "never", clamp the strip to the standard
+   iOS status-bar height. max() means the moment WebKit reports a real inset
+   (Dynamic Island included) the real value wins, so this needs no revisiting.
+   Web, desktop and Android browsers never get this class and are untouched. */
+html.zx-native-ios {
+  --zx-status-bar: max(env(safe-area-inset-top, 0px), 2.75rem);
+}
+
+/* Keeps the status-bar strip on the app-s own background while content scrolls
+   beneath it, so scrolled text can never collide with the clock. Same colour as
+   the page, so it is invisible -- it only masks what passes under it. */
+html.zx-native-ios::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 100;
+  height: var(--zx-status-bar);
+  background: var(--background);
+  pointer-events: none;
 }
 
 body {

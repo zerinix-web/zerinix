@@ -32,6 +32,15 @@ export function NativeSplashLifecycle() {
       return;
     }
 
+    // Marks the document as running inside the iOS Capacitor shell so
+    // app/globals.css can clamp --zx-status-bar to a real status-bar height
+    // there. Scoped to iOS because it is the iOS WebView that reports
+    // env(safe-area-inset-top) as 0 under contentInset "automatic"; web,
+    // desktop and Android never get the class and keep pure env() behaviour.
+    if (Capacitor.getPlatform() === "ios") {
+      document.documentElement.classList.add("zx-native-ios");
+    }
+
     SplashScreen.hide().catch(() => {
       // Nothing meaningful to recover here -- the native splash simply
       // stays until the OS itself moves on. Never throw into the app's

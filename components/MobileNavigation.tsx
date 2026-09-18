@@ -167,13 +167,12 @@ export function MobileHeader({
 //
 // On web and desktop every env() term resolves to 0, so spacing collapses
 // back to the plain rem values.
-// `calc(fallback + env())`, never `max(fallback, env())`. When a WebView
-// reports the inset as 0 -- which iOS does whenever the native shell manages
-// insets itself -- `max()` collapses to its small fallback and content slides
-// under the status bar, while `calc()` still keeps the full fallback. Both
-// forms were in use; the max() screens were the ones that overlapped the
-// clock on a physical iPhone while the calc() screen did not.
-export const MOBILE_SAFE_AREA_TOP = "pt-[calc(1.25rem+env(safe-area-inset-top))]";
+// Reads the single --zx-safe-area-top definition in app/globals.css rather
+// than restating an env() expression here. That variable is app-s normal top
+// padding plus --zx-status-bar, and the native shell clamps --zx-status-bar to
+// a real status-bar height, so one edit in one file governs every screen and
+// no page can drift to a different formula.
+export const MOBILE_SAFE_AREA_TOP = "pt-[var(--zx-safe-area-top)]";
 // Mirrors the navigation's real height: 4.75rem of rows/padding plus the very
 // same max(0.65rem,env(...)) the bar applies to itself below, so the reserved
 // space equals the bar whether or not the device reports a bottom inset.

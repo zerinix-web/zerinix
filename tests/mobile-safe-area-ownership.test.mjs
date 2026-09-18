@@ -17,7 +17,7 @@ const NAV_SCREENS = [
 test("the navigation owns the shared safe-area constants", () => {
   assert.match(
     navigation,
-    /export const MOBILE_SAFE_AREA_TOP = "pt-\[calc\(1\.25rem\+env\(safe-area-inset-top\)\)\]";/
+    /export const MOBILE_SAFE_AREA_TOP = "pt-\[var\(--zx-safe-area-top\)\]";/
   );
   assert.match(
     navigation,
