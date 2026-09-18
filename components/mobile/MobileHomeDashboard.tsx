@@ -80,8 +80,16 @@ export default function MobileHomeDashboard({
   const hasAnyActivity =
     projectCount > 0 || completedReports > 0 || recentReports.length > 0;
 
+  // `shrink-0` is load-bearing: this is a direct flex item of the page-s
+  // `flex min-h-screen flex-col` wrapper, while every other mobile screen sits
+  // inside a `flex-1` section with a `min-h-dvh` root. Left shrinkable, this
+  // item was compressed below its content height and the overflow was then
+  // clipped by `overflow-hidden` on the page `main`, so the document stopped
+  // scrolling before the last "Continue where you left off" card -- and the
+  // navigation clearance below it -- could be reached. `min-h-dvh` matches the
+  // pattern the other four screens already use.
   return (
-    <div className="relative z-10 flex w-full flex-col lg:hidden">
+    <div className="relative z-10 flex min-h-dvh w-full shrink-0 flex-col lg:hidden">
       <header
         className={`flex shrink-0 items-center gap-2.5 border-b border-white/[0.06] bg-black/40 px-4 pb-2.5 backdrop-blur-2xl ${MOBILE_SAFE_AREA_TOP}`}
       >
