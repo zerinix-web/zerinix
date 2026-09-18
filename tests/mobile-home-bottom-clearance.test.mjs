@@ -9,6 +9,7 @@ const navigation = read("components/MobileNavigation.tsx");
 const dashboardPage = read("app/dashboard/page.tsx");
 const dashboardTheme = read("app/lib/ui/dashboard-theme.ts");
 const rootLayout = read("app/layout.tsx");
+const globals = read("app/globals.css");
 
 // The Home shell: everything up to the header.
 const shell = home.slice(
@@ -88,7 +89,7 @@ test("the last Continue section is inside the scroller and ends with modest padd
   const continueSection = home.indexOf("<ContinueActivitySection");
 
   assert.ok(continueSection > scrollerStart, "the last section must be scrollable content");
-  assert.match(scroller, /\bpb-6\b/, "a reading gap, not a second nav reservation");
+  assert.match(scroller, /pb-\[calc\(1\.5rem\+var\(--zx-home-indicator\)\)\]/);
 });
 
 test("no pixel hacks, spacers or negative margins, and the top inset is untouched", () => {
@@ -96,4 +97,35 @@ test("no pixel hacks, spacers or negative margins, and the top inset is untouche
   assert.doesNotMatch(home, /className="[^"]*\s-m[btlrxy]?-/);
   assert.match(home, /\$\{MOBILE_SAFE_AREA_TOP\}/);
   assert.equal((home.match(/env\(safe-area-inset-top/g) || []).length, 0);
+});
+
+test("the final card stays inside the reachable scroll range, not just visually cleared", () => {
+  // The shell reserves the bar OUTSIDE the scroller -- visual clearance only.
+  // On iOS the scroller viewport additionally loses the home-indicator strip
+  // to UIKit while env() reports 0, so the scroller bottom edge lands behind
+  // the fixed bar. Without content-space reservation the scroll range ends
+  // with the last card still covered, which is exactly why only rubber-band
+  // revealed it. The strip must be scrollable content inside the scroller.
+  assert.match(
+    scroller,
+    /var\(--zx-home-indicator\)/,
+    "the scroller must reserve the lost strip as real scroll space"
+  );
+  assert.match(shell, /\$\{MOBILE_NAV_CLEARANCE\}/, "the shell still reserves the bar height");
+
+  // One term per element: the shell reserves the bar, the scroller the strip.
+  assert.doesNotMatch(shell, /--zx-home-indicator/);
+  assert.doesNotMatch(scroller, /MOBILE_NAV_CLEARANCE/);
+});
+
+test("the home-indicator strip has one central definition a real inset can win", () => {
+  assert.match(globals, /--zx-home-indicator: env\(safe-area-inset-bottom, 0px\);/);
+  assert.match(
+    globals,
+    /html\.zx-native-ios \{[\s\S]*?--zx-home-indicator: max\(env\(safe-area-inset-bottom, 0px\), 2\.125rem\);/
+  );
+  // A base value and one native clamp -- no third owner.
+  assert.equal((globals.match(/--zx-home-indicator:/g) || []).length, 2);
+  // Mirrors the status-bar strip, so top and bottom follow one pattern.
+  assert.match(globals, /--zx-status-bar: max\(env\(safe-area-inset-top, 0px\), 2\.75rem\);/);
 });

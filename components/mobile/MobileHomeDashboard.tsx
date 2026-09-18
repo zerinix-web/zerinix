@@ -110,7 +110,15 @@ export default function MobileHomeDashboard({
         </p>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6 pt-6">
+      {/* The shell padding above reserves the navigation-s height outside this
+          scroller, which is visual clearance only. On iOS the scroller-s own
+          viewport also loses the home-indicator strip to UIKit, so its last
+          rows render behind the fixed bar and normal scrolling ends before
+          they clear it -- only rubber-band exposed them. Adding that strip
+          here, inside the scroller, turns it into real scrollable content
+          space so the final card can always be scrolled into view. It resolves
+          to the plain reading gap on web. */}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(1.5rem+var(--zx-home-indicator))] pt-6">
         <section aria-label="Overview">
           <h1 className="max-w-[17rem] text-[1.75rem] font-semibold leading-[1.15] tracking-[-0.04em] text-white">
             Your decision workspace
