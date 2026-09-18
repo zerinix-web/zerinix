@@ -84,11 +84,14 @@ test("Home scrolls naturally and clears the bottom navigation exactly once", () 
   assert.match(home, /MOBILE_NAV_CLEARANCE/);
   assert.match(home, /MOBILE_SAFE_AREA_TOP/);
 
-  // Natural document scrolling: no fixed-height shell, no inner scroller.
-  // (`overflow-hidden` on the line-clamped card text is unrelated layout.)
-  assert.doesNotMatch(home, /h-\[100dvh\]/);
-  assert.doesNotMatch(home, /min-h-\[100svh\]/);
-  assert.doesNotMatch(home, /overflow-y-auto/);
+  // Home owns its scrolling in a viewport-height shell with one inner
+  // scroller. Document scrolling was tried first and failed on device: the
+  // page main clips overflow, so content past it never became scrollable and
+  // the tail of "Continue where you left off" stayed unreachable. See
+  // tests/mobile-home-bottom-clearance.test.mjs for the full contract.
+  assert.match(home, /h-\[100dvh\]/);
+  assert.match(home, /overflow-y-auto/);
+  assert.equal((home.match(/overflow-y-auto/g) || []).length, 1);
 
   // No spacer elements, negative margins, or hardcoded device offsets.
   assert.doesNotMatch(home, /<div className="pb-\[calc\([^"]*\)\]" \/>/);

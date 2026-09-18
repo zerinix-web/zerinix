@@ -80,16 +80,25 @@ export default function MobileHomeDashboard({
   const hasAnyActivity =
     projectCount > 0 || completedReports > 0 || recentReports.length > 0;
 
-  // `shrink-0` is load-bearing: this is a direct flex item of the page-s
-  // `flex min-h-screen flex-col` wrapper, while every other mobile screen sits
-  // inside a `flex-1` section with a `min-h-dvh` root. Left shrinkable, this
-  // item was compressed below its content height and the overflow was then
-  // clipped by `overflow-hidden` on the page `main`, so the document stopped
-  // scrolling before the last "Continue where you left off" card -- and the
-  // navigation clearance below it -- could be reached. `min-h-dvh` matches the
-  // pattern the other four screens already use.
+  // Home owns its own scrolling instead of relying on the document.
+  //
+  // The page chain above is html{height:100%} > body > main{min-h-screen,
+  // overflow-hidden} > div{flex min-h-screen flex-col}. Because `main` clips
+  // overflow, anything taller than it never contributes scrollable height, so
+  // document scrolling stopped short and the tail of "Continue where you left
+  // off" stayed unreachable behind the fixed navigation. Growing this
+  // component (min-h-dvh + shrink-0) could not fix that: the clipping happens
+  // in an ancestor, so a taller child only produces more clipped content.
+  //
+  // This is the same shell the Ask workspace already uses successfully on
+  // device: a viewport-height column that hides its own overflow, a shrink-0
+  // header, and a single flex-1 scroller beneath it that owns the vertical
+  // scrolling. The navigation clearance sits on the shell, so the scroller
+  // ends above the fixed bar and its last card is always reachable.
   return (
-    <div className="relative z-10 flex min-h-dvh w-full shrink-0 flex-col lg:hidden">
+    <div
+      className={`relative z-10 flex h-[100dvh] w-full shrink-0 flex-col overflow-hidden lg:hidden ${MOBILE_NAV_CLEARANCE}`}
+    >
       <header
         className={`flex shrink-0 items-center gap-2.5 border-b border-white/[0.06] bg-black/40 px-4 pb-2.5 backdrop-blur-2xl ${MOBILE_SAFE_AREA_TOP}`}
       >
@@ -101,7 +110,7 @@ export default function MobileHomeDashboard({
         </p>
       </header>
 
-      <div className={`px-4 pt-6 ${MOBILE_NAV_CLEARANCE}`}>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6 pt-6">
         <section aria-label="Overview">
           <h1 className="max-w-[17rem] text-[1.75rem] font-semibold leading-[1.15] tracking-[-0.04em] text-white">
             Your decision workspace
