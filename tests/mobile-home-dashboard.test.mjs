@@ -84,15 +84,16 @@ test("Home scrolls naturally and clears the bottom navigation exactly once", () 
   assert.match(home, /MOBILE_NAV_CLEARANCE/);
   assert.match(home, /MOBILE_SAFE_AREA_TOP/);
 
-  // Home scrolls with the document, like every other mobile screen. A
-  // viewport-height shell with an inner scroller was tried first and failed on
-  // device: under contentInset "automatic" the shell ends below the visible
-  // region, so the scroller's own viewport sat behind the fixed bar and its
-  // last card was reachable only by rubber-banding. See
-  // tests/mobile-home-bottom-clearance.test.mjs for the full contract.
-  assert.doesNotMatch(home, /h-\[100dvh\]/);
-  assert.equal((home.match(/overflow-y-auto/g) || []).length, 0);
-  assert.match(home, /min-h-dvh/);
+  // Home owns one bounded scroller inside a viewport-fixed shell, so no
+  // ancestor height or overflow rule participates in its scroll range, and
+  // the clearance lives inside the scrollable content. Document scrolling was
+  // tried and failed on device: as the page column's only in-flow child, Home
+  // left that column at min-h-screen and main's overflow-hidden clipped the
+  // rest. See tests/mobile-home-bottom-clearance.test.mjs for the structural
+  // contract this summarises.
+  assert.match(home, /fixed inset-0/);
+  assert.equal((home.match(/overflow-y-auto/g) || []).length, 1);
+  assert.doesNotMatch(home, /min-h-dvh/);
 
   // No spacer elements, negative margins, or hardcoded device offsets.
   assert.doesNotMatch(home, /<div className="pb-\[[^"]*\]" \/>/);

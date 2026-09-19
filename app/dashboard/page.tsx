@@ -503,26 +503,27 @@ export default async function DashboardPage() {
             the viewport, and there is only ever one copy of it. */}
         {mobileChatHomeEnabled ? <MobileBottomNavigation /> : null}
 
-        {/* Home sits in the same `section.flex-1 lg:hidden` wrapper that the
-            other mobile dashboard routes use for their screens, so it is a
-            normal growing block in this page's flex column and scrolls with
-            the document just like they do. */}
+        {/* Home is NOT wrapped in a `flex-1` section here, unlike the other
+            mobile routes. On this route it would be the only in-flow child of
+            this column (the sidebar's aside is `hidden lg:flex` and its mobile
+            header is disabled above), and a lone `flex: 1 1 0%` child leaves
+            the column at min-h-screen in WebKit, so Home's overflow was
+            clipped by main's overflow-hidden and became unreachable. Home owns
+            a viewport-fixed shell instead and depends on no ancestor height. */}
         {mobileChatHomeEnabled ? (
-          <section className="flex-1 lg:hidden">
-            <MobileHomeDashboard
-              workspaces={workspaces}
-              completedReports={completedReports}
-              reportsNeedingAttention={reportsNeedingAttention}
-              recentReports={recentReports.map((report) => ({
-                id: report.id,
-                workspaceId: report.workspaceId,
-                title: report.title,
-                type: report.type,
-                status: report.status,
-                createdAt: report.createdAt,
-              }))}
-            />
-          </section>
+          <MobileHomeDashboard
+            workspaces={workspaces}
+            completedReports={completedReports}
+            reportsNeedingAttention={reportsNeedingAttention}
+            recentReports={recentReports.map((report) => ({
+              id: report.id,
+              workspaceId: report.workspaceId,
+              title: report.title,
+              type: report.type,
+              status: report.status,
+              createdAt: report.createdAt,
+            }))}
+          />
         ) : null}
 
         <section
