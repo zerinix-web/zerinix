@@ -17,15 +17,15 @@ const NAV_SCREENS = [
 test("the navigation owns the shared safe-area constants", () => {
   assert.match(
     navigation,
-    /export const MOBILE_SAFE_AREA_TOP = "pt-\[var\(--zx-safe-area-top\)\]";/
+    /export const MOBILE_SAFE_AREA_TOP = "pt-\[calc\(1\.25rem\+var\(--zx-status-bar\)\)\]";/
   );
   assert.match(
     navigation,
-    /"pb-\[calc\(4\.75rem\+max\(0\.65rem,env\(safe-area-inset-bottom\)\)\)\]"/
+    /"pb-\[calc\(4\.75rem\+var\(--zx-home-indicator\)\)\]"/
   );
   assert.match(
     navigation,
-    /"pb-\[calc\(1\.5rem\+4\.75rem\+max\(0\.65rem,env\(safe-area-inset-bottom\)\)\)\]"/
+    /"pb-\[calc\(1\.5rem\+4\.75rem\+var\(--zx-home-indicator\)\)\]"/
   );
   // calc(fallback + env), never max(fallback, env): a WebView reporting the
   // inset as 0 must still get the full fallback rather than collapsing to it.

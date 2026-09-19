@@ -167,27 +167,34 @@ export function MobileHeader({
 //
 // On web and desktop every env() term resolves to 0, so spacing collapses
 // back to the plain rem values.
-// Reads the single --zx-safe-area-top definition in app/globals.css rather
-// than restating an env() expression here. That variable is app-s normal top
-// padding plus --zx-status-bar, and the native shell clamps --zx-status-bar to
-// a real status-bar height, so one edit in one file governs every screen and
-// no page can drift to a different formula.
-export const MOBILE_SAFE_AREA_TOP = "pt-[var(--zx-safe-area-top)]";
-// Mirrors the navigation's real height: 4.75rem of rows/padding plus the very
-// same max(0.65rem,env(...)) the bar applies to itself below, so the reserved
-// space equals the bar whether or not the device reports a bottom inset.
+// The arithmetic lives HERE, in the declaration, and --zx-status-bar supplies
+// only a terminal length. The reverse -- a --zx-safe-area-top variable holding
+// calc(1.25rem + var(--zx-status-bar)), consumed as pt-[var(--zx-safe-area-top)]
+// -- is what shipped before, and it computed to 0px on a physical iPhone while
+// the same expression written literally computed to 82px (see app/globals.css).
+// The inset itself is still defined once, centrally; only the addition moved.
+export const MOBILE_SAFE_AREA_TOP = "pt-[calc(1.25rem+var(--zx-status-bar))]";
+// Mirrors the navigation's real height exactly: 4.75rem of rows/padding plus
+// --zx-home-indicator, which is the very same max(0.65rem, env(...)) the bar
+// applies to itself below. One definition, so the reservation cannot drift
+// from the bar it reserves for, on any device.
 export const MOBILE_NAV_CLEARANCE =
-  "pb-[calc(4.75rem+max(0.65rem,env(safe-area-inset-bottom)))]";
+  "pb-[calc(4.75rem+var(--zx-home-indicator))]";
 // The tail of a scroll container whose last card should come to rest CLEAR of
 // the bar rather than flush against its top edge: the same reservation plus a
-// 1.5rem reading gap. Applied to an in-flow child of the scroller, never to
-// the scroll container itself -- WebKit leaves a scroll container's own
-// padding-bottom out of its scrollable overflow, so it would add no reachable
-// range. Written out in full because Tailwind only sees literal class strings;
-// a composed template literal would never be generated. A test pins it to
+// 1.5rem reading gap. Two rules govern it, both learned from device
+// measurements:
+//   - It goes on an in-flow CHILD of the scroller, never on the scroll
+//     container itself: WebKit leaves a scroll container's own padding-bottom
+//     out of its scrollable overflow, so there it adds no reachable range.
+//   - The calc() lives in the class; --zx-home-indicator supplies only a
+//     terminal length. A calc()-valued custom property consumed through var()
+//     computes to 0 on iOS WebKit (see app/globals.css).
+// Written out in full because Tailwind only sees literal class strings; a
+// composed template literal would never be generated. Tests pin it to
 // MOBILE_NAV_CLEARANCE so the two can never drift apart.
 export const MOBILE_SCROLLER_TAIL =
-  "pb-[calc(1.5rem+4.75rem+max(0.65rem,env(safe-area-inset-bottom)))]";
+  "pb-[calc(1.5rem+4.75rem+var(--zx-home-indicator))]";
 
 export function MobileBottomNavigation({
   labels,

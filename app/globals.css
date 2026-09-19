@@ -12,13 +12,26 @@
    native WebView (ios.backgroundColor #050706) makes that seam invisible,
    and color-scheme: dark keeps form controls and overscroll dark too. */
 :root {
-  /* Single source of truth for the iOS top safe area.
-     --zx-status-bar is the height of the status-bar strip itself, and
-     --zx-safe-area-top is that plus the app-s normal top padding. Screens
-     consume ONLY --zx-safe-area-top (via MOBILE_SAFE_AREA_TOP), so the inset
-     is defined once here and never restated per page. */
+  /* Single source of truth for the iOS safe areas: the status-bar strip and
+     the home-indicator strip. Screens add their own padding to these via
+     MOBILE_SAFE_AREA_TOP / MOBILE_NAV_CLEARANCE, so each inset is defined
+     once here and never restated per page.
+
+     NEVER give one of these variables a calc() value. Measured on a physical
+     iPhone through Safari Web Inspector: --zx-safe-area-top used to hold
+     calc(1.25rem + var(--zx-status-bar)), which resolved correctly to the
+     string "calc(1.25rem + max(62px, 2.75rem))" -- and yet the rule that
+     consumed it, padding-top: var(--zx-safe-area-top), computed to 0px. The
+     identical expression written literally in a declaration computed to 82px
+     in the same console. This WebKit rejects a var() substitution whose value
+     is itself a calc(), silently, with the rule present and matching. So the
+     variables hold terminal values and the arithmetic lives in the
+     declaration: pt-[calc(1.25rem+var(--zx-status-bar))]. That shape is
+     measured working on the device. */
   --zx-status-bar: env(safe-area-inset-top, 0px);
-  --zx-safe-area-top: calc(1.25rem + var(--zx-status-bar));
+  /* The bottom counterpart. Both variables hold a TERMINAL value -- an env(),
+     or a max() of plain lengths -- never a calc(). See the note below. */
+  --zx-home-indicator: max(0.65rem, env(safe-area-inset-bottom, 0px));
   color-scheme: dark;
   --background: #050706;
   --foreground: #ededed;

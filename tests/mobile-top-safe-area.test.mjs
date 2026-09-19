@@ -20,17 +20,21 @@ const TOP_INSET_SCREENS = [
 
 test("the top safe area has exactly one definition, in globals.css", () => {
   assert.match(globals, /--zx-status-bar: env\(safe-area-inset-top, 0px\);/);
-  assert.match(globals, /--zx-safe-area-top: calc\(1\.25rem \+ var\(--zx-status-bar\)\);/);
+  // The addition lives in the consuming class now, not in a variable: a
+  // calc()-valued custom property computes to 0 through var() on iOS.
+  assert.doesNotMatch(globals, /--zx-safe-area-top:/);
+  assert.match(navigation, /pt-\[calc\(1\.25rem\+var\(--zx-status-bar\)\)\]/);
 
   // Declared once each: a second definition would be a competing owner.
-  assert.equal((globals.match(/--zx-safe-area-top:/g) || []).length, 1);
+  assert.equal((globals.match(/--zx-safe-area-top:/g) || []).length, 0, "the calc-valued variable is gone");
   assert.equal((globals.match(/--zx-status-bar:/g) || []).length, 2, "base value plus the native clamp");
 });
 
 test("the native iOS shell clamps the strip without hardcoding a device offset", () => {
+  // The clamp is kept: a max() of plain lengths is a terminal value, and the
+  // device measured calc(1.25rem + var(--zx-status-bar)) at 82px with it in
+  // place. Only calc()-VALUED variables are forbidden (see globals.css).
   assert.match(globals, /html\.zx-native-ios \{\s*--zx-status-bar: max\(env\(safe-area-inset-top, 0px\), 2\.75rem\);/);
-  // max() means a real reported inset always wins once the native build
-  // stops zeroing it, so this never has to be revisited per device.
   assert.doesNotMatch(globals, /--zx-status-bar: 2\.75rem;/);
   assert.doesNotMatch(globals, /--zx-status-bar: \d+px;/);
 });
@@ -54,7 +58,7 @@ test("only the iOS Capacitor shell is tagged, so web and Android keep pure env()
 });
 
 test("every mobile screen consumes the shared variable and restates no inset", () => {
-  assert.match(navigation, /export const MOBILE_SAFE_AREA_TOP = "pt-\[var\(--zx-safe-area-top\)\]";/);
+  assert.match(navigation, /export const MOBILE_SAFE_AREA_TOP = "pt-\[calc\(1\.25rem\+var\(--zx-status-bar\)\)\]";/);
 
   for (const path of TOP_INSET_SCREENS) {
     const source = read(path);
@@ -72,7 +76,7 @@ test("bottom safe-area behaviour is unchanged", () => {
   assert.match(navigation, /pb-\[max\(0\.65rem,env\(safe-area-inset-bottom\)\)\]/);
   assert.match(
     navigation,
-    /"pb-\[calc\(4\.75rem\+max\(0\.65rem,env\(safe-area-inset-bottom\)\)\)\]"/
+    /"pb-\[calc\(4\.75rem\+var\(--zx-home-indicator\)\)\]"/
   );
   // The top fix must not have touched the bottom variable space.
   assert.doesNotMatch(globals, /--zx-status-bar-bottom/);
