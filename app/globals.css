@@ -19,11 +19,6 @@
      is defined once here and never restated per page. */
   --zx-status-bar: env(safe-area-inset-top, 0px);
   --zx-safe-area-top: calc(1.25rem + var(--zx-status-bar));
-  /* The home-indicator strip, the bottom counterpart of --zx-status-bar.
-     A scroll container adds this to its own bottom padding so its last item
-     can scroll clear of the fixed navigation. 0 on web, where nothing is
-     inset and the navigation clearance already covers the bar. */
-  --zx-home-indicator: env(safe-area-inset-bottom, 0px);
   color-scheme: dark;
   --background: #050706;
   --foreground: #ededed;
@@ -46,14 +41,6 @@
    Web, desktop and Android browsers never get this class and are untouched. */
 html.zx-native-ios {
   --zx-status-bar: max(env(safe-area-inset-top, 0px), 2.75rem);
-  /* Same reason as the status bar above: under contentInset "automatic" UIKit
-     insets the scroll view by the home indicator but reports the inset as 0,
-     so a scroll container cannot see the strip its own viewport lost. The
-     fixed navigation anchors to the visual viewport, which sits that much
-     higher than the shell bottom, leaving the scroller-s final strip behind
-     the bar. 2.125rem is the standard home-indicator height, and max() hands
-     control back to a real reported inset after a native rebuild. */
-  --zx-home-indicator: max(env(safe-area-inset-bottom, 0px), 2.125rem);
 }
 
 /* Keeps the status-bar strip on the app-s own background while content scrolls

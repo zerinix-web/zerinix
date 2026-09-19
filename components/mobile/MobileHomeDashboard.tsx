@@ -24,10 +24,10 @@ import {
 // honest "in progress" state to show.
 //
 // Layout rules follow the conventions the rest of the app now uses: the
-// header owns the top safe-area inset, the scroll container clears the fixed
-// MobileBottomNavigation with its own height plus the bottom inset, and the
-// page scrolls naturally -- no fixed-height shell, no spacer elements, no
-// negative margins, no device-specific offsets.
+// header owns the top safe-area inset, the screen root reserves the fixed
+// MobileBottomNavigation once via the shared clearance constant, and the page
+// scrolls with the document -- no fixed-height shell, no inner scroller, no
+// spacer elements, no negative margins, no device-specific offsets.
 
 const ANALYSIS_ACTIONS = [
   {
@@ -80,27 +80,40 @@ export default function MobileHomeDashboard({
   const hasAnyActivity =
     projectCount > 0 || completedReports > 0 || recentReports.length > 0;
 
-  // Home owns its own scrolling instead of relying on the document.
+  // Home scrolls with the document, exactly like every other mobile screen
+  // (Account, Reports, Projects, Workspace detail).
   //
-  // The page chain above is html{height:100%} > body > main{min-h-screen,
-  // overflow-hidden} > div{flex min-h-screen flex-col}. Because `main` clips
-  // overflow, anything taller than it never contributes scrollable height, so
-  // document scrolling stopped short and the tail of "Continue where you left
-  // off" stayed unreachable behind the fixed navigation. Growing this
-  // component (min-h-dvh + shrink-0) could not fix that: the clipping happens
-  // in an ancestor, so a taller child only produces more clipped content.
+  // The shell that shipped before this -- a viewport-height column with an
+  // inner scroll container -- could not work in the current native WebView.
+  // Capacitor still runs contentInset "automatic", so UIKit, not WebKit,
+  // applies the safe-area insets: the document is pushed down by the status
+  // bar and the visible region is shorter than 100dvh by the top and bottom
+  // insets combined, while env() still reports 0. A viewport-height shell
+  // therefore ended below the visible region, so the SCROLLER-S OWN VIEWPORT,
+  // not its content, sat off screen behind the fixed navigation. Scrolling
+  // could never bring that strip up; only UIScrollView-s rubber-band shifts the whole
+  // document, which is exactly why forcing the scroll revealed the last card
+  // and releasing snapped it away again. Padding could not rescue it either:
+  // WebKit excludes a scroll container-s own bottom padding from its
+  // scrollable overflow, so that padding added no scroll range at all.
   //
-  // This is the same shell the Ask workspace already uses successfully on
-  // device: a viewport-height column that hides its own overflow, a shrink-0
-  // header, and a single flex-1 scroller beneath it that owns the vertical
-  // scrolling. The navigation clearance sits on the shell, so the scroller
-  // ends above the fixed bar and its last card is always reachable.
+  // Document scrolling has neither problem. UIKit-s contentInset.bottom is
+  // part of the scroll view-s range, so the end of the document is always
+  // reachable, and the clearance below is ordinary in-flow padding on a
+  // growing block, which does count towards the document-s scroll height.
+  //
+  // The earlier belief that an ancestor clipped the document was wrong: `main`
+  // is min-h-screen with auto height, so it grows with its content and its
+  // overflow-hidden never triggers vertically -- which is why the four sibling
+  // screens under that identical ancestor chain scroll to their end on this
+  // same device. Home is now structurally identical to them, down to the
+  // `section.flex-1` wrapper in app/dashboard/page.tsx.
   return (
     <div
-      className={`relative z-10 flex h-[100dvh] w-full shrink-0 flex-col overflow-hidden lg:hidden ${MOBILE_NAV_CLEARANCE}`}
+      className={`relative min-h-dvh overflow-hidden text-white lg:hidden ${MOBILE_NAV_CLEARANCE}`}
     >
       <header
-        className={`flex shrink-0 items-center gap-2.5 border-b border-white/[0.06] bg-black/40 px-4 pb-2.5 backdrop-blur-2xl ${MOBILE_SAFE_AREA_TOP}`}
+        className={`flex items-center gap-2.5 border-b border-white/[0.06] bg-black/40 px-4 pb-2.5 backdrop-blur-2xl ${MOBILE_SAFE_AREA_TOP}`}
       >
         <span className="flex h-8 w-8 items-center justify-center rounded-[0.85rem] bg-white text-[10px] font-black tracking-[0.1em] text-black shadow-md shadow-white/5">
           ZX
@@ -110,15 +123,7 @@ export default function MobileHomeDashboard({
         </p>
       </header>
 
-      {/* The shell padding above reserves the navigation-s height outside this
-          scroller, which is visual clearance only. On iOS the scroller-s own
-          viewport also loses the home-indicator strip to UIKit, so its last
-          rows render behind the fixed bar and normal scrolling ends before
-          they clear it -- only rubber-band exposed them. Adding that strip
-          here, inside the scroller, turns it into real scrollable content
-          space so the final card can always be scrolled into view. It resolves
-          to the plain reading gap on web. */}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(1.5rem+var(--zx-home-indicator))] pt-6">
+      <div className="px-4 pb-6 pt-6">
         <section aria-label="Overview">
           <h1 className="max-w-[17rem] text-[1.75rem] font-semibold leading-[1.15] tracking-[-0.04em] text-white">
             Your decision workspace

@@ -503,20 +503,26 @@ export default async function DashboardPage() {
             the viewport, and there is only ever one copy of it. */}
         {mobileChatHomeEnabled ? <MobileBottomNavigation /> : null}
 
+        {/* Home sits in the same `section.flex-1 lg:hidden` wrapper that the
+            other mobile dashboard routes use for their screens, so it is a
+            normal growing block in this page's flex column and scrolls with
+            the document just like they do. */}
         {mobileChatHomeEnabled ? (
-          <MobileHomeDashboard
-            workspaces={workspaces}
-            completedReports={completedReports}
-            reportsNeedingAttention={reportsNeedingAttention}
-            recentReports={recentReports.map((report) => ({
-              id: report.id,
-              workspaceId: report.workspaceId,
-              title: report.title,
-              type: report.type,
-              status: report.status,
-              createdAt: report.createdAt,
-            }))}
-          />
+          <section className="flex-1 lg:hidden">
+            <MobileHomeDashboard
+              workspaces={workspaces}
+              completedReports={completedReports}
+              reportsNeedingAttention={reportsNeedingAttention}
+              recentReports={recentReports.map((report) => ({
+                id: report.id,
+                workspaceId: report.workspaceId,
+                title: report.title,
+                type: report.type,
+                status: report.status,
+                createdAt: report.createdAt,
+              }))}
+            />
+          </section>
         ) : null}
 
         <section

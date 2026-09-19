@@ -84,17 +84,18 @@ test("Home scrolls naturally and clears the bottom navigation exactly once", () 
   assert.match(home, /MOBILE_NAV_CLEARANCE/);
   assert.match(home, /MOBILE_SAFE_AREA_TOP/);
 
-  // Home owns its scrolling in a viewport-height shell with one inner
-  // scroller. Document scrolling was tried first and failed on device: the
-  // page main clips overflow, so content past it never became scrollable and
-  // the tail of "Continue where you left off" stayed unreachable. See
+  // Home scrolls with the document, like every other mobile screen. A
+  // viewport-height shell with an inner scroller was tried first and failed on
+  // device: under contentInset "automatic" the shell ends below the visible
+  // region, so the scroller's own viewport sat behind the fixed bar and its
+  // last card was reachable only by rubber-banding. See
   // tests/mobile-home-bottom-clearance.test.mjs for the full contract.
-  assert.match(home, /h-\[100dvh\]/);
-  assert.match(home, /overflow-y-auto/);
-  assert.equal((home.match(/overflow-y-auto/g) || []).length, 1);
+  assert.doesNotMatch(home, /h-\[100dvh\]/);
+  assert.equal((home.match(/overflow-y-auto/g) || []).length, 0);
+  assert.match(home, /min-h-dvh/);
 
   // No spacer elements, negative margins, or hardcoded device offsets.
-  assert.doesNotMatch(home, /<div className="pb-\[calc\([^"]*\)\]" \/>/);
+  assert.doesNotMatch(home, /<div className="pb-\[[^"]*\]" \/>/);
   assert.doesNotMatch(home, /className="[^"]*\s-m[btlrxy]?-/);
   // Spacing and positioning must never be a hardcoded device offset.
   // (Typography such as text-[11px] is unrelated and allowed.)
