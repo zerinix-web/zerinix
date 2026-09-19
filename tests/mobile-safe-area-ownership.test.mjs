@@ -23,6 +23,10 @@ test("the navigation owns the shared safe-area constants", () => {
     navigation,
     /"pb-\[calc\(4\.75rem\+max\(0\.65rem,env\(safe-area-inset-bottom\)\)\)\]"/
   );
+  assert.match(
+    navigation,
+    /"pb-\[calc\(1\.5rem\+4\.75rem\+max\(0\.65rem,env\(safe-area-inset-bottom\)\)\)\]"/
+  );
   // calc(fallback + env), never max(fallback, env): a WebView reporting the
   // inset as 0 must still get the full fallback rather than collapsing to it.
   assert.doesNotMatch(navigation, /pt-\[max\([^\]]*env\(safe-area-inset-top\)/);
@@ -36,7 +40,14 @@ test("bottom-nav screens reserve the navigation height exactly once, from the sh
   for (const path of NAV_SCREENS) {
     const source = read(path);
 
-    assert.match(source, /MOBILE_NAV_CLEARANCE/, `${path} must use the shared clearance`);
+    // Home's scroller reserves the bar plus a reading gap via
+    // MOBILE_SCROLLER_TAIL; every other screen uses the plain clearance. Both
+    // are derived from the navigation's own height in the same file.
+    assert.match(
+      source,
+      /MOBILE_NAV_CLEARANCE|MOBILE_SCROLLER_TAIL/,
+      `${path} must reserve the bar from a shared constant`
+    );
     assert.doesNotMatch(
       source,
       /pb-\[calc\(8\.\d+rem\+env\(safe-area-inset-bottom\)\)\]/,

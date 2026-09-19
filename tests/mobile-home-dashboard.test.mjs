@@ -81,7 +81,7 @@ test("metrics and calls to action are omitted when there is nothing real to show
 test("Home scrolls naturally and clears the bottom navigation exactly once", () => {
   // Nav clearance comes from the shared constant the navigation exports, so
   // the reserved height can never drift from the bar it reserves for.
-  assert.match(home, /MOBILE_NAV_CLEARANCE/);
+  assert.match(home, /MOBILE_SCROLLER_TAIL/);
   assert.match(home, /MOBILE_SAFE_AREA_TOP/);
 
   // Home owns one bounded scroller inside a viewport-fixed shell, so no

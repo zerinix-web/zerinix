@@ -99,17 +99,19 @@ test("navigation clearance is inside the real scrollable content, not simulated 
   // child of the scroller: padding on such a child is part of the scrollable
   // overflow region, so it genuinely extends scrollHeight.
   assert.equal(owner.children.length, 1, "the scroller wraps its content in one in-flow block");
-  assert.match(content.attrs, /\$\{MOBILE_NAV_CLEARANCE\}/);
+  assert.match(content.attrs, /\$\{MOBILE_SCROLLER_TAIL\}/);
 
   // It must NOT be on the scroll container itself: WebKit excludes a scroll
   // container's own padding-bottom from its scrollable overflow, so that
   // padding adds no scroll range (this shipped twice and failed twice).
   assert.doesNotMatch(owner.className, /(?:^|\s)p[btlrxy]?-/, "no padding on the scroll container");
-  assert.doesNotMatch(owner.attrs, /MOBILE_NAV_CLEARANCE/);
+  assert.doesNotMatch(owner.attrs, /MOBILE_SCROLLER_TAIL/);
 
   // ...nor on the shell, where it only shortens the viewport.
-  assert.doesNotMatch(shell.attrs, /MOBILE_NAV_CLEARANCE/);
-  assert.equal((home.match(/MOBILE_NAV_CLEARANCE/g) || []).length, 2, "imported once, applied once");
+  assert.doesNotMatch(shell.attrs, /MOBILE_SCROLLER_TAIL/);
+  assert.equal((home.match(/MOBILE_SCROLLER_TAIL/g) || []).length, 2, "imported once, applied once");
+  // The exact sizes are proven numerically in
+  // tests/mobile-home-scroll-reachability.test.mjs.
 });
 
 test("the final Home card is part of the scroll owner's scrollHeight", () => {

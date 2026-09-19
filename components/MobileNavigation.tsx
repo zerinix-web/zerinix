@@ -178,6 +178,16 @@ export const MOBILE_SAFE_AREA_TOP = "pt-[var(--zx-safe-area-top)]";
 // space equals the bar whether or not the device reports a bottom inset.
 export const MOBILE_NAV_CLEARANCE =
   "pb-[calc(4.75rem+max(0.65rem,env(safe-area-inset-bottom)))]";
+// The tail of a scroll container whose last card should come to rest CLEAR of
+// the bar rather than flush against its top edge: the same reservation plus a
+// 1.5rem reading gap. Applied to an in-flow child of the scroller, never to
+// the scroll container itself -- WebKit leaves a scroll container's own
+// padding-bottom out of its scrollable overflow, so it would add no reachable
+// range. Written out in full because Tailwind only sees literal class strings;
+// a composed template literal would never be generated. A test pins it to
+// MOBILE_NAV_CLEARANCE so the two can never drift apart.
+export const MOBILE_SCROLLER_TAIL =
+  "pb-[calc(1.5rem+4.75rem+max(0.65rem,env(safe-area-inset-bottom)))]";
 
 export function MobileBottomNavigation({
   labels,

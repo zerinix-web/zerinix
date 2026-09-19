@@ -7,8 +7,8 @@ import {
   type MobileHomeReportSummary,
 } from "@/components/mobile/MobileHomeSections";
 import {
-  MOBILE_NAV_CLEARANCE,
   MOBILE_SAFE_AREA_TOP,
+  MOBILE_SCROLLER_TAIL,
 } from "@/components/MobileNavigation";
 
 // Mobile Home: an executive command center, not a second AI chat entry
@@ -105,10 +105,12 @@ export default function MobileHomeDashboard({
   // document never scrolls alongside it. The decorative `main` behind it is
   // untouched and still paints the background.
   //
-  // The clearance is applied to the content wrapper INSIDE the scroller, not
-  // to the scroller itself: padding on an in-flow child is part of the
-  // scrollable overflow region, so the last card is genuinely inside
-  // scrollHeight and scrolls clear of the fixed bar.
+  // The tail reservation is applied to the content wrapper INSIDE the
+  // scroller, not to the scroller itself: padding on an in-flow child is
+  // part of the scrollable overflow region, so the last card is genuinely
+  // inside scrollHeight. It is the bar's own height plus a reading gap, so
+  // the final card comes to rest clear of the bar instead of flush against
+  // it.
   return (
     <div className="fixed inset-0 z-30 flex flex-col lg:hidden">
       <header
@@ -123,7 +125,7 @@ export default function MobileHomeDashboard({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        <div className={`px-4 pt-6 ${MOBILE_NAV_CLEARANCE}`}>
+        <div className={`px-4 pt-6 ${MOBILE_SCROLLER_TAIL}`}>
           <section aria-label="Overview">
             <h1 className="max-w-[17rem] text-[1.75rem] font-semibold leading-[1.15] tracking-[-0.04em] text-white">
               Your decision workspace
