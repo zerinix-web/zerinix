@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const navigation = read("components/MobileNavigation.tsx");
+const layout = read("components/mobile-layout.ts");
 
 // Every screen that renders beneath the fixed MobileBottomNavigation.
 const NAV_SCREENS = [
@@ -14,17 +15,17 @@ const NAV_SCREENS = [
   "components/mobile/MobileWorkspaceDetail.tsx",
 ];
 
-test("the navigation owns the shared safe-area constants", () => {
+test("the shared safe-area constants are declared once, outside the client module", () => {
   assert.match(
-    navigation,
+    layout,
     /export const MOBILE_SAFE_AREA_TOP = "pt-\[calc\(1\.25rem\+var\(--zx-status-bar\)\)\]";/
   );
   assert.match(
-    navigation,
+    layout,
     /"pb-\[calc\(4\.75rem\+var\(--zx-home-indicator\)\)\]"/
   );
   assert.match(
-    navigation,
+    layout,
     /"pb-\[calc\(1\.5rem\+4\.75rem\+var\(--zx-home-indicator\)\)\]"/
   );
   // calc(fallback + env), never max(fallback, env): a WebView reporting the

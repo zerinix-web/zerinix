@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const navigation = read("components/MobileNavigation.tsx");
 const globals = read("app/globals.css");
+const layout = read("components/mobile-layout.ts");
 const home = read("components/mobile/MobileHomeDashboard.tsx");
 
 // --- A CSS length evaluator, so this file proves the geometry numerically
@@ -66,9 +67,9 @@ function evalLength(expression, insetPx) {
 const paddingExpression = (source, constant) =>
   new RegExp(`${constant} =\\s*"pb-\\[([^\\]]*)\\]"`).exec(source)[1];
 
-const navClearance = paddingExpression(navigation, "MOBILE_NAV_CLEARANCE");
-const scrollerTail = paddingExpression(navigation, "MOBILE_SCROLLER_TAIL");
-const safeAreaTop = /MOBILE_SAFE_AREA_TOP = "pt-\[([^\]]*)\]"/.exec(navigation)[1];
+const navClearance = paddingExpression(layout, "MOBILE_NAV_CLEARANCE");
+const scrollerTail = paddingExpression(layout, "MOBILE_SCROLLER_TAIL");
+const safeAreaTop = /MOBILE_SAFE_AREA_TOP = "pt-\[([^\]]*)\]"/.exec(layout)[1];
 
 // The bar's real composed height, read from the navigation's own markup
 // rather than restated here: pt-2 + pill p-1.5 (top and bottom) + a min-h-14

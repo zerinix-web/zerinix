@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const globals = read("app/globals.css");
 const navigation = read("components/MobileNavigation.tsx");
+const layout = read("components/mobile-layout.ts");
 const nativeLifecycle = read("components/NativeSplashLifecycle.tsx");
 const chat = read("components/AIChatWorkspace.tsx");
 const home = read("components/mobile/MobileHomeDashboard.tsx");
@@ -23,7 +24,7 @@ test("the top safe area has exactly one definition, in globals.css", () => {
   // The addition lives in the consuming class now, not in a variable: a
   // calc()-valued custom property computes to 0 through var() on iOS.
   assert.doesNotMatch(globals, /--zx-safe-area-top:/);
-  assert.match(navigation, /pt-\[calc\(1\.25rem\+var\(--zx-status-bar\)\)\]/);
+  assert.match(layout, /pt-\[calc\(1\.25rem\+var\(--zx-status-bar\)\)\]/);
 
   // Declared once each: a second definition would be a competing owner.
   assert.equal((globals.match(/--zx-safe-area-top:/g) || []).length, 0, "the calc-valued variable is gone");
@@ -58,7 +59,7 @@ test("only the iOS Capacitor shell is tagged, so web and Android keep pure env()
 });
 
 test("every mobile screen consumes the shared variable and restates no inset", () => {
-  assert.match(navigation, /export const MOBILE_SAFE_AREA_TOP = "pt-\[calc\(1\.25rem\+var\(--zx-status-bar\)\)\]";/);
+  assert.match(layout, /export const MOBILE_SAFE_AREA_TOP = "pt-\[calc\(1\.25rem\+var\(--zx-status-bar\)\)\]";/);
 
   for (const path of TOP_INSET_SCREENS) {
     const source = read(path);
@@ -73,9 +74,11 @@ test("every mobile screen consumes the shared variable and restates no inset", (
 });
 
 test("bottom safe-area behaviour is unchanged", () => {
+  // The bar still consumes the inset directly, in the navigation markup...
   assert.match(navigation, /pb-\[max\(0\.65rem,env\(safe-area-inset-bottom\)\)\]/);
+  // ...and the matching reservation is declared in the plain layout module.
   assert.match(
-    navigation,
+    layout,
     /"pb-\[calc\(4\.75rem\+var\(--zx-home-indicator\)\)\]"/
   );
   // The top fix must not have touched the bottom variable space.

@@ -15,11 +15,11 @@ import {
 } from "@/app/lib/ai/response-sanitization";
 import { splitStreamingMarkdownIntoSettledAndActive } from "@/app/lib/streaming-markdown-split";
 import { useThrottledStreamingReveal } from "@/app/lib/streaming-reveal";
+import { MobileBottomNavigation } from "@/components/MobileNavigation";
 import {
-  MobileBottomNavigation,
   MOBILE_NAV_CLEARANCE,
   MOBILE_SAFE_AREA_TOP,
-} from "@/components/MobileNavigation";
+} from "@/components/mobile-layout";
 import {
   AlertCircle,
   Bot,

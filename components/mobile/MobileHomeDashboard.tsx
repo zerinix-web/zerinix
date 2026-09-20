@@ -9,7 +9,7 @@ import {
 import {
   MOBILE_SAFE_AREA_TOP,
   MOBILE_SCROLLER_TAIL,
-} from "@/components/MobileNavigation";
+} from "@/components/mobile-layout";
 
 // Mobile Home: an executive command center, not a second AI chat entry
 // point. Free-form advisory lives on the Ask tab (/chat), which is the only

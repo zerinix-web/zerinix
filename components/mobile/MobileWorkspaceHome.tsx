@@ -14,7 +14,7 @@ import type { DashboardWorkspace } from "@/app/dashboard/report-utils";
 import {
   MOBILE_NAV_CLEARANCE,
   MOBILE_SAFE_AREA_TOP,
-} from "@/components/MobileNavigation";
+} from "@/components/mobile-layout";
 
 function formatActivityDate(value: string) {
   const date = new Date(value);

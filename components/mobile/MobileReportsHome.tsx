@@ -20,7 +20,7 @@ import type {
 import {
   MOBILE_NAV_CLEARANCE,
   MOBILE_SAFE_AREA_TOP,
-} from "@/components/MobileNavigation";
+} from "@/components/mobile-layout";
 
 type MobileReportFilter = "All" | MobileReportType;
 
