@@ -11,6 +11,8 @@ const shared = read("components/chat/advisor-profile-types.ts");
 // two roles, switched at md. Everything about drawer contents hangs on that.
 const aside = chat.slice(chat.indexOf("<aside"), chat.indexOf("</aside>"));
 const askColumn = chat.slice(chat.indexOf("</aside>"));
+// Comments explain why the panel is absent, so they mention it by name.
+const askColumnCode = askColumn.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
 
 test("the mobile drawer contains navigation and sessions only, never the profile form", () => {
   // The regression: the Advisor Profile form was written inline inside the
@@ -34,7 +36,11 @@ test("the mobile drawer contains navigation and sessions only, never the profile
 test("the profile panel has one implementation and one state owner", () => {
   // Not duplicated: a single component, rendered into a slot per breakpoint,
   // with every value passed in. No local state of its own.
-  assert.equal((chat.match(/<AdvisorProfilePanel/g) || []).length, 2, "one sidebar slot, one mobile slot");
+  assert.equal(
+    (chat.match(/<AdvisorProfilePanel/g) || []).length,
+    1,
+    "exactly one slot: the desktop sidebar"
+  );
   assert.doesNotMatch(panel, /useState|useReducer/, "the panel must not own state");
   assert.match(panel, /export default function AdvisorProfilePanel/);
 
@@ -43,19 +49,32 @@ test("the profile panel has one implementation and one state owner", () => {
     assert.match(chat, state);
   }
 
-  // Exactly one slot is ever displayed.
+  // The only slot is the desktop sidebar one.
   assert.match(chat, /className="hidden md:block"/);
-  assert.match(askColumn, /shrink-0 px-4 pt-3 sm:px-6 md:hidden/);
 });
 
-test("the mobile profile slot lives in the Ask content column, not the drawer", () => {
-  const mobileSlot = chat.indexOf('md:hidden">\n          <AdvisorProfilePanel');
-  assert.ok(mobileSlot > chat.indexOf("</aside>"), "the mobile slot must sit outside the aside");
-  // Above the composer, so it never covers it.
+test("Advisor Profile is not rendered anywhere on the mobile Ask screen", () => {
+  // Below md there are exactly two places it could show: the drawer (the
+  // aside) and the Ask content column. It must be in neither -- the drawer
+  // because navigation is not main content, the column because the feature is
+  // moving to Account. The ONLY slot is `hidden md:block` inside the aside,
+  // which is display:none below md, so nothing is rendered on a phone.
+  assert.doesNotMatch(askColumnCode, /<AdvisorProfilePanel/, "not in the Ask content column");
+  assert.doesNotMatch(askColumnCode, /Advisor Profile/, "no collapsed card either");
+
+  const slotContext = chat.slice(chat.indexOf("<AdvisorProfilePanel") - 400, chat.indexOf("<AdvisorProfilePanel"));
+  assert.match(slotContext, /className="hidden md:block"/);
   assert.ok(
-    mobileSlot < chat.indexOf('shrink-0 border-t border-white/10 bg-black/80'),
-    "the mobile slot must precede the composer"
+    chat.indexOf("<AdvisorProfilePanel") < chat.indexOf("</aside>"),
+    "the single slot lives in the aside, behind an md-and-up breakpoint"
   );
+  // No mobile-visible slot may reappear.
+  assert.doesNotMatch(chat, /md:hidden[^>]*>\s*<AdvisorProfilePanel/);
+
+  // The feature itself is intact -- state, save path and data model untouched.
+  assert.match(chat, /const \[profile, setProfile\] = useState<ChatProfile>/);
+  assert.match(chat, /saveProfile/);
+  assert.ok(read("components/chat/AdvisorProfilePanel.tsx").length > 0);
 });
 
 test("the drawer can never be wider than the viewport", () => {
@@ -92,10 +111,16 @@ test("nothing in Ask can push the document wider than the viewport", () => {
 
 test("the Ask content column stays independently scrollable and correctly sized", () => {
   assert.match(chat, /className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6"/);
-  // One scroll owner in the column: the message list. The profile slot and the
-  // composer are shrink-0 siblings, so neither steals or splits the scroll.
-  assert.match(chat, /shrink-0 px-4 pt-3 sm:px-6 md:hidden/);
+  // One scroll owner in the column: the message list, with the composer as a
+  // shrink-0 sibling below it. Nothing else splits or steals the scroll.
   assert.match(chat, /shrink-0 border-t border-white\/10 bg-black\/80/);
+  // The composer's textarea scrolls its own text, which is not a layout
+  // scroller; the column itself must have exactly one.
+  assert.equal(
+    (askColumnCode.match(/flex-1 overflow-y-auto/g) || []).length,
+    1,
+    "exactly one layout scroll owner in the Ask content column"
+  );
 });
 
 test("the shared profile module is importable from both sides", () => {

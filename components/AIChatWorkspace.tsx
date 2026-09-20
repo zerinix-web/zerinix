@@ -2263,11 +2263,13 @@ export default function AIChatWorkspace({
           })}
         </div>
 
-        {/* Sidebar slot. From md up this aside is a real static sidebar, so the
-            panel belongs here. BELOW md the same aside is the slide-over
-            drawer, which must hold navigation and sessions only -- the panel
-            renders in the Ask content column instead (the md:hidden slot
-            below). One component, one state owner, one visible copy. */}
+        {/* The ONLY Advisor Profile slot, and it is md-and-up. From md up this
+            aside is a real static sidebar, so the panel belongs here. Below md
+            the same aside is the slide-over drawer, and `hidden` keeps the
+            panel out of it -- nothing renders it on a phone, in the drawer or
+            in the Ask column. The feature and its data model are unchanged;
+            only its mobile placement is withdrawn, pending a move to
+            Account. */}
         <div className="hidden md:block">
           <AdvisorProfilePanel
             profile={profile}
@@ -2446,24 +2448,11 @@ export default function AIChatWorkspace({
           </div>
         </div>
 
-        {/* Advisor Profile on mobile. The drawer is navigation only, so the
-            panel lives in the main Ask column, directly above the composer and
-            collapsed by default -- same component, same state as the sidebar
-            slot. */}
-        <div className="relative z-10 shrink-0 px-4 pt-3 sm:px-6 md:hidden">
-          <AdvisorProfilePanel
-            profile={profile}
-            profileDraft={profileDraft}
-            setProfileDraft={setProfileDraft}
-            profileOpen={profileOpen}
-            setProfileOpen={setProfileOpen}
-            profileMessage={profileMessage}
-            setProfileMessage={setProfileMessage}
-            profileSaving={profileSaving}
-            saveProfile={saveProfile}
-            setClearProfileConfirmOpen={setClearProfileConfirmOpen}
-          />
-        </div>
+        {/* Advisor Profile is DESKTOP-ONLY on Ask. It is not rendered in this
+            column and not in the drawer (see the `hidden md:block` slot in the
+            aside above, which the drawer's own breakpoint excludes). The
+            feature, its state and its data model are untouched -- only its
+            mobile placement is withdrawn, pending a move to Account. */}
 
         {/* The home-indicator inset belongs to whichever element actually
             sits above it. On mobile that is the fixed bottom navigation,
