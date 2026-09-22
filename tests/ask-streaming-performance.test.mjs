@@ -5,6 +5,14 @@ import { readFileSync } from "node:fs";
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const chat = read("components/AIChatWorkspace.tsx");
 const route = read("app/api/chat/route.ts");
+const vercelConfig = JSON.parse(read("vercel.json"));
+const poolerUrl = (() => {
+  try {
+    return read("supabase/.temp/pooler-url");
+  } catch {
+    return "";
+  }
+})();
 
 const readLoop = chat.slice(
   chat.indexOf("async function readStreamingText"),
@@ -46,25 +54,31 @@ test("non-browser runtimes keep the original synchronous behaviour", () => {
   assert.match(readLoop, /if \(!canSchedulePaint\) \{\s*paint\(\);/);
 });
 
-test("Ask shows exactly one waiting state, and Stop stays reachable", () => {
+test("mobile shows one waiting state: the answer card, and nothing in the composer", () => {
   const stopAt = chat.indexOf("onClick={stopGeneration}");
   const composer = chat.slice(stopAt - 400, stopAt + 1800);
-
-  // The answer card is the single progress indicator.
-  assert.match(chat, /\{message\.regenerating\s*\? "Regenerating"\s*: message\.content\s*\? "Generating"\s*: "Thinking"\}/);
-  // The composer no longer spins a second time for the same event.
-  // (Comments explain the removal, so they name the old label.)
+  // Comments describe the removed UI, so compare against code only.
   const chatCode = chat.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+
+  // The answer card is the single generation indicator.
+  assert.match(chat, /\{message\.regenerating\s*\? "Regenerating"\s*: message\.content\s*\? "Generating"\s*: "Thinking"\}/);
+
+  // The composer shows no second spinner and no second generation label.
   assert.doesNotMatch(chatCode, /Advising\.\.\./);
   assert.doesNotMatch(composer, /loading \? <Loader2/);
 
-  // Stop replaces send while streaming: one button, always meaningful.
+  // Stop is hidden on phones; the composer is simply disabled while streaming.
   assert.match(composer, /onClick=\{stopGeneration\}/);
-  assert.match(composer, /Stop/);
+  assert.match(composer, /className="hidden min-h-12[^"]*md:inline-flex"/);
+  assert.doesNotMatch(
+    composer,
+    /className="inline-flex min-h-12[^"]*"\s*>\s*<Square/,
+    "Stop must never render unconditionally on mobile"
+  );
+
+  // The send button stays mounted and is disabled for the duration.
+  assert.match(composer, /disabled=\{\s*loading \|\|/);
   assert.match(composer, /Ask advisor/);
-  assert.match(chat, /\{loading \? \(\s*<button[\s\S]{0,400}?stopGeneration[\s\S]*?\) : \(/);
-  // The send button's own guards survive; `loading` is no longer one of them
-  // because it is not rendered while loading.
   assert.match(composer, /!prompt\.trim\(\)/);
   assert.match(composer, /attachments\.some\(\(attachment\) => attachment\.status !== "ready"\)/);
 });
@@ -92,7 +106,7 @@ test("the server reports its own share of first-token latency", () => {
   // Cumulative marks, emitted as Server-Timing on the streamed response, so
   // the pre-model cost can be read from a device Network tab rather than
   // inferred. Measurement only: nothing branches on these.
-  for (const phase of ["auth", "profile", "memory", "prep"]) {
+  for (const phase of ["auth", "profile", "memory", "ratelimit", "research_start", "prep"]) {
     assert.match(route, new RegExp(`mark\\("${phase}"\\)`), `${phase} must be marked`);
   }
   assert.match(route, /"Server-Timing": Object\.entries\(timings\)/);
@@ -101,4 +115,69 @@ test("the server reports its own share of first-token latency", () => {
   // The anti-buffering headers that make progressive delivery possible stay.
   assert.match(route, /"Cache-Control": "no-cache, no-transform"/);
   assert.match(route, /"X-Accel-Buffering": "no"/);
+});
+
+test("user-keyed reads start before the work that does not depend on them", () => {
+  // The profile read is issued as soon as the user is known and awaited at its
+  // original call site, so its round trip overlaps the body parse and the
+  // beta-access authorization instead of queueing behind them.
+  assert.match(route, /const profileQuery = supabase\s*\n\s*\.from\("ai_chat_profiles"\)/);
+  assert.match(route, /const \{ data: profileData, error: profileError \} = await profileQuery;/);
+  assert.ok(
+    route.indexOf("const profileQuery") < route.indexOf("const body = await req.json()"),
+    "the profile read must be in flight before the body is parsed"
+  );
+
+  // The user-memory read starts early too, but ONLY when no memory write has
+  // to happen first -- a turn that writes memories still reads after writing.
+  assert.match(
+    route,
+    /const memoriesQuery =\s*\n\s*memoryOperations\.length === 0 \? loadUserMemoriesForUser\(supabase, user\) : null;/
+  );
+  assert.match(route, /memoriesQuery\s*\n\s*\? await memoriesQuery\s*\n\s*: await loadUserMemoriesForUser\(/);
+  assert.match(route, /memoryApplyResult\.fallbackMemories/, "the write-then-read path is unchanged");
+});
+
+test("research is measured, and its Fast-mode cost is visible rather than silently skipped", () => {
+  // webResearch is decided from the prompt alone, not from modelPreference, so
+  // a Fast-mode request can still run the whole pipeline before the first
+  // token. Skipping it would change what the model is grounded on, so it is
+  // measured here, not disabled.
+  assert.match(route, /mark\("research_start"\)/);
+  assert.match(route, /const webResearch = shouldUseAnalysisWebResearch\(prompt, attachments\);/);
+  assert.doesNotMatch(
+    route,
+    /webResearch = [^;]*modelPreference/,
+    "gating research on Fast mode is an answer-quality decision, not a silent optimisation"
+  );
+});
+
+test("serverless functions are co-located with the database region", () => {
+  // Measured on a physical iPhone: prep was 1746ms for about five sequential
+  // Supabase round trips -- 240-600ms each, where a co-located single-row
+  // indexed select is 10-50ms. The cause was distance, not work: Vercel
+  // defaults to iad1 (US East) and this project's database is in eu-central-1
+  // (Frankfurt), so every query crossed the Atlantic twice.
+  //
+  // Next's preferredRegion is not an option here: on Vercel it is only honoured
+  // with runtime = "edge", and this route needs Node (Supabase service client,
+  // OpenAI SDK). vercel.json regions applies to Node serverless functions.
+  assert.deepEqual(vercelConfig.regions, ["fra1"], "functions must run beside the database");
+
+  // Pinned to what the repo itself records about where the database lives, so
+  // the two cannot drift apart silently.
+  if (poolerUrl) {
+    assert.match(poolerUrl, /aws-0-eu-central-1/, "database region changed -- revisit vercel.json regions");
+  }
+
+  // The cron entry must survive the edit.
+  assert.equal(vercelConfig.crons?.[0]?.path, "/api/report-jobs/worker");
+});
+
+test("auth is unchanged: the session is still verified against Supabase", () => {
+  // Replacing getUser() with local JWT verification would remove a 325ms round
+  // trip but weaken revocation -- a revoked session would stay valid until the
+  // token expired. Latency work must not buy speed with that.
+  assert.match(route, /await supabase\.auth\.getUser\(\)/);
+  assert.doesNotMatch(route, /getClaims\(|jwtVerify\(|decodeJwt\(/);
 });

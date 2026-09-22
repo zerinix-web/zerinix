@@ -1267,6 +1267,20 @@ async function handleChatPost(req: Request) {
       );
     }
 
+    // Two user-keyed reads start HERE, before the body is parsed, and are
+    // awaited at their original call sites below. Nothing between depends on
+    // them, so their round trips now overlap the body parse, the beta-access
+    // authorization and every synchronous step in between instead of queueing
+    // behind them. Same queries, same results, same error handling -- only the
+    // moment the request leaves is earlier.
+    const profileQuery = supabase
+      .from("ai_chat_profiles")
+      .select(
+        "preferred_country,preferred_industries,investment_budget_ranges,preferred_language,experience_level,available_time,business_interests,risk_tolerance,long_term_goals"
+      )
+      .eq("user_id", user.id)
+      .maybeSingle();
+
     const body = await req.json();
     const attachmentValidationError = getAttachmentValidationError(body?.attachments);
 
@@ -1398,14 +1412,16 @@ async function handleChatPost(req: Request) {
       return NextResponse.json({ error: "Message is required." }, { status: 400 });
     }
 
+    // extractExplicitMemoryOperations is a pure function over the prompt, so
+    // deciding this here costs nothing -- and it lets the common case (a turn
+    // that writes no memories) start its user-memory read immediately instead
+    // of waiting for the profile round trip to finish first.
+    const memoryOperations = extractExplicitMemoryOperations(prompt);
+    const memoriesQuery =
+      memoryOperations.length === 0 ? loadUserMemoriesForUser(supabase, user) : null;
+
     const responseLanguage = detectResponseLanguage(prompt);
-    const { data: profileData, error: profileError } = await supabase
-      .from("ai_chat_profiles")
-      .select(
-        "preferred_country,preferred_industries,investment_budget_ranges,preferred_language,experience_level,available_time,business_interests,risk_tolerance,long_term_goals"
-      )
-      .eq("user_id", user.id)
-      .maybeSingle();
+    const { data: profileData, error: profileError } = await profileQuery;
     mark("profile");
 
     if (profileError) {
@@ -1413,7 +1429,6 @@ async function handleChatPost(req: Request) {
     }
 
     const chatProfile = normalizeProfile(profileData);
-    const memoryOperations = extractExplicitMemoryOperations(prompt);
     const memoryApplyResult = memoryOperations.length > 0
       ? await applyUserMemoryOperations(supabase, user.id, memoryOperations, user)
       : { remembered: 0, forgotten: 0, failed: 0, storage: "none" as const };
@@ -1437,11 +1452,16 @@ async function handleChatPost(req: Request) {
       );
     }
 
-    const userMemories = await loadUserMemoriesForUser(
-      supabase,
-      user,
-      memoryApplyResult.fallbackMemories
-    );
+    // When the turn writes memories, the read must follow the write, exactly
+    // as before. When it does not -- the overwhelming majority of turns -- the
+    // read was started above and is already in flight.
+    const userMemories = memoriesQuery
+      ? await memoriesQuery
+      : await loadUserMemoriesForUser(
+          supabase,
+          user,
+          memoryApplyResult.fallbackMemories
+        );
     mark("memory");
     const rememberedName = getUserNameFromMemories(userMemories);
 
@@ -1616,6 +1636,7 @@ async function handleChatPost(req: Request) {
       reportField: "chat",
       ip,
     });
+    mark("ratelimit");
     const { model, planTier, promptHash } = productionLimit;
 
     if (!productionLimit.allowed) {
@@ -1735,6 +1756,18 @@ async function handleChatPost(req: Request) {
     let chatResearch: DomainResearchBundle | null = null;
     let chatMarketGraph: MarketIntelligenceGraph | null = null;
     let chatResearchContext = "";
+    // webResearch is decided by shouldUseAnalysisWebResearch(prompt,
+    // attachments) alone -- it is NOT gated by modelPreference, so a Fast-mode
+    // question still runs the full research pipeline before the first token
+    // whenever the prompt contains one of its trigger words (market,
+    // competitor, industry, trend, price, pricing, research, latest, current,
+    // news, and their Turkish equivalents pazar/rakip/sektör/fiyat/güncel/
+    // araştır). Those are ordinary vocabulary for this product, so this branch
+    // is taken often. It is marked separately because it is the prime suspect
+    // for "long delay before ZERINIX starts answering", and skipping it would
+    // change what the model is grounded on -- an answer-quality decision, not
+    // a performance one.
+    mark("research_start");
     if (webResearch) {
       const researchConversationContext = [
         ...cacheRelevantHistory.slice(-10).map(
@@ -1986,7 +2019,8 @@ async function handleChatPost(req: Request) {
     // Everything above is pre-model work: auth, profile, memory, report
     // access, rate limiting, cache lookup and research. `prep` is therefore
     // the server-side share of "time to first token" -- the part that is ours
-    // rather than the model's.
+    // rather than the model's. Subtract research_start from prep to see what
+    // the research pipeline alone cost on this request.
     mark("prep");
 
     const stream = await withOpenAiCostOperation(

@@ -2608,40 +2608,39 @@ export default function AIChatWorkspace({
                   </select>
                 </div>
 
-                {/* One waiting state, not two. While a response is in flight
-                    the answer card itself is the progress indicator
-                    (Thinking -> Generating -> Regenerating, in context, where
-                    the user is already looking). A disabled "Advising..."
-                    button beside it spun a second time for the same event and
-                    said nothing the card did not. The send button is replaced
-                    by Stop for the duration, which is the only control that
-                    does something while streaming. */}
+                {/* One waiting state, and it is the answer card
+                    (Thinking -> Generating), in context, where the user is
+                    already looking. The composer adds no second spinner and no
+                    second generation indicator: while a response streams it is
+                    simply disabled. Stop stays available from md up, where
+                    there is room for it beside the send button; on a phone the
+                    composer is just inert for the duration. */}
                 <div className="flex items-center gap-2">
                   {loading ? (
                     <button
                       type="button"
                       onClick={stopGeneration}
-                      className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-red-300/20 bg-red-400/10 px-5 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-400/15"
+                      className="hidden min-h-12 items-center justify-center gap-2 rounded-2xl border border-red-300/20 bg-red-400/10 px-5 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-400/15 md:inline-flex"
                     >
                       <Square className="h-4 w-4" />
                       Stop
                     </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={
-                        !prompt.trim() ||
-                        // Never send while a file is still being read, and never
-                        // send an unreadable file as if the model received it.
-                        attachments.some((attachment) => attachment.status !== "ready")
-                      }
-                      onClick={() => void sendMessage()}
-                      className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/40 transition hover:-translate-y-0.5 hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
-                    >
-                      Ask advisor
-                      <Send className="h-4 w-4" />
-                    </button>
-                  )}
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={
+                      loading ||
+                      !prompt.trim() ||
+                      // Never send while a file is still being read, and never
+                      // send an unreadable file as if the model received it.
+                      attachments.some((attachment) => attachment.status !== "ready")
+                    }
+                    onClick={() => void sendMessage()}
+                    className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/40 transition hover:-translate-y-0.5 hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+                  >
+                    Ask advisor
+                    <Send className="h-4 w-4" />
+                  </button>
                 </div>
               </div>
             </div>
