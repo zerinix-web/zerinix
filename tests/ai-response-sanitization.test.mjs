@@ -21,7 +21,18 @@ test("shared AI response sanitizer removes accidental non-English prefixes", () 
 test("chat streaming sanitizes accumulated output before rendering and persistence", () => {
   for (const source of [chatWorkspaceSource, plannerSource]) {
     assert.match(source, /import \{[\s\S]{0,80}sanitizeAiResponseText/);
-    assert.match(source, /onChunk\(sanitizeAiResponseText\(output\)\)/);
+    // Every streamed paint is sanitized before it reaches the UI. The Ask
+    // workspace paints from a frame-batched buffer (latestOutput) rather
+    // than from `output` directly, so the identifier is not pinned -- what
+    // matters is that nothing unsanitized is ever handed to onChunk.
+    assert.match(source, /onChunk\(sanitizeAiResponseText\(\w+\)\)/);
+    // The raw accumulators must never be painted directly; only a
+    // sanitizeAiResponseText(...) call or an already-sanitized value.
+    assert.doesNotMatch(
+      source,
+      /onChunk\((?:output|latestOutput)\)/,
+      "raw streamed text must never be rendered"
+    );
     assert.match(source, /const sanitizedOutput = sanitizeAiResponseText\(output\)/);
     assert.match(source, /return sanitizedOutput/);
   }

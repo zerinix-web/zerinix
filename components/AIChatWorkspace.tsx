@@ -1659,6 +1659,36 @@ export default function AIChatWorkspace({
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let output = "";
+    let latestOutput = "";
+    let paintHandle: number | null = null;
+
+    // requestAnimationFrame where it exists (every browser this ships to); a
+    // direct call keeps non-browser runtimes and tests behaving exactly as
+    // they did before.
+    const canSchedulePaint = typeof requestAnimationFrame === "function";
+
+    function paint() {
+      paintHandle = null;
+      onChunk(sanitizeAiResponseText(latestOutput));
+    }
+
+    function schedulePaint() {
+      if (!canSchedulePaint) {
+        paint();
+        return;
+      }
+
+      if (paintHandle === null) {
+        paintHandle = requestAnimationFrame(paint);
+      }
+    }
+
+    function cancelPendingPaint() {
+      if (paintHandle !== null && canSchedulePaint) {
+        cancelAnimationFrame(paintHandle);
+        paintHandle = null;
+      }
+    }
 
     while (true) {
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -1689,12 +1719,28 @@ export default function AIChatWorkspace({
 
       const streamError = extractChatStreamError(output);
       if (streamError !== null) {
+        cancelPendingPaint();
         throw new Error(streamError);
       }
 
-      onChunk(sanitizeAiResponseText(output));
+      // Coalesce chunk -> UI to at most one update per animation frame.
+      //
+      // Painting every chunk was quadratic: sanitizeAiResponseText rescans the
+      // WHOLE accumulated answer (two transforms plus four regex passes), and
+      // the React update re-renders and re-parses the entire markdown message.
+      // Both grow with the answer, so a long reply paid that cost once per
+      // chunk -- hundreds of times, each more expensive than the last. On a
+      // phone that is what made streaming crawl and then lurch.
+      //
+      // A frame is ~16ms, so this is not buffering: it is the fastest cadence
+      // the display can actually show. Chunks still arrive and accumulate at
+      // full speed; only the redundant repaints between frames are dropped,
+      // and the exact final text is always flushed below.
+      latestOutput = output;
+      schedulePaint();
     }
 
+    cancelPendingPaint();
     output += decoder.decode();
 
     const streamError = extractChatStreamError(output);
@@ -2562,6 +2608,14 @@ export default function AIChatWorkspace({
                   </select>
                 </div>
 
+                {/* One waiting state, not two. While a response is in flight
+                    the answer card itself is the progress indicator
+                    (Thinking -> Generating -> Regenerating, in context, where
+                    the user is already looking). A disabled "Advising..."
+                    button beside it spun a second time for the same event and
+                    said nothing the card did not. The send button is replaced
+                    by Stop for the duration, which is the only control that
+                    does something while streaming. */}
                 <div className="flex items-center gap-2">
                   {loading ? (
                     <button
@@ -2572,22 +2626,22 @@ export default function AIChatWorkspace({
                       <Square className="h-4 w-4" />
                       Stop
                     </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    disabled={
-                      !prompt.trim() ||
-                      loading ||
-                      // Never send while a file is still being read, and never
-                      // send an unreadable file as if the model received it.
-                      attachments.some((attachment) => attachment.status !== "ready")
-                    }
-                    onClick={() => void sendMessage()}
-                    className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/40 transition hover:-translate-y-0.5 hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
-                  >
-                    {loading ? "Advising..." : "Ask advisor"}
-                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={
+                        !prompt.trim() ||
+                        // Never send while a file is still being read, and never
+                        // send an unreadable file as if the model received it.
+                        attachments.some((attachment) => attachment.status !== "ready")
+                      }
+                      onClick={() => void sendMessage()}
+                      className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-teal-300 px-5 py-3 text-sm font-semibold text-black shadow-lg shadow-teal-950/40 transition hover:-translate-y-0.5 hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+                    >
+                      Ask advisor
+                      <Send className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

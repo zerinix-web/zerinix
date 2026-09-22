@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import type { ResponseInput } from "openai/resources/responses/responses";
 import { authorizeStrategicReportAccess } from "@/app/lib/strategic-report-access";
 import { createClient } from "@/app/lib/supabase/server";
@@ -1202,6 +1202,14 @@ async function handleChatPost(req: Request) {
   }
 
   const startedAt = Date.now();
+  // Server-Timing instrumentation. Cumulative milliseconds from the start of
+  // the handler, emitted as a header on the streamed response so the real
+  // numbers can be read from a device's Network tab instead of guessed at.
+  // Measuring only: no branch depends on these values.
+  const timings: Record<string, number> = {};
+  const mark = (phase: string) => {
+    timings[phase] = Date.now() - startedAt;
+  };
   const ip = getClientIpFromRequest(req);
   const ipRateLimit = checkRateLimit(`api:chat:ip:${ip}`, {
     limit: 60,
@@ -1221,6 +1229,7 @@ async function handleChatPost(req: Request) {
       data: { user },
       error: userError,
     } = await supabase.auth.getUser();
+    mark("auth");
 
     if (userError || !user) {
       logChatAuthorizationDecision("AUTH_BRANCH_02", {
@@ -1397,6 +1406,7 @@ async function handleChatPost(req: Request) {
       )
       .eq("user_id", user.id)
       .maybeSingle();
+    mark("profile");
 
     if (profileError) {
       logServerError("api:chat:profile-select", profileError);
@@ -1432,6 +1442,7 @@ async function handleChatPost(req: Request) {
       user,
       memoryApplyResult.fallbackMemories
     );
+    mark("memory");
     const rememberedName = getUserNameFromMemories(userMemories);
 
     if (memoryOperations.length > 0) {
@@ -1774,13 +1785,26 @@ async function handleChatPost(req: Request) {
       }
 
       if (conversationId && chatResearch) {
-        await storeConversationResearchSnapshot({
+        // Persisted AFTER the response, not before the model call. This write
+        // is a snapshot of research the model context already contains, so
+        // nothing downstream reads it back during this request -- awaiting it
+        // here only delayed the first token by a full database round trip.
+        // `after` still guarantees it runs, so persistence is unchanged.
+        const researchSnapshot = {
           supabase,
           userId: user.id,
           conversationId,
           identity: researchIdentity,
           research: chatResearch,
           marketIntelligenceGraph: chatMarketGraph || undefined,
+        };
+
+        after(async () => {
+          try {
+            await storeConversationResearchSnapshot(researchSnapshot);
+          } catch (snapshotError) {
+            logServerError("chat:research_snapshot", snapshotError);
+          }
         });
       }
 
@@ -1958,6 +1982,12 @@ async function handleChatPost(req: Request) {
       providerCalled: true,
       quotaConsumed: false,
     });
+
+    // Everything above is pre-model work: auth, profile, memory, report
+    // access, rate limiting, cache lookup and research. `prep` is therefore
+    // the server-side share of "time to first token" -- the part that is ours
+    // rather than the model's.
+    mark("prep");
 
     const stream = await withOpenAiCostOperation(
       {
@@ -2435,6 +2465,9 @@ async function handleChatPost(req: Request) {
           "Content-Type": "text/plain; charset=utf-8",
           "Cache-Control": "no-cache, no-transform",
           "X-Accel-Buffering": "no",
+          "Server-Timing": Object.entries(timings)
+            .map(([phase, duration]) => `${phase};dur=${duration}`)
+            .join(", "),
         },
       }
     );

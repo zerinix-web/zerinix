@@ -14,7 +14,11 @@ const governance = readFileSync("app/lib/ai/governance.ts", "utf8");
 test("chat creates one validated research bundle and answers from that bundle", () => {
   assert.match(chatRoute, /resolveDomainResearchWithCache\(\{/);
   assert.match(chatRoute, /formatDomainResearchForReportGeneration\(/);
-  assert.match(chatRoute, /storeConversationResearchSnapshot\(\{/);
+  // The snapshot is still persisted, but no longer on the critical path:
+  // it is built here and written in after(), so it cannot delay the first
+  // token. The contract is that it is written, not how the call is spelled.
+  assert.match(chatRoute, /const researchSnapshot = \{/);
+  assert.match(chatRoute, /storeConversationResearchSnapshot\(researchSnapshot\)/);
   assert.match(
     chatRoute,
     /createChatResponseCapabilities\(webResearch && !chatResearchContext\)/
