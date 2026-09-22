@@ -60,8 +60,9 @@ test("mobile shows one waiting state: the answer card, and nothing in the compos
   // Comments describe the removed UI, so compare against code only.
   const chatCode = chat.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
 
-  // The answer card is the single generation indicator.
-  assert.match(chat, /\{message\.regenerating\s*\? "Regenerating"\s*: message\.content\s*\? "Generating"\s*: "Thinking"\}/);
+  // The answer card is the single generation indicator, and within it only
+  // one element is ever visible at a time (see the dedicated test below).
+  assert.match(chat, /\{message\.regenerating \? "Regenerating" : "Generating"\}/);
 
   // The composer shows no second spinner and no second generation label.
   assert.doesNotMatch(chatCode, /Advising\.\.\./);
@@ -180,4 +181,40 @@ test("auth is unchanged: the session is still verified against Supabase", () => 
   // token expired. Latency work must not buy speed with that.
   assert.match(route, /await supabase\.auth\.getUser\(\)/);
   assert.doesNotMatch(route, /getClaims\(|jwtVerify\(|decodeJwt\(/);
+});
+
+test("exactly one loading element is on screen at a time", () => {
+  // The regression: before the first token the header badge said "Thinking"
+  // AND the big TypingIndicator card said "AI is thinking" directly below it --
+  // two spinners, one line apart, for the same wait.
+  //
+  // The two now render on strictly inverse conditions, so they can never
+  // overlap: the card while there is no content, the badge only once there is.
+  assert.match(
+    chat,
+    /message\.status === "streaming" && !message\.content \? \(\s*<TypingIndicator \/>/,
+    "the big card owns the pre-stream wait"
+  );
+  assert.match(
+    chat,
+    /\{message\.status === "streaming" && message\.content \? \(/,
+    "the header badge must require content"
+  );
+
+  // The badge can no longer say "Thinking" -- that wording belongs to the card,
+  // and reaching it would mean the two conditions had drifted back together.
+  const badge = chat.slice(
+    chat.indexOf('{message.status === "streaming" && message.content ? ('),
+    chat.indexOf('{message.status === "streaming" && message.content ? (') + 500
+  );
+  assert.doesNotMatch(badge, /"Thinking"/);
+  assert.match(badge, /"Regenerating"/);
+  assert.match(badge, /"Generating"/);
+
+  // The big card keeps its own copy and remains the single pre-stream state.
+  assert.match(chat, /<p className="text-sm font-semibold text-white">AI is thinking<\/p>/);
+  assert.equal((chat.match(/<TypingIndicator \/>/g) || []).length, 1);
+
+  // And Stop stays gone from mobile.
+  assert.match(chat, /className="hidden min-h-12[^"]*md:inline-flex"/);
 });

@@ -965,14 +965,17 @@ const ChatBubble = memo(function ChatBubble({
             {isUser ? "YOU" : "ZERINIX"}
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            {message.status === "streaming" ? (
+            {/* Only once text exists. Before the first token the big
+                TypingIndicator card below ("AI is thinking") is the single
+                loading state, and this badge would have said the same thing a
+                second time, one line above it. The card renders on exactly the
+                inverse condition (streaming && !message.content), so the two
+                can never be on screen together: the card disappears the moment
+                content arrives and this takes over as the streaming marker. */}
+            {message.status === "streaming" && message.content ? (
               <span className="inline-flex items-center gap-1.5 rounded-lg border border-teal-300/20 px-2 py-1 text-xs text-teal-100">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                {message.regenerating
-                  ? "Regenerating"
-                  : message.content
-                    ? "Generating"
-                    : "Thinking"}
+                {message.regenerating ? "Regenerating" : "Generating"}
               </span>
             ) : null}
             <button
