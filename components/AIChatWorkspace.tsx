@@ -2661,12 +2661,18 @@ export default function AIChatWorkspace({
             </div>
 
             <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-[11px] text-zinc-600 sm:mt-3 sm:gap-3 sm:text-xs">
-              <span className="inline-flex items-center gap-1">
+              {/* Both hints below describe things a phone cannot do: there is
+                  no hardware Enter key to send with, and no drag-and-drop onto
+                  the window. They are hidden below sm and kept from there up,
+                  where a keyboard and a pointer are the norm. The sentence
+                  after them is product guidance, not a desktop shortcut, so it
+                  stays on every screen. */}
+              <span className="hidden items-center gap-1 sm:inline-flex">
                 <CornerDownLeft className="h-3.5 w-3.5" />
                 <span>Enter to send</span>
                 <span className="hidden md:inline"> · Shift + Enter for newline</span>
               </span>
-              <span className="inline-flex items-center gap-1">
+              <span className="hidden items-center gap-1 sm:inline-flex">
                 <MoreHorizontal className="h-3.5 w-3.5" />
                 Drag files anywhere
               </span>
