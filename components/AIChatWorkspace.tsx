@@ -1082,16 +1082,28 @@ export default function AIChatWorkspace({
   conversationLoadError = "",
   initialReportMemory = null,
 }: AIChatWorkspaceProps) {
-  const initialConversationId = useMemo(
-    () => initialConversations[0]?.id || createMessageId(),
-    [initialConversations]
-  );
-  const [conversations, setConversations] = useState<Conversation[]>(() =>
-    initialConversations.length > 0
-      ? initialConversations
-      : [createConversation(initialConversationId)]
-  );
-  const [activeConversationId, setActiveConversationId] = useState(initialConversationId);
+  // Ask always opens on a clean session.
+  //
+  // Previously the most recently updated conversation became the active one on
+  // mount, so simply tapping Ask in the bottom navigation re-opened the last
+  // exchange -- and any refresh or re-entry resurrected it again. History is
+  // already reachable from the left drawer, so the main route restoring it too
+  // was a second, unasked-for path to the same thing.
+  //
+  // Nothing is deleted or hidden: every loaded conversation is kept in the
+  // list below, so the drawer is unchanged and selecting one restores it in
+  // full. Only the ACTIVE conversation changes -- it is a fresh, empty session
+  // instead of the newest historical one.
+  //
+  // The fresh session is deliberately not persisted here. sendMessage calls
+  // ensurePersistedConversation before writing the first message, so a session
+  // the user never uses leaves no row behind and cannot clutter the drawer.
+  const freshConversationId = useMemo(() => createMessageId(), []);
+  const [conversations, setConversations] = useState<Conversation[]>(() => [
+    createConversation(freshConversationId),
+    ...initialConversations,
+  ]);
+  const [activeConversationId, setActiveConversationId] = useState(freshConversationId);
   const [prompt, setPrompt] = useState("");
   // Shared with the planner composer so both surfaces read file bytes,
   // validate size/MIME, and serialize attachments identically.
