@@ -1184,6 +1184,25 @@ export default function AIChatWorkspace({
   const mobileKeyboardOpen =
     mobileKeyboardViewportHeight !== null || mobileComposerFocused;
 
+  // The shell shrinks to the visible viewport, but the DOCUMENT ROOT does not:
+  // html is height:100% plus min-height:100dvh and body is min-height:100%,
+  // and all three track the layout viewport, which iOS leaves at full screen
+  // height when the keyboard opens. That left keyboard-height of empty
+  // scrollable document below the app. This class lets the root collapse to
+  // its content for exactly as long as the keyboard is open (see
+  // app/globals.css); the class is removed on close and on unmount, so
+  // navigating away can never leave the document collapsed.
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const root = document.documentElement;
+    root.classList.toggle("zx-keyboard-open", mobileKeyboardOpen);
+
+    return () => root.classList.remove("zx-keyboard-open");
+  }, [mobileKeyboardOpen]);
+
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) {
       return;

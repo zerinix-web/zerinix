@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const chat = read("components/AIChatWorkspace.tsx");
 const navigation = read("components/MobileNavigation.tsx");
+const globals = read("app/globals.css");
+const layout = read("app/layout.tsx");
 
 const navRender = chat.slice(
   chat.indexOf("{mobileKeyboardOpen ?"),
@@ -116,8 +118,10 @@ test("no bar-sized gap is reserved above the keyboard", () => {
     /lg:pb-0 \$\{MOBILE_NAV_CLEARANCE\}`\}/,
     "the clearance must not be applied unconditionally again"
   );
-  // The same flag drives both, so the gap and the bar cannot disagree.
-  assert.equal((chat.match(/mobileKeyboardOpen/g) || []).length, 3);
+  // One flag drives every keyboard reaction -- declaration, the document
+  // collapse effect and its dependency, the clearance and the bar -- so none
+  // of them can disagree about the keyboard's state.
+  assert.equal((chat.match(/mobileKeyboardOpen/g) || []).length, 5);
 });
 
 test("content still scrolls while the keyboard is open", () => {
@@ -131,4 +135,50 @@ test("content still scrolls while the keyboard is open", () => {
   // Exactly one layout scroller in the column -- no nested competitor.
   const column = chat.slice(chat.indexOf("</aside>"));
   assert.equal((column.match(/flex-1 overflow-y-auto/g) || []).length, 1);
+});
+
+test("keyboard-open state cannot create scrollable space below the composer", () => {
+  // THE BUG. The shell shrank to the visible viewport, but the DOCUMENT ROOT
+  // did not: html carries h-full and min-height:100dvh, body carries
+  // min-h-full, and all three track the LAYOUT viewport, which iOS leaves at
+  // full screen height while the keyboard is open. The difference -- exactly
+  // the keyboard's height -- was empty scrollable document below the app.
+  // Scrolling it dragged the whole page up and carried the composer off
+  // screen, exposing a large black region.
+  //
+  // These are the three locked heights the fix has to answer for:
+  assert.match(layout, /className=\{`\$\{geistSans\.variable\} \$\{geistMono\.variable\} h-full/);
+  assert.match(layout, /<body className="min-h-full/);
+  assert.match(globals, /min-height: 100dvh;/);
+
+  // While the keyboard is open the root collapses to its content, so there is
+  // no range left to scroll past.
+  assert.match(
+    globals,
+    /html\.zx-keyboard-open,\s*\n\s*html\.zx-keyboard-open body \{\s*\n\s*height: auto;\s*\n\s*min-height: 0;\s*\n\s*\}/,
+    "both the root and body must be released, not just one"
+  );
+
+  // Removed at its source rather than hidden behind overflow, which would
+  // leave the oversized document in place.
+  assert.doesNotMatch(globals, /html\.zx-keyboard-open[^{]*\{[^}]*overflow:\s*hidden/);
+  // No device-specific compensation anywhere near it.
+  assert.doesNotMatch(globals, /html\.zx-keyboard-open[^{]*\{[^}]*\d{3,}px/);
+});
+
+test("the collapse lasts exactly as long as the keyboard is open", () => {
+  // Driven by the same derived flag as the bar, so the document, the bar and
+  // the reserved space can never disagree about the keyboard's state.
+  assert.match(
+    chat,
+    /root\.classList\.toggle\("zx-keyboard-open", mobileKeyboardOpen\);/
+  );
+  assert.match(
+    chat,
+    /return \(\) => root\.classList\.remove\("zx-keyboard-open"\);/,
+    "unmount must restore the document, or navigating away leaves it collapsed"
+  );
+  assert.match(chat, /\}, \[mobileKeyboardOpen\]\);/, "the effect must re-run when the flag changes");
+  // Nothing else may write this class.
+  assert.equal((chat.match(/zx-keyboard-open/g) || []).length, 2);
 });

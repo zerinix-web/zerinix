@@ -88,6 +88,28 @@ html {
   scrollbar-width: thin;
 }
 
+/* Set by the Ask workspace while the mobile software keyboard is open.
+
+   The document root is locked to the LAYOUT viewport: html carries h-full
+   (height: 100%) from app/layout.tsx and min-height: 100dvh above, and body
+   carries min-h-full. iOS does not shrink the layout viewport when the
+   keyboard opens -- only the VISUAL viewport shrinks -- so all three keep the
+   document at full screen height while the app shrinks to the visible area.
+   The difference is exactly the keyboard's height, and it became empty
+   scrollable document below the app: scrolling it dragged the whole page up,
+   carried the composer off screen and exposed this background as a large black
+   region.
+
+   Collapsing the root to its content while the keyboard is open removes that
+   range at its source, rather than hiding it with overflow. The app itself is
+   already sized to the visible viewport, so there is nothing left to scroll
+   past. Removing the class restores every value above unchanged. */
+html.zx-keyboard-open,
+html.zx-keyboard-open body {
+  height: auto;
+  min-height: 0;
+}
+
 ::selection {
   background: rgba(94, 234, 212, 0.32);
   color: #ffffff;
