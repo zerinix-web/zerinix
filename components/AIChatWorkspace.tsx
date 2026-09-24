@@ -105,6 +105,9 @@ type AIChatWorkspaceProps = {
   } | null;
 };
 
+// Matches this file's own `md:` usage, and is shared by the two signals
+// that decide the mobile keyboard is open.
+const MOBILE_KEYBOARD_BREAKPOINT_PX = 768;
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 60_000;
 const CHAT_REQUEST_TIMEOUT_MS = 75_000;
 const ACTIVE_REPORT_ID_STORAGE_KEY = "zerinix.activeReportId";
@@ -1161,6 +1164,17 @@ export default function AIChatWorkspace({
   // keeps its normal Tailwind-driven height exactly as before.
   const [mobileKeyboardViewportHeight, setMobileKeyboardViewportHeight] =
     useState<number | null>(null);
+  // Second signal for the same question, because the first one is not reliable
+  // on device: the visualViewport size check above only fires when iOS
+  // actually shrinks the visual viewport, and in this WebView it sometimes
+  // does not -- leaving the bottom navigation on screen, overlapping the "Ask
+  // advisor" button, exactly when the user is typing.
+  //
+  // Focus is deterministic: the software keyboard is open precisely while the
+  // composer has focus. The width is read at focus time rather than tracked,
+  // because a rotation mid-focus is not a case worth a resize listener, and
+  // this must never affect tablet or desktop, where the navigation stays.
+  const [mobileComposerFocused, setMobileComposerFocused] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) {
@@ -1168,11 +1182,10 @@ export default function AIChatWorkspace({
     }
 
     const viewport = window.visualViewport;
-    const MOBILE_BREAKPOINT_PX = 768; // matches this file's own `md:` usage
     const KEYBOARD_HEIGHT_THRESHOLD_PX = 120;
 
     function handleViewportResize() {
-      if (window.innerWidth >= MOBILE_BREAKPOINT_PX) {
+      if (window.innerWidth >= MOBILE_KEYBOARD_BREAKPOINT_PX) {
         setMobileKeyboardViewportHeight(null);
         return;
       }
@@ -2053,7 +2066,12 @@ export default function AIChatWorkspace({
       }}
       onDrop={handleDropFiles}
     >
-      {mobileKeyboardViewportHeight === null ? <MobileBottomNavigation /> : null}
+      {/* Hidden while the mobile keyboard is open, by EITHER signal, and
+          restored the moment it closes. Above md neither signal can be set,
+          so tablet and desktop are untouched. */}
+      {mobileKeyboardViewportHeight === null && !mobileComposerFocused ? (
+        <MobileBottomNavigation />
+      ) : null}
       {renameTarget ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl">
           <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-zinc-950 p-6 shadow-2xl shadow-black/60">
@@ -2576,8 +2594,16 @@ export default function AIChatWorkspace({
                 ref={composerRef}
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
-                onFocus={preserveMessageScrollAfterViewportChange}
-                onBlur={preserveMessageScrollAfterViewportChange}
+                onFocus={() => {
+                  preserveMessageScrollAfterViewportChange();
+                  setMobileComposerFocused(
+                    window.innerWidth < MOBILE_KEYBOARD_BREAKPOINT_PX
+                  );
+                }}
+                onBlur={() => {
+                  preserveMessageScrollAfterViewportChange();
+                  setMobileComposerFocused(false);
+                }}
                 onKeyDown={(event) => {
                   if (
                     event.key === "Enter" &&
