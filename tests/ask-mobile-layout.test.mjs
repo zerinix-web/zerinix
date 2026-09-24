@@ -124,9 +124,14 @@ test("short Ask content leaves no oversized gap before the bottom navigation", (
   // The shell reserves the navigation's real height (its own 4.75rem of
   // padding/rows plus the device inset it adds) instead of a flat guess
   // that left slack under the composer.
+  // Still the navigation's own constant rather than a guessed number -- but
+  // applied only while the bar is actually on screen. While the mobile
+  // keyboard is open the bar is hidden, and reserving its height then left a
+  // black gap above the keyboard (see
+  // tests/ask-mobile-keyboard-navigation.test.mjs).
   assert.match(
     chatWorkspace,
-    /className=\{`flex h-\[100dvh\] min-h-\[100svh\] overflow-hidden bg-black text-white lg:pb-0 \$\{MOBILE_NAV_CLEARANCE\}`\}/
+    /className=\{`flex h-\[100dvh\] min-h-\[100svh\] overflow-hidden bg-black text-white lg:pb-0 \$\{\s*mobileKeyboardOpen \? "" : MOBILE_NAV_CLEARANCE\s*\}`\}/
   );
   assert.doesNotMatch(chatWorkspace, /pb-28 text-white/);
 

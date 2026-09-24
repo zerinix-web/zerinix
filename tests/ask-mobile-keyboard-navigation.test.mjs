@@ -7,8 +7,12 @@ const chat = read("components/AIChatWorkspace.tsx");
 const navigation = read("components/MobileNavigation.tsx");
 
 const navRender = chat.slice(
-  chat.indexOf("mobileKeyboardViewportHeight === null &&"),
-  chat.indexOf("mobileKeyboardViewportHeight === null &&") + 220
+  chat.indexOf("{mobileKeyboardOpen ?"),
+  chat.indexOf("{mobileKeyboardOpen ?") + 120
+);
+const shellClass = chat.slice(
+  chat.indexOf("className={`flex h-[100dvh] min-h-[100svh]"),
+  chat.indexOf("className={`flex h-[100dvh] min-h-[100svh]") + 220
 );
 
 test("the bottom navigation is hidden while the mobile keyboard is open", () => {
@@ -16,8 +20,12 @@ test("the bottom navigation is hidden while the mobile keyboard is open", () => 
   // "Ask advisor" button. It was already gated on the visualViewport size
   // check, but that signal does not fire reliably in this WebView -- iOS does
   // not always shrink the visual viewport when the keyboard opens.
-  assert.match(navRender, /!mobileComposerFocused/, "focus must also hide it");
   assert.match(navRender, /<MobileBottomNavigation \/>/);
+  // Both signals feed one derived flag, so nothing can react to only one.
+  assert.match(
+    chat,
+    /const mobileKeyboardOpen =\s*\n\s*mobileKeyboardViewportHeight !== null \|\| mobileComposerFocused;/
+  );
 
   // Focus is the deterministic signal: set on composer focus...
   assert.match(
@@ -42,7 +50,7 @@ test("the navigation returns when the keyboard closes", () => {
     "set on focus, cleared on blur -- no other writers"
   );
   // Rendering is conditional, not a CSS class that could be left behind.
-  assert.match(navRender, /\? \(\s*<MobileBottomNavigation \/>\s*\) : null/);
+  assert.match(navRender, /\{mobileKeyboardOpen \? null : <MobileBottomNavigation \/>\}/);
 });
 
 test("tablet and desktop navigation behaviour is unchanged", () => {
@@ -81,4 +89,46 @@ test("the whole composer stays reachable while typing", () => {
   // Earlier mobile decisions survive: no Stop on phones, one loading element.
   assert.match(chat, /className="hidden min-h-12[^"]*md:inline-flex"/);
   assert.match(chat, /\{message\.status === "streaming" && message\.content \? \(/);
+});
+
+test("the shell uses the real visible viewport while the keyboard is open", () => {
+  // The inline height comes from visualViewport, so the shell is exactly the
+  // space above the keyboard rather than a stale 100dvh screen height.
+  assert.match(
+    chat,
+    /mobileKeyboardViewportHeight !== null\s*\? \{ height: mobileKeyboardViewportHeight, minHeight: mobileKeyboardViewportHeight \}\s*: undefined/
+  );
+  // No device-specific pixel values anywhere in that decision.
+  assert.doesNotMatch(chat, /height: \d{3,}px/);
+});
+
+test("no bar-sized gap is reserved above the keyboard", () => {
+  // THE BUG: the bar was hidden while its clearance padding stayed, so ~110px
+  // of padding sat between the composer and the keyboard as a black gap -- and
+  // that height came out of the message scroller.
+  assert.match(
+    shellClass,
+    /\$\{\s*mobileKeyboardOpen \? "" : MOBILE_NAV_CLEARANCE\s*\}/,
+    "the clearance must be dropped while the keyboard is open"
+  );
+  assert.doesNotMatch(
+    shellClass,
+    /lg:pb-0 \$\{MOBILE_NAV_CLEARANCE\}`\}/,
+    "the clearance must not be applied unconditionally again"
+  );
+  // The same flag drives both, so the gap and the bar cannot disagree.
+  assert.equal((chat.match(/mobileKeyboardOpen/g) || []).length, 3);
+});
+
+test("content still scrolls while the keyboard is open", () => {
+  // The message list is the single flex-1 scroller inside a shell whose height
+  // is the visible viewport; with the clearance gone it gets that space back.
+  assert.match(
+    chat,
+    /className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6"/
+  );
+  assert.match(chat, /overflow-hidden bg-black text-white/, "the shell still owns its overflow");
+  // Exactly one layout scroller in the column -- no nested competitor.
+  const column = chat.slice(chat.indexOf("</aside>"));
+  assert.equal((column.match(/flex-1 overflow-y-auto/g) || []).length, 1);
 });

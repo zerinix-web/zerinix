@@ -1175,6 +1175,14 @@ export default function AIChatWorkspace({
   // because a rotation mid-focus is not a case worth a resize listener, and
   // this must never affect tablet or desktop, where the navigation stays.
   const [mobileComposerFocused, setMobileComposerFocused] = useState(false);
+  // One question, two signals. EVERYTHING that must react to the mobile
+  // keyboard reads this, so the bar's visibility and the space reserved for it
+  // can never disagree -- which is exactly what went wrong: the bar was
+  // hidden while its clearance padding stayed, leaving a black gap the height
+  // of the bar between the composer and the keyboard, and stealing that height
+  // from the message scroller.
+  const mobileKeyboardOpen =
+    mobileKeyboardViewportHeight !== null || mobileComposerFocused;
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) {
@@ -2045,7 +2053,16 @@ export default function AIChatWorkspace({
       // nav's own `lg:hidden` -- with `md:pb-0` the nav stayed visible on
       // tablets while nothing reserved space for it, so it covered the
       // composer between 768px and 1024px.
-      className={`flex h-[100dvh] min-h-[100svh] overflow-hidden bg-black text-white lg:pb-0 ${MOBILE_NAV_CLEARANCE}`}
+      // While the mobile keyboard is open the bar is hidden, so reserving its
+      // height would be reserving space for nothing: that padding was the
+      // black gap above the keyboard, and the height it took came straight out
+      // of the flex-1 message scroller, which is why scrolling felt stuck. The
+      // inline height below already constrains the shell to the real visible
+      // viewport, so with the padding gone the composer sits directly above
+      // the keyboard and the scroller gets the remaining space.
+      className={`flex h-[100dvh] min-h-[100svh] overflow-hidden bg-black text-white lg:pb-0 ${
+        mobileKeyboardOpen ? "" : MOBILE_NAV_CLEARANCE
+      }`}
       style={
         mobileKeyboardViewportHeight !== null
           ? { height: mobileKeyboardViewportHeight, minHeight: mobileKeyboardViewportHeight }
@@ -2069,9 +2086,7 @@ export default function AIChatWorkspace({
       {/* Hidden while the mobile keyboard is open, by EITHER signal, and
           restored the moment it closes. Above md neither signal can be set,
           so tablet and desktop are untouched. */}
-      {mobileKeyboardViewportHeight === null && !mobileComposerFocused ? (
-        <MobileBottomNavigation />
-      ) : null}
+      {mobileKeyboardOpen ? null : <MobileBottomNavigation />}
       {renameTarget ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl">
           <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-zinc-950 p-6 shadow-2xl shadow-black/60">
