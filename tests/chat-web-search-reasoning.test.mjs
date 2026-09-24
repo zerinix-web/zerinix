@@ -29,13 +29,17 @@ test("web_search requests never use minimal reasoning", () => {
   assert.deepEqual(capabilities.include, ["web_search_call.action.sources"]);
 });
 
-test("simple no-search requests retain the low-cost minimal reasoning route", () => {
+test("simple no-search requests stay on the low-cost route", () => {
+  // Fast's floor moved from "minimal" to "low" when the two modes were made
+  // genuinely different: "minimal" is no longer used anywhere, so the
+  // web-search compatibility hazard it created cannot recur at all.
   const capabilities = createChatResponseCapabilities(false);
 
   assert.deepEqual(capabilities, {
-    reasoning: { effort: "minimal" },
+    reasoning: { effort: "low" },
   });
   assert.equal("tools" in capabilities, false);
+  // Model routing is untouched by the preference work.
   assert.match(modelRouter, /chat: "FAST"/);
   assert.match(modelRouter, /FAST: "gpt-5-nano"/);
 });
@@ -44,7 +48,7 @@ test("Strategic Advisory with web search passes the provider compatibility gate"
   assert.equal(mockResponsesApiStatus(true), 200);
   assert.match(
     chatRoute,
-    /createChatResponseCapabilities\(webResearch && !chatResearchContext\)/
+    /createChatResponseCapabilities\(\s*webResearch && !chatResearchContext,\s*modelPreference\s*\)/
   );
   assert.match(chatRoute, /storeConversationResearchSnapshot/);
   assert.match(chatRoute, /reportType: "strategic_advisory"/);

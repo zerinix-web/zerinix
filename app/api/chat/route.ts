@@ -77,7 +77,11 @@ import {
   omitTrailingDuplicateUserPrompt,
   optimizeChatHistoryForCost,
 } from "@/app/lib/ai/token-optimization";
-import { createChatResponseCapabilities } from "@/app/lib/ai/chat-request-config";
+import {
+  applyChatOutputBudgetPreference,
+  createChatResponseCapabilities,
+  createChatResponseVerbosity,
+} from "@/app/lib/ai/chat-request-config";
 import {
   applyUserMemoryOperations,
   buildUserMemoryContext,
@@ -1664,7 +1668,11 @@ async function handleChatPost(req: Request) {
       normalizedPrompt: normalizeAiPrompt(
         userMemoryContext ? `${prompt}\n\nUser memories:\n${userMemoryContext}` : prompt
       ),
-      mode: `chat:${requestKind}:${selectedIntent}:${selectedExpert}:web:${webResearch}`,
+      // modelPreference is part of the key because the two modes produce
+      // materially different answers -- different reasoning effort,
+      // verbosity, search depth and output budget. Without it, whichever
+      // mode ran first would serve its cached answer to the other.
+      mode: `chat:${requestKind}:${selectedIntent}:${selectedExpert}:web:${webResearch}:mode:${modelPreference}`,
       language: responseLanguage,
       model,
     });
@@ -1853,7 +1861,11 @@ async function handleChatPost(req: Request) {
       });
     }
 
-    const maxOutputTokens = getChatMaxOutputTokens(requestKind);
+    // Balanced gets ~1.5x the budget; Fast keeps exactly today's limit.
+    const maxOutputTokens = applyChatOutputBudgetPreference(
+      getChatMaxOutputTokens(requestKind),
+      modelPreference
+    );
     const historyWithoutCurrentPrompt = cacheRelevantHistory;
     const optimizedHistory = optimizeChatHistoryForCost(
       historyWithoutCurrentPrompt.map((message) => ({
@@ -2038,8 +2050,11 @@ async function handleChatPost(req: Request) {
           // was already injected into the prompt, avoiding a redundant
           // Responses-API web search on top of it -- so this is really
           // createChatResponseCapabilities(webResearch && !chatResearchContext).
-          ...createChatResponseCapabilities(webResearch && !chatResearchContext),
-          text: { verbosity: "low" },
+          ...createChatResponseCapabilities(
+            webResearch && !chatResearchContext,
+            modelPreference
+          ),
+          text: { verbosity: createChatResponseVerbosity(modelPreference) },
           instructions: instructionsText,
           input: providerInput,
           max_output_tokens: maxOutputTokens,

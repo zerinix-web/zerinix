@@ -132,12 +132,12 @@ const modelOptions: Array<{
   {
     value: "fast",
     label: "Fast",
-    description: "Low-latency answers",
+    description: "Quick guidance",
   },
   {
     value: "balanced",
     label: "Balanced",
-    description: "Deeper reasoning",
+    description: "Deeper analysis",
   },
 ];
 

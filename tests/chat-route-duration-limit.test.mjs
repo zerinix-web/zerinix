@@ -86,6 +86,11 @@ test("the fix changes nothing about quality, grounding or the model", () => {
   // shorter answers, no weaker auth.
   assert.doesNotMatch(chatRoute, /webResearch = [^;]*modelPreference/);
   assert.match(chatRoute, /await supabase\.auth\.getUser\(\)/);
-  assert.match(chatRoute, /const maxOutputTokens = getChatMaxOutputTokens\(requestKind\);/);
+  // The budget still derives from requestKind; Balanced scales that base by
+  // ~1.5x and Fast leaves it exactly as it was.
+  assert.match(
+    chatRoute,
+    /applyChatOutputBudgetPreference\(\s*getChatMaxOutputTokens\(requestKind\),\s*modelPreference\s*\)/
+  );
   assert.match(read("app/lib/ai/response-continuation.ts"), /MAX_CHAT_RESPONSE_CONTINUATIONS = 4/);
 });
