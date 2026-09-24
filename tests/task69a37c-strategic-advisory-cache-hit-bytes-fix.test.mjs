@@ -250,7 +250,7 @@ test("client-2c. a multi-chunk stream (simulating network fragmentation across s
 // ===========================================================================
 
 test("parity-a. route.ts's real textStream() has the exact same TextEncoder + ReadableStream + enqueue/close + headers shape this test's textStream() mirrors", () => {
-  const fnMatch = chatRouteSource.match(/export function textStream\(content: string\) \{[\s\S]{0,1100}?\n\}/);
+  const fnMatch = chatRouteSource.match(/export function textStream\(\s*content: string,\s*confidenceCeiling: ChatConfidenceBand = "Moderate"\s*\) \{[\s\S]{0,1100}?\n\}/);
   assert.ok(fnMatch, "textStream function not found in route.ts");
   const body = fnMatch[0];
   assert.match(body, /const encoder = new TextEncoder\(\);/);
@@ -267,15 +267,22 @@ test("parity-b. route.ts exports resolveFinalStrategicAdvisoryText with the exac
   const body = fnMatch[0];
   const preferenceIdx = body.indexOf("stripUnsupportedPreferenceClaims(");
   const numericIdx = body.indexOf("attachNumericProvenanceLabels(");
-  const confidenceIdx = body.indexOf("correctConfidenceDecisionConflation(rawText)");
-  assert.ok(preferenceIdx >= 0 && numericIdx >= 0 && confidenceIdx >= 0);
-  assert.ok(preferenceIdx < numericIdx && numericIdx < confidenceIdx, "composition order must be preference(numeric(confidence(rawText)))");
+  const confidenceIdx = body.indexOf("correctConfidenceDecisionConflation(");
+  // Innermost step is now normalizeChatConfidencePrecision: chat computes no
+  // confidence score, so a percentage is invented precision whatever
+  // produced it -- including a cached answer whose evidence is long gone.
+  const precisionIdx = body.indexOf("normalizeChatConfidencePrecision(rawText)");
+  assert.ok(preferenceIdx >= 0 && numericIdx >= 0 && confidenceIdx >= 0 && precisionIdx >= 0);
+  assert.ok(
+    preferenceIdx < numericIdx && numericIdx < confidenceIdx && confidenceIdx < precisionIdx,
+    "composition order must be preference(numeric(confidence(precision(rawText))))"
+  );
 });
 
 test("parity-c. THE ACTUAL ROOT-CAUSE FIX: route.ts's cache-hit branch now calls resolveFinalStrategicAdvisoryText on cachedChatResponse.responseText BEFORE passing it to textStream -- this exact line was the bug", () => {
   assert.match(
     chatRouteSource,
-    /return textStream\(resolveFinalStrategicAdvisoryText\(cachedChatResponse\.responseText\)\);/
+    /return textStream\(\s*resolveFinalStrategicAdvisoryText\(cachedChatResponse\.responseText\),\s*confidenceCeiling\s*\);/
   );
 });
 

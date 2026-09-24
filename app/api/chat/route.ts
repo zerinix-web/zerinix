@@ -65,6 +65,15 @@ import {
 } from "@/app/lib/report-engine/executive-decision-brief";
 import { attachNumericProvenanceLabels } from "@/app/lib/report-engine/numeric-provenance-guard";
 import {
+  buildChatConfidenceInstruction,
+  type ChatConfidenceBand,
+  capChatConfidenceToEvidence,
+  normalizeChatConfidencePrecision,
+  resolveChatConfidenceCeiling,
+  CHAT_CONFIDENCE_CEILING_HEADER,
+  type ChatConfidenceEvidence,
+} from "@/app/lib/ai/chat-confidence-standard";
+import {
   addTokenUsage,
   CHAT_RESPONSE_CONTINUATION_INPUT,
   getContinuationMaxOutputTokens,
@@ -902,12 +911,22 @@ export function resolveFinalStrategicAdvisoryText(rawText: string): string {
     return rawText;
   }
 
+  // normalizeChatConfidencePrecision runs first and needs no evidence
+  // context: chat computes no confidence score anywhere, so a percentage is
+  // invented precision whatever produced it -- including a cached answer whose
+  // original evidence is long gone. Capping a stated BAND to this turn's
+  // evidence needs that context and happens at the call sites that have it.
   return stripUnsupportedPreferenceClaims(
-    attachNumericProvenanceLabels(correctConfidenceDecisionConflation(rawText))
+    attachNumericProvenanceLabels(
+      correctConfidenceDecisionConflation(normalizeChatConfidencePrecision(rawText))
+    )
   );
 }
 
-export function textStream(content: string) {
+export function textStream(
+  content: string,
+  confidenceCeiling: ChatConfidenceBand = "Moderate"
+) {
   const encoder = new TextEncoder();
   // P0 FIX #8 (hardening pass) -- confirmed live: chat, like Market
   // Analysis, injects the market intelligence graph as raw JSON into the
@@ -930,6 +949,7 @@ export function textStream(content: string) {
         "Content-Type": "text/plain; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
         "X-Accel-Buffering": "no",
+        [CHAT_CONFIDENCE_CEILING_HEADER]: confidenceCeiling,
       },
     }
   );
@@ -1663,6 +1683,22 @@ async function handleChatPost(req: Request) {
       userMemoryContext,
       webResearch,
     });
+    // What this turn actually has to stand on. Both are facts the server
+    // already knows -- no model judgement, no mode input: choosing Balanced
+    // must never raise confidence by itself, only the evidence it gathers can.
+    //
+    // Computed HERE, before the cache lookup, because the ceiling is sent as
+    // a response header on every path -- including a cache hit, which returns
+    // long before the generation branch. chatResearchContext is only ever set
+    // inside `if (webResearch)`, so webResearch alone is a sufficient proxy
+    // for it and is available this early.
+    const confidenceEvidence: ChatConfidenceEvidence = {
+      verifiedSources: webResearch,
+      userSpecificData:
+        attachments.length > 0 || Boolean(reportMemory) || Boolean(profileContext),
+    };
+    const confidenceCeiling = resolveChatConfidenceCeiling(confidenceEvidence);
+
     const chatCacheKey = createAiCacheKey({
       endpoint: "/api/chat",
       normalizedPrompt: normalizeAiPrompt(
@@ -1734,7 +1770,10 @@ async function handleChatPost(req: Request) {
         // own comment above for the full trace): this is the exact
         // branch that shipped a stale/unguarded cached response straight
         // to the client with no decision/numeric correction at all.
-        return textStream(resolveFinalStrategicAdvisoryText(cachedChatResponse.responseText));
+        return textStream(
+          resolveFinalStrategicAdvisoryText(cachedChatResponse.responseText),
+          confidenceCeiling
+        );
       }
     }
 
@@ -1902,6 +1941,7 @@ async function handleChatPost(req: Request) {
         : "Answer from the current conversation and general reasoning. Do not mention missing report context unless the user explicitly asks about a saved report.",
       "Answer naturally and directly. You may help with business, strategy, operations, finance, product, marketing, technology, or general questions.",
       "Use the conversation history for context, but do not fabricate facts.",
+      buildChatConfidenceInstruction(confidenceEvidence),
       chatResearchContext
         ? "A validated ZERINIX research snapshot is attached. Base external factual claims, competitors, market sizing, confidence, and executive recommendations on this exact evidence only. Do not start another web search or replace its citations."
         : "No validated external research snapshot is attached.",
@@ -2441,6 +2481,14 @@ async function handleChatPost(req: Request) {
             ) {
               const estimatedCostUsd = estimateAiCostUsd(model, tokenUsage);
 
+              // The cached copy is held to the same standard as a live answer,
+              // and capped while this turn's evidence is still known -- a cache
+              // hit months later has no way to recompute it.
+              const cacheableText = capChatConfidenceToEvidence(
+                normalizeChatConfidencePrecision(streamedText),
+                confidenceCeiling
+              );
+
               await storeCachedAiResponse(supabase, {
                 userId: user.id,
                 cacheKey: chatCacheKey,
@@ -2449,7 +2497,7 @@ async function handleChatPost(req: Request) {
                 reportField: "chat",
                 language: responseLanguage,
                 model,
-                responseText: streamedText,
+                responseText: cacheableText,
                 tokenUsage,
                 estimatedCostUsd,
                 expiresInDays: webResearch ? 1 : 7,
@@ -2514,6 +2562,9 @@ async function handleChatPost(req: Request) {
           "Content-Type": "text/plain; charset=utf-8",
           "Cache-Control": "no-cache, no-transform",
           "X-Accel-Buffering": "no",
+          // Sent with the headers, so it is in the client's hands before the
+          // first token arrives and the first painted frame is already capped.
+          [CHAT_CONFIDENCE_CEILING_HEADER]: confidenceCeiling,
           "Server-Timing": Object.entries(timings)
             .map(([phase, duration]) => `${phase};dur=${duration}`)
             .join(", "),

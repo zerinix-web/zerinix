@@ -25,7 +25,10 @@ test("chat streaming sanitizes accumulated output before rendering and persisten
     // workspace paints from a frame-batched buffer (latestOutput) rather
     // than from `output` directly, so the identifier is not pinned -- what
     // matters is that nothing unsanitized is ever handed to onChunk.
-    assert.match(source, /onChunk\(sanitizeAiResponseText\(\w+\)\)/);
+    // The Ask workspace additionally normalises confidence precision around
+    // the sanitize call, so allow a wrapper -- what matters is that the
+    // sanitizer is applied to the accumulated text before it is painted.
+    assert.match(source, /onChunk\((?:\w+\()?sanitizeAiResponseText\(\w+\)\)?\)/);
     // The raw accumulators must never be painted directly; only a
     // sanitizeAiResponseText(...) call or an already-sanitized value.
     assert.doesNotMatch(
@@ -33,7 +36,7 @@ test("chat streaming sanitizes accumulated output before rendering and persisten
       /onChunk\((?:output|latestOutput)\)/,
       "raw streamed text must never be rendered"
     );
-    assert.match(source, /const sanitizedOutput = sanitizeAiResponseText\(output\)/);
+    assert.match(source, /const sanitizedOutput = (?:\w+\(\s*)?sanitizeAiResponseText\(output\)/);
     assert.match(source, /return sanitizedOutput/);
   }
 });

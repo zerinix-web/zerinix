@@ -42,7 +42,12 @@ test("batching never delays or loses the final answer", () => {
   // A pending frame is cancelled and the exact final text flushed, so the
   // completed message is never a frame-stale copy.
   assert.match(readLoop, /cancelPendingPaint\(\);\s*output \+= decoder\.decode\(\);/);
-  assert.match(readLoop, /const sanitizedOutput = sanitizeAiResponseText\(output\);\s*onChunk\(sanitizedOutput\);/);
+  // The final flush is still the exact, fully-transformed text (the
+  // confidence normaliser now wraps the sanitizer here and in paint(), so
+  // rendered, returned and persisted text stay identical).
+  // applyConfidenceStandard = precision normaliser + evidence cap, the same
+  // pair every painted frame uses, so rendered and final text are identical.
+  assert.match(readLoop, /const sanitizedOutput = applyConfidenceStandard\(sanitizeAiResponseText\(output\)\);\s*onChunk\(sanitizedOutput\);/);
   // Stream errors still abort immediately, per chunk, before any paint.
   assert.match(readLoop, /if \(streamError !== null\) \{\s*cancelPendingPaint\(\);\s*throw new Error\(streamError\)/);
 });

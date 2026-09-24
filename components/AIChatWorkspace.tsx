@@ -13,6 +13,12 @@ import {
   sanitizeAiResponseText,
   extractChatStreamError,
 } from "@/app/lib/ai/response-sanitization";
+import {
+  capChatConfidenceToEvidence,
+  normalizeChatConfidencePrecision,
+  parseChatConfidenceCeiling,
+  CHAT_CONFIDENCE_CEILING_HEADER,
+} from "@/app/lib/ai/chat-confidence-standard";
 import { splitStreamingMarkdownIntoSettledAndActive } from "@/app/lib/streaming-markdown-split";
 import { useThrottledStreamingReveal } from "@/app/lib/streaming-reveal";
 import { MobileBottomNavigation } from "@/components/MobileNavigation";
@@ -1711,6 +1717,21 @@ export default function AIChatWorkspace({
       throw new Error(errorMessage);
     }
 
+    // The server's evidence ceiling travels in a response header, so it is
+    // already known here -- before a single token has been read. Every painted
+    // frame is capped with it, which is what stops an unsupported
+    // "Confidence: High" from ever being visible, rather than correcting it
+    // afterwards in the cache or in persisted history.
+    const confidenceCeiling = parseChatConfidenceCeiling(
+      response.headers.get(CHAT_CONFIDENCE_CEILING_HEADER)
+    );
+
+    const applyConfidenceStandard = (text: string) =>
+      capChatConfidenceToEvidence(
+        normalizeChatConfidencePrecision(text),
+        confidenceCeiling
+      );
+
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let output = "";
@@ -1722,9 +1743,14 @@ export default function AIChatWorkspace({
     // they did before.
     const canSchedulePaint = typeof requestAnimationFrame === "function";
 
+    // Confidence percentages are normalised on every painted frame, so
+    // invented precision never reaches the screen -- not even for the moment
+    // between arriving and the stream finishing. The transform is pure and
+    // safe on partial text: an incomplete number cannot match a complete
+    // pattern, so nothing flickers.
     function paint() {
       paintHandle = null;
-      onChunk(sanitizeAiResponseText(latestOutput));
+      onChunk(applyConfidenceStandard(sanitizeAiResponseText(latestOutput)));
     }
 
     function schedulePaint() {
@@ -1803,7 +1829,9 @@ export default function AIChatWorkspace({
       throw new Error(streamError);
     }
 
-    const sanitizedOutput = sanitizeAiResponseText(output);
+    // The same transform on the final text, so what is rendered, returned and
+    // persisted are identical.
+    const sanitizedOutput = applyConfidenceStandard(sanitizeAiResponseText(output));
     onChunk(sanitizedOutput);
 
     return sanitizedOutput;
