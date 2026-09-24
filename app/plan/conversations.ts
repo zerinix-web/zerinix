@@ -126,6 +126,28 @@ async function loadMessagesForConversations(
   return { data: messages, error: null };
 }
 
+// An assistant turn is only part of the conversation once it finished.
+//
+// The client persists the assistant row BEFORE the request, as an empty
+// placeholder with status "streaming", and rewrites it to "failed" with the
+// friendly error text if the turn breaks. Either way the row outlives the
+// attempt, and restoring it replays a dead moment as though it were an answer:
+// re-opening Ask with no request in flight showed the old "Advisor timed out"
+// card again, and an interrupted turn (navigation away, backgrounded app,
+// crash) would replay the "AI is thinking" card forever.
+//
+// A transient failure is not an assistant response, so unfinished assistant
+// rows are dropped on restore. Nothing is deleted -- the rows stay for
+// debugging -- and the USER's message is always kept, so the prompt survives
+// and can simply be asked again. Completed assistant turns are untouched.
+function isRestorableMessage(message: MessageRow) {
+  if (message.role !== "assistant") {
+    return true;
+  }
+
+  return message.status === "complete";
+}
+
 export async function loadPlanConversations(
   supabase: SupabaseClient,
   user: User
@@ -185,17 +207,19 @@ export async function loadPlanConversations(
       title: conversation.title,
       createdAt: new Date(conversation.created_at).getTime(),
       updatedAt: new Date(conversation.updated_at).getTime(),
-      messages: (messagesByConversation.get(conversation.id) || []).map((message) => ({
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        mode: message.mode || "chat",
-        status: message.status,
-        attachments: Array.isArray(message.attachments)
-          ? message.attachments
-          : [],
-        createdAt: new Date(message.created_at).getTime(),
-      })),
+      messages: (messagesByConversation.get(conversation.id) || [])
+        .filter(isRestorableMessage)
+        .map((message) => ({
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          mode: message.mode || "chat",
+          status: message.status,
+          attachments: Array.isArray(message.attachments)
+            ? message.attachments
+            : [],
+          createdAt: new Date(message.created_at).getTime(),
+        })),
     })),
     error: "",
     workspaces,
