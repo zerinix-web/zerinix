@@ -2515,6 +2515,29 @@ async function handleChatPost(req: Request) {
   }
 }
 
+// Vercel kills a function at the platform default when a route declares no
+// maxDuration, and this route declared none -- the only STREAMING model route
+// in the app that did not (app/api/plan and app/api/market-analysis both
+// declare 300, and their comments already describe "the 300s Vercel
+// maxDuration shared by every trigger path"). That default is far below what
+// an Ask turn can legitimately need, so longer answers were cut off mid-stream
+// by the platform rather than by anything going wrong.
+//
+// How long a legitimate turn runs, measured on a physical iPhone: a SUCCESSFUL
+// request took 7.87s to first byte and 14.67s end to end -- already at the
+// edge. Worse, one turn is not one model call: when a response stops on
+// max_output_tokens the route continues it, up to
+// MAX_CHAT_RESPONSE_CONTINUATIONS (4) more times, so a single answer can be
+// FIVE sequential model calls, each paying its own time to first token, plus
+// pre-model work and optional web research. Nothing about that is pathological
+// -- it is the normal shape of a long advisory answer.
+//
+// 300 matches every other AI route here. It is a CEILING, not a target: it
+// changes nothing about a fast request, and it does not mask failures, because
+// the client still gives up far earlier (75s overall, 60s with no chunk). It
+// only stops the platform from killing answers that are still being written.
+export const maxDuration = 300;
+
 export async function POST(req: Request) {
   const requestId = createOpenAiRequestId(req);
   return runWithOpenAiCostContext(
