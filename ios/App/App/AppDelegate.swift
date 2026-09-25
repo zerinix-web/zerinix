@@ -4,7 +4,15 @@ import Capacitor
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
-    var window: UIWindow?
+    // NO `var window: UIWindow?` HERE ON PURPOSE. This app is scene-based
+    // (see SceneDelegate.swift and Info.plist's UIApplicationSceneManifest),
+    // and UIKit never populates the app delegate's window for a scene-based
+    // app -- the window belongs to the scene. Declaring one would leave a
+    // permanently nil property that invites someone to assign to it, which is
+    // exactly how this migration ends up with two windows and two competing
+    // lifecycles. @capacitor/splash-screen already handles its absence: it
+    // reads UIApplication.shared.delegate?.window first and falls back to
+    // UIApplication.shared.connectedScenes, so the splash keeps working.
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
@@ -33,6 +41,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
     }
 
+    // NOTE: now that the app is scene-based, UIKit routes URL opens and
+    // Universal Links to SceneDelegate instead, so the two methods below are
+    // no longer the live path -- SceneDelegate forwards to the same
+    // ApplicationDelegateProxy. They are kept because they remain correct,
+    // cost nothing, and still apply in any non-scene context.
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
         // Called when the app was launched with a url. Feel free to add additional processing here,
         // but if you want the App API to support tracking app url opens, make sure to keep this call
