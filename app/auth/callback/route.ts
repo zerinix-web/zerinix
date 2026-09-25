@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/app/lib/supabase/server";
 import { ensureFreeBillingProfile } from "@/app/lib/auth/provision-user";
 import { isPrivateBetaAllowed } from "@/app/lib/beta-access";
+import { isAppAttestedAccount } from "@/app/lib/ios-app-store-access";
 
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
@@ -35,7 +36,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(oauthErrorUrl);
     }
 
-    if (!isPrivateBetaAllowed(user)) {
+    // Self-service registration is email + password, so an attested account
+    // only reaches this callback if the user later signs in with Google or
+    // Apple. Their email is still not on the private-beta allowlist, so
+    // without this they would be signed straight back out of an account they
+    // legitimately created.
+    if (!isPrivateBetaAllowed(user) && !isAppAttestedAccount(user)) {
       await supabase.auth.signOut();
       return NextResponse.redirect(accessDeniedUrl);
     }

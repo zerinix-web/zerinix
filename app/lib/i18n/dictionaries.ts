@@ -65,6 +65,7 @@ export const dictionaries = {
       registrationFailed:
         "Your account could not be created. Please try again.",
       privateBetaAccess: "Private beta access",
+      appAccessLabel: "Account access",
       requestAccess: "Request access",
       accessEyebrow: "ZERINIX ACCESS",
       privateBetaTitle: "ZERINIX Private Beta",
@@ -75,6 +76,18 @@ export const dictionaries = {
       privateBetaBody1: "ZERINIX is currently available by invitation only.",
       privateBetaBody2:
         "We are onboarding new founders in small groups while we refine the platform.",
+      appAccessBadge: "ACCOUNT ACCESS",
+      appAccessTitle: "Create your ZERINIX account",
+      appAccessBody1:
+        "ZERINIX accounts are approved individually so every workspace stays private and secure.",
+      appAccessBody2:
+        "Request an account and our team will set yours up.",
+      appAccessCta: "Request an account",
+      registrationUnavailable:
+        "Account creation is not available on this device. Please open ZERINIX on your iPhone or iPad.",
+      appAccessFooter: "Already have an account?",
+      appAccessDenied:
+        "This account does not have access to ZERINIX. Contact admin@zerinix.com to request access.",
       requestEarlyAccess: "Request Early Access",
       waitlistEyebrow: "ZERINIX waitlist",
       waitlistTitle: "Request early access",
@@ -311,6 +324,7 @@ export const dictionaries = {
       registrationFailed:
         "Hesabınız oluşturulamadı. Lütfen tekrar deneyin.",
       privateBetaAccess: "Private beta erişimi",
+      appAccessLabel: "Hesap erişimi",
       requestAccess: "Erişim talep et",
       accessEyebrow: "ZERINIX ERİŞİM",
       privateBetaTitle: "ZERINIX Private Beta",
@@ -321,6 +335,17 @@ export const dictionaries = {
       privateBetaBody1: "ZERINIX şu anda yalnızca davetle kullanılabilir.",
       privateBetaBody2:
         "Platformu geliştirirken yeni girişimcileri küçük gruplar halinde kabul ediyoruz.",
+      appAccessBadge: "HESAP ERİŞİMİ",
+      appAccessTitle: "ZERINIX hesabınızı oluşturun",
+      appAccessBody1:
+        "ZERINIX hesapları, her çalışma alanı gizli ve güvenli kalsın diye tek tek onaylanır.",
+      appAccessBody2: "Hesap talep edin, ekibimiz sizin için oluştursun.",
+      appAccessCta: "Hesap talep et",
+      registrationUnavailable:
+        "Bu cihazda hesap oluşturulamıyor. Lütfen ZERINIX'i iPhone veya iPad'inizde açın.",
+      appAccessFooter: "Zaten hesabınız var mı?",
+      appAccessDenied:
+        "Bu hesabın ZERINIX erişimi yok. Erişim talebi için admin@zerinix.com ile iletişime geçin.",
       requestEarlyAccess: "Erken Erişim Talep Et",
     },
     nav: {
@@ -549,6 +574,7 @@ export const dictionaries = {
       registrationFailed:
         "Ihr Konto konnte nicht erstellt werden. Versuchen Sie es erneut.",
       privateBetaAccess: "Private-Beta-Zugang",
+      appAccessLabel: "Kontozugang",
       requestAccess: "Zugang anfragen",
       accessEyebrow: "ZERINIX ZUGANG",
       privateBetaTitle: "ZERINIX Private Beta",
@@ -559,6 +585,17 @@ export const dictionaries = {
       privateBetaBody1: "ZERINIX ist derzeit nur auf Einladung verfügbar.",
       privateBetaBody2:
         "Wir nehmen neue Gründer in kleinen Gruppen auf, während wir die Plattform weiter verfeinern.",
+      appAccessBadge: "KONTOZUGANG",
+      appAccessTitle: "Erstellen Sie Ihr ZERINIX-Konto",
+      appAccessBody1:
+        "ZERINIX-Konten werden einzeln freigegeben, damit jeder Arbeitsbereich privat und sicher bleibt.",
+      appAccessBody2: "Fragen Sie ein Konto an, unser Team richtet es für Sie ein.",
+      appAccessCta: "Konto anfragen",
+      registrationUnavailable:
+        "Auf diesem Gerät ist keine Kontoerstellung möglich. Bitte öffnen Sie ZERINIX auf Ihrem iPhone oder iPad.",
+      appAccessFooter: "Sie haben bereits ein Konto?",
+      appAccessDenied:
+        "Dieses Konto hat keinen Zugang zu ZERINIX. Wenden Sie sich an admin@zerinix.com, um Zugang anzufragen.",
       requestEarlyAccess: "Frühzugang anfragen",
       waitlistEyebrow: "ZERINIX Warteliste",
       waitlistTitle: "Frühzugang anfragen",

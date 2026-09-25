@@ -15,14 +15,24 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   const { auth_error: authError, error } = await searchParams;
   const { locale, dictionary } = await getRequestDictionary();
+  // The access-denied message is the one error whose wording differs between
+  // the website and the App Store build: the web keeps "private beta access",
+  // while the iOS build says the account has no access, without framing the
+  // product as beta software (App Store Review Guideline 2.2). Both are
+  // rendered and app/globals.css shows one, because the same deployment
+  // serves both. The gate itself is unchanged -- the message only describes
+  // an authorization failure that already happened.
   const pageError =
-    error === "beta_access_required"
-      ? dictionary.auth.betaAccessRequired
-      : error === "oauth_callback_failed"
-        ? dictionary.auth.oauthError
-        : authError
-          ? dictionary.auth.authError
-          : "";
+    error === "beta_access_required" ? (
+      <>
+        <span className="zx-web-only">{dictionary.auth.betaAccessRequired}</span>
+        <span className="zx-ios-only">{dictionary.auth.appAccessDenied}</span>
+      </>
+    ) : error === "oauth_callback_failed" ? (
+      dictionary.auth.oauthError
+    ) : authError ? (
+      dictionary.auth.authError
+    ) : null;
 
   return (
     <AuthShell
@@ -31,7 +41,12 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       subtitle={dictionary.auth.loginSubtitle}
       locale={locale}
       dictionary={dictionary}
-      footerText={dictionary.auth.privateBetaAccess}
+      footerText={
+        <>
+          <span className="zx-web-only">{dictionary.auth.privateBetaAccess}</span>
+          <span className="zx-ios-only">{dictionary.auth.appAccessLabel}</span>
+        </>
+      }
       footerHref="/register"
       footerLinkText={dictionary.auth.requestAccess}
     >

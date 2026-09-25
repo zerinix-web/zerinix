@@ -264,11 +264,15 @@ export default function MobileAccountHome({
               />
             </div>
 
+            {/* A permanently disabled control that advertises an unbuilt
+                feature. The website keeps it; the iOS build omits it, because
+                App Store Review Guideline 2.2 reads visible "coming soon"
+                placeholders as pre-release software. */}
             <button
               type="button"
               disabled
               aria-disabled="true"
-              className="mt-5 flex min-h-12 w-full cursor-not-allowed items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.045] px-4 text-sm font-semibold text-zinc-500"
+              className="zx-web-only mt-5 flex min-h-12 w-full cursor-not-allowed items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.045] px-4 text-sm font-semibold text-zinc-500"
             >
               Upgrade plan
               <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]">

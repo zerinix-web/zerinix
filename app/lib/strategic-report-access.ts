@@ -5,6 +5,7 @@ import {
   isLocalDevelopmentOwnerOrAdmin,
   isPrivateBetaAllowed,
 } from "./beta-access.ts";
+import { isAppAttestedAccount } from "./ios-app-store-access.ts";
 
 type AdminRoleLoader = (userId: string) => Promise<unknown>;
 
@@ -15,6 +16,7 @@ export type StrategicReportAccess = {
     | "verified_admin_owner_claim"
     | "verified_admin_owner_role"
     | "local_development_owner_admin"
+    | "attested_ios_app_store"
     | "private_beta_denied";
 };
 
@@ -75,6 +77,15 @@ export async function authorizeStrategicReportAccess({
 }): Promise<StrategicReportAccess> {
   if (isPrivateBetaAllowed(account, allowedEmails)) {
     return { allowed: true, branch: "approved_beta" };
+  }
+
+  // An account created through the iOS App Store app. Reached only after this
+  // server verified an Apple App Attest assertion (see
+  // app/api/ios/registration/route.ts), and recorded in app_metadata, which
+  // the user cannot write. The private-beta allowlist above is untouched: an
+  // account that did not come through that attested path still needs it.
+  if (isAppAttestedAccount(account)) {
+    return { allowed: true, branch: "attested_ios_app_store" };
   }
 
   if (hasVerifiedAdminOrOwnerClaim(account)) {

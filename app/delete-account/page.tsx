@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import HomeLink from "@/components/HomeLink";
 import { Mail, Sparkles } from "lucide-react";
 
 // Public, no-login-required account deletion page (used as the "Account
@@ -74,20 +75,17 @@ export default function DeleteAccountPage() {
     <main className="min-h-screen bg-black text-white">
       <header className="border-b border-white/10 bg-black/80 backdrop-blur-xl">
         <nav className="mx-auto flex h-16 w-full max-w-3xl items-center justify-between px-5 sm:px-8">
-          <Link href="/" className="flex items-center gap-2.5">
+          <HomeLink className="flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/[0.06]">
               <Sparkles className="h-3.5 w-3.5 text-teal-200" />
             </span>
             <span className="text-sm font-semibold tracking-[0.28em] text-white">
               ZERINIX
             </span>
-          </Link>
-          <Link
-            href="/"
-            className="text-sm font-medium text-zinc-400 transition hover:text-white"
-          >
+          </HomeLink>
+          <HomeLink className="text-sm font-medium text-zinc-400 transition hover:text-white">
             Back to ZERINIX
-          </Link>
+          </HomeLink>
         </nav>
       </header>
 
@@ -345,9 +343,9 @@ export default function DeleteAccountPage() {
             <Link href="/privacy" className="font-medium text-zinc-400 transition hover:text-white">
               Privacy Policy
             </Link>
-            <Link href="/" className="font-medium text-zinc-400 transition hover:text-white">
+            <HomeLink className="font-medium text-zinc-400 transition hover:text-white">
               zerinix.com
-            </Link>
+            </HomeLink>
           </div>
         </div>
       </footer>

@@ -110,6 +110,24 @@ html.zx-keyboard-open body {
   min-height: 0;
 }
 
+/* Platform-scoped copy. The App Store build and the public website are the
+   SAME deployment -- the iOS shell loads https://zerinix.com -- so anything
+   that must differ between them is rendered once and chosen here, by the
+   zx-native-ios class the shell sets on <html> before first paint.
+
+   Hiding with :not() rather than toggling display keeps each element's own
+   natural display value when it IS shown, so a flex row stays a flex row.
+
+   The website keeps every word it has today: without the class, .zx-ios-only
+   is the only thing hidden. */
+html:not(.zx-native-ios) .zx-ios-only {
+  display: none !important;
+}
+
+html.zx-native-ios .zx-web-only {
+  display: none !important;
+}
+
 ::selection {
   background: rgba(94, 234, 212, 0.32);
   color: #ffffff;

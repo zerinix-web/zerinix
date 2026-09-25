@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import HomeLink from "@/components/HomeLink";
 import { Sparkles } from "lucide-react";
 
 // Public, no-login-required legal page (required for App Store Connect
@@ -53,20 +54,17 @@ export default function PrivacyPolicyPage() {
     <main className="min-h-screen bg-black text-white">
       <header className="border-b border-white/10 bg-black/80 backdrop-blur-xl">
         <nav className="mx-auto flex h-16 w-full max-w-3xl items-center justify-between px-5 sm:px-8">
-          <Link href="/" className="flex items-center gap-2.5">
+          <HomeLink className="flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/[0.06]">
               <Sparkles className="h-3.5 w-3.5 text-teal-200" />
             </span>
             <span className="text-sm font-semibold tracking-[0.28em] text-white">
               ZERINIX
             </span>
-          </Link>
-          <Link
-            href="/"
-            className="text-sm font-medium text-zinc-400 transition hover:text-white"
-          >
+          </HomeLink>
+          <HomeLink className="text-sm font-medium text-zinc-400 transition hover:text-white">
             Back to ZERINIX
-          </Link>
+          </HomeLink>
         </nav>
       </header>
 
@@ -105,10 +103,20 @@ export default function PrivacyPolicyPage() {
               markets, and generate strategic reports and analyses based on
               information they provide.
             </p>
-            <p>
+            {/* Same policy, two wordings. The website keeps the private-beta
+                description; the iOS build states the same access restriction
+                without calling the product a beta, because App Store Review
+                Guideline 2.2 rejects builds presented as beta software.
+                app/globals.css shows one of the two. */}
+            <p className="zx-web-only">
               Access to the Service is currently limited to an invite-only
               private beta. This policy applies to anyone who creates an
               account, signs in, or otherwise uses the Service.
+            </p>
+            <p className="zx-ios-only">
+              Access to the Service is currently limited to approved accounts.
+              This policy applies to anyone who creates an account, signs in,
+              or otherwise uses the Service.
             </p>
           </Section>
 
@@ -214,12 +222,18 @@ export default function PrivacyPolicyPage() {
           </Section>
 
           <Section id="authentication" title="Authentication">
-            <p>
+            <p className="zx-web-only">
               Sign-in is handled by Supabase Auth. You can sign in with an
               email and password or through Google or Apple sign-in. During
               the private beta, access is additionally restricted to
               approved accounts; if your account is not on the approved
               list, you will not be able to sign in.
+            </p>
+            <p className="zx-ios-only">
+              Sign-in is handled by Supabase Auth. You can sign in with an
+              email and password or through Google or Apple sign-in. Access is
+              additionally restricted to approved accounts; if your account is
+              not on the approved list, you will not be able to sign in.
             </p>
           </Section>
 
@@ -409,9 +423,9 @@ export default function PrivacyPolicyPage() {
       <footer className="border-t border-white/10 px-5 py-8 sm:px-8">
         <div className="mx-auto flex w-full max-w-3xl flex-col items-start justify-between gap-3 text-xs text-zinc-500 sm:flex-row sm:items-center">
           <p>&copy; {new Date(LAST_UPDATED).getFullYear()} ZERINIX. All rights reserved.</p>
-          <Link href="/" className="font-medium text-zinc-400 transition hover:text-white">
+          <HomeLink className="font-medium text-zinc-400 transition hover:text-white">
             zerinix.com
-          </Link>
+          </HomeLink>
         </div>
       </footer>
     </main>

@@ -90,7 +90,11 @@ test("service-role access is isolated to server-only admin modules", () => {
       file.startsWith("app/admin/") ||
       file === "app/lib/billing/stripe-webhook.ts" ||
       file === "app/lib/integrations/email-events.ts" ||
-      file === "app/lib/account/account-deletion-service.ts"
+      file === "app/lib/account/account-deletion-service.ts" ||
+      // Apple App Attest: verifies device attestations and creates the
+      // resulting App Store accounts. Confined to this one server-only
+      // module so the routes above it never touch service-role credentials.
+      file === "app/lib/ios-attestation/store.ts"
     ) {
       continue;
     }
