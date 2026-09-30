@@ -156,27 +156,49 @@ function readNonceExtension(certificateDer: Buffer): Buffer {
 // authenticator data
 // ---------------------------------------------------------------------------
 
-export type AuthenticatorData = {
-  rpIdHash: Buffer;
-  flags: number;
-  signCount: number;
-  aaguid: Buffer | null;
-  credentialId: Buffer | null;
-};
-
-function parseAuthenticatorData(authData: Buffer): AuthenticatorData {
+/**
+ * The fixed 37-byte header every authenticator data blob begins with.
+ *
+ * Everything after it differs by message type, which is why reading it is
+ * separated from reading the attested credential below.
+ */
+function readAuthenticatorDataHeader(authData: Buffer) {
   if (authData.length < 37) {
     throw new AppAttestError("Authenticator data is too short");
   }
 
-  const rpIdHash = Buffer.from(authData.subarray(0, 32));
-  const flags = authData[32];
-  const signCount = authData.readUInt32BE(33);
+  return {
+    rpIdHash: Buffer.from(authData.subarray(0, 32)),
+    flags: authData[32],
+    signCount: authData.readUInt32BE(33),
+  };
+}
 
-  if (authData.length === 37) {
-    return { rpIdHash, flags, signCount, aaguid: null, credentialId: null };
-  }
-
+/**
+ * The attested credential block, which only an ATTESTATION carries.
+ *
+ * BUG FIX -- found against a real iPhone, where every genuine assertion was
+ * rejected with "credential id runs past the end". This used to be part of one
+ * parser shared by attestations and assertions, which decided whether a
+ * credential block was present by checking `authData.length === 37`.
+ *
+ * That assumption does not hold. Apple appends CBOR extension data to
+ * assertion authenticator data -- on the captured device,
+ * {apple_bundle_version_01, apple_validation_category_01}, 62 bytes -- so the
+ * blob is 99 bytes and the old code read bytes 53-54 of that CBOR as a
+ * credential-id length, got 25970, and threw.
+ *
+ * Note it cannot be fixed by branching on the AT flag either: the real
+ * assertion carries flags 0xc0, i.e. AT *and* ED both set, despite having no
+ * credential block at all. The reliable distinction is the message type, not
+ * the flags, so attestations call this and assertions do not.
+ *
+ * Ignoring the trailing bytes on the assertion path is safe because the
+ * signature is computed over the WHOLE authenticator data: any tampering with
+ * the extensions breaks signature verification, which is asserted by a
+ * regression test.
+ */
+function readAttestedCredential(authData: Buffer) {
   if (authData.length < 55) {
     throw new AppAttestError("Authenticator data has a truncated attested credential");
   }
@@ -188,9 +210,10 @@ function parseAuthenticatorData(authData: Buffer): AuthenticatorData {
     throw new AppAttestError("Authenticator data credential id runs past the end");
   }
 
-  const credentialId = Buffer.from(authData.subarray(55, 55 + credentialIdLength));
-
-  return { rpIdHash, flags, signCount, aaguid, credentialId };
+  return {
+    aaguid,
+    credentialId: Buffer.from(authData.subarray(55, 55 + credentialIdLength)),
+  };
 }
 
 /** The relying-party identifier Apple hashes into every attestation. */
@@ -343,7 +366,10 @@ export function verifyAppAttestAttestation(input: AttestationInput): Attestation
     throw new AppAttestError("Attestation nonce does not match the issued challenge");
   }
 
-  const parsed = parseAuthenticatorData(authData);
+  const parsed = {
+    ...readAuthenticatorDataHeader(authData),
+    ...readAttestedCredential(authData),
+  };
 
   // 3. Bind it to THIS app. Otherwise any App Attest-enabled app would do.
   const expectedRpIdHash = sha256(Buffer.from(appIdentifier(teamId, bundleId), "utf8"));
@@ -450,7 +476,9 @@ export function verifyAppAttestAssertion(input: AssertionInput): AssertionResult
     throw new AppAttestError("Assertion is missing its signature or authenticator data");
   }
 
-  const parsed = parseAuthenticatorData(authenticatorData);
+  // Header only. An assertion carries no attested credential, and anything
+  // after the header is Apple extension data that this must not try to parse.
+  const parsed = readAuthenticatorDataHeader(authenticatorData);
 
   const expectedRpIdHash = sha256(Buffer.from(appIdentifier(teamId, bundleId), "utf8"));
   if (!timingSafeEqualBuffers(expectedRpIdHash, parsed.rpIdHash)) {

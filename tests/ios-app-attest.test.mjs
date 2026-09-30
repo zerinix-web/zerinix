@@ -7,6 +7,7 @@ import {
   createAssertion,
   encodeCbor,
   AAGUID_DEVELOPMENT,
+  APPLE_ASSERTION_EXTENSIONS,
 } from "./support/app-attest-fixtures.mjs";
 import {
   APPLE_APP_ATTEST_ROOT_CA_PEM,
@@ -258,6 +259,74 @@ test("an assertion produced for a different app is refused", () => {
   });
 
   rejects(() => verifyAssertionFor(device, assertion, clientData));
+});
+
+test("an assertion carrying Apple's extension data verifies", () => {
+  // The synthetic mirror of the physical-device regression. The fixtures used
+  // to emit a bare 37-byte header, which is not what Apple sends: real
+  // assertions append CBOR extensions and set AT and ED together while
+  // carrying no attested credential. Both properties are reproduced here.
+  const device = attestedDevice();
+  const clientData = Buffer.from("challenge-abc:founder@example.com");
+  const assertion = createAssertion({
+    ...device,
+    clientData,
+    signCount: 1,
+    extensions: APPLE_ASSERTION_EXTENSIONS,
+  });
+
+  assert.equal(verifyAssertionFor(device, assertion, clientData).signCount, 1);
+});
+
+test("an assertion with AT set but no credential block still verifies", () => {
+  // Apple sets flags 0xc0 on assertions. Anything that decides how to parse by
+  // looking at the AT flag would break on exactly this.
+  const device = attestedDevice();
+  const clientData = Buffer.from("challenge-abc:founder@example.com");
+  const assertion = createAssertion({
+    ...device,
+    clientData,
+    signCount: 2,
+    extensions: APPLE_ASSERTION_EXTENSIONS,
+    flagsOverride: 0xc0,
+  });
+
+  assert.equal(verifyAssertionFor(device, assertion, clientData).signCount, 2);
+});
+
+test("extension data does not weaken any assertion check", () => {
+  const device = attestedDevice();
+  const clientData = Buffer.from("challenge-abc:founder@example.com");
+  const withExtensions = (overrides) =>
+    createAssertion({ ...device, clientData, signCount: 3,
+                      extensions: APPLE_ASSERTION_EXTENSIONS, ...overrides });
+
+  rejects(() => verifyAssertionFor(device, withExtensions({}), clientData, 3),
+    "a replayed counter must still be refused when extensions are present");
+  rejects(() => verifyAssertionFor(device, withExtensions({ rpIdHashOverride: randomBytes(32) }), clientData),
+    "a different application must still be refused when extensions are present");
+  rejects(() => verifyAssertionFor(device, withExtensions({}), Buffer.from("different client data")),
+    "different client data must still be refused when extensions are present");
+});
+
+test("authenticator data shorter than its fixed header is refused", () => {
+  // FOUND BY MUTATION TESTING: nothing covered the 37-byte bound, so removing
+  // it broke no test. Without it a truncated blob reaches readUInt32BE and
+  // raises a RangeError instead of failing closed as an AppAttestError.
+  const device = attestedDevice();
+  const clientData = Buffer.from("challenge-abc:founder@example.com");
+
+  for (const length of [0, 1, 32, 36]) {
+    rejects(
+      () =>
+        verifyAssertionFor(
+          device,
+          encodeCbor({ signature: Buffer.alloc(70), authenticatorData: Buffer.alloc(length) }),
+          clientData
+        ),
+      `authenticator data of ${length} bytes must be refused`
+    );
+  }
 });
 
 test("a malformed assertion is refused rather than partially trusted", () => {

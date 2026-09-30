@@ -125,23 +125,38 @@ export const AAGUID_PRODUCTION = Buffer.concat([
 ]);
 export const AAGUID_DEVELOPMENT = Buffer.from("appattestdevelop", "utf8");
 
+/**
+ * Apple's real assertions carry CBOR extension data after the 37-byte header,
+ * and set BOTH the AT (0x40) and ED (0x80) flags while carrying no attested
+ * credential at all. Captured from a physical iPhone; reproduced here so the
+ * suite exercises the real wire format rather than a simplified one.
+ */
+export const APPLE_ASSERTION_EXTENSIONS = Buffer.from(
+  "omdhcHBsZV9idW5kbGVfdmVyc2lvbl8wMWEyeBxhcHBsZV92YWxpZGF0aW9uX2NhdGVnb3J5XzAxRAMAAAA=",
+  "base64"
+);
+
 export function buildAuthenticatorData({
   appId,
   signCount = 0,
   aaguid = null,
   credentialId = null,
   rpIdHash = null,
+  extensions = null,
 }) {
   const head = Buffer.alloc(37);
   (rpIdHash ?? sha256(Buffer.from(appId, "utf8"))).copy(head, 0);
-  head[32] = aaguid ? 0x40 : 0x00;
+  head[32] = (aaguid ? 0x40 : 0x00) | (extensions ? 0x80 : 0x00);
   head.writeUInt32BE(signCount, 33);
 
-  if (!aaguid) return head;
+  if (!aaguid) {
+    return extensions ? Buffer.concat([head, extensions]) : head;
+  }
 
   const length = Buffer.alloc(2);
   length.writeUInt16BE(credentialId.length, 0);
-  return Buffer.concat([head, aaguid, length, credentialId]);
+  const attested = Buffer.concat([head, aaguid, length, credentialId]);
+  return extensions ? Buffer.concat([attested, extensions]) : attested;
 }
 
 /**
@@ -220,12 +235,16 @@ export function createAssertion({
   signCount = 1,
   rpIdHashOverride = null,
   signWithKeyPem = null,
+  extensions = null,
+  flagsOverride = null,
 }) {
   const authenticatorData = buildAuthenticatorData({
     appId: `${teamId}.${bundleId}`,
     signCount,
     rpIdHash: rpIdHashOverride,
+    extensions,
   });
+  if (flagsOverride !== null) authenticatorData[32] = flagsOverride;
   const nonce = sha256(authenticatorData, sha256(clientData));
   const signer = createSign("sha256");
   signer.update(nonce);
