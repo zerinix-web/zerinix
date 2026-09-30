@@ -19,6 +19,7 @@ import {
   verifyAppAttestAssertion,
 } from "@/app/lib/ios-attestation/app-attest";
 import { decodeBase64 } from "@/app/lib/ios-attestation/encoding";
+import { isAlreadyRegisteredSignUp } from "@/app/lib/ios-attestation/signup-result";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MINIMUM_PASSWORD_LENGTH = 8;
@@ -185,6 +186,17 @@ export async function POST(request: NextRequest) {
     // neither does this: doing so would turn the endpoint into an oracle for
     // which addresses hold ZERINIX accounts.
     console.warn("[ios-registration] sign-up rejected", { reason: error?.message });
+    return noStoreJson({ error: "registration_failed" }, { status: 400 });
+  }
+
+  // An already-registered address comes back looking like success, with a
+  // fabricated user id that addresses no row -- see isAlreadyRegisteredSignUp.
+  // Every admin call against that id fails, which is how this used to surface
+  // as a 503. The response is deliberately the SAME generic body as any other
+  // sign-up failure, so the endpoint still reveals nothing about which
+  // addresses exist.
+  if (isAlreadyRegisteredSignUp(data.user)) {
+    console.warn("[ios-registration] sign-up returned no identity");
     return noStoreJson({ error: "registration_failed" }, { status: 400 });
   }
 
