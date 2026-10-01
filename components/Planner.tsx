@@ -273,7 +273,6 @@ import {
 } from "@/app/lib/ai/understanding";
 import { UnderstandingLoadingState } from "@/components/planner/UnderstandingCard";
 import { getComposerSuggestions } from "@/components/planner/composer-suggestions";
-import ZerinixLogo from "@/components/ZerinixLogo";
 
 type ReportSection = {
   field?: keyof (MarketReport & PlanReport) | string;
@@ -8018,7 +8017,9 @@ function ConversationSidebar({
             aria-label="Go to dashboard home"
             className="flex items-center gap-3 rounded-2xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
           >
-            <ZerinixLogo className="h-10 w-10 rounded-2xl border border-teal-200/20 shadow-lg shadow-teal-950/20" />
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-teal-200/20 bg-teal-200/10 shadow-lg shadow-teal-950/20">
+              <Sparkles className="h-5 w-5 text-teal-200" />
+            </span>
             <div>
               <p className="text-lg font-semibold tracking-[0.28em] text-white">
                 ZERINIX

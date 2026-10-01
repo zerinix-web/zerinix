@@ -19,7 +19,6 @@ import {
   MobileHeader,
 } from "@/components/MobileNavigation";
 import { getRequestDictionary } from "@/app/lib/i18n/server";
-import ZerinixLogo from "@/components/ZerinixLogo";
 
 export default async function DashboardSidebar({
   showMobileNavigation = true,
@@ -72,7 +71,9 @@ export default async function DashboardSidebar({
           aria-label="Go to dashboard home"
           className="group flex items-center gap-3 rounded-[1.65rem] border border-white/10 bg-white/[0.045] p-3 shadow-xl shadow-black/20 ring-1 ring-white/[0.025] transition duration-300 hover:-translate-y-0.5 hover:border-teal-300/25 hover:bg-white/[0.065] hover:shadow-2xl hover:shadow-teal-950/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
         >
-          <ZerinixLogo className="h-11 w-11 rounded-[1.15rem] shadow-lg shadow-white/10" />
+          <span className="flex h-11 w-11 items-center justify-center rounded-[1.15rem] bg-white text-sm font-black tracking-[0.12em] text-black shadow-lg shadow-white/10">
+            ZX
+          </span>
           <span className="min-w-0">
             <span className="block text-lg font-bold tracking-[0.14em] text-white">
               ZERINIX

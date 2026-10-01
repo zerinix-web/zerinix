@@ -14,7 +14,6 @@ import { dictionaries, type AppDictionary } from "@/app/lib/i18n/dictionaries";
 // Imported, never re-exported: a re-export from this "use client" module
 // would hand server components the same broken proxy all over again.
 import { MOBILE_NAV_CLEARANCE } from "@/components/mobile-layout";
-import ZerinixLogo from "@/components/ZerinixLogo";
 
 // TASK -- Mobile V1 Home: the bottom-nav labels for this first tab and
 // the "Ask" tab use their own dedicated `nav.mobileHome`/`nav.mobileAsk`
@@ -126,7 +125,9 @@ export function MobileHeader({
           aria-label="Go to dashboard home"
           className="inline-flex items-center gap-3 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
         >
-          <ZerinixLogo className="h-10 w-10 rounded-[1rem] shadow-lg shadow-white/10" />
+          <span className="flex h-10 w-10 items-center justify-center rounded-[1rem] bg-white text-xs font-black tracking-[0.12em] text-black shadow-lg shadow-white/10">
+            ZX
+          </span>
           <span>
             <span className="block text-sm font-bold tracking-[0.16em] text-white">
               ZERINIX

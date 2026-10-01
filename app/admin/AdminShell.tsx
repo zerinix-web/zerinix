@@ -5,7 +5,6 @@ import { dashboardTheme } from "@/app/lib/ui/dashboard-theme";
 import { requireAdminPage } from "./admin-data";
 import { AdminGlobalSearch } from "./AdminGlobalSearch";
 import { AdminNavigation } from "./AdminNavigation";
-import ZerinixLogo from "@/components/ZerinixLogo";
 
 function formatRole(role: string) {
   return role
@@ -45,7 +44,9 @@ export async function AdminShell({
             href="/admin"
             className={`flex h-16 items-center gap-3 rounded-[1.65rem] p-3 ${dashboardTheme.surface} ${dashboardTheme.hoverSurface}`}
           >
-            <ZerinixLogo className="h-10 w-10 rounded-[1.15rem] shadow-lg shadow-white/10" />
+            <span className="flex h-10 w-10 items-center justify-center rounded-[1.15rem] bg-white text-[11px] font-black tracking-[0.16em] text-black shadow-lg shadow-white/10">
+              ZX
+            </span>
             <span>
               <span className="block text-[14px] font-bold tracking-[0.18em]">
                 ZERINIX
