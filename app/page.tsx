@@ -25,6 +25,8 @@ import {
   Zap,
 } from "lucide-react";
 import WaitlistForm from "@/components/WaitlistForm";
+import PlatformCopy from "@/components/PlatformCopy";
+import { iosCopy } from "@/app/lib/i18n/ios-copy";
 import { getRequestDictionary } from "@/app/lib/i18n/server";
 import { createClient } from "@/app/lib/supabase/server";
 
@@ -77,7 +79,18 @@ export default async function Home() {
     redirect("/dashboard");
   }
 
-  const { dictionary } = await getRequestDictionary();
+  const { locale, dictionary } = await getRequestDictionary();
+
+  // The landing page is what the Capacitor shell would open on, and its copy
+  // describes ZERINIX as a private beta -- which App Store Review Guideline
+  // 2.2 treats as pre-release software. The platform is unknowable here (one
+  // deployment serves the website and the iOS shell), so every affected string
+  // ships in both wordings and app/globals.css shows one. `iosCopy` returns
+  // the string unchanged when it has no neutral counterpart, so wrapping a
+  // string that needs no change costs nothing.
+  const platformCopy = (text: string) => (
+    <PlatformCopy web={text} ios={iosCopy(locale, text)} />
+  );
   const pageWorkflowSteps = dictionary.landing.workflowSteps;
   const pageChatMessages = [
     {
@@ -106,8 +119,8 @@ export default async function Home() {
   }));
   const pagePricing = dictionary.landing.pricingPlans.map((plan, index) => ({
     name: plan[0],
-    price: plan[1],
-    description: plan[2],
+    price: platformCopy(plan[1]),
+    description: platformCopy(plan[2]),
     features: plan.slice(3),
     highlighted: index === highlightedPricingIndex,
   }));
@@ -156,7 +169,9 @@ export default async function Home() {
               className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-zinc-100 transition hover:border-teal-200/40 hover:bg-white/[0.08]"
             >
               <LockKeyhole className="h-4 w-4 text-teal-200" />
-              <span className="hidden sm:inline">{dictionary.landing.developerLogin}</span>
+              <span className="hidden sm:inline">
+                {platformCopy(dictionary.landing.developerLogin)}
+              </span>
               <span className="sm:hidden">{dictionary.landing.login}</span>
             </Link>
           </div>
@@ -167,7 +182,7 @@ export default async function Home() {
         <div className="landing-fade-up landing-mobile-safe min-w-0">
           <div className="inline-flex items-center gap-2 rounded-full border border-teal-200/20 bg-teal-200/10 px-4 py-2 text-sm font-medium text-teal-100 shadow-lg shadow-teal-950/20">
             <span className="h-2 w-2 rounded-full bg-teal-200 shadow-[0_0_18px_rgba(94,234,212,0.8)]" />
-            {dictionary.landing.heroBadge}
+            {platformCopy(dictionary.landing.heroBadge)}
           </div>
 
           <h1 className="mt-7 max-w-5xl text-4xl font-semibold leading-[1.04] tracking-tight text-white sm:text-6xl lg:text-7xl">
@@ -179,18 +194,25 @@ export default async function Home() {
           </p>
 
           <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center">
-            <WaitlistForm labels={dictionary.landing} />
+            {/* App Store Review Guideline 2.2: the iOS build must not present
+                a waitlist, an early-access request or a "Developer Login", all
+                of which describe pre-release software. The website keeps them
+                unchanged; on iOS the same row collapses to the ordinary
+                sign-in link that is already here. */}
+            <div className="zx-web-only contents">
+              <WaitlistForm labels={dictionary.landing} />
+            </div>
             <Link
               href="/login?next=/plan"
               prefetch={false}
               className="inline-flex items-center justify-center gap-2 rounded-full border border-white/12 bg-white/[0.045] px-6 py-3 text-sm font-semibold text-white transition hover:border-white/30 hover:bg-white/[0.08] sm:w-auto"
             >
-              {dictionary.landing.developerLogin}
+              {platformCopy(dictionary.landing.developerLogin)}
               <ChevronRight className="h-4 w-4" />
             </Link>
           </div>
           <p className="mt-4 max-w-xl text-sm leading-6 text-zinc-500">
-            {dictionary.landing.helperText}
+            {platformCopy(dictionary.landing.helperText)}
           </p>
 
           <div className="mt-10 grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3">
@@ -464,7 +486,7 @@ export default async function Home() {
             </h2>
           </div>
           <p className="max-w-sm text-sm leading-6 text-zinc-500">
-            {dictionary.landing.pricingDescription}
+            {platformCopy(dictionary.landing.pricingDescription)}
           </p>
         </div>
 
@@ -503,15 +525,29 @@ export default async function Home() {
               <div className="mt-7">
                 <a
                   href="#waitlist"
-                  className={
+                  className={`zx-web-only ${
                     plan.highlighted
                       ? "inline-flex w-full items-center justify-center gap-2 rounded-full bg-teal-300 px-5 py-3 text-sm font-semibold text-black transition hover:bg-teal-200"
                       : "inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/12 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-white transition hover:border-white/25 hover:bg-white/[0.08]"
-                  }
+                  }`}
                 >
                   {dictionary.landing.requestAccess}
                   <ArrowUpRight className="h-4 w-4" />
                 </a>
+                {/* iOS gets the same button pointing at sign-in instead of the
+                    waitlist anchor, so the pricing card keeps a working CTA. */}
+                <Link
+                  href="/login?next=/plan"
+                  prefetch={false}
+                  className={`zx-ios-only ${
+                    plan.highlighted
+                      ? "inline-flex w-full items-center justify-center gap-2 rounded-full bg-teal-300 px-5 py-3 text-sm font-semibold text-black transition hover:bg-teal-200"
+                      : "inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/12 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-white transition hover:border-white/25 hover:bg-white/[0.08]"
+                  }`}
+                >
+                  {dictionary.landing.login}
+                  <ArrowUpRight className="h-4 w-4" />
+                </Link>
               </div>
             </article>
           ))}
@@ -542,7 +578,7 @@ export default async function Home() {
                   {question}
                 </h3>
                 <p className="mt-3 text-sm leading-7 text-zinc-400">
-                  {answer}
+                  {platformCopy(answer)}
                 </p>
               </article>
             ))}
@@ -555,20 +591,22 @@ export default async function Home() {
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-teal-100/80">
-                {dictionary.landing.privateBeta}
+                {platformCopy(dictionary.landing.privateBeta)}
               </p>
               <h2 className="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-white sm:text-5xl">
                 {dictionary.landing.betaCtaTitle}
               </h2>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row lg:flex-col xl:flex-row">
-              <WaitlistForm labels={dictionary.landing} />
+              <div className="zx-web-only contents">
+                <WaitlistForm labels={dictionary.landing} />
+              </div>
               <Link
                 href="/login?next=/plan"
                 prefetch={false}
                 className="inline-flex items-center justify-center gap-2 rounded-full border border-white/12 bg-white/[0.055] px-6 py-3 text-sm font-semibold text-white transition hover:border-white/30 hover:bg-white/[0.1]"
               >
-                {dictionary.landing.developerLogin}
+                {platformCopy(dictionary.landing.developerLogin)}
                 <ChevronRight className="h-4 w-4" />
               </Link>
             </div>
@@ -598,7 +636,7 @@ export default async function Home() {
                   className="flex items-start gap-3 rounded-2xl border border-white/10 bg-black/30 p-4"
                 >
                   <Fingerprint className="mt-0.5 h-5 w-5 text-teal-200" />
-                  <p className="text-sm leading-6 text-zinc-300">{item}</p>
+                  <p className="text-sm leading-6 text-zinc-300">{platformCopy(item)}</p>
                 </div>
               ))}
             </div>
@@ -636,7 +674,7 @@ export default async function Home() {
                 {dictionary.landing.access}
               </p>
               <div className="mt-4 grid gap-3 text-sm text-zinc-400">
-                <a href="#waitlist" className="transition hover:text-white">
+                <a href="#waitlist" className="zx-web-only transition hover:text-white">
                   {dictionary.landing.requestEarlyAccess}
                 </a>
                 <a href="#security" className="transition hover:text-white">
@@ -647,7 +685,7 @@ export default async function Home() {
                   prefetch={false}
                   className="transition hover:text-white"
                 >
-                  {dictionary.landing.developerLogin}
+                  {platformCopy(dictionary.landing.developerLogin)}
                 </Link>
               </div>
             </div>

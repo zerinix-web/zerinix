@@ -1,16 +1,20 @@
 import Link from "next/link";
+import HomeLink from "@/components/HomeLink";
 import type { ReactNode } from "react";
 import type { AppDictionary } from "@/app/lib/i18n/dictionaries";
 import type { AppLocale } from "@/app/lib/i18n/config";
 
 type AuthShellProps = {
   eyebrow: string;
-  title: string;
+  // ReactNode, not string: /register and /login ship both the web copy and the
+  // neutral iOS copy and let app/globals.css show one of them, so these slots
+  // receive an element pair rather than a single string.
+  title: ReactNode;
   subtitle: string;
   locale: AppLocale;
   dictionary: AppDictionary;
   children: ReactNode;
-  footerText: string;
+  footerText: ReactNode;
   footerHref: string;
   footerLinkText: string;
 };
@@ -32,9 +36,9 @@ export default function AuthShell({
 
       <div className="relative mx-auto flex w-full max-w-6xl flex-col">
         <nav className="flex items-center justify-between">
-          <Link href="/" className="text-xl font-bold tracking-[0.12em]">
+          <HomeLink className="text-xl font-bold tracking-[0.12em]">
             ZERINIX
-          </Link>
+          </HomeLink>
 
           <div className="flex items-center gap-3">
             <Link

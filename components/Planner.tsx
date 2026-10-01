@@ -12032,8 +12032,18 @@ const ReportPanel = memo(function ReportPanel({
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.06]">
             <Info className="h-5 w-5 text-teal-200" />
           </div>
+          {/* Same restriction, two wordings: the website keeps "beta users",
+              the iOS build states the access limit without describing the
+              product as beta software (App Store Review Guideline 2.2).
+              app/globals.css shows exactly one of the two. The server-side
+              gate is untouched. */}
           <p className="mt-5 text-lg font-semibold text-white">
-            Strategic Reports are currently limited to approved beta users.
+            <span className="zx-web-only">
+              Strategic Reports are currently limited to approved beta users.
+            </span>
+            <span className="zx-ios-only">
+              Strategic Reports are currently limited to approved accounts.
+            </span>
           </p>
           <p className="mt-2 text-sm leading-6 text-zinc-400">
             Your request was understood successfully, but full report generation is not

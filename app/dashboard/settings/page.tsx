@@ -175,7 +175,13 @@ export default async function SettingsPage({
                   </span>
                 </label>
 
-                <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+                {/* .zx-web-only on every "Coming soon" control below: these are
+                    placeholders for features that are not connected yet, and
+                    App Store Review Guideline 2.2 treats visible unfinished
+                    functionality as a sign of pre-release software. The website
+                    still shows them; the iOS build simply omits them. Nothing
+                    here was functional, so no capability is lost. */}
+                <div className="zx-web-only rounded-2xl border border-white/10 bg-black/25 p-4">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                     <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04]">
                       {settings.avatarUrl ? (
@@ -459,7 +465,7 @@ export default async function SettingsPage({
                   </h2>
                 </div>
               </div>
-              <div className="mt-6 rounded-2xl border border-white/10 bg-black/25 p-4 text-sm leading-6 text-zinc-500">
+              <div className="zx-web-only mt-6 rounded-2xl border border-white/10 bg-black/25 p-4 text-sm leading-6 text-zinc-500">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-white">Device inventory</span>
                   <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
@@ -497,16 +503,41 @@ export default async function SettingsPage({
               {
                 icon: KeyRound,
                 title: "API Keys",
-                body: "Coming soon. User API keys are not supported yet, so no credentials or access tokens are displayed in this settings area.",
+                // Purely a placeholder for a feature that does not exist, so
+                // the iOS build omits the whole tile (Guideline 2.2). The copy
+                // is marked web-only as well, rather than relying on the tile
+                // alone, so the guarantee holds at the level of the words.
+                platform: "zx-web-only",
+                body: (
+                  <span className="zx-web-only">
+                    Coming soon. User API keys are not supported yet, so no
+                    credentials or access tokens are displayed in this settings
+                    area.
+                  </span>
+                ),
               },
               {
                 icon: Globe2,
                 title: "Regional controls",
-                body: `Timezone preference: ${settings.timezonePreference}. Regional billing and tax controls are coming soon and remain disabled until billing configuration is complete.`,
+                // This tile does carry a real setting (the timezone
+                // preference), so iOS keeps it and only drops the sentence
+                // announcing unbuilt billing controls.
+                platform: "",
+                body: (
+                  <>
+                    {`Timezone preference: ${settings.timezonePreference}.`}
+                    <span className="zx-web-only">
+                      {" "}
+                      Regional billing and tax controls are coming soon and
+                      remain disabled until billing configuration is complete.
+                    </span>
+                  </>
+                ),
               },
               {
                 icon: Languages,
                 title: "Language behavior",
+                platform: "",
                 body: `Default language preference: ${settings.preferredLanguage}. Report body language still follows the user's prompt language.`,
               },
             ].map((item) => {
@@ -515,7 +546,7 @@ export default async function SettingsPage({
               return (
                 <section
                   key={item.title}
-                  className="rounded-[1.85rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl"
+                  className={`${item.platform} rounded-[1.85rem] border border-white/10 bg-white/[0.045] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl`}
                 >
                   <Icon className="h-5 w-5 text-teal-200" />
                   <h2 className="mt-4 text-xl font-semibold text-white">{item.title}</h2>
@@ -544,7 +575,7 @@ export default async function SettingsPage({
             </div>
 
             <div className="mt-6 grid gap-4 xl:grid-cols-2">
-              <section className="rounded-2xl border border-white/10 bg-black/25 p-4">
+              <section className="zx-web-only rounded-2xl border border-white/10 bg-black/25 p-4">
                 <Download className="h-5 w-5 text-teal-200" />
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <h3 className="font-semibold text-white">Export personal data</h3>
