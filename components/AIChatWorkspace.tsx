@@ -63,6 +63,7 @@ import {
   useAttachments,
   type PlannerAttachment,
 } from "@/components/planner/useAttachments";
+import ZerinixLogo from "@/components/ZerinixLogo";
 
 type ChatModelPreference = "fast" | "balanced";
 
@@ -2287,8 +2288,9 @@ export default function AIChatWorkspace({
           <Link
             href="/dashboard"
             aria-label="Go to dashboard home"
-            className="rounded-xl text-xl font-semibold tracking-[0.16em] text-white transition hover:text-teal-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
+            className="flex items-center gap-3 rounded-xl text-xl font-semibold tracking-[0.16em] text-white transition hover:text-teal-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
           >
+            <ZerinixLogo className="h-10 w-10 rounded-[1.15rem]" />
             ZERINIX
           </Link>
           <button

@@ -1,6 +1,7 @@
 import { FileText, Search } from "lucide-react";
 import type { CSSProperties } from "react";
 import DashboardLoading from "../loading";
+import ZerinixLogo from "@/components/ZerinixLogo";
 
 function MobileSkeleton({
   className = "",
@@ -24,9 +25,7 @@ export default function ReportsLoading() {
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_90%_0%,rgba(45,212,191,0.11),transparent_30%)]" />
         <div className="relative mx-auto max-w-xl">
           <div className="flex items-center gap-3 border-b border-white/10 pb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-xs font-black tracking-wider text-black">
-              ZX
-            </div>
+            <ZerinixLogo className="h-10 w-10 rounded-2xl" />
             <div>
               <p className="text-sm font-bold tracking-[0.14em]">ZERINIX</p>
               <p className="text-[11px] text-zinc-500">

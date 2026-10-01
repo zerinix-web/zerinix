@@ -10,6 +10,7 @@ import {
   MOBILE_SAFE_AREA_TOP,
   MOBILE_SCROLLER_TAIL,
 } from "@/components/mobile-layout";
+import ZerinixLogo from "@/components/ZerinixLogo";
 
 // Mobile Home: an executive command center, not a second AI chat entry
 // point. Free-form advisory lives on the Ask tab (/chat), which is the only
@@ -116,9 +117,7 @@ export default function MobileHomeDashboard({
       <header
         className={`flex shrink-0 items-center gap-2.5 border-b border-white/[0.06] bg-black/40 px-4 pb-2.5 backdrop-blur-2xl ${MOBILE_SAFE_AREA_TOP}`}
       >
-        <span className="flex h-8 w-8 items-center justify-center rounded-[0.85rem] bg-white text-[10px] font-black tracking-[0.1em] text-black shadow-md shadow-white/5">
-          ZX
-        </span>
+        <ZerinixLogo className="h-8 w-8 rounded-[0.85rem] shadow-md shadow-white/5" />
         <p className="text-[13px] font-bold leading-tight tracking-[0.14em] text-white">
           ZERINIX
         </p>

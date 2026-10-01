@@ -18,7 +18,6 @@ import {
   Quote,
   Radar,
   ShieldCheck,
-  Sparkles,
   Target,
   TrendingUp,
   Workflow,
@@ -29,6 +28,7 @@ import PlatformCopy from "@/components/PlatformCopy";
 import { iosCopy } from "@/app/lib/i18n/ios-copy";
 import { getRequestDictionary } from "@/app/lib/i18n/server";
 import { createClient } from "@/app/lib/supabase/server";
+import ZerinixLogo from "@/components/ZerinixLogo";
 
 export const metadata: Metadata = {
   title: "ZERINIX | AI Business Planning for Founders",
@@ -139,9 +139,7 @@ export default async function Home() {
           aria-label={dictionary.landing.mainNavigation}
         >
           <Link href="/" className="group flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/15 bg-white/[0.06] shadow-lg shadow-black/30">
-              <Sparkles className="h-4 w-4 text-teal-200" />
-            </span>
+            <ZerinixLogo className="h-9 w-9 rounded-xl border border-white/15 shadow-lg shadow-black/30" />
             <span className="text-lg font-semibold tracking-[0.28em] text-white">
               ZERINIX
             </span>

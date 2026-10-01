@@ -3,6 +3,7 @@ import HomeLink from "@/components/HomeLink";
 import type { ReactNode } from "react";
 import type { AppDictionary } from "@/app/lib/i18n/dictionaries";
 import type { AppLocale } from "@/app/lib/i18n/config";
+import ZerinixLogo from "@/components/ZerinixLogo";
 
 type AuthShellProps = {
   eyebrow: string;
@@ -36,7 +37,8 @@ export default function AuthShell({
 
       <div className="relative mx-auto flex w-full max-w-6xl flex-col">
         <nav className="flex items-center justify-between">
-          <HomeLink className="text-xl font-bold tracking-[0.12em]">
+          <HomeLink className="flex items-center gap-3 text-xl font-bold tracking-[0.12em]">
+            <ZerinixLogo className="h-10 w-10 rounded-[1.15rem]" />
             ZERINIX
           </HomeLink>
 

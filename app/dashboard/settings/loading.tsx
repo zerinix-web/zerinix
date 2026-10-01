@@ -1,3 +1,5 @@
+import ZerinixLogo from "@/components/ZerinixLogo";
+
 export default function SettingsLoading() {
   return (
     <>
@@ -5,9 +7,7 @@ export default function SettingsLoading() {
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_92%_0%,rgba(45,212,191,0.12),transparent_30%)]" />
         <div className="relative mx-auto max-w-xl">
           <div className="flex items-center gap-3 border-b border-white/10 pb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-xs font-black tracking-wider text-black">
-              ZX
-            </div>
+            <ZerinixLogo className="h-10 w-10 rounded-2xl" />
             <div>
               <div className="h-3 w-20 animate-pulse rounded-full bg-white/15" />
               <div className="mt-2 h-2.5 w-28 animate-pulse rounded-full bg-white/[0.07]" />

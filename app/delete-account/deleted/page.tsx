@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import HomeLink from "@/components/HomeLink";
-import { CheckCircle2, Sparkles } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import ClearDeletedAccountSession from "@/components/account/ClearDeletedAccountSession";
+import ZerinixLogo from "@/components/ZerinixLogo";
 
 // Destination of the in-app deletion flow (deleteAccount in
 // app/dashboard/settings/actions.ts) after the account has been deleted.
@@ -29,9 +30,7 @@ export default function AccountDeletedPage() {
       <header className="border-b border-white/10 bg-black/80 backdrop-blur-xl">
         <nav className="mx-auto flex h-16 w-full max-w-3xl items-center justify-between px-5 sm:px-8">
           <HomeLink className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/[0.06]">
-              <Sparkles className="h-3.5 w-3.5 text-teal-200" />
-            </span>
+            <ZerinixLogo className="h-8 w-8 rounded-lg border border-white/15" />
             <span className="text-sm font-semibold tracking-[0.28em] text-white">
               ZERINIX
             </span>
