@@ -246,23 +246,28 @@ html.zx-native-ios .zx-web-only {
     content: "";
     position: absolute;
     inset: -4% -22% auto -22%;
-    height: 70%;
+    height: 86%;
     z-index: -1;
     pointer-events: none;
     /* The centres sit low enough that each gradient's BRIGHTEST point lands on
        screen, in the hero itself, rather than above the top edge -- measured:
        with the peak off screen only the weak tail showed and the lift was
-       1.6%, well under the intended 3-6%. Sideways the box still bleeds past
-       both edges, so no boundary is ever visible. */
+       1.6%, well under the intended range. Sideways the box still bleeds past
+       both edges, so no boundary is ever visible.
+
+       The second gradient is the upper-right/centre-right light. It is anchored
+       near the right edge and carries a tall radius so its falloff reaches the
+       vertical middle of the screen -- on a real iPhone the first pass died out
+       a third of the way down and read as nothing at all below the hero. */
     background:
       radial-gradient(
-        56% 44% at 50% 22%,
-        rgb(var(--zx-glow) / 0.055),
+        56% 42% at 50% 18%,
+        rgb(var(--zx-glow) / 0.1),
         rgb(var(--zx-glow) / 0) 72%
       ),
       radial-gradient(
-        40% 32% at 80% 10%,
-        rgb(var(--zx-glow) / 0.032),
+        50% 40% at 84% 30%,
+        rgb(var(--zx-glow) / 0.062),
         rgb(var(--zx-glow) / 0) 70%
       );
   }
@@ -274,18 +279,18 @@ html.zx-native-ios .zx-web-only {
      shadow it had; the turquoise is added as a second, very tight halo that
      is already almost gone by the card's edge. */
   .zx-analysis-card {
-    border-color: rgb(var(--zx-glow) / 0.16);
+    border-color: rgb(var(--zx-glow) / 0.26);
     box-shadow:
       0 12px 30px rgba(0, 0, 0, 0.22),
-      0 0 24px -16px rgb(var(--zx-glow) / 0.5);
+      0 0 26px -14px rgb(var(--zx-glow) / 0.72);
   }
 
   /* The icon chip reads as the light source for the card. An inset term lifts
      the inside of the chip and an outer term lets a little of it escape. */
   .zx-analysis-icon {
     box-shadow:
-      0 0 16px -6px rgb(var(--zx-glow) / 0.3),
-      inset 0 0 10px -4px rgb(var(--zx-glow) / 0.2);
+      0 0 18px -5px rgb(var(--zx-glow) / 0.52),
+      inset 0 0 11px -3px rgb(var(--zx-glow) / 0.34);
   }
 
   /* 4. ACTIVE BOTTOM NAVIGATION
@@ -296,8 +301,8 @@ html.zx-native-ios .zx-web-only {
      touched and stay neutral grey. */
   .zx-nav-active {
     box-shadow:
-      0 0 20px -8px rgb(var(--zx-glow) / 0.45),
-      0 0 38px -16px rgb(var(--zx-glow) / 0.28);
+      0 0 22px -7px rgb(var(--zx-glow) / 0.72),
+      0 0 40px -14px rgb(var(--zx-glow) / 0.45);
   }
 }
 
