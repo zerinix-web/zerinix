@@ -176,7 +176,7 @@ export function MobileBottomNavigation({
               aria-current={active ? "page" : undefined}
               className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-[1.05rem] px-1 text-[10px] font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/35 ${
                 active
-                  ? "border border-teal-200/25 bg-teal-200/[0.12] text-teal-100 shadow-[0_0_16px_-6px_rgba(45,212,191,0.45)]"
+                  ? "zx-nav-active border border-teal-200/25 bg-teal-200/[0.12] text-teal-100"
                   : "border border-transparent text-zinc-500 active:bg-white/[0.06] active:text-white"
               }`}
             >

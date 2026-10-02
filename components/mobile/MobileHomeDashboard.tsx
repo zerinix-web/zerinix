@@ -112,7 +112,7 @@ export default function MobileHomeDashboard({
   // the final card comes to rest clear of the bar instead of flush against
   // it.
   return (
-    <div className="fixed inset-0 z-30 flex flex-col lg:hidden">
+    <div className="fixed inset-0 z-30 flex flex-col lg:hidden zx-ambient-glow">
       <header
         className={`flex shrink-0 items-center gap-2.5 border-b border-white/[0.06] bg-black/40 px-4 pb-2.5 backdrop-blur-2xl ${MOBILE_SAFE_AREA_TOP}`}
       >
@@ -201,9 +201,9 @@ export default function MobileHomeDashboard({
                   <Link
                     key={action.label}
                     href={action.href}
-                    className="group flex min-h-[6.5rem] flex-col items-start justify-between rounded-2xl border border-white/[0.08] bg-white/[0.035] p-2.5 text-left shadow-[0_12px_30px_rgba(0,0,0,0.22)] transition duration-200 active:-translate-y-0.5 active:scale-[0.97] active:border-teal-200/20 active:bg-white/[0.06]"
+                    className="zx-analysis-card group flex min-h-[6.5rem] flex-col items-start justify-between rounded-2xl border border-white/[0.08] bg-white/[0.035] p-2.5 text-left shadow-[0_12px_30px_rgba(0,0,0,0.22)] transition duration-200 active:-translate-y-0.5 active:scale-[0.97] active:border-teal-200/20 active:bg-white/[0.06]"
                   >
-                    <span className="flex h-8 w-8 items-center justify-center rounded-xl border border-teal-200/15 bg-teal-200/[0.08] text-teal-100 transition duration-200 group-active:border-teal-200/30">
+                    <span className="zx-analysis-icon flex h-8 w-8 items-center justify-center rounded-xl border border-teal-200/15 bg-teal-200/[0.08] text-teal-100 transition duration-200 group-active:border-teal-200/30">
                       <Icon className="h-[0.9rem] w-[0.9rem]" />
                     </span>
                     <span className="min-w-0">

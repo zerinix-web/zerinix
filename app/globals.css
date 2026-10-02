@@ -32,6 +32,18 @@
   /* The bottom counterpart. Both variables hold a TERMINAL value -- an env(),
      or a max() of plain lengths -- never a calc(). See the note below. */
   --zx-home-indicator: max(0.65rem, env(safe-area-inset-bottom, 0px));
+  /* The ZERINIX turquoise, as bare RGB channels. It is the same accent the
+     selection highlight, the scrollbar and the landing hover state already
+     use (rgb(94 234 212) -- teal-300), stated once so the mobile ambient
+     lighting below cannot drift into a second cyan.
+
+     The alpha is deliberately NOT part of this value. Each effect states its
+     own opacity literally in its declaration, which keeps this a terminal
+     value -- the same discipline the safe-area variables above follow, and
+     for the same reason: this WebKit silently drops a var() substitution
+     whose value is itself an expression. To dim or lift the whole system,
+     scale the alphas in the mobile block near the end of this file. */
+  --zx-glow: 94 234 212;
   color-scheme: dark;
   --background: #050706;
   --foreground: #ededed;
@@ -196,6 +208,96 @@ html.zx-native-ios .zx-web-only {
 @media (min-width: 640px) {
   .landing-mobile-safe {
     max-width: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Ambient turquoise lighting -- MOBILE ONLY.
+
+   The product stays black. This adds reflected light, not colour: the page
+   glow peaks at ~5.5% alpha and every surface underneath it keeps the
+   background it already had. Nothing here changes layout, spacing or type --
+   only border-colour, box-shadow and one decorative pseudo-element.
+
+   Scoped to the mobile breakpoint twice over: the components that carry these
+   classes are all `lg:hidden`, and the rules themselves sit inside this media
+   query. Desktop therefore cannot be reached even if a class leaks onto a
+   shared component.
+
+   Everything is a gradient or a shadow -- no images, no canvas, no animation,
+   nothing that forces a repaint on scroll.
+   ------------------------------------------------------------------------ */
+@media (max-width: 1023px) {
+  /* 1. PAGE AMBIENT GLOW
+     Sits on the fixed mobile app shell, so it stays put while the content
+     scrolls underneath -- light in a room does not scroll with the furniture.
+
+     z-index: -1 keeps it behind the header and the scroller while remaining
+     inside the shell's own stacking context (the shell is `fixed z-30`), so
+     it can never paint over content or escape behind the page background.
+
+     The box bleeds well past all three upper edges: the gradient's own
+     boundary is then off screen, and what is visible on the device is only
+     the soft middle of the falloff -- no edge to notice. The stops end on a
+     fully transparent turquoise rather than `transparent`, because
+     `transparent` interpolates through transparent BLACK and leaves a faint
+     grey bloom over a dark background. */
+  .zx-ambient-glow::before {
+    content: "";
+    position: absolute;
+    inset: -4% -22% auto -22%;
+    height: 70%;
+    z-index: -1;
+    pointer-events: none;
+    /* The centres sit low enough that each gradient's BRIGHTEST point lands on
+       screen, in the hero itself, rather than above the top edge -- measured:
+       with the peak off screen only the weak tail showed and the lift was
+       1.6%, well under the intended 3-6%. Sideways the box still bleeds past
+       both edges, so no boundary is ever visible. */
+    background:
+      radial-gradient(
+        56% 44% at 50% 22%,
+        rgb(var(--zx-glow) / 0.055),
+        rgb(var(--zx-glow) / 0) 72%
+      ),
+      radial-gradient(
+        40% 32% at 80% 10%,
+        rgb(var(--zx-glow) / 0.032),
+        rgb(var(--zx-glow) / 0) 70%
+      );
+  }
+
+  /* 2 + 3. ANALYSIS CARDS
+     The three entry points (Business Idea Validation, Market Intelligence,
+     Strategic Advisory) are the only cards that take any accent, so the
+     surface stays black everywhere else. The card keeps the exact depth
+     shadow it had; the turquoise is added as a second, very tight halo that
+     is already almost gone by the card's edge. */
+  .zx-analysis-card {
+    border-color: rgb(var(--zx-glow) / 0.16);
+    box-shadow:
+      0 12px 30px rgba(0, 0, 0, 0.22),
+      0 0 24px -16px rgb(var(--zx-glow) / 0.5);
+  }
+
+  /* The icon chip reads as the light source for the card. An inset term lifts
+     the inside of the chip and an outer term lets a little of it escape. */
+  .zx-analysis-icon {
+    box-shadow:
+      0 0 16px -6px rgb(var(--zx-glow) / 0.3),
+      inset 0 0 10px -4px rgb(var(--zx-glow) / 0.2);
+  }
+
+  /* 4. ACTIVE BOTTOM NAVIGATION
+     Replaces a one-off `rgba(45, 212, 191, …)` shadow -- a second, greener
+     cyan -- with the shared accent. Two shadows instead of one: a close,
+     brighter core and a wide, dim spread, so the glow dissolves into the
+     black bar instead of stopping at a radius. Inactive items are not
+     touched and stay neutral grey. */
+  .zx-nav-active {
+    box-shadow:
+      0 0 20px -8px rgb(var(--zx-glow) / 0.45),
+      0 0 38px -16px rgb(var(--zx-glow) / 0.28);
   }
 }
 
