@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { ArrowRight, BarChart3, FileText, Rocket, TriangleAlert } from "lucide-react";
 import type { DashboardWorkspace } from "@/app/dashboard/report-utils";
 import {
@@ -116,9 +117,14 @@ export default function MobileHomeDashboard({
       <header
         className={`flex shrink-0 items-center gap-2.5 border-b border-white/[0.06] bg-black/40 px-4 pb-2.5 backdrop-blur-2xl ${MOBILE_SAFE_AREA_TOP}`}
       >
-        <span className="flex h-8 w-8 items-center justify-center rounded-[0.85rem] bg-white text-[10px] font-black tracking-[0.1em] text-black shadow-md shadow-white/5">
-          ZX
-        </span>
+        <Image
+          src="/zerinix-mark.png"
+          alt=""
+          width={128}
+          height={128}
+          loading="eager"
+          className="h-8 w-8 shrink-0 rounded-[0.85rem]"
+        />
         <p className="text-[13px] font-bold leading-tight tracking-[0.14em] text-white">
           ZERINIX
         </p>

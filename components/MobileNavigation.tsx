@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -125,9 +126,14 @@ export function MobileHeader({
           aria-label="Go to dashboard home"
           className="inline-flex items-center gap-3 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-200/30"
         >
-          <span className="flex h-10 w-10 items-center justify-center rounded-[1rem] bg-white text-xs font-black tracking-[0.12em] text-black shadow-lg shadow-white/10">
-            ZX
-          </span>
+          <Image
+            src="/zerinix-mark.png"
+            alt=""
+            width={128}
+            height={128}
+            loading="eager"
+            className="h-10 w-10 shrink-0 rounded-[1rem]"
+          />
           <span>
             <span className="block text-sm font-bold tracking-[0.16em] text-white">
               ZERINIX
