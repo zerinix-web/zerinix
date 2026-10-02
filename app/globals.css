@@ -246,7 +246,7 @@ html.zx-native-ios .zx-web-only {
     content: "";
     position: absolute;
     inset: -4% -22% auto -22%;
-    height: 86%;
+    height: 118%;
     z-index: -1;
     pointer-events: none;
     /* The centres sit low enough that each gradient's BRIGHTEST point lands on
@@ -255,19 +255,24 @@ html.zx-native-ios .zx-web-only {
        1.6%, well under the intended range. Sideways the box still bleeds past
        both edges, so no boundary is ever visible.
 
-       The second gradient is the upper-right/centre-right light. It is anchored
-       near the right edge and carries a tall radius so its falloff reaches the
-       vertical middle of the screen -- on a real iPhone the first pass died out
-       a third of the way down and read as nothing at all below the hero. */
+       The second gradient is the upper-right/centre-right light, anchored near
+       the right edge. Both carry tall radii and the box now runs past the
+       bottom of the viewport, so the falloff thins out gradually over the whole
+       page instead of ending partway down -- on a real iPhone a glow that
+       stopped at the hero read as nothing at all below it. The percentages are
+       expressed against that taller box, so the peaks stay where they were.
+
+       Alphas and geometry are the only things tuned here; the card, icon and
+       navigation rules below are untouched. */
     background:
       radial-gradient(
-        56% 42% at 50% 18%,
-        rgb(var(--zx-glow) / 0.1),
+        56% 42% at 50% 13%,
+        rgb(var(--zx-glow) / 0.135),
         rgb(var(--zx-glow) / 0) 72%
       ),
       radial-gradient(
-        50% 40% at 84% 30%,
-        rgb(var(--zx-glow) / 0.062),
+        50% 42% at 84% 28%,
+        rgb(var(--zx-glow) / 0.084),
         rgb(var(--zx-glow) / 0) 70%
       );
   }
