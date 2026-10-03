@@ -228,86 +228,96 @@ html.zx-native-ios .zx-web-only {
    nothing that forces a repaint on scroll.
    ------------------------------------------------------------------------ */
 @media (max-width: 1023px) {
-  /* 1. PAGE AMBIENT GLOW
-     Sits on the fixed mobile app shell, so it stays put while the content
-     scrolls underneath -- light in a room does not scroll with the furniture.
+  /* 1 + 2 + 3. PAGE AMBIENT LIGHT
+     Rebuilt against a real device screenshot rather than tuned by feel. The
+     reference was measured across the frame: along the hero band the green
+     channel climbs from ~20 on the left to ~133 hard against the right edge,
+     peaks vertically around 16% of the screen, and is back to black by ~46%.
+     So this is not one wash turned up -- it is a bright source pinned to the
+     upper right, the spill it throws back toward the centre, a much fainter
+     ambience behind the header, and a low tie-in layer. Black negative space
+     below the cards is part of the look, not a shortfall.
 
-     z-index: -1 keeps it behind the header and the scroller while remaining
-     inside the shell's own stacking context (the shell is `fixed z-30`), so
-     it can never paint over content or escape behind the page background.
-
-     The box bleeds well past all three upper edges: the gradient's own
-     boundary is then off screen, and what is visible on the device is only
-     the soft middle of the falloff -- no edge to notice. The stops end on a
-     fully transparent turquoise rather than `transparent`, because
-     `transparent` interpolates through transparent BLACK and leaves a faint
-     grey bloom over a dark background. */
+     The box bleeds past the top and both sides so no gradient boundary is
+     ever on screen, and every stop ends on a fully transparent turquoise
+     rather than `transparent`, which interpolates through transparent BLACK
+     and leaves a grey bloom on a dark background. */
   .zx-ambient-glow::before {
     content: "";
     position: absolute;
-    inset: -4% -22% auto -22%;
-    height: 118%;
+    inset: -14% -10% auto -10%;
+    height: 92%;
     z-index: -1;
     pointer-events: none;
-    /* The centres sit low enough that each gradient's BRIGHTEST point lands on
-       screen, in the hero itself, rather than above the top edge -- measured:
-       with the peak off screen only the weak tail showed and the lift was
-       1.6%, well under the intended range. Sideways the box still bleeds past
-       both edges, so no boundary is ever visible.
-
-       The second gradient is the upper-right/centre-right light, anchored near
-       the right edge. Both carry tall radii and the box now runs past the
-       bottom of the viewport, so the falloff thins out gradually over the whole
-       page instead of ending partway down -- on a real iPhone a glow that
-       stopped at the hero read as nothing at all below it. The percentages are
-       expressed against that taller box, so the peaks stay where they were.
-
-       Alphas and geometry are the only things tuned here; the card, icon and
-       navigation rules below are untouched. */
     background:
       radial-gradient(
-        56% 42% at 50% 13%,
-        rgb(var(--zx-glow) / 0.185),
+        54% 33% at 88% 20%,
+        rgb(var(--zx-glow) / 0.46),
+        rgb(var(--zx-glow) / 0) 68%
+      ),
+      radial-gradient(
+        74% 33% at 82% 30%,
+        rgb(var(--zx-glow) / 0.14),
         rgb(var(--zx-glow) / 0) 72%
       ),
       radial-gradient(
-        50% 42% at 84% 28%,
-        rgb(var(--zx-glow) / 0.115),
-        rgb(var(--zx-glow) / 0) 70%
+        44% 22% at 14% 20%,
+        rgb(var(--zx-glow) / 0.13),
+        rgb(var(--zx-glow) / 0) 74%
+      ),
+      radial-gradient(
+        92% 32% at 60% 25%,
+        rgb(var(--zx-glow) / 0.06),
+        rgb(var(--zx-glow) / 0) 78%
       );
   }
 
-  /* 2 + 3. ANALYSIS CARDS
-     The three entry points (Business Idea Validation, Market Intelligence,
-     Strategic Advisory) are the only cards that take any accent, so the
-     surface stays black everywhere else. The card keeps the exact depth
-     shadow it had; the turquoise is added as a second, very tight halo that
-     is already almost gone by the card's edge. */
+  /* 4. HERO STATISTICS CARD
+     The one card the light falls on most directly, so it takes a tinted edge
+     and a soft reflection. The black depth shadow it already had is kept
+     first in the list, unchanged. */
+  .zx-stat-card {
+    border-color: rgb(var(--zx-glow) / 0.24);
+    box-shadow:
+      0 12px 32px rgba(0, 0, 0, 0.24),
+      0 0 30px -14px rgb(var(--zx-glow) / 0.45);
+  }
+
+  /* 5. ANALYSIS CARDS
+     Edge illumination, with the icon container carrying the stronger
+     treatment so it reads as where the light lands. */
   .zx-analysis-card {
     border-color: rgb(var(--zx-glow) / 0.26);
     box-shadow:
       0 12px 30px rgba(0, 0, 0, 0.22),
-      0 0 26px -14px rgb(var(--zx-glow) / 0.72);
+      0 0 26px -12px rgb(var(--zx-glow) / 0.45);
   }
 
-  /* The icon chip reads as the light source for the card. An inset term lifts
-     the inside of the chip and an outer term lets a little of it escape. */
   .zx-analysis-icon {
+    border-color: rgb(var(--zx-glow) / 0.32);
     box-shadow:
-      0 0 18px -5px rgb(var(--zx-glow) / 0.52),
-      inset 0 0 11px -3px rgb(var(--zx-glow) / 0.34);
+      0 0 20px -5px rgb(var(--zx-glow) / 0.48),
+      inset 0 0 12px -3px rgb(var(--zx-glow) / 0.3);
   }
 
-  /* 4. ACTIVE BOTTOM NAVIGATION
-     Replaces a one-off `rgba(45, 212, 191, …)` shadow -- a second, greener
-     cyan -- with the shared accent. Two shadows instead of one: a close,
-     brighter core and a wide, dim spread, so the glow dissolves into the
-     black bar instead of stopping at a radius. Inactive items are not
-     touched and stay neutral grey. */
+  /* 6. RECENT PROJECT / CONTINUE CARDS
+     Deliberately the most restrained tier: these sit low on the page where
+     the reference is almost pure black, so they get an edge and little else. */
+  .zx-project-card {
+    border-color: rgb(var(--zx-glow) / 0.16);
+    box-shadow:
+      0 10px 26px rgba(0, 0, 0, 0.2),
+      0 0 22px -16px rgb(var(--zx-glow) / 0.5);
+  }
+
+  /* 7. ACTIVE BOTTOM NAVIGATION
+     A close bright core plus a wide dim spread, so the glow dissolves into
+     the bar instead of stopping at a radius. Inactive items are untouched
+     and stay neutral grey. */
   .zx-nav-active {
     box-shadow:
-      0 0 22px -7px rgb(var(--zx-glow) / 0.72),
-      0 0 40px -14px rgb(var(--zx-glow) / 0.45);
+      0 0 24px -6px rgb(var(--zx-glow) / 0.8),
+      0 0 44px -12px rgb(var(--zx-glow) / 0.5);
   }
 }
 

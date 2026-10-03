@@ -141,7 +141,7 @@ export default function MobileHomeDashboard({
               decisions.
             </p>
 
-            <div className="mt-5 rounded-[1.4rem] border border-white/[0.08] bg-white/[0.035] p-4 shadow-[0_12px_32px_rgba(0,0,0,0.24)]">
+            <div className="zx-stat-card mt-5 rounded-[1.4rem] border border-white/[0.08] bg-white/[0.035] p-4 shadow-[0_12px_32px_rgba(0,0,0,0.24)]">
               {hasAnyActivity ? (
                 <>
                   <div className="flex items-start gap-6">

@@ -112,7 +112,7 @@ export function RecentProjectsSection({
               key={workspace.id}
               href={`/dashboard/workspaces/${workspace.id}`}
               tabIndex={linkTabIndex}
-              className="group flex min-h-[5.75rem] w-[9.5rem] shrink-0 snap-start flex-col justify-between rounded-2xl border border-white/[0.08] bg-white/[0.035] p-3.5 shadow-[0_10px_26px_rgba(0,0,0,0.2)] transition duration-200 active:-translate-y-0.5 active:scale-[0.99] active:border-teal-200/20 active:bg-white/[0.06]"
+              className="zx-project-card group flex min-h-[5.75rem] w-[9.5rem] shrink-0 snap-start flex-col justify-between rounded-2xl border border-white/[0.08] bg-white/[0.035] p-3.5 shadow-[0_10px_26px_rgba(0,0,0,0.2)] transition duration-200 active:-translate-y-0.5 active:scale-[0.99] active:border-teal-200/20 active:bg-white/[0.06]"
             >
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.05] text-zinc-400 transition duration-200 group-active:border-teal-200/20 group-active:text-teal-100">
                 <Folder className="h-[0.95rem] w-[0.95rem]" />
@@ -177,7 +177,7 @@ export function ContinueActivitySection({
             key={report.id}
             href={`/dashboard/${report.id}`}
             tabIndex={linkTabIndex}
-            className="group flex min-h-[4.5rem] w-full items-center gap-3.5 rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-left shadow-[0_10px_28px_rgba(0,0,0,0.18)] transition duration-200 active:-translate-y-0.5 active:scale-[0.99] active:border-teal-200/20 active:bg-white/[0.055]"
+            className="zx-project-card group flex min-h-[4.5rem] w-full items-center gap-3.5 rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-left shadow-[0_10px_28px_rgba(0,0,0,0.18)] transition duration-200 active:-translate-y-0.5 active:scale-[0.99] active:border-teal-200/20 active:bg-white/[0.055]"
           >
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.05] text-zinc-400 transition duration-200 group-active:border-teal-200/20 group-active:text-teal-100">
               <FileText className="h-4 w-4" />
