@@ -130,7 +130,7 @@ export default function MobileHomeDashboard({
         </p>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className={`px-4 pt-6 ${MOBILE_SCROLLER_TAIL}`}>
           <section aria-label="Overview">
             <h1 className="max-w-[17rem] text-[1.75rem] font-semibold leading-[1.15] tracking-[-0.04em] text-white">

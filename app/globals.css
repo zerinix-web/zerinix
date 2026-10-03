@@ -32,18 +32,6 @@
   /* The bottom counterpart. Both variables hold a TERMINAL value -- an env(),
      or a max() of plain lengths -- never a calc(). See the note below. */
   --zx-home-indicator: max(0.65rem, env(safe-area-inset-bottom, 0px));
-  /* The ZERINIX turquoise, as bare RGB channels. It is the same accent the
-     selection highlight, the scrollbar and the landing hover state already
-     use (rgb(94 234 212) -- teal-300), stated once so the mobile ambient
-     lighting below cannot drift into a second cyan.
-
-     The alpha is deliberately NOT part of this value. Each effect states its
-     own opacity literally in its declaration, which keeps this a terminal
-     value -- the same discipline the safe-area variables above follow, and
-     for the same reason: this WebKit silently drops a var() substitution
-     whose value is itself an expression. To dim or lift the whole system,
-     scale the alphas in the mobile block near the end of this file. */
-  --zx-glow: 94 234 212;
   color-scheme: dark;
   --background: #050706;
   --foreground: #ededed;
@@ -228,96 +216,98 @@ html.zx-native-ios .zx-web-only {
    nothing that forces a repaint on scroll.
    ------------------------------------------------------------------------ */
 @media (max-width: 1023px) {
-  /* 1 + 2 + 3. PAGE AMBIENT LIGHT
-     Rebuilt against a real device screenshot rather than tuned by feel. The
-     reference was measured across the frame: along the hero band the green
-     channel climbs from ~20 on the left to ~133 hard against the right edge,
-     peaks vertically around 16% of the screen, and is back to black by ~46%.
-     So this is not one wash turned up -- it is a bright source pinned to the
-     upper right, the spill it throws back toward the centre, a much fainter
-     ambience behind the header, and a low tie-in layer. Black negative space
-     below the cards is part of the look, not a shortfall.
+  /* ------------------------------------------------------------------------
+     MOBILE HOME LIGHTING
 
-     The box bleeds past the top and both sides so no gradient boundary is
-     ever on screen, and every stop ends on a fully transparent turquoise
-     rather than `transparent`, which interpolates through transparent BLACK
-     and leaves a grey bloom on a dark background. */
-  .zx-ambient-glow::before {
-    content: "";
-    position: absolute;
-    inset: -14% -10% auto -10%;
-    height: 92%;
-    z-index: -1;
-    pointer-events: none;
-    background:
+     Every colour below is written as a literal rgba(94, 234, 212, A) -- the
+     ZERINIX turquoise, the same accent the selection highlight, the scrollbar
+     and the landing hover state use. DO NOT refactor these back into a custom
+     property consumed inside a colour function. They were written that way
+     and the whole system rendered as plain black on a physical iPhone while
+     being correct in every desktop browser: this WebKit silently drops a
+     var() substitution it cannot re-parse, exactly as the safe-area note at
+     the top of this file records for calc() values. The literals are the
+     measured-working shape.
+
+     The ambient light is the SHELL'S OWN BACKGROUND, not a pseudo-element.
+     It used to be a ::before at z-index: -1, which depends on negative-z
+     painting inside a stacking context that also contains backdrop-filter
+     descendants -- fragile across engines, and invisible on device. An
+     element's own background is painted beneath all of its descendants by
+     definition, with no stacking context to negotiate.
+
+     Gradient centres sit outside the box on purpose (96%, 4%) so the bright
+     cores are off-frame and only the soft middle of each falloff is on
+     screen; that is what keeps the boundaries invisible without needing to
+     oversize the element. Every stop ends on a fully transparent TURQUOISE
+     rather than `transparent`, which interpolates through transparent black
+     and blooms grey on a dark background.
+     --------------------------------------------------------------------- */
+  .zx-ambient-glow {
+    background-image:
       radial-gradient(
-        54% 33% at 88% 20%,
-        rgb(var(--zx-glow) / 0.46),
-        rgb(var(--zx-glow) / 0) 68%
+        65% 30% at 96% 4%,
+        rgba(94, 234, 212, 0.46),
+        rgba(94, 234, 212, 0) 68%
       ),
       radial-gradient(
-        74% 33% at 82% 30%,
-        rgb(var(--zx-glow) / 0.14),
-        rgb(var(--zx-glow) / 0) 72%
+        89% 30% at 88% 14%,
+        rgba(94, 234, 212, 0.14),
+        rgba(94, 234, 212, 0) 72%
       ),
       radial-gradient(
-        44% 22% at 14% 20%,
-        rgb(var(--zx-glow) / 0.13),
-        rgb(var(--zx-glow) / 0) 74%
+        53% 20% at 7% 4%,
+        rgba(94, 234, 212, 0.13),
+        rgba(94, 234, 212, 0) 74%
       ),
       radial-gradient(
-        92% 32% at 60% 25%,
-        rgb(var(--zx-glow) / 0.06),
-        rgb(var(--zx-glow) / 0) 78%
+        110% 29% at 62% 9%,
+        rgba(94, 234, 212, 0.06),
+        rgba(94, 234, 212, 0) 78%
       );
+    background-repeat: no-repeat;
   }
 
-  /* 4. HERO STATISTICS CARD
-     The one card the light falls on most directly, so it takes a tinted edge
-     and a soft reflection. The black depth shadow it already had is kept
-     first in the list, unchanged. */
+  /* The hero statistics card: the surface the light falls on most directly. */
   .zx-stat-card {
-    border-color: rgb(var(--zx-glow) / 0.24);
+    border-color: rgba(94, 234, 212, 0.24);
     box-shadow:
       0 12px 32px rgba(0, 0, 0, 0.24),
-      0 0 30px -14px rgb(var(--zx-glow) / 0.45);
+      0 0 30px -14px rgba(94, 234, 212, 0.45);
   }
 
-  /* 5. ANALYSIS CARDS
-     Edge illumination, with the icon container carrying the stronger
-     treatment so it reads as where the light lands. */
+  /* The three analysis cards, with their icon containers carrying the
+     stronger treatment so each reads as where the light lands. */
   .zx-analysis-card {
-    border-color: rgb(var(--zx-glow) / 0.26);
+    border-color: rgba(94, 234, 212, 0.26);
     box-shadow:
       0 12px 30px rgba(0, 0, 0, 0.22),
-      0 0 26px -12px rgb(var(--zx-glow) / 0.45);
+      0 0 26px -12px rgba(94, 234, 212, 0.45);
   }
 
   .zx-analysis-icon {
-    border-color: rgb(var(--zx-glow) / 0.32);
+    border-color: rgba(94, 234, 212, 0.32);
     box-shadow:
-      0 0 20px -5px rgb(var(--zx-glow) / 0.48),
-      inset 0 0 12px -3px rgb(var(--zx-glow) / 0.3);
+      0 0 20px -5px rgba(94, 234, 212, 0.48),
+      inset 0 0 12px -3px rgba(94, 234, 212, 0.3);
   }
 
-  /* 6. RECENT PROJECT / CONTINUE CARDS
-     Deliberately the most restrained tier: these sit low on the page where
-     the reference is almost pure black, so they get an edge and little else. */
+  /* Recent-project and continue rows: the most restrained tier, since they
+     sit low on the page where the reference is almost pure black. */
   .zx-project-card {
-    border-color: rgb(var(--zx-glow) / 0.16);
+    border-color: rgba(94, 234, 212, 0.16);
     box-shadow:
       0 10px 26px rgba(0, 0, 0, 0.2),
-      0 0 22px -16px rgb(var(--zx-glow) / 0.5);
+      0 0 22px -16px rgba(94, 234, 212, 0.5);
   }
 
-  /* 7. ACTIVE BOTTOM NAVIGATION
-     A close bright core plus a wide dim spread, so the glow dissolves into
-     the bar instead of stopping at a radius. Inactive items are untouched
-     and stay neutral grey. */
+  /* Active bottom-navigation item: a close bright core plus a wide dim
+     spread, so it dissolves into the bar instead of stopping at a radius.
+     Inactive items are untouched and stay neutral grey. */
   .zx-nav-active {
     box-shadow:
-      0 0 24px -6px rgb(var(--zx-glow) / 0.8),
-      0 0 44px -12px rgb(var(--zx-glow) / 0.5);
+      0 0 24px -6px rgba(94, 234, 212, 0.8),
+      0 0 44px -12px rgba(94, 234, 212, 0.5);
   }
 }
 
