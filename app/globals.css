@@ -245,51 +245,62 @@ html.zx-native-ios .zx-web-only {
      --------------------------------------------------------------------- */
   .zx-ambient-glow {
     background-image:
+      /* The core: small and bright, and deliberately BELOW the header band.
+         The header carries bg-black/40 and a backdrop blur, so it dims
+         whatever is behind it; a bright gradient crossing its bottom edge
+         produced a hard 74/255 line right across the screen. Keeping the
+         core under that edge leaves the header lit from one side rather
+         than washed, and removes the band at source. */
       radial-gradient(
-        65% 30% at 96% 4%,
-        rgba(94, 234, 212, 0.46),
-        rgba(94, 234, 212, 0) 68%
+        38% 23% at 93% 18%,
+        rgba(94, 234, 212, 0.58),
+        rgba(94, 234, 212, 0) 66%
       ),
+      /* the diffusion the core throws back toward the centre */
       radial-gradient(
-        89% 30% at 88% 14%,
-        rgba(94, 234, 212, 0.14),
+        64% 30% at 86% 23%,
+        rgba(94, 234, 212, 0.2),
         rgba(94, 234, 212, 0) 72%
       ),
+      /* the downward fade, tall and dim, carrying light past the hero and
+         dying out before the lower half stays black */
       radial-gradient(
-        53% 20% at 7% 4%,
-        rgba(94, 234, 212, 0.13),
-        rgba(94, 234, 212, 0) 74%
+        50% 42% at 88% 34%,
+        rgba(94, 234, 212, 0.1),
+        rgba(94, 234, 212, 0) 76%
       ),
+      /* a whisper behind the left of the header -- deliberately narrow, so
+         the header is lit from one side instead of washed across */
       radial-gradient(
-        110% 29% at 62% 9%,
-        rgba(94, 234, 212, 0.06),
-        rgba(94, 234, 212, 0) 78%
+        38% 15% at 8% 5%,
+        rgba(94, 234, 212, 0.1),
+        rgba(94, 234, 212, 0) 74%
       );
     background-repeat: no-repeat;
   }
 
   /* The hero statistics card: the surface the light falls on most directly. */
   .zx-stat-card {
-    border-color: rgba(94, 234, 212, 0.24);
+    border-color: rgba(94, 234, 212, 0.32);
     box-shadow:
       0 12px 32px rgba(0, 0, 0, 0.24),
-      0 0 30px -14px rgba(94, 234, 212, 0.45);
+      0 0 30px -14px rgba(94, 234, 212, 0.6);
   }
 
   /* The three analysis cards, with their icon containers carrying the
      stronger treatment so each reads as where the light lands. */
   .zx-analysis-card {
-    border-color: rgba(94, 234, 212, 0.26);
+    border-color: rgba(94, 234, 212, 0.34);
     box-shadow:
       0 12px 30px rgba(0, 0, 0, 0.22),
-      0 0 26px -12px rgba(94, 234, 212, 0.45);
+      0 0 26px -12px rgba(94, 234, 212, 0.6);
   }
 
   .zx-analysis-icon {
-    border-color: rgba(94, 234, 212, 0.32);
+    border-color: rgba(94, 234, 212, 0.42);
     box-shadow:
-      0 0 20px -5px rgba(94, 234, 212, 0.48),
-      inset 0 0 12px -3px rgba(94, 234, 212, 0.3);
+      0 0 20px -5px rgba(94, 234, 212, 0.62),
+      inset 0 0 12px -3px rgba(94, 234, 212, 0.4);
   }
 
   /* Recent-project and continue rows: the most restrained tier, since they
