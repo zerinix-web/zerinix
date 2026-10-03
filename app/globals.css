@@ -267,12 +267,12 @@ html.zx-native-ios .zx-web-only {
     background:
       radial-gradient(
         56% 42% at 50% 13%,
-        rgb(var(--zx-glow) / 0.135),
+        rgb(var(--zx-glow) / 0.185),
         rgb(var(--zx-glow) / 0) 72%
       ),
       radial-gradient(
         50% 42% at 84% 28%,
-        rgb(var(--zx-glow) / 0.084),
+        rgb(var(--zx-glow) / 0.115),
         rgb(var(--zx-glow) / 0) 70%
       );
   }
