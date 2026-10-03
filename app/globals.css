@@ -252,13 +252,18 @@ html.zx-native-ios .zx-web-only {
          core under that edge leaves the header lit from one side rather
          than washed, and removes the band at source. */
       radial-gradient(
-        38% 23% at 93% 18%,
-        rgba(94, 234, 212, 0.58),
-        rgba(94, 234, 212, 0) 66%
+        29% 17% at 93% 17%,
+        rgba(86, 233, 243, 0.66),
+        rgba(86, 233, 243, 0) 68%
       ),
-      /* the diffusion the core throws back toward the centre */
+      /* The diffusion the core throws back toward the centre. It keeps the
+         brand teal while the core above is a cleaner cyan: measured on
+         device the core read rgb(63, 159, 143) -- a blue-to-green ratio of
+         0.899, visibly green. Lighting only the core with a blue-leaning
+         turquoise brings that to roughly 1.0 without recolouring the
+         falloff or anything else that uses the accent. */
       radial-gradient(
-        64% 30% at 86% 23%,
+        56% 27% at 87% 23%,
         rgba(94, 234, 212, 0.2),
         rgba(94, 234, 212, 0) 72%
       ),
@@ -281,19 +286,19 @@ html.zx-native-ios .zx-web-only {
 
   /* The hero statistics card: the surface the light falls on most directly. */
   .zx-stat-card {
-    border-color: rgba(94, 234, 212, 0.32);
+    border-color: rgba(94, 234, 212, 0.36);
     box-shadow:
       0 12px 32px rgba(0, 0, 0, 0.24),
-      0 0 30px -14px rgba(94, 234, 212, 0.6);
+      0 0 30px -14px rgba(94, 234, 212, 0.72);
   }
 
   /* The three analysis cards, with their icon containers carrying the
      stronger treatment so each reads as where the light lands. */
   .zx-analysis-card {
-    border-color: rgba(94, 234, 212, 0.34);
+    border-color: rgba(94, 234, 212, 0.38);
     box-shadow:
       0 12px 30px rgba(0, 0, 0, 0.22),
-      0 0 26px -12px rgba(94, 234, 212, 0.6);
+      0 0 26px -12px rgba(94, 234, 212, 0.72);
   }
 
   .zx-analysis-icon {
