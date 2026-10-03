@@ -12879,8 +12879,17 @@ export default function Planner({
       initialMode ||
       "chat"
   );
+  // `initialMode` belongs here for the same reason it belongs in activeMode
+  // above. Home's "Start an analysis" cards link to /plan?new=1&mode=market
+  // (and &mode=plan), app/plan/page.tsx turns that into initialMode, and
+  // activeMode picks it up -- but this flag did not, so arriving from Home
+  // left the mode correctly set to "market" while the UI still insisted
+  // "Select an analysis type to continue." and kept Send disabled. The two
+  // initialisers have to agree: a mode arriving in the URL IS a selection.
+  // getInitialMode only ever yields "market" or "plan", never "chat", so
+  // this can never mark the neutral default as chosen.
   const [hasSelectedAnalysisMode, setHasSelectedAnalysisMode] = useState(
-    Boolean(regenerationContext || restoredReportMode)
+    Boolean(regenerationContext || restoredReportMode || initialMode)
   );
   const [isUnderstanding, setIsUnderstanding] = useState(false);
   const [composerResetKey, setComposerResetKey] = useState(0);

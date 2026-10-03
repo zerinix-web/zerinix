@@ -395,6 +395,18 @@ export const MobileConversationExperience = memo(function MobileConversationExpe
               }}
             />
           </label>
+          {/* 16px, not 15px, and that one pixel is load-bearing. iOS WKWebView
+              auto-zooms the page whenever a focused field's font-size is under
+              16px, and app/layout.tsx deliberately sets no maximumScale -- iOS
+              ignores it anyway and it would break pinch-zoom for everyone. The
+              zoom widens the layout past the visual viewport, so the whole
+              screen (title, chips, composer, navigation) could be panned
+              sideways and looked cut off on both edges, which is the "severe
+              horizontal overflow" reported from device. Measured at 320-440px
+              there is no static overflow here to fix. This is the only typable
+              field on this screen; the file input beside it is sr-only and
+              cannot take focus. leading-6 and min-h-12 are untouched, so the
+              composer's height does not move. */}
           <textarea
             value={prompt}
             onChange={(event) => updatePrompt(event.target.value)}
@@ -402,7 +414,7 @@ export const MobileConversationExperience = memo(function MobileConversationExpe
             rows={1}
             aria-label="Message ZERINIX AI"
             placeholder="Describe a business decision, opportunity or challenge…"
-            className="max-h-36 min-h-12 flex-1 resize-none bg-transparent py-3 text-[15px] leading-6 text-white outline-none placeholder:text-zinc-600"
+            className="max-h-36 min-h-12 flex-1 resize-none bg-transparent py-3 text-[16px] leading-6 text-white outline-none placeholder:text-zinc-600"
           />
           <button
             type="button"
